@@ -115,12 +115,53 @@
                             Text="Playlists"
                             TextColor="{DynamicResource TextSecondary}"
                             VerticalOptions="Center" />
-                        <ActivityIndicator Grid.Column="1"
-                            HeightRequest="16"
-                            IsRunning="{Binding IsLoadingPlaylists}"
-                            IsVisible="{Binding IsLoadingPlaylists}"
-                            WidthRequest="16"
-                            Color="{DynamicResource IconSecondary}" />
+                        <HorizontalStackLayout Grid.Column="1"
+                            Spacing="6"
+                            VerticalOptions="Center">
+                            <Border behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                                BackgroundColor="Transparent"
+                                HeightRequest="24"
+                                StrokeThickness="0"
+                                WidthRequest="24">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Tapped="OnOpenCreatePlaylistTapped" />
+                                </Border.GestureRecognizers>
+                                <Border.StrokeShape>
+                                    <RoundRectangle CornerRadius="12" />
+                                </Border.StrokeShape>
+                                <Label FontSize="12"
+                                    HorizontalOptions="Center"
+                                    Text="{mi:Fluent Icon=Add24,
+                                                     FontOverride=True}"
+                                    TextColor="{DynamicResource IconSecondary}"
+                                    VerticalOptions="Center" />
+                            </Border>
+
+                            <Border behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                                BackgroundColor="Transparent"
+                                HeightRequest="24"
+                                StrokeThickness="0"
+                                WidthRequest="24">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Tapped="OnNavigatePlaylistsTapped" />
+                                </Border.GestureRecognizers>
+                                <Border.StrokeShape>
+                                    <RoundRectangle CornerRadius="12" />
+                                </Border.StrokeShape>
+                                <Label FontSize="12"
+                                    HorizontalOptions="Center"
+                                    Text="{mi:Fluent Icon=TextBulletListLtr24,
+                                                     FontOverride=True}"
+                                    TextColor="{DynamicResource IconSecondary}"
+                                    VerticalOptions="Center" />
+                            </Border>
+
+                            <ActivityIndicator HeightRequest="16"
+                                IsRunning="{Binding IsLoadingPlaylists}"
+                                IsVisible="{Binding IsLoadingPlaylists}"
+                                WidthRequest="16"
+                                Color="{DynamicResource IconSecondary}" />
+                        </HorizontalStackLayout>
                     </Grid>
 
                     <!--  Playlists List  -->
@@ -156,7 +197,7 @@
                                             <Label FontSize="13"
                                                 LineBreakMode="TailTruncation"
                                                 MaxLines="1"
-                                                Text="{Binding Name}"
+                                                Text="{Binding DisplayName}"
                                                 TextColor="{DynamicResource TextPrimary}" />
                                             <Label FontSize="11"
                                                 LineBreakMode="TailTruncation"
@@ -241,7 +282,9 @@
                     </Border>
                 </HorizontalStackLayout>
 
-                <Border Grid.Column="1"
+                <!--!-  User Profile Button  -->
+                <Border x:Name="UserProfileButton"
+                    Grid.Column="1"
                     Margin="12,0,0,0"
                     behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                     BackgroundColor="Transparent"
@@ -250,6 +293,10 @@
                     StrokeThickness="0"
                     VerticalOptions="Center"
                     WidthRequest="32">
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding ShowUserMenuCommand}"
+                            CommandParameter="{x:Reference UserProfileButton}" />
+                    </Border.GestureRecognizers>
                     <Border.StrokeShape>
                         <RoundRectangle CornerRadius="16" />
                     </Border.StrokeShape>
@@ -539,6 +586,206 @@
                         Value="{Binding Volume, Mode=TwoWay}" />
                 </HorizontalStackLayout>
             </Grid>
+        </Grid>
+
+        <!--! Playlist Creation Overlay  -->
+        <Grid x:Name="CreatePlaylistOverlay"
+            Grid.Row="0"
+            Grid.RowSpan="3"
+            Grid.Column="0"
+            Grid.ColumnSpan="2"
+            BackgroundColor="Transparent"
+            InputTransparent="False"
+            IsVisible="False">
+            <BoxView BackgroundColor="#80000000">
+                <BoxView.GestureRecognizers>
+                    <TapGestureRecognizer Tapped="OnCancelCreatePlaylistTapped" />
+                </BoxView.GestureRecognizers>
+            </BoxView>
+
+            <Border BackgroundColor="{DynamicResource BackgroundSecondary}"
+                Padding="24,20"
+                HorizontalOptions="Center"
+                VerticalOptions="Center"
+                WidthRequest="420">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="12" />
+                </Border.StrokeShape>
+
+                <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="16">
+                    <Grid Grid.Row="0" ColumnDefinitions="*,Auto" VerticalOptions="Center">
+                        <Label FontAttributes="Bold"
+                            FontSize="18"
+                            Text="Wiedergabeliste erstellen"
+                            TextColor="{DynamicResource TextPrimary}" />
+                        <Border Grid.Column="1"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Tapped="OnCancelCreatePlaylistTapped" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="12"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=Dismiss24,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                    </Grid>
+
+                    <VerticalStackLayout Grid.Row="1" Spacing="8">
+                        <Label FontSize="12"
+                            Text="Name"
+                            TextColor="{DynamicResource TextSecondary}" />
+                        <Border BackgroundColor="{DynamicResource BackgroundTertiary}"
+                            StrokeThickness="0"
+                            Padding="12,0">
+                            <Entry x:Name="CreatePlaylistNameEntry"
+                                FontSize="14"
+                                HeightRequest="38"
+                                Placeholder="Name eingeben"
+                                PlaceholderColor="{DynamicResource TextTertiary}"
+                                TextColor="{DynamicResource TextPrimary}"
+                                VerticalOptions="Center"
+                                TextChanged="OnCreatePlaylistNameChanged" />
+                        </Border>
+                    </VerticalStackLayout>
+
+                    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <Button Text="Abbrechen"
+                            BackgroundColor="Transparent"
+                            Clicked="OnCancelCreatePlaylistClicked"
+                            TextColor="{DynamicResource TextSecondary}" />
+                        <Button x:Name="CreatePlaylistButton"
+                            Grid.Column="1"
+                            Text="Erstellen"
+                            BackgroundColor="{DynamicResource AccentColor}"
+                            Clicked="OnCreatePlaylistClicked"
+                            IsEnabled="False"
+                            TextColor="White" />
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!--! Login Overlay  -->
+        <Grid x:Name="LoginOverlay"
+            Grid.Row="0"
+            Grid.RowSpan="3"
+            Grid.Column="0"
+            Grid.ColumnSpan="2"
+            BackgroundColor="#DD000000"
+            InputTransparent="False"
+            IsVisible="False">
+
+            <Border BackgroundColor="{DynamicResource BackgroundSecondary}"
+                Stroke="{DynamicResource SeparatorColor}"
+                StrokeThickness="1"
+                StrokeShape="RoundRectangle 12"
+                Padding="40,32"
+                HorizontalOptions="Center"
+                VerticalOptions="Center"
+                WidthRequest="400">
+
+                <VerticalStackLayout Spacing="24">
+                    <VerticalStackLayout Spacing="8">
+                        <Label Text="&#xE72E;"
+                            FontFamily="SegoeFluentIcons"
+                            FontSize="48"
+                            TextColor="{DynamicResource AccentColor}"
+                            HorizontalOptions="Center" />
+                        <Label Text="Anmeldung erforderlich"
+                            FontSize="24"
+                            FontAttributes="Bold"
+                            TextColor="{DynamicResource TextPrimary}"
+                            HorizontalOptions="Center" />
+                        <Label Text="Bitte melden Sie sich bei Music Assistant an"
+                            FontSize="14"
+                            TextColor="{DynamicResource TextSecondary}"
+                            HorizontalOptions="Center" />
+                    </VerticalStackLayout>
+
+                    <Border x:Name="LoginErrorBorder"
+                        IsVisible="False"
+                        BackgroundColor="#33ff4757"
+                        Stroke="{DynamicResource AccentColor}"
+                        StrokeThickness="1"
+                        StrokeShape="RoundRectangle 6"
+                        Padding="12,8">
+                        <Label x:Name="LoginErrorLabel"
+                            TextColor="{DynamicResource AccentColor}"
+                            FontSize="13"
+                            HorizontalTextAlignment="Center" />
+                    </Border>
+
+                    <VerticalStackLayout Spacing="16">
+                        <VerticalStackLayout Spacing="6">
+                            <Label Text="Benutzername"
+                                FontSize="13"
+                                TextColor="{DynamicResource TextSecondary}" />
+                            <Border BackgroundColor="{DynamicResource BackgroundTertiary}"
+                                Stroke="{DynamicResource SeparatorColor}"
+                                StrokeThickness="1"
+                                StrokeShape="RoundRectangle 6"
+                                Padding="12,0">
+                                <Entry x:Name="LoginUsernameEntry"
+                                    Placeholder="Benutzername eingeben"
+                                    PlaceholderColor="{DynamicResource TextTertiary}"
+                                    TextColor="{DynamicResource TextPrimary}"
+                                    BackgroundColor="Transparent"
+                                    FontSize="15"
+                                    HeightRequest="44"
+                                    Completed="OnLoginUsernameCompleted" />
+                            </Border>
+                        </VerticalStackLayout>
+
+                        <VerticalStackLayout Spacing="6">
+                            <Label Text="Passwort"
+                                FontSize="13"
+                                TextColor="{DynamicResource TextSecondary}" />
+                            <Border BackgroundColor="{DynamicResource BackgroundTertiary}"
+                                Stroke="{DynamicResource SeparatorColor}"
+                                StrokeThickness="1"
+                                StrokeShape="RoundRectangle 6"
+                                Padding="12,0">
+                                <Entry x:Name="LoginPasswordEntry"
+                                    Placeholder="Passwort eingeben"
+                                    PlaceholderColor="{DynamicResource TextTertiary}"
+                                    TextColor="{DynamicResource TextPrimary}"
+                                    BackgroundColor="Transparent"
+                                    FontSize="15"
+                                    HeightRequest="44"
+                                    IsPassword="True"
+                                    Completed="OnLoginPasswordCompleted" />
+                            </Border>
+                        </VerticalStackLayout>
+                    </VerticalStackLayout>
+
+                    <Button x:Name="LoginButton"
+                        Text="Anmelden"
+                        FontSize="15"
+                        FontAttributes="Bold"
+                        BackgroundColor="{DynamicResource AccentColor}"
+                        TextColor="White"
+                        HeightRequest="48"
+                        CornerRadius="8"
+                        Clicked="OnLoginClicked" />
+
+                    <ActivityIndicator x:Name="LoginLoadingIndicator"
+                        IsVisible="False"
+                        IsRunning="False"
+                        Color="{DynamicResource AccentColor}"
+                        HeightRequest="24"
+                        WidthRequest="24"
+                        HorizontalOptions="Center" />
+                </VerticalStackLayout>
+            </Border>
         </Grid>
 
     </Grid>

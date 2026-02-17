@@ -100,7 +100,6 @@ public static class MauiProgram
 
         // Views registrieren
         builder.Services.AddSingleton<MainPage>();
-        builder.Services.AddTransient<LoginOverlay>();
         builder.Services.AddTransient<HomePage>();
         builder.Services.AddTransient<ExplorePage>();
         builder.Services.AddTransient<FavoritesPage>();

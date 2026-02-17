@@ -1099,6 +1099,48 @@ public class MusicAssistantService
     }
 
     /// <summary>
+    /// Fetch MediaItem by uri and deserialize to its concrete type.
+    /// </summary>
+    public async Task<MediaItem?> ResolveItemByUriAsync(string uri)
+    {
+        if (string.IsNullOrWhiteSpace(uri))
+        {
+            return null;
+        }
+
+        try
+        {
+            var args = new { uri = uri };
+            var element = await SendCommandAsync<JsonElement>("music/item_by_uri", args);
+
+            if (element.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            if (!element.TryGetProperty("media_type", out var mediaTypeValue))
+            {
+                return null;
+            }
+
+            var mediaType = mediaTypeValue.GetString()?.ToLowerInvariant();
+            return mediaType switch
+            {
+                "track" => await DeserializeMediaItemAsync<Track>(element),
+                "album" => await DeserializeMediaItemAsync<Album>(element),
+                "playlist" => await DeserializeMediaItemAsync<Playlist>(element),
+                "artist" => await DeserializeMediaItemAsync<Artist>(element),
+                _ => null
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to resolve media item by uri: {Uri}", uri);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Return a list of the last added tracks.
     /// </summary>
     public async Task<List<Track>> GetRecentlyAddedTracksAsync(int limit = 50)
@@ -1631,13 +1673,17 @@ public class MusicAssistantService
     /// <summary>
     /// Enrich media items with provider manifest for their primary provider
     /// </summary>
-    private async Task EnrichWithProviderInfoAsync<T>(List<T> items) where T : MediaItem
+    public async Task EnrichWithProviderInfoAsync<T>(IEnumerable<T> items) where T : MediaItem
     {
-        if (items == null || items.Count == 0)
+        if (items == null)
+            return;
+
+        var materialized = items as List<T> ?? items.ToList();
+        if (materialized.Count == 0)
             return;
 
         // Sammle alle einzigartigen primären Provider (aus ProviderMappings)
-        var uniqueProviders = items
+        var uniqueProviders = materialized
             .Select(item => item.ProviderMappings.FirstOrDefault()?.ProviderDomain)
             .Where(p => !string.IsNullOrEmpty(p))
             .Select(p => p!)
@@ -1645,7 +1691,7 @@ public class MusicAssistantService
             .ToList();
 
         _logger.LogDebug("Fetching {Count} unique provider manifests for {ItemCount} items",
-            uniqueProviders.Count, items.Count);
+            uniqueProviders.Count, materialized.Count);
 
         // Lade alle Manifeste parallel (nur einmal pro Provider dank Cache)
         var manifestResults = await Task.WhenAll(
@@ -1660,7 +1706,7 @@ public class MusicAssistantService
             .ToDictionary(r => r.Domain, r => r.Manifest!);
 
         // Setze das Manifest für jedes Item
-        foreach (var item in items)
+        foreach (var item in materialized)
         {
             var providerDomain = item.ProviderMappings.FirstOrDefault()?.ProviderDomain;
             if (!string.IsNullOrEmpty(providerDomain) &&
@@ -1669,6 +1715,17 @@ public class MusicAssistantService
                 item.ProviderManifest = manifest;
             }
         }
+    }
+
+    private async Task<T?> DeserializeMediaItemAsync<T>(JsonElement element) where T : MediaItem
+    {
+        var item = JsonSerializer.Deserialize<T>(element.GetRawText(), JsonOptions);
+        if (item != null)
+        {
+            await EnrichWithProviderInfoAsync(new List<T> { item });
+        }
+
+        return item;
     }
 
     #endregion

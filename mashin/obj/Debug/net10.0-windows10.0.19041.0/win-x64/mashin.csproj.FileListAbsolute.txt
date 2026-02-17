@@ -573,3 +573,4 @@ C:\Users\ericb\source\repos\mashin\mashin\obj\Debug\net10.0-windows10.0.19041.0\
 C:\Users\ericb\source\repos\mashin\mashin\obj\Debug\net10.0-windows10.0.19041.0\win-x64\qualifiers.txt.intermediate
 C:\Users\ericb\source\repos\mashin\mashin\obj\Debug\net10.0-windows10.0.19041.0\win-x64\MultipleQualifiersPerDimensionFound.txt
 C:\Users\ericb\source\repos\mashin\mashin\bin\Debug\net10.0-windows10.0.19041.0\win-x64\resources.pri
+C:\Users\ericb\source\repos\mashin\mashin\obj\Debug\net10.0-windows10.0.19041.0\win-x64\mashin.sourcelink.json

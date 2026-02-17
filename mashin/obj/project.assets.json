@@ -9018,7 +9018,7 @@
         }
       }
     },
-    "net10.0-android36.0/iossimulator-arm64": {
+    "net10.0-android36.0/iossimulator-x64": {
       "AathifMahir.Maui.MauiIcons.Core/5.0.0": {
         "type": "package",
         "dependencies": {
@@ -12001,7 +12001,7 @@
         }
       }
     },
-    "net10.0-android36.0/maccatalyst-arm64": {
+    "net10.0-android36.0/maccatalyst-x64": {
       "AathifMahir.Maui.MauiIcons.Core/5.0.0": {
         "type": "package",
         "dependencies": {
@@ -14984,7 +14984,7 @@
         }
       }
     },
-    "net10.0-android36.0/win-arm64": {
+    "net10.0-android36.0/win-x64": {
       "AathifMahir.Maui.MauiIcons.Core/5.0.0": {
         "type": "package",
         "dependencies": {
@@ -20896,7 +20896,7 @@
         }
       }
     },
-    "net10.0-ios26.2/iossimulator-arm64": {
+    "net10.0-ios26.2/iossimulator-x64": {
       "AathifMahir.Maui.MauiIcons.Core/5.0.0": {
         "type": "package",
         "dependencies": {
@@ -21855,7 +21855,7 @@
         }
       }
     },
-    "net10.0-ios26.2/maccatalyst-arm64": {
+    "net10.0-ios26.2/maccatalyst-x64": {
       "AathifMahir.Maui.MauiIcons.Core/5.0.0": {
         "type": "package",
         "dependencies": {
@@ -22814,7 +22814,7 @@
         }
       }
     },
-    "net10.0-ios26.2/win-arm64": {
+    "net10.0-ios26.2/win-x64": {
       "AathifMahir.Maui.MauiIcons.Core/5.0.0": {
         "type": "package",
         "dependencies": {
@@ -26634,7 +26634,7 @@
         }
       }
     },
-    "net10.0-maccatalyst26.2/iossimulator-arm64": {
+    "net10.0-maccatalyst26.2/iossimulator-x64": {
       "AathifMahir.Maui.MauiIcons.Core/5.0.0": {
         "type": "package",
         "dependencies": {
@@ -27581,7 +27581,7 @@
         }
       }
     },
-    "net10.0-maccatalyst26.2/maccatalyst-arm64": {
+    "net10.0-maccatalyst26.2/maccatalyst-x64": {
       "AathifMahir.Maui.MauiIcons.Core/5.0.0": {
         "type": "package",
         "dependencies": {
@@ -28534,7 +28534,7 @@
         }
       }
     },
-    "net10.0-maccatalyst26.2/win-arm64": {
+    "net10.0-maccatalyst26.2/win-x64": {
       "AathifMahir.Maui.MauiIcons.Core/5.0.0": {
         "type": "package",
         "dependencies": {
@@ -33050,7 +33050,7 @@
         }
       }
     },
-    "net10.0-windows10.0.19041/iossimulator-arm64": {
+    "net10.0-windows10.0.19041/iossimulator-x64": {
       "AathifMahir.Maui.MauiIcons.Core/5.0.0": {
         "type": "package",
         "dependencies": {
@@ -34203,7 +34203,7 @@
         }
       }
     },
-    "net10.0-windows10.0.19041/maccatalyst-arm64": {
+    "net10.0-windows10.0.19041/maccatalyst-x64": {
       "AathifMahir.Maui.MauiIcons.Core/5.0.0": {
         "type": "package",
         "dependencies": {
@@ -35356,7 +35356,7 @@
         }
       }
     },
-    "net10.0-windows10.0.19041/win-arm64": {
+    "net10.0-windows10.0.19041/win-x64": {
       "AathifMahir.Maui.MauiIcons.Core/5.0.0": {
         "type": "package",
         "dependencies": {
@@ -35495,7 +35495,7 @@
           "lib/net8.0-windows10.0.19041/_._": {}
         },
         "native": {
-          "runtimes/win-arm64/native/libHarfBuzzSharp.dll": {}
+          "runtimes/win-x64/native/libHarfBuzzSharp.dll": {}
         }
       },
       "IPNetwork2/2.1.2": {
@@ -35790,7 +35790,7 @@
           "lib/net6.0-windows10.0.19041.0/Microsoft.Graphics.Canvas.Interop.dll": {}
         },
         "native": {
-          "runtimes/win-arm64/native/Microsoft.Graphics.Canvas.dll": {}
+          "runtimes/win-x64/native/Microsoft.Graphics.Canvas.dll": {}
         },
         "build": {
           "buildTransitive/net6.0-windows10.0.19041.0/Microsoft.Graphics.Win2D.props": {},
@@ -36093,7 +36093,7 @@
       "Microsoft.Web.WebView2/1.0.3179.45": {
         "type": "package",
         "native": {
-          "runtimes/win-arm64/native/WebView2Loader.dll": {}
+          "runtimes/win-x64/native/WebView2Loader.dll": {}
         },
         "build": {
           "buildTransitive/Microsoft.Web.WebView2.targets": {}
@@ -36227,8 +36227,8 @@
           "lib/net6.0-windows10.0.18362.0/Microsoft.WindowsAppRuntime.Bootstrap.Net.dll": {}
         },
         "native": {
-          "runtimes/win-arm64/native/Microsoft.Windows.ApplicationModel.Background.UniversalBGTask.dll": {},
-          "runtimes/win-arm64/native/Microsoft.WindowsAppRuntime.Bootstrap.dll": {}
+          "runtimes/win-x64/native/Microsoft.Windows.ApplicationModel.Background.UniversalBGTask.dll": {},
+          "runtimes/win-x64/native/Microsoft.WindowsAppRuntime.Bootstrap.dll": {}
         },
         "build": {
           "buildTransitive/Microsoft.WindowsAppSDK.props": {},
@@ -36440,7 +36440,7 @@
           "lib/net8.0-windows10.0.19041/_._": {}
         },
         "native": {
-          "runtimes/win-arm64/native/libSkiaSharp.dll": {}
+          "runtimes/win-x64/native/libSkiaSharp.dll": {}
         }
       },
       "Svg.Custom/3.0.4": {
@@ -41923,20 +41923,26 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\ericb\\.nuget\\packages\\": {}
+    "C:\\Users\\ericb\\.nuget\\packages\\": {},
+    "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\ericb\\sources\\repos\\mashin\\mashin\\mashin.csproj",
+      "projectUniqueName": "C:\\Users\\ericb\\source\\repos\\mashin\\mashin\\mashin.csproj",
       "projectName": "mashin",
-      "projectPath": "C:\\Users\\ericb\\sources\\repos\\mashin\\mashin\\mashin.csproj",
+      "projectPath": "C:\\Users\\ericb\\source\\repos\\mashin\\mashin\\mashin.csproj",
       "packagesPath": "C:\\Users\\ericb\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\ericb\\sources\\repos\\mashin\\mashin\\obj\\",
+      "outputPath": "C:\\Users\\ericb\\source\\repos\\mashin\\mashin\\obj\\",
       "projectStyle": "PackageReference",
       "crossTargeting": true,
+      "fallbackFolders": [
+        "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
+      ],
       "configFilePaths": [
-        "C:\\Users\\ericb\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        "C:\\Users\\ericb\\AppData\\Roaming\\NuGet\\NuGet.Config",
+        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
+        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
       ],
       "originalTargetFrameworks": [
         "net10.0-android",
@@ -41945,6 +41951,7 @@
         "net10.0-windows10.0.19041.0"
       ],
       "sources": {
+        "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
         "C:\\Program Files\\dotnet\\library-packs": {},
         "https://api.nuget.org/v3/index.json": {}
       },
@@ -41976,7 +41983,7 @@
         "auditLevel": "low",
         "auditMode": "all"
       },
-      "SdkAnalysisLevel": "10.0.100"
+      "SdkAnalysisLevel": "10.0.200"
     },
     "frameworks": {
       "net10.0-android36.0": {
@@ -42032,6 +42039,12 @@
         ],
         "assetTargetFallback": true,
         "warn": true,
+        "downloadDependencies": [
+          {
+            "name": "Microsoft.NETCore.App.Ref",
+            "version": "[10.0.3, 10.0.3]"
+          }
+        ],
         "frameworkReferences": {
           "Microsoft.Android": {
             "privateAssets": "all"
@@ -42043,7 +42056,7 @@
             "privateAssets": "all"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.102/PortableRuntimeIdentifierGraph.json",
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.200-preview.0.26103.119/PortableRuntimeIdentifierGraph.json",
         "packagesToPrune": {
           "Microsoft.CSharp": "(,4.7.32767]",
           "Microsoft.VisualBasic": "(,10.4.32767]",
@@ -42372,6 +42385,12 @@
         ],
         "assetTargetFallback": true,
         "warn": true,
+        "downloadDependencies": [
+          {
+            "name": "Microsoft.NETCore.App.Ref",
+            "version": "[10.0.3, 10.0.3]"
+          }
+        ],
         "frameworkReferences": {
           "Microsoft.iOS": {
             "privateAssets": "all"
@@ -42383,7 +42402,7 @@
             "privateAssets": "all"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.102/PortableRuntimeIdentifierGraph.json",
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.200-preview.0.26103.119/PortableRuntimeIdentifierGraph.json",
         "packagesToPrune": {
           "Microsoft.CSharp": "(,4.7.32767]",
           "Microsoft.VisualBasic": "(,10.4.32767]",
@@ -42713,6 +42732,12 @@
         ],
         "assetTargetFallback": true,
         "warn": true,
+        "downloadDependencies": [
+          {
+            "name": "Microsoft.NETCore.App.Ref",
+            "version": "[10.0.3, 10.0.3]"
+          }
+        ],
         "frameworkReferences": {
           "Microsoft.MacCatalyst": {
             "privateAssets": "all"
@@ -42724,7 +42749,7 @@
             "privateAssets": "all"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.102/PortableRuntimeIdentifierGraph.json",
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.200-preview.0.26103.119/PortableRuntimeIdentifierGraph.json",
         "packagesToPrune": {
           "Microsoft.CSharp": "(,4.7.32767]",
           "Microsoft.VisualBasic": "(,10.4.32767]",
@@ -43061,7 +43086,7 @@
             "privateAssets": "all"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.102/PortableRuntimeIdentifierGraph.json",
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.200-preview.0.26103.119/PortableRuntimeIdentifierGraph.json",
         "packagesToPrune": {
           "Microsoft.CSharp": "(,4.7.32767]",
           "Microsoft.VisualBasic": "(,10.4.32767]",
@@ -43345,13 +43370,13 @@
       "android-x64": {
         "#import": []
       },
-      "iossimulator-arm64": {
+      "iossimulator-x64": {
         "#import": []
       },
-      "maccatalyst-arm64": {
+      "maccatalyst-x64": {
         "#import": []
       },
-      "win-arm64": {
+      "win-x64": {
         "#import": []
       }
     }

@@ -20,13 +20,13 @@ build_property.PlatformNeutralAssembly =
 build_property.EnforceExtendedAnalyzerRules = 
 build_property._SupportedPlatformList = Linux,macOS,Windows
 build_property.RootNamespace = mashin
-build_property.ProjectDir = C:\Users\ericb\sources\repos\mashin\mashin\
+build_property.ProjectDir = C:\Users\ericb\source\repos\mashin\mashin\
 build_property.EnableComHosting = 
 build_property.EnableGeneratedComInterfaceComImportInterop = 
 build_property.EffectiveAnalysisLevelStyle = 10.0
 build_property.EnableCodeStyleSeverity = 
 
-[C:/Users/ericb/sources/repos/mashin/mashin/App.xaml]
+[C:/Users/ericb/source/repos/mashin/mashin/App.xaml]
 build_metadata.AdditionalFiles.GenKind = Xaml
 build_metadata.AdditionalFiles.ManifestResourceName = mashin.App.xaml
 build_metadata.AdditionalFiles.TargetPath = App.xaml
@@ -36,7 +36,7 @@ build_metadata.AdditionalFiles.NoWarn =
 build_metadata.AdditionalFiles.EnableDiagnostics = 
 build_metadata.AdditionalFiles.LineInfo = 
 
-[C:/Users/ericb/sources/repos/mashin/mashin/Resources/Styles/DarkTheme.xaml]
+[C:/Users/ericb/source/repos/mashin/mashin/Resources/Styles/DarkTheme.xaml]
 build_metadata.AdditionalFiles.GenKind = Xaml
 build_metadata.AdditionalFiles.ManifestResourceName = mashin.Resources.Styles.DarkTheme.xaml
 build_metadata.AdditionalFiles.TargetPath = Resources\Styles\DarkTheme.xaml
@@ -46,7 +46,7 @@ build_metadata.AdditionalFiles.NoWarn =
 build_metadata.AdditionalFiles.EnableDiagnostics = 
 build_metadata.AdditionalFiles.LineInfo = 
 
-[C:/Users/ericb/sources/repos/mashin/mashin/Resources/Styles/LightTheme.xaml]
+[C:/Users/ericb/source/repos/mashin/mashin/Resources/Styles/LightTheme.xaml]
 build_metadata.AdditionalFiles.GenKind = Xaml
 build_metadata.AdditionalFiles.ManifestResourceName = mashin.Resources.Styles.LightTheme.xaml
 build_metadata.AdditionalFiles.TargetPath = Resources\Styles\LightTheme.xaml
@@ -56,7 +56,7 @@ build_metadata.AdditionalFiles.NoWarn =
 build_metadata.AdditionalFiles.EnableDiagnostics = 
 build_metadata.AdditionalFiles.LineInfo = 
 
-[C:/Users/ericb/sources/repos/mashin/mashin/Resources/Styles/Styles.xaml]
+[C:/Users/ericb/source/repos/mashin/mashin/Resources/Styles/Styles.xaml]
 build_metadata.AdditionalFiles.GenKind = Xaml
 build_metadata.AdditionalFiles.ManifestResourceName = mashin.Resources.Styles.Styles.xaml
 build_metadata.AdditionalFiles.TargetPath = Resources\Styles\Styles.xaml
@@ -66,7 +66,7 @@ build_metadata.AdditionalFiles.NoWarn =
 build_metadata.AdditionalFiles.EnableDiagnostics = 
 build_metadata.AdditionalFiles.LineInfo = 
 
-[C:/Users/ericb/sources/repos/mashin/mashin/Views/Desktop/AlbumDetailPage.xaml]
+[C:/Users/ericb/source/repos/mashin/mashin/Views/Desktop/AlbumDetailPage.xaml]
 build_metadata.AdditionalFiles.GenKind = Xaml
 build_metadata.AdditionalFiles.ManifestResourceName = mashin.Views.Desktop.AlbumDetailPage.xaml
 build_metadata.AdditionalFiles.TargetPath = Views\Desktop\AlbumDetailPage.xaml
@@ -76,7 +76,7 @@ build_metadata.AdditionalFiles.NoWarn =
 build_metadata.AdditionalFiles.EnableDiagnostics = 
 build_metadata.AdditionalFiles.LineInfo = 
 
-[C:/Users/ericb/sources/repos/mashin/mashin/Views/Desktop/ArtistDetailPage.xaml]
+[C:/Users/ericb/source/repos/mashin/mashin/Views/Desktop/ArtistDetailPage.xaml]
 build_metadata.AdditionalFiles.GenKind = Xaml
 build_metadata.AdditionalFiles.ManifestResourceName = mashin.Views.Desktop.ArtistDetailPage.xaml
 build_metadata.AdditionalFiles.TargetPath = Views\Desktop\ArtistDetailPage.xaml
@@ -86,7 +86,7 @@ build_metadata.AdditionalFiles.NoWarn =
 build_metadata.AdditionalFiles.EnableDiagnostics = 
 build_metadata.AdditionalFiles.LineInfo = 
 
-[C:/Users/ericb/sources/repos/mashin/mashin/Views/Desktop/Controls/ContextMenu.xaml]
+[C:/Users/ericb/source/repos/mashin/mashin/Views/Desktop/Controls/ContextMenu.xaml]
 build_metadata.AdditionalFiles.GenKind = Xaml
 build_metadata.AdditionalFiles.ManifestResourceName = mashin.Views.Desktop.Controls.ContextMenu.xaml
 build_metadata.AdditionalFiles.TargetPath = Views\Desktop\Controls\ContextMenu.xaml
@@ -96,7 +96,7 @@ build_metadata.AdditionalFiles.NoWarn =
 build_metadata.AdditionalFiles.EnableDiagnostics = 
 build_metadata.AdditionalFiles.LineInfo = 
 
-[C:/Users/ericb/sources/repos/mashin/mashin/Views/Desktop/Controls/ContextSubMenu.xaml]
+[C:/Users/ericb/source/repos/mashin/mashin/Views/Desktop/Controls/ContextSubMenu.xaml]
 build_metadata.AdditionalFiles.GenKind = Xaml
 build_metadata.AdditionalFiles.ManifestResourceName = mashin.Views.Desktop.Controls.ContextSubMenu.xaml
 build_metadata.AdditionalFiles.TargetPath = Views\Desktop\Controls\ContextSubMenu.xaml
@@ -106,7 +106,7 @@ build_metadata.AdditionalFiles.NoWarn =
 build_metadata.AdditionalFiles.EnableDiagnostics = 
 build_metadata.AdditionalFiles.LineInfo = 
 
-[C:/Users/ericb/sources/repos/mashin/mashin/Views/Desktop/Controls/RowView.xaml]
+[C:/Users/ericb/source/repos/mashin/mashin/Views/Desktop/Controls/RowView.xaml]
 build_metadata.AdditionalFiles.GenKind = Xaml
 build_metadata.AdditionalFiles.ManifestResourceName = mashin.Views.Desktop.Controls.RowView.xaml
 build_metadata.AdditionalFiles.TargetPath = Views\Desktop\Controls\RowView.xaml
@@ -116,7 +116,7 @@ build_metadata.AdditionalFiles.NoWarn =
 build_metadata.AdditionalFiles.EnableDiagnostics = 
 build_metadata.AdditionalFiles.LineInfo = 
 
-[C:/Users/ericb/sources/repos/mashin/mashin/Views/Desktop/Controls/SkeletonLoader.xaml]
+[C:/Users/ericb/source/repos/mashin/mashin/Views/Desktop/Controls/SkeletonLoader.xaml]
 build_metadata.AdditionalFiles.GenKind = Xaml
 build_metadata.AdditionalFiles.ManifestResourceName = mashin.Views.Desktop.Controls.SkeletonLoader.xaml
 build_metadata.AdditionalFiles.TargetPath = Views\Desktop\Controls\SkeletonLoader.xaml
@@ -126,7 +126,7 @@ build_metadata.AdditionalFiles.NoWarn =
 build_metadata.AdditionalFiles.EnableDiagnostics = 
 build_metadata.AdditionalFiles.LineInfo = 
 
-[C:/Users/ericb/sources/repos/mashin/mashin/Views/Desktop/Controls/TableView.xaml]
+[C:/Users/ericb/source/repos/mashin/mashin/Views/Desktop/Controls/TableView.xaml]
 build_metadata.AdditionalFiles.GenKind = Xaml
 build_metadata.AdditionalFiles.ManifestResourceName = mashin.Views.Desktop.Controls.TableView.xaml
 build_metadata.AdditionalFiles.TargetPath = Views\Desktop\Controls\TableView.xaml
@@ -136,7 +136,7 @@ build_metadata.AdditionalFiles.NoWarn =
 build_metadata.AdditionalFiles.EnableDiagnostics = 
 build_metadata.AdditionalFiles.LineInfo = 
 
-[C:/Users/ericb/sources/repos/mashin/mashin/Views/Desktop/ExplorePage.xaml]
+[C:/Users/ericb/source/repos/mashin/mashin/Views/Desktop/ExplorePage.xaml]
 build_metadata.AdditionalFiles.GenKind = Xaml
 build_metadata.AdditionalFiles.ManifestResourceName = mashin.Views.Desktop.ExplorePage.xaml
 build_metadata.AdditionalFiles.TargetPath = Views\Desktop\ExplorePage.xaml
@@ -146,7 +146,7 @@ build_metadata.AdditionalFiles.NoWarn =
 build_metadata.AdditionalFiles.EnableDiagnostics = 
 build_metadata.AdditionalFiles.LineInfo = 
 
-[C:/Users/ericb/sources/repos/mashin/mashin/Views/Desktop/FavoritesPage.xaml]
+[C:/Users/ericb/source/repos/mashin/mashin/Views/Desktop/FavoritesPage.xaml]
 build_metadata.AdditionalFiles.GenKind = Xaml
 build_metadata.AdditionalFiles.ManifestResourceName = mashin.Views.Desktop.FavoritesPage.xaml
 build_metadata.AdditionalFiles.TargetPath = Views\Desktop\FavoritesPage.xaml
@@ -156,7 +156,7 @@ build_metadata.AdditionalFiles.NoWarn =
 build_metadata.AdditionalFiles.EnableDiagnostics = 
 build_metadata.AdditionalFiles.LineInfo = 
 
-[C:/Users/ericb/sources/repos/mashin/mashin/Views/Desktop/HomePage.xaml]
+[C:/Users/ericb/source/repos/mashin/mashin/Views/Desktop/HomePage.xaml]
 build_metadata.AdditionalFiles.GenKind = Xaml
 build_metadata.AdditionalFiles.ManifestResourceName = mashin.Views.Desktop.HomePage.xaml
 build_metadata.AdditionalFiles.TargetPath = Views\Desktop\HomePage.xaml
@@ -166,17 +166,7 @@ build_metadata.AdditionalFiles.NoWarn =
 build_metadata.AdditionalFiles.EnableDiagnostics = 
 build_metadata.AdditionalFiles.LineInfo = 
 
-[C:/Users/ericb/sources/repos/mashin/mashin/Views/Desktop/LoginOverlay.xaml]
-build_metadata.AdditionalFiles.GenKind = Xaml
-build_metadata.AdditionalFiles.ManifestResourceName = mashin.Views.Desktop.LoginOverlay.xaml
-build_metadata.AdditionalFiles.TargetPath = Views\Desktop\LoginOverlay.xaml
-build_metadata.AdditionalFiles.RelativePath = Views\Desktop\LoginOverlay.xaml
-build_metadata.AdditionalFiles.Inflator = Runtime
-build_metadata.AdditionalFiles.NoWarn = 
-build_metadata.AdditionalFiles.EnableDiagnostics = 
-build_metadata.AdditionalFiles.LineInfo = 
-
-[C:/Users/ericb/sources/repos/mashin/mashin/Views/Desktop/MainPage.xaml]
+[C:/Users/ericb/source/repos/mashin/mashin/Views/Desktop/MainPage.xaml]
 build_metadata.AdditionalFiles.GenKind = Xaml
 build_metadata.AdditionalFiles.ManifestResourceName = mashin.Views.Desktop.MainPage.xaml
 build_metadata.AdditionalFiles.TargetPath = Views\Desktop\MainPage.xaml
@@ -186,7 +176,7 @@ build_metadata.AdditionalFiles.NoWarn =
 build_metadata.AdditionalFiles.EnableDiagnostics = 
 build_metadata.AdditionalFiles.LineInfo = 
 
-[C:/Users/ericb/sources/repos/mashin/mashin/Views/Desktop/PlaylistDetailPage.xaml]
+[C:/Users/ericb/source/repos/mashin/mashin/Views/Desktop/PlaylistDetailPage.xaml]
 build_metadata.AdditionalFiles.GenKind = Xaml
 build_metadata.AdditionalFiles.ManifestResourceName = mashin.Views.Desktop.PlaylistDetailPage.xaml
 build_metadata.AdditionalFiles.TargetPath = Views\Desktop\PlaylistDetailPage.xaml
@@ -196,7 +186,7 @@ build_metadata.AdditionalFiles.NoWarn =
 build_metadata.AdditionalFiles.EnableDiagnostics = 
 build_metadata.AdditionalFiles.LineInfo = 
 
-[C:/Users/ericb/sources/repos/mashin/mashin/Views/Desktop/SearchPage.xaml]
+[C:/Users/ericb/source/repos/mashin/mashin/Views/Desktop/SearchPage.xaml]
 build_metadata.AdditionalFiles.GenKind = Xaml
 build_metadata.AdditionalFiles.ManifestResourceName = mashin.Views.Desktop.SearchPage.xaml
 build_metadata.AdditionalFiles.TargetPath = Views\Desktop\SearchPage.xaml

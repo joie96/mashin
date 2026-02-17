@@ -132,16 +132,15 @@
                     <!--  Album  -->
                     <Label Grid.Column="4"
                         x:Name="AlbumLabel"
-                        BindingContext="{Binding Album}"
                         FontSize="14"
                         LineBreakMode="TailTruncation"
                         MaxLines="1"
-                        Text="{Binding Name}"
+                        Text="{Binding Album.Name}"
                         TextColor="{DynamicResource TextTertiary}"
                         VerticalOptions="Center">
                         <Label.Behaviors>
                             <behaviors:LinkLabelBehavior Command="{Binding Source={x:Reference self}, Path=PrimaryInfoTappedCommand}"
-                                CommandParameter="{Binding .}"
+                                CommandParameter="{Binding Album}"
                                 HoverTextColor="{DynamicResource TextSecondary}">
                             </behaviors:LinkLabelBehavior>
                         </Label.Behaviors>

@@ -17,7 +17,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("mashin")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0+844659ec893795d196b9601225b850280628ccc5")]
 [assembly: System.Reflection.AssemblyProductAttribute("mashin")]
 [assembly: System.Reflection.AssemblyTitleAttribute("mashin")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

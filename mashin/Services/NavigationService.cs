@@ -165,7 +165,7 @@ public class NavigationService : INavigationService
         }
         _logger.LogDebug("Navigating to {PageName}", entry.PageType.Name);
 
-        if (entry.Parameter != null && newPage.BindingContext is INavigationAware navigationAware)
+        if (newPage.BindingContext is INavigationAware navigationAware)
         {
             await navigationAware.OnNavigatedToAsync(entry.Parameter);
         }

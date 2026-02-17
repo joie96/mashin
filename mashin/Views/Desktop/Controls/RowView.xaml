@@ -237,7 +237,7 @@
                     FontSize="14"
                     LineBreakMode="TailTruncation"
                     MaxLines="1"
-                    Text="{Binding Name}"
+                    Text="{Binding DisplayName}"
                     TextColor="{DynamicResource TextSecondary}">
                     <Label.Behaviors>
                         <behaviors:HoverMarqueeBehavior />

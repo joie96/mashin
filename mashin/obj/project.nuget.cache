@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "ZoKPbBfXM1s=",
+  "dgSpecHash": "5TXwPhUYlK0=",
   "success": true,
-  "projectFilePath": "C:\\Users\\ericb\\sources\\repos\\mashin\\mashin\\mashin.csproj",
+  "projectFilePath": "C:\\Users\\ericb\\source\\repos\\mashin\\mashin\\mashin.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\ericb\\.nuget\\packages\\aathifmahir.maui.mauiicons.core\\5.0.0\\aathifmahir.maui.mauiicons.core.5.0.0.nupkg.sha512",
     "C:\\Users\\ericb\\.nuget\\packages\\aathifmahir.maui.mauiicons.fluent\\5.0.0\\aathifmahir.maui.mauiicons.fluent.5.0.0.nupkg.sha512",
@@ -166,6 +166,9 @@
     "C:\\Users\\ericb\\.nuget\\packages\\xamarin.kotlinx.serialization.core\\1.9.0.1\\xamarin.kotlinx.serialization.core.1.9.0.1.nupkg.sha512",
     "C:\\Users\\ericb\\.nuget\\packages\\xamarin.kotlinx.serialization.core.jvm\\1.9.0.1\\xamarin.kotlinx.serialization.core.jvm.1.9.0.1.nupkg.sha512",
     "C:\\Users\\ericb\\.nuget\\packages\\zeroconf\\3.7.16\\zeroconf.3.7.16.nupkg.sha512",
+    "C:\\Users\\ericb\\.nuget\\packages\\microsoft.netcore.app.ref\\10.0.3\\microsoft.netcore.app.ref.10.0.3.nupkg.sha512",
+    "C:\\Users\\ericb\\.nuget\\packages\\microsoft.netcore.app.ref\\10.0.3\\microsoft.netcore.app.ref.10.0.3.nupkg.sha512",
+    "C:\\Users\\ericb\\.nuget\\packages\\microsoft.netcore.app.ref\\10.0.3\\microsoft.netcore.app.ref.10.0.3.nupkg.sha512",
     "C:\\Users\\ericb\\.nuget\\packages\\microsoft.windows.sdk.net.ref\\10.0.19041.57\\microsoft.windows.sdk.net.ref.10.0.19041.57.nupkg.sha512"
   ],
   "logs": []

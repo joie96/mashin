@@ -2,6 +2,7 @@
 using mashin.Services;
 using mashin.Views.Desktop;
 using Microsoft.Extensions.Logging;
+using Microsoft.Maui.Controls;
 using Microsoft.Maui.Dispatching;
 using Sendspin.SDK.Connection;
 using Sendspin.SDK.Models;
@@ -9,6 +10,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
+using mashin.Collections;
 
 namespace mashin.ViewModels;
 
@@ -21,6 +23,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private readonly IUserDataService _userDataService;
     private readonly IPlayerService _playerService;
     private readonly INavigationService _navigationService;
+    private readonly IContextMenuService _contextMenuService;
     private readonly ILogger<MainViewModel> _logger;
 
     private readonly IDispatcherTimer _positionTimer;
@@ -41,6 +44,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private bool _isSearching;
 
     private Track? _currentTrack;
+
+    private readonly ObservableCollection<ContextMenuItem> _userMenuItems;
+
+    private ObservableRangeCollection<Playlist> _playlists = new();
 
     private NavigationSection _currentSection = NavigationSection.Home;
 
@@ -68,6 +75,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         IUserDataService userDataService,
         IPlayerService playerService,
         INavigationService navigationService,
+        IContextMenuService contextMenuService,
         ILogger<MainViewModel> logger)
     {
         _settings = settings;
@@ -75,9 +83,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _userDataService = userDataService;
         _playerService = playerService;
         _navigationService = navigationService;
+        _contextMenuService = contextMenuService;
         _logger = logger;
 
-        Playlists = new ObservableCollection<Playlist>();
+        _userMenuItems = new ObservableCollection<ContextMenuItem>
+        {
+            new()
+            {
+                Text = "Logout",
+                Command = new Command(async () => await ExecuteLogoutAsync())
+            }
+        };
 
         // Navigation Commands
         NavigateToHomeCommand = new Command(async () => await navigationService.NavigateToAsync<HomePage>());
@@ -86,6 +102,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         NavigateToPlaylistCommand = new Command<Playlist>(async (playlist) => await navigationService.NavigateToAsync<PlaylistDetailPage>(playlist));
 
         SearchCommand = new Command(async () => await ExecuteSearchAsync());
+
+        ShowUserMenuCommand = new Command<View>(async (anchor) => await ShowUserMenuAsync(anchor));
 
         // Playback Commands
         PreviousTrackCommand = new Command(async () => await PreviousTrackAsync());
@@ -128,7 +146,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     #region Bindable Properties (Playlists)
 
-    public ObservableCollection<Playlist> Playlists { get; }
+    public ObservableRangeCollection<Playlist> Playlists
+    {
+        get => _playlists;
+        private set => SetProperty(ref _playlists, value);
+    }
 
     public bool IsLoadingPlaylists
     {
@@ -248,6 +270,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public ICommand SearchCommand { get; }
 
+    public ICommand ShowUserMenuCommand { get; }
+
     #endregion
 
     #region Search
@@ -326,21 +350,41 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             return;
         }
 
+        IsLoadingPlaylists = true;
         try
         {
-            IsLoadingPlaylists = true;
+            // Get all user playlists (username--*) ordered by sort name.
+            var prefix = GetUserPlaylistPrefix();
+            var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(
+                search: string.IsNullOrWhiteSpace(prefix) ? null : prefix,
+                orderBy: "sort_name");
 
-            var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(limit: 50, orderBy: "sort_name");
-
-            // Update bindable collections on the UI thread.
-            await MainThread.InvokeOnMainThreadAsync(() =>
+            // Remove username prefix from display name
+            foreach (var playlist in playlists)
             {
-                Playlists.Clear();
-                foreach (var p in playlists)
+                if (!string.IsNullOrWhiteSpace(prefix)
+                    && !string.IsNullOrWhiteSpace(playlist.Name)
+                    && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                 {
-                    Playlists.Add(p);
+                    playlist.DisplayName = playlist.Name[prefix.Length..];
                 }
-            });
+            }
+
+            // Load playlists progressively.
+            var visiblePlaylists = playlists.Take(10).ToList();
+            Playlists = new ObservableRangeCollection<Playlist>(visiblePlaylists);
+            await Task.Yield();
+            IsLoadingPlaylists = false;
+
+            var remainingPlaylists = playlists.Skip(visiblePlaylists.Count).ToList();
+            if (remainingPlaylists.Count > 0)
+            {
+                foreach (var batch in remainingPlaylists.Chunk(20))
+                {
+                    Playlists.AddRange(batch);
+                    await Task.Yield();
+                }
+            }
 
             _logger.LogInformation("Loaded {Count} playlists", Playlists.Count);
         }
@@ -383,6 +427,54 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         {
             _logger.LogError(ex, "Failed to play playlist: {Name}", playlist.Name);
         }
+    }
+
+    public async Task<bool> CreatePlaylistAsync(string name)
+    {
+        name = name?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        var prefix = GetUserPlaylistPrefix();
+        if (string.IsNullOrWhiteSpace(prefix))
+        {
+            _logger.LogWarning("Cannot create playlist without a user name prefix.");
+            return false;
+        }
+
+        if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            name = string.Concat(prefix, name);
+        }
+
+        try
+        {
+            var playlist = await _musicAssistant.CreatePlaylistAsync(name);
+            if (playlist != null)
+            {
+                await LoadPlaylistsAsync();
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create playlist: {Name}", name);
+        }
+
+        return false;
+    }
+
+    private string? GetUserPlaylistPrefix()
+    {
+        var username = _userDataService.CurrentUser?.Username;
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            return null;
+        }
+
+        return string.Concat(username, "--");
     }
 
     #endregion
@@ -602,6 +694,34 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     }
 
     #endregion
+
+    #region User Menu
+
+    private async Task ShowUserMenuAsync(View? anchor)
+    {
+        if (anchor is null || _userMenuItems.Count == 0)
+        {
+            return;
+        }
+
+        await _contextMenuService.ShowContextMenuAsync(_userMenuItems, anchor);
+    }
+
+    private async Task ExecuteLogoutAsync()
+    {
+        try
+        {
+            await _musicAssistant.LogoutAsync();
+            await _musicAssistant.TryAutoLoginAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Logout failed");
+        }
+    }
+
+    #endregion
+
 
     #region Helpers (INotifyPropertyChanged)
 

@@ -53,7 +53,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         }
     }
 
-    public string PlaylistName => Playlist?.Name ?? "Unbekannte Playlist";
+    public string PlaylistName => Playlist?.DisplayName ?? "Unbekannte Playlist";
 
     public string? ImageUrl => Playlist?.ImageUrl;
 
@@ -257,6 +257,20 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             // Fetch playlist metadata
             var playlist = await _musicAssistant.GetPlaylistAsync(playlistId, providerInstanceOrDomain);
             playlist?.Favorite = _userDataService.IsFavorite(playlist);
+
+            if (playlist != null)
+            {
+                var prefix = GetUserPlaylistPrefix();
+                playlist.DisplayName = playlist.Name;
+
+                if (!string.IsNullOrWhiteSpace(prefix)
+                    && !string.IsNullOrWhiteSpace(playlist.Name)
+                    && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    playlist.DisplayName = playlist.Name[prefix.Length..];
+                }
+            }
+
             Playlist = playlist;
 
             if (Playlist == null)
@@ -476,6 +490,20 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         }
 
         return items;
+    }
+
+    #endregion
+
+    #region Helper Methods
+    private string? GetUserPlaylistPrefix()
+    {
+        var username = _userDataService.CurrentUser?.Username;
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            return null;
+        }
+
+        return string.Concat(username, "--");
     }
 
     #endregion
