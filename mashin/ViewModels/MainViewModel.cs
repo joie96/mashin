@@ -321,7 +321,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             await _playerService.ConnectAsync(uri);
         }
 
-        _ = await _userDataService.EnsureLoadedAsync();
+        _ = await _userDataService.EnsureLoadedAsync(forceRefresh: true);
 
         await LoadPlaylistsAsync();
     }

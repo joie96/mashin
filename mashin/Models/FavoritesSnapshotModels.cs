@@ -45,6 +45,9 @@ public sealed class FavoriteTrackSnapshot
 
     [JsonPropertyName("artists")]
     public List<FavoriteArtistRef> Artists { get; set; } = new();
+
+    [JsonPropertyName("provider_mappings")]
+    public List<ProviderMapping> ProviderMappings { get; set; } = new();
 }
 
 public sealed class FavoriteAlbumSnapshot
@@ -72,6 +75,9 @@ public sealed class FavoriteAlbumSnapshot
 
     [JsonPropertyName("artists")]
     public List<FavoriteArtistRef> Artists { get; set; } = new();
+
+    [JsonPropertyName("provider_mappings")]
+    public List<ProviderMapping> ProviderMappings { get; set; } = new();
 }
 
 public sealed class FavoritePlaylistSnapshot
@@ -93,6 +99,9 @@ public sealed class FavoritePlaylistSnapshot
 
     [JsonPropertyName("image_url")]
     public string? ImageUrl { get; set; }
+
+    [JsonPropertyName("provider_mappings")]
+    public List<ProviderMapping> ProviderMappings { get; set; } = new();
 }
 
 public sealed class FavoriteArtistSnapshot
@@ -114,6 +123,9 @@ public sealed class FavoriteArtistSnapshot
 
     [JsonPropertyName("image_url")]
     public string? ImageUrl { get; set; }
+
+    [JsonPropertyName("provider_mappings")]
+    public List<ProviderMapping> ProviderMappings { get; set; } = new();
 }
 
 public sealed class FavoriteAlbumRef
@@ -132,6 +144,9 @@ public sealed class FavoriteAlbumRef
 
     [JsonPropertyName("image_url")]
     public string? ImageUrl { get; set; }
+
+    [JsonPropertyName("provider_mappings")]
+    public List<ProviderMapping> ProviderMappings { get; set; } = new();
 }
 
 public sealed class FavoriteArtistRef
@@ -144,4 +159,7 @@ public sealed class FavoriteArtistRef
 
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("provider_mappings")]
+    public List<ProviderMapping> ProviderMappings { get; set; } = new();
 }

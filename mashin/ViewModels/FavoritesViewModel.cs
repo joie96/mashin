@@ -698,7 +698,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
             Name = snapshot.Name,
             Duration = snapshot.Duration,
             Favorite = true,
-            ProviderMappings = BuildProviderMappings(snapshot.Provider, snapshot.ItemId)
+            ProviderMappings = GetProviderMappings(snapshot.ProviderMappings)
         };
 
         if (!string.IsNullOrWhiteSpace(snapshot.DisplayName))
@@ -717,7 +717,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                 Name = snapshot.Album.Name,
                 Year = snapshot.Album.Year,
                 Favorite = false,
-                ProviderMappings = BuildProviderMappings(snapshot.Album.Provider, snapshot.Album.ItemId)
+                ProviderMappings = GetProviderMappings(snapshot.Album.ProviderMappings)
             };
 
             album.DisplayName = snapshot.Album.Name;
@@ -745,7 +745,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
             Name = snapshot.Name,
             Year = snapshot.Year,
             Favorite = true,
-            ProviderMappings = BuildProviderMappings(snapshot.Provider, snapshot.ItemId)
+            ProviderMappings = GetProviderMappings(snapshot.ProviderMappings)
         };
 
         if (!string.IsNullOrWhiteSpace(snapshot.DisplayName))
@@ -774,7 +774,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
             Provider = snapshot.Provider,
             Name = snapshot.Name,
             Favorite = true,
-            ProviderMappings = BuildProviderMappings(snapshot.Provider, snapshot.ItemId)
+            ProviderMappings = GetProviderMappings(snapshot.ProviderMappings)
         };
 
         if (!string.IsNullOrWhiteSpace(snapshot.DisplayName))
@@ -795,7 +795,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
             Provider = snapshot.Provider,
             Name = snapshot.Name,
             Favorite = true,
-            ProviderMappings = BuildProviderMappings(snapshot.Provider, snapshot.ItemId)
+            ProviderMappings = GetProviderMappings(snapshot.ProviderMappings)
         };
 
         if (!string.IsNullOrWhiteSpace(snapshot.DisplayName))
@@ -814,7 +814,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
             ItemId = snapshot.ItemId,
             Provider = snapshot.Provider,
             Name = snapshot.Name,
-            ProviderMappings = BuildProviderMappings(snapshot.Provider, snapshot.ItemId)
+            ProviderMappings = GetProviderMappings(snapshot.ProviderMappings)
         };
 
         artist.DisplayName = snapshot.Name;
@@ -842,30 +842,23 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
         };
     }
 
-    private static List<ProviderMapping> BuildProviderMappings(string? providerInstance, string? itemId)
+    private static List<ProviderMapping> GetProviderMappings(List<ProviderMapping>? snapshotMappings)
     {
-        if (string.IsNullOrWhiteSpace(providerInstance) || string.IsNullOrWhiteSpace(itemId))
+        if (snapshotMappings == null || snapshotMappings.Count == 0)
         {
             return new List<ProviderMapping>();
         }
 
-        var domain = providerInstance;
-        var separatorIndex = providerInstance.IndexOf("--", StringComparison.Ordinal);
-        if (separatorIndex > 0)
-        {
-            domain = providerInstance[..separatorIndex];
-        }
-
-        return new List<ProviderMapping>
-        {
-            new()
+        return snapshotMappings
+            .Select(mapping => new ProviderMapping
             {
-                ItemId = itemId,
-                ProviderDomain = domain,
-                ProviderInstance = providerInstance,
-                Available = true
-            }
-        };
+                ItemId = mapping.ItemId,
+                ProviderDomain = mapping.ProviderDomain,
+                ProviderInstance = mapping.ProviderInstance,
+                Available = mapping.Available,
+                Url = mapping.Url
+            })
+            .ToList();
     }
 
     private string? GetUserPlaylistPrefix()

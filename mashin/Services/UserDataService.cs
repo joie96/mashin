@@ -30,6 +30,7 @@ public sealed class UserDataService : IUserDataService
     private const string FavoritesRootKey = "mashin.favorites";
 
     private readonly MusicAssistantService _musicAssistant;
+    private readonly SettingsService _settings;
     private readonly ILogger<UserDataService> _logger;
     private readonly SemaphoreSlim _lock = new(1, 1);
 
@@ -44,9 +45,11 @@ public sealed class UserDataService : IUserDataService
 
     public UserDataService(
         MusicAssistantService musicAssistant,
+        SettingsService settings,
         ILogger<UserDataService> logger)
     {
         _musicAssistant = musicAssistant;
+        _settings = settings;
         _logger = logger;
     }
 
@@ -59,14 +62,28 @@ public sealed class UserDataService : IUserDataService
         await _lock.WaitAsync(cancellationToken);
         try
         {
+            var configuredUsername = _settings.Username;
+
             if (IsLoaded && !forceRefresh)
             {
-                return true;
+                if (string.IsNullOrWhiteSpace(configuredUsername)
+                    || string.Equals(CurrentUser?.Username, configuredUsername, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                _logger.LogInformation(
+                    "Detected user switch from {CurrentUser} to {ConfiguredUser}, reloading user data",
+                    CurrentUser?.Username,
+                    configuredUsername);
             }
 
             var user = await _musicAssistant.GetCurrentUserAsync();
             if (user == null)
             {
+                CurrentUser = null;
+                _preferences = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+                IsLoaded = false;
                 return false;
             }
 
@@ -78,6 +95,9 @@ public sealed class UserDataService : IUserDataService
         }
         catch (Exception ex)
         {
+            CurrentUser = null;
+            _preferences = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            IsLoaded = false;
             _logger.LogWarning(ex, "Failed to load user data");
             return false;
         }
@@ -230,8 +250,7 @@ public sealed class UserDataService : IUserDataService
 
             foreach (var item in mediaItems.Where(i => i != null && !string.IsNullOrWhiteSpace(i.Uri)))
             {
-                var uri = item.Uri!;
-                var updated = UpdateSnapshot(snapshot, item, uri, isFavorite);
+                var updated = UpdateSnapshot(snapshot, item, isFavorite);
                 if (updated)
                 {
                     changed = true;
@@ -281,11 +300,11 @@ public sealed class UserDataService : IUserDataService
             try
             {
                 var json = JsonSerializer.Serialize(dictionary);
-                snapshot = JsonSerializer.Deserialize<FavoritesSnapshot>(json);
-                if (snapshot != null)
+                FavoritesSnapshot? deserializedSnapshot = JsonSerializer.Deserialize<FavoritesSnapshot>(json);
+                if (deserializedSnapshot is FavoritesSnapshot parsedSnapshot)
                 {
-                    _preferences[FavoritesRootKey] = snapshot;
-                    return snapshot;
+                    _preferences[FavoritesRootKey] = parsedSnapshot;
+                    return parsedSnapshot;
                 }
             }
             catch (Exception ex)
@@ -299,9 +318,9 @@ public sealed class UserDataService : IUserDataService
             return null;
         }
 
-        snapshot = new FavoritesSnapshot();
-        _preferences[FavoritesRootKey] = snapshot;
-        return snapshot;
+        var createdSnapshot = new FavoritesSnapshot();
+        _preferences[FavoritesRootKey] = createdSnapshot;
+        return createdSnapshot;
     }
 
     private static bool IsSnapshotFavorite(FavoritesSnapshot snapshot, MediaType mediaType, string uri)
@@ -316,8 +335,10 @@ public sealed class UserDataService : IUserDataService
         };
     }
 
-    private static bool UpdateSnapshot(FavoritesSnapshot snapshot, MediaItem item, string uri, bool isFavorite)
+    private static bool UpdateSnapshot(FavoritesSnapshot snapshot, MediaItem item, bool isFavorite)
     {
+        var uri = item.Uri!;
+
         return item.MediaType switch
         {
             MediaType.Track => UpdateSnapshotList(snapshot.Tracks, uri, isFavorite, () => CreateTrackSnapshot(item as Track ?? new Track
@@ -401,7 +422,10 @@ public sealed class UserDataService : IUserDataService
             Name = track.Name,
             DisplayName = track.DisplayName,
             Duration = track.Duration,
-            ImageUrl = track.ImageUrl
+            ImageUrl = track.ImageUrl,
+            ProviderMappings = track.ProviderMappings
+                .Select(CloneProviderMapping)
+                .ToList()
         };
 
         if (track.Album != null)
@@ -412,7 +436,10 @@ public sealed class UserDataService : IUserDataService
                 Provider = track.Album.Provider,
                 Name = track.Album.Name,
                 Year = track.Album.Year,
-                ImageUrl = track.Album.ImageUrl
+                ImageUrl = track.Album.ImageUrl,
+                ProviderMappings = track.Album.ProviderMappings
+                    .Select(CloneProviderMapping)
+                    .ToList()
             };
         }
 
@@ -424,7 +451,10 @@ public sealed class UserDataService : IUserDataService
                 {
                     ItemId = artist.ItemId,
                     Provider = artist.Provider,
-                    Name = artist.Name
+                    Name = artist.Name,
+                    ProviderMappings = artist.ProviderMappings
+                        .Select(CloneProviderMapping)
+                        .ToList()
                 });
             }
         }
@@ -442,7 +472,10 @@ public sealed class UserDataService : IUserDataService
             Name = album.Name,
             DisplayName = album.DisplayName,
             Year = album.Year,
-            ImageUrl = album.ImageUrl
+            ImageUrl = album.ImageUrl,
+            ProviderMappings = album.ProviderMappings
+                .Select(CloneProviderMapping)
+                .ToList()
         };
 
         if (album.Artists != null)
@@ -453,7 +486,10 @@ public sealed class UserDataService : IUserDataService
                 {
                     ItemId = artist.ItemId,
                     Provider = artist.Provider,
-                    Name = artist.Name
+                    Name = artist.Name,
+                    ProviderMappings = artist.ProviderMappings
+                        .Select(CloneProviderMapping)
+                        .ToList()
                 });
             }
         }
@@ -470,7 +506,10 @@ public sealed class UserDataService : IUserDataService
             Provider = artist.Provider,
             Name = artist.Name,
             DisplayName = artist.DisplayName,
-            ImageUrl = artist.ImageUrl
+            ImageUrl = artist.ImageUrl,
+            ProviderMappings = artist.ProviderMappings
+                .Select(CloneProviderMapping)
+                .ToList()
         };
     }
 
@@ -483,7 +522,22 @@ public sealed class UserDataService : IUserDataService
             Provider = playlist.Provider,
             Name = playlist.Name,
             DisplayName = playlist.DisplayName,
-            ImageUrl = playlist.ImageUrl
+            ImageUrl = playlist.ImageUrl,
+            ProviderMappings = playlist.ProviderMappings
+                .Select(CloneProviderMapping)
+                .ToList()
+        };
+    }
+
+    private static ProviderMapping CloneProviderMapping(ProviderMapping mapping)
+    {
+        return new ProviderMapping
+        {
+            ItemId = mapping.ItemId,
+            ProviderDomain = mapping.ProviderDomain,
+            ProviderInstance = mapping.ProviderInstance,
+            Available = mapping.Available,
+            Url = mapping.Url
         };
     }
 

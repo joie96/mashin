@@ -107,6 +107,34 @@ public class MusicAssistantService
         }
     }
 
+    private static string NormalizeImagePath(string? path, string? provider, string baseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        if (Uri.TryCreate(path, UriKind.Absolute, out _))
+        {
+            return path;
+        }
+
+        var encodedPath = Uri.EscapeDataString(path);
+        var encodedProvider = Uri.EscapeDataString(string.IsNullOrWhiteSpace(provider) ? "builtin" : provider);
+        return $"{baseUrl.TrimEnd('/')}/imageproxy?path={encodedPath}&provider={encodedProvider}&checksum=&size=256";
+    }
+
+    private void NormalizePlaylistImage(Playlist? playlist)
+    {
+        var image = playlist?.Metadata?.Images?.FirstOrDefault();
+        if (image == null)
+        {
+            return;
+        }
+
+        image.Path = NormalizeImagePath(image.Path, image.Provider, _settings.MusicAssistantUrl);
+    }
+
     #region Authentication
 
     /// <summary>
@@ -352,6 +380,7 @@ public class MusicAssistantService
         _httpClient.DefaultRequestHeaders.Authorization = null;
 
         _settings.AuthToken = null;
+        _settings.Username = null;
         _settings.Save();
 
         _logger.LogInformation("Logged out");
@@ -807,7 +836,13 @@ public class MusicAssistantService
         if (!string.IsNullOrEmpty(orderBy)) args["order_by"] = orderBy;
 
         var result = await SendCommandAsync<List<Playlist>>("music/playlists/library_items", args);
-        return result ?? new List<Playlist>();
+        var playlists = result ?? new List<Playlist>();
+        foreach (var playlist in playlists)
+        {
+            NormalizePlaylistImage(playlist);
+        }
+
+        return playlists;
     }
 
     /// <summary>
@@ -821,7 +856,9 @@ public class MusicAssistantService
             provider_instance_id_or_domain = providerInstanceIdOrDomain
         };
 
-        return await SendCommandAsync<Playlist>("music/playlists/get", args);
+        var playlist = await SendCommandAsync<Playlist>("music/playlists/get", args);
+        NormalizePlaylistImage(playlist);
+        return playlist;
     }
 
     /// <summary>
@@ -859,7 +896,9 @@ public class MusicAssistantService
             args["provider_instance_or_domain"] = providerInstanceOrDomain;
         }
 
-        return await SendCommandAsync<Playlist>("music/playlists/create_playlist", args);
+        var playlist = await SendCommandAsync<Playlist>("music/playlists/create_playlist", args);
+        NormalizePlaylistImage(playlist);
+        return playlist;
     }
 
     /// <summary>
