@@ -1,0 +1,641 @@
+﻿using mashin.Collections;
+using mashin.Models;
+using mashin.Services;
+using mashin.Views.Desktop;
+using MauiIcons.Fluent;
+using Microsoft.Extensions.Logging;
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+using System.Windows.Input;
+
+namespace mashin.ViewModels;
+
+public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, IDisposable
+{
+    #region Fields
+
+    private readonly MusicAssistantService _musicAssistant;
+    private readonly IContextMenuService _contextMenuService;
+    private readonly INavigationService _navigationService;
+    private readonly ILogger<ArtistDetailViewModel> _logger;
+
+    private Artist? _artist;
+    private List<Album> _allAlbums = new();
+    private List<Track> _allTopTracks = new();
+
+    private ObservableRangeCollection<Track> _topTracks = new();
+    private ObservableRangeCollection<ContextMenuItem> _contextMenuItems = new();
+    private ObservableRangeCollection<Album> _albums = new();
+    private ObservableRangeCollection<Artist> _similarArtists = new();
+
+    private readonly IReadOnlyList<TableViewSkeleton> _trackSkeletons = Enumerable.Range(0, 10)
+        .Select(_ => new TableViewSkeleton())
+        .ToList();
+    private readonly IReadOnlyList<RowViewSkeleton> _albumSkeletons = Enumerable.Range(0, 20)
+        .Select(_ => new RowViewSkeleton())
+        .ToList();
+    private readonly IReadOnlyList<RowViewSkeleton> _artistSkeletons = Enumerable.Range(0, 20)
+        .Select(_ => new RowViewSkeleton())
+        .ToList();
+
+    private bool _isLoading;
+    private bool _isLoadingMetadata;
+    private bool _isLoadingAlbums;
+    private bool _isLoadingTracks;
+    private bool _isLoadingSimilarArtists;
+    private bool _isDescriptionExpanded;
+    private bool _isTracksExpanded;
+    private bool _disposed;
+    #endregion
+
+    #region Properties
+
+    public Artist? Artist
+    {
+        get => _artist;
+        set
+        {
+            if (SetProperty(ref _artist, value))
+            {
+                OnPropertyChanged(nameof(ArtistName));
+                OnPropertyChanged(nameof(ImageUrl));
+                OnPropertyChanged(nameof(HasDescription));
+                IsDescriptionExpanded = false;
+            }
+        }
+    }
+
+    public string ArtistName => Artist?.Name ?? "Unbekannter Interpret";
+
+    public string? ImageUrl => Artist?.ImageUrl;
+
+    public bool HasDescription => !string.IsNullOrWhiteSpace(Artist?.Metadata?.Description);
+
+    public ObservableRangeCollection<Track> TopTracks
+    {
+        get => _topTracks;
+        set
+        {
+            if (SetProperty(ref _topTracks, value))
+            {
+                OnPropertyChanged(nameof(TopTrackItems));
+            }
+        }
+    }
+
+    public ObservableRangeCollection<Album> Albums
+    {
+        get => _albums;
+        set
+        {
+            if (SetProperty(ref _albums, value))
+            {
+                OnPropertyChanged(nameof(AlbumItems));
+            }
+        }
+    }
+
+    public ObservableRangeCollection<Artist> SimilarArtists
+    {
+        get => _similarArtists;
+        set
+        {
+            if (SetProperty(ref _similarArtists, value))
+            {
+                OnPropertyChanged(nameof(SimilarArtistItems));
+            }
+        }
+    }
+
+    public ObservableRangeCollection<ContextMenuItem> ContextMenuItems
+    {
+        get => _contextMenuItems;
+        set => SetProperty(ref _contextMenuItems, value);
+    }
+
+    public IMediaItemActions MediaActions { get; }
+
+    public ICommand AlbumTappedCommand { get; }
+    public ICommand ArtistTappedCommand { get; }
+    public ICommand ShowContextMenuAtAnchorCommand { get; }
+    public ICommand ShowContextMenuAtPositionCommand { get; }
+    public ICommand ToggleDescriptionCommand { get; }
+    public ICommand ToggleTracksCommand { get; }
+
+    public bool IsLoading
+    {
+        get => _isLoading;
+        set => SetProperty(ref _isLoading, value);
+    }
+
+    public bool IsLoadingMetadata
+    {
+        get => _isLoadingMetadata;
+        set => SetProperty(ref _isLoadingMetadata, value);
+    }
+
+    public bool IsLoadingAlbums
+    {
+        get => _isLoadingAlbums;
+        set
+        {
+            if (SetProperty(ref _isLoadingAlbums, value))
+            {
+                OnPropertyChanged(nameof(AlbumItems));
+            }
+        }
+    }
+
+    public bool IsLoadingTracks
+    {
+        get => _isLoadingTracks;
+        set
+        {
+            if (SetProperty(ref _isLoadingTracks, value))
+            {
+                OnPropertyChanged(nameof(TopTrackItems));
+            }
+        }
+    }
+
+    public bool IsLoadingSimilarArtists
+    {
+        get => _isLoadingSimilarArtists;
+        set
+        {
+            if (SetProperty(ref _isLoadingSimilarArtists, value))
+            {
+                OnPropertyChanged(nameof(SimilarArtistItems));
+            }
+        }
+    }
+    
+    public bool IsDescriptionExpanded
+    {
+        get => _isDescriptionExpanded;
+        set
+        {
+            if (SetProperty(ref _isDescriptionExpanded, value))
+            {
+                OnPropertyChanged(nameof(DescriptionMaxLines));
+            }
+        }
+    }
+
+    public int DescriptionMaxLines => IsDescriptionExpanded ? int.MaxValue : 4;
+
+    public IEnumerable<object> TopTrackItems => IsLoadingTracks ? _trackSkeletons : _topTracks;
+    public IEnumerable<object> AlbumItems => IsLoadingAlbums ? _albumSkeletons : _albums;
+    public IEnumerable<object> SimilarArtistItems => IsLoadingSimilarArtists ? _artistSkeletons : _similarArtists;
+
+    public bool IsTracksExpanded
+    {
+        get => _isTracksExpanded;
+        set
+        {
+            if (SetProperty(ref _isTracksExpanded, value))
+            {
+                UpdateDisplayedTracks();
+            }
+        }
+    }
+
+    #endregion
+
+    #region Construction
+
+    public ArtistDetailViewModel(
+        MusicAssistantService musicAssistant,
+        IPlayerService playerService,
+        IMediaItemActions mediaActions,
+        IContextMenuService contextMenuService,
+        INavigationService navigationService,
+        ILogger<ArtistDetailViewModel> logger)
+    {
+        _musicAssistant = musicAssistant;
+        _contextMenuService = contextMenuService;
+        _navigationService = navigationService;
+        _logger = logger;
+
+        MediaActions = mediaActions;
+
+        // Navigation Commands
+        AlbumTappedCommand = new Command<object>(async parameter => await _navigationService.NavigateToAsync<AlbumDetailPage>(parameter));
+
+        ArtistTappedCommand = new Command<object>(async parameter => await _navigationService.NavigateToAsync<ArtistDetailPage>(parameter));
+
+        // Toggle Commands
+        ToggleDescriptionCommand = new Command(() => IsDescriptionExpanded = !IsDescriptionExpanded);
+        ToggleTracksCommand = new Command(() => IsTracksExpanded = !IsTracksExpanded);
+
+        // Context Menu Commands
+        ShowContextMenuAtAnchorCommand = new Command<View>(async (anchor) =>
+        {
+            if (ContextMenuItems?.Count > 0 && anchor != null)
+            {
+                await _contextMenuService.ShowContextMenuAsync(ContextMenuItems, anchor);
+            }
+        });
+
+        ShowContextMenuAtPositionCommand = new Command<Point>(async (position) =>
+        {
+            if (ContextMenuItems?.Count > 0)
+            {
+                await _contextMenuService.ShowContextMenuAsync(ContextMenuItems, position);
+            }
+        });
+    }
+
+    #endregion
+
+    #region INavigationAware
+
+    public Task OnNavigatedToAsync(object? parameter)
+    {
+        if (parameter is MediaItem item)
+        {
+            _logger.LogInformation("Navigated to artist target: {ItemId} ({Provider})", item.ItemId, item.Provider);
+
+            _ = LoadArtistAsync(item.ItemId, item.Provider);
+        }
+        else
+        {
+            _logger.LogWarning("NavigatedTo called without valid MediaItem parameter");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task OnNavigatedFromAsync()
+    {
+        _logger.LogDebug("Navigated away from artist: {ArtistName}", ArtistName);
+        return Task.CompletedTask;
+    }
+
+    #endregion
+
+    #region Data Loading
+
+    // Loads artist details progressively
+    public async Task LoadArtistAsync(string artistId, string providerInstanceOrDomain = "library")
+    {
+        IsLoading = true;
+        IsLoadingMetadata = true;
+        IsLoadingAlbums = true;
+        IsLoadingTracks = true;
+        IsLoadingSimilarArtists = true;
+        
+        try
+        {
+            // Artist Metadata 
+            await LoadArtistMetadataAsync(artistId, providerInstanceOrDomain);
+
+            // Albums
+            await LoadAlbumsAsync(artistId, providerInstanceOrDomain);
+
+            // Top Tracks
+            await LoadTopTracksAsync(artistId, providerInstanceOrDomain);
+
+            // Similar Artists
+            await LoadSimilarArtistsAsync(artistId);
+
+            // Context Menu
+            await BuildContextMenuAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load artist: {ArtistId}", artistId);
+        }
+        finally
+        {
+            IsLoading = false;
+            _navigationService.IsNavigating = false;
+        }
+    }
+
+    private async Task LoadArtistMetadataAsync(string artistId, string provider)
+    {
+        IsLoadingMetadata = true;
+        try
+        {
+            Artist = await _musicAssistant.GetArtistAsync(artistId, provider);
+
+            if (Artist == null)
+            {
+                _logger.LogWarning("Artist not found: {ArtistId}", artistId);
+            }
+        }
+        finally
+        {
+            IsLoadingMetadata = false;
+            _navigationService.IsNavigating = false;
+        }
+    }
+
+    private async Task LoadAlbumsAsync(string artistId, string provider)
+    {
+        IsLoadingAlbums = true;
+        try
+        {
+            // Get all albums and sort by year descending
+            var albums = await _musicAssistant.GetArtistAlbumsAsync(artistId, provider);
+            var sortedAlbums = albums.OrderByDescending(a => a.Year ?? 0).ToList();
+
+            _allAlbums = sortedAlbums;
+
+            // Load albums progressively
+            var visibleAlbums = sortedAlbums.Take(10);
+            Albums = new ObservableRangeCollection<Album>(visibleAlbums);
+            await Task.Yield();
+            IsLoadingAlbums = false;
+
+            var remainingAlbums = sortedAlbums.Skip(visibleAlbums.Count()).ToList();
+            if (remainingAlbums.Count > 0)
+            {
+                foreach (var batch in remainingAlbums.Chunk(20))
+                {
+                    Albums.AddRange(batch);
+                    await Task.Yield();    
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load albums");
+            IsLoadingAlbums = false;
+        }
+    }
+
+    private async Task LoadTopTracksAsync(string artistId, string provider)
+    {
+        IsLoadingTracks = true;
+        try
+        {
+            var tracks = await _musicAssistant.GetArtistTracksAsync(artistId, provider);
+
+            var processedTracks = new List<Track>();
+            for (var i = 0; i < tracks.Count; i++)
+            {
+                tracks[i].Index = i + 1;
+
+                // try to fill missing album year from already loaded albums
+                var album = tracks[i].Album;
+                if (album != null && !album.Year.HasValue && Albums.Count > 0)
+                {
+                    var albumWithYear = _allAlbums.FirstOrDefault(a => a.ItemId == album.ItemId) ??
+                                       _allAlbums.FirstOrDefault(a => string.Equals(a.Name, album.Name, StringComparison.OrdinalIgnoreCase));
+
+                    if (albumWithYear?.Year.HasValue == true)
+                    {
+                        album.Year = albumWithYear.Year;
+                    }
+                }
+
+                processedTracks.Add(tracks[i]);
+            }
+
+            _allTopTracks = processedTracks;
+            IsTracksExpanded = false;
+            
+            // Load tracks immediately
+            var visibleTracks = _allTopTracks.Take(10).ToList();
+            TopTracks = new ObservableRangeCollection<Track>(visibleTracks);
+            await Task.Yield();
+            IsLoadingTracks = false;
+
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load tracks");
+            IsLoadingTracks = false;
+        }
+    }
+
+    private void UpdateDisplayedTracks()
+    {
+        if (_allTopTracks.Count == 0)
+        {
+            if (TopTracks.Count > 0)
+            {
+                TopTracks.Clear();
+            }
+            return;
+        }
+
+        if (IsTracksExpanded)
+        {
+
+            var missingTracks = _allTopTracks.Skip(TopTracks.Count).ToList();
+            if (missingTracks.Count > 0)
+            {
+                TopTracks.AddRange(missingTracks);
+            }
+            
+        }
+        else
+        {
+            var desiredCount = Math.Min(10, _allTopTracks.Count);
+            var extraTracks = TopTracks.Skip(desiredCount).ToList();
+            if (extraTracks.Count > 0)
+            {
+                TopTracks.RemoveRange(extraTracks, NotifyCollectionChangedAction.Remove);
+            }  
+        }
+    }
+
+    private async Task LoadSimilarArtistsAsync(string artistId)
+    {
+        IsLoadingSimilarArtists = true;
+        try
+        {
+            var topTrack = TopTracks.FirstOrDefault();
+
+            var similarTracks = topTrack != null
+                ? await _musicAssistant.GetSimilarTracksAsync(
+                    topTrack.ItemId,
+                    topTrack.Provider,
+                    limit: 50,
+                    allowLookup: true)
+                : new List<Track>();
+
+            // Fallback: Try version from other provider if no similar tracks found (maby obsolet when allowLookup is fixed)
+            if (topTrack != null && similarTracks.Count == 0)
+            {
+                var versions = await _musicAssistant.GetTrackVersionsAsync(topTrack.ItemId, topTrack.Provider);
+                var fallbackVersion = versions
+                    .FirstOrDefault(v => !string.Equals(v.Provider, topTrack.Provider, StringComparison.OrdinalIgnoreCase))
+                    ?? versions.FirstOrDefault();
+
+                if (fallbackVersion != null)
+                {
+                    similarTracks = await _musicAssistant.GetSimilarTracksAsync(
+                        fallbackVersion.ItemId,
+                        fallbackVersion.Provider,
+                        limit: 50,
+                        allowLookup: true);
+                }
+            }
+
+            var uniqueArtists = similarTracks
+                .SelectMany(track => track.Artists ?? Enumerable.Empty<Artist>())
+                .GroupBy(artist => artist.ItemId)
+                .Select(group => group.First())
+                .Where(artist => artist.ItemId != artistId)
+                .Take(15)
+                .ToList();
+
+            SimilarArtists = new ObservableRangeCollection<Artist>();
+            foreach (var artistRef in uniqueArtists)
+            {
+                try
+                {
+                    var fullArtist = await _musicAssistant.GetArtistAsync(artistRef.ItemId, artistRef.Provider);
+                    if (fullArtist != null)
+                    {
+                        if (IsLoadingSimilarArtists == true) {IsLoadingSimilarArtists = false;}
+                        SimilarArtists.Add(fullArtist);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to load details for artist: {ArtistId}", artistRef.ItemId);
+                }
+            }
+        }
+        finally
+        {
+            IsLoadingSimilarArtists = false;
+        }
+    }
+    #endregion
+
+    #region Context Menu
+
+    private async Task BuildContextMenuAsync()
+    {
+        var menu = new ObservableRangeCollection<ContextMenuItem>
+        {
+            new()
+            {
+                Text = "Abspielen",
+                Icon = FluentIcons.Add12,
+                Command = new Command(async () =>
+                    await MediaActions.PlayMediaAsync(TopTracks.Where(t => t.IsSelected)))
+            },
+            new()
+            {
+                Text = "Als Nächstes spielen",
+                Icon = FluentIcons.Add12,
+                Command = new Command(async () =>
+                    await MediaActions.PlayMediaNextAsync(TopTracks.Where(t => t.IsSelected)))
+            },
+            new()
+            {
+                Text = "Als Letztes spielen",
+                Icon = FluentIcons.Add12,
+                Command = new Command(async () =>
+                    await MediaActions.PlayMediaLastAsync(TopTracks.Where(t => t.IsSelected)))
+            },
+            new() { IsSeparator = true },
+            new()
+            {
+                Text = "Zu Wiedergabeliste hinzufügen",
+                Icon = FluentIcons.Add12,
+                SubItems = await GetPlaylistSubItemsAsync()
+            },
+            new() { IsSeparator = true },
+            new()
+            {
+                Text = "Zu Favoriten hinzufügen",
+                Icon = FluentIcons.Add12,
+                Command = new Command(async () =>
+                    await MediaActions.AddToFavoritesAsync(TopTracks.Where(t => t.IsSelected)))
+            },
+            new()
+            {
+                Text = "Aus Favoriten entfernen",
+                Icon = FluentIcons.Add12,
+                Command = new Command(async () =>
+                    await MediaActions.RemoveFromFavoritesAsync(TopTracks.Where(t => t.IsSelected)))
+            }
+        };
+
+        ContextMenuItems = menu;
+    }
+
+    private async Task<ObservableRangeCollection<ContextMenuItem>> GetPlaylistSubItemsAsync()
+    {
+        var items = new ObservableRangeCollection<ContextMenuItem>();
+
+        try
+        {
+            var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(orderBy: "sort_name");
+
+            foreach (var playlist in playlists)
+            {
+                if (playlist.Name.StartsWith("~")) { continue; } // Skip hidden/system playlists
+
+                items.Add(new ContextMenuItem
+                {
+                    Text = playlist.Name,
+                    Icon = FluentIcons.Add12,
+                    Command = new Command(async () =>
+                        await MediaActions.AddToPlaylistAsync(
+                            TopTracks.Where(t => t.IsSelected),
+                            playlist))
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load playlists for context menu");
+        }
+
+        return items;
+    }
+
+    #endregion
+
+    #region INotifyPropertyChanged
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+
+    protected bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value))
+        {
+            return false;
+        }
+
+        field = value;
+        OnPropertyChanged(propertyName);
+        return true;
+    }
+
+    #endregion
+
+    #region IDisposable
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        _allAlbums.Clear();
+        _allTopTracks.Clear();
+        _topTracks.Clear();
+        _contextMenuItems.Clear();
+        _albums.Clear();
+        _similarArtists.Clear();
+        PropertyChanged = null;
+    }
+
+    #endregion
+}

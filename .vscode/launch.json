@@ -1,0 +1,23 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug (Windows)",
+            "type": "maui",
+            "request": "launch",
+            "preLaunchTask": "maui: Build Windows"
+        },
+        {
+            "name": "Debug (Android Emulator)",
+            "type": "maui",
+            "request": "launch",
+            "preLaunchTask": "maui: Build Android"
+        },
+        {
+            "name": "Debug (Android Device)",
+            "type": "maui",
+            "request": "launch",
+            "preLaunchTask": "maui: Build Android"
+        }
+    ]
+}

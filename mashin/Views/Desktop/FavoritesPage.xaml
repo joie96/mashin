@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:models="clr-namespace:mashin.Models"
+             x:Class="mashin.Views.Desktop.FavoritesPage"
+             BackgroundColor="{DynamicResource BackgroundPrimary}">
+
+    <ScrollView Padding="30,20">
+        <VerticalStackLayout Spacing="36">
+
+            <!-- Überschrift -->
+            <Label Text="Favoriten"
+                   FontSize="32"
+                   FontAttributes="Bold"
+                   TextColor="{DynamicResource TextPrimary}"/>
+
+            <!-- Playlists Sektion -->
+            <VerticalStackLayout Spacing="18">
+                <!-- Header mit Button -->
+                <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                    <Label Text="Playlists"
+                           FontSize="22"
+                           FontAttributes="Bold"
+                           TextColor="{DynamicResource TextPrimary}"
+                           VerticalOptions="Center"/>
+                    <Button Text="Alles anzeigen"
+                            Grid.Column="1"
+                            Clicked="OnShowAllPlaylists"
+                            StyleClass="OutlineButton"
+                            Padding="18,4"
+                            FontSize="16"/>
+                </Grid>
+
+                <!-- Horizontale Playlist-Liste -->
+                <ScrollView Orientation="Horizontal">
+                    <HorizontalStackLayout Spacing="18">
+                        <!-- Playlist erstellen Kachel -->
+                        <Frame HeightRequest="180" WidthRequest="180"
+                               BackgroundColor="{DynamicResource BackgroundTertiary}"
+                               CornerRadius="16"
+                               VerticalOptions="Start"
+                               HorizontalOptions="Start">
+                            <Grid>
+                                <Label Text="+" FontSize="48" HorizontalOptions="Center" VerticalOptions="Center" TextColor="{DynamicResource IconSecondary}"/>
+                            </Grid>
+                        </Frame>
+
+                        <!-- Playlists -->
+                        <CollectionView ItemsSource="{Binding PlaylistsLimited}" ItemsLayout="HorizontalList"
+                                        HeightRequest="180"
+                                        SelectionMode="None">
+                            <CollectionView.ItemTemplate>
+                                <DataTemplate x:DataType="models:Playlist">
+                                    <Frame HeightRequest="180" WidthRequest="180"
+                                           CornerRadius="16"
+                                           Padding="0"
+                                           Margin="0"
+                                           BackgroundColor="{DynamicResource BackgroundTertiary}">
+                                        <Grid RowDefinitions="*,Auto,Auto">
+                                            <Image Source="{Binding ImageUrl, TargetNullValue='dotnet_bot.png'}"
+                                                   Aspect="AspectFill"
+                                                   HeightRequest="120"
+                                                   WidthRequest="180"
+                                                   Grid.Row="0"/>
+                                            <Label Text="{Binding Name}" FontSize="15" FontAttributes="Bold" TextColor="{DynamicResource TextPrimary}" Grid.Row="1" Margin="8,4,8,0"/>
+                                            <Label Text="Öffentlich" FontSize="13" TextColor="{DynamicResource TextSecondary}" Grid.Row="2" Margin="8,0,8,8"/>
+                                        </Grid>
+                                    </Frame>
+                                </DataTemplate>
+                            </CollectionView.ItemTemplate>
+                        </CollectionView>
+                    </HorizontalStackLayout>
+                </ScrollView>
+            </VerticalStackLayout>
+
+            <!-- Weitere Untersektionen können hier folgen -->
+
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

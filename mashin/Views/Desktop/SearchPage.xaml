@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage x:Class="mashin.Views.Desktop.SearchPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:behaviors="clr-namespace:mashin.Views.Desktop.Behaviors"
+    xmlns:controls="clr-namespace:mashin.Views.Desktop.Controls"
+    xmlns:converters="clr-namespace:mashin.Converters"
+    xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
+    xmlns:vm="clr-namespace:mashin.ViewModels"
+    x:DataType="vm:SearchViewModel"
+    BackgroundColor="{DynamicResource BackgroundPrimary}">
+    <ContentPage.Resources>
+        <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
+    </ContentPage.Resources>
+
+    <ScrollView x:Name="scrollView">
+        <Grid 
+            Padding="40,30,40,30"
+            RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+            RowSpacing="0">
+
+            <!--  Header  -->
+            <VerticalStackLayout Grid.Row="0" Spacing="6">
+                <Label FontAttributes="Bold"
+                    FontSize="24"
+                    Text="Suchergebnisse"
+                    TextColor="{DynamicResource TextPrimary}" />
+            </VerticalStackLayout>
+
+            <!--  Tracks  (incl. Skeletons)  -->
+            <Grid Grid.Row="1"
+                Margin="0,36,0,0"
+                RowDefinitions="Auto,Auto,*,Auto"
+                RowSpacing="16">
+                <Label Grid.Row="0"
+                    FontAttributes="Bold"
+                    FontSize="18"
+                    Text="Titel"
+                    TextColor="{DynamicResource TextPrimary}" />
+                <Label Grid.Row="1"
+                    FontSize="14"
+                    IsVisible="{Binding ShowNoTracksMessage}"
+                    Text="Keine Titel gefunden."
+                    TextColor="{DynamicResource TextTertiary}" />
+                <controls:TableView Grid.Row="2"
+                    ContextMenuItems="{Binding ContextMenuItems}"
+                    IsVisible="True"
+                    ItemsSource="{Binding TrackItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowContextMenuAtPositionCommand}"
+                    VerticalOptions="Fill" />
+
+                <!--  Toggle Button -->
+                <Border Grid.Row="3"
+                    Margin="0,0,0,0"
+                    behaviors:HoverBehavior.EnableScaleHover="True"
+                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                    BackgroundColor="Transparent"
+                    HeightRequest="24"
+                    HorizontalOptions="Center"
+                    IsVisible="{Binding HasMoreTracks}"
+                    StrokeThickness="0"
+                    WidthRequest="24">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="12" />
+                    </Border.StrokeShape>
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding ToggleTracksCommand}" />
+                    </Border.GestureRecognizers>
+                    <Grid>
+                        <Label FontSize="12"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsTracksExpanded, Converter={StaticResource InvertedBoolConverter}}"
+                            Text="{mi:Fluent Icon=ChevronDown24,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                        <Label FontSize="12"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsTracksExpanded}"
+                            Text="{mi:Fluent Icon=ChevronUp24,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!--  Albums  (incl. Skeletons) -->
+            <Grid Grid.Row="2"
+                Margin="0,36,0,0"
+                RowDefinitions="Auto,Auto,*"
+                RowSpacing="16">
+                <Label Grid.Row="0"
+                    FontAttributes="Bold"
+                    FontSize="18"
+                    Text="Alben"
+                    TextColor="{DynamicResource TextPrimary}" />
+                <Label Grid.Row="1"
+                    FontSize="14"
+                    IsVisible="{Binding ShowNoAlbumsMessage}"
+                    Text="Keine Alben gefunden."
+                    TextColor="{DynamicResource TextTertiary}" />
+                <controls:RowView Grid.Row="2"
+                    IsVisible="True"
+                    ItemCornerRadius="8"
+                    ItemsSource="{Binding AlbumItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
+            </Grid>
+
+            <!--  Playlists  (incl. Skeletons) -->
+            <Grid Grid.Row="3"
+                Margin="0,36,0,0"
+                RowDefinitions="Auto,Auto,*"
+                RowSpacing="16">
+                <Label Grid.Row="0"
+                    FontAttributes="Bold"
+                    FontSize="18"
+                    Text="Playlists"
+                    TextColor="{DynamicResource TextPrimary}" />
+                <Label Grid.Row="1"
+                    FontSize="14"
+                    IsVisible="{Binding ShowNoPlaylistsMessage}"
+                    Text="Keine Playlists gefunden."
+                    TextColor="{DynamicResource TextTertiary}" />
+                <controls:RowView Grid.Row="2"
+                    IsVisible="True"
+                    ItemCornerRadius="8"
+                    ItemsSource="{Binding PlaylistItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding PlaylistTappedCommand}" />
+            </Grid>
+
+            <!--  Artists  (incl. Skeletons) -->
+            <Grid Grid.Row="4"
+                Margin="0,36,0,0"
+                RowDefinitions="Auto,Auto,*"
+                RowSpacing="16">
+                <Label Grid.Row="0"
+                    FontAttributes="Bold"
+                    FontSize="18"
+                    Text="Artists"
+                    TextColor="{DynamicResource TextPrimary}" />
+                <Label Grid.Row="1"
+                    FontSize="14"
+                    IsVisible="{Binding ShowNoArtistsMessage}"
+                    Text="Keine Artists gefunden."
+                    TextColor="{DynamicResource TextTertiary}" />
+                <controls:RowView Grid.Row="2"
+                    IsVisible="True"
+                    ItemCornerRadius="100"
+                    ItemsSource="{Binding ArtistItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
+            </Grid>
+
+        </Grid>
+    </ScrollView>
+</ContentPage>

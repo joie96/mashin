@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml">
+
+    <Color x:Key="BackgroundPrimary">#ffffff</Color>
+    <Color x:Key="BackgroundSecondary">#f5f5f5</Color>
+    <Color x:Key="BackgroundTertiary">#eeeeee</Color>
+
+    <Color x:Key="TextPrimary">#000000</Color>
+    <Color x:Key="TextSecondary">#666666</Color>
+    <Color x:Key="TextTertiary">#999999</Color>
+
+    <Color x:Key="SeparatorColor">#dddddd</Color>
+
+    <Color x:Key="BorderPrimary">#d0d0d0</Color>
+    <Color x:Key="BorderSecondary">#e0e0e0</Color>
+
+    <Color x:Key="IconPrimary">#000000</Color>
+    <Color x:Key="IconPrimary90">#E6000000</Color>
+    <Color x:Key="IconPrimary80">#CC000000</Color>
+    <Color x:Key="IconPrimary75">#BF000000</Color>
+    <Color x:Key="IconPrimary70">#B3000000</Color>
+    <Color x:Key="IconPrimary60">#99000000</Color>
+    <Color x:Key="IconPrimary50">#80000000</Color>
+    <Color x:Key="IconSecondary">#666666</Color>
+    <Color x:Key="IconTertiary">#999999</Color>
+
+    <Color x:Key="AccentColor">#ff4757</Color>
+    <Color x:Key="AccentHover">#ee5a6f</Color>
+    <Color x:Key="HoverBackground">#eeeeee</Color>
+    <Color x:Key="HoverBackground50">#80EEEEEE</Color>
+    <Color x:Key="HoverBackground25">#40EEEEEE</Color>
+    <Color x:Key="SelectionBackground">#e0e0e0</Color>
+
+    <Color x:Key="White">#ffffff</Color>
+    <Color x:Key="Black">#000000</Color>
+
+</ResourceDictionary>

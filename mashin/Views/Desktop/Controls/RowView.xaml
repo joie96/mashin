@@ -1,0 +1,401 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView x:Class="mashin.Views.Desktop.Controls.RowView"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:behaviors="clr-namespace:mashin.Views.Desktop.Behaviors"
+    xmlns:controls="clr-namespace:mashin.Views.Desktop.Controls"
+    xmlns:converters="clr-namespace:mashin.Converters"
+    xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
+    xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
+    xmlns:models="clr-namespace:mashin.Models"
+    x:Name="self"
+    Loaded="OnRowViewLoaded"
+    Unloaded="OnRowViewUnloaded">
+
+    <ContentView.Resources>
+        <converters:IsLastItemConverter x:Key="IsLastItemConverter" />
+        <converters:IsSelectedOrHoverVisibleConverter x:Key="IsSelectedOrHoverVisibleConverter" />
+        <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
+
+        <DataTemplate x:Key="AlbumTemplate">
+            <Grid x:Name="GridItemContainer"
+                Loaded="OnItemLoaded"
+                Unloaded="OnItemUnloaded"
+                RowDefinitions="Auto,Auto,Auto,Auto"
+                WidthRequest="125">
+
+                <!--  Cover + Overlays  -->
+                <Border x:Name="CoverBorder"
+                    Grid.Row="0"
+                    behaviors:HoverBehavior.BaseBackgroundColor="Transparent"
+                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                    BackgroundColor="Transparent"
+                    HeightRequest="125"
+                    StrokeThickness="0"
+                    WidthRequest="125">
+                    <Border.GestureRecognizers>
+                        <PointerGestureRecognizer Buttons="Primary" PointerPressed="OnGridItemPrimaryPointerPressed" />
+                        <PointerGestureRecognizer Buttons="Secondary" PointerPressed="OnGridItemSecondaryPointerPressed" />
+                        <TapGestureRecognizer NumberOfTapsRequired="2" Tapped="OnGridItemDoubleTapped" />
+                    </Border.GestureRecognizers>
+
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="8" />
+                    </Border.StrokeShape>
+
+                    <Border.Triggers>
+                        <DataTrigger Binding="{Binding IsSelected}"
+                            TargetType="Border"
+                            Value="True">
+                            <Setter Property="BackgroundColor" Value="{DynamicResource SelectionBackground}" />
+                        </DataTrigger>
+                    </Border.Triggers>
+
+                    <Grid behaviors:HoverBehavior.ShowOnHoverTarget="{x:Reference HoverOverlay}">
+                        <!--  Album Cover  -->
+                        <Border StrokeThickness="0">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
+                            </Border.StrokeShape>
+                            <Image Aspect="AspectFill"
+                                Source="{Binding ImageUrl}">
+                                <Image.Clip>
+                                    <RoundRectangleGeometry CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" Rect="0,0,125,125" />
+                                </Image.Clip>
+                            </Image>
+                        </Border>
+
+                        <!--  Provider Icon (Top-Left)  -->
+                        <ffimageloading:SvgCachedImage Margin="3,3,0,0"
+                            HeightRequest="18"
+                            HorizontalOptions="Start"
+                            Source="{Binding ProviderManifest.IconSvg}"
+                            ToolTipProperties.Text="{Binding ProviderName}"
+                            VerticalOptions="Start"
+                            WidthRequest="18">
+                            <ffimageloading:SvgCachedImage.Triggers>
+                                <DataTrigger Binding="{Binding ProviderManifest.IconSvg}"
+                                    TargetType="ffimageloading:SvgCachedImage"
+                                    Value="{x:Null}">
+                                    <Setter Property="IsVisible" Value="False" />
+                                </DataTrigger>
+                            </ffimageloading:SvgCachedImage.Triggers>
+                        </ffimageloading:SvgCachedImage>
+
+                        <!--  Selection Overlay  -->
+                        <Border BackgroundColor="{DynamicResource SelectionBackground}"
+                            InputTransparent="True"
+                            IsVisible="{Binding IsSelected}"
+                            Opacity="0.55"
+                            StrokeThickness="0">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="8" />
+                            </Border.StrokeShape>
+                        </Border>
+
+                        <!--  Hover Overlay  -->
+                        <Border x:Name="HoverOverlay"
+                            BackgroundColor="#80000000"
+                            Opacity="0"
+                            StrokeThickness="0">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="8" />
+                            </Border.StrokeShape>
+                            <Grid RowDefinitions="Auto,*,Auto">
+
+                                <!--  Play Button  -->
+                                <Border Grid.RowSpan="3"
+                                    behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource IconPrimary75}"
+                                    behaviors:HoverBehavior.EnableScaleHover="True"
+                                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource IconPrimary}"
+                                    BackgroundColor="{DynamicResource IconPrimary75}"
+                                    HeightRequest="56"
+                                    HorizontalOptions="Center"
+                                    StrokeThickness="0"
+                                    VerticalOptions="Center"
+                                    WidthRequest="56">
+                                    <Border.GestureRecognizers>
+                                        <TapGestureRecognizer Tapped="OnPlayOverlayClicked" />
+                                    </Border.GestureRecognizers>
+                                    <Border.StrokeShape>
+                                        <RoundRectangle CornerRadius="28" />
+                                    </Border.StrokeShape>
+                                    <Label FontSize="28"
+                                        HorizontalOptions="Center"
+                                        Text="{mi:FluentFilled Icon=Play48Filled,
+                                                         FontOverride=True}"
+                                        TextColor="{DynamicResource BackgroundPrimary}"
+                                        VerticalOptions="Center" />
+                                </Border>
+
+                                <!--  Bottom Row: Favorite & More  -->
+                                <Grid Grid.Row="2"
+                                    Margin="8"
+                                    ColumnDefinitions="*,Auto">
+                                    <!--  Favorite Outline  -->
+                                    <Label Grid.Column="0"
+                                        Margin="0,0,12,0"
+                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                                        behaviors:HoverBehavior.EnableScaleHover="True"
+                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                                        FontSize="18"
+                                        HorizontalOptions="End"
+                                        IsVisible="{Binding Favorite, Converter={StaticResource InvertedBoolConverter}}"
+                                        Text="{mi:Fluent Icon=Heart48,
+                                                         FontOverride=True}"
+                                        TextColor="{DynamicResource IconSecondary}"
+                                        VerticalOptions="Center">
+                                        <Label.GestureRecognizers>
+                                            <TapGestureRecognizer Tapped="OnFavoriteIconTapped" />
+                                        </Label.GestureRecognizers>
+                                    </Label>
+
+                                    <!--  Favorite Filled  -->
+                                    <Label Grid.Column="0"
+                                        Margin="0,0,12,0"
+                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                                        behaviors:HoverBehavior.EnableScaleHover="True"
+                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                                        FontSize="18"
+                                        HorizontalOptions="End"
+                                        IsVisible="{Binding Favorite}"
+                                        Text="{mi:FluentFilled Icon=Heart48Filled,
+                                                               FontOverride=True}"
+                                        TextColor="{DynamicResource IconSecondary}"
+                                        VerticalOptions="Center">
+                                        <Label.GestureRecognizers>
+                                            <TapGestureRecognizer Tapped="OnFavoriteIconTapped" />
+                                        </Label.GestureRecognizers>
+                                    </Label>
+
+                                    <!--  More  -->
+                                    <Label x:Name="MoreIconLabel"
+                                        Grid.Column="1"
+                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                                        behaviors:HoverBehavior.EnableScaleHover="True"
+                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                                        FontSize="18"
+                                        HorizontalOptions="End"
+                                        Text="{mi:Fluent Icon=MoreHorizontal48,
+                                                         FontOverride=True}"
+                                        TextColor="{DynamicResource IconSecondary}"
+                                        VerticalOptions="Center">
+                                        <Label.GestureRecognizers>
+                                            <TapGestureRecognizer Tapped="OnMoreIconTapped" />
+                                        </Label.GestureRecognizers>
+                                    </Label>
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <!--  Checkbox  -->
+                        <Border Margin="0,3,3,0"
+                            behaviors:HoverBehavior.BaseBackgroundColor="Transparent"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground50}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="20"
+                            HorizontalOptions="End"
+                            Stroke="{DynamicResource IconSecondary}"
+                            StrokeThickness="0.75"
+                            VerticalOptions="Start"
+                            WidthRequest="20">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="4" />
+                            </Border.StrokeShape>
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding IsSelected}"
+                                    TargetType="Border"
+                                    Value="True">
+                                    <Setter Property="BackgroundColor" Value="{DynamicResource AccentColor}" />
+                                    <Setter Property="Stroke" Value="{DynamicResource AccentColor}" />
+                                </DataTrigger>
+                            </Border.Triggers>
+                            <Border.GestureRecognizers>
+                                <PointerGestureRecognizer PointerPressed="OnCustomCheckBoxPointerPressed" />
+                            </Border.GestureRecognizers>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                IsVisible="{Binding IsSelected}"
+                                Text="{mi:Fluent Icon=Checkmark16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconPrimary}"
+                                VerticalOptions="Center" />
+                            <Border.IsVisible>
+                                <MultiBinding Converter="{StaticResource IsSelectedOrHoverVisibleConverter}">
+                                    <Binding Path="IsSelected" />
+                                    <Binding Path="Opacity" Source="{x:Reference HoverOverlay}" />
+                                </MultiBinding>
+                            </Border.IsVisible>
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <!--  Title  -->
+                <Label Grid.Row="1"
+                    Margin="0,12,0,4"
+                    FontAttributes="Bold"
+                    FontSize="14"
+                    LineBreakMode="TailTruncation"
+                    MaxLines="1"
+                    Text="{Binding Name}"
+                    TextColor="{DynamicResource TextSecondary}">
+                    <Label.Behaviors>
+                        <behaviors:HoverMarqueeBehavior />
+                        <behaviors:LinkLabelBehavior Command="{Binding PrimaryInfoTappedCommand, Source={x:Reference self}}"
+                            CommandParameter="{Binding .}"
+                            HoverTextColor="{DynamicResource TextSecondary}" />
+                    </Label.Behaviors>
+                    <Label.Triggers>
+                        <DataTrigger Binding="{Binding IsPlaying}"
+                            TargetType="Label"
+                            Value="True">
+                            <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
+                        </DataTrigger>
+                    </Label.Triggers>
+                </Label>
+
+                <!--  Artists  -->
+                <HorizontalStackLayout x:Name="ArtistContainer"
+                    Grid.Row="2"
+                    Margin="0,0,0,2"
+                    BindableLayout.ItemsSource="{Binding Artists}">
+                    <BindableLayout.ItemTemplate>
+                        <DataTemplate x:DataType="models:Artist">
+                            <HorizontalStackLayout Spacing="0">
+                                <Label x:Name="ArtistLabel"
+                                    FontSize="14"
+                                    LineBreakMode="TailTruncation"
+                                    MaxLines="1"
+                                    Text="{Binding Name}"
+                                    TextColor="{DynamicResource TextTertiary}">
+                                    <Label.Behaviors>
+                                        <behaviors:LinkLabelBehavior Command="{Binding SecondaryInfoTappedCommand, Source={x:Reference self}}"
+                                            CommandParameter="{Binding .}"
+                                            HoverTextColor="{DynamicResource TextSecondary}">
+                                        </behaviors:LinkLabelBehavior>
+                                    </Label.Behaviors>
+                                </Label>
+                                <Label x:Name="CommaLabel"
+                                    FontSize="14"
+                                    Text=", "
+                                    TextColor="{DynamicResource TextTertiary}">
+                                    <Label.Triggers>
+                                        <DataTrigger TargetType="Label" Value="True">
+                                            <DataTrigger.Binding>
+                                                <MultiBinding Converter="{StaticResource IsLastItemConverter}">
+                                                    <Binding Path="." />
+                                                    <Binding Path="BindingContext.Artists" Source="{x:Reference ArtistContainer}" />
+                                                </MultiBinding>
+                                            </DataTrigger.Binding>
+                                            <Setter Property="IsVisible" Value="False" />
+                                        </DataTrigger>
+                                    </Label.Triggers>
+                                </Label>
+                            </HorizontalStackLayout>
+                        </DataTemplate>
+                    </BindableLayout.ItemTemplate>
+                </HorizontalStackLayout>
+
+                <!--  Year  -->
+                <Label Grid.Row="3"
+                    FontSize="14"
+                    MaxLines="1"
+                    Text="{Binding Year}"
+                    TextColor="{DynamicResource TextTertiary}" />
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate x:Key="SkeletonTemplate" x:DataType="models:RowViewSkeleton">
+            <ContentView>
+                <Grid RowDefinitions="125,14,14,14" WidthRequest="125">
+                    <controls:SkeletonLoader WidthRequest="125" HeightRequest="125" CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
+                    <controls:SkeletonLoader Grid.Row="1" WidthRequest="120" HeightRequest="14" HorizontalOptions="Start" Margin="0,12,0,4" />
+                    <controls:SkeletonLoader Grid.Row="2" WidthRequest="110" HeightRequest="14" HorizontalOptions="Start" Margin="0,0,0,2" />
+                    <controls:SkeletonLoader Grid.Row="3" WidthRequest="60" HeightRequest="14" HorizontalOptions="Start" />
+                </Grid>
+            </ContentView>
+        </DataTemplate>
+
+        <controls:RowViewTemplateSelector x:Key="RowViewTemplateSelector"
+            AlbumTemplate="{StaticResource AlbumTemplate}"
+            SkeletonTemplate="{StaticResource SkeletonTemplate}" />
+    </ContentView.Resources>
+
+    <Grid>
+        <CollectionView x:Name="collectionView"
+            ItemSizingStrategy="MeasureFirstItem"
+            ItemTemplate="{StaticResource RowViewTemplateSelector}"
+            ItemsSource="{Binding ItemsSource, Source={x:Reference self}}"
+            Scrolled="OnCollectionViewScrolled"
+            SelectionMode="None"
+            HorizontalOptions="Fill">
+            
+            <!--  DisableScrollBehavior   -->
+            <CollectionView.Behaviors>
+                <behaviors:DisableScrollBehavior
+                    DisableHorizontalScroll="True"
+                    DisableVerticalScroll="True" />
+            </CollectionView.Behaviors>
+
+            <CollectionView.ItemsLayout>
+                <LinearItemsLayout ItemSpacing="5" Orientation="Horizontal" />
+            </CollectionView.ItemsLayout>
+        </CollectionView>
+
+        <!--  Scroll Navigation Buttons  -->
+        <HorizontalStackLayout Margin="0,-50,0,0"
+            HorizontalOptions="End"
+            Spacing="4"
+            VerticalOptions="Start">
+
+            <Border x:Name="leftScrollButton"
+                behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource BackgroundPrimary}"
+                behaviors:HoverBehavior.EnableScaleHover="True"
+                behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                BackgroundColor="{DynamicResource BackgroundPrimary}"
+                HeightRequest="40"
+                IsVisible="True"
+                Stroke="{DynamicResource BorderSecondary}"
+                StrokeThickness="0"
+                WidthRequest="40">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="20" />
+                </Border.StrokeShape>
+                <Border.GestureRecognizers>
+                    <TapGestureRecognizer Tapped="OnScrollLeftClicked" />
+                </Border.GestureRecognizers>
+                <Label FontSize="20"
+                    HorizontalOptions="Center"
+                    Text="{mi:Fluent Icon=ChevronLeft24,
+                                     FontOverride=True}"
+                    TextColor="{DynamicResource IconPrimary}"
+                    VerticalOptions="Center" />
+            </Border>
+
+            <Border x:Name="rightScrollButton"
+                behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource BackgroundPrimary}"
+                behaviors:HoverBehavior.EnableScaleHover="True"
+                behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                BackgroundColor="{DynamicResource BackgroundPrimary}"
+                HeightRequest="40"
+                IsVisible="True"
+                Stroke="{DynamicResource BorderSecondary}"
+                StrokeThickness="0"
+                WidthRequest="40">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="20" />
+                </Border.StrokeShape>
+                <Border.GestureRecognizers>
+                    <TapGestureRecognizer Tapped="OnScrollRightClicked" />
+                </Border.GestureRecognizers>
+                <Label FontSize="20"
+                    HorizontalOptions="Center"
+                    Text="{mi:Fluent Icon=ChevronRight24,
+                                     FontOverride=True}"
+                    TextColor="{DynamicResource IconPrimary}"
+                    VerticalOptions="Center" />
+            </Border>
+        </HorizontalStackLayout>
+        
+    </Grid>
+</ContentView>

@@ -1,0 +1,324 @@
+﻿using System;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+using Sendspin.SDK.Audio;
+using Sendspin.SDK.Models;
+using SDL2;
+
+namespace mashin.Audio
+{
+    /// <summary>
+    /// SDL2-basierte IAudioPlayer-Implementierung für Sendspin.SDK.
+    /// Nutzt SDL-Audio-Callback, liest Samples von einem IAudioSampleSource
+    /// und füllt den vom Callback bereitgestellten Stream mit Float32-PCM.
+    /// </summary>
+    public sealed class SdlAudioPlayer : IAudioPlayer
+    {
+        private readonly ILogger<SdlAudioPlayer> _logger;
+        private readonly IntPtr _deviceName;
+
+        private AudioFormat? _format;
+        private IAudioSampleSource? _source;
+
+        private uint _deviceId;
+        private SDL.SDL_AudioSpec _obtainedSpec;
+        private SDL.SDL_AudioCallback? _audioCallback; // kept alive
+        private readonly object _stateLock = new();
+
+        private float _volume = 1.0f;
+        private bool _isMuted;
+        private int _outputLatencyMs;
+
+        public SdlAudioPlayer(ILogger<SdlAudioPlayer> logger, string? deviceName = null)
+        {
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _deviceName = string.IsNullOrWhiteSpace(deviceName) 
+                ? IntPtr.Zero 
+                : SDL.SDL_utf8_encode(deviceName);
+            State = AudioPlayerState.Uninitialized;
+        }
+
+        public AudioPlayerState State { get; private set; }
+
+        public float Volume
+        {
+            get => _volume;
+            set
+            {
+                _volume = Math.Clamp(value, 0f, 1f);
+            }
+        }
+
+        public bool IsMuted
+        {
+            get => _isMuted;
+            set
+            {
+                _isMuted = value;
+            }
+        }
+
+        public int OutputLatencyMs => _outputLatencyMs;
+
+        public event EventHandler<AudioPlayerState>? StateChanged;
+        public event EventHandler<AudioPlayerError>? ErrorOccurred;
+
+        public Task InitializeAsync(AudioFormat format, CancellationToken cancellationToken = default)
+        {
+            return Task.Run(
+                () =>
+                {
+                    try
+                    {
+                        ArgumentNullException.ThrowIfNull(format);
+
+                        _format = format;
+
+                        // Init SDL audio subsystem if not already initialized
+                        if ((SDL.SDL_WasInit(SDL.SDL_INIT_AUDIO) & SDL.SDL_INIT_AUDIO) == 0)
+                        {
+                            if (SDL.SDL_Init(SDL.SDL_INIT_AUDIO) != 0)
+                            {
+                                var err = SDL.SDL_GetError();
+                                throw new InvalidOperationException($"SDL_Init(SDL_INIT_AUDIO) failed: {err}");
+                            }
+                        }
+
+                        // Verify audio drivers are available
+                        var numAudioDrivers = SDL.SDL_GetNumAudioDrivers();
+                        _logger.LogDebug("Available audio drivers: {DriverCount}", numAudioDrivers);
+                        
+                        var currentDriver = SDL.SDL_GetCurrentAudioDriver();
+                        if (string.IsNullOrEmpty(currentDriver))
+                        {
+                            throw new InvalidOperationException("No audio driver initialized by SDL");
+                        }
+                        _logger.LogDebug("Current audio driver: {Driver}", currentDriver);
+
+                        // Check available audio devices
+                        var numDevices = SDL.SDL_GetNumAudioDevices(0); // 0 = playback devices
+                        _logger.LogDebug("Available audio playback devices: {DeviceCount}", numDevices);
+                        if (numDevices < 0)
+                        {
+                            var err = SDL.SDL_GetError();
+                            throw new InvalidOperationException($"SDL_GetNumAudioDevices failed: {err}");
+                        }
+
+                        // Prepare desired spec for float32 interleaved samples
+                        var desired = new SDL.SDL_AudioSpec
+                        {
+                            freq = format.SampleRate,
+                            format = SDL.AUDIO_F32SYS,
+                            channels = (byte)format.Channels,
+                            // request ~50ms buffer in frames
+                            samples = (ushort)Math.Max(256, (format.SampleRate * 50) / 1000),
+                            silence = 0,
+                            userdata = IntPtr.Zero
+                        };
+
+                        // create callback and keep delegate alive in field
+                        _audioCallback = AudioCallback;
+                        desired.callback = _audioCallback;
+
+                        // open device (0 = not capture)
+                        try
+                        {
+                            _deviceId = _deviceName == IntPtr.Zero
+                                ? SDL.SDL_OpenAudioDevice(IntPtr.Zero, 0, ref desired, out _obtainedSpec, 0)
+                                : SDL.SDL_OpenAudioDevice(_deviceName, 0, ref desired, out _obtainedSpec, 0);
+                        }
+                        catch (NullReferenceException nre)
+                        {
+                            var sdlError = SDL.SDL_GetError();
+                            throw new InvalidOperationException(
+                                $"SDL_OpenAudioDevice threw NullReferenceException. This may indicate an SDL2 version mismatch or missing audio subsystem. SDL Error: {sdlError}", 
+                                nre);
+                        }
+                        
+                        if (_deviceId == 0)
+                        {
+                            var err = SDL.SDL_GetError();
+                            throw new InvalidOperationException($"SDL_OpenAudioDevice failed: {err}");
+                        }
+
+                        // compute approximated latency from obtained spec
+                        _outputLatencyMs = (_obtainedSpec.samples * 1000) / Math.Max(1, _obtainedSpec.freq);
+
+                        SetState(AudioPlayerState.Stopped);
+
+                        _logger.LogInformation(
+                            "SDL audio initialized: {SampleRate}Hz {Channels}ch, requested latency ~50ms, obtained samples={ObtainedSamples}, latencyApproxMs={LatencyMs}, device={DeviceName}",
+                            format.SampleRate,
+                            format.Channels,
+                            _obtainedSpec.samples,
+                            _outputLatencyMs,
+                            _deviceName == IntPtr.Zero ? "System Default" : "Custom Device");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to initialize SDL audio");
+                        SetState(AudioPlayerState.Error);
+                        ErrorOccurred?.Invoke(this, new AudioPlayerError("Failed to initialize audio output", ex));
+                        throw;
+                    }
+                },
+                cancellationToken);
+        }
+
+        public void SetSampleSource(IAudioSampleSource source)
+        {
+            if (_deviceId == 0 || _format == null)
+            {
+                throw new InvalidOperationException("Player not initialized. Call InitializeAsync first.");
+            }
+
+            ArgumentNullException.ThrowIfNull(source);
+
+            _source = source;
+
+            _logger.LogDebug("Sample source configured");
+        }
+
+        public void Play()
+        {
+            if (_deviceId == 0)
+            {
+                throw new InvalidOperationException("Player not initialized.");
+            }
+
+            SDL.SDL_PauseAudioDevice(_deviceId, 0); // unpause -> start callback
+            SetState(AudioPlayerState.Playing);
+            _logger.LogInformation("Playback started");
+        }
+
+        public void Pause()
+        {
+            if (_deviceId == 0)
+            {
+                return;
+            }
+
+            SDL.SDL_PauseAudioDevice(_deviceId, 1);
+            SetState(AudioPlayerState.Paused);
+            _logger.LogInformation("Playback paused");
+        }
+
+        public void Stop()
+        {
+            if (_deviceId == 0)
+            {
+                return;
+            }
+
+            SDL.SDL_PauseAudioDevice(_deviceId, 1);
+            SetState(AudioPlayerState.Stopped);
+            _logger.LogInformation("Playback stopped");
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            lock (_stateLock)
+            {
+                try
+                {
+                    if (_deviceId != 0)
+                    {
+                        // ensure stopped
+                        SDL.SDL_PauseAudioDevice(_deviceId, 1);
+                        SDL.SDL_CloseAudioDevice(_deviceId);
+                        _deviceId = 0;
+                    }
+
+                    // Note: do not call SDL_Quit here globally; leave lifecycle to app if needed.
+
+                    _source = null;
+                    _format = null;
+                    _audioCallback = null;
+                    SetState(AudioPlayerState.Uninitialized);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Exception during DisposeAsync");
+                    ErrorOccurred?.Invoke(this, new AudioPlayerError("Dispose failed", ex));
+                }
+            }
+
+            return new ValueTask(Task.CompletedTask);
+        }
+
+        /// <summary>
+        /// SDL audio callback - called on SDL audio thread.
+        /// Must be fast and non-blocking.
+        /// Fills the provided stream (pointer) with float32 interleaved PCM samples.
+        /// </summary>
+        private void AudioCallback(IntPtr userdata, IntPtr stream, int len)
+        {
+            try
+            {
+                // number of floats to write (len is bytes)
+                var floatsCount = len / sizeof(float);
+
+                // allocate a buffer on the managed heap; small allocations are fine here because
+                // SDK BufferedAudioSampleSource is expected to be fast. Keep it short-lived.
+                var buffer = new float[floatsCount];
+
+                if (_isMuted || _source == null)
+                {
+                    // fill with silence
+                    Array.Clear(buffer, 0, buffer.Length);
+                }
+                else
+                {
+                    // Read samples from source. The source is expected to be fast and non-blocking.
+                    var read = _source.Read(buffer, 0, floatsCount);
+
+                    // Fill remainder with silence if underrun
+                    if (read < floatsCount)
+                    {
+                        Array.Clear(buffer, read, floatsCount - read);
+                    }
+
+                    // Apply volume if needed
+                    var vol = _volume;
+                    if (vol < 0.999f)
+                    {
+                        for (var i = 0; i < buffer.Length; i++)
+                        {
+                            buffer[i] *= vol;
+                        }
+                    }
+                }
+
+                // Copy float[] into native stream pointer
+                // Marshal.Copy supports float[] -> IntPtr
+                Marshal.Copy(buffer, 0, stream, floatsCount);
+            }
+            catch (Exception ex)
+            {
+                // We can't throw on the audio thread; log and notify error listeners.
+                _logger.LogError(ex, "Exception in SDL audio callback");
+                SetState(AudioPlayerState.Error);
+                ErrorOccurred?.Invoke(this, new AudioPlayerError("Playback error in audio callback", ex));
+
+                // Fill stream with silence to keep audio device happy
+                Span<byte> zeroSpan = new byte[len];
+                Marshal.Copy(zeroSpan.ToArray(), 0, stream, len);
+            }
+        }
+
+        private void SetState(AudioPlayerState newState)
+        {
+            lock (_stateLock)
+            {
+                if (State != newState)
+                {
+                    _logger.LogDebug("Player state: {OldState} -> {NewState}", State, newState);
+                    State = newState;
+                    StateChanged?.Invoke(this, newState);
+                }
+            }
+        }
+    }
+}

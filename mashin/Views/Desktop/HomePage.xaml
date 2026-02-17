@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:controls="clr-namespace:mashin.Views.Desktop.Controls"
+             x:Class="mashin.Views.Desktop.HomePage"
+             BackgroundColor="{DynamicResource BackgroundPrimary}">
+
+    <ScrollView Padding="30,20">
+        <VerticalStackLayout Spacing="30">
+
+            <Label Text="Willkommen zurück!"
+                   FontSize="32"
+                   FontAttributes="Bold"
+                   TextColor="{DynamicResource TextPrimary}"/>
+
+            <Grid HeightRequest="400">
+                <Label Text="Home Content wird hier angezeigt..."
+                       FontSize="18"
+                       HorizontalOptions="Center"
+                       VerticalOptions="Center"
+                       TextColor="{DynamicResource TextTertiary}"/>
+            </Grid>
+
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

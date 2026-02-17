@@ -1,0 +1,545 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage x:Class="mashin.Views.Desktop.MainPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:behaviors="clr-namespace:mashin.Views.Desktop.Behaviors"
+    xmlns:converters="clr-namespace:mashin.Converters"
+    xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
+    xmlns:models="clr-namespace:mashin.Models"
+    xmlns:vm="clr-namespace:mashin.ViewModels"
+    x:DataType="vm:MainViewModel"
+    BackgroundColor="{DynamicResource BackgroundPrimary}">
+
+    <ContentPage.Resources>
+        <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
+    </ContentPage.Resources>
+
+    <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,*,90">
+
+        <!--  Sidebar  -->
+        <Grid Grid.Row="0"
+            Grid.RowSpan="2"
+            Grid.Column="0"
+            BackgroundColor="{DynamicResource BackgroundSecondary}">
+            <ScrollView>
+                <VerticalStackLayout Spacing="0">
+
+                    <!--  Header  -->
+                    <Grid Padding="20,30,20,20" HeightRequest="80">
+                        <HorizontalStackLayout Spacing="12" VerticalOptions="Center">
+                            <Label FontAttributes="Bold"
+                                FontSize="18"
+                                Text="Music Assistant"
+                                TextColor="{DynamicResource TextPrimary}" />
+                        </HorizontalStackLayout>
+                    </Grid>
+
+                    <!--  Navigation Items  -->
+                    <VerticalStackLayout Padding="8,10" Spacing="2">
+
+                        <!--  Home  -->
+                        <Border Padding="12,10"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="44">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding NavigateToHomeCommand}" />
+                            </Border.GestureRecognizers>
+
+                            <HorizontalStackLayout Spacing="12" VerticalOptions="Center">
+                                <Label FontSize="18"
+                                    Text="{mi:Fluent Icon=Home24,
+                                                     FontOverride=True}"
+                                    TextColor="{DynamicResource IconSecondary}" />
+                                <Label FontSize="14"
+                                    Text="Home"
+                                    TextColor="{DynamicResource TextSecondary}" />
+                            </HorizontalStackLayout>
+                        </Border>
+
+                        <!--  Entdecken  -->
+                        <Border Padding="12,10"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="44">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding NavigateToExploreCommand}" />
+                            </Border.GestureRecognizers>
+
+                            <HorizontalStackLayout Spacing="12" VerticalOptions="Center">
+                                <Label FontSize="18"
+                                    Text="{mi:Fluent Icon=CompassNorthwest24,
+                                                     FontOverride=True}"
+                                    TextColor="{DynamicResource IconSecondary}" />
+                                <Label FontSize="14"
+                                    Text="Entdecken"
+                                    TextColor="{DynamicResource TextSecondary}" />
+                            </HorizontalStackLayout>
+                        </Border>
+
+                        <!--  Favoriten  -->
+                        <Border Padding="12,10"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="44">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding NavigateToFavoritesCommand}" />
+                            </Border.GestureRecognizers>
+
+                            <HorizontalStackLayout Spacing="12" VerticalOptions="Center">
+                                <Label FontSize="18"
+                                    Text="{mi:Fluent Icon=Heart24,
+                                                     FontOverride=True}"
+                                    TextColor="{DynamicResource IconSecondary}" />
+                                <Label FontSize="14"
+                                    Text="Favoriten"
+                                    TextColor="{DynamicResource TextSecondary}" />
+                            </HorizontalStackLayout>
+                        </Border>
+
+                    </VerticalStackLayout>
+
+                    <!--  Separator  -->
+                    <BoxView Margin="12,15"
+                        BackgroundColor="{DynamicResource SeparatorColor}"
+                        HeightRequest="1" />
+
+                    <!--  Playlists Header  -->
+                    <Grid Padding="12,8" HeightRequest="40">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Label FontAttributes="Bold"
+                            FontSize="13"
+                            Text="Playlists"
+                            TextColor="{DynamicResource TextSecondary}"
+                            VerticalOptions="Center" />
+                        <ActivityIndicator Grid.Column="1"
+                            HeightRequest="16"
+                            IsRunning="{Binding IsLoadingPlaylists}"
+                            IsVisible="{Binding IsLoadingPlaylists}"
+                            WidthRequest="16"
+                            Color="{DynamicResource IconSecondary}" />
+                    </Grid>
+
+                    <!--  Playlists List  -->
+                    <CollectionView Margin="0,0,0,10"
+                        ItemsSource="{Binding Playlists}"
+                        SelectionMode="None">
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate x:DataType="models:Playlist">
+                                <Border Margin="4,2"
+                                    Padding="8,4"
+                                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                                    BackgroundColor="Transparent"
+                                    HeightRequest="60">
+                                    <Border.GestureRecognizers>
+                                        <TapGestureRecognizer Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}}, Path=BindingContext.NavigateToPlaylistCommand}" CommandParameter="{Binding .}" />
+                                    </Border.GestureRecognizers>
+
+                                    <Grid ColumnDefinitions="40,*" ColumnSpacing="10">
+                                        <Border Grid.Column="0"
+                                            BackgroundColor="{DynamicResource BackgroundTertiary}"
+                                            HeightRequest="40"
+                                            StrokeThickness="0"
+                                            WidthRequest="40">
+                                            <Border.StrokeShape>
+                                                <RoundRectangle CornerRadius="2" />
+                                            </Border.StrokeShape>
+                                            <Image Aspect="AspectFill" Source="{Binding ImageUrl}" />
+                                        </Border>
+
+                                        <VerticalStackLayout Grid.Column="1"
+                                            Spacing="4"
+                                            VerticalOptions="Center">
+                                            <Label FontSize="13"
+                                                LineBreakMode="TailTruncation"
+                                                MaxLines="1"
+                                                Text="{Binding Name}"
+                                                TextColor="{DynamicResource TextPrimary}" />
+                                            <Label FontSize="11"
+                                                LineBreakMode="TailTruncation"
+                                                MaxLines="1"
+                                                Text="{Binding ProviderName}"
+                                                TextColor="{DynamicResource TextTertiary}" />
+                                        </VerticalStackLayout>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
+
+                </VerticalStackLayout>
+            </ScrollView>
+            <BoxView HorizontalOptions="End"
+                WidthRequest="1"
+                Color="{DynamicResource BorderSecondary}" />
+        </Grid>
+
+        <!--  Top Bar  -->
+        <Grid Grid.Row="0"
+            Grid.Column="1"
+            BackgroundColor="{DynamicResource BackgroundPrimary}"
+            RowDefinitions="Auto,1">
+            <Grid Grid.Row="0"
+                Padding="24,16,24,20"
+                ColumnDefinitions="*,Auto">
+                <HorizontalStackLayout HorizontalOptions="Start" Spacing="12">
+
+                    <!--  Back Button  -->
+                    <Border behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                        BackgroundColor="Transparent"
+                        HeightRequest="32"
+                        StrokeThickness="0"
+                        VerticalOptions="Center"
+                        WidthRequest="32">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Tapped="OnBackTapped" />
+                        </Border.GestureRecognizers>
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="16" />
+                        </Border.StrokeShape>
+                        <Label FontSize="16"
+                            HorizontalOptions="Center"
+                            Text="{mi:Fluent Icon=ArrowLeft24,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center" />
+                    </Border>
+
+                    <!--  Search Bar  -->
+                    <Border Padding="12,0"
+                        BackgroundColor="{DynamicResource BackgroundSecondary}"
+                        HeightRequest="36"
+                        HorizontalOptions="Start"
+                        StrokeThickness="0"
+                        WidthRequest="420">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="18" />
+                        </Border.StrokeShape>
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                            <Label FontSize="16"
+                                Text="{mi:Fluent Icon=Search24,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                            <Entry Grid.Column="1"
+                                Margin="0,-2,-15,1"
+                                BackgroundColor="Transparent"
+                                FontSize="13"
+                                HeightRequest="36"
+                                Placeholder="Künstler:innen, Songs, Alben ..."
+                                PlaceholderColor="{DynamicResource TextTertiary}"
+                                ReturnCommand="{Binding SearchCommand}"
+                                ReturnType="Search"
+                                Text="{Binding SearchQuery}"
+                                TextColor="{DynamicResource TextPrimary}"
+                                VerticalOptions="Center"
+                                VerticalTextAlignment="Center" />
+                        </Grid>
+                    </Border>
+                </HorizontalStackLayout>
+
+                <Border Grid.Column="1"
+                    Margin="12,0,0,0"
+                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                    BackgroundColor="Transparent"
+                    HeightRequest="32"
+                    HorizontalOptions="End"
+                    StrokeThickness="0"
+                    VerticalOptions="Center"
+                    WidthRequest="32">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="16" />
+                    </Border.StrokeShape>
+                    <Label FontSize="16"
+                        HorizontalOptions="Center"
+                        Text="{mi:Fluent Icon=Person24,
+                                         FontOverride=True}"
+                        TextColor="{DynamicResource IconSecondary}"
+                        VerticalOptions="Center" />
+                </Border>
+            </Grid>
+
+            <BoxView Grid.Row="1"
+                HeightRequest="1"
+                Color="{DynamicResource BorderSecondary}" />
+        </Grid>
+
+        <!--  Content Area  -->
+        <Grid Grid.Row="1" Grid.Column="1">
+            <ContentView x:Name="ContentContainer" BackgroundColor="{DynamicResource BackgroundPrimary}" />
+
+            <Grid BackgroundColor="Transparent" IsVisible="{Binding IsNavigating}">
+                <BoxView BackgroundColor="#80000000" />
+                <ActivityIndicator HeightRequest="48"
+                    HorizontalOptions="Center"
+                    IsRunning="{Binding IsNavigating}"
+                    VerticalOptions="Center"
+                    WidthRequest="48"
+                    Color="{DynamicResource AccentColor}" />
+            </Grid>
+        </Grid>
+
+        <!--  Player Bar  -->
+        <Grid Grid.Row="2"
+            Grid.Column="0"
+            Grid.ColumnSpan="2"
+            BackgroundColor="{DynamicResource BackgroundSecondary}"
+            RowDefinitions="1,*">
+            <BoxView Grid.Row="0"
+                HeightRequest="1"
+                Color="{DynamicResource BorderSecondary}" />
+            <Grid Grid.Row="1"
+                Padding="20,0"
+                ColumnDefinitions="250,*,250"
+                HeightRequest="90">
+
+                <!--  Left: Track Info  -->
+                <HorizontalStackLayout Spacing="12" VerticalOptions="Center">
+                    <Border BackgroundColor="{DynamicResource BackgroundTertiary}"
+                        HeightRequest="60"
+                        StrokeShape="RoundRectangle 4"
+                        StrokeThickness="0"
+                        WidthRequest="60">
+                        <Image Aspect="AspectFill" Source="{Binding CurrentTrack.ImageUrl}" />
+                    </Border>
+
+                    <VerticalStackLayout MaximumWidthRequest="140"
+                        Spacing="4"
+                        VerticalOptions="Center">
+                        <Label FontSize="13"
+                            LineBreakMode="TailTruncation"
+                            Text="{Binding CurrentTrack.Name}"
+                            TextColor="{DynamicResource TextPrimary}" />
+                        <Label FontSize="12"
+                            LineBreakMode="TailTruncation"
+                            Text="{Binding CurrentTrack.ArtistName}"
+                            TextColor="{DynamicResource TextSecondary}" />
+                    </VerticalStackLayout>
+
+                    <Border Margin="8,0,0,0"
+                        behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                        BackgroundColor="Transparent"
+                        HeightRequest="32"
+                        StrokeThickness="0"
+                        VerticalOptions="Center"
+                        WidthRequest="32">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="16" />
+                        </Border.StrokeShape>
+                        <Label FontSize="18"
+                            HorizontalOptions="Center"
+                            Text="{mi:Fluent Icon=Heart24,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                </HorizontalStackLayout>
+
+                <!--  Center: Controls  -->
+                <VerticalStackLayout Grid.Column="1"
+                    Spacing="0"
+                    VerticalOptions="Center">
+                    <HorizontalStackLayout HeightRequest="36"
+                        HorizontalOptions="Center"
+                        Spacing="12">
+                        <!--  Shuffle  -->
+                        <Border behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="32"
+                            StrokeThickness="0"
+                            VerticalOptions="Center"
+                            WidthRequest="32">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="16" />
+                            </Border.StrokeShape>
+                            <Label FontSize="16"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ArrowShuffle24,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                        <!--  Previous  -->
+                        <Border behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="32"
+                            StrokeThickness="0"
+                            VerticalOptions="Center"
+                            WidthRequest="32">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding PreviousTrackCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="16" />
+                            </Border.StrokeShape>
+                            <Label FontSize="18"
+                                HorizontalOptions="Center"
+                                Text="{mi:FluentFilled Icon=Previous48Filled,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconPrimary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                        <!--  Play/Pause  -->
+                        <Border behaviors:HoverBehavior.EnableScaleHover="True"
+                            BackgroundColor="{DynamicResource IconPrimary}"
+                            HeightRequest="36"
+                            StrokeThickness="0"
+                            VerticalOptions="Center"
+                            WidthRequest="36">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding TogglePlayPauseCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="18" />
+                            </Border.StrokeShape>
+                            <Grid>
+                                <Label FontSize="18"
+                                    HorizontalOptions="Center"
+                                    IsVisible="{Binding IsPlaying, Converter={StaticResource InvertedBoolConverter}}"
+                                    Text="{mi:FluentFilled Icon=Play48Filled,
+                                                     FontOverride=True}"
+                                    TextColor="{DynamicResource BackgroundPrimary}"
+                                    VerticalOptions="Center" />
+                                <Label FontSize="18"
+                                    HorizontalOptions="Center"
+                                    IsVisible="{Binding IsPlaying}"
+                                    Text="{mi:FluentFilled Icon=Pause48Filled,
+                                                     FontOverride=True}"
+                                    TextColor="{DynamicResource BackgroundPrimary}"
+                                    VerticalOptions="Center" />
+                                <ActivityIndicator HeightRequest="20"
+                                    IsRunning="{Binding IsBuffering}"
+                                    IsVisible="{Binding IsBuffering}"
+                                    WidthRequest="20"
+                                    Color="{DynamicResource IconPrimary}" />
+                            </Grid>
+                        </Border>
+
+                        <!--  Next  -->
+                        <Border behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="32"
+                            StrokeThickness="0"
+                            VerticalOptions="Center"
+                            WidthRequest="32">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding NextTrackCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="16" />
+                            </Border.StrokeShape>
+                            <Label FontSize="18"
+                                HorizontalOptions="Center"
+                                Text="{mi:FluentFilled Icon=Next48Filled,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconPrimary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                        <!--  Repeat  -->
+                        <Border behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="32"
+                            StrokeThickness="0"
+                            VerticalOptions="Center"
+                            WidthRequest="32">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="16" />
+                            </Border.StrokeShape>
+                            <Label FontSize="16"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ArrowRepeatAll24,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                    </HorizontalStackLayout>
+
+                    <!--  Position Slider  -->
+                    <Grid ColumnDefinitions="Auto,*,Auto"
+                        ColumnSpacing="10"
+                        HorizontalOptions="Center"
+                        MaximumWidthRequest="600">
+                        <Label FontSize="11"
+                            Text="{Binding PositionText}"
+                            TextColor="{DynamicResource TextTertiary}"
+                            VerticalOptions="Center" />
+                        <Slider Grid.Column="1"
+                            Maximum="{Binding Duration}"
+                            MaximumTrackColor="{DynamicResource BackgroundTertiary}"
+                            Minimum="0"
+                            MinimumTrackColor="{DynamicResource IconSecondary}"
+                            MinimumWidthRequest="300"
+                            ThumbColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center"
+                            Value="{Binding Position}">
+                            <Slider.Behaviors>
+                                <behaviors:SliderDragCompletedBehavior Command="{Binding SeekCommand}" />
+                            </Slider.Behaviors>
+                        </Slider>
+                        <Label Grid.Column="2"
+                            FontSize="11"
+                            Text="{Binding DurationText}"
+                            TextColor="{DynamicResource TextTertiary}"
+                            VerticalOptions="Center" />
+                    </Grid>
+                </VerticalStackLayout>
+
+                <!--  Right: Volume  -->
+                <HorizontalStackLayout Grid.Column="2"
+                    HorizontalOptions="End"
+                    Spacing="12"
+                    VerticalOptions="Center">
+                    <Border behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                        BackgroundColor="Transparent"
+                        HeightRequest="32"
+                        StrokeThickness="0"
+                        VerticalOptions="Center"
+                        WidthRequest="32">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="16" />
+                        </Border.StrokeShape>
+                        <Label FontSize="16"
+                            HorizontalOptions="Center"
+                            Text="{mi:Fluent Icon=Speaker224,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center" />
+                    </Border>
+
+                    <Border behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                        BackgroundColor="Transparent"
+                        HeightRequest="32"
+                        StrokeThickness="0"
+                        VerticalOptions="Center"
+                        WidthRequest="32">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="16" />
+                        </Border.StrokeShape>
+                        <Label FontSize="16"
+                            HorizontalOptions="Center"
+                            Text="{mi:Fluent Icon=SpeakerMute24,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center" />
+                    </Border>
+
+                    <Slider Maximum="100"
+                        MaximumTrackColor="{DynamicResource BackgroundTertiary}"
+                        Minimum="0"
+                        MinimumTrackColor="{DynamicResource IconSecondary}"
+                        ThumbColor="{DynamicResource IconPrimary}"
+                        VerticalOptions="Center"
+                        WidthRequest="90"
+                        Value="{Binding Volume, Mode=TwoWay}" />
+                </HorizontalStackLayout>
+            </Grid>
+        </Grid>
+
+    </Grid>
+</ContentPage>

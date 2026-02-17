@@ -1,0 +1,286 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage x:Class="mashin.Views.Desktop.ArtistDetailPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:behaviors="clr-namespace:mashin.Views.Desktop.Behaviors"
+    xmlns:controls="clr-namespace:mashin.Views.Desktop.Controls"
+    xmlns:converters="clr-namespace:mashin.Converters"
+    xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
+    xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
+    xmlns:vm="clr-namespace:mashin.ViewModels"
+    x:DataType="vm:ArtistDetailViewModel"
+    BackgroundColor="{DynamicResource BackgroundPrimary}">
+
+    <ContentPage.Resources>
+        <converters:IntToBoolConverter x:Key="IntToBoolConverter" />
+        <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
+        <converters:RemoveBlankLinesConverter x:Key="RemoveBlankLinesConverter" />
+    </ContentPage.Resources>
+
+    <ScrollView>
+        <Grid Padding="40,30,40,30"
+            RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
+            RowSpacing="0">
+
+            <!--  Artist Header  -->
+            <Grid Grid.Row="0"
+                ColumnDefinitions="150,*"
+                ColumnSpacing="30">
+
+                <!--  Artist Image - Loading State  -->
+                <Border Grid.Column="0"
+                    HeightRequest="150"
+                    IsVisible="{Binding IsLoadingMetadata}"
+                    StrokeThickness="0"
+                    WidthRequest="150">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="100" />
+                    </Border.StrokeShape>
+                    <controls:SkeletonLoader CornerRadius="100" HeightRequest="150" WidthRequest="150" />
+                </Border>
+
+                <!--  Artist Image - Actual  -->
+                <Border Grid.Column="0"
+                    BackgroundColor="{DynamicResource BackgroundTertiary}"
+                    HeightRequest="150"
+                    IsVisible="{Binding IsLoadingMetadata, Converter={StaticResource InvertedBoolConverter}}"
+                    StrokeThickness="0"
+                    WidthRequest="150">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="100" />
+                    </Border.StrokeShape>
+                    <Image Aspect="AspectFill"
+                        HeightRequest="150"
+                        HorizontalOptions="Center"
+                        Source="{Binding ImageUrl}"
+                        VerticalOptions="Center"
+                        WidthRequest="150" />
+                </Border>
+
+                <!--  Artist Info - Loading State  -->
+                <VerticalStackLayout Grid.Column="1"
+                    IsVisible="{Binding IsLoadingMetadata}"
+                    Spacing="12"
+                    VerticalOptions="Center">
+                    <controls:SkeletonLoader HeightRequest="12" HorizontalOptions="Start" WidthRequest="120" />
+                    <controls:SkeletonLoader HeightRequest="32" HorizontalOptions="Start" WidthRequest="300" />
+                    <controls:SkeletonLoader HeightRequest="14" HorizontalOptions="Start" WidthRequest="150" />
+                </VerticalStackLayout>
+
+                <!--  Artist Info - Actual  -->
+                <VerticalStackLayout Grid.Column="1"
+                    IsVisible="{Binding IsLoadingMetadata, Converter={StaticResource InvertedBoolConverter}}"
+                    Spacing="12"
+                    VerticalOptions="Center">
+
+                    <Label FontAttributes="Bold"
+                        FontSize="12"
+                        Text="ARTIST/INTERPRET"
+                        TextColor="{DynamicResource TextSecondary}" />
+
+                    <!--  Artist Name + Provider Icon  -->
+                    <HorizontalStackLayout Spacing="16" VerticalOptions="Center">
+                        <Label FontAttributes="Bold"
+                            FontSize="32"
+                            LineBreakMode="WordWrap"
+                            MaxLines="2"
+                            Text="{Binding ArtistName}"
+                            TextColor="{DynamicResource TextPrimary}" />
+                        <ffimageloading:SvgCachedImage HeightRequest="28"
+                            Source="{Binding Artist.ProviderManifest.IconSvg}"
+                            ToolTipProperties.Text="{Binding Artist.ProviderName}"
+                            VerticalOptions="Center"
+                            WidthRequest="28">
+                            <ffimageloading:SvgCachedImage.Triggers>
+                                <DataTrigger Binding="{Binding Artist.ProviderManifest.IconSvg}"
+                                    TargetType="ffimageloading:SvgCachedImage"
+                                    Value="{x:Null}">
+                                    <Setter Property="IsVisible" Value="False" />
+                                </DataTrigger>
+                            </ffimageloading:SvgCachedImage.Triggers>
+                        </ffimageloading:SvgCachedImage>
+                    </HorizontalStackLayout>
+
+                    <Label FontSize="14"
+                        Text="{Binding Albums.Count, StringFormat='{0} Alben'}"
+                        TextColor="{DynamicResource TextSecondary}" />
+
+                </VerticalStackLayout>
+            </Grid>
+
+            <!--  Description - Loading State  -->
+            <Grid Grid.Row="1"
+                Margin="0,36,0,0"
+                IsVisible="{Binding IsLoadingMetadata}"
+                RowDefinitions="Auto,Auto,Auto,Auto"
+                RowSpacing="16">
+                <controls:SkeletonLoader Grid.Row="0" HeightRequest="18" HorizontalOptions="Start" WidthRequest="200" />
+                <controls:SkeletonLoader Grid.Row="1" HeightRequest="14" HorizontalOptions="Fill" />
+                <controls:SkeletonLoader Grid.Row="2" HeightRequest="14" HorizontalOptions="Fill" />
+                <controls:SkeletonLoader Grid.Row="3" HeightRequest="14" HorizontalOptions="Fill" />
+            </Grid>
+
+            <!--  Description - Actual  -->
+            <Grid Grid.Row="2"
+                Margin="0,36,0,0"
+                IsVisible="{Binding HasDescription}"
+                RowDefinitions="Auto,Auto,Auto"
+                RowSpacing="16">
+                <Grid.Triggers>
+                    <DataTrigger Binding="{Binding IsLoadingMetadata}"
+                        TargetType="Grid"
+                        Value="True">
+                        <Setter Property="IsVisible" Value="False" />
+                    </DataTrigger>
+                </Grid.Triggers>
+                <Label Grid.Row="0"
+                    FontAttributes="Bold"
+                    FontSize="18"
+                    Text="{Binding ArtistName, StringFormat='Über {0}'}"
+                    TextColor="{DynamicResource TextPrimary}" />
+                <Label Grid.Row="1"
+                    FontSize="14"
+                    LineBreakMode="WordWrap"
+                    MaxLines="{Binding DescriptionMaxLines}"
+                    Text="{Binding Artist.Metadata.Description, Converter={StaticResource RemoveBlankLinesConverter}}"
+                    TextColor="{DynamicResource TextSecondary}">
+                    <Label.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding ToggleDescriptionCommand}" />
+                    </Label.GestureRecognizers>
+                </Label>
+                <Border Grid.Row="2"
+                    Margin="0,-8,0,-36"
+                    behaviors:HoverBehavior.EnableScaleHover="True"
+                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                    BackgroundColor="Transparent"
+                    HeightRequest="24"
+                    HorizontalOptions="Center"
+                    StrokeThickness="0"
+                    WidthRequest="24">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="12" />
+                    </Border.StrokeShape>
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding ToggleDescriptionCommand}" />
+                    </Border.GestureRecognizers>
+                    <Grid>
+                        <Label FontSize="12"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsDescriptionExpanded, Converter={StaticResource InvertedBoolConverter}}"
+                            Text="{mi:Fluent Icon=ChevronDown24,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                        <Label FontSize="12"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsDescriptionExpanded}"
+                            Text="{mi:Fluent Icon=ChevronUp24,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!--  Albums/Releases Section  -->
+            <Grid Grid.Row="3"
+                Margin="0,36,0,0"
+                RowDefinitions="Auto,*"
+                RowSpacing="16">
+                <Label Grid.Row="0"
+                    FontAttributes="Bold"
+                    FontSize="18"
+                    Text="Veröffentlichungen"
+                    TextColor="{DynamicResource TextPrimary}" />
+
+                <!--  Albums  -->
+                <controls:RowView Grid.Row="1"
+                    ItemCornerRadius="8"
+                    ItemsSource="{Binding AlbumItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowContextMenuAtPositionCommand}" />
+            </Grid>
+
+            <!--  Similar Artists Section  -->
+            <Grid Grid.Row="4"
+                Margin="0,36,0,0"
+                RowDefinitions="Auto,*"
+                RowSpacing="16">
+                <Label Grid.Row="0"
+                    FontAttributes="Bold"
+                    FontSize="18"
+                    Text="Ähnliche Interpreten"
+                    TextColor="{DynamicResource TextPrimary}" />
+
+                <!--  Similar Artists  -->
+                <controls:RowView Grid.Row="1"
+                    ItemCornerRadius="100"
+                    ItemsSource="{Binding SimilarArtistItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowContextMenuAtPositionCommand}" />
+            </Grid>
+
+            <!--  Top Tracks Section  -->
+            <Grid Grid.Row="5"
+                Margin="0,36,0,0"
+                RowDefinitions="Auto,*,Auto"
+                RowSpacing="16">
+                <Label Grid.Row="0"
+                    FontAttributes="Bold"
+                    FontSize="18"
+                    Text="Toplieder"
+                    TextColor="{DynamicResource TextPrimary}" />
+
+                <controls:TableView Grid.Row="1"
+                    ContextMenuItems="{Binding ContextMenuItems}"
+                    ItemsSource="{Binding TopTrackItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowContextMenuAtPositionCommand}" />
+
+                <!--  Toggle Button  -->
+                <Border Grid.Row="2"
+                    Margin="0,-8,0,-24"
+                    behaviors:HoverBehavior.EnableScaleHover="True"
+                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                    BackgroundColor="Transparent"
+                    HeightRequest="24"
+                    HorizontalOptions="Center"
+                    StrokeThickness="0"
+                    WidthRequest="24">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="12" />
+                    </Border.StrokeShape>
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding ToggleTracksCommand}" />
+                    </Border.GestureRecognizers>
+                    <Grid>
+                        <Label FontSize="12"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsTracksExpanded, Converter={StaticResource InvertedBoolConverter}}"
+                            Text="{mi:Fluent Icon=ChevronDown24,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                        <Label FontSize="12"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsTracksExpanded}"
+                            Text="{mi:Fluent Icon=ChevronUp24,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                    </Grid>
+                </Border>
+            </Grid>
+
+        </Grid>
+    </ScrollView>
+</ContentPage>
