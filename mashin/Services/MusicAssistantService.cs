@@ -987,10 +987,27 @@ public class MusicAssistantService
         {
             updateImage.Path = RestoreImagePath(updateImage.Path, _settings.MusicAssistantUrl);
         }
+
+        var updatePayload = new Dictionary<string, object?>
+        {
+            ["item_id"] = update.ItemId,
+            ["provider"] = update.Provider,
+            ["name"] = update.Name,
+            ["sort_name"] = update.SortName,
+            ["uri"] = update.Uri,
+            ["media_type"] = "playlist",
+            ["provider_mappings"] = update.ProviderMappings,
+            ["metadata"] = update.Metadata,
+            ["favorite"] = update.Favorite,
+            ["external_ids"] = update.ExternalIds,
+            ["owner"] = update.Owner,
+            ["is_editable"] = update.IsEditable
+        };
+
         var args = new Dictionary<string, object>
         {
             ["item_id"] = itemId,
-            ["update"] = update,
+            ["update"] = updatePayload,
             ["overwrite"] = overwrite
         };
 

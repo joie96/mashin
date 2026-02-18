@@ -12,7 +12,6 @@ public interface IUserDataService
     bool IsLoaded { get; }
     AuthUser? CurrentUser { get; }
 
-    Task<bool> EnsureLoadedAsync(bool forceRefresh = false, CancellationToken cancellationToken = default);
     Task<Dictionary<string, object>> GetPreferencesAsync(bool forceRefresh = false, CancellationToken cancellationToken = default);
     T? GetPreference<T>(string key);
     Task<bool> SetPreferenceAsync(string key, object? value, CancellationToken cancellationToken = default);
@@ -57,7 +56,7 @@ public sealed class UserDataService : IUserDataService
 
     #region Load and preferences
 
-    public async Task<bool> EnsureLoadedAsync(bool forceRefresh = false, CancellationToken cancellationToken = default)
+    private async Task<bool> EnsureLoadedInternalAsync(bool forceRefresh = false, CancellationToken cancellationToken = default)
     {
         await _lock.WaitAsync(cancellationToken);
         try
@@ -109,7 +108,7 @@ public sealed class UserDataService : IUserDataService
 
     public async Task<Dictionary<string, object>> GetPreferencesAsync(bool forceRefresh = false, CancellationToken cancellationToken = default)
     {
-        await EnsureLoadedAsync(forceRefresh, cancellationToken);
+        await EnsureLoadedInternalAsync(forceRefresh, cancellationToken);
 
         await _lock.WaitAsync(cancellationToken);
         try
@@ -125,6 +124,11 @@ public sealed class UserDataService : IUserDataService
     public T? GetPreference<T>(string key)
     {
         if (string.IsNullOrWhiteSpace(key))
+        {
+            return default;
+        }
+
+        if (!IsLoaded && !EnsureLoadedInternalSync())
         {
             return default;
         }
@@ -157,7 +161,7 @@ public sealed class UserDataService : IUserDataService
             return false;
         }
 
-        if (!await EnsureLoadedAsync(false, cancellationToken))
+        if (!await EnsureLoadedInternalAsync(false, cancellationToken))
         {
             return false;
         }
@@ -188,7 +192,12 @@ public sealed class UserDataService : IUserDataService
 
     public bool IsFavorite(MediaItem mediaItem)
     {
-        if (!IsLoaded || mediaItem == null || string.IsNullOrWhiteSpace(mediaItem.Uri))
+        if (mediaItem == null || string.IsNullOrWhiteSpace(mediaItem.Uri))
+        {
+            return false;
+        }
+
+        if (!IsLoaded && !EnsureLoadedInternalSync())
         {
             return false;
         }
@@ -204,7 +213,7 @@ public sealed class UserDataService : IUserDataService
 
     public async Task<FavoritesSnapshot?> GetFavoritesSnapshotAsync(CancellationToken cancellationToken = default)
     {
-        if (!await EnsureLoadedAsync(false, cancellationToken))
+        if (!await EnsureLoadedInternalAsync(false, cancellationToken))
         {
             return null;
         }
@@ -232,7 +241,7 @@ public sealed class UserDataService : IUserDataService
 
     public async Task<bool> SetFavoritesAsync(IEnumerable<MediaItem> mediaItems, bool isFavorite, CancellationToken cancellationToken = default)
     {
-        if (!await EnsureLoadedAsync(false, cancellationToken))
+        if (!await EnsureLoadedInternalAsync(false, cancellationToken))
         {
             return false;
         }
@@ -647,6 +656,19 @@ public sealed class UserDataService : IUserDataService
     #endregion
 
     #region Internal sync
+
+    private bool EnsureLoadedInternalSync(bool forceRefresh = false)
+    {
+        try
+        {
+            return EnsureLoadedInternalAsync(forceRefresh).ConfigureAwait(false).GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to synchronously ensure user data is loaded");
+            return false;
+        }
+    }
 
     private async Task<bool> SaveCoreAsync(CancellationToken cancellationToken)
     {

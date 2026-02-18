@@ -92,7 +92,7 @@
                         Text="Erstellen"
                         BackgroundColor="Transparent"
                         Clicked="OnCreateClicked"
-                        IsEnabled="False"
+                        IsEnabled="True"
                         TextColor="White" />
                 </Border>
             </Grid>

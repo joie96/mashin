@@ -92,7 +92,7 @@
                         Text="Umbenennen"
                         BackgroundColor="Transparent"
                         Clicked="OnUpdateClicked"
-                        IsEnabled="False"
+                        IsEnabled="True"
                         TextColor="White" />
                 </Border>
             </Grid>

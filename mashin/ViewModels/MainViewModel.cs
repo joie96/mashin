@@ -23,12 +23,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private readonly IUserDataService _userDataService;
     private readonly IPlayerService _playerService;
     private readonly INavigationService _navigationService;
+    private readonly IOverlayService _overlayService;
+    private readonly IPlaylistStoreService _playlistStore;
     private readonly IContextMenuService _contextMenuService;
     private readonly ILogger<MainViewModel> _logger;
 
     private readonly IDispatcherTimer _positionTimer;
 
-    private bool _isLoadingPlaylists;
     private bool _isPlaying;
     private bool _isBuffering;
     private bool _isNavigating;
@@ -45,9 +46,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private Track? _currentTrack;
 
-    private readonly ObservableCollection<ContextMenuItem> _userMenuItems;
-
-    private ObservableRangeCollection<Playlist> _playlists = new();
+    private ObservableCollection<ContextMenuItem> _userMenuItems = new();
 
     private NavigationSection _currentSection = NavigationSection.Home;
 
@@ -75,6 +74,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         IUserDataService userDataService,
         IPlayerService playerService,
         INavigationService navigationService,
+        IOverlayService overlayService,
+        IPlaylistStoreService playlistStore,
         IContextMenuService contextMenuService,
         ILogger<MainViewModel> logger)
     {
@@ -83,17 +84,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _userDataService = userDataService;
         _playerService = playerService;
         _navigationService = navigationService;
+        _overlayService = overlayService;
+        _playlistStore = playlistStore;
         _contextMenuService = contextMenuService;
         _logger = logger;
 
-        _userMenuItems = new ObservableCollection<ContextMenuItem>
-        {
-            new()
-            {
-                Text = "Logout",
-                Command = new Command(async () => await ExecuteLogoutAsync())
-            }
-        };
+        BuildUserMenuItems();
 
         // Navigation Commands
         NavigateToHomeCommand = new Command(async () => await navigationService.NavigateToAsync<HomePage>());
@@ -102,8 +98,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         NavigateToPlaylistCommand = new Command<Playlist>(async (playlist) => await navigationService.NavigateToAsync<PlaylistDetailPage>(playlist));
 
         SearchCommand = new Command(async () => await ExecuteSearchAsync());
+        
+        // Overlay Commands
+        ShowCreatePlaylistOverlayCommand = new Command(async () => await ExecuteShowCreatePlaylistOverlayAsync());
 
-        ShowUserMenuCommand = new Command<View>(async (anchor) => await ShowUserMenuAsync(anchor));
+        // User Icon Menu Command
+        ShowUserMenuCommand = new Command<View>(async (anchor) => {
+        if (_userMenuItems?.Count > 0 && anchor != null)
+            {
+                await _contextMenuService.ShowContextMenuAsync(_userMenuItems, anchor);
+            }
+        });
 
         // Playback Commands
         PreviousTrackCommand = new Command(async () => await PreviousTrackAsync());
@@ -120,6 +125,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         _navigationService.PropertyChanged += OnNavigationServicePropertyChanged;
         IsNavigating = _navigationService.IsNavigating;
+
+        _musicAssistant.LoginRequired += OnLoginRequired;
+        _playlistStore.PropertyChanged += OnPlaylistStorePropertyChanged;
 
         // Subscribe to player state; these events drive most UI state.
         _playerService.ConnectionStateChanged += OnConnectionStateChanged;
@@ -148,14 +156,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public ObservableRangeCollection<Playlist> Playlists
     {
-        get => _playlists;
-        private set => SetProperty(ref _playlists, value);
+        get => _playlistStore.Playlists;
     }
 
     public bool IsLoadingPlaylists
     {
-        get => _isLoadingPlaylists;
-        private set => SetProperty(ref _isLoadingPlaylists, value);
+        get => _playlistStore.IsLoading;
     }
 
     #endregion
@@ -253,23 +259,22 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     #region Commands
 
+    // Navigaton Commands
     public ICommand NavigateToHomeCommand { get; }
     public ICommand NavigateToExploreCommand { get; }
     public ICommand NavigateToFavoritesCommand { get; }
     public ICommand NavigateToPlaylistCommand { get; }
 
+    // Playback Commands
     public ICommand PreviousTrackCommand { get; }
-
     public ICommand NextTrackCommand { get; }
-
     public ICommand TogglePlayPauseCommand { get; }
-
     public ICommand SeekCommand { get; }
 
+    // Others
     public ICommand PlayPlaylistCommand { get; }
-
     public ICommand SearchCommand { get; }
-
+    public ICommand ShowCreatePlaylistOverlayCommand { get; }
     public ICommand ShowUserMenuCommand { get; }
 
     #endregion
@@ -321,9 +326,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             await _playerService.ConnectAsync(uri);
         }
 
-        _ = await _userDataService.EnsureLoadedAsync(forceRefresh: true);
-
-        await LoadPlaylistsAsync();
+        await _playlistStore.RefreshAsync();
     }
 
     public async ValueTask DisposeAsync()
@@ -331,8 +334,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _positionTimer.Tick -= OnPositionTimerTick;
         _positionTimer.Stop();
 
+        _musicAssistant.LoginRequired -= OnLoginRequired;
+
         _playerService.ConnectionStateChanged -= OnConnectionStateChanged;
         _playerService.GroupStateChanged -= OnGroupStateChanged;
+        _playlistStore.PropertyChanged -= OnPlaylistStorePropertyChanged;
 
         _navigationService.PropertyChanged -= OnNavigationServicePropertyChanged;
 
@@ -341,62 +347,54 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     #endregion
 
-    #region Playlist Logic
+    #region Login Overlay
 
-    private async Task LoadPlaylistsAsync()
+    private async void OnLoginRequired(object? sender, EventArgs e)
     {
-        if (IsLoadingPlaylists)
+        await _overlayService.ShowLoginAsync(
+            _settings.Username,
+            async (username, password) =>
+            {
+                try
+                {
+                    _logger.LogInformation("Attempting login for user: {Username}", username);
+                    var success = await _musicAssistant.LoginAsync(username, password);
+
+                    if (success)
+                    {
+                        _logger.LogInformation("Login successful for user: {Username}", username);
+                        return (true, null);
+                    }
+
+                    _logger.LogWarning("Login failed for user: {Username}", username);
+                    return (false, "Anmeldung fehlgeschlagen. Bitte überprüfen Sie Ihre Anmeldedaten.");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Login error for user: {Username}", username);
+                    return (false, $"Verbindungsfehler: {ex.Message}");
+                }
+            });
+    }
+
+    #endregion
+
+    #region Create Playlist Overlay
+
+    private async Task ExecuteShowCreatePlaylistOverlayAsync()
+    {
+        var name = await _overlayService.ShowCreatePlaylistAsync();
+        if (string.IsNullOrWhiteSpace(name))
         {
             return;
         }
 
-        IsLoadingPlaylists = true;
-        try
-        {
-            // Get all user playlists (username--*) ordered by sort name.
-            var prefix = GetUserPlaylistPrefix();
-            var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(
-                search: string.IsNullOrWhiteSpace(prefix) ? null : prefix,
-                orderBy: "sort_name");
-
-            // Remove username prefix from display name
-            foreach (var playlist in playlists)
-            {
-                if (!string.IsNullOrWhiteSpace(prefix)
-                    && !string.IsNullOrWhiteSpace(playlist.Name)
-                    && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                {
-                    playlist.DisplayName = playlist.Name[prefix.Length..];
-                }
-            }
-
-            // Load playlists progressively.
-            var visiblePlaylists = playlists.Take(10).ToList();
-            Playlists = new ObservableRangeCollection<Playlist>(visiblePlaylists);
-            await Task.Yield();
-            IsLoadingPlaylists = false;
-
-            var remainingPlaylists = playlists.Skip(visiblePlaylists.Count).ToList();
-            if (remainingPlaylists.Count > 0)
-            {
-                foreach (var batch in remainingPlaylists.Chunk(20))
-                {
-                    Playlists.AddRange(batch);
-                    await Task.Yield();
-                }
-            }
-
-            _logger.LogInformation("Loaded {Count} playlists", Playlists.Count);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to load playlists");
-        }
-        finally
-        {
-            IsLoadingPlaylists = false;
-        }
+        await _playlistStore.CreateAsync(name);
     }
+
+    #endregion
+
+    #region Playlist Logic
 
     private async Task PlayPlaylistAsync(Playlist playlist)
     {
@@ -427,146 +425,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         {
             _logger.LogError(ex, "Failed to play playlist: {Name}", playlist.Name);
         }
-    }
-
-    public async Task<bool> CreatePlaylistAsync(string name)
-    {
-        name = name?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return false;
-        }
-
-        var prefix = GetUserPlaylistPrefix();
-        if (string.IsNullOrWhiteSpace(prefix))
-        {
-            _logger.LogWarning("Cannot create playlist without a user name prefix.");
-            return false;
-        }
-
-        if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            name = string.Concat(prefix, name);
-        }
-
-        try
-        {
-            var playlist = await _musicAssistant.CreatePlaylistAsync(name);
-            if (playlist != null)
-            {
-                await LoadPlaylistsAsync();
-                return true;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to create playlist: {Name}", name);
-        }
-
-        return false;
-    }
-
-    public async Task<bool> UpdatePlaylistAsync(Playlist playlist, string name)
-    {
-        if (playlist is null)
-        {
-            return false;
-        }
-
-        name = name?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return false;
-        }
-
-        var prefix = GetUserPlaylistPrefix();
-        if (string.IsNullOrWhiteSpace(prefix))
-        {
-            _logger.LogWarning("Cannot update playlist without a user name prefix.");
-            return false;
-        }
-
-        if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            name = string.Concat(prefix, name);
-        }
-
-        if (string.IsNullOrWhiteSpace(playlist.ItemId))
-        {
-            _logger.LogWarning("Cannot update playlist without an item id.");
-            return false;
-        }
-
-        var originalName = playlist.Name;
-        var originalDisplayName = playlist.DisplayName;
-        var success = false;
-
-        try
-        {
-            playlist.Name = name;
-            playlist.DisplayName = name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-                ? name[prefix.Length..]
-                : name;
-
-            var updated = await _musicAssistant.UpdatePlaylistAsync(playlist.ItemId, playlist);
-            if (updated != null)
-            {
-                await LoadPlaylistsAsync();
-                success = true;
-                return true;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to update playlist: {Name}", name);
-        }
-        finally
-        {
-            if (!success)
-            {
-                playlist.Name = originalName;
-                playlist.DisplayName = originalDisplayName;
-            }
-        }
-
-        return false;
-    }
-
-    public async Task<bool> RemovePlaylistAsync(Playlist playlist)
-    {
-        if (playlist is null)
-        {
-            return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(playlist.ItemId))
-        {
-            _logger.LogWarning("Cannot remove playlist without an item id.");
-            return false;
-        }
-
-        try
-        {
-            await _musicAssistant.RemovePlaylistAsync(playlist.ItemId);
-            await LoadPlaylistsAsync();
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to remove playlist: {Name}", playlist.Name);
-            return false;
-        }
-    }
-
-    private string? GetUserPlaylistPrefix()
-    {
-        var username = _userDataService.CurrentUser?.Username;
-        if (string.IsNullOrWhiteSpace(username))
-        {
-            return null;
-        }
-
-        return string.Concat(username, "--");
     }
 
     #endregion
@@ -692,6 +550,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
     }
 
+    private void OnPlaylistStorePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(IPlaylistStoreService.IsLoading))
+        {
+            OnPropertyChanged(nameof(IsLoadingPlaylists));
+        }
+    }
+
     private async void OnGroupStateChanged(object? sender, GroupState group)
     {
         try
@@ -789,14 +655,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     #region User Menu
 
-    private async Task ShowUserMenuAsync(View? anchor)
+    private void BuildUserMenuItems()
     {
-        if (anchor is null || _userMenuItems.Count == 0)
-        {
-            return;
-        }
+        _userMenuItems.Clear();
 
-        await _contextMenuService.ShowContextMenuAsync(_userMenuItems, anchor);
+        _userMenuItems.Add(new ContextMenuItem
+        {
+            Text = "Logout",
+            Command = new Command(async () => await ExecuteLogoutAsync())
+        });
     }
 
     private async Task ExecuteLogoutAsync()

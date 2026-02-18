@@ -124,7 +124,7 @@
                                 StrokeThickness="0"
                                 WidthRequest="24">
                                 <Border.GestureRecognizers>
-                                    <TapGestureRecognizer Tapped="OnOpenCreatePlaylistTapped" />
+                                    <TapGestureRecognizer Command="{Binding ShowCreatePlaylistOverlayCommand}" />
                                 </Border.GestureRecognizers>
                                 <Border.StrokeShape>
                                     <RoundRectangle CornerRadius="12" />

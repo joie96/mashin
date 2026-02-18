@@ -21,6 +21,8 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly IUserDataService _userDataService;
+    private readonly IOverlayService _overlayService;
+    private readonly IPlaylistStoreService _playlistStore;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
     private readonly ILogger<PlaylistDetailViewModel> _logger;
@@ -78,18 +80,6 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         }
     }
 
-    public ObservableRangeCollection<ContextMenuItem> HeaderContextMenuItems
-    {
-        get => _headerContextMenuItems;
-        set => SetProperty(ref _headerContextMenuItems, value);
-    }
-
-    public ObservableRangeCollection<ContextMenuItem> ContentContextMenuItems
-    {
-        get => _contentContextMenuItems;
-        set => SetProperty(ref _contentContextMenuItems, value);
-    }
-
 
     public bool IsLoadingTracks
     {
@@ -141,6 +131,8 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         MusicAssistantService musicAssistant,
         IPlayerService playerService,
         IUserDataService userDataService,
+        IOverlayService overlayService,
+        IPlaylistStoreService playlistStore,
         IMediaItemActions mediaActions,
         IContextMenuService contextMenuService,
         INavigationService navigationService,
@@ -148,6 +140,8 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     {
         _musicAssistant = musicAssistant;
         _userDataService = userDataService;
+        _overlayService = overlayService;
+        _playlistStore = playlistStore;
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
         _logger = logger;
@@ -161,33 +155,33 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         // Context Menu Commands
         ShowHeaderContextMenuAtAnchorCommand = new Command<View>(async (anchor) =>
         {
-            if (HeaderContextMenuItems?.Count > 0 && anchor != null)
+            if (_headerContextMenuItems.Count > 0 && anchor != null)
             {
-                await _contextMenuService.ShowContextMenuAsync(HeaderContextMenuItems, anchor);
+                await _contextMenuService.ShowContextMenuAsync(_headerContextMenuItems, anchor);
             }
         });
 
         ShowHeaderContextMenuAtPositionCommand = new Command<Point>(async (position) =>
         {
-            if (HeaderContextMenuItems?.Count > 0)
+            if (_headerContextMenuItems.Count > 0)
             {
-                await _contextMenuService.ShowContextMenuAsync(HeaderContextMenuItems, position);
+                await _contextMenuService.ShowContextMenuAsync(_headerContextMenuItems, position);
             }
         });
 
         ShowContentContextMenuAtAnchorCommand = new Command<View>(async (anchor) =>
         {
-            if (ContentContextMenuItems?.Count > 0 && anchor != null)
+            if (_contentContextMenuItems.Count > 0 && anchor != null)
             {
-                await _contextMenuService.ShowContextMenuAsync(ContentContextMenuItems, anchor);
+                await _contextMenuService.ShowContextMenuAsync(_contentContextMenuItems, anchor);
             }
         });
 
         ShowContentContextMenuAtPositionCommand = new Command<Point>(async (position) =>
         {
-            if (ContentContextMenuItems?.Count > 0)
+            if (_contentContextMenuItems.Count > 0)
             {
-                await _contextMenuService.ShowContextMenuAsync(ContentContextMenuItems, position);
+                await _contextMenuService.ShowContextMenuAsync(_contentContextMenuItems, position);
             }
         });
 
@@ -229,6 +223,8 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         if (parameter is MediaItem item)
         {
             _logger.LogInformation("Navigated to playlist target: {ItemId} ({Provider})", item.ItemId, item.Provider);
+            
+            // Load data
             _ = LoadPlaylistAsync(item.ItemId, item.Provider);
         }
         else
@@ -279,7 +275,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 return;
             }
 
-            await BuildHeaderContextMenuAsync();
+            _ = BuildHeaderContextMenuAsync();            
 
             // Fetch Tracks
             var tracks = await _musicAssistant.GetPlaylistTracksAsync(
@@ -297,15 +293,14 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             Tracks = new ObservableRangeCollection<Track>();
             _navigationService.IsNavigating = false;
 
+            _ = BuildContentContextMenuAsync();
+
             // Render in chunks of 10
             foreach (var batch in tracks.Chunk(10))
                 {
                     Tracks.AddRange(batch);
                     await Task.Yield();
                 }
-
-            // Build context menu 
-            await BuildContentContextMenuAsync();
 
             _logger.LogInformation("Loaded playlist '{Name}' with {Count} tracks",
                 Playlist.Name, Tracks.Count);
@@ -323,13 +318,52 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
     #endregion
 
+    
+    #region Playlist Actions
+
+    private async Task RenamePlaylistAsync()
+    {
+        var playlist = Playlist!;
+
+        var updatedName = await _overlayService.ShowUpdatePlaylistAsync(playlist);
+        if (string.IsNullOrWhiteSpace(updatedName))
+        {
+            return;
+        }
+
+        var renamed = await _playlistStore.RenameAsync(playlist, updatedName);
+        if (renamed)
+        {
+            OnPropertyChanged(nameof(PlaylistName));
+        }
+    }
+
+    private async Task DeletePlaylistAsync()
+    {
+        var playlist = Playlist!;
+
+        var confirmed = await _overlayService.ShowDeletePlaylistAsync(playlist);
+        if (!confirmed)
+        {
+            return;
+        }
+
+        var removed = await _playlistStore.RemoveAsync(playlist);
+        if (removed)
+        {
+            await _navigationService.GoBackAsync();
+        }
+    }
+
+    #endregion
+
     #region Context Menu
 
     private Task BuildHeaderContextMenuAsync()
     {
         if (Playlist == null)
         {
-            HeaderContextMenuItems = new ObservableRangeCollection<ContextMenuItem>();
+            _headerContextMenuItems = new ObservableRangeCollection<ContextMenuItem>();
             return Task.CompletedTask;
         }
 
@@ -386,12 +420,30 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             });
         }
 
-        HeaderContextMenuItems = menu;
+        menu.Add(new ContextMenuItem { IsSeparator = true });
+
+        menu.Add(new ContextMenuItem
+        {
+            Text = "Wiedergabeliste umbenennen",
+            Icon = FluentIcons.Rename16,
+            Command = new Command(async () => await RenamePlaylistAsync())
+        });
+
+        menu.Add(new ContextMenuItem
+        {
+            Text = "Wiedergabeliste löschen",
+            Icon = FluentIcons.Delete12,
+            Command = new Command(async () => await DeletePlaylistAsync())
+        });
+
+        _headerContextMenuItems = menu;
         return Task.CompletedTask;
     }
 
-    private async Task BuildContentContextMenuAsync()
+    private Task BuildContentContextMenuAsync()
     {
+        var playlists = _playlistStore.Playlists;
+
         var menu = new ObservableRangeCollection<ContextMenuItem>
         {
             new()
@@ -420,7 +472,18 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             {
                 Text = "Zu Wiedergabeliste hinzufügen",
                 Icon = FluentIcons.Add12,
-                SubItems = await GetPlaylistSubItemsAsync()
+                SubItems = new ObservableCollection<ContextMenuItem>(
+                    playlists
+                        .Where(playlist => !playlist.Name.StartsWith("~"))
+                        .Select(playlist => new ContextMenuItem
+                        {
+                            Text = playlist.DisplayName,
+                            Icon = FluentIcons.TextBulletListLtr16,
+                            Command = new Command(async () =>
+                                await MediaActions.AddToPlaylistAsync(
+                                    Tracks.Where(t => t.IsSelected),
+                                    playlist))
+                        }))
             },
             new()
             {
@@ -458,38 +521,8 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             }
         };
 
-        ContentContextMenuItems = menu;
-    }
-
-    private async Task<ObservableCollection<ContextMenuItem>> GetPlaylistSubItemsAsync()
-    {
-        var items = new ObservableCollection<ContextMenuItem>();
-
-        try
-        {
-            var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(orderBy: "sort_name");
-
-            foreach (var playlist in playlists)
-            {
-                if (playlist.Name.StartsWith("~")) { continue; } // Skip hidden/system playlists
-
-                items.Add(new ContextMenuItem
-                {
-                    Text = playlist.Name,
-                    Icon = FluentIcons.TextBulletListLtr16,
-                    Command = new Command(async () => 
-                        await MediaActions.AddToPlaylistAsync(
-                            Tracks.Where(t => t.IsSelected), 
-                            playlist))
-                });
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to load playlists for context menu");
-        }
-
-        return items;
+        _contentContextMenuItems = menu;
+        return Task.CompletedTask;
     }
 
     #endregion
