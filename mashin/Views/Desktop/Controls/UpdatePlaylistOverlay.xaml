@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView x:Class="mashin.Views.Desktop.Controls.UpdatePlaylistOverlay"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:behaviors="clr-namespace:mashin.Views.Desktop.Behaviors"
+    xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons">
+
+    <Border BackgroundColor="{DynamicResource BackgroundSecondary}"
+        Padding="24,20"
+        HorizontalOptions="Center"
+        VerticalOptions="Center"
+        WidthRequest="400">
+        <Border.StrokeShape>
+            <RoundRectangle CornerRadius="12" />
+        </Border.StrokeShape>
+
+        <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="16">
+            <Grid Grid.Row="0" ColumnDefinitions="*,Auto" VerticalOptions="Center">
+                <Label FontAttributes="Bold"
+                    FontSize="18"
+                    Text="Wiedergabeliste umbenennen"
+                    TextColor="{DynamicResource TextPrimary}" />
+                <Border Grid.Column="1"
+                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                    BackgroundColor="Transparent"
+                    HeightRequest="28"
+                    StrokeThickness="0"
+                    WidthRequest="28">
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnCancelTapped" />
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="14" />
+                    </Border.StrokeShape>
+                    <Label FontSize="12"
+                        HorizontalOptions="Center"
+                        Text="{mi:Fluent Icon=Dismiss24,
+                                         FontOverride=True}"
+                        TextColor="{DynamicResource IconSecondary}"
+                        VerticalOptions="Center" />
+                </Border>
+            </Grid>
+
+            <VerticalStackLayout Grid.Row="1" Spacing="8">
+                <Label FontSize="12"
+                    Text="Name"
+                    TextColor="{DynamicResource TextSecondary}" />
+                <Border BackgroundColor="{DynamicResource BackgroundTertiary}"
+                    StrokeThickness="0"
+                    Padding="-1,-1,-1,0">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="6" />
+                    </Border.StrokeShape>
+                    <Entry x:Name="UpdatePlaylistNameEntry"
+                        FontSize="14"
+                        HeightRequest="38"
+                        Placeholder="Neuen Namen eingeben"
+                        PlaceholderColor="{DynamicResource TextTertiary}"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center"
+                        TextChanged="OnUpdatePlaylistNameChanged" />
+                </Border>
+            </VerticalStackLayout>
+
+            <Grid Grid.Row="2" ColumnDefinitions="*,*" ColumnSpacing="12">
+                <Border HorizontalOptions="Center"
+                    WidthRequest="150"
+                    BackgroundColor="Transparent"
+                    StrokeThickness="0"
+                    behaviors:HoverBehavior.BaseBackgroundColor="Transparent"
+                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="6" />
+                    </Border.StrokeShape>
+                    <Button Text="Abbrechen"
+                        BackgroundColor="Transparent"
+                        Clicked="OnCancelClicked"
+                        TextColor="{DynamicResource TextSecondary}" />
+                </Border>
+                <Border Grid.Column="1"
+                    HorizontalOptions="Center"
+                    WidthRequest="150"
+                    BackgroundColor="{DynamicResource AccentColor}"
+                    StrokeThickness="0"
+                    IsEnabled="{Binding Source={x:Reference UpdatePlaylistButton}, Path=IsEnabled}"
+                    behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource AccentColor}"
+                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource AccentHover}">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="6" />
+                    </Border.StrokeShape>
+                    <Button x:Name="UpdatePlaylistButton"
+                        Text="Umbenennen"
+                        BackgroundColor="Transparent"
+                        Clicked="OnUpdateClicked"
+                        IsEnabled="False"
+                        TextColor="White" />
+                </Border>
+            </Grid>
+        </Grid>
+    </Border>
+</ContentView>

@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView x:Class="mashin.Views.Desktop.Controls.LoginOverlay"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons">
+
+    <Border BackgroundColor="{DynamicResource BackgroundSecondary}"
+        Stroke="{DynamicResource SeparatorColor}"
+        StrokeThickness="1"
+        StrokeShape="RoundRectangle 12"
+        Padding="40,32"
+        HorizontalOptions="Center"
+        VerticalOptions="Center"
+        WidthRequest="420">
+
+        <VerticalStackLayout Spacing="24">
+            <VerticalStackLayout Spacing="8">
+                <Label Text="&#xE72E;"
+                    FontFamily="SegoeFluentIcons"
+                    FontSize="48"
+                    TextColor="{DynamicResource AccentColor}"
+                    HorizontalOptions="Center" />
+                <Label Text="Anmeldung erforderlich"
+                    FontSize="24"
+                    FontAttributes="Bold"
+                    TextColor="{DynamicResource TextPrimary}"
+                    HorizontalOptions="Center" />
+                <Label Text="Bitte melden Sie sich bei Music Assistant an"
+                    FontSize="14"
+                    TextColor="{DynamicResource TextSecondary}"
+                    HorizontalOptions="Center" />
+            </VerticalStackLayout>
+
+            <Border x:Name="LoginErrorBorder"
+                IsVisible="False"
+                BackgroundColor="#33ff4757"
+                Stroke="{DynamicResource AccentColor}"
+                StrokeThickness="1"
+                StrokeShape="RoundRectangle 6"
+                Padding="12,8">
+                <Label x:Name="LoginErrorLabel"
+                    TextColor="{DynamicResource AccentColor}"
+                    FontSize="13"
+                    HorizontalTextAlignment="Center" />
+            </Border>
+
+            <VerticalStackLayout Spacing="16">
+                <VerticalStackLayout Spacing="6">
+                    <Label Text="Benutzername"
+                        FontSize="13"
+                        TextColor="{DynamicResource TextSecondary}" />
+                    <Border BackgroundColor="{DynamicResource BackgroundTertiary}"
+                        Stroke="{DynamicResource SeparatorColor}"
+                        StrokeThickness="0"
+                        StrokeShape="RoundRectangle 6"
+                        Padding="-1,-1,-1,-1">
+                        <Entry x:Name="LoginUsernameEntry"
+                            Placeholder="Benutzername eingeben"
+                            PlaceholderColor="{DynamicResource TextTertiary}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            BackgroundColor="Transparent"
+                            FontSize="15"
+                            HeightRequest="44"
+                            Completed="OnLoginUsernameCompleted" />
+                    </Border>
+                </VerticalStackLayout>
+
+                <VerticalStackLayout Spacing="6">
+                    <Label Text="Passwort"
+                        FontSize="13"
+                        TextColor="{DynamicResource TextSecondary}" />
+                    <Border BackgroundColor="{DynamicResource BackgroundTertiary}"
+                        Stroke="{DynamicResource SeparatorColor}"
+                        StrokeThickness="0"
+                        StrokeShape="RoundRectangle 6"
+                        Padding="-1,-1,-1,-1">
+                        <Entry x:Name="LoginPasswordEntry"
+                            Placeholder="Passwort eingeben"
+                            PlaceholderColor="{DynamicResource TextTertiary}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            BackgroundColor="Transparent"
+                            FontSize="15"
+                            HeightRequest="44"
+                            IsPassword="True"
+                            Completed="OnLoginPasswordCompleted" />
+                    </Border>
+                </VerticalStackLayout>
+            </VerticalStackLayout>
+
+            <Button x:Name="LoginButton"
+                Text="Anmelden"
+                FontSize="15"
+                FontAttributes="Bold"
+                BackgroundColor="{DynamicResource AccentColor}"
+                TextColor="White"
+                HeightRequest="48"
+                CornerRadius="8"
+                Clicked="OnLoginClicked" />
+
+            <ActivityIndicator x:Name="LoginLoadingIndicator"
+                IsVisible="False"
+                IsRunning="False"
+                Color="{DynamicResource AccentColor}"
+                HeightRequest="24"
+                WidthRequest="24"
+                HorizontalOptions="Center" />
+        </VerticalStackLayout>
+    </Border>
+</ContentView>

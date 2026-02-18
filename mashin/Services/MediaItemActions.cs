@@ -19,6 +19,8 @@ public interface IMediaItemActions
     Task RemoveFromPlaylistAsync(object item, Playlist playlist);
     Task AddToFavoritesAsync(object item);
     Task RemoveFromFavoritesAsync(object item);
+    Task UpdatePlaylistAsync(Playlist playlist);
+    Task RemovePlaylistAsync(Playlist playlist);
 
 }
 
@@ -292,6 +294,50 @@ public class MediaItemActions : IMediaItemActions
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to remove items from favorites");
+        }
+    }
+
+    /// <summary>
+    /// Updates a playlist in the library.
+    /// </summary>
+    public async Task UpdatePlaylistAsync(Playlist playlist)
+    {
+        if (playlist == null)
+        {
+            _logger.LogWarning("No playlist provided for update");
+            return;
+        }
+
+        try
+        {
+            _logger.LogInformation("Updating playlist: {PlaylistName}", playlist.Name);
+            await _musicAssistant.UpdatePlaylistAsync(playlist.ItemId, playlist, true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update playlist: {PlaylistName}", playlist.Name);
+        }
+    }
+
+    /// <summary>
+    /// Removes a playlist from the library.
+    /// </summary>
+    public async Task RemovePlaylistAsync(Playlist playlist)
+    {
+        if (playlist == null)
+        {
+            _logger.LogWarning("No playlist provided for removal");
+            return;
+        }
+
+        try
+        {
+            _logger.LogInformation("Removing playlist: {PlaylistName}", playlist.Name);
+            await _musicAssistant.RemovePlaylistAsync(playlist.ItemId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to remove playlist: {PlaylistName}", playlist.Name);
         }
     }
 

@@ -1,4 +1,5 @@
-﻿using System.Net.Http.Json;
+﻿using System.Net;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -124,16 +125,37 @@ public class MusicAssistantService
         return $"{baseUrl.TrimEnd('/')}/imageproxy?path={encodedPath}&provider={encodedProvider}&checksum=&size=256";
     }
 
-    private void NormalizePlaylistImage(Playlist? playlist)
+    private static string RestoreImagePath(string? path, string baseUrl)
     {
-        var image = playlist?.Metadata?.Images?.FirstOrDefault();
-        if (image == null)
+        if (string.IsNullOrWhiteSpace(path))
         {
-            return;
+            return string.Empty;
         }
 
-        image.Path = NormalizeImagePath(image.Path, image.Provider, _settings.MusicAssistantUrl);
+        if (!Uri.TryCreate(path, UriKind.Absolute, out var uri))
+        {
+            return path;
+        }
+
+        var proxyPath = $"{baseUrl.TrimEnd('/')}/imageproxy";
+        if (!path.StartsWith(proxyPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return path;
+        }
+
+        var query = uri.Query.TrimStart('?');
+        foreach (var part in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var kvp = part.Split('=', 2);
+            if (kvp.Length == 2 && kvp[0] == "path")
+            {
+                return WebUtility.UrlDecode(kvp[1]);
+            }
+        }
+
+        return path;
     }
+
 
     #region Authentication
 
@@ -839,7 +861,11 @@ public class MusicAssistantService
         var playlists = result ?? new List<Playlist>();
         foreach (var playlist in playlists)
         {
-            NormalizePlaylistImage(playlist);
+            var image = playlist.Metadata?.Images?.FirstOrDefault();
+            if (image != null)
+            {
+                image.Path = NormalizeImagePath(image.Path, image.Provider, _settings.MusicAssistantUrl);
+            }
         }
 
         return playlists;
@@ -857,7 +883,11 @@ public class MusicAssistantService
         };
 
         var playlist = await SendCommandAsync<Playlist>("music/playlists/get", args);
-        NormalizePlaylistImage(playlist);
+        var image = playlist?.Metadata?.Images?.FirstOrDefault();
+        if (image != null)
+        {
+            image.Path = NormalizeImagePath(image.Path, image.Provider, _settings.MusicAssistantUrl);
+        }
         return playlist;
     }
 
@@ -897,7 +927,11 @@ public class MusicAssistantService
         }
 
         var playlist = await SendCommandAsync<Playlist>("music/playlists/create_playlist", args);
-        NormalizePlaylistImage(playlist);
+        var image = playlist?.Metadata?.Images?.FirstOrDefault();
+        if (image != null)
+        {
+            image.Path = NormalizeImagePath(image.Path, image.Provider, _settings.MusicAssistantUrl);
+        }
         return playlist;
     }
 
@@ -927,6 +961,46 @@ public class MusicAssistantService
         };
 
         await SendCommandAsync<object>("music/playlists/remove_playlist_tracks", args);
+    }
+
+    /// <summary>
+    /// Remove a playlist from the library.
+    /// </summary>
+    public async Task RemovePlaylistAsync(string itemId, bool recursive = false)
+    {
+        var args = new Dictionary<string, object>
+        {
+            ["item_id"] = itemId,
+            ["recursive"] = recursive
+        };
+
+        await SendCommandAsync<object>("music/playlists/remove", args);
+    }
+
+    /// <summary>
+    /// Update an existing playlist in the library.
+    /// </summary>
+    public async Task<Playlist?> UpdatePlaylistAsync(string itemId, Playlist update, bool overwrite = false)
+    {
+        var updateImage = update.Metadata?.Images?.FirstOrDefault();
+        if (updateImage != null)
+        {
+            updateImage.Path = RestoreImagePath(updateImage.Path, _settings.MusicAssistantUrl);
+        }
+        var args = new Dictionary<string, object>
+        {
+            ["item_id"] = itemId,
+            ["update"] = update,
+            ["overwrite"] = overwrite
+        };
+
+        var playlist = await SendCommandAsync<Playlist>("music/playlists/update", args);
+        var playlistImage = playlist?.Metadata?.Images?.FirstOrDefault();
+        if (playlistImage != null)
+        {
+            playlistImage.Path = NormalizeImagePath(playlistImage.Path, playlistImage.Provider, _settings.MusicAssistantUrl);
+        }
+        return playlist;
     }
 
     /// <summary>

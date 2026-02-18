@@ -466,6 +466,98 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         return false;
     }
 
+    public async Task<bool> UpdatePlaylistAsync(Playlist playlist, string name)
+    {
+        if (playlist is null)
+        {
+            return false;
+        }
+
+        name = name?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        var prefix = GetUserPlaylistPrefix();
+        if (string.IsNullOrWhiteSpace(prefix))
+        {
+            _logger.LogWarning("Cannot update playlist without a user name prefix.");
+            return false;
+        }
+
+        if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            name = string.Concat(prefix, name);
+        }
+
+        if (string.IsNullOrWhiteSpace(playlist.ItemId))
+        {
+            _logger.LogWarning("Cannot update playlist without an item id.");
+            return false;
+        }
+
+        var originalName = playlist.Name;
+        var originalDisplayName = playlist.DisplayName;
+        var success = false;
+
+        try
+        {
+            playlist.Name = name;
+            playlist.DisplayName = name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                ? name[prefix.Length..]
+                : name;
+
+            var updated = await _musicAssistant.UpdatePlaylistAsync(playlist.ItemId, playlist);
+            if (updated != null)
+            {
+                await LoadPlaylistsAsync();
+                success = true;
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update playlist: {Name}", name);
+        }
+        finally
+        {
+            if (!success)
+            {
+                playlist.Name = originalName;
+                playlist.DisplayName = originalDisplayName;
+            }
+        }
+
+        return false;
+    }
+
+    public async Task<bool> RemovePlaylistAsync(Playlist playlist)
+    {
+        if (playlist is null)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(playlist.ItemId))
+        {
+            _logger.LogWarning("Cannot remove playlist without an item id.");
+            return false;
+        }
+
+        try
+        {
+            await _musicAssistant.RemovePlaylistAsync(playlist.ItemId);
+            await LoadPlaylistsAsync();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to remove playlist: {Name}", playlist.Name);
+            return false;
+        }
+    }
+
     private string? GetUserPlaylistPrefix()
     {
         var username = _userDataService.CurrentUser?.Username;
