@@ -14,7 +14,7 @@
         <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
     </ContentPage.Resources>
 
-    <Grid Padding="40,30,40,30"
+    <Grid Padding="40,30,40,0"
           RowDefinitions="Auto,*"
           RowSpacing="0">
         <!-- Playlist Header -->
@@ -203,7 +203,6 @@
                                     MediaActions="{Binding MediaActions}"
                                     PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
                                     SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                                    ContextMenuItems="{Binding ContentContextMenuItems}"
                                     ShowContextMenuAtAnchorCommand="{Binding ShowContentContextMenuAtAnchorCommand}"
                                     ShowContextMenuAtPositionCommand="{Binding ShowContentContextMenuAtPositionCommand}"
                                     IsVisible="{Binding ShowTrackTable}" />

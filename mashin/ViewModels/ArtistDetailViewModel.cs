@@ -3,6 +3,7 @@ using mashin.Models;
 using mashin.Services;
 using mashin.Views.Desktop;
 using MauiIcons.Fluent;
+using MauiIcons.Fluent.Filled;
 using Microsoft.Extensions.Logging;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
@@ -17,6 +18,8 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     #region Fields
 
     private readonly MusicAssistantService _musicAssistant;
+    private readonly IUserDataService _userDataService;
+    private readonly IPlaylistStoreService _playlistStore;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
     private readonly ILogger<ArtistDetailViewModel> _logger;
@@ -26,7 +29,10 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     private List<Track> _allTopTracks = new();
 
     private ObservableRangeCollection<Track> _topTracks = new();
-    private ObservableRangeCollection<ContextMenuItem> _contextMenuItems = new();
+    private ObservableRangeCollection<ContextMenuItem> _headerContextMenuItems = new();
+    private ObservableRangeCollection<ContextMenuItem> _trackContextMenuItems = new();
+    private ObservableRangeCollection<ContextMenuItem> _albumContextMenuItems = new();
+    private ObservableRangeCollection<ContextMenuItem> _artistContextMenuItems = new();
     private ObservableRangeCollection<Album> _albums = new();
     private ObservableRangeCollection<Artist> _similarArtists = new();
 
@@ -62,6 +68,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                 OnPropertyChanged(nameof(ArtistName));
                 OnPropertyChanged(nameof(ImageUrl));
                 OnPropertyChanged(nameof(HasDescription));
+                OnPropertyChanged(nameof(IsArtistFavorite));
                 IsDescriptionExpanded = false;
             }
         }
@@ -72,6 +79,8 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     public string? ImageUrl => Artist?.ImageUrl;
 
     public bool HasDescription => !string.IsNullOrWhiteSpace(Artist?.Metadata?.Description);
+
+    public bool IsArtistFavorite => Artist?.Favorite ?? false;
 
     public ObservableRangeCollection<Track> TopTracks
     {
@@ -109,18 +118,20 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         }
     }
 
-    public ObservableRangeCollection<ContextMenuItem> ContextMenuItems
-    {
-        get => _contextMenuItems;
-        set => SetProperty(ref _contextMenuItems, value);
-    }
-
     public IMediaItemActions MediaActions { get; }
 
     public ICommand AlbumTappedCommand { get; }
     public ICommand ArtistTappedCommand { get; }
-    public ICommand ShowContextMenuAtAnchorCommand { get; }
-    public ICommand ShowContextMenuAtPositionCommand { get; }
+    public ICommand ShowHeaderContextMenuAtAnchorCommand { get; }
+    public ICommand ShowHeaderContextMenuAtPositionCommand { get; }
+    public ICommand ShowTrackContextMenuAtAnchorCommand { get; }
+    public ICommand ShowTrackContextMenuAtPositionCommand { get; }
+    public ICommand ShowAlbumContextMenuAtAnchorCommand { get; }
+    public ICommand ShowAlbumContextMenuAtPositionCommand { get; }
+    public ICommand ShowArtistContextMenuAtAnchorCommand { get; }
+    public ICommand ShowArtistContextMenuAtPositionCommand { get; }
+    public ICommand PlayArtistCommand { get; }
+    public ICommand ToggleArtistFavoriteCommand { get; }
     public ICommand ToggleDescriptionCommand { get; }
     public ICommand ToggleTracksCommand { get; }
 
@@ -209,12 +220,16 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     public ArtistDetailViewModel(
         MusicAssistantService musicAssistant,
         IPlayerService playerService,
+        IUserDataService userDataService,
+        IPlaylistStoreService playlistStore,
         IMediaItemActions mediaActions,
         IContextMenuService contextMenuService,
         INavigationService navigationService,
         ILogger<ArtistDetailViewModel> logger)
     {
         _musicAssistant = musicAssistant;
+        _userDataService = userDataService;
+        _playlistStore = playlistStore;
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
         _logger = logger;
@@ -226,29 +241,105 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
         ArtistTappedCommand = new Command<object>(async parameter => await _navigationService.NavigateToAsync<ArtistDetailPage>(parameter));
 
+        PlayArtistCommand = new Command(async () =>
+        {
+            if (Artist != null)
+            {
+                await MediaActions.PlayMediaAsync(Artist);
+            }
+        });
+
+        ToggleArtistFavoriteCommand = new Command(async () =>
+        {
+            if (Artist == null)
+            {
+                return;
+            }
+
+            if (Artist.Favorite)
+            {
+                await MediaActions.RemoveFromFavoritesAsync(Artist);
+            }
+            else
+            {
+                await MediaActions.AddToFavoritesAsync(Artist);
+            }
+
+            OnPropertyChanged(nameof(IsArtistFavorite));
+            await BuildHeaderContextMenuAsync();
+        });
+
         // Toggle Commands
         ToggleDescriptionCommand = new Command(() => IsDescriptionExpanded = !IsDescriptionExpanded);
         ToggleTracksCommand = new Command(() => IsTracksExpanded = !IsTracksExpanded);
 
         // Context Menu Commands
-        ShowContextMenuAtAnchorCommand = new Command<View>(async (anchor) =>
+        ShowHeaderContextMenuAtAnchorCommand = new Command<View>(async (anchor) =>
         {
-            if (ContextMenuItems?.Count > 0 && anchor != null)
+            if (_headerContextMenuItems.Count > 0 && anchor != null)
             {
-                await _contextMenuService.ShowContextMenuAsync(ContextMenuItems, anchor);
+                await _contextMenuService.ShowContextMenuAsync(_headerContextMenuItems, anchor);
             }
         });
 
-        ShowContextMenuAtPositionCommand = new Command<Point>(async (position) =>
+        ShowHeaderContextMenuAtPositionCommand = new Command<Point>(async (position) =>
         {
-            if (ContextMenuItems?.Count > 0)
+            if (_headerContextMenuItems.Count > 0)
             {
-                await _contextMenuService.ShowContextMenuAsync(ContextMenuItems, position);
+                await _contextMenuService.ShowContextMenuAsync(_headerContextMenuItems, position);
+            }
+        });
+
+        ShowTrackContextMenuAtAnchorCommand = new Command<View>(async (anchor) =>
+        {
+            if (_trackContextMenuItems.Count > 0 && anchor != null)
+            {
+                await _contextMenuService.ShowContextMenuAsync(_trackContextMenuItems, anchor);
+            }
+        });
+
+        ShowTrackContextMenuAtPositionCommand = new Command<Point>(async (position) =>
+        {
+            if (_trackContextMenuItems.Count > 0)
+            {
+                await _contextMenuService.ShowContextMenuAsync(_trackContextMenuItems, position);
+            }
+        });
+
+        ShowAlbumContextMenuAtAnchorCommand = new Command<View>(async (anchor) =>
+        {
+            if (_albumContextMenuItems.Count > 0 && anchor != null)
+            {
+                await _contextMenuService.ShowContextMenuAsync(_albumContextMenuItems, anchor);
+            }
+        });
+
+        ShowAlbumContextMenuAtPositionCommand = new Command<Point>(async (position) =>
+        {
+            if (_albumContextMenuItems.Count > 0)
+            {
+                await _contextMenuService.ShowContextMenuAsync(_albumContextMenuItems, position);
+            }
+        });
+
+        ShowArtistContextMenuAtAnchorCommand = new Command<View>(async (anchor) =>
+        {
+            if (_artistContextMenuItems.Count > 0 && anchor != null)
+            {
+                await _contextMenuService.ShowContextMenuAsync(_artistContextMenuItems, anchor);
+            }
+        });
+
+        ShowArtistContextMenuAtPositionCommand = new Command<Point>(async (position) =>
+        {
+            if (_artistContextMenuItems.Count > 0)
+            {
+                await _contextMenuService.ShowContextMenuAsync(_artistContextMenuItems, position);
             }
         });
     }
 
-    #endregion
+        #endregion
 
     #region INavigationAware
 
@@ -301,8 +392,10 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             // Similar Artists
             await LoadSimilarArtistsAsync(artistId);
 
-            // Context Menu
-            await BuildContextMenuAsync();
+            await BuildHeaderContextMenuAsync();
+            await BuildTrackContextMenuAsync();
+            await BuildAlbumContextMenuAsync();
+            await BuildArtistContextMenuAsync();
         }
         catch (Exception ex)
         {
@@ -321,6 +414,11 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         try
         {
             Artist = await _musicAssistant.GetArtistAsync(artistId, provider);
+            if (Artist != null)
+            {
+                Artist.Favorite = _userDataService.IsFavorite(Artist);
+                OnPropertyChanged(nameof(IsArtistFavorite));
+            }
 
             if (Artist == null)
             {
@@ -513,28 +611,93 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
     #region Context Menu
 
-    private async Task BuildContextMenuAsync()
+    private Task BuildHeaderContextMenuAsync()
+    {
+        if (Artist == null)
+        {
+            _headerContextMenuItems = new ObservableRangeCollection<ContextMenuItem>();
+            return Task.CompletedTask;
+        }
+
+        var menu = new ObservableRangeCollection<ContextMenuItem>
+        {
+            new()
+            {
+                Text = "Abspielen",
+                Icon = FluentIcons.Play12,
+                Command = new Command(async () => await MediaActions.PlayMediaAsync(Artist))
+            },
+            new()
+            {
+                Text = "Als Nächstes spielen",
+                Icon = FluentIcons.ArrowForward16,
+                Command = new Command(async () => await MediaActions.PlayMediaNextAsync(Artist))
+            },
+            new()
+            {
+                Text = "Als Letztes spielen",
+                Icon = FluentIcons.ArrowNext12,
+                Command = new Command(async () => await MediaActions.PlayMediaLastAsync(Artist))
+            },
+            new() { IsSeparator = true }
+        };
+
+        if (Artist.Favorite)
+        {
+            menu.Add(new ContextMenuItem
+            {
+                Text = "Aus Favoriten entfernen",
+                Icon = FluentFilledIcons.Heart12Filled,
+                IconIsFilled = true,
+                Command = new Command(async () =>
+                {
+                    await MediaActions.RemoveFromFavoritesAsync(Artist);
+                    OnPropertyChanged(nameof(IsArtistFavorite));
+                    await BuildHeaderContextMenuAsync();
+                })
+            });
+        }
+        else
+        {
+            menu.Add(new ContextMenuItem
+            {
+                Text = "Zu Favoriten hinzufügen",
+                Icon = FluentIcons.Heart12,
+                Command = new Command(async () =>
+                {
+                    await MediaActions.AddToFavoritesAsync(Artist);
+                    OnPropertyChanged(nameof(IsArtistFavorite));
+                    await BuildHeaderContextMenuAsync();
+                })
+            });
+        }
+
+        _headerContextMenuItems = menu;
+        return Task.CompletedTask;
+    }
+
+    private Task BuildTrackContextMenuAsync()
     {
         var menu = new ObservableRangeCollection<ContextMenuItem>
         {
             new()
             {
                 Text = "Abspielen",
-                Icon = FluentIcons.Add12,
+                Icon = FluentIcons.Play12,
                 Command = new Command(async () =>
                     await MediaActions.PlayMediaAsync(TopTracks.Where(t => t.IsSelected)))
             },
             new()
             {
                 Text = "Als Nächstes spielen",
-                Icon = FluentIcons.Add12,
+                Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
                     await MediaActions.PlayMediaNextAsync(TopTracks.Where(t => t.IsSelected)))
             },
             new()
             {
                 Text = "Als Letztes spielen",
-                Icon = FluentIcons.Add12,
+                Icon = FluentIcons.ArrowNext12,
                 Command = new Command(async () =>
                     await MediaActions.PlayMediaLastAsync(TopTracks.Where(t => t.IsSelected)))
             },
@@ -543,57 +706,133 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             {
                 Text = "Zu Wiedergabeliste hinzufügen",
                 Icon = FluentIcons.Add12,
-                SubItems = await GetPlaylistSubItemsAsync()
+                SubItems = new ObservableCollection<ContextMenuItem>(
+                    _playlistStore.Playlists
+                        .Where(playlist => !playlist.Name.StartsWith("~"))
+                        .Select(playlist => new ContextMenuItem
+                        {
+                            Text = playlist.DisplayName,
+                            Icon = FluentIcons.TextBulletListLtr16,
+                            Command = new Command(async () =>
+                                await MediaActions.AddToPlaylistAsync(
+                                    TopTracks.Where(t => t.IsSelected),
+                                    playlist))
+                        }))
             },
             new() { IsSeparator = true },
             new()
             {
                 Text = "Zu Favoriten hinzufügen",
-                Icon = FluentIcons.Add12,
+                Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                     await MediaActions.AddToFavoritesAsync(TopTracks.Where(t => t.IsSelected)))
             },
             new()
             {
                 Text = "Aus Favoriten entfernen",
-                Icon = FluentIcons.Add12,
+                Icon = FluentFilledIcons.Heart12Filled,
+                IconIsFilled = true,
                 Command = new Command(async () =>
                     await MediaActions.RemoveFromFavoritesAsync(TopTracks.Where(t => t.IsSelected)))
             }
         };
 
-        ContextMenuItems = menu;
+        _trackContextMenuItems = menu;
+        return Task.CompletedTask;
     }
 
-    private async Task<ObservableRangeCollection<ContextMenuItem>> GetPlaylistSubItemsAsync()
+    private Task BuildAlbumContextMenuAsync()
     {
-        var items = new ObservableRangeCollection<ContextMenuItem>();
-
-        try
+        var menu = new ObservableRangeCollection<ContextMenuItem>
         {
-            var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(orderBy: "sort_name");
-
-            foreach (var playlist in playlists)
+            new()
             {
-                if (playlist.Name.StartsWith("~")) { continue; } // Skip hidden/system playlists
-
-                items.Add(new ContextMenuItem
-                {
-                    Text = playlist.Name,
-                    Icon = FluentIcons.Add12,
-                    Command = new Command(async () =>
-                        await MediaActions.AddToPlaylistAsync(
-                            TopTracks.Where(t => t.IsSelected),
-                            playlist))
-                });
+                Text = "Abspielen",
+                Icon = FluentIcons.Play12,
+                Command = new Command(async () =>
+                    await MediaActions.PlayMediaAsync(Albums.Where(a => a.IsSelected)))
+            },
+            new()
+            {
+                Text = "Als Nächstes spielen",
+                Icon = FluentIcons.ArrowForward16,
+                Command = new Command(async () =>
+                    await MediaActions.PlayMediaNextAsync(Albums.Where(a => a.IsSelected)))
+            },
+            new()
+            {
+                Text = "Als Letztes spielen",
+                Icon = FluentIcons.ArrowNext12,
+                Command = new Command(async () =>
+                    await MediaActions.PlayMediaLastAsync(Albums.Where(a => a.IsSelected)))
+            },
+            new() { IsSeparator = true },
+            new()
+            {
+                Text = "Zu Favoriten hinzufügen",
+                Icon = FluentIcons.Heart12,
+                Command = new Command(async () =>
+                    await MediaActions.AddToFavoritesAsync(Albums.Where(a => a.IsSelected)))
+            },
+            new()
+            {
+                Text = "Aus Favoriten entfernen",
+                Icon = FluentFilledIcons.Heart12Filled,
+                IconIsFilled = true,
+                Command = new Command(async () =>
+                    await MediaActions.RemoveFromFavoritesAsync(Albums.Where(a => a.IsSelected)))
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to load playlists for context menu");
-        }
+        };
 
-        return items;
+        _albumContextMenuItems = menu;
+        return Task.CompletedTask;
+    }
+
+    private Task BuildArtistContextMenuAsync()
+    {
+        var menu = new ObservableRangeCollection<ContextMenuItem>
+        {
+            new()
+            {
+                Text = "Abspielen",
+                Icon = FluentIcons.Play12,
+                Command = new Command(async () =>
+                    await MediaActions.PlayMediaAsync(SimilarArtists.Where(a => a.IsSelected)))
+            },
+            new()
+            {
+                Text = "Als Nächstes spielen",
+                Icon = FluentIcons.ArrowForward16,
+                Command = new Command(async () =>
+                    await MediaActions.PlayMediaNextAsync(SimilarArtists.Where(a => a.IsSelected)))
+            },
+            new()
+            {
+                Text = "Als Letztes spielen",
+                Icon = FluentIcons.ArrowNext12,
+                Command = new Command(async () =>
+                    await MediaActions.PlayMediaLastAsync(SimilarArtists.Where(a => a.IsSelected)))
+            },
+            new() { IsSeparator = true },
+            new()
+            {
+                Text = "Zu Favoriten hinzufügen",
+                Icon = FluentIcons.Heart12,
+                Command = new Command(async () =>
+                    await MediaActions.AddToFavoritesAsync(SimilarArtists.Where(a => a.IsSelected)))
+            },
+            new()
+            {
+                Text = "Aus Favoriten entfernen",
+                Icon = FluentFilledIcons.Heart12Filled,
+                IconIsFilled = true,
+                Command = new Command(async () =>
+                    await MediaActions.RemoveFromFavoritesAsync(SimilarArtists.Where(a => a.IsSelected)))
+            }
+        };
+
+        _artistContextMenuItems = menu;
+        return Task.CompletedTask;
     }
 
     #endregion
@@ -631,7 +870,10 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         _allAlbums.Clear();
         _allTopTracks.Clear();
         _topTracks.Clear();
-        _contextMenuItems.Clear();
+        _headerContextMenuItems.Clear();
+        _trackContextMenuItems.Clear();
+        _albumContextMenuItems.Clear();
+        _artistContextMenuItems.Clear();
         _albums.Clear();
         _similarArtists.Clear();
         PropertyChanged = null;

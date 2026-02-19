@@ -41,20 +41,138 @@
 
                 <!--  Artist Image - Actual  -->
                 <Border Grid.Column="0"
-                    BackgroundColor="{DynamicResource BackgroundTertiary}"
+                    behaviors:HoverBehavior.BaseBackgroundColor="Transparent"
+                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                    BackgroundColor="Transparent"
                     HeightRequest="150"
                     IsVisible="{Binding IsLoadingMetadata, Converter={StaticResource InvertedBoolConverter}}"
                     StrokeThickness="0"
                     WidthRequest="150">
                     <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="100" />
+                        <RoundRectangle CornerRadius="8" />
                     </Border.StrokeShape>
-                    <Image Aspect="AspectFill"
-                        HeightRequest="150"
-                        HorizontalOptions="Center"
-                        Source="{Binding ImageUrl}"
-                        VerticalOptions="Center"
-                        WidthRequest="150" />
+
+                    <!--  Cover + Overlays  -->
+                    <Grid x:Name="ArtistCoverContainer"
+                          behaviors:HoverBehavior.ShowOnHoverTarget="{x:Reference ArtistCoverHoverOverlay}">
+                        <Grid.GestureRecognizers>
+                            <PointerGestureRecognizer Buttons="Secondary"
+                                PointerPressed="OnArtistCoverSecondaryPointerPressed" />
+                        </Grid.GestureRecognizers>
+
+                        <!--  Artist Cover  -->
+                        <Border StrokeThickness="0">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="100" />
+                            </Border.StrokeShape>
+                            <Image Aspect="AspectFill"
+                                HeightRequest="150"
+                                HorizontalOptions="Center"
+                                Source="{Binding ImageUrl}"
+                                VerticalOptions="Center"
+                                WidthRequest="150">
+                                <Image.Clip>
+                                    <RoundRectangleGeometry CornerRadius="100" Rect="0,0,150,150" />
+                                </Image.Clip>
+                            </Image>
+                        </Border>
+
+                        <!--  Hover Overlay  -->
+                        <Border x:Name="ArtistCoverHoverOverlay"
+                            BackgroundColor="#80000000"
+                            Opacity="0"
+                            StrokeThickness="0">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="8" />
+                            </Border.StrokeShape>
+                            <Grid RowDefinitions="Auto,*,Auto">
+
+                                <!--  Play Button  -->
+                                <Border Grid.RowSpan="3"
+                                    behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource IconPrimary75}"
+                                    behaviors:HoverBehavior.EnableScaleHover="True"
+                                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource IconPrimary}"
+                                    BackgroundColor="{DynamicResource IconPrimary75}"
+                                    HeightRequest="64"
+                                    HorizontalOptions="Center"
+                                    StrokeThickness="0"
+                                    VerticalOptions="Center"
+                                    WidthRequest="64">
+                                    <Border.GestureRecognizers>
+                                        <TapGestureRecognizer Command="{Binding PlayArtistCommand}" />
+                                    </Border.GestureRecognizers>
+                                    <Border.StrokeShape>
+                                        <RoundRectangle CornerRadius="100" />
+                                    </Border.StrokeShape>
+                                    <Label FontSize="28"
+                                        HorizontalOptions="Center"
+                                        Text="{mi:FluentFilled Icon=Play12Filled,
+                                                         FontOverride=True}"
+                                        TextColor="{DynamicResource BackgroundPrimary}"
+                                        VerticalOptions="Center" />
+                                </Border>
+
+                                <!--  Bottom Row: Favorite & More  -->
+                                <Grid Grid.Row="2"
+                                    Margin="8"
+                                    ColumnDefinitions="*,Auto">
+                                    <!--  Favorite Outline  -->
+                                    <Label Grid.Column="0"
+                                        Margin="0,0,12,0"
+                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                                        behaviors:HoverBehavior.EnableScaleHover="True"
+                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                                        FontSize="18"
+                                        HorizontalOptions="End"
+                                        IsVisible="{Binding IsArtistFavorite, Converter={StaticResource InvertedBoolConverter}}"
+                                        Text="{mi:Fluent Icon=Heart48,
+                                                         FontOverride=True}"
+                                        TextColor="{DynamicResource IconSecondary}"
+                                        VerticalOptions="Center">
+                                        <Label.GestureRecognizers>
+                                            <TapGestureRecognizer Command="{Binding ToggleArtistFavoriteCommand}" />
+                                        </Label.GestureRecognizers>
+                                    </Label>
+
+                                    <!--  Favorite Filled  -->
+                                    <Label Grid.Column="0"
+                                        Margin="0,0,12,0"
+                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                                        behaviors:HoverBehavior.EnableScaleHover="True"
+                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                                        FontSize="18"
+                                        HorizontalOptions="End"
+                                        IsVisible="{Binding IsArtistFavorite}"
+                                        Text="{mi:FluentFilled Icon=Heart48Filled,
+                                                               FontOverride=True}"
+                                        TextColor="{DynamicResource IconSecondary}"
+                                        VerticalOptions="Center">
+                                        <Label.GestureRecognizers>
+                                            <TapGestureRecognizer Command="{Binding ToggleArtistFavoriteCommand}" />
+                                        </Label.GestureRecognizers>
+                                    </Label>
+
+                                    <!--  More  -->
+                                    <Label x:Name="ArtistMoreIconLabel"
+                                        Grid.Column="1"
+                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                                        behaviors:HoverBehavior.EnableScaleHover="True"
+                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                                        FontSize="18"
+                                        HorizontalOptions="End"
+                                        Text="{mi:Fluent Icon=MoreHorizontal48,
+                                                         FontOverride=True}"
+                                        TextColor="{DynamicResource IconSecondary}"
+                                        VerticalOptions="Center">
+                                        <Label.GestureRecognizers>
+                                            <TapGestureRecognizer Command="{Binding ShowHeaderContextMenuAtAnchorCommand}"
+                                                                  CommandParameter="{x:Reference ArtistMoreIconLabel}" />
+                                        </Label.GestureRecognizers>
+                                    </Label>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                    </Grid>
                 </Border>
 
                 <!--  Artist Info - Loading State  -->
@@ -200,8 +318,8 @@
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
                     SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    ShowContextMenuAtAnchorCommand="{Binding ShowContextMenuAtAnchorCommand}"
-                    ShowContextMenuAtPositionCommand="{Binding ShowContextMenuAtPositionCommand}" />
+                    ShowContextMenuAtAnchorCommand="{Binding ShowAlbumContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowAlbumContextMenuAtPositionCommand}" />
             </Grid>
 
             <!--  Similar Artists Section  -->
@@ -222,8 +340,8 @@
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
                     SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    ShowContextMenuAtAnchorCommand="{Binding ShowContextMenuAtAnchorCommand}"
-                    ShowContextMenuAtPositionCommand="{Binding ShowContextMenuAtPositionCommand}" />
+                    ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
             </Grid>
 
             <!--  Top Tracks Section  -->
@@ -238,13 +356,12 @@
                     TextColor="{DynamicResource TextPrimary}" />
 
                 <controls:TableView Grid.Row="1"
-                    ContextMenuItems="{Binding ContextMenuItems}"
                     ItemsSource="{Binding TopTrackItems}"
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
                     SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    ShowContextMenuAtAnchorCommand="{Binding ShowContextMenuAtAnchorCommand}"
-                    ShowContextMenuAtPositionCommand="{Binding ShowContextMenuAtPositionCommand}" />
+                    ShowContextMenuAtAnchorCommand="{Binding ShowTrackContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowTrackContextMenuAtPositionCommand}" />
 
                 <!--  Toggle Button  -->
                 <Border Grid.Row="2"

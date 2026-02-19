@@ -24,4 +24,15 @@ public partial class ArtistDetailPage : ContentPage
         BindingContext = null;
 
     }
+
+    private void OnArtistCoverSecondaryPointerPressed(object? sender, PointerEventArgs e)
+    {
+        if (BindingContext is not ArtistDetailViewModel viewModel)
+        {
+            return;
+        }
+
+        var position = e.GetPosition(null);
+        viewModel.ShowHeaderContextMenuAtPositionCommand.Execute(position);
+    }
 }

@@ -29,9 +29,6 @@ public partial class TableView : ContentView
     public static readonly BindableProperty MediaActionsProperty =
         BindableProperty.Create(nameof(MediaActions), typeof(IMediaItemActions), typeof(TableView));
 
-    public static readonly BindableProperty ContextMenuItemsProperty =
-    BindableProperty.Create(nameof(ContextMenuItems), typeof(ObservableCollection<ContextMenuItem>), typeof(TableView));
-
     public static readonly BindableProperty ShowContextMenuAtAnchorCommandProperty =
         BindableProperty.Create(nameof(ShowContextMenuAtAnchorCommand), typeof(ICommand), typeof(TableView));
 
@@ -85,12 +82,6 @@ public partial class TableView : ContentView
     {
         get => (IMediaItemActions?)GetValue(MediaActionsProperty);
         set => SetValue(MediaActionsProperty, value);
-    }
-
-    public ObservableCollection<ContextMenuItem>? ContextMenuItems
-    {
-        get => (ObservableCollection<ContextMenuItem>?)GetValue(ContextMenuItemsProperty);
-        set => SetValue(ContextMenuItemsProperty, value);
     }
 
     public ICommand? ShowContextMenuAtAnchorCommand
@@ -155,7 +146,6 @@ public partial class TableView : ContentView
         ShowContextMenuAtAnchorCommand = null;
         ShowContextMenuAtPositionCommand = null;
         MediaActions = null;
-        ContextMenuItems = null;
 
         if (collectionView != null)
         {

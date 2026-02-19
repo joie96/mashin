@@ -23,4 +23,15 @@ public partial class AlbumDetailPage : ContentPage
 
         BindingContext = null;
     }
+
+    private void OnAlbumCoverSecondaryPointerPressed(object? sender, PointerEventArgs e)
+    {
+        if (BindingContext is not AlbumDetailViewModel viewModel)
+        {
+            return;
+        }
+
+        var position = e.GetPosition(null);
+        viewModel.ShowHeaderContextMenuAtPositionCommand.Execute(position);
+    }
 }

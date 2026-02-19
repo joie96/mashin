@@ -14,11 +14,11 @@
             <RoundRectangle CornerRadius="12" />
         </Border.StrokeShape>
 
-        <VerticalStackLayout Spacing="16">
+        <VerticalStackLayout Spacing="20">
             <Grid ColumnDefinitions="*,Auto" VerticalOptions="Center">
                 <Label FontAttributes="Bold"
                     FontSize="18"
-                    Text="Wiedergabeliste loeschen"
+                    Text="Wiedergabeliste löschen"
                     TextColor="{DynamicResource TextPrimary}" />
                 <Border Grid.Column="1"
                     behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
@@ -41,18 +41,15 @@
                 </Border>
             </Grid>
 
-            <Label x:Name="PlaylistNameLabel"
-                FontSize="14"
-                HorizontalOptions="Center"
-                TextColor="{DynamicResource TextPrimary}" />
             <Label FontSize="13"
-                HorizontalOptions="Center"
-                Text="Moechtest du diese Wiedergabeliste wirklich loeschen?"
+                Margin="0,12,0,0"
+                HorizontalOptions="Start"
+                Text="Bist du sicher?"
                 TextColor="{DynamicResource TextSecondary}" />
 
-            <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
-                <Border HorizontalOptions="Center"
-                    WidthRequest="150"
+            <HorizontalStackLayout HorizontalOptions="End"
+                Spacing="12">
+                <Border WidthRequest="150"
                     BackgroundColor="Transparent"
                     StrokeThickness="0"
                     behaviors:HoverBehavior.BaseBackgroundColor="Transparent"
@@ -65,9 +62,7 @@
                         Clicked="OnCancelClicked"
                         TextColor="{DynamicResource TextSecondary}" />
                 </Border>
-                <Border Grid.Column="1"
-                    HorizontalOptions="Center"
-                    WidthRequest="150"
+                <Border WidthRequest="150"
                     BackgroundColor="{DynamicResource AccentColor}"
                     StrokeThickness="0"
                     IsEnabled="{Binding Source={x:Reference DeletePlaylistButton}, Path=IsEnabled}"
@@ -77,13 +72,13 @@
                         <RoundRectangle CornerRadius="6" />
                     </Border.StrokeShape>
                     <Button x:Name="DeletePlaylistButton"
-                        Text="Loeschen"
+                        Text="Bestätigen"
                         BackgroundColor="Transparent"
                         Clicked="OnDeleteClicked"
                         IsEnabled="True"
                         TextColor="White" />
                 </Border>
-            </Grid>
+            </HorizontalStackLayout>
         </VerticalStackLayout>
     </Border>
 </ContentView>

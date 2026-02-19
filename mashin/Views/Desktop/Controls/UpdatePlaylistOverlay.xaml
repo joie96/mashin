@@ -62,9 +62,10 @@
                 </Border>
             </VerticalStackLayout>
 
-            <Grid Grid.Row="2" ColumnDefinitions="*,*" ColumnSpacing="12">
-                <Border HorizontalOptions="Center"
-                    WidthRequest="150"
+            <HorizontalStackLayout Grid.Row="2"
+                HorizontalOptions="End"
+                Spacing="12">
+                <Border WidthRequest="150"
                     BackgroundColor="Transparent"
                     StrokeThickness="0"
                     behaviors:HoverBehavior.BaseBackgroundColor="Transparent"
@@ -77,9 +78,7 @@
                         Clicked="OnCancelClicked"
                         TextColor="{DynamicResource TextSecondary}" />
                 </Border>
-                <Border Grid.Column="1"
-                    HorizontalOptions="Center"
-                    WidthRequest="150"
+                <Border WidthRequest="150"
                     BackgroundColor="{DynamicResource AccentColor}"
                     StrokeThickness="0"
                     IsEnabled="{Binding Source={x:Reference UpdatePlaylistButton}, Path=IsEnabled}"
@@ -95,7 +94,7 @@
                         IsEnabled="True"
                         TextColor="White" />
                 </Border>
-            </Grid>
+            </HorizontalStackLayout>
         </Grid>
     </Border>
 </ContentView>

@@ -244,12 +244,6 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
         }
     }
 
-    public ObservableRangeCollection<ContextMenuItem> ContextMenuItems
-    {
-        get => _contextMenuItems;
-        private set => SetProperty(ref _contextMenuItems, value);
-    }
-
     public IMediaItemActions MediaActions { get; }
 
     public ICommand AlbumTappedCommand { get; }
@@ -326,17 +320,17 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
 
         ShowContextMenuAtAnchorCommand = new Command<View>(async (anchor) =>
         {
-            if (ContextMenuItems?.Count > 0 && anchor != null)
+            if (_contextMenuItems.Count > 0 && anchor != null)
             {
-                await _contextMenuService.ShowContextMenuAsync(ContextMenuItems, anchor);
+                await _contextMenuService.ShowContextMenuAsync(_contextMenuItems, anchor);
             }
         });
 
         ShowContextMenuAtPositionCommand = new Command<Point>(async (position) =>
         {
-            if (ContextMenuItems?.Count > 0)
+            if (_contextMenuItems.Count > 0)
             {
-                await _contextMenuService.ShowContextMenuAsync(ContextMenuItems, position);
+                await _contextMenuService.ShowContextMenuAsync(_contextMenuItems, position);
             }
         });
     }
@@ -621,7 +615,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
             }
         };
 
-        ContextMenuItems = menu;
+        _contextMenuItems = menu;
     }
 
     private async Task<ObservableRangeCollection<ContextMenuItem>> GetPlaylistSubItemsAsync()

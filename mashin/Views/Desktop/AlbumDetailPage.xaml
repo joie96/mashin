@@ -48,12 +48,119 @@
                     <Border.StrokeShape>
                         <RoundRectangle CornerRadius="8" />
                     </Border.StrokeShape>
-                    <Image Aspect="AspectFill"
-                        HeightRequest="150"
-                        HorizontalOptions="Center"
-                        Source="{Binding ImageUrl}"
-                        VerticalOptions="Center"
-                        WidthRequest="150" />
+
+                    <!--  Cover + Overlays  -->
+                    <Grid x:Name="AlbumCoverContainer"
+                          behaviors:HoverBehavior.ShowOnHoverTarget="{x:Reference AlbumCoverHoverOverlay}">
+                        <Grid.GestureRecognizers>
+                            <PointerGestureRecognizer Buttons="Secondary"
+                                PointerPressed="OnAlbumCoverSecondaryPointerPressed" />
+                        </Grid.GestureRecognizers>
+
+                        <!--  Album Cover  -->
+                        <Image Aspect="AspectFill"
+                            HeightRequest="150"
+                            HorizontalOptions="Center"
+                            Source="{Binding ImageUrl}"
+                            VerticalOptions="Center"
+                            WidthRequest="150" />
+
+                        <!--  Hover Overlay  -->
+                        <Border x:Name="AlbumCoverHoverOverlay"
+                            BackgroundColor="#80000000"
+                            Opacity="0"
+                            StrokeThickness="0">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="8" />
+                            </Border.StrokeShape>
+                            <Grid RowDefinitions="Auto,*,Auto">
+
+                                <!--  Play Button  -->
+                                <Border Grid.RowSpan="3"
+                                    behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource IconPrimary75}"
+                                    behaviors:HoverBehavior.EnableScaleHover="True"
+                                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource IconPrimary}"
+                                    BackgroundColor="{DynamicResource IconPrimary75}"
+                                    HeightRequest="64"
+                                    HorizontalOptions="Center"
+                                    StrokeThickness="0"
+                                    VerticalOptions="Center"
+                                    WidthRequest="64">
+                                    <Border.GestureRecognizers>
+                                        <TapGestureRecognizer Command="{Binding PlayAlbumCommand}" />
+                                    </Border.GestureRecognizers>
+                                    <Border.StrokeShape>
+                                        <RoundRectangle CornerRadius="100" />
+                                    </Border.StrokeShape>
+                                    <Label FontSize="28"
+                                        HorizontalOptions="Center"
+                                        Text="{mi:FluentFilled Icon=Play12Filled,
+                                                         FontOverride=True}"
+                                        TextColor="{DynamicResource BackgroundPrimary}"
+                                        VerticalOptions="Center" />
+                                </Border>
+
+                                <!--  Bottom Row: Favorite & More  -->
+                                <Grid Grid.Row="2"
+                                    Margin="8"
+                                    ColumnDefinitions="*,Auto">
+                                    <!--  Favorite Outline  -->
+                                    <Label Grid.Column="0"
+                                        Margin="0,0,12,0"
+                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                                        behaviors:HoverBehavior.EnableScaleHover="True"
+                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                                        FontSize="18"
+                                        HorizontalOptions="End"
+                                        IsVisible="{Binding IsAlbumFavorite, Converter={StaticResource InvertedBoolConverter}}"
+                                        Text="{mi:Fluent Icon=Heart48,
+                                                         FontOverride=True}"
+                                        TextColor="{DynamicResource IconSecondary}"
+                                        VerticalOptions="Center">
+                                        <Label.GestureRecognizers>
+                                            <TapGestureRecognizer Command="{Binding ToggleAlbumFavoriteCommand}" />
+                                        </Label.GestureRecognizers>
+                                    </Label>
+
+                                    <!--  Favorite Filled  -->
+                                    <Label Grid.Column="0"
+                                        Margin="0,0,12,0"
+                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                                        behaviors:HoverBehavior.EnableScaleHover="True"
+                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                                        FontSize="18"
+                                        HorizontalOptions="End"
+                                        IsVisible="{Binding IsAlbumFavorite}"
+                                        Text="{mi:FluentFilled Icon=Heart48Filled,
+                                                               FontOverride=True}"
+                                        TextColor="{DynamicResource IconSecondary}"
+                                        VerticalOptions="Center">
+                                        <Label.GestureRecognizers>
+                                            <TapGestureRecognizer Command="{Binding ToggleAlbumFavoriteCommand}" />
+                                        </Label.GestureRecognizers>
+                                    </Label>
+
+                                    <!--  More  -->
+                                    <Label x:Name="AlbumMoreIconLabel"
+                                        Grid.Column="1"
+                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                                        behaviors:HoverBehavior.EnableScaleHover="True"
+                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                                        FontSize="18"
+                                        HorizontalOptions="End"
+                                        Text="{mi:Fluent Icon=MoreHorizontal48,
+                                                         FontOverride=True}"
+                                        TextColor="{DynamicResource IconSecondary}"
+                                        VerticalOptions="Center">
+                                        <Label.GestureRecognizers>
+                                            <TapGestureRecognizer Command="{Binding ShowHeaderContextMenuAtAnchorCommand}"
+                                                                  CommandParameter="{x:Reference AlbumMoreIconLabel}" />
+                                        </Label.GestureRecognizers>
+                                    </Label>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                    </Grid>
                 </Border>
 
                 <!--  Album Info - Loading State  -->
@@ -206,13 +313,13 @@
                     Text="Titel"
                     TextColor="{DynamicResource TextPrimary}" />
 
-                <controls:TableView Grid.Row="1" ContextMenuItems="{Binding ContextMenuItems}"
+                <controls:TableView Grid.Row="1"
                     ItemsSource="{Binding TrackItems}"
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
                     SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    ShowContextMenuAtAnchorCommand="{Binding ShowContextMenuAtAnchorCommand}"
-                    ShowContextMenuAtPositionCommand="{Binding ShowContextMenuAtPositionCommand}" />
+                    ShowContextMenuAtAnchorCommand="{Binding ShowTrackContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowTrackContextMenuAtPositionCommand}" />
             </Grid>
 
             <!--  Other Albums Section  -->
@@ -233,8 +340,8 @@
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
                     SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    ShowContextMenuAtAnchorCommand="{Binding ShowContextMenuAtAnchorCommand}"
-                    ShowContextMenuAtPositionCommand="{Binding ShowContextMenuAtPositionCommand}" />
+                    ShowContextMenuAtAnchorCommand="{Binding ShowAlbumContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowAlbumContextMenuAtPositionCommand}" />
             </Grid>
 
             <!--  Similar Artists Section  -->
@@ -255,8 +362,8 @@
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
                     SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    ShowContextMenuAtAnchorCommand="{Binding ShowContextMenuAtAnchorCommand}"
-                    ShowContextMenuAtPositionCommand="{Binding ShowContextMenuAtPositionCommand}" />
+                    ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
             </Grid>
 
         </Grid>

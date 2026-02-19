@@ -123,6 +123,16 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         OnPropertyChanged(nameof(TrackItems));
     }
 
+    private void OnStorePlaylistsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _ = BuildContentContextMenuAsync();
+    }
+
     #endregion
 
     #region Construction
@@ -146,9 +156,14 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         _navigationService = navigationService;
         _logger = logger;
 
+        _playlistStore.Playlists.CollectionChanged += OnStorePlaylistsCollectionChanged;
+
         MediaActions = mediaActions;
 
-        AlbumTappedCommand = new Command<object>(async parameter => await _navigationService.NavigateToAsync<AlbumDetailPage>(parameter));
+        AlbumTappedCommand = new Command<object>(async parameter => 
+        { 
+            await _navigationService.NavigateToAsync<AlbumDetailPage>(parameter); 
+        });
 
         ArtistTappedCommand = new Command<object>(async parameter => await _navigationService.NavigateToAsync<ArtistDetailPage>(parameter));
 
@@ -424,8 +439,8 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
         menu.Add(new ContextMenuItem
         {
-            Text = "Wiedergabeliste umbenennen",
-            Icon = FluentIcons.Rename16,
+            Text = "Wiedergabeliste bearbeiten",
+            Icon = FluentIcons.Edit16,
             Command = new Command(async () => await RenamePlaylistAsync())
         });
 
@@ -579,6 +594,8 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             _tracks.CollectionChanged -= OnTracksCollectionChanged;
             _tracks.Clear();
         }
+
+        _playlistStore.Playlists.CollectionChanged -= OnStorePlaylistsCollectionChanged;
 
         _headerContextMenuItems.Clear();
         _contentContextMenuItems.Clear();

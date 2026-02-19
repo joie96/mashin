@@ -2,6 +2,8 @@ namespace mashin.Views.Desktop.Controls;
 
 public partial class DeletePlaylistOverlay : ContentView
 {
+    private string _playlistName = string.Empty;
+
     public DeletePlaylistOverlay()
     {
         InitializeComponent();
@@ -12,8 +14,8 @@ public partial class DeletePlaylistOverlay : ContentView
 
     public string PlaylistName
     {
-        get => PlaylistNameLabel.Text ?? string.Empty;
-        set => PlaylistNameLabel.Text = value;
+        get => _playlistName;
+        set => _playlistName = value;
     }
 
     public bool IsDeleteEnabled

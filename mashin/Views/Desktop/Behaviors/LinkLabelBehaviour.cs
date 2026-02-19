@@ -47,6 +47,8 @@ public sealed class LinkLabelBehavior : Behavior<Label>
         base.OnAttachedTo(bindable);
 
         associatedObject = bindable;
+        BindingContext = bindable.BindingContext;
+        bindable.BindingContextChanged += OnAssociatedObjectBindingContextChanged;
 
         tap = new TapGestureRecognizer();
         tap.Tapped += OnTapped;
@@ -61,6 +63,8 @@ public sealed class LinkLabelBehavior : Behavior<Label>
     protected override void OnDetachingFrom(Label bindable)
     {
         base.OnDetachingFrom(bindable);
+
+        bindable.BindingContextChanged -= OnAssociatedObjectBindingContextChanged;
 
         if (tap != null)
         {
@@ -78,7 +82,16 @@ public sealed class LinkLabelBehavior : Behavior<Label>
         }
 
         associatedObject = null;
+        BindingContext = null;
         originalTextColor = null;
+    }
+
+    void OnAssociatedObjectBindingContextChanged(object? sender, EventArgs e)
+    {
+        if (associatedObject != null)
+        {
+            BindingContext = associatedObject.BindingContext;
+        }
     }
 
     void OnPointerEntered(object? sender, PointerEventArgs e)
@@ -127,7 +140,10 @@ public sealed class LinkLabelBehavior : Behavior<Label>
             return;
         }
 
-        var parameter = CommandParameter ?? associatedObject?.BindingContext;
+        var parameter = IsSet(CommandParameterProperty)
+            ? CommandParameter
+            : associatedObject?.BindingContext;
+
         if (command.CanExecute(parameter))
         {
             command.Execute(parameter);

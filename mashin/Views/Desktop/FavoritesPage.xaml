@@ -43,7 +43,6 @@
                     Text="Keine favorisierten Titel."
                     TextColor="{DynamicResource TextTertiary}" />
                 <controls:TableView Grid.Row="2"
-                    ContextMenuItems="{Binding ContextMenuItems}"
                     IsVisible="True"
                     ItemsSource="{Binding TrackItems}"
                     MediaActions="{Binding MediaActions}"
