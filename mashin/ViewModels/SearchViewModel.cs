@@ -398,7 +398,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
 
     #endregion
 
-    #region Search & Loading results
+    #region Data Loading
 
     private async Task SearchAsync(SearchRequest request)
     {
@@ -575,7 +575,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 Text = "Abspielen",
                 Icon = FluentIcons.Add12,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaAsync(Tracks.Where(t => t.IsSelected)))
+                    await PlaySelectedTracksWithModesAsync(Tracks, playbackContextItem: null))
             },
             new()
             {
@@ -616,6 +616,30 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
         };
 
         _contextMenuItems = menu;
+    }
+
+    private async Task PlaySelectedTracksWithModesAsync(IEnumerable<Track> tracks, MediaItem? playbackContextItem)
+    {
+        var selectedTracks = tracks.Where(t => t.IsSelected).ToList();
+        if (selectedTracks.Count == 0)
+        {
+            return;
+        }
+
+        if (selectedTracks.Count > 1 || playbackContextItem == null)
+        {
+            await MediaActions.PlayMediaAsync(selectedTracks.First());
+
+            var remainingTracks = selectedTracks.Skip(1).ToList();
+            if (remainingTracks.Count > 0)
+            {
+                await MediaActions.PlayMediaNextAsync(remainingTracks);
+            }
+
+            return;
+        }
+
+        await MediaActions.PlayMediaAsync(playbackContextItem, selectedTracks.First());
     }
 
     private async Task<ObservableRangeCollection<ContextMenuItem>> GetPlaylistSubItemsAsync()

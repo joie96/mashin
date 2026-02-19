@@ -225,7 +225,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             }
 
             OnPropertyChanged(nameof(IsPlaylistFavorite));
-            await BuildHeaderContextMenuAsync();
+            _ = BuildHeaderContextMenuAsync();
         });
     }
 
@@ -416,7 +416,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 {
                     await MediaActions.RemoveFromFavoritesAsync(Playlist);
                     OnPropertyChanged(nameof(IsPlaylistFavorite));
-                    await BuildHeaderContextMenuAsync();
+                    _ = BuildHeaderContextMenuAsync();
                 })
             });
         }
@@ -430,7 +430,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 {
                     await MediaActions.AddToFavoritesAsync(Playlist);
                     OnPropertyChanged(nameof(IsPlaylistFavorite));
-                    await BuildHeaderContextMenuAsync();
+                    _ = BuildHeaderContextMenuAsync();
                 })
             });
         }
@@ -465,8 +465,8 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             {
                 Text = "Abspielen",
                 Icon = FluentIcons.Play12,
-                Command = new Command(async () => 
-                    await MediaActions.PlayMediaAsync(Tracks.Where(t => t.IsSelected)))
+                Command = new Command(async () =>
+                    await PlaySelectedTracksWithModesAsync(Tracks, Playlist))
             },
             new()
             {
@@ -538,6 +538,30 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
         _contentContextMenuItems = menu;
         return Task.CompletedTask;
+    }
+
+    private async Task PlaySelectedTracksWithModesAsync(IEnumerable<Track> tracks, MediaItem? playbackContextItem)
+    {
+        var selectedTracks = tracks.Where(t => t.IsSelected).ToList();
+        if (selectedTracks.Count == 0)
+        {
+            return;
+        }
+
+        if (selectedTracks.Count > 1 || playbackContextItem == null)
+        {
+            await MediaActions.PlayMediaAsync(selectedTracks.First());
+
+            var remainingTracks = selectedTracks.Skip(1).ToList();
+            if (remainingTracks.Count > 0)
+            {
+                await MediaActions.PlayMediaNextAsync(remainingTracks);
+            }
+
+            return;
+        }
+
+        await MediaActions.PlayMediaAsync(playbackContextItem, selectedTracks.First());
     }
 
     #endregion

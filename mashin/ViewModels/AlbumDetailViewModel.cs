@@ -381,10 +381,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
             await Task.WhenAll(tracksTask, otherAlbumsTask);
 
             await LoadSimilarArtistsAsync();
-            await BuildHeaderContextMenuAsync();
-            await BuildTrackContextMenuAsync();
-            await BuildAlbumContextMenuAsync();
-            await BuildArtistContextMenuAsync();
+   
         }
         catch (Exception ex)
         {
@@ -409,6 +406,9 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
             {
                 _logger.LogWarning("Album not found: {AlbumId}", albumId);
             }
+
+            _ = BuildHeaderContextMenuAsync();
+
         }
         finally
         {
@@ -436,7 +436,10 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
             }
 
             Tracks = new ObservableRangeCollection<Track>(processedTracks);
+            
+            _ = BuildTrackContextMenuAsync();
 
+            // Set fallback artists for getting similar artists later if album metadata is missing artist info
             if (Album != null && (Album.Artists == null || Album.Artists.Count == 0))
             {
                 var fallbackArtists = Tracks.FirstOrDefault()?.Artists;
@@ -446,6 +449,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                     OnPropertyChanged(nameof(ArtistName));
                 }
             }
+
         }
         catch (Exception ex)
         {
@@ -481,8 +485,10 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
             foreach (var album in visibleAlbums)
             {
                 OtherAlbums.Add(album);
-                await Task.Delay(10);
+                await Task.Yield(); 
             }
+
+            _ = BuildAlbumContextMenuAsync();
 
             // Add remaining albums quickly (virtuallized in collection view)
             var remainingAlbums = filteredAlbums.Skip(10).ToList();
@@ -492,7 +498,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 foreach (var batch in remainingAlbums.Chunk(20))
                 {
                     OtherAlbums.AddRange(batch);
-                    await Task.Delay(30); // Minimal delay between batches
+                    await Task.Yield();
                 }
             }
         }
@@ -563,6 +569,9 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                     _logger.LogWarning(ex, "Failed to load details for artist: {ArtistId}", artistRef.ItemId);
                 }
             }
+            
+            _ = BuildArtistContextMenuAsync();
+
         }
         finally
         {
@@ -648,7 +657,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 Text = "Abspielen",
                 Icon = FluentIcons.Play12,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaAsync(Tracks.Where(t => t.IsSelected)))
+                    await PlaySelectedTracksWithModesAsync(Tracks, Album))
             },
             new()
             {
@@ -702,6 +711,30 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
 
         _trackContextMenuItems = menu;
         return Task.CompletedTask;
+    }
+
+    private async Task PlaySelectedTracksWithModesAsync(IEnumerable<Track> tracks, MediaItem? playbackContextItem)
+    {
+        var selectedTracks = tracks.Where(t => t.IsSelected).ToList();
+        if (selectedTracks.Count == 0)
+        {
+            return;
+        }
+
+        if (selectedTracks.Count > 1 || playbackContextItem == null)
+        {
+            await MediaActions.PlayMediaAsync(selectedTracks.First());
+
+            var remainingTracks = selectedTracks.Skip(1).ToList();
+            if (remainingTracks.Count > 0)
+            {
+                await MediaActions.PlayMediaNextAsync(remainingTracks);
+            }
+
+            return;
+        }
+
+        await MediaActions.PlayMediaAsync(playbackContextItem, selectedTracks.First());
     }
 
     private Task BuildAlbumContextMenuAsync()

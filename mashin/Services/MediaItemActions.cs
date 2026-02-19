@@ -12,9 +12,9 @@ namespace mashin.Services;
 /// </summary>
 public interface IMediaItemActions
 {
-    Task PlayMediaAsync(object item);
-    Task PlayMediaNextAsync(object item);
-    Task PlayMediaLastAsync(object item);
+    Task PlayMediaAsync(object item, object? startItem = null);
+    Task PlayMediaNextAsync(object item, object? startItem = null);
+    Task PlayMediaLastAsync(object item, object? startItem = null);
     Task AddToPlaylistAsync(object item, Playlist playlist);
     Task RemoveFromPlaylistAsync(object item, Playlist playlist);
     Task AddToFavoritesAsync(object item);
@@ -49,7 +49,7 @@ public class MediaItemActions : IMediaItemActions
        /// <summary>
     /// Plays the specified media item(s), replacing the current queue.
     /// </summary>
-    public async Task PlayMediaAsync(object item)
+    public async Task PlayMediaAsync(object item, object? startItem = null)
     {
         var mediaItems = GetMediaItemsFromParameter(item);
         if (mediaItems.Count == 0)
@@ -71,7 +71,8 @@ public class MediaItemActions : IMediaItemActions
             await _musicAssistant.PlayMediaAsync(
                 _playerService.ClientId,
                 mediaItems,
-                QueueOption.Replace);
+                QueueOption.Replace,
+                startItem: startItem);
         }
         catch (Exception ex)
         {
@@ -82,7 +83,7 @@ public class MediaItemActions : IMediaItemActions
     /// <summary>
     /// Plays the specified media item(s) next in the queue.
     /// </summary>
-    public async Task PlayMediaNextAsync(object item)
+    public async Task PlayMediaNextAsync(object item, object? startItem = null)
     {
         var mediaItems = GetMediaItemsFromParameter(item);
         if (mediaItems.Count == 0)
@@ -104,7 +105,8 @@ public class MediaItemActions : IMediaItemActions
             await _musicAssistant.PlayMediaAsync(
                 _playerService.ClientId,
                 mediaItems,
-                QueueOption.Next);
+                QueueOption.Next,
+                startItem: startItem);
         }
         catch (Exception ex)
         {
@@ -115,7 +117,7 @@ public class MediaItemActions : IMediaItemActions
     /// <summary>
     /// Adds the specified media item(s) to the end of the queue.
     /// </summary>
-    public async Task PlayMediaLastAsync(object item)
+    public async Task PlayMediaLastAsync(object item, object? startItem = null)
     {
         var mediaItems = GetMediaItemsFromParameter(item);
         if (mediaItems.Count == 0)
@@ -137,7 +139,8 @@ public class MediaItemActions : IMediaItemActions
             await _musicAssistant.PlayMediaAsync(
                 _playerService.ClientId,
                 mediaItems,
-                QueueOption.Add);
+                QueueOption.Add,
+                startItem: startItem);
         }
         catch (Exception ex)
         {

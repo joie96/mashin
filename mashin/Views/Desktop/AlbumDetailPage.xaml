@@ -316,6 +316,7 @@
                 <controls:TableView Grid.Row="1"
                     ItemsSource="{Binding TrackItems}"
                     MediaActions="{Binding MediaActions}"
+                    PlaybackContextItem="{Binding Album}"
                     PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
                     SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
                     ShowContextMenuAtAnchorCommand="{Binding ShowTrackContextMenuAtAnchorCommand}"

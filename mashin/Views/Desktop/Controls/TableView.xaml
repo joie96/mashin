@@ -43,19 +43,39 @@
                     CascadeInputTransparent="False"
                     ColumnDefinitions="40,48,5*,80,3*,3*,*,80,40,40,40">
                     <!--  #  -->
-                    <Label Grid.Column="0"
+                    <Grid Grid.Column="0"
                         HorizontalOptions="Center"
-                        Text="{Binding Index}"
-                        TextColor="{DynamicResource TextTertiary}"
                         VerticalOptions="Center">
-                        <Label.Triggers>
-                            <DataTrigger Binding="{Binding IsPlaying}"
-                                TargetType="Label"
-                                Value="True">
-                                <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
-                            </DataTrigger>
-                        </Label.Triggers>
-                    </Label>
+                        <Label HorizontalOptions="Center"
+                            IsVisible="True"
+                            Text="{Binding Index}"
+                            TextColor="{DynamicResource TextTertiary}"
+                            VerticalOptions="Center">
+                            <Label.Triggers>
+                                <DataTrigger Binding="{Binding IsPlaying}"
+                                    TargetType="Label"
+                                    Value="True">
+                                    <Setter Property="IsVisible" Value="False" />
+                                </DataTrigger>
+                            </Label.Triggers>
+                        </Label>
+
+                        <Label HorizontalOptions="Center"
+                            IsVisible="False"
+                            FontSize="14"
+                            Text="{mi:FluentFilled Icon=Pause12Filled,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource AccentColor}"
+                            VerticalOptions="Center">
+                            <Label.Triggers>
+                                <DataTrigger Binding="{Binding IsPlaying}"
+                                    TargetType="Label"
+                                    Value="True">
+                                    <Setter Property="IsVisible" Value="True" />
+                                </DataTrigger>
+                            </Label.Triggers>
+                        </Label>
+                    </Grid>
 
                     <!--  Cover + Play Overlay  -->
                     <Grid Grid.Column="1"

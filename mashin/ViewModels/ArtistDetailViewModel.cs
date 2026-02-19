@@ -392,10 +392,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             // Similar Artists
             await LoadSimilarArtistsAsync(artistId);
 
-            await BuildHeaderContextMenuAsync();
-            await BuildTrackContextMenuAsync();
-            await BuildAlbumContextMenuAsync();
-            await BuildArtistContextMenuAsync();
+            
         }
         catch (Exception ex)
         {
@@ -424,6 +421,8 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             {
                 _logger.LogWarning("Artist not found: {ArtistId}", artistId);
             }
+
+            _ = BuildHeaderContextMenuAsync();
         }
         finally
         {
@@ -448,6 +447,8 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             Albums = new ObservableRangeCollection<Album>(visibleAlbums);
             await Task.Yield();
             IsLoadingAlbums = false;
+
+            _ = BuildAlbumContextMenuAsync();
 
             var remainingAlbums = sortedAlbums.Skip(visibleAlbums.Count()).ToList();
             if (remainingAlbums.Count > 0)
@@ -502,6 +503,8 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             TopTracks = new ObservableRangeCollection<Track>(visibleTracks);
             await Task.Yield();
             IsLoadingTracks = false;
+
+            _ = BuildTrackContextMenuAsync();
 
         }
         catch (Exception ex)
@@ -601,6 +604,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                     _logger.LogWarning(ex, "Failed to load details for artist: {ArtistId}", artistRef.ItemId);
                 }
             }
+            _ = BuildArtistContextMenuAsync();
         }
         finally
         {
@@ -685,7 +689,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                 Text = "Abspielen",
                 Icon = FluentIcons.Play12,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaAsync(TopTracks.Where(t => t.IsSelected)))
+                    await PlaySelectedTracksWithModesAsync(TopTracks, playbackContextItem: null))
             },
             new()
             {
@@ -739,6 +743,30 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
         _trackContextMenuItems = menu;
         return Task.CompletedTask;
+    }
+
+    private async Task PlaySelectedTracksWithModesAsync(IEnumerable<Track> tracks, MediaItem? playbackContextItem)
+    {
+        var selectedTracks = tracks.Where(t => t.IsSelected).ToList();
+        if (selectedTracks.Count == 0)
+        {
+            return;
+        }
+
+        if (selectedTracks.Count > 1 || playbackContextItem == null)
+        {
+            await MediaActions.PlayMediaAsync(selectedTracks.First());
+
+            var remainingTracks = selectedTracks.Skip(1).ToList();
+            if (remainingTracks.Count > 0)
+            {
+                await MediaActions.PlayMediaNextAsync(remainingTracks);
+            }
+
+            return;
+        }
+
+        await MediaActions.PlayMediaAsync(playbackContextItem, selectedTracks.First());
     }
 
     private Task BuildAlbumContextMenuAsync()

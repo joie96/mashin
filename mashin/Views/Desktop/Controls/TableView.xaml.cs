@@ -1,5 +1,8 @@
 using mashin.Models;
 using mashin.Services;
+using mashin.ViewModels;
+using mashin.Views.Desktop;
+using Microsoft.Maui.ApplicationModel;
 using System.Collections;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -35,12 +38,17 @@ public partial class TableView : ContentView
     public static readonly BindableProperty ShowContextMenuAtPositionCommandProperty =
         BindableProperty.Create(nameof(ShowContextMenuAtPositionCommand), typeof(ICommand), typeof(TableView));
 
+    public static readonly BindableProperty PlaybackContextItemProperty =
+        BindableProperty.Create(nameof(PlaybackContextItem), typeof(MediaItem), typeof(TableView));
+
     #endregion
 
     #region Fields
 
     private readonly ObservableCollection<object> _selectedItems = new();
     private IKeyboardService? _keyboardService;
+    private MainViewModel? _mainViewModel;
+    private Track? _currentTrack;
     private int? _anchorIndex;
     private bool _isCheckboxClick;
 
@@ -96,6 +104,12 @@ public partial class TableView : ContentView
         set => SetValue(ShowContextMenuAtPositionCommandProperty, value);
     }
 
+    public MediaItem? PlaybackContextItem
+    {
+        get => (MediaItem?)GetValue(PlaybackContextItemProperty);
+        set => SetValue(PlaybackContextItemProperty, value);
+    }
+
     #endregion
 
     #region Construction
@@ -129,6 +143,9 @@ public partial class TableView : ContentView
             }
         }
 
+        AttachPlaybackStateSource();
+        UpdatePlayingStateForVisibleItems();
+
     }
 
     private void OnTableViewUnloaded(object? sender, EventArgs e)
@@ -141,11 +158,15 @@ public partial class TableView : ContentView
             _keyboardService = null;
         }
 
+        DetachPlaybackStateSource();
+        ResetPlayingStateForVisibleItems();
+
         PrimaryInfoTappedCommand = null;
         SecondaryInfoTappedCommand = null;
         ShowContextMenuAtAnchorCommand = null;
         ShowContextMenuAtPositionCommand = null;
         MediaActions = null;
+        PlaybackContextItem = null;
 
         if (collectionView != null)
         {
@@ -156,7 +177,7 @@ public partial class TableView : ContentView
         ItemsSource = null;
         BindingContext = null;
 
-        // Collections bereinigen
+        // Clear collections
         _selectedItems.Clear();
 
     }
@@ -175,6 +196,7 @@ public partial class TableView : ContentView
         view._anchorIndex = null;
         view.ClearAllSelections();
         view.SyncSelectionAndHeaderState(clickedItem: null);
+        view.UpdatePlayingStateForVisibleItems();
     }
 
     #endregion
@@ -304,14 +326,19 @@ public partial class TableView : ContentView
             return;
         }
 
-        // Select the item
         SelectSingle(item);
         SyncSelectionAndHeaderState(item);
 
-        // Play the clicked item immediately
+        // Context mode: play the container (e.g. album/playlist) and start at clicked item.
+        if (PlaybackContextItem != null)
+        {
+            await MediaActions.PlayMediaAsync(PlaybackContextItem, item);
+            return;
+        }
+
+        // Fallback mode: play clicked item immediately and append following visible items.
         await MediaActions.PlayMediaAsync(item);
 
-        // Enqueue remaining items after the clicked one
         var itemsToQueue = GetItemsAfterIndex(item);
         if (itemsToQueue.Count > 0)
         {
@@ -332,14 +359,19 @@ public partial class TableView : ContentView
             return;
         }
 
-        // Select the item
         SelectSingle(item);
         SyncSelectionAndHeaderState(item);
 
-        // Play the clicked item immediately
+        // Context mode: play the container (e.g. album/playlist) and start at clicked item.
+        if (PlaybackContextItem != null)
+        {
+            await MediaActions.PlayMediaAsync(PlaybackContextItem, item);
+            return;
+        }
+
+        // Fallback mode: play clicked item immediately and append following visible items.
         await MediaActions.PlayMediaAsync(item);
 
-        // Enqueue remaining items after the clicked one
         var itemsToQueue = GetItemsAfterIndex(item);
         if (itemsToQueue.Count > 0)
         {
@@ -507,6 +539,97 @@ public partial class TableView : ContentView
 
         var newValue = total > 0 && selected == total;
         IsAllSelected = newValue;
+    }
+
+    #endregion
+
+    #region Playing state tracking
+
+    private void AttachPlaybackStateSource()
+    {
+        if (_mainViewModel != null)
+        {
+            return;
+        }
+
+        var mainPage = Application.Current?.Windows.FirstOrDefault()?.Page as MainPage;
+        if (mainPage?.BindingContext is not MainViewModel vm)
+        {
+            return;
+        }
+
+        _mainViewModel = vm;
+        _currentTrack = vm.CurrentTrack;
+        _mainViewModel.CurrentTrackChanged += OnCurrentTrackChanged;
+    }
+
+    private void DetachPlaybackStateSource()
+    {
+        if (_mainViewModel == null)
+        {
+            return;
+        }
+
+        _mainViewModel.CurrentTrackChanged -= OnCurrentTrackChanged;
+        _mainViewModel = null;
+        _currentTrack = null;
+    }
+
+    private void OnCurrentTrackChanged(object? sender, Track? track)
+    {
+        _currentTrack = track;
+
+        if (MainThread.IsMainThread)
+        {
+            UpdatePlayingStateForVisibleItems();
+            return;
+        }
+
+        MainThread.BeginInvokeOnMainThread(UpdatePlayingStateForVisibleItems);
+    }
+
+    private void UpdatePlayingStateForVisibleItems()
+    {
+        var activeTrack = _currentTrack;
+
+        foreach (var item in EnumerateSelectableItems())
+        {
+            var isPlaying = activeTrack != null && IsSameTrack(item, activeTrack);
+            if (item.IsPlaying != isPlaying)
+            {
+                item.IsPlaying = isPlaying;
+            }
+        }
+    }
+
+    private void ResetPlayingStateForVisibleItems()
+    {
+        foreach (var item in EnumerateSelectableItems())
+        {
+            if (item.IsPlaying)
+            {
+                item.IsPlaying = false;
+            }
+        }
+    }
+
+    private static bool IsSameTrack(MediaItem item, Track activeTrack)
+    {
+        if (!string.IsNullOrWhiteSpace(item.Uri)
+            && !string.IsNullOrWhiteSpace(activeTrack.Uri)
+            && string.Equals(item.Uri, activeTrack.Uri, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.ItemId)
+            && !string.IsNullOrWhiteSpace(activeTrack.ItemId)
+            && string.Equals(item.ItemId, activeTrack.ItemId, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     #endregion

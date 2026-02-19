@@ -1452,7 +1452,8 @@ public class MusicAssistantService
      string queueId,
      List<MediaItem> mediaItems,
      QueueOption option = QueueOption.Replace,
-     bool radioMode = false)
+        bool radioMode = false,
+        object? startItem = null)
     {
         if (mediaItems == null || mediaItems.Count == 0)
         {
@@ -1479,6 +1480,11 @@ public class MusicAssistantService
             ["radio_mode"] = radioMode
         };
 
+        if (startItem is MediaItem startMediaItem && !string.IsNullOrWhiteSpace(startMediaItem.ItemId))
+        {
+            args["start_item"] = startMediaItem.ItemId;
+        }
+
         await SendCommandAsync<object>("player_queues/play_media", args);
     }
 
@@ -1489,9 +1495,10 @@ public class MusicAssistantService
         string queueId,
         MediaItem mediaItem,
         QueueOption option = QueueOption.Play,
-        bool radioMode = false)
+        bool radioMode = false,
+        object? startItem = null)
     {
-        await PlayMediaAsync(queueId, new List<MediaItem> { mediaItem }, option, radioMode);
+        await PlayMediaAsync(queueId, new List<MediaItem> { mediaItem }, option, radioMode, startItem);
     }
 
     /// <summary>
