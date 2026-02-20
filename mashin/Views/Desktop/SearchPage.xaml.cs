@@ -17,8 +17,6 @@ public partial class SearchPage : ContentPage
     {
         base.OnDisappearing();
 
-        _viewModel?.Dispose();
-
         BindingContext = null;
     }
 }

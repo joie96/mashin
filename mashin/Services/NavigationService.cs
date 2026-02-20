@@ -87,13 +87,10 @@ public class NavigationService : INavigationService
 
             IsNavigating = true;
             await Task.Yield();
+            await Task.Delay(100);
 
-            // Dispose current page
-            if (_currentPage != null)
-            {
-                await CleanupPageAsync(_currentPage);
-                _currentPage = null;
-            }
+            var previousPage = _currentPage;
+            var previousScope = _currentScope;
 
             // Save new page type and parameter on stack
             var entry = new NavigationEntry(typeof(TPage), parameter);
@@ -101,6 +98,11 @@ public class NavigationService : INavigationService
             
             // Show new page
             await ShowPageAsync(entry);
+
+            if (previousPage != null)
+            {
+                _ = CleanupPageAsync(previousPage, previousScope);
+            }
         }
         catch (Exception ex)
         {
@@ -126,17 +128,19 @@ public class NavigationService : INavigationService
             IsNavigating = true;
             await Task.Yield();
 
-            // Remove current entry and dispose current page
+            // Remove current entry
             _navigationStack.Pop();
-            if (_currentPage != null)
-            {
-                await CleanupPageAsync(_currentPage);
-                _currentPage = null;
-            }
+            var previousPage = _currentPage;
+            var previousScope = _currentScope;
 
             // Show previous page by recreating it from type+parameter
             var previousEntry = _navigationStack.Peek();
             await ShowPageAsync(previousEntry);
+
+            if (previousPage != null)
+            {
+                _ = CleanupPageAsync(previousPage, previousScope);
+            }
             
         }
         catch (Exception ex)
@@ -165,11 +169,6 @@ public class NavigationService : INavigationService
         }
         _logger.LogDebug("Navigating to {PageName}", entry.PageType.Name);
 
-        if (newPage.BindingContext is INavigationAware navigationAware)
-        {
-            await navigationAware.OnNavigatedToAsync(entry.Parameter);
-        }
-
         _currentPage = newPage;
         _currentScope = scope;
 
@@ -182,29 +181,31 @@ public class NavigationService : INavigationService
         }
 
         newPage.SendAppearing();
+
+        if (newPage.BindingContext is INavigationAware navigationAware)
+        {
+            _ = navigationAware.OnNavigatedToAsync(entry.Parameter).ContinueWith(task =>
+            {
+                _logger.LogError(task.Exception, "OnNavigatedToAsync failed for {ViewModel}", navigationAware.GetType().Name);
+                IsNavigating = false;
+            }, TaskContinuationOptions.OnlyOnFaulted);
+        }
     }
 
-    private async Task CleanupPageAsync(ContentPage page)
+    private async Task CleanupPageAsync(ContentPage page, IServiceScope? scope)
     {
         _logger.LogDebug("Disposing page: {PageName}", page.GetType().Name);
 
+        var bindingContext = page.BindingContext;
+
         // Call OnNavigatedFromAsync if page is navigation aware
-        if (page.BindingContext is INavigationAware navAware)
+        if (bindingContext is INavigationAware navAware)
         {
             await navAware.OnNavigatedFromAsync();
         }
 
         // Trigger lifecycle
         page.SendDisappearing();
-
-        // Clear image cache
-        ImageService.Instance.InvalidateMemoryCache();
-
-        // Dispose ViewModel if IDisposable
-        if (page.BindingContext is IDisposable disposable)
-        {
-            disposable.Dispose();
-        }
 
         // Clear BindingContext and content references
         if (page.Content != null)
@@ -214,23 +215,30 @@ public class NavigationService : INavigationService
         page.BindingContext = null;
         page.Content = null;
 
-        // Detach from container
-        if (_contentContainer != null)
+        // Dispose async to avoid blocking UI thread
+        _ = Task.Run(() =>
         {
-            var containerContent = _contentContainer.Content;
-            if (containerContent != null)
+            try
             {
-                containerContent.BindingContext = null;
+                if (bindingContext is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to dispose binding context for {PageName}", page.GetType().Name);
             }
 
-            _contentContainer.Content = null;
-        }
-
-        if (_currentScope != null)
-        {
-            _currentScope.Dispose();
-            _currentScope = null;
-        }
+            try
+            {
+                scope?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to dispose scope for {PageName}", page.GetType().Name);
+            }
+        });
 
     }
 

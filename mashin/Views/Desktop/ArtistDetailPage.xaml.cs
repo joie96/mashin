@@ -18,8 +18,6 @@ public partial class ArtistDetailPage : ContentPage
     protected override void OnDisappearing()
     {
         base.OnDisappearing();
-                
-        _viewModel?.Dispose();
         
         BindingContext = null;
 

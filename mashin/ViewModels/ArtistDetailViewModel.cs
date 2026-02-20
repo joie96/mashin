@@ -445,9 +445,10 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             // Load albums progressively
             var visibleAlbums = sortedAlbums.Take(10);
             Albums = new ObservableRangeCollection<Album>(visibleAlbums);
-            await Task.Yield();
             IsLoadingAlbums = false;
-
+            await Task.Yield();
+            await Task.Delay(100);
+            
             _ = BuildAlbumContextMenuAsync();
 
             var remainingAlbums = sortedAlbums.Skip(visibleAlbums.Count()).ToList();
@@ -456,7 +457,8 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                 foreach (var batch in remainingAlbums.Chunk(20))
                 {
                     Albums.AddRange(batch);
-                    await Task.Yield();    
+                    await Task.Yield(); 
+                    await Task.Delay(100);   
                 }
             }
         }
@@ -501,8 +503,10 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             // Load tracks immediately
             var visibleTracks = _allTopTracks.Take(10).ToList();
             TopTracks = new ObservableRangeCollection<Track>(visibleTracks);
-            await Task.Yield();
             IsLoadingTracks = false;
+            await Task.Yield();
+            await Task.Delay(100);
+            
 
             _ = BuildTrackContextMenuAsync();
 

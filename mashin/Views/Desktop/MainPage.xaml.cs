@@ -49,9 +49,9 @@ public partial class MainPage : ContentPage
 
     #region Navigation
 
-    private async void OnBackTapped(object? sender, TappedEventArgs e)
+    private void OnBackTapped(object? sender, TappedEventArgs e)
     {
-        await _navigationService.GoBackAsync();
+        _ = _navigationService.GoBackAsync();
     }
 
     private void OnNavigatePlaylistsTapped(object? sender, TappedEventArgs e)

@@ -18,8 +18,6 @@ public partial class FavoritesPage : ContentPage
     {
         base.OnDisappearing();
 
-        _viewModel?.Dispose();
-
         BindingContext = null;
     }
 }

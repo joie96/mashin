@@ -19,8 +19,6 @@ public partial class PlaylistDetailPage : ContentPage
     {
         base.OnDisappearing();
 
-        _viewModel?.Dispose();
-
         BindingContext = null;
 
     }

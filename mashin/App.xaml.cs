@@ -2,12 +2,15 @@
 using mashin.Views.Desktop;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using FFImageLoading;
+using FFImageLoading.Config;
 
 namespace mashin;
 
 public partial class App : Application
 {
     private readonly SettingsService _settings;
+    private static bool _ffImageLoadingConfigured;
 
     public App(SettingsService settings)
     {
@@ -50,12 +53,27 @@ public partial class App : Application
 
     protected override Window CreateWindow(IActivationState? activationState)
     {
+        // Configure FFImageLoading once at app startup
+        if (!_ffImageLoadingConfigured)
+        {
+            try
+            {
+                ImageService.Instance.Initialize(new Configuration
+                {
+                    MaxMemoryCacheSize = 64 * 1024 * 1024
+                });
+                _ffImageLoadingConfigured = true;
+            }
+            catch
+            {
+            }
+        }
+
         var services = Handler!.MauiContext!.Services;
 
         // MainPage als Window
         var mainPage = services.GetRequiredService<MainPage>();
-        //var favoritesCache = services.GetRequiredService<FavoritesCacheService>();
-        //_ = favoritesCache.InitializeAsync();
+        
         var window = new Window(mainPage);
 
         return window;
