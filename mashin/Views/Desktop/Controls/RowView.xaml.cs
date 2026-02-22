@@ -50,7 +50,7 @@ public partial class RowView : ContentView
     private int? _anchorIndex;
     private bool _isCheckboxClick;
     private double _currentScrollPosition = 0;
-    private const double ScrollPixelStep = 620;
+    private const double ScrollPixelStep = 780;
     private CancellationTokenSource? _scrollCts;
 
     #endregion
