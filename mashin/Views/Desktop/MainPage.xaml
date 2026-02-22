@@ -3,6 +3,7 @@
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
     xmlns:behaviors="clr-namespace:mashin.Views.Desktop.Behaviors"
+    xmlns:controls="clr-namespace:mashin.Views.Desktop.Controls"
     xmlns:converters="clr-namespace:mashin.Converters"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
     xmlns:models="clr-namespace:mashin.Models"
@@ -537,7 +538,7 @@
                     </Grid>
                 </VerticalStackLayout>
 
-                <!--  Right: Volume  -->
+                <!--  Right: Queue  -->
                 <HorizontalStackLayout Grid.Column="2"
                     HorizontalOptions="End"
                     Spacing="12"
@@ -548,17 +549,21 @@
                         StrokeThickness="0"
                         VerticalOptions="Center"
                         WidthRequest="32">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Tapped="OnQueueTapped" />
+                        </Border.GestureRecognizers>
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="16" />
                         </Border.StrokeShape>
                         <Label FontSize="16"
                             HorizontalOptions="Center"
-                            Text="{mi:Fluent Icon=Speaker224,
+                            Text="{mi:Fluent Icon=AppsList24,
                                              FontOverride=True}"
                             TextColor="{DynamicResource IconSecondary}"
                             VerticalOptions="Center" />
                     </Border>
-
+                    
+                    <!--  Volume  -->
                     <Border behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                         BackgroundColor="Transparent"
                         HeightRequest="32"
@@ -587,6 +592,13 @@
                 </HorizontalStackLayout>
             </Grid>
         </Grid>
+
+        <!--  Queue Overlay Host  -->
+        <controls:QueueOverlay x:Name="QueueOverlay"
+            Grid.Row="0"
+            Grid.RowSpan="2"
+            Grid.Column="0"
+            Grid.ColumnSpan="2" />
 
         <!--! Overlay Host  -->
         <Grid x:Name="OverlayHost"

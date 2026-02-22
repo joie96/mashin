@@ -46,7 +46,7 @@ public class MediaItemActions : IMediaItemActions
         _logger = logger;
     }
 
-       /// <summary>
+    /// <summary>
     /// Plays the specified media item(s), replacing the current queue.
     /// </summary>
     public async Task PlayMediaAsync(object item, object? startItem = null)

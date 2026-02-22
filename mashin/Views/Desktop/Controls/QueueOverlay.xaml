@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView x:Class="mashin.Views.Desktop.Controls.QueueOverlay"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:controls="clr-namespace:mashin.Views.Desktop.Controls"
+    xmlns:converters="clr-namespace:mashin.Converters"
+    xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
+    xmlns:vm="clr-namespace:mashin.ViewModels"
+    x:DataType="vm:MainViewModel"
+    BackgroundColor="Transparent"
+    InputTransparent="False"
+    IsClippedToBounds="True"
+    IsVisible="False">
+
+    <ContentView.Resources>
+        <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
+    </ContentView.Resources>
+
+    <Grid IsClippedToBounds="True">
+        <BoxView x:Name="OverlayBackdrop"
+            BackgroundColor="#80000000"
+            Opacity="0" />
+
+        <Border x:Name="OverlayPanel"
+            BackgroundColor="{DynamicResource BackgroundSecondary}"
+            StrokeThickness="0"
+            TranslationY="2000">
+            <Grid Padding="48,30,48,30"
+                ColumnDefinitions="300,*"
+                ColumnSpacing="40">
+
+                <VerticalStackLayout Spacing="16" VerticalOptions="Start">
+                    <Border BackgroundColor="{DynamicResource BackgroundTertiary}"
+                        HeightRequest="300"
+                        StrokeThickness="0"
+                        WidthRequest="300">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="6" />
+                        </Border.StrokeShape>
+                        <Image Aspect="AspectFill" Source="{Binding CurrentTrack.ImageUrl}" />
+                    </Border>
+
+                    <HorizontalStackLayout HorizontalOptions="Center" Spacing="22">
+                        <Label FontSize="24"
+                            Text="{mi:Fluent Icon=Add24,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}" />
+
+                        <Grid>
+                            <Label FontSize="24"
+                                IsVisible="{Binding CurrentTrack.Favorite, Converter={StaticResource InvertedBoolConverter}}"
+                                Text="{mi:Fluent Icon=Heart24,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}" />
+                            <Label FontSize="24"
+                                IsVisible="{Binding CurrentTrack.Favorite}"
+                                Text="{mi:FluentFilled Icon=Heart48Filled,
+                                                       FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}" />
+                        </Grid>
+                    </HorizontalStackLayout>
+
+                    <VerticalStackLayout Spacing="4">
+                        <Label FontAttributes="Bold"
+                            FontSize="14"
+                            HorizontalTextAlignment="Center"
+                            LineBreakMode="TailTruncation"
+                            MaxLines="1"
+                            Text="{Binding CurrentTrack.Name}"
+                            TextColor="{DynamicResource TextPrimary}" />
+                        <Label FontSize="12"
+                            HorizontalTextAlignment="Center"
+                            LineBreakMode="TailTruncation"
+                            MaxLines="1"
+                            Text="{Binding CurrentTrack.ArtistName}"
+                            TextColor="{DynamicResource TextSecondary}" />
+                    </VerticalStackLayout>
+                </VerticalStackLayout>
+
+                <controls:TableView Grid.Column="1"
+                    ItemsSource="{Binding CurrentQueueTracks}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowQueueContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowQueueContextMenuAtPositionCommand}" />
+            </Grid>
+        </Border>
+    </Grid>
+</ContentView>

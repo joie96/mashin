@@ -1,5 +1,6 @@
 using mashin.Services;
 using mashin.ViewModels;
+using mashin.Views.Desktop.Controls;
 using Microsoft.Extensions.Logging;
 
 namespace mashin.Views.Desktop;
@@ -61,6 +62,26 @@ public partial class MainPage : ContentPage
 
     #endregion
 
+    #region Queue Overlay
+
+    private async void OnQueueTapped(object? sender, TappedEventArgs e)
+    {
+        if (QueueOverlay.IsAnimating)
+        {
+            return;
+        }
+
+        if (QueueOverlay.IsOpen)
+        {
+            await QueueOverlay.HideAsync();
+            return;
+        }
+
+        await QueueOverlay.ShowAsync();
+    }
+
+    #endregion
+
     #region Overlay Host
 
     private void OnOverlayBackdropTapped(object? sender, TappedEventArgs e)
@@ -69,4 +90,5 @@ public partial class MainPage : ContentPage
     }
 
     #endregion
+
 }
