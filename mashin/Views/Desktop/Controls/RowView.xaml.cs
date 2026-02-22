@@ -238,7 +238,7 @@ public partial class RowView : ContentView
         _scrollCts?.Cancel();
         _scrollCts = new CancellationTokenSource();
 
-        var targetPosition = _currentScrollPosition + ScrollPixelStep;
+        var targetPosition = collectionView.ClampHorizontalTargetX(_currentScrollPosition + ScrollPixelStep);
         _currentScrollPosition = targetPosition;
         
         await collectionView.ScrollToPixelSmoothAsync(

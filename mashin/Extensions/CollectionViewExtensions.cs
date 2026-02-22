@@ -59,6 +59,22 @@ public static class CollectionViewExtensions
 #endif
     }
 
+    public static double ClampHorizontalTargetX(this CollectionView collectionView, double targetX)
+    {
+#if WINDOWS
+        if (collectionView?.Handler?.PlatformView is Microsoft.UI.Xaml.Controls.ListViewBase listView)
+        {
+            var scrollViewer = FindScrollViewer(listView);
+            if (scrollViewer != null)
+            {
+                return Math.Clamp(targetX, 0, scrollViewer.ScrollableWidth);
+            }
+        }
+#endif
+
+        return Math.Max(0, targetX);
+    }
+
 #if WINDOWS
     private static Microsoft.UI.Xaml.Controls.ScrollViewer? FindScrollViewer(Microsoft.UI.Xaml.DependencyObject parent)
     {
@@ -106,6 +122,10 @@ public static class CollectionViewExtensions
     private static double EaseInOutQuad(double t)
     {
         return t < 0.5 ? 2 * t * t : 1 - Math.Pow(-2 * t + 2, 2) / 2;
+    }
+        private static double EaseOutCubic(double t)
+    {
+        return 1 - Math.Pow(1 - t, 3);
     }
 #endif
 }
