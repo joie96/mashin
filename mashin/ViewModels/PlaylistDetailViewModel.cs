@@ -34,6 +34,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     private readonly IReadOnlyList<TableViewSkeleton> _trackSkeletons = Enumerable.Range(0, 10)
         .Select(_ => new TableViewSkeleton())
         .ToList();
+    private bool _isLoadingMetadata;
     private bool _isLoadingTracks;
     private bool _disposed;
 
@@ -92,6 +93,12 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 OnPropertyChanged(nameof(TrackItems));
             }
         }
+    }
+
+    public bool IsLoadingMetadata
+    {
+        get => _isLoadingMetadata;
+        private set => SetProperty(ref _isLoadingMetadata, value);
     }
 
     public bool HasTracks => Tracks.Count > 0;
@@ -262,10 +269,24 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
     public async Task LoadPlaylistAsync(string playlistId, string providerInstanceOrDomain = "library")
     {
+        IsLoadingMetadata = true;
         IsLoadingTracks = true;
         try
         {
-            // Fetch playlist metadata
+            await LoadPlaylistMetadataAsync(playlistId, providerInstanceOrDomain);
+
+            await LoadPlaylistTracksAsync(playlistId, providerInstanceOrDomain);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load playlist: {PlaylistId}", playlistId);
+        }
+    }
+
+    private async Task LoadPlaylistMetadataAsync(string playlistId, string providerInstanceOrDomain)
+    {
+        try
+        {
             var playlist = await _musicAssistant.GetPlaylistAsync(playlistId, providerInstanceOrDomain);
             playlist?.Favorite = _userDataService.IsFavorite(playlist);
 
@@ -290,44 +311,56 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 return;
             }
 
-            _ = BuildHeaderContextMenuAsync();            
+            _ = BuildHeaderContextMenuAsync();
+        }
+        finally
+        {
+            IsLoadingMetadata = false;
+        }
+    }
 
-            // Fetch Tracks
+    private async Task LoadPlaylistTracksAsync(string playlistId, string providerInstanceOrDomain)
+    {
+        try
+        {
             var tracks = await _musicAssistant.GetPlaylistTracksAsync(
                 playlistId,
                 providerInstanceOrDomain,
                 forceRefresh: true);
 
-            // Populate track indices and favorite status
             for (var i = 0; i < tracks.Count; i++)
             {
                 tracks[i].Index = i + 1;
                 tracks[i].Favorite = _userDataService.IsFavorite(tracks[i]);
             }
 
-            Tracks = new ObservableRangeCollection<Track>();
-            _navigationService.IsNavigating = false;
+            // Load tracks progressively
+            var visibleTracks = tracks.Take(50).ToList();
+            Tracks = new ObservableRangeCollection<Track>(visibleTracks);
+            IsLoadingTracks = false;
+            await Task.Delay(50);
 
             _ = BuildContentContextMenuAsync();
 
-            // Render in chunks of 10
-            foreach (var batch in tracks.Chunk(10))
+            var remainingTracks = tracks.Skip(visibleTracks.Count).ToList();
+            if (remainingTracks.Count > 0)
+            {
+                foreach (var batch in remainingTracks.Chunk(50))
                 {
                     Tracks.AddRange(batch);
-                    await Task.Yield();
+                    await Task.Delay(50);
                 }
+            }
 
-            _logger.LogInformation("Loaded playlist '{Name}' with {Count} tracks",
-                Playlist.Name, Tracks.Count);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to load playlist: {PlaylistId}", playlistId);
+            if (Playlist != null)
+            {
+                _logger.LogInformation("Loaded playlist '{Name}' with {Count} tracks",
+                    Playlist.Name, Tracks.Count);
+            }
         }
         finally
         {
             IsLoadingTracks = false;
-            _navigationService.IsNavigating = false;
         }
     }
 
@@ -587,6 +620,12 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+        if (propertyName == nameof(IsLoadingMetadata)
+            || propertyName == nameof(IsLoadingTracks))
+        {
+            _navigationService.IsNavigating = IsLoadingMetadata || IsLoadingTracks;
+        }
     }
 
     protected bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

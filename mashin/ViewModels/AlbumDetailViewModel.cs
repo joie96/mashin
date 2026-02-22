@@ -386,7 +386,6 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to load album: {AlbumId}", albumId);
-            _navigationService.IsNavigating = false;
         }
     }
 
@@ -436,10 +435,12 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
             }
 
             Tracks = new ObservableRangeCollection<Track>(processedTracks);
+            IsLoadingTracks = false;
+            await Task.Delay(50);
             
             _ = BuildTrackContextMenuAsync();
 
-            // Set fallback artists for getting similar artists later if album metadata is missing artist info
+            // Set fallback artists
             if (Album != null && (Album.Artists == null || Album.Artists.Count == 0))
             {
                 var fallbackArtists = Tracks.FirstOrDefault()?.Artists;
@@ -458,7 +459,6 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
         finally
         {
             IsLoadingTracks = false;
-            _navigationService.IsNavigating = false;
         }
     }
 
@@ -480,25 +480,23 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 .OrderByDescending(a => a.Year ?? 0)
                 .ToList();
 
-            // Render first 10 albums "slowly"
-            var visibleAlbums = filteredAlbums.Take(10);
-            foreach (var album in visibleAlbums)
-            {
-                OtherAlbums.Add(album);
-                await Task.Yield(); 
-            }
+            // Load albums progressively
+            var visibleAlbums = filteredAlbums.Take(10).ToList();
+            OtherAlbums = new ObservableRangeCollection<Album>(visibleAlbums);
+            IsLoadingOtherAlbums = false;
+            await Task.Delay(50);
 
             _ = BuildAlbumContextMenuAsync();
 
             // Add remaining albums quickly (virtuallized in collection view)
-            var remainingAlbums = filteredAlbums.Skip(10).ToList();
+            var remainingAlbums = filteredAlbums.Skip(visibleAlbums.Count).ToList();
             if (remainingAlbums.Count > 0)
             {
-                // Add remaining albums in batches of 20
-                foreach (var batch in remainingAlbums.Chunk(20))
+                // Add remaining albums in batches of 10
+                foreach (var batch in remainingAlbums.Chunk(10))
                 {
                     OtherAlbums.AddRange(batch);
-                    await Task.Yield();
+                    await Task.Delay(50);
                 }
             }
         }
@@ -840,6 +838,12 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
     protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+        if (propertyName == nameof(IsLoadingMetadata)
+            || propertyName == nameof(IsLoadingTracks))
+        {
+            _navigationService.IsNavigating = IsLoadingMetadata || IsLoadingTracks;
+        }
     }
 
     protected bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

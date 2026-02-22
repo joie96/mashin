@@ -86,8 +86,7 @@ public class NavigationService : INavigationService
             }
 
             IsNavigating = true;
-            await Task.Yield();
-            await Task.Delay(100);
+            await Task.Delay(10);
 
             var previousPage = _currentPage;
             var previousScope = _currentScope;
@@ -126,7 +125,7 @@ public class NavigationService : INavigationService
             }
 
             IsNavigating = true;
-            await Task.Yield();
+            await Task.Delay(10);
 
             // Remove current entry
             _navigationStack.Pop();
@@ -184,11 +183,7 @@ public class NavigationService : INavigationService
 
         if (newPage.BindingContext is INavigationAware navigationAware)
         {
-            _ = navigationAware.OnNavigatedToAsync(entry.Parameter).ContinueWith(task =>
-            {
-                _logger.LogError(task.Exception, "OnNavigatedToAsync failed for {ViewModel}", navigationAware.GetType().Name);
-                IsNavigating = false;
-            }, TaskContinuationOptions.OnlyOnFaulted);
+            await navigationAware.OnNavigatedToAsync(entry.Parameter);
         }
     }
 

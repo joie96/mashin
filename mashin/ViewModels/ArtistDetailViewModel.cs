@@ -401,7 +401,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         finally
         {
             IsLoading = false;
-            _navigationService.IsNavigating = false;
         }
     }
 
@@ -427,7 +426,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         finally
         {
             IsLoadingMetadata = false;
-            _navigationService.IsNavigating = false;
         }
     }
 
@@ -445,20 +443,18 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             // Load albums progressively
             var visibleAlbums = sortedAlbums.Take(10);
             Albums = new ObservableRangeCollection<Album>(visibleAlbums);
-            IsLoadingAlbums = false;
-            await Task.Yield();
-            await Task.Delay(100);
+            IsLoadingAlbums = false;        
+            await Task.Delay(50);
             
             _ = BuildAlbumContextMenuAsync();
 
             var remainingAlbums = sortedAlbums.Skip(visibleAlbums.Count()).ToList();
             if (remainingAlbums.Count > 0)
             {
-                foreach (var batch in remainingAlbums.Chunk(20))
+                foreach (var batch in remainingAlbums.Chunk(10))
                 {
-                    Albums.AddRange(batch);
-                    await Task.Yield(); 
-                    await Task.Delay(100);   
+                    Albums.AddRange(batch);    
+                    await Task.Delay(50);   
                 }
             }
         }
@@ -503,9 +499,8 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             // Load tracks immediately
             var visibleTracks = _allTopTracks.Take(10).ToList();
             TopTracks = new ObservableRangeCollection<Track>(visibleTracks);
-            IsLoadingTracks = false;
-            await Task.Yield();
-            await Task.Delay(100);
+            IsLoadingTracks = false;    
+            await Task.Delay(50);
             
 
             _ = BuildTrackContextMenuAsync();
@@ -876,6 +871,12 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+        if (propertyName == nameof(IsLoadingMetadata)
+            || propertyName == nameof(IsLoadingAlbums))
+        {
+            _navigationService.IsNavigating = IsLoadingMetadata || IsLoadingAlbums;
+        }
     }
 
     protected bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

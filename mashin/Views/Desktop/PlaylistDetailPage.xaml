@@ -27,7 +27,7 @@
                     WidthRequest="150"
                     HeightRequest="150"
                     StrokeThickness="0"
-                    IsVisible="{Binding IsLoadingTracks}">
+                    IsVisible="{Binding IsLoadingMetadata}">
                 <Border.StrokeShape>
                     <RoundRectangle CornerRadius="8" />
                 </Border.StrokeShape>
@@ -40,7 +40,7 @@
                     HeightRequest="150"
                     StrokeThickness="0"
                     BackgroundColor="{DynamicResource BackgroundTertiary}"
-                    IsVisible="{Binding IsLoadingTracks, Converter={StaticResource InvertedBoolConverter}}">
+                    IsVisible="{Binding IsLoadingMetadata, Converter={StaticResource InvertedBoolConverter}}">
                 <Border.StrokeShape>
                     <RoundRectangle CornerRadius="8" />
                 </Border.StrokeShape>
@@ -151,7 +151,7 @@
 
             <!-- Playlist Info - Loading State -->
                 <VerticalStackLayout Grid.Column="1"
-                                     IsVisible="{Binding IsLoadingTracks}"
+                                     IsVisible="{Binding IsLoadingMetadata}"
                                      Spacing="12"
                                      VerticalOptions="Center">
                 <controls:SkeletonLoader WidthRequest="120" HeightRequest="12" HorizontalOptions="Start" />
@@ -161,7 +161,7 @@
 
             <!-- Playlist Info - Actual -->
                 <VerticalStackLayout Grid.Column="1"
-                                     IsVisible="{Binding IsLoadingTracks, Converter={StaticResource InvertedBoolConverter}}"
+                                     IsVisible="{Binding IsLoadingMetadata, Converter={StaticResource InvertedBoolConverter}}"
                                      Spacing="12"
                                      VerticalOptions="Center">
 

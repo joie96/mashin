@@ -48,6 +48,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
     private bool _isLoadingAlbums;
     private bool _isLoadingPlaylists;
     private bool _isLoadingArtists;
+    private MediaType? _navigationAnchorType;
     private bool _disposed;
 
     #endregion
@@ -408,6 +409,16 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
 
         var requested = new HashSet<MediaType>(mediaTypes);
 
+        _navigationAnchorType = null;
+        foreach (var type in new[] { MediaType.Track, MediaType.Album, MediaType.Playlist, MediaType.Artist })
+        {
+            if (requested.Contains(type))
+            {
+                _navigationAnchorType = type;
+                break;
+            }
+        }
+
         IsLoadingTracks = requested.Contains(MediaType.Track);
         IsLoadingAlbums = requested.Contains(MediaType.Album);
         IsLoadingPlaylists = requested.Contains(MediaType.Playlist);
@@ -474,8 +485,6 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
         switch (mediaType)
         {
             case MediaType.Track:
-                _navigationService.IsNavigating = false;
-                
                 _allTracks = results.Tracks ?? new List<Track>();
                 for (var i = 0; i < _allTracks.Count; i++)
                 {
@@ -487,74 +496,68 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 var visibleTracks = _allTracks.Take(10).ToList();
 
                 Tracks = new ObservableRangeCollection<Track>(visibleTracks);
-                await Task.Yield();
                 IsLoadingTracks = false;
+                await Task.Delay(50);
 
                 OnPropertyChanged(nameof(HasMoreTracks));
                 break;
 
             case MediaType.Album:
-                if (!IsLoadingTracks) _navigationService.IsNavigating = false;
-                
                 var albums = results.Albums ?? new List<Album>();
                 
                 var visibleAlbums = albums.Take(10);
                
                 Albums = new ObservableRangeCollection<Album>(visibleAlbums);
-                await Task.Yield();
                 IsLoadingAlbums = false;
+                await Task.Delay(50);
                 
                 var remainingAlbums = albums.Skip(visibleAlbums.Count()).ToList();
                 if (remainingAlbums.Count > 0)
                 {
-                    foreach (var batch in remainingAlbums.Chunk(20))
+                    foreach (var batch in remainingAlbums.Chunk(10))
                     {
                         Albums.AddRange(batch);       
-                        await Task.Yield();
+                        await Task.Delay(50);
                     }
                 }
                 break;
 
             case MediaType.Playlist:
-                if (!IsLoadingTracks && !IsLoadingAlbums) _navigationService.IsNavigating = false;
-                
                 var playlists = results.Playlists ?? new List<Playlist>();
                 
                 var visiblePlaylists = playlists.Take(10);
 
                 Playlists = new ObservableRangeCollection<Playlist>(visiblePlaylists);
-                await Task.Yield();
                 IsLoadingPlaylists = false;
+                await Task.Delay(50);
                 
                 var remainingPlaylists = playlists.Skip(visiblePlaylists.Count()).ToList();
                 if (remainingPlaylists.Count > 0)
                 {
-                    foreach (var batch in remainingPlaylists.Chunk(20))
+                    foreach (var batch in remainingPlaylists.Chunk(10))
                     {
                         Playlists.AddRange(batch);
-                        await Task.Yield();
+                        await Task.Delay(50);
                     }
                 }
                 
                 break;
 
             case MediaType.Artist:
-                if (!IsLoadingTracks && !IsLoadingAlbums && !IsLoadingPlaylists) _navigationService.IsNavigating = false;
-                
                 var artists = results.Artists ?? new List<Artist>();
 
                 var visibleArtists = artists.Take(10);
 
                 Artists = new ObservableRangeCollection<Artist>(visibleArtists);
-                await Task.Yield();
                 IsLoadingArtists = false;
+                await Task.Delay(50);
                 
                 var remainingArtists = artists.Skip(visibleArtists.Count()).ToList();
                 if (remainingArtists.Count > 0)
                 {
-                    foreach (var batch in remainingArtists.Chunk(20))
+                    foreach (var batch in remainingArtists.Chunk(10))
                     {
-                        await Task.Yield();
+                        await Task.Delay(50);
                         Artists.AddRange(batch);
                     }
                 }            
@@ -706,7 +709,39 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
     public event PropertyChangedEventHandler? PropertyChanged;
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
-        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+        if (_navigationAnchorType == null)
+        {
+            return;
+        }
+
+        if (propertyName == nameof(IsLoadingTracks)
+            && _navigationAnchorType == MediaType.Track
+            && !IsLoadingTracks)
+        {
+            _navigationService.IsNavigating = false;
+        }
+        else if (propertyName == nameof(IsLoadingAlbums)
+            && _navigationAnchorType == MediaType.Album
+            && !IsLoadingAlbums)
+        {
+            _navigationService.IsNavigating = false;
+        }
+        else if (propertyName == nameof(IsLoadingPlaylists)
+            && _navigationAnchorType == MediaType.Playlist
+            && !IsLoadingPlaylists)
+        {
+            _navigationService.IsNavigating = false;
+        }
+        else if (propertyName == nameof(IsLoadingArtists)
+            && _navigationAnchorType == MediaType.Artist
+            && !IsLoadingArtists)
+        {
+            _navigationService.IsNavigating = false;
+        }
+    }
 
     private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
