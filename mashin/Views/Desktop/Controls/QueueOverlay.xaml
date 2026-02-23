@@ -17,19 +17,25 @@
     </ContentView.Resources>
 
     <Grid IsClippedToBounds="True">
+        <!--  Overlay Backdrop  -->
         <BoxView x:Name="OverlayBackdrop"
             BackgroundColor="#80000000"
             Opacity="0" />
 
+        <!--  Queue Overlay Panel  -->
         <Border x:Name="OverlayPanel"
             BackgroundColor="{DynamicResource BackgroundSecondary}"
             StrokeThickness="0"
             TranslationY="2000">
-            <Grid Padding="48,30,48,30"
+            <Grid Padding="48,52,48,30"
                 ColumnDefinitions="300,*"
                 ColumnSpacing="40">
-
-                <VerticalStackLayout Spacing="16" VerticalOptions="Start">
+                
+                <!--  Current Track Column  -->
+                <VerticalStackLayout Margin="0,50,0,0"
+                    Spacing="16"
+                    VerticalOptions="Start">
+                    <!--  Cover Art  -->
                     <Border BackgroundColor="{DynamicResource BackgroundTertiary}"
                         HeightRequest="300"
                         StrokeThickness="0"
@@ -40,6 +46,7 @@
                         <Image Aspect="AspectFill" Source="{Binding CurrentTrack.ImageUrl}" />
                     </Border>
 
+                    <!--  Track Actions  -->
                     <HorizontalStackLayout HorizontalOptions="Center" Spacing="22">
                         <Label FontSize="24"
                             Text="{mi:Fluent Icon=Add24,
@@ -60,6 +67,7 @@
                         </Grid>
                     </HorizontalStackLayout>
 
+                    <!--  Track Meta  -->
                     <VerticalStackLayout Spacing="4">
                         <Label FontAttributes="Bold"
                             FontSize="14"
@@ -77,13 +85,73 @@
                     </VerticalStackLayout>
                 </VerticalStackLayout>
 
-                <controls:TableView Grid.Column="1"
-                    ItemsSource="{Binding CurrentQueueTracks}"
-                    MediaActions="{Binding MediaActions}"
-                    PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
-                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    ShowContextMenuAtAnchorCommand="{Binding ShowQueueContextMenuAtAnchorCommand}"
-                    ShowContextMenuAtPositionCommand="{Binding ShowQueueContextMenuAtPositionCommand}" />
+                <!--  Queue Content Column  -->
+                <Grid Grid.Column="1"
+                    HorizontalOptions="Fill"
+                    RowDefinitions="Auto,*"
+                    RowSpacing="8">
+                    <!--  Queue Header  -->
+                    <Grid Padding="0,0,0,0"
+                        HorizontalOptions="Fill">
+                        <!--  Queue Summary  -->
+                        <HorizontalStackLayout
+                            HorizontalOptions="Start"
+                            Spacing="8"
+                            VerticalOptions="Center">
+                            <Label FontAttributes="Bold"
+                                FontSize="14"
+                                Text="Warteschlange"
+                                TextColor="{DynamicResource TextSecondary}"
+                                VerticalOptions="Center" />
+                            <Label FontSize="14"
+                                Text="•"
+                                TextColor="{DynamicResource TextTertiary}"
+                                VerticalOptions="Center" />
+                            <Label FontSize="14"
+                                Text="{Binding QueueTrackCountText}"
+                                TextColor="{DynamicResource TextTertiary}"
+                                VerticalOptions="Center" />
+                            <Label FontSize="14"
+                                Text="•"
+                                TextColor="{DynamicResource TextTertiary}"
+                                VerticalOptions="Center" />
+                            <Label FontSize="14"
+                                Text="{Binding QueueTotalDurationText}"
+                                TextColor="{DynamicResource TextTertiary}"
+                                VerticalOptions="Center" />
+                        </HorizontalStackLayout>
+
+                        <!--  Auto Recommendations Toggle  -->
+                        <Grid
+                            ColumnDefinitions="Auto,Auto"
+                            ColumnSpacing="6"
+                            HorizontalOptions="End"
+                            VerticalOptions="Center">
+                            <Label Grid.Column="0"
+                                FontSize="14"
+                                Text="Automatische Empfehlungen:"
+                                TextColor="{DynamicResource TextSecondary}"
+                                VerticalOptions="Center" />
+
+                            <Switch Grid.Column="1"
+                                IsToggled="{Binding IsDontStopTheMusicEnabled, Mode=TwoWay}"
+                                OnColor="{DynamicResource AccentColor}"
+                                Scale="0.8"
+                                MinimumWidthRequest="0"
+                                VerticalOptions="Center" />
+                        </Grid>
+                    </Grid>
+
+                    <!--  Queue Table  -->
+                    <controls:TableView Grid.Row="1"
+                        ItemsSource="{Binding CurrentQueueTracks}"
+                        MediaActions="{Binding MediaActions}"
+                        PlaybackContextItem="{Binding CurrentPlayerQueue}"
+                        PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
+                        SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                        ShowContextMenuAtAnchorCommand="{Binding ShowQueueContextMenuAtAnchorCommand}"
+                        ShowContextMenuAtPositionCommand="{Binding ShowQueueContextMenuAtPositionCommand}" />
+                </Grid>
             </Grid>
         </Border>
     </Grid>

@@ -39,7 +39,7 @@ public partial class TableView : ContentView
         BindableProperty.Create(nameof(ShowContextMenuAtPositionCommand), typeof(ICommand), typeof(TableView));
 
     public static readonly BindableProperty PlaybackContextItemProperty =
-        BindableProperty.Create(nameof(PlaybackContextItem), typeof(MediaItem), typeof(TableView));
+        BindableProperty.Create(nameof(PlaybackContextItem), typeof(object), typeof(TableView));
 
     #endregion
 
@@ -104,9 +104,9 @@ public partial class TableView : ContentView
         set => SetValue(ShowContextMenuAtPositionCommandProperty, value);
     }
 
-    public MediaItem? PlaybackContextItem
+    public object? PlaybackContextItem
     {
-        get => (MediaItem?)GetValue(PlaybackContextItemProperty);
+        get => GetValue(PlaybackContextItemProperty);
         set => SetValue(PlaybackContextItemProperty, value);
     }
 
@@ -329,14 +329,31 @@ public partial class TableView : ContentView
         SelectSingle(item);
         SyncSelectionAndHeaderState(item);
 
-        // Context mode: play the container (e.g. album/playlist) and start at clicked item.
-        if (PlaybackContextItem != null)
+        // Context queue: play item index
+        if (PlaybackContextItem is PlayerQueue queueContext)
+        {
+            if (!string.IsNullOrWhiteSpace(queueContext.QueueId))
+            {
+                var zeroBasedIndex = item is Track queueTrack && queueTrack.Index > 0
+                    ? queueTrack.Index - 1
+                    : (GetIndexOf(item) ?? -1);
+
+                if (zeroBasedIndex >= 0)
+                {
+                    await MediaActions.PlayIndexAsync(queueContext.QueueId, zeroBasedIndex);
+                    return;
+                }
+            }
+        }
+
+        // Context album, playlist, etc.: Play the container and start at clicked item if context is available.
+        if (PlaybackContextItem != null && !(PlaybackContextItem is PlayerQueue)) 
         {
             await MediaActions.PlayMediaAsync(PlaybackContextItem, item);
             return;
         }
 
-        // Fallback mode: play clicked item immediately and append following visible items.
+        // Fallback: Play clicked item immediately and append following visible items.
         await MediaActions.PlayMediaAsync(item);
 
         var itemsToQueue = GetItemsAfterIndex(item);
@@ -362,14 +379,31 @@ public partial class TableView : ContentView
         SelectSingle(item);
         SyncSelectionAndHeaderState(item);
 
-        // Context mode: play the container (e.g. album/playlist) and start at clicked item.
-        if (PlaybackContextItem != null)
+        // Context queue: play item index
+        if (PlaybackContextItem is PlayerQueue queueContext)
+        {
+            if (!string.IsNullOrWhiteSpace(queueContext.QueueId))
+            {
+                var zeroBasedIndex = item is Track queueTrack && queueTrack.Index > 0
+                    ? queueTrack.Index - 1
+                    : (GetIndexOf(item) ?? -1);
+
+                if (zeroBasedIndex >= 0)
+                {
+                    await MediaActions.PlayIndexAsync(queueContext.QueueId, zeroBasedIndex);
+                    return;
+                }
+            }
+        }
+
+        // Context album, playlist, etc.: Play the container and start at clicked item if context is available.
+        if (PlaybackContextItem != null && !(PlaybackContextItem is PlayerQueue)) 
         {
             await MediaActions.PlayMediaAsync(PlaybackContextItem, item);
             return;
         }
 
-        // Fallback mode: play clicked item immediately and append following visible items.
+        // Fallback: Play clicked item immediately and append following visible items.
         await MediaActions.PlayMediaAsync(item);
 
         var itemsToQueue = GetItemsAfterIndex(item);

@@ -1589,11 +1589,19 @@ public class MusicAssistantService
     }
 
     /// <summary>
-    /// Delete item (by id or index) from the queue.
+    /// Delete item by index from the queue.
     /// </summary>
-    public async Task DeleteQueueItemAsync(string queueId, string itemIdOrIndex)
+    public async Task DeleteQueueItemAsync(string queueId, int itemIndex)
     {
-        await SendCommandAsync<object>("player_queues/delete_item", new { queue_id = queueId, item_id_or_index = itemIdOrIndex });
+        await SendCommandAsync<object>("player_queues/delete_item", new { queue_id = queueId, item_id_or_index = itemIndex });
+    }
+
+    /// <summary>
+    /// Delete item by queue item id from the queue.
+    /// </summary>
+    public async Task DeleteQueueItemAsync(string queueId, string itemId)
+    {
+        await SendCommandAsync<object>("player_queues/delete_item", new { queue_id = queueId, item_id_or_index = itemId });
     }
 
     /// <summary>
@@ -1626,6 +1634,18 @@ public class MusicAssistantService
         {
             queue_id = queueId,
             repeat_mode = repeatMode.ToString().ToLowerInvariant()
+        });
+    }
+
+    /// <summary>
+    /// Configure "Don't stop the music" setting on the queue.
+    /// </summary>
+    public async Task SetDontStopTheMusicAsync(string queueId, bool dontStopTheMusicEnabled)
+    {
+        await SendCommandAsync<object>("player_queues/dont_stop_the_music", new
+        {
+            queue_id = queueId,
+            dont_stop_the_music_enabled = dontStopTheMusicEnabled
         });
     }
 

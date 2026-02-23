@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace mashin.Models
@@ -182,6 +183,8 @@ namespace mashin.Models
     /// </summary>
     public class Track : MediaItem
     {
+        private int _index;
+
         public override MediaType MediaType { get; set; } = MediaType.Track;
 
         [JsonPropertyName("duration")]
@@ -200,7 +203,20 @@ namespace mashin.Models
         public int TrackNumber { get; set; }
 
         [JsonIgnore]
-        public int Index { get; set; }
+        public int Index
+        {
+            get => _index;
+            set
+            {
+                if (_index == value)
+                {
+                    return;
+                }
+
+                _index = value;
+                OnPropertyChanged();
+            }
+        }
 
         [JsonIgnore]
         public override string? ImageUrl => Album?.ImageUrl ?? Metadata?.Images?.FirstOrDefault()?.Path;
@@ -518,6 +534,19 @@ namespace mashin.Models
     }
 
     /// <summary>
+    /// Music Assistant API PlaybackState enum
+    /// </summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public enum PlaybackState
+    {
+        Idle,
+        Playing,
+        Paused,
+        Buffering,
+        Unknown
+    }
+
+    /// <summary>
     /// Music Assistant API PlayerQueue wrapper
     /// </summary>
     public class PlayerQueue
@@ -525,23 +554,41 @@ namespace mashin.Models
         [JsonPropertyName("queue_id")]
         public string QueueId { get; set; } = string.Empty;
 
+        [JsonPropertyName("active")]
+        public bool Active { get; set; }
+
         [JsonPropertyName("display_name")]
         public string DisplayName { get; set; } = string.Empty;
 
-        [JsonPropertyName("active")]
-        public bool Active { get; set; }
+        [JsonPropertyName("available")]
+        public bool Available { get; set; }
 
         [JsonPropertyName("items")]
         public int ItemCount { get; set; }
 
-        [JsonPropertyName("state")]
-        public string State { get; set; } = "idle";
+        [JsonPropertyName("shuffle_enabled")]
+        public bool? ShuffleEnabled { get; set; }
+
+        [JsonPropertyName("repeat_mode")]
+        public RepeatMode? RepeatMode { get; set; }
+
+        [JsonPropertyName("dont_stop_the_music_enabled")]
+        public bool? DontStopTheMusicEnabled { get; set; }
 
         [JsonPropertyName("current_index")]
         public int? CurrentIndex { get; set; }
 
+        [JsonPropertyName("index_in_buffer")]
+        public int? IndexInBuffer { get; set; }
+
         [JsonPropertyName("elapsed_time")]
         public double? ElapsedTime { get; set; }
+
+        [JsonPropertyName("elapsed_time_last_updated")]
+        public double? ElapsedTimeLastUpdated { get; set; }
+
+        [JsonPropertyName("state")]
+        public PlaybackState? State { get; set; }
 
         [JsonPropertyName("current_item")]
         public QueueItem? CurrentItem { get; set; }
@@ -549,11 +596,17 @@ namespace mashin.Models
         [JsonPropertyName("next_item")]
         public QueueItem? NextItem { get; set; }
 
-        [JsonPropertyName("shuffle_enabled")]
-        public bool ShuffleEnabled { get; set; }
+        [JsonPropertyName("radio_source")]
+        public List<MediaType>? RadioSource { get; set; }
 
-        [JsonPropertyName("repeat_mode")]
-        public RepeatMode RepeatMode { get; set; }
+        [JsonPropertyName("flow_mode")]
+        public bool? FlowMode { get; set; }
+
+        [JsonPropertyName("resume_pos")]
+        public int? ResumePos { get; set; }
+
+        [JsonPropertyName("extra_attributes")]
+        public Dictionary<string, JsonElement>? ExtraAttributes { get; set; }
     }
 
     /// <summary>

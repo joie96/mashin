@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 
 namespace mashin.Services;
 
+#region Interfaces
+
 /// <summary>
 /// Interface for common actions on MediaItems that can be used in different views (TableView, RowView, etc.).
 /// </summary>
@@ -21,18 +23,32 @@ public interface IMediaItemActions
     Task RemoveFromFavoritesAsync(object item);
     Task UpdatePlaylistAsync(Playlist playlist);
     Task RemovePlaylistAsync(Playlist playlist);
+    Task ClearQueueAsync(string queueId, bool skipStop = false);
+    Task PlayIndexAsync(string queueId, int index);
+    Task DeleteQueueItemAsync(string queueId, int itemIndex);
+    Task DeleteQueueItemAsync(string queueId, string itemId);
+    Task MoveQueueItemAsync(string queueId, string queueItemId, int posShift = 0);
+    Task SetDontStopTheMusicAsync(string queueId, bool dontStopTheMusicEnabled);
 
 }
+
+#endregion
 
 /// <summary>
 /// Provides common actions for MediaItems that can be used in different views (TableView, RowView, etc.).
 /// </summary>
 public class MediaItemActions : IMediaItemActions
 {
+    #region Fields
+
     private readonly MusicAssistantService _musicAssistant;
     private readonly IPlayerService _playerService;
     private readonly IUserDataService _userDataService;
     private readonly ILogger<MediaItemActions> _logger;
+
+    #endregion
+
+    #region Constructor
 
     public MediaItemActions(
         MusicAssistantService musicAssistant,
@@ -45,6 +61,10 @@ public class MediaItemActions : IMediaItemActions
         _userDataService = userDataService;
         _logger = logger;
     }
+
+    #endregion
+
+    #region Media Item Actions
 
     /// <summary>
     /// Plays the specified media item(s), replacing the current queue.
@@ -344,6 +364,158 @@ public class MediaItemActions : IMediaItemActions
         }
     }
 
+    #endregion
+
+    #region Queue Item Actions
+
+    /// <summary>
+    /// Clears all items in the queue.
+    /// </summary>
+    public async Task ClearQueueAsync(string queueId, bool skipStop = false)
+    {
+        if (string.IsNullOrWhiteSpace(queueId))
+        {
+            _logger.LogWarning("QueueId is required to clear queue");
+            return;
+        }
+
+        try
+        {
+            await _musicAssistant.ClearQueueAsync(queueId, skipStop);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to clear queue: {QueueId}", queueId);
+        }
+    }
+
+    /// <summary>
+    /// Plays item at index in the queue.
+    /// </summary>
+    public async Task PlayIndexAsync(string queueId, int index)
+    {
+        if (string.IsNullOrWhiteSpace(queueId))
+        {
+            _logger.LogWarning("QueueId is required to play queue index");
+            return;
+        }
+
+        try
+        {
+            await _musicAssistant.PlayIndexAsync(queueId, index);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to play index {Index} on queue: {QueueId}", index, queueId);
+        }
+    }
+
+    /// <summary>
+    /// Deletes an item by index from the queue.
+    /// </summary>
+    public async Task DeleteQueueItemAsync(string queueId, int itemIndex)
+    {
+        if (string.IsNullOrWhiteSpace(queueId))
+        {
+            _logger.LogWarning("QueueId is required to delete queue item");
+            return;
+        }
+
+        if (itemIndex < 0)
+        {
+            _logger.LogWarning("Queue item index must be >= 0 to delete queue item");
+            return;
+        }
+
+        try
+        {
+            await _musicAssistant.DeleteQueueItemAsync(queueId, itemIndex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete queue item index {QueueItemIndex} from queue: {QueueId}", itemIndex, queueId);
+        }
+    }
+
+    /// <summary>
+    /// Deletes an item by queue item id from the queue.
+    /// </summary>
+    public async Task DeleteQueueItemAsync(string queueId, string itemId)
+    {
+        if (string.IsNullOrWhiteSpace(queueId))
+        {
+            _logger.LogWarning("QueueId is required to delete queue item");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(itemId))
+        {
+            _logger.LogWarning("Item id is required to delete queue item");
+            return;
+        }
+
+        try
+        {
+            await _musicAssistant.DeleteQueueItemAsync(queueId, itemId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete queue item {QueueItem} from queue: {QueueId}", itemId, queueId);
+        }
+    }
+
+    /// <summary>
+    /// Moves a queue item up/down by a position shift.
+    /// </summary>
+    public async Task MoveQueueItemAsync(string queueId, string queueItemId, int posShift = 0)
+    {
+        if (string.IsNullOrWhiteSpace(queueId))
+        {
+            _logger.LogWarning("QueueId is required to move queue item");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(queueItemId))
+        {
+            _logger.LogWarning("Queue item id is required to move queue item");
+            return;
+        }
+
+        try
+        {
+            await _musicAssistant.MoveQueueItemAsync(queueId, queueItemId, posShift);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to move queue item {QueueItemId} on queue: {QueueId}", queueItemId, queueId);
+        }
+    }
+
+    /// <summary>
+    /// Configures "Don't stop the music" setting on the queue.
+    /// </summary>
+    public async Task SetDontStopTheMusicAsync(string queueId, bool dontStopTheMusicEnabled)
+    {
+        if (string.IsNullOrWhiteSpace(queueId))
+        {
+            _logger.LogWarning("QueueId is required to configure don't stop the music");
+            return;
+        }
+
+        try
+        {
+            await _musicAssistant.SetDontStopTheMusicAsync(queueId, dontStopTheMusicEnabled);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to set don't stop the music on queue: {QueueId}", queueId);
+        }
+    }
+
+    #endregion
+
+    #region Helpers
+
     /// <summary>
     /// Converts a parameter to a list of MediaItems.
     /// Supports single MediaItem or IList of MediaItems.
@@ -365,4 +537,6 @@ public class MediaItemActions : IMediaItemActions
 
         return new List<MediaItem>();
     }
+
+    #endregion
 }

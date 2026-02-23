@@ -8,10 +8,12 @@ using Microsoft.Maui.Dispatching;
 using Sendspin.SDK.Connection;
 using Sendspin.SDK.Models;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using mashin.Collections;
+using MauiIcons.Fluent.Filled;
 
 namespace mashin.ViewModels;
 
@@ -38,6 +40,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private double _duration;
     private double _position;
     private bool _isSeeking;
+    private bool _isDontStopTheMusicEnabled;
 
     private int _volume = 50;
     private bool _suppressVolumeCommand;
@@ -45,8 +48,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private string _searchQuery = string.Empty;
     private bool _isSearching;
 
+    private PlayerQueue? _currentPlayerQueue;
     private Track? _currentTrack;
-    private IReadOnlyList<Track> _currentQueueTracks = Array.Empty<Track>();
+    private readonly ObservableRangeCollection<Track> _currentQueueTracks = new();
 
     private ObservableCollection<ContextMenuItem> _userMenuItems = new();
     private ObservableRangeCollection<ContextMenuItem> _queueContextMenuItems = new();
@@ -54,6 +58,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private NavigationSection _currentSection = NavigationSection.Home;
 
     public event EventHandler<Track?>? CurrentTrackChanged;
+    public event Func<Task>? CloseQueueViewRequested;
 
     #endregion
 
@@ -93,6 +98,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _contextMenuService = contextMenuService;
         _logger = logger;
         MediaActions = mediaActions;
+        _currentQueueTracks.CollectionChanged += OnCurrentQueueTracksCollectionChanged;
 
         BuildUserMenuItems();
         BuildQueueContextMenuItems();
@@ -142,11 +148,32 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             }
         });
 
+        // LinkLabel Commands
         AlbumTappedCommand = new Command<object>(async parameter =>
-            await _navigationService.NavigateToAsync<AlbumDetailPage>(parameter));
+        {
+            if (CloseQueueViewRequested is { } closeQueueViewRequested)
+            {
+                foreach (var callback in closeQueueViewRequested.GetInvocationList().OfType<Func<Task>>())
+                {
+                    await callback();
+                }
+            }
+
+            await _navigationService.NavigateToAsync<AlbumDetailPage>(parameter);
+        });
 
         ArtistTappedCommand = new Command<object>(async parameter =>
-            await _navigationService.NavigateToAsync<ArtistDetailPage>(parameter));
+        {
+            if (CloseQueueViewRequested is { } closeQueueViewRequested)
+            {
+                foreach (var callback in closeQueueViewRequested.GetInvocationList().OfType<Func<Task>>())
+                {
+                    await callback();
+                }
+            }
+
+            await _navigationService.NavigateToAsync<ArtistDetailPage>(parameter);
+        });
 
         // Playback Commands
         PreviousTrackCommand = new Command(async () => await PreviousTrackAsync());
@@ -283,10 +310,37 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
     }
 
-    public IReadOnlyList<Track> CurrentQueueTracks
+    public PlayerQueue? CurrentPlayerQueue
     {
-        get => _currentQueueTracks;
-        private set => SetProperty(ref _currentQueueTracks, value);
+        get => _currentPlayerQueue;
+        private set => SetProperty(ref _currentPlayerQueue, value);
+    }
+
+    public ObservableRangeCollection<Track> CurrentQueueTracks => _currentQueueTracks;
+
+    public string QueueTrackCountText => $"{_currentQueueTracks.Count} Titel";
+
+    public string QueueTotalDurationText
+    {
+        get
+        {
+            var totalSeconds = _currentQueueTracks.Sum(track => Math.Max(0, track.Duration));
+            return FormatQueueDuration(totalSeconds);
+        }
+    }
+
+    public bool IsDontStopTheMusicEnabled
+    {
+        get => _isDontStopTheMusicEnabled;
+        set
+        {
+            if (!SetProperty(ref _isDontStopTheMusicEnabled, value))
+            {
+                return;
+            }
+
+            _ = SetDontStopTheMusicAsync(value);
+        }
     }
 
     #endregion
@@ -382,6 +436,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         _positionTimer.Tick -= OnPositionTimerTick;
         _positionTimer.Stop();
+
+        _currentQueueTracks.CollectionChanged -= OnCurrentQueueTracksCollectionChanged;
 
         _musicAssistant.LoginRequired -= OnLoginRequired;
 
@@ -607,6 +663,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
     }
 
+    private void OnCurrentQueueTracksCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(QueueTrackCountText));
+        OnPropertyChanged(nameof(QueueTotalDurationText));
+    }
+
     private async void OnGroupStateChanged(object? sender, GroupState group)
     {
         try
@@ -633,8 +695,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             var md = group.Metadata;
             if (md is null)
             {
+                CurrentPlayerQueue = null;
                 CurrentTrack = null;
-                CurrentQueueTracks = Array.Empty<Track>();
+                _currentQueueTracks.Clear();
 
                 Duration = 0;
                 if (!_isSeeking)
@@ -658,6 +721,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                     try
                     {
                         var activeQueue = await _musicAssistant.GetActiveQueueForPlayerAsync(_playerService.ClientId);
+                        CurrentPlayerQueue = activeQueue;
 
                         // Set CurrentTrack, only if changed (based on uri or id) to avoid unnecessary UI updates
                         if (activeQueue?.CurrentItem?.MediaItem != null)
@@ -709,12 +773,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                                 if (!currentQueueTrackKeys.SequenceEqual(nextQueueTrackKeys))
                                 {
                                     await _musicAssistant.EnrichWithProviderInfoAsync(nextQueueTracks);
-                                    CurrentQueueTracks = nextQueueTracks;
+                                    _currentQueueTracks.ReplaceRange(nextQueueTracks);
                                 }
                             }
                             else
                             {
-                                CurrentQueueTracks = Array.Empty<Track>();
+                                CurrentPlayerQueue = activeQueue;
+                                _currentQueueTracks.Clear();
                             }
 
                             _logger.LogDebug("Retrieved current track from Music Assistant queue: {Name} by {Artist}",
@@ -725,15 +790,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                             _logger.LogDebug("No current item found in Music Assistant queue for player: {PlayerId}",
                                 _playerService.ClientId);
 
+                            CurrentPlayerQueue = activeQueue;
                             CurrentTrack = null;
-                            CurrentQueueTracks = Array.Empty<Track>();
+                            _currentQueueTracks.Clear();
                         }
                     }
                     catch (Exception ex)
                     {
                         _logger.LogWarning(ex, "Failed to retrieve current track from Music Assistant queue");
+                        CurrentPlayerQueue = null;
                         CurrentTrack = null;
-                        CurrentQueueTracks = Array.Empty<Track>();
+                        _currentQueueTracks.Clear();
                     }
                 }
             }
@@ -780,70 +847,409 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             {
                 Text = "Abspielen",
                 Icon = FluentIcons.Play12,
-                Command = new Command(async () =>
-                    await MediaActions.PlayMediaAsync(CurrentQueueTracks.Where(track => track.IsSelected)))
+                Command = new Command(async () => await PlaySelectedQueueIndexAsync())
             },
             new()
             {
                 Text = "Als Nächstes spielen",
-                Icon = FluentIcons.Add12,
-                Command = new Command(async () =>
-                    await MediaActions.PlayMediaNextAsync(CurrentQueueTracks.Where(track => track.IsSelected)))
+                Icon = FluentIcons.ArrowForward16,
+                Command = new Command(async () => await MoveSelectedQueueItemsNextAsync())
             },
             new()
             {
                 Text = "Als Letztes spielen",
-                Icon = FluentIcons.Add12,
-                Command = new Command(async () =>
-                    await MediaActions.PlayMediaLastAsync(CurrentQueueTracks.Where(track => track.IsSelected)))
+                Icon = FluentIcons.ArrowNext12,
+                Command = new Command(async () => await MoveSelectedQueueItemsLastAsync())
+            },
+            new()
+            {
+                Text = "Aus Queue entfernen",
+                Icon = FluentIcons.Dismiss12,
+                Command = new Command(async () => await RemoveSelectedQueueItemsAsync())
             },
             new() { IsSeparator = true },
             new()
             {
                 Text = "Zu Wiedergabeliste hinzufügen",
                 Icon = FluentIcons.Add12,
-                SubItems = BuildQueuePlaylistSubItems()
+                SubItems = new ObservableCollection<ContextMenuItem>(
+                    _playlistStore.Playlists
+                        .Where(playlist => !playlist.Name.StartsWith("~", StringComparison.Ordinal))
+                        .Select(playlist => new ContextMenuItem
+                        {
+                            Text = playlist.DisplayName,
+                            Icon = FluentIcons.TextBulletListLtr16,
+                            Command = new Command(async () =>
+                                await MediaActions.AddToPlaylistAsync(
+                                    CurrentQueueTracks.Where(track => track.IsSelected),
+                                    playlist))
+                        }))
             },
             new() { IsSeparator = true },
             new()
             {
                 Text = "Zu Favoriten hinzufügen",
-                Icon = FluentIcons.Add12,
+                Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                     await MediaActions.AddToFavoritesAsync(CurrentQueueTracks.Where(track => track.IsSelected)))
             },
             new()
             {
                 Text = "Aus Favoriten entfernen",
-                Icon = FluentIcons.Add12,
+                Icon = FluentFilledIcons.Heart12Filled,
                 Command = new Command(async () =>
                     await MediaActions.RemoveFromFavoritesAsync(CurrentQueueTracks.Where(track => track.IsSelected)))
             }
         };
     }
 
-    private ObservableRangeCollection<ContextMenuItem> BuildQueuePlaylistSubItems()
-    {
-        var items = new ObservableRangeCollection<ContextMenuItem>();
+    #region Queue Menu Actions
 
-        foreach (var playlist in _playlistStore.Playlists)
+    private async Task PlaySelectedQueueIndexAsync()
+    {
+        var selectedTracks = CurrentQueueTracks
+            .Where(track => track.IsSelected)
+            .OrderBy(track => track.Index)
+            .ToList();
+
+        if (selectedTracks.Count == 0)
         {
-            if (playlist.Name.StartsWith("~", StringComparison.Ordinal))
+            _logger.LogInformation("No queue items selected for play");
+            return;
+        }
+
+        var firstSelected = selectedTracks.First();
+        var zeroBasedIndex = Math.Max(0, firstSelected.Index - 1);
+
+        var activeQueue = await GetActiveQueueForContextMenuAsync();
+        if (activeQueue == null)
+        {
+            return;
+        }
+
+        await MediaActions.PlayIndexAsync(activeQueue.QueueId, zeroBasedIndex);
+    }
+
+    private async Task MoveSelectedQueueItemsNextAsync()
+    {
+        var activeQueue = await GetActiveQueueForContextMenuAsync();
+        if (activeQueue == null)
+        {
+            return;
+        }
+
+        var queueItems = await _musicAssistant.GetQueueItemsAsync(activeQueue.QueueId);
+        if (queueItems.Count == 0)
+        {
+            _logger.LogInformation("Queue is empty, nothing to move");
+            return;
+        }
+
+        var selectedIndices = CurrentQueueTracks
+            .Where(track => track.IsSelected)
+            .Select(track => Math.Max(0, track.Index - 1))
+            .Distinct()
+            .OrderBy(index => index)
+            .ToList();
+
+        if (selectedIndices.Count == 0)
+        {
+            _logger.LogInformation("No queue items selected for 'Als Nächstes spielen'");
+            return;
+        }
+
+        var selectedQueueItemIds = selectedIndices
+            .Where(index => index < queueItems.Count)
+            .Select(index => queueItems[index].QueueItemId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToList();
+
+        if (selectedQueueItemIds.Count == 0)
+        {
+            _logger.LogInformation("No valid queue items selected for move");
+            return;
+        }
+
+        // Calculate target position for each selected item, based on current queue order and current playing index.
+        var currentIndex = Math.Max(0, activeQueue.CurrentIndex ?? 0);
+        var queueItemOrder = queueItems.Select(item => item.QueueItemId).ToList();
+        var insertPosition = Math.Min(currentIndex + 1, queueItemOrder.Count);
+
+        foreach (var queueItemId in selectedQueueItemIds)
+        {
+            var currentPosition = queueItemOrder.IndexOf(queueItemId);
+            if (currentPosition < 0)
             {
                 continue;
             }
 
-            items.Add(new ContextMenuItem
+            if (currentPosition < insertPosition)
             {
-                Text = playlist.DisplayName,
-                Icon = FluentIcons.Add12,
-                Command = new Command(async () =>
-                    await MediaActions.AddToPlaylistAsync(CurrentQueueTracks.Where(track => track.IsSelected), playlist))
-            });
+                insertPosition--;
+            }
+
+            var positionShift = insertPosition - currentPosition;
+            if (positionShift != 0)
+            {
+                await MediaActions.MoveQueueItemAsync(activeQueue.QueueId, queueItemId, positionShift);
+            }
+
+            queueItemOrder.RemoveAt(currentPosition);
+            queueItemOrder.Insert(insertPosition, queueItemId);
+            insertPosition++;
         }
 
-        return items;
+        // Update local queue track order to reflect the move, before reloading from server (optimistic update).
+        var validSelectedIndices = selectedIndices
+            .Where(index => index >= 0 && index < _currentQueueTracks.Count)
+            .Distinct()
+            .OrderBy(index => index)
+            .ToList();
+
+        if (validSelectedIndices.Count > 0)
+        {
+            var selectedTracks = validSelectedIndices
+                .Select(index => _currentQueueTracks[index])
+                .ToList();
+
+            for (var index = validSelectedIndices.Count - 1; index >= 0; index--)
+            {
+                _currentQueueTracks.RemoveAt(validSelectedIndices[index]);
+            }
+
+            var removedBeforeOrAtCurrent = validSelectedIndices.Count(index => index <= currentIndex);
+            var localInsertPosition = Math.Min(currentIndex + 1 - removedBeforeOrAtCurrent, _currentQueueTracks.Count);
+            localInsertPosition = Math.Max(0, localInsertPosition);
+
+            foreach (var track in selectedTracks)
+            {
+                _currentQueueTracks.Insert(localInsertPosition, track);
+                localInsertPosition++;
+            }
+        }
+
+        for (var index = 0; index < _currentQueueTracks.Count; index++)
+        {
+            _currentQueueTracks[index].Index = index + 1;
+        }
+
+        await ReloadCurrentQueueTracksAsync(activeQueue.QueueId);
     }
+
+    private async Task MoveSelectedQueueItemsLastAsync()
+    {
+        var activeQueue = await GetActiveQueueForContextMenuAsync();
+        if (activeQueue == null)
+        {
+            return;
+        }
+
+        var queueItems = await _musicAssistant.GetQueueItemsAsync(activeQueue.QueueId);
+        if (queueItems.Count == 0)
+        {
+            _logger.LogInformation("Queue is empty, nothing to move");
+            return;
+        }
+
+        var selectedIndices = CurrentQueueTracks
+            .Where(track => track.IsSelected)
+            .Select(track => Math.Max(0, track.Index - 1))
+            .Distinct()
+            .OrderBy(index => index)
+            .ToList();
+
+        if (selectedIndices.Count == 0)
+        {
+            _logger.LogInformation("No queue items selected for 'Als Letztes spielen'");
+            return;
+        }
+
+        var selectedQueueItemIds = selectedIndices
+            .Where(index => index < queueItems.Count)
+            .Select(index => queueItems[index].QueueItemId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToList();
+
+        if (selectedQueueItemIds.Count == 0)
+        {
+            _logger.LogInformation("No valid queue items selected for move");
+            return;
+        }
+
+        // Calculate target position for each selected item, based on current queue order.
+        var queueItemOrder = queueItems.Select(item => item.QueueItemId).ToList();
+
+        foreach (var queueItemId in selectedQueueItemIds)
+        {
+            var currentPosition = queueItemOrder.IndexOf(queueItemId);
+            if (currentPosition < 0)
+            {
+                continue;
+            }
+
+            var targetPosition = queueItemOrder.Count - 1;
+            var positionShift = targetPosition - currentPosition;
+            if (positionShift != 0)
+            {
+                await MediaActions.MoveQueueItemAsync(activeQueue.QueueId, queueItemId, positionShift);
+            }
+
+            queueItemOrder.RemoveAt(currentPosition);
+            queueItemOrder.Add(queueItemId);
+        }
+
+        // Update local queue track order to reflect the move, before reloading from server (optimistic update).
+        var validSelectedIndices = selectedIndices
+            .Where(index => index >= 0 && index < _currentQueueTracks.Count)
+            .Distinct()
+            .OrderBy(index => index)
+            .ToList();
+
+        if (validSelectedIndices.Count > 0)
+        {
+            var selectedTracks = validSelectedIndices
+                .Select(index => _currentQueueTracks[index])
+                .ToList();
+
+            for (var index = validSelectedIndices.Count - 1; index >= 0; index--)
+            {
+                _currentQueueTracks.RemoveAt(validSelectedIndices[index]);
+            }
+
+            foreach (var track in selectedTracks)
+            {
+                _currentQueueTracks.Add(track);
+            }
+        }
+
+        for (var index = 0; index < _currentQueueTracks.Count; index++)
+        {
+            _currentQueueTracks[index].Index = index + 1;
+        }
+
+        await ReloadCurrentQueueTracksAsync(activeQueue.QueueId);
+    }
+
+    private async Task RemoveSelectedQueueItemsAsync()
+    {
+        var activeQueue = await GetActiveQueueForContextMenuAsync();
+        if (activeQueue == null)
+        {
+            return;
+        }
+
+        var selectedIndices = CurrentQueueTracks
+            .Where(track => track.IsSelected)
+            .Select(track => Math.Max(0, track.Index - 1))
+            .Distinct()
+            .OrderByDescending(index => index)
+            .ToList();
+
+        if (selectedIndices.Count == 0)
+        {
+            _logger.LogInformation("No queue items selected for removal");
+            return;
+        }
+
+        foreach (var selectedIndex in selectedIndices)
+        {
+            await MediaActions.DeleteQueueItemAsync(activeQueue.QueueId, selectedIndex);
+
+            if (selectedIndex >= 0 && selectedIndex < _currentQueueTracks.Count)
+            {
+                _currentQueueTracks.RemoveAt(selectedIndex);
+            }
+        }
+
+        for (var index = 0; index < _currentQueueTracks.Count; index++)
+        {
+            _currentQueueTracks[index].Index = index + 1;
+        }
+
+        await ReloadCurrentQueueTracksAsync(activeQueue.QueueId);
+    }
+
+    private async Task ReloadCurrentQueueTracksAsync(string queueId)
+    {
+        if (string.IsNullOrWhiteSpace(queueId))
+        {
+            return;
+        }
+
+        var queueItems = await _musicAssistant.GetQueueItemsAsync(queueId);
+        var reloadedTracks = queueItems
+            .Select(queueItem => queueItem.MediaItem)
+            .OfType<Track>()
+            .ToList();
+
+        for (var index = 0; index < reloadedTracks.Count; index++)
+        {
+            var track = reloadedTracks[index];
+            track.Index = index + 1;
+            track.Favorite = _userDataService.IsFavorite(track);
+        }
+
+        var localTrackKeys = _currentQueueTracks
+            .Select(track => !string.IsNullOrWhiteSpace(track.Uri)
+                ? $"uri:{track.Uri.Trim().ToUpperInvariant()}"
+                : $"id:{track.ItemId}")
+            .ToList();
+
+        var reloadedTrackKeys = reloadedTracks
+            .Select(track => !string.IsNullOrWhiteSpace(track.Uri)
+                ? $"uri:{track.Uri.Trim().ToUpperInvariant()}"
+                : $"id:{track.ItemId}")
+            .ToList();
+
+        if (!localTrackKeys.SequenceEqual(reloadedTrackKeys))
+        {
+            if (reloadedTracks.Count > 0)
+            {
+                await _musicAssistant.EnrichWithProviderInfoAsync(reloadedTracks);
+            }
+
+            _currentQueueTracks.ReplaceRange(reloadedTracks);
+        }
+    }
+
+    private async Task SetDontStopTheMusicAsync(bool dontStopTheMusicEnabled)
+    {
+        try
+        {
+            var queueId = CurrentPlayerQueue?.QueueId;
+            if (string.IsNullOrWhiteSpace(queueId))
+            {
+                _logger.LogDebug("No active queue available for dont-stop-the-music toggle");
+                return;
+            }
+
+            await MediaActions.SetDontStopTheMusicAsync(queueId, dontStopTheMusicEnabled);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to set dont-stop-the-music state to {Enabled}", dontStopTheMusicEnabled);
+        }
+    }
+
+    private async Task<PlayerQueue?> GetActiveQueueForContextMenuAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_playerService.ClientId))
+        {
+            _logger.LogWarning("ClientId is not available. Player connection is missing.");
+            return null;
+        }
+
+        var activeQueue = await _musicAssistant.GetActiveQueueForPlayerAsync(_playerService.ClientId);
+        if (activeQueue == null || string.IsNullOrWhiteSpace(activeQueue.QueueId))
+        {
+            _logger.LogWarning("No active queue found for player: {PlayerId}", _playerService.ClientId);
+            return null;
+        }
+
+        return activeQueue;
+    }
+
+    #endregion
 
     private async Task ExecuteLogoutAsync()
     {
@@ -893,6 +1299,24 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         var ts = TimeSpan.FromSeconds(seconds);
         return ts.Hours > 0 ? ts.ToString(@"h\:mm\:ss") : ts.ToString(@"m\:ss");
+    }
+
+    private static string FormatQueueDuration(int totalSeconds)
+    {
+        if (totalSeconds <= 0)
+        {
+            return "0 Minuten";
+        }
+
+        var ts = TimeSpan.FromSeconds(totalSeconds);
+        var totalHours = (int)ts.TotalHours;
+
+        if (totalHours > 0)
+        {
+            return $"{totalHours} Std. {ts.Minutes:00} Minuten";
+        }
+
+        return $"{ts.Minutes} Minuten";
     }
 
     #endregion

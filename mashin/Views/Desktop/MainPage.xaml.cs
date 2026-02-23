@@ -31,6 +31,7 @@ public partial class MainPage : ContentPage
         _overlayService = overlayService;
         _logger = logger;
         BindingContext = _viewModel;
+        _viewModel.CloseQueueViewRequested += OnCloseQueueViewRequestedAsync;
 
         _overlayService.Initialize(OverlayHost, OverlayContent);
 
@@ -63,6 +64,19 @@ public partial class MainPage : ContentPage
     #endregion
 
     #region Queue Overlay
+
+    private async Task OnCloseQueueViewRequestedAsync()
+    {
+        if (QueueOverlay.IsAnimating)
+        {
+            return;
+        }
+
+        if (QueueOverlay.IsOpen)
+        {
+            await QueueOverlay.HideAsync();
+        }
+    }
 
     private async void OnQueueTapped(object? sender, TappedEventArgs e)
     {
