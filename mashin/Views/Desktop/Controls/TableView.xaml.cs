@@ -5,6 +5,7 @@ using mashin.Views.Desktop;
 using Microsoft.Maui.ApplicationModel;
 using System.Collections;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows.Input;
 
@@ -145,6 +146,7 @@ public partial class TableView : ContentView
 
         AttachPlaybackStateSource();
         UpdatePlayingStateForVisibleItems();
+        UpdateFavoriteStateForVisibleItems();
 
     }
 
@@ -197,6 +199,7 @@ public partial class TableView : ContentView
         view.ClearAllSelections();
         view.SyncSelectionAndHeaderState(clickedItem: null);
         view.UpdatePlayingStateForVisibleItems();
+        view.UpdateFavoriteStateForVisibleItems();
     }
 
     #endregion
@@ -428,6 +431,13 @@ public partial class TableView : ContentView
         {
             await MediaActions.AddToFavoritesAsync(item);
         }
+
+        if (_currentTrack != null && IsSameTrack(item, _currentTrack) && _currentTrack.Favorite != item.Favorite)
+        {
+            _currentTrack.Favorite = item.Favorite;
+        }
+
+        UpdateFavoriteStateForVisibleItems();
     }
 
     #endregion
@@ -577,7 +587,7 @@ public partial class TableView : ContentView
 
     #endregion
 
-    #region Playing state tracking
+    #region Playing state & favorite tracking
 
     private void AttachPlaybackStateSource()
     {
@@ -595,6 +605,11 @@ public partial class TableView : ContentView
         _mainViewModel = vm;
         _currentTrack = vm.CurrentTrack;
         _mainViewModel.CurrentTrackChanged += OnCurrentTrackChanged;
+
+        if (_currentTrack != null)
+        {
+            _currentTrack.PropertyChanged += OnCurrentTrackPropertyChanged;
+        }
     }
 
     private void DetachPlaybackStateSource()
@@ -605,21 +620,58 @@ public partial class TableView : ContentView
         }
 
         _mainViewModel.CurrentTrackChanged -= OnCurrentTrackChanged;
+
+        if (_currentTrack != null)
+        {
+            _currentTrack.PropertyChanged -= OnCurrentTrackPropertyChanged;
+        }
+
         _mainViewModel = null;
         _currentTrack = null;
     }
 
     private void OnCurrentTrackChanged(object? sender, Track? track)
     {
+        if (_currentTrack != null)
+        {
+            _currentTrack.PropertyChanged -= OnCurrentTrackPropertyChanged;
+        }
+
         _currentTrack = track;
+
+        if (_currentTrack != null)
+        {
+            _currentTrack.PropertyChanged += OnCurrentTrackPropertyChanged;
+        }
 
         if (MainThread.IsMainThread)
         {
             UpdatePlayingStateForVisibleItems();
+            UpdateFavoriteStateForVisibleItems();
             return;
         }
 
-        MainThread.BeginInvokeOnMainThread(UpdatePlayingStateForVisibleItems);
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            UpdatePlayingStateForVisibleItems();
+            UpdateFavoriteStateForVisibleItems();
+        });
+    }
+
+    private void OnCurrentTrackPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(MediaItem.Favorite))
+        {
+            return;
+        }
+
+        if (MainThread.IsMainThread)
+        {
+            UpdateFavoriteStateForVisibleItems();
+            return;
+        }
+
+        MainThread.BeginInvokeOnMainThread(UpdateFavoriteStateForVisibleItems);
     }
 
     private void UpdatePlayingStateForVisibleItems()
@@ -644,6 +696,25 @@ public partial class TableView : ContentView
             {
                 item.IsPlaying = false;
             }
+        }
+    }
+
+    private void UpdateFavoriteStateForVisibleItems()
+    {
+        var activeTrack = _currentTrack;
+        if (activeTrack == null)
+        {
+            return;
+        }
+
+        foreach (var item in EnumerateSelectableItems())
+        {
+            if (!IsSameTrack(item, activeTrack) || item.Favorite == activeTrack.Favorite)
+            {
+                continue;
+            }
+
+            item.Favorite = activeTrack.Favorite;
         }
     }
 

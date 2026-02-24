@@ -45,6 +45,8 @@ public partial class MainPage : ContentPage
         _ = _navigationService.NavigateToAsync<HomePage>();
 
         _ = _viewModel.InitializeAsync();
+
+        UpdateQueueIconColor();
     }
 
     #endregion
@@ -75,6 +77,7 @@ public partial class MainPage : ContentPage
         if (QueueOverlay.IsOpen)
         {
             await QueueOverlay.HideAsync();
+            UpdateQueueIconColor();
         }
     }
 
@@ -88,10 +91,22 @@ public partial class MainPage : ContentPage
         if (QueueOverlay.IsOpen)
         {
             await QueueOverlay.HideAsync();
+            UpdateQueueIconColor();
             return;
         }
 
+        var queueIconLabel = this.FindByName<Label>("QueueIconLabel");
+        queueIconLabel?.SetDynamicResource(Label.TextColorProperty, "AccentColor");
         await QueueOverlay.ShowAsync();
+        UpdateQueueIconColor();
+    }
+
+    private void UpdateQueueIconColor()
+    {
+        var queueIconLabel = this.FindByName<Label>("QueueIconLabel");
+        queueIconLabel?.SetDynamicResource(
+            Label.TextColorProperty,
+            QueueOverlay.IsOpen ? "AccentColor" : "IconSecondary");
     }
 
     #endregion

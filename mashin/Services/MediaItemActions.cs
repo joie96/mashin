@@ -44,6 +44,7 @@ public class MediaItemActions : IMediaItemActions
     private readonly MusicAssistantService _musicAssistant;
     private readonly IPlayerService _playerService;
     private readonly IUserDataService _userDataService;
+    private readonly IQueueSyncService _queueSyncService;
     private readonly ILogger<MediaItemActions> _logger;
 
     #endregion
@@ -54,11 +55,13 @@ public class MediaItemActions : IMediaItemActions
         MusicAssistantService musicAssistant,
         IPlayerService playerService,
         IUserDataService userDataService,
+        IQueueSyncService queueSyncService,
         ILogger<MediaItemActions> logger)
     {
         _musicAssistant = musicAssistant;
         _playerService = playerService;
         _userDataService = userDataService;
+        _queueSyncService = queueSyncService;
         _logger = logger;
     }
 
@@ -93,6 +96,7 @@ public class MediaItemActions : IMediaItemActions
                 mediaItems,
                 QueueOption.Replace,
                 startItem: startItem);
+            await _queueSyncService.RefreshNowAsync();
         }
         catch (Exception ex)
         {
@@ -127,6 +131,7 @@ public class MediaItemActions : IMediaItemActions
                 mediaItems,
                 QueueOption.Next,
                 startItem: startItem);
+            await _queueSyncService.RefreshNowAsync();
         }
         catch (Exception ex)
         {
@@ -161,6 +166,7 @@ public class MediaItemActions : IMediaItemActions
                 mediaItems,
                 QueueOption.Add,
                 startItem: startItem);
+            await _queueSyncService.RefreshNowAsync();
         }
         catch (Exception ex)
         {
@@ -382,6 +388,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.ClearQueueAsync(queueId, skipStop);
+            await _queueSyncService.RefreshNowAsync();
         }
         catch (Exception ex)
         {
@@ -403,6 +410,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.PlayIndexAsync(queueId, index);
+            await _queueSyncService.RefreshNowAsync();
         }
         catch (Exception ex)
         {
@@ -430,6 +438,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.DeleteQueueItemAsync(queueId, itemIndex);
+            await _queueSyncService.RefreshNowAsync();
         }
         catch (Exception ex)
         {
@@ -457,6 +466,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.DeleteQueueItemAsync(queueId, itemId);
+            await _queueSyncService.RefreshNowAsync();
         }
         catch (Exception ex)
         {
@@ -484,6 +494,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.MoveQueueItemAsync(queueId, queueItemId, posShift);
+            await _queueSyncService.RefreshNowAsync();
         }
         catch (Exception ex)
         {
@@ -505,6 +516,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.SetDontStopTheMusicAsync(queueId, dontStopTheMusicEnabled);
+            await _queueSyncService.RefreshNowAsync();
         }
         catch (Exception ex)
         {

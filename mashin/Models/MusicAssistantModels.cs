@@ -596,9 +596,6 @@ namespace mashin.Models
         [JsonPropertyName("next_item")]
         public QueueItem? NextItem { get; set; }
 
-        [JsonPropertyName("radio_source")]
-        public List<MediaType>? RadioSource { get; set; }
-
         [JsonPropertyName("flow_mode")]
         public bool? FlowMode { get; set; }
 

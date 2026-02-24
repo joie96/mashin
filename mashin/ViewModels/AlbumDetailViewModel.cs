@@ -397,7 +397,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
             Album = await _musicAssistant.GetAlbumAsync(albumId, provider);
             if (Album != null)
             {
-                Album.Favorite = _userDataService.IsFavorite(Album);
+                Album.Favorite = await _userDataService.IsFavoriteAsync(Album);
                 OnPropertyChanged(nameof(IsAlbumFavorite));
             }
 
@@ -713,13 +713,15 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     private async Task PlaySelectedTracksWithModesAsync(IEnumerable<Track> tracks, MediaItem? playbackContextItem)
     {
-        var selectedTracks = tracks.Where(t => t.IsSelected).ToList();
+        var trackList = tracks.ToList();
+        var selectedTracks = trackList.Where(t => t.IsSelected).ToList();
         if (selectedTracks.Count == 0)
         {
             return;
         }
 
-        if (selectedTracks.Count > 1 || playbackContextItem == null)
+        // multiple tracks selected:  play the first one and queue the rest selected tracks
+        if (selectedTracks.Count > 1)
         {
             await MediaActions.PlayMediaAsync(selectedTracks.First());
 
@@ -732,7 +734,28 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
             return;
         }
 
-        await MediaActions.PlayMediaAsync(playbackContextItem, selectedTracks.First());
+        // single track selected: play the track and queue the following tracks in the list
+        var selectedTrack = selectedTracks.First();
+
+        if (playbackContextItem == null)
+        {
+            await MediaActions.PlayMediaAsync(selectedTrack);
+
+            var selectedIndex = trackList.IndexOf(selectedTrack);
+            if (selectedIndex >= 0 && selectedIndex < trackList.Count - 1)
+            {
+                var followingTracks = trackList.Skip(selectedIndex + 1).ToList();
+                if (followingTracks.Count > 0)
+                {
+                    await MediaActions.PlayMediaNextAsync(followingTracks);
+                }
+            }
+
+            return;
+        }
+
+        // context item given: play the track with context
+        await MediaActions.PlayMediaAsync(playbackContextItem, selectedTrack);
     }
 
     private Task BuildAlbumContextMenuAsync()

@@ -2,6 +2,7 @@
 <ContentView x:Class="mashin.Views.Desktop.Controls.QueueOverlay"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:behaviors="clr-namespace:mashin.Views.Desktop.Behaviors"
     xmlns:controls="clr-namespace:mashin.Views.Desktop.Controls"
     xmlns:converters="clr-namespace:mashin.Converters"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
@@ -48,40 +49,81 @@
 
                     <!--  Track Actions  -->
                     <HorizontalStackLayout HorizontalOptions="Center" Spacing="22">
-                        <Label FontSize="24"
-                            Text="{mi:Fluent Icon=Add24,
+                        <Border x:Name="QueueOverlayAddToPlaylistButton"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="36"
+                            StrokeThickness="0"
+                            ToolTipProperties.Text="Zu Wiedergabeliste hinzufügen"
+                            WidthRequest="36">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ShowCurrentTrackContextMenuCommand}"
+                                    CommandParameter="{x:Reference QueueOverlayAddToPlaylistButton}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="18" />
+                            </Border.StrokeShape>
+                            <Label FontSize="24"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=Add24,
                                              FontOverride=True}"
-                            TextColor="{DynamicResource IconSecondary}" />
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
 
-                        <Grid>
-                            <Label FontSize="24"
-                                IsVisible="{Binding CurrentTrack.Favorite, Converter={StaticResource InvertedBoolConverter}}"
-                                Text="{mi:Fluent Icon=Heart24,
+                        <Border
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="36"
+                            StrokeThickness="0"
+                            ToolTipProperties.Text="Favorit"
+                            WidthRequest="36">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ToggleCurrentTrackFavoriteCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="18" />
+                            </Border.StrokeShape>
+                            <Grid>
+                                <Label FontSize="24"
+                                    HorizontalOptions="Center"
+                                    IsVisible="{Binding CurrentTrack.Favorite, Converter={StaticResource InvertedBoolConverter}}"
+                                    Text="{mi:Fluent Icon=Heart24,
                                                  FontOverride=True}"
-                                TextColor="{DynamicResource IconSecondary}" />
-                            <Label FontSize="24"
-                                IsVisible="{Binding CurrentTrack.Favorite}"
-                                Text="{mi:FluentFilled Icon=Heart48Filled,
+                                    TextColor="{DynamicResource IconSecondary}"
+                                    VerticalOptions="Center" />
+                                <Label FontSize="24"
+                                    HorizontalOptions="Center"
+                                    IsVisible="{Binding CurrentTrack.Favorite}"
+                                    Text="{mi:FluentFilled Icon=Heart48Filled,
                                                        FontOverride=True}"
-                                TextColor="{DynamicResource IconSecondary}" />
-                        </Grid>
+                                    TextColor="{DynamicResource IconSecondary}"
+                                    VerticalOptions="Center" />
+                            </Grid>
+                        </Border>
                     </HorizontalStackLayout>
 
                     <!--  Track Meta  -->
                     <VerticalStackLayout Spacing="4">
                         <Label FontAttributes="Bold"
-                            FontSize="14"
+                            FontSize="16"
                             HorizontalTextAlignment="Center"
                             LineBreakMode="TailTruncation"
                             MaxLines="1"
                             Text="{Binding CurrentTrack.Name}"
                             TextColor="{DynamicResource TextPrimary}" />
-                        <Label FontSize="12"
+                        <Label FontSize="14"
                             HorizontalTextAlignment="Center"
                             LineBreakMode="TailTruncation"
                             MaxLines="1"
                             Text="{Binding CurrentTrack.ArtistName}"
-                            TextColor="{DynamicResource TextSecondary}" />
+                            TextColor="{DynamicResource TextSecondary}">
+                            <Label.Behaviors>
+                                <behaviors:LinkLabelBehavior Command="{Binding ArtistTappedCommand}"
+                                    CommandParameter="{Binding CurrentTrackPrimaryArtist}"
+                                    HoverTextColor="{DynamicResource TextPrimary}" />
+                            </Label.Behaviors>
+                        </Label>
                     </VerticalStackLayout>
                 </VerticalStackLayout>
 

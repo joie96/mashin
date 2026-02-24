@@ -13,10 +13,10 @@ public interface IUserDataService
     AuthUser? CurrentUser { get; }
 
     Task<Dictionary<string, object>> GetPreferencesAsync(bool forceRefresh = false, CancellationToken cancellationToken = default);
-    T? GetPreference<T>(string key);
+    Task<T?> GetPreferenceAsync<T>(string key, CancellationToken cancellationToken = default);
     Task<bool> SetPreferenceAsync(string key, object? value, CancellationToken cancellationToken = default);
 
-    bool IsFavorite(MediaItem mediaItem);
+    Task<bool> IsFavoriteAsync(MediaItem mediaItem, CancellationToken cancellationToken = default);
     Task<FavoritesSnapshot?> GetFavoritesSnapshotAsync(CancellationToken cancellationToken = default);
     Task<bool> SetFavoriteAsync(MediaItem mediaItem, bool isFavorite, CancellationToken cancellationToken = default);
     Task<bool> SetFavoritesAsync(IEnumerable<MediaItem> mediaItems, bool isFavorite, CancellationToken cancellationToken = default);
@@ -121,36 +121,44 @@ public sealed class UserDataService : IUserDataService
         }
     }
 
-    public T? GetPreference<T>(string key)
+    public async Task<T?> GetPreferenceAsync<T>(string key, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(key))
         {
             return default;
         }
 
-        if (!IsLoaded && !EnsureLoadedInternalSync())
+        if (!await EnsureLoadedInternalAsync(false, cancellationToken))
         {
             return default;
         }
 
-        if (!_preferences.TryGetValue(key, out var value) || value is null)
-        {
-            return default;
-        }
-
-        if (value is T typedValue)
-        {
-            return typedValue;
-        }
-
+        await _lock.WaitAsync(cancellationToken);
         try
         {
-            var json = JsonSerializer.Serialize(value);
-            return JsonSerializer.Deserialize<T>(json);
+            if (!_preferences.TryGetValue(key, out var value) || value is null)
+            {
+                return default;
+            }
+
+            if (value is T typedValue)
+            {
+                return typedValue;
+            }
+
+            try
+            {
+                var json = JsonSerializer.Serialize(value);
+                return JsonSerializer.Deserialize<T>(json);
+            }
+            catch
+            {
+                return default;
+            }
         }
-        catch
+        finally
         {
-            return default;
+            _lock.Release();
         }
     }
 
@@ -190,25 +198,33 @@ public sealed class UserDataService : IUserDataService
 
     #region Favorites
 
-    public bool IsFavorite(MediaItem mediaItem)
+    public async Task<bool> IsFavoriteAsync(MediaItem mediaItem, CancellationToken cancellationToken = default)
     {
         if (mediaItem == null || string.IsNullOrWhiteSpace(mediaItem.Uri))
         {
             return false;
         }
 
-        if (!IsLoaded && !EnsureLoadedInternalSync())
+        if (!await EnsureLoadedInternalAsync(false, cancellationToken))
         {
             return false;
         }
 
-        var snapshot = LoadFavoritesSnapshot(createIfMissing: false);
-        if (snapshot == null)
+        await _lock.WaitAsync(cancellationToken);
+        try
         {
-            return false;
-        }
+            var snapshot = LoadFavoritesSnapshot(createIfMissing: false);
+            if (snapshot == null)
+            {
+                return false;
+            }
 
-        return IsSnapshotFavorite(snapshot, mediaItem.MediaType, mediaItem.Uri!);
+            return IsSnapshotFavorite(snapshot, mediaItem.MediaType, mediaItem.Uri!);
+        }
+        finally
+        {
+            _lock.Release();
+        }
     }
 
     public async Task<FavoritesSnapshot?> GetFavoritesSnapshotAsync(CancellationToken cancellationToken = default)
@@ -655,20 +671,7 @@ public sealed class UserDataService : IUserDataService
 
     #endregion
 
-    #region Internal sync
-
-    private bool EnsureLoadedInternalSync(bool forceRefresh = false)
-    {
-        try
-        {
-            return EnsureLoadedInternalAsync(forceRefresh).ConfigureAwait(false).GetAwaiter().GetResult();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to synchronously ensure user data is loaded");
-            return false;
-        }
-    }
+    #region Persistence
 
     private async Task<bool> SaveCoreAsync(CancellationToken cancellationToken)
     {
