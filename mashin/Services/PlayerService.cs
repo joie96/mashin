@@ -67,8 +67,10 @@ public sealed class PlayerService : IPlayerService
     private bool _isMuted;
     private bool? _shuffleEnabled;
     private string? _repeatMode;
-    private double _lastServerPositionSeconds;
-    private DateTime _lastServerPositionTimestampUtc;
+    private long _metadataTimestampUs;
+    private double _metadataTrackProgressMs;
+    private double _metadataTrackDurationMs;
+    private double _metadataPlaybackSpeed;
     #endregion
 
     #region Events
@@ -256,85 +258,121 @@ public sealed class PlayerService : IPlayerService
 
     private void OnGroupStateChanged(object? sender, GroupState group)
     {
+        // Playing state
         var stateName = group.PlaybackState.ToString();
         IsPlaying = stateName.Equals("Playing", StringComparison.OrdinalIgnoreCase);
         IsBuffering = stateName.Equals("Buffering", StringComparison.OrdinalIgnoreCase)
             || stateName.Equals("Loading", StringComparison.OrdinalIgnoreCase);
 
+        // Volume and mute state
         var clampedVolume = Math.Max(0, Math.Min(100, group.Volume));
         Volume = clampedVolume;
         IsMuted = group.Muted;
 
+        // Shuffle and repeat state
         ShuffleEnabled = group.Shuffle;
         RepeatMode = group.Repeat?.ToString();
 
+        // Metadata
         var md = group.Metadata;
         if (md == null)
         {
-            DurationSeconds = 0;
-            TrackTitle = null;
-            TrackArtist = null;
-            TrackAlbum = null;
-            UpdateServerPosition(0);
+            _logger.LogDebug("Group update without metadata; keeping last known duration/track/position.");
             return;
         }
-
-        DurationSeconds = md.Duration is > 0 ? md.Duration.Value : 0;
         TrackTitle = md.Title;
         TrackArtist = md.Artist;
         TrackAlbum = md.Album;
-        var serverPosition = md.Position ?? 0;
-        UpdateServerPosition(serverPosition);
+
+        // Position tracking
+        var progress = md.Progress;
+        if (progress?.TrackProgress is null
+            || progress.TrackDuration is null
+            || progress.PlaybackSpeed is null
+            || md.Timestamp is not > 0)
+        {
+            _logger.LogDebug("Metadata without complete progress/timestamp; skipping position baseline update.");
+            return;
+        }
+
+        lock (_stateLock)
+        {
+            _metadataTimestampUs = md.Timestamp.Value;
+            _metadataTrackProgressMs = Math.Max(0d, progress.TrackProgress.Value);
+            _metadataTrackDurationMs = Math.Max(0d, progress.TrackDuration.Value);
+            _metadataPlaybackSpeed = Math.Max(0d, progress.PlaybackSpeed.Value);
+        }
     }
     #endregion
 
     #region Position Tracking
 
-    private void UpdateServerPosition(double serverPositionSeconds)
-    {
-        lock (_stateLock)
-        {
-            _lastServerPositionSeconds = Math.Max(0, serverPositionSeconds);
-            _lastServerPositionTimestampUtc = DateTime.UtcNow;
-        }
-
-        UpdatePositionFromTimer();
-    }
+    private static long GetCurrentClientTimestampUs()
+        => (DateTime.UtcNow.Ticks - DateTime.UnixEpoch.Ticks) / 10;
 
     private void UpdatePositionFromTimer()
     {
-        double lastPosition;
-        DateTime lastTimestamp;
-        double duration;
-        bool playing;
+        if (!IsPlaying)
+        {
+            return;
+        }
+
+        long metadataTimestampUs;
+        double trackProgressMs;
+        double trackDurationMs;
+        double playbackSpeed;
 
         lock (_stateLock)
         {
-            lastPosition = _lastServerPositionSeconds;
-            lastTimestamp = _lastServerPositionTimestampUtc;
-            duration = _durationSeconds;
-            playing = _isPlaying;
+            metadataTimestampUs = _metadataTimestampUs;
+            trackProgressMs = _metadataTrackProgressMs;
+            trackDurationMs = _metadataTrackDurationMs;
+            playbackSpeed = _metadataPlaybackSpeed;
         }
 
-        double nextPosition;
-        if (playing && lastTimestamp != default)
+        if (metadataTimestampUs <= 0)
         {
-            var delta = DateTime.UtcNow - lastTimestamp;
-            nextPosition = lastPosition + delta.TotalSeconds;
+            return;
+        }
+
+        var currentServerTimeUs = metadataTimestampUs;
+        if (_clockSynchronizer.HasMinimalSync)
+        {
+            var currentClientTimeUs = GetCurrentClientTimestampUs();
+            currentServerTimeUs = _clockSynchronizer.ClientToServerTime(currentClientTimeUs);
+        }
+
+        var deltaUs = Math.Max(0L, currentServerTimeUs - metadataTimestampUs);
+        var calculatedProgressMs = trackProgressMs + (deltaUs * playbackSpeed / 1_000_000d);
+
+        double currentTrackProgressMs;
+        if (trackDurationMs != 0)
+        {
+            currentTrackProgressMs = Math.Max(0d, Math.Min(calculatedProgressMs, trackDurationMs));
         }
         else
         {
-            nextPosition = lastPosition;
+            currentTrackProgressMs = Math.Max(0d, calculatedProgressMs);
         }
 
-        if (duration > 0)
+        var durationSeconds = Math.Max(0d, trackDurationMs / 1000d);
+        if (Math.Abs(durationSeconds - _durationSeconds) >= 0.001)
         {
-            nextPosition = Math.Max(0, Math.Min(duration, nextPosition));
+            DurationSeconds = durationSeconds;
         }
 
-        if (Math.Abs(nextPosition - _positionSeconds) >= 0.1)
+        var nextPositionSeconds = currentTrackProgressMs / 1000d;
+
+        if (Math.Abs(nextPositionSeconds - _positionSeconds) >= 0.1)
         {
-            PositionSeconds = nextPosition;
+            _logger.LogDebug(
+                "Calculated position: {CalculatedPosition:F3}s (trackProgressMs={TrackProgressMs:F0}, speed={Speed:F0}, durationMs={DurationMs:F0})",
+                nextPositionSeconds,
+                trackProgressMs,
+                playbackSpeed,
+                trackDurationMs);
+
+            PositionSeconds = nextPositionSeconds;
         }
     }
     #endregion

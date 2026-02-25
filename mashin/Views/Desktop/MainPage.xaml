@@ -568,7 +568,7 @@
                             MinimumWidthRequest="300"
                             ThumbColor="{DynamicResource IconPrimary}"
                             VerticalOptions="Center"
-                            Value="{Binding Position}">
+                            Value="{Binding SliderPosition, Mode=TwoWay}">
                             <Slider.Behaviors>
                                 <behaviors:SliderDragCompletedBehavior Command="{Binding SeekCommand}" />
                             </Slider.Behaviors>
@@ -652,20 +652,22 @@
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="16" />
                         </Border.StrokeShape>
-                        <Label FontSize="16"
-                            HorizontalOptions="Center"
-                            Text="{mi:Fluent Icon=SpeakerMute24,
-                                             FontOverride=True}"
-                            TextColor="{DynamicResource IconSecondary}"
-                            VerticalOptions="Center">
-                            <Label.Triggers>
-                                <DataTrigger Binding="{Binding IsMuted}"
-                                    TargetType="Label"
-                                    Value="True">
-                                    <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
-                                </DataTrigger>
-                            </Label.Triggers>
-                        </Label>
+                        <Grid>
+                            <Label FontSize="16"
+                                HorizontalOptions="Center"
+                                IsVisible="{Binding IsMuted}"
+                                Text="{mi:Fluent Icon=SpeakerMute24,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource AccentColor}"
+                                VerticalOptions="Center" />
+                            <Label FontSize="16"
+                                HorizontalOptions="Center"
+                                IsVisible="{Binding IsMuted, Converter={StaticResource InvertedBoolConverter}}"
+                                Text="{mi:Fluent Icon=Speaker224,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Grid>
                     </Border>
 
                     <Slider Maximum="100"

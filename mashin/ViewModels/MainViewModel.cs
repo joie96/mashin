@@ -42,6 +42,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private string? _repeatMode;
     private double _duration;
     private double _position;
+    private double _sliderPosition;
     private bool _isSeeking;
     private double _volume = 50;
     private bool _suppressVolumeCommand;
@@ -326,6 +327,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 OnPropertyChanged(nameof(PositionText));
             }
         }
+    }
+
+    public double SliderPosition
+    {
+        get => _sliderPosition;
+        set => SetProperty(ref _sliderPosition, value);
     }
 
     public string DurationText => FormatTime(Duration);
@@ -685,6 +692,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
             var clamped = Math.Max(0, Math.Min(Duration, seconds));
             Position = clamped;
+            SliderPosition = clamped;
 
             await _playerService.SendCommandAsync(
                 "seek",
@@ -764,12 +772,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
             case nameof(IPlayerService.DurationSeconds):
                 Duration = _playerService.DurationSeconds;
+                if (SliderPosition > Duration)
+                {
+                    SliderPosition = Duration;
+                }
                 break;
 
             case nameof(IPlayerService.PositionSeconds):
                 if (!_isSeeking)
                 {
-                    Position = _playerService.PositionSeconds;
+                    var position = _playerService.PositionSeconds;
+                    Position = position;
+                    SliderPosition = position;
                 }
                 break;
 
