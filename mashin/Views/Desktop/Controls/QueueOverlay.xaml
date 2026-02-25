@@ -49,28 +49,6 @@
 
                     <!--  Track Actions  -->
                     <HorizontalStackLayout HorizontalOptions="Center" Spacing="22">
-                        <Border x:Name="QueueOverlayAddToPlaylistButton"
-                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-                            BackgroundColor="Transparent"
-                            HeightRequest="36"
-                            StrokeThickness="0"
-                            ToolTipProperties.Text="Zu Wiedergabeliste hinzufügen"
-                            WidthRequest="36">
-                            <Border.GestureRecognizers>
-                                <TapGestureRecognizer Command="{Binding ShowCurrentTrackContextMenuCommand}"
-                                    CommandParameter="{x:Reference QueueOverlayAddToPlaylistButton}" />
-                            </Border.GestureRecognizers>
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="18" />
-                            </Border.StrokeShape>
-                            <Label FontSize="24"
-                                HorizontalOptions="Center"
-                                Text="{mi:Fluent Icon=Add24,
-                                             FontOverride=True}"
-                                TextColor="{DynamicResource IconSecondary}"
-                                VerticalOptions="Center" />
-                        </Border>
-
                         <Border
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
@@ -101,6 +79,28 @@
                                     VerticalOptions="Center" />
                             </Grid>
                         </Border>
+                        
+                        <Border x:Name="QueueOverlayAddToPlaylistButton"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="36"
+                            StrokeThickness="0"
+                            ToolTipProperties.Text="Zu Wiedergabeliste hinzufügen"
+                            WidthRequest="36">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ShowCurrentTrackContextMenuCommand}"
+                                    CommandParameter="{x:Reference QueueOverlayAddToPlaylistButton}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="18" />
+                            </Border.StrokeShape>
+                            <Label FontSize="24"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=Add24,
+                                             FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>                       
                     </HorizontalStackLayout>
 
                     <!--  Track Meta  -->
@@ -186,7 +186,7 @@
 
                     <!--  Queue Table  -->
                     <controls:TableView Grid.Row="1"
-                        ItemsSource="{Binding CurrentQueueTracks}"
+                        ItemsSource="{Binding CurrentQueueItems}"
                         MediaActions="{Binding MediaActions}"
                         PlaybackContextItem="{Binding CurrentPlayerQueue}"
                         PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"

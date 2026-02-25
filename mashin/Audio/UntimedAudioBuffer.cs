@@ -53,6 +53,9 @@ public sealed class UntimedAudioBuffer : ITimedAudioBuffer
     public long CalibratedStartupLatencyMicroseconds { get; set; }
 
     /// <inheritdoc/>
+    public string? TimingSourceName { get; set; }
+
+    /// <inheritdoc/>
     public long SyncErrorMicroseconds => 0;
 
     /// <inheritdoc/>

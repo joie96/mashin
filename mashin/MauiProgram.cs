@@ -31,8 +31,7 @@ public static class MauiProgram
         builder.Logging.AddDebug();
         builder.Logging.SetMinimumLevel(LogLevel.Debug);
 
-        builder.Logging.AddFilter("Sendspin.SDK.Client.SendspinClientService", LogLevel.Warning);
-        builder.Logging.AddFilter("Sendspin.SDK", LogLevel.Warning);
+        builder.Logging.AddFilter("Sendspin.SDK", LogLevel.Debug);
         builder.Logging.AddFilter("mashin", LogLevel.Debug);
 #else
         // Production Logging

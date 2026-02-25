@@ -16,18 +16,18 @@ public interface IQueueSyncService : IAsyncDisposable
 {
     event EventHandler? CurrentPlayerQueueUpdated;
     event EventHandler? CurrentTrackUpdated;
-    event EventHandler<QueueTracksChangedEventArgs>? CurrentQueueTracksUpdated;
+    event EventHandler<QueueItemsChangedEventArgs>? CurrentQueueItemsUpdated;
 
     PlayerQueue? CurrentPlayerQueue { get; }
     Track? CurrentTrack { get; }
-    IReadOnlyList<Track> CurrentQueueTracks { get; }
+    IReadOnlyList<QueueItem> CurrentQueueItems { get; }
 
     Task StartAsync(CancellationToken cancellationToken = default);
     Task StopAsync();
     Task RefreshNowAsync(CancellationToken cancellationToken = default);
 }
 
-public enum QueueTrackChangeType
+public enum QueueItemChangeType
 {
     Insert,
     Remove,
@@ -35,44 +35,44 @@ public enum QueueTrackChangeType
     Replace
 }
 
-public sealed class QueueTrackChange
+public sealed class QueueItemChange
 {
-    public QueueTrackChangeType ChangeType { get; }
+    public QueueItemChangeType ChangeType { get; }
     public int Index { get; }
     public int NewIndex { get; }
-    public Track? Track { get; }
+    public QueueItem? Item { get; }
 
-    private QueueTrackChange(QueueTrackChangeType changeType, int index, int newIndex, Track? track)
+    private QueueItemChange(QueueItemChangeType changeType, int index, int newIndex, QueueItem? item)
     {
         ChangeType = changeType;
         Index = index;
         NewIndex = newIndex;
-        Track = track;
+        Item = item;
     }
 
-    public static QueueTrackChange Insert(int index, Track track) => new(QueueTrackChangeType.Insert, index, -1, track);
-    public static QueueTrackChange Remove(int index) => new(QueueTrackChangeType.Remove, index, -1, null);
-    public static QueueTrackChange Move(int index, int newIndex) => new(QueueTrackChangeType.Move, index, newIndex, null);
-    public static QueueTrackChange Replace(int index, Track track) => new(QueueTrackChangeType.Replace, index, -1, track);
+    public static QueueItemChange Insert(int index, QueueItem item) => new(QueueItemChangeType.Insert, index, -1, item);
+    public static QueueItemChange Remove(int index) => new(QueueItemChangeType.Remove, index, -1, null);
+    public static QueueItemChange Move(int index, int newIndex) => new(QueueItemChangeType.Move, index, newIndex, null);
+    public static QueueItemChange Replace(int index, QueueItem item) => new(QueueItemChangeType.Replace, index, -1, item);
 }
 
-public sealed class QueueTracksChangeSet
+public sealed class QueueItemsChangeSet
 {
-    public static QueueTracksChangeSet Empty { get; } = new(Array.Empty<QueueTrackChange>());
+    public static QueueItemsChangeSet Empty { get; } = new(Array.Empty<QueueItemChange>());
 
-    public IReadOnlyList<QueueTrackChange> Changes { get; }
+    public IReadOnlyList<QueueItemChange> Changes { get; }
 
-    public QueueTracksChangeSet(IReadOnlyList<QueueTrackChange> changes)
+    public QueueItemsChangeSet(IReadOnlyList<QueueItemChange> changes)
     {
         Changes = changes;
     }
 }
 
-public sealed class QueueTracksChangedEventArgs : EventArgs
+public sealed class QueueItemsChangedEventArgs : EventArgs
 {
-    public QueueTracksChangeSet ChangeSet { get; }
+    public QueueItemsChangeSet ChangeSet { get; }
 
-    public QueueTracksChangedEventArgs(QueueTracksChangeSet changeSet)
+    public QueueItemsChangedEventArgs(QueueItemsChangeSet changeSet)
     {
         ChangeSet = changeSet;
     }
@@ -96,7 +96,7 @@ public sealed class QueueSyncService : IQueueSyncService
 
     private CancellationTokenSource? _loopCts;
     private Task? _loopTask;
-    private readonly List<Track> _currentQueueTracks = new();
+    private readonly List<QueueItem> _currentQueueItems = new();
 
     #endregion
 
@@ -104,7 +104,7 @@ public sealed class QueueSyncService : IQueueSyncService
 
     public event EventHandler? CurrentPlayerQueueUpdated;
     public event EventHandler? CurrentTrackUpdated;
-    public event EventHandler<QueueTracksChangedEventArgs>? CurrentQueueTracksUpdated;
+    public event EventHandler<QueueItemsChangedEventArgs>? CurrentQueueItemsUpdated;
 
     #endregion
 
@@ -112,7 +112,7 @@ public sealed class QueueSyncService : IQueueSyncService
 
     public PlayerQueue? CurrentPlayerQueue { get; private set; }
     public Track? CurrentTrack { get; private set; }
-    public IReadOnlyList<Track> CurrentQueueTracks => new ReadOnlyCollection<Track>(_currentQueueTracks);
+    public IReadOnlyList<QueueItem> CurrentQueueItems => new ReadOnlyCollection<QueueItem>(_currentQueueItems);
 
     #endregion
 
@@ -248,7 +248,7 @@ public sealed class QueueSyncService : IQueueSyncService
     {
         if (string.IsNullOrWhiteSpace(_playerService.ClientId))
         {
-            UpdateState(null, null, Array.Empty<Track>());
+            UpdateState(null, null, Array.Empty<QueueItem>());
             return;
         }
 
@@ -258,7 +258,7 @@ public sealed class QueueSyncService : IQueueSyncService
             var activeQueue = await _musicAssistant.GetActiveQueueForPlayerAsync(_playerService.ClientId);
             if (activeQueue == null)
             {
-                UpdateState(null, null, Array.Empty<Track>());
+                UpdateState(null, null, Array.Empty<QueueItem>());
                 return;
             }
 
@@ -271,11 +271,11 @@ public sealed class QueueSyncService : IQueueSyncService
             }
 
             // Get queue tracks
-            var queueTracks = new List<Track>();
+            var queueItems = new List<QueueItem>();
             if (!string.IsNullOrWhiteSpace(activeQueue.QueueId))
             {
-                var queueItems = await _musicAssistant.GetQueueItemsAsync(activeQueue.QueueId);
-                queueTracks = queueItems
+                queueItems = await _musicAssistant.GetQueueItemsAsync(activeQueue.QueueId);
+                var queueTracks = queueItems
                     .Select(queueItem => queueItem.MediaItem)
                     .OfType<Track>()
                     .ToList();
@@ -285,48 +285,33 @@ public sealed class QueueSyncService : IQueueSyncService
                     await _musicAssistant.EnrichWithProviderInfoAsync(queueTracks);
                 }
 
-                for (var index = 0; index < queueTracks.Count; index++)
+                for (var index = 0; index < queueItems.Count; index++)
                 {
-                    var track = queueTracks[index];
+                    var track = queueItems[index].MediaItem;
+                    if (track == null)
+                    {
+                        continue;
+                    }
+
                     track.Index = index + 1;
                     track.Favorite = await _userDataService.IsFavoriteAsync(track, cancellationToken);
                 }
             }
 
             // Set current track to first in queue if no active track
-            if (currentTrack == null && queueTracks.Count > 0)
+            var firstQueueTrack = queueItems.Select(item => item.MediaItem).OfType<Track>().FirstOrDefault();
+            if (currentTrack == null && firstQueueTrack != null)
             {
-                currentTrack = queueTracks[0];
+                currentTrack = firstQueueTrack;
             }
 
-            /*
-            // Prefer the corresponding instance from queueTracks so CurrentTrack and queue list share the same object reference.
-            if (currentTrack != null && queueTracks.Count > 0)
-            {
-                var queueCurrentTrack = queueTracks.FirstOrDefault(track =>
-                    (!string.IsNullOrWhiteSpace(track.Uri)
-                        && !string.IsNullOrWhiteSpace(currentTrack.Uri)
-                        && string.Equals(track.Uri, currentTrack.Uri, StringComparison.Ordinal))
-                    || (string.Equals(track.ItemId, currentTrack.ItemId, StringComparison.Ordinal)
-                        && string.Equals(track.Provider, currentTrack.Provider, StringComparison.OrdinalIgnoreCase)));
-
-                if (queueCurrentTrack != null)
-                {
-                    currentTrack = queueCurrentTrack;
-                }
-            }
-
-            currentTrack?.IsPlaying = true;
-
-            */
-
-            UpdateState(activeQueue, currentTrack, queueTracks);
+            UpdateState(activeQueue, currentTrack, queueItems);
             return;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to refresh queue state");
-            UpdateState(null, null, Array.Empty<Track>());
+            UpdateState(null, null, Array.Empty<QueueItem>());
             return;
         }
     }
@@ -335,11 +320,11 @@ public sealed class QueueSyncService : IQueueSyncService
 
    #region State Update
 
-    private void UpdateState(PlayerQueue? nextQueue, Track? nextTrack, IReadOnlyList<Track> nextQueueTracks)
+    private void UpdateState(PlayerQueue? nextQueue, Track? nextTrack, IReadOnlyList<QueueItem> nextQueueItems)
     {
         var queueChanged = !ArePlayerQueuesEqual(CurrentPlayerQueue, nextQueue);
         var currentTrackChanged = !AreTracksEqual(CurrentTrack, nextTrack);
-        var queueTracksChanged = !AreTrackListsEqual(_currentQueueTracks, nextQueueTracks);
+        var queueItemsChanged = !AreQueueItemListsEqual(_currentQueueItems, nextQueueItems);
 
         if (queueChanged)
         {
@@ -353,12 +338,12 @@ public sealed class QueueSyncService : IQueueSyncService
             CurrentTrackUpdated?.Invoke(this, EventArgs.Empty);
         }
 
-        if (queueTracksChanged)
+        if (queueItemsChanged)
         {
-            var changeSet = BuildQueueTracksChangeSet(_currentQueueTracks, nextQueueTracks);
-            _currentQueueTracks.Clear();
-            _currentQueueTracks.AddRange(nextQueueTracks);
-            CurrentQueueTracksUpdated?.Invoke(this, new QueueTracksChangedEventArgs(changeSet));
+            var changeSet = BuildQueueItemsChangeSet(_currentQueueItems, nextQueueItems);
+            _currentQueueItems.Clear();
+            _currentQueueItems.AddRange(nextQueueItems);
+            CurrentQueueItemsUpdated?.Invoke(this, new QueueItemsChangedEventArgs(changeSet));
         }
     }
 
@@ -366,22 +351,22 @@ public sealed class QueueSyncService : IQueueSyncService
 
     #region ChangeSet Builder
 
-    private static QueueTracksChangeSet BuildQueueTracksChangeSet(IReadOnlyList<Track> previous, IReadOnlyList<Track> next)
+    private static QueueItemsChangeSet BuildQueueItemsChangeSet(IReadOnlyList<QueueItem> previous, IReadOnlyList<QueueItem> next)
     {
         if (previous.Count == 0 && next.Count == 0)
         {
-            return QueueTracksChangeSet.Empty;
+            return QueueItemsChangeSet.Empty;
         }
 
         var previousEntries = BuildTokenEntries(previous);
         var nextEntries = BuildTokenEntries(next);
 
-        var previousByToken = previousEntries.ToDictionary(entry => entry.Token, entry => entry.Track);
-        var nextByToken = nextEntries.ToDictionary(entry => entry.Token, entry => entry.Track);
+        var previousByToken = previousEntries.ToDictionary(entry => entry.Token, entry => entry.Item);
+        var nextByToken = nextEntries.ToDictionary(entry => entry.Token, entry => entry.Item);
 
         var workingTokens = previousEntries.Select(entry => entry.Token).ToList();
         var nextTokenSet = nextEntries.Select(entry => entry.Token).ToHashSet(StringComparer.Ordinal);
-        var changes = new List<QueueTrackChange>();
+        var changes = new List<QueueItemChange>();
 
         for (var index = workingTokens.Count - 1; index >= 0; index--)
         {
@@ -390,7 +375,7 @@ public sealed class QueueSyncService : IQueueSyncService
                 continue;
             }
 
-            changes.Add(QueueTrackChange.Remove(index));
+            changes.Add(QueueItemChange.Remove(index));
             workingTokens.RemoveAt(index);
         }
 
@@ -406,50 +391,50 @@ public sealed class QueueSyncService : IQueueSyncService
             var existingIndex = workingTokens.IndexOf(desiredToken);
             if (existingIndex >= 0)
             {
-                changes.Add(QueueTrackChange.Move(existingIndex, targetIndex));
+                changes.Add(QueueItemChange.Move(existingIndex, targetIndex));
                 workingTokens.RemoveAt(existingIndex);
                 workingTokens.Insert(targetIndex, desiredToken);
                 continue;
             }
 
-            changes.Add(QueueTrackChange.Insert(targetIndex, nextByToken[desiredToken]));
+            changes.Add(QueueItemChange.Insert(targetIndex, nextByToken[desiredToken]));
             workingTokens.Insert(targetIndex, desiredToken);
         }
 
         for (var index = 0; index < nextEntries.Count; index++)
         {
             var token = nextEntries[index].Token;
-            if (!previousByToken.TryGetValue(token, out var previousTrack))
+            if (!previousByToken.TryGetValue(token, out var previousItem))
             {
                 continue;
             }
 
-            var nextTrack = nextByToken[token];
-            if (!AreTracksEqual(previousTrack, nextTrack))
+            var nextItem = nextByToken[token];
+            if (!AreQueueItemsEqual(previousItem, nextItem))
             {
-                changes.Add(QueueTrackChange.Replace(index, nextTrack));
+                changes.Add(QueueItemChange.Replace(index, nextItem));
             }
         }
 
         return changes.Count == 0
-            ? QueueTracksChangeSet.Empty
-            : new QueueTracksChangeSet(changes);
+            ? QueueItemsChangeSet.Empty
+            : new QueueItemsChangeSet(changes);
     }
 
-    private static List<(string Token, Track Track)> BuildTokenEntries(IReadOnlyList<Track> tracks)
+    private static List<(string Token, QueueItem Item)> BuildTokenEntries(IReadOnlyList<QueueItem> items)
     {
         var keyCounts = new Dictionary<string, int>(StringComparer.Ordinal);
-        var entries = new List<(string Token, Track Track)>(tracks.Count);
+        var entries = new List<(string Token, QueueItem Item)>(items.Count);
 
-        foreach (var track in tracks)
+        foreach (var item in items)
         {
-            var key = GetTrackKey(track);
+            var key = GetQueueItemKey(item);
             var nextOccurrence = keyCounts.TryGetValue(key, out var existingCount)
                 ? existingCount + 1
                 : 1;
 
             keyCounts[key] = nextOccurrence;
-            entries.Add(($"{key}#{nextOccurrence}", track));
+            entries.Add(($"{key}#{nextOccurrence}", item));
         }
 
         return entries;
@@ -480,7 +465,7 @@ public sealed class QueueSyncService : IQueueSyncService
         return string.Equals(GetTrackKey(left), GetTrackKey(right), StringComparison.Ordinal);
     }
 
-    private static bool AreTrackListsEqual(IReadOnlyList<Track> left, IReadOnlyList<Track> right)
+    private static bool AreQueueItemListsEqual(IReadOnlyList<QueueItem> left, IReadOnlyList<QueueItem> right)
     {
         if (left.Count != right.Count)
         {
@@ -489,13 +474,18 @@ public sealed class QueueSyncService : IQueueSyncService
 
         for (var index = 0; index < left.Count; index++)
         {
-            if (!AreTracksEqual(left[index], right[index]))
+            if (!AreQueueItemsEqual(left[index], right[index]))
             {
                 return false;
             }
         }
 
         return true;
+    }
+
+    private static bool AreQueueItemsEqual(QueueItem? left, QueueItem? right)
+    {
+        return string.Equals(GetQueueItemKey(left), GetQueueItemKey(right), StringComparison.Ordinal);
     }
 
     private static string GetTrackKey(Track? track)
@@ -506,6 +496,27 @@ public sealed class QueueSyncService : IQueueSyncService
         }
 
         return $"uri:{track.Uri.Trim().ToUpperInvariant()}";
+    }
+
+    private static string GetQueueItemKey(QueueItem? item)
+    {
+        if (!string.IsNullOrWhiteSpace(item?.QueueItemId))
+        {
+            return $"id:{item.QueueItemId.Trim()}";
+        }
+
+        var track = item?.MediaItem;
+        if (!string.IsNullOrWhiteSpace(track?.Uri))
+        {
+            return $"uri:{track.Uri.Trim().ToUpperInvariant()}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(track?.ItemId))
+        {
+            return $"item:{track.ItemId.Trim()}";
+        }
+
+        return string.Empty;
     }
 
     #endregion

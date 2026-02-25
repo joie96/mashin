@@ -341,7 +341,7 @@
                 Color="{DynamicResource BorderSecondary}" />
             <Grid Grid.Row="1"
                 Padding="20,0"
-                ColumnDefinitions="250,*,250"
+                ColumnDefinitions="Auto,*,Auto"
                 HeightRequest="90">
 
                 <!--  Left: Track Info  -->
@@ -354,7 +354,7 @@
                         <Image Aspect="AspectFill" Source="{Binding CurrentTrack.ImageUrl}" />
                     </Border>
 
-                    <VerticalStackLayout MaximumWidthRequest="140"
+                    <VerticalStackLayout
                         Spacing="4"
                         VerticalOptions="Center">
                         <Label FontSize="13"
@@ -646,6 +646,9 @@
                         StrokeThickness="0"
                         VerticalOptions="Center"
                         WidthRequest="32">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding ToggleMuteCommand}" />
+                        </Border.GestureRecognizers>
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="16" />
                         </Border.StrokeShape>
@@ -654,7 +657,15 @@
                             Text="{mi:Fluent Icon=SpeakerMute24,
                                              FontOverride=True}"
                             TextColor="{DynamicResource IconSecondary}"
-                            VerticalOptions="Center" />
+                            VerticalOptions="Center">
+                            <Label.Triggers>
+                                <DataTrigger Binding="{Binding IsMuted}"
+                                    TargetType="Label"
+                                    Value="True">
+                                    <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
+                                </DataTrigger>
+                            </Label.Triggers>
+                        </Label>
                     </Border>
 
                     <Slider Maximum="100"

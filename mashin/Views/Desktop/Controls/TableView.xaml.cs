@@ -1,7 +1,5 @@
 using mashin.Models;
 using mashin.Services;
-using mashin.ViewModels;
-using mashin.Views.Desktop;
 using Microsoft.Maui.ApplicationModel;
 using System.Collections;
 using System.Collections.ObjectModel;
@@ -48,7 +46,7 @@ public partial class TableView : ContentView
 
     private readonly ObservableCollection<object> _selectedItems = new();
     private IKeyboardService? _keyboardService;
-    private MainViewModel? _mainViewModel;
+    private IQueueSyncService? _queueSyncService;
     private Track? _currentTrack;
     private int? _anchorIndex;
     private bool _isCheckboxClick;
@@ -243,7 +241,13 @@ public partial class TableView : ContentView
 
     private void OnCustomCheckBoxPointerPressed(object? sender, PointerEventArgs e)
     {
-        if (sender is not Border border || border.BindingContext is not MediaItem item)
+        if (sender is not Border border)
+        {
+            return;
+        }
+
+        var item = GetMediaItem(border.BindingContext);
+        if (item == null)
         {
             return;
         }
@@ -277,7 +281,13 @@ public partial class TableView : ContentView
             return;
         }
 
-        if (sender is not BindableObject bindable || bindable.BindingContext is not MediaItem item)
+        if (sender is not BindableObject bindable)
+        {
+            return;
+        }
+
+        var item = GetMediaItem(bindable.BindingContext);
+        if (item == null)
         {
             return;
         }
@@ -305,7 +315,13 @@ public partial class TableView : ContentView
 
     private void OnRowSecondaryPointerPressed(object? sender, PointerEventArgs e)
     {
-        if (sender is not BindableObject bindable || bindable.BindingContext is not MediaItem item)
+        if (sender is not BindableObject bindable)
+        {
+            return;
+        }
+
+        var item = GetMediaItem(bindable.BindingContext);
+        if (item == null)
         {
             return;
         }
@@ -324,7 +340,13 @@ public partial class TableView : ContentView
 
     private async void OnRowDoubleTapped(object? sender, Microsoft.Maui.Controls.TappedEventArgs e)
     {
-        if (sender is not Border border || border.BindingContext is not MediaItem item || MediaActions == null)
+        if (sender is not Border border || MediaActions == null)
+        {
+            return;
+        }
+
+        var item = GetMediaItem(border.BindingContext);
+        if (item == null)
         {
             return;
         }
@@ -373,8 +395,8 @@ public partial class TableView : ContentView
             return;
         }
 
-        // The Border inherits the BindingContext from the DataTemplate
-        if (playOverlay.BindingContext is not MediaItem item)
+        var item = GetMediaItem(playOverlay.BindingContext);
+        if (item == null)
         {
             return;
         }
@@ -418,7 +440,13 @@ public partial class TableView : ContentView
 
     private async void OnFavoriteIconTapped(object? sender, Microsoft.Maui.Controls.TappedEventArgs e)
     {
-        if (sender is not Label label || label.BindingContext is not MediaItem item || MediaActions == null)
+        if (sender is not Label label || MediaActions == null)
+        {
+            return;
+        }
+
+        var item = GetMediaItem(label.BindingContext);
+        if (item == null)
         {
             return;
         }
@@ -451,7 +479,8 @@ public partial class TableView : ContentView
             return;
         }
 
-        if (label.BindingContext is MediaItem selectable)
+        var selectable = GetMediaItem(label.BindingContext);
+        if (selectable != null)
         {
             SelectSingle(selectable);
             SyncSelectionAndHeaderState(selectable);
@@ -591,20 +620,26 @@ public partial class TableView : ContentView
 
     private void AttachPlaybackStateSource()
     {
-        if (_mainViewModel != null)
+        if (_queueSyncService != null)
         {
             return;
         }
 
-        var mainPage = Application.Current?.Windows.FirstOrDefault()?.Page as MainPage;
-        if (mainPage?.BindingContext is not MainViewModel vm)
+        var mauiContext = Handler?.MauiContext
+            ?? Microsoft.Maui.Controls.Application.Current?.Handler?.MauiContext;
+        if (mauiContext == null)
         {
             return;
         }
 
-        _mainViewModel = vm;
-        _currentTrack = vm.CurrentTrack;
-        _mainViewModel.CurrentTrackChanged += OnCurrentTrackChanged;
+        _queueSyncService = mauiContext.Services.GetService<IQueueSyncService>();
+        if (_queueSyncService == null)
+        {
+            return;
+        }
+
+        _currentTrack = _queueSyncService.CurrentTrack;
+        _queueSyncService.CurrentTrackUpdated += OnCurrentTrackUpdated;
 
         if (_currentTrack != null)
         {
@@ -614,30 +649,30 @@ public partial class TableView : ContentView
 
     private void DetachPlaybackStateSource()
     {
-        if (_mainViewModel == null)
+        if (_queueSyncService == null)
         {
             return;
         }
 
-        _mainViewModel.CurrentTrackChanged -= OnCurrentTrackChanged;
+        _queueSyncService.CurrentTrackUpdated -= OnCurrentTrackUpdated;
 
         if (_currentTrack != null)
         {
             _currentTrack.PropertyChanged -= OnCurrentTrackPropertyChanged;
         }
 
-        _mainViewModel = null;
+        _queueSyncService = null;
         _currentTrack = null;
     }
 
-    private void OnCurrentTrackChanged(object? sender, Track? track)
+    private void OnCurrentTrackUpdated(object? sender, EventArgs e)
     {
         if (_currentTrack != null)
         {
             _currentTrack.PropertyChanged -= OnCurrentTrackPropertyChanged;
         }
 
-        _currentTrack = track;
+        _currentTrack = _queueSyncService?.CurrentTrack;
 
         if (_currentTrack != null)
         {
@@ -783,17 +818,34 @@ public partial class TableView : ContentView
             if (item is MediaItem selectable)
             {
                 yield return selectable;
+                continue;
+            }
+
+            if (item is QueueItem queueItem && queueItem.MediaItem != null)
+            {
+                yield return queueItem.MediaItem;
             }
         }
+    }
+
+    private static MediaItem? GetMediaItem(object? context)
+    {
+        if (context is MediaItem mediaItem)
+        {
+            return mediaItem;
+        }
+
+        return context is QueueItem queueItem ? queueItem.MediaItem : null;
     }
 
     #endregion
 }
 
 #region TemplateSelector
-public sealed class TableViewTemplateSelector : DataTemplateSelector
+public sealed class TableViewContentTemplateSelector : DataTemplateSelector
 {
     public DataTemplate? TrackTemplate { get; set; }
+    public DataTemplate? QueueItemTemplate { get; set; }
     public DataTemplate? SkeletonTemplate { get; set; }
 
     protected override DataTemplate OnSelectTemplate(object item, BindableObject container)
@@ -803,17 +855,60 @@ public sealed class TableViewTemplateSelector : DataTemplateSelector
             return SkeletonTemplate;
         }
 
-        if (TrackTemplate != null)
+        if (item is QueueItem && QueueItemTemplate != null)
+        {
+            return QueueItemTemplate;
+        }
+
+        if (item is Track && TrackTemplate != null)
         {
             return TrackTemplate;
         }
 
-        if (SkeletonTemplate != null)
+        throw new InvalidOperationException("TableViewTemplateSelector requires TrackTemplate, QueueItemTemplate, or SkeletonTemplate.");
+    }
+}
+
+public sealed class TableViewHeaderTemplateSelector : DataTemplateSelector
+{
+    public DataTemplate? TrackHeaderTemplate { get; set; }
+    public DataTemplate? QueueHeaderTemplate { get; set; }
+    public DataTemplate? SkeletonHeaderTemplate { get; set; }
+
+    protected override DataTemplate OnSelectTemplate(object item, BindableObject container)
+    {
+        var sample = GetSampleItem(item);
+
+        if (sample is QueueItem && QueueHeaderTemplate != null)
         {
-            return SkeletonTemplate;
+            return QueueHeaderTemplate;
         }
 
-        throw new InvalidOperationException("TableViewTemplateSelector requires TrackTemplate or SkeletonTemplate.");
+        if (sample is Track && TrackHeaderTemplate != null)
+        {
+            return TrackHeaderTemplate;
+        }
+
+
+        throw new InvalidOperationException("TableViewHeaderTemplateSelector requires a header template.");
+    }
+
+    private static object? GetSampleItem(object item)
+    {
+        if (item is IEnumerable enumerable)
+        {
+            foreach (var entry in enumerable)
+            {
+                if (entry != null)
+                {
+                    return entry;
+                }
+            }
+
+            return null;
+        }
+
+        return item;
     }
 }
 #endregion
