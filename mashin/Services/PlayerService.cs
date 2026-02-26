@@ -33,7 +33,7 @@ public interface IPlayerService : IAsyncDisposable, INotifyPropertyChanged
     PlayerPlayState PlayState { get; set; }
     int Volume { get; }
     double DurationSeconds { get; }
-    double PositionSeconds { get; }
+    double PositionSeconds { get; set; }
     string? TrackTitle { get; }
     string? TrackArtist { get; }
     string? TrackAlbum { get; }
@@ -56,6 +56,7 @@ public sealed class PlayerService : IPlayerService
     #region Fields
     private readonly ILogger<PlayerService> _logger;
     private readonly ILoggerFactory _loggerFactory;
+    private readonly IAudioPlayer _audioPlayer;
     private readonly IAudioPipeline _audioPipeline;
     private readonly IClockSynchronizer _clockSynchronizer;
     private readonly SettingsService _settingsService;
@@ -114,7 +115,7 @@ public sealed class PlayerService : IPlayerService
     public double PositionSeconds
     {
         get => _positionSeconds;
-        private set => SetProperty(ref _positionSeconds, value);
+        set => SetProperty(ref _positionSeconds, Math.Max(0d, value));
     }
 
     public string? TrackTitle
@@ -160,16 +161,19 @@ public sealed class PlayerService : IPlayerService
     public PlayerService(
         ILogger<PlayerService> logger,
         ILoggerFactory loggerFactory,
+        IAudioPlayer audioPlayer,
         IAudioPipeline audioPipeline,
         IClockSynchronizer clockSynchronizer,
         SettingsService settingsService)
     {
         _logger = logger;
         _loggerFactory = loggerFactory;
+        _audioPlayer = audioPlayer;
         _audioPipeline = audioPipeline;
         _clockSynchronizer = clockSynchronizer;
         _settingsService = settingsService;
         _positionTimer = new Timer(_ => UpdatePositionFromTimer(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
+        _audioPlayer.StateChanged += OnAudioPlayerStateChanged;
     }
     #endregion
 
@@ -261,10 +265,10 @@ public sealed class PlayerService : IPlayerService
 
     private void OnGroupStateChanged(object? sender, GroupState group)
     {
-        // Playing state
-        var stateName = group.PlaybackState.ToString();
-        var mappedPlayState = MapServerPlaybackState(stateName);
-        SetPlayState(new PlayerPlayState(mappedPlayState, DateTimeOffset.UtcNow));
+        // Playing state -> use AudioPlayer state for more immediate feedback (instead of waiting for metadata update with progress info)
+        //var stateName = group.PlaybackState.ToString();
+        //var mappedPlayState = MapServerPlaybackState(stateName);
+        //SetPlayState(new PlayerPlayState(mappedPlayState, DateTimeOffset.UtcNow));
 
         // Volume and mute state
         var clampedVolume = Math.Max(0, Math.Min(100, group.Volume));
@@ -282,6 +286,16 @@ public sealed class PlayerService : IPlayerService
             _logger.LogDebug("Group update without metadata; keeping last known duration/track/position.");
             return;
         }
+
+        var trackChanged = !string.Equals(TrackTitle, md.Title, StringComparison.Ordinal)
+            || !string.Equals(TrackArtist, md.Artist, StringComparison.Ordinal)
+            || !string.Equals(TrackAlbum, md.Album, StringComparison.Ordinal);
+
+        if (trackChanged)
+        {
+            PositionSeconds = 0;
+        }
+
         TrackTitle = md.Title;
         TrackArtist = md.Artist;
         TrackAlbum = md.Album;
@@ -306,6 +320,21 @@ public sealed class PlayerService : IPlayerService
             _metadataTrackDurationMs = Math.Max(0d, progress.TrackDuration.Value);
             _metadataPlaybackSpeed = Math.Max(0d, progress.PlaybackSpeed.Value);
         }
+    }
+
+    private void OnAudioPlayerStateChanged(object? sender, AudioPlayerState state)
+    {
+        var mappedState = state switch
+        {
+            AudioPlayerState.Playing => PlayerPlaybackState.Playing,
+            AudioPlayerState.Paused => PlayerPlaybackState.Paused,
+            AudioPlayerState.Stopped => PlayerPlaybackState.Stopped,
+            AudioPlayerState.Uninitialized => PlayerPlaybackState.Stopped,
+            AudioPlayerState.Error => PlayerPlaybackState.Unknown,
+            _ => PlayerPlaybackState.Unknown,
+        };
+
+        SetPlayState(new PlayerPlayState(mappedState, DateTimeOffset.UtcNow));
     }
     #endregion
 
@@ -475,6 +504,7 @@ public sealed class PlayerService : IPlayerService
 
     public async ValueTask DisposeAsync()
     {
+        _audioPlayer.StateChanged -= OnAudioPlayerStateChanged;
         await DisconnectAsync();
         _positionTimer.Dispose();
         _cleanupLock.Dispose();

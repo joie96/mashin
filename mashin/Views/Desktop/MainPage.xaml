@@ -13,6 +13,7 @@
 
     <ContentPage.Resources>
         <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
+        <converters:PlayStateToBoolConverter x:Key="PlayStateToBoolConverter" />
     </ContentPage.Resources>
 
     <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,*,90">
@@ -491,23 +492,24 @@
                             <Grid>
                                 <Label FontSize="18"
                                     HorizontalOptions="Center"
-                                    IsVisible="{Binding IsPlaying, Converter={StaticResource InvertedBoolConverter}}"
+                                    IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=show-play-icon}"
                                     Text="{mi:FluentFilled Icon=Play48Filled,
                                                      FontOverride=True}"
                                     TextColor="{DynamicResource BackgroundPrimary}"
                                     VerticalOptions="Center" />
                                 <Label FontSize="18"
                                     HorizontalOptions="Center"
-                                    IsVisible="{Binding IsPlaying}"
+                                    IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=show-pause-icon}"
                                     Text="{mi:FluentFilled Icon=Pause48Filled,
                                                      FontOverride=True}"
                                     TextColor="{DynamicResource BackgroundPrimary}"
                                     VerticalOptions="Center" />
-                                <ActivityIndicator HeightRequest="20"
-                                    IsRunning="{Binding IsBuffering}"
-                                    IsVisible="{Binding IsBuffering}"
-                                    WidthRequest="20"
-                                    Color="{DynamicResource IconPrimary}" />
+                                <ActivityIndicator HeightRequest="16"
+                                    IsRunning="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
+                                    IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
+                                    Scale="1.5"
+                                    WidthRequest="16"
+                                    Color="{DynamicResource BackgroundPrimary}" />
                             </Grid>
                         </Border>
 
@@ -570,7 +572,7 @@
                             VerticalOptions="Center"
                             Value="{Binding SliderPosition, Mode=TwoWay}">
                             <Slider.Behaviors>
-                                <behaviors:SliderDragCompletedBehavior Command="{Binding SeekCommand}" />
+                                <behaviors:SliderDragCompletedBehavior StartedCommand="{Binding BeginSeekCommand}" Command="{Binding SeekCommand}" />
                             </Slider.Behaviors>
                         </Slider>
                         <Label Grid.Column="2"

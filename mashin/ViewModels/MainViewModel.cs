@@ -35,15 +35,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
 
     // Player
-    private bool _isPlaying;
-    private bool _isBuffering;
     private bool _isMuted;
     private bool? _shuffleEnabled;
     private string? _repeatMode;
+    private PlayerPlayState _playState = new(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow);
     private double _duration;
     private double _position;
     private double _sliderPosition;
-    private bool _isSeeking;
     private double _volume = 50;
     private bool _suppressVolumeCommand;
 
@@ -205,6 +203,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         TogglePlayPauseCommand = new Command(async () => await TogglePlayPauseAsync());
         ToggleMuteCommand = new Command(async () => await ToggleMuteAsync());
         ToggleDontStopTheMusicCommand = new Command(() => IsDontStopTheMusicEnabled = !IsDontStopTheMusicEnabled);
+        BeginSeekCommand = new Command<double>(_ => BeginSeek());
         SeekCommand = new Command<double>(async seconds => await SeekAsync(seconds));
         PlayPlaylistCommand = new Command<Playlist>(async playlist => await PlayPlaylistAsync(playlist));
 
@@ -233,7 +232,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         // Subscribe to player state events
         _playerService.PropertyChanged += OnPlayerServicePropertyChanged;
-        ApplyPlaybackFlags(_playerService.PlayState);
+        PlayState = _playerService.PlayState;
 
         // Subscribe to queue sync updates
         _queueSyncService.CurrentPlayerQueueUpdated += OnCurrentPlayerQueueUpdated;
@@ -276,16 +275,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     #region Bindable Properties (Playback)
 
-    public bool IsPlaying
+    public PlayerPlayState PlayState
     {
-        get => _isPlaying;
-        private set => SetProperty(ref _isPlaying, value);
-    }
-
-    public bool IsBuffering
-    {
-        get => _isBuffering;
-        private set => SetProperty(ref _isBuffering, value);
+        get => _playState;
+        private set
+        {
+            SetProperty(ref _playState, value);
+        }
     }
 
     public bool IsMuted
@@ -446,6 +442,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     public ICommand ToggleDontStopTheMusicCommand { get; }
     public ICommand ToggleCurrentTrackFavoriteCommand { get; }
     public ICommand ShowCurrentTrackContextMenuCommand { get; }
+    public ICommand BeginSeekCommand { get; }
     public ICommand SeekCommand { get; }
 
     // Others
@@ -616,7 +613,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 new List<MediaItem> { playlist },
                 QueueOption.Play);
 
-            IsBuffering = true;
             _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
         }
         catch (Exception ex)
@@ -633,9 +629,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         try
         {
-            var command = IsPlaying ? "pause" : "play";
+            var isPlaying = PlayState.State == PlayerPlaybackState.Playing || PlayState.State == PlayerPlaybackState.Seeking;
+            var command = isPlaying ? "pause" : "play";
             await _playerService.SendCommandAsync(command);
-            IsBuffering = true;
             _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
         }
         catch (Exception ex)
@@ -649,8 +645,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         try
         {
             await _playerService.SendCommandAsync("next");
-            IsBuffering = true;
             _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+            _playerService.PositionSeconds = 0;
         }
         catch (Exception ex)
         {
@@ -663,8 +659,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         try
         {
             await _playerService.SendCommandAsync("previous");
-            IsBuffering = true;
             _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+            _playerService.PositionSeconds = 0;
         }
         catch (Exception ex)
         {
@@ -691,15 +687,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private async Task SeekAsync(double seconds)
     {
+        if (PlayState.State != PlayerPlaybackState.Seeking)
+        {
+            _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Seeking, DateTimeOffset.UtcNow);
+        }
+        
         try
         {
-            _isSeeking = true;
-
             var clamped = Math.Max(0, Math.Min(Duration, seconds));
             Position = clamped;
             SliderPosition = clamped;
-            _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Seeking, DateTimeOffset.UtcNow);
-
+            _playerService.PositionSeconds = clamped;
             var queueId = CurrentPlayerQueue?.QueueId;
             if (string.IsNullOrWhiteSpace(queueId))
             {
@@ -715,8 +713,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
         finally
         {
-            _isSeeking = false;
+            _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Playing, DateTimeOffset.UtcNow);
         }
+    }
+
+    private void BeginSeek()
+    {
+        _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Seeking, DateTimeOffset.UtcNow);
     }
 
     private async Task SetVolumeAsync(int volume)
@@ -747,7 +750,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         switch (e.PropertyName)
         {
             case nameof(IPlayerService.PlayState):
-                ApplyPlaybackFlags(_playerService.PlayState);
+                PlayState = _playerService.PlayState;
                 break;
 
             case nameof(IPlayerService.Volume):
@@ -783,7 +786,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 break;
 
             case nameof(IPlayerService.PositionSeconds):
-                if (!_isSeeking)
+                if (PlayState.State != PlayerPlaybackState.Seeking)
                 {
                     var position = _playerService.PositionSeconds;
                     Position = position;
@@ -803,12 +806,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 }
                 break;
         }
-    }
-
-    private void ApplyPlaybackFlags(PlayerPlayState playState)
-    {
-        IsPlaying = playState.State == PlayerPlaybackState.Playing || playState.State == PlayerPlaybackState.Seeking;
-        IsBuffering = playState.State == PlayerPlaybackState.Buffering;
     }
 
     private void OnNavigationServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
