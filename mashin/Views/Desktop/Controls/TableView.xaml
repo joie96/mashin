@@ -1014,14 +1014,18 @@
 
     <Grid RowDefinitions="Auto,*">
 
+        <CollectionView Grid.Row="0"
+                        ItemsSource="{Binding HeaderItems, Source={x:Reference self}}"
+                        ItemTemplate="{StaticResource TableViewHeaderTemplateSelector}"
+                        SelectionMode="None">
+        </CollectionView>
+
         <CollectionView x:Name="collectionView"
                         Grid.Row="1"
                         Margin="0,0"
                         ItemTemplate="{StaticResource TableViewTemplateSelector}"
                         ItemSizingStrategy="MeasureFirstItem"
                         ItemsSource="{Binding ItemsSource, Source={x:Reference self}}"
-                        Header="{Binding ItemsSource, Source={x:Reference self}}"
-                        HeaderTemplate="{StaticResource TableViewHeaderTemplateSelector}"
                         SelectionMode="None">
         </CollectionView>
     </Grid>

@@ -38,13 +38,14 @@ public partial class TableView : ContentView
         BindableProperty.Create(nameof(ShowContextMenuAtPositionCommand), typeof(ICommand), typeof(TableView));
 
     public static readonly BindableProperty PlaybackContextItemProperty =
-        BindableProperty.Create(nameof(PlaybackContextItem), typeof(object), typeof(TableView));
+        BindableProperty.Create(nameof(PlaybackContextItem), typeof(object), typeof(TableView), propertyChanged: OnPlaybackContextItemChanged);
 
     #endregion
 
     #region Fields
 
     private readonly ObservableCollection<object> _selectedItems = new();
+    private readonly ObservableCollection<object> _headerItems = new();
     private IKeyboardService? _keyboardService;
     private IQueueSyncService? _queueSyncService;
     private Track? _currentTrack;
@@ -109,6 +110,8 @@ public partial class TableView : ContentView
         set => SetValue(PlaybackContextItemProperty, value);
     }
 
+    public ObservableCollection<object> HeaderItems => _headerItems;
+
     #endregion
 
     #region Construction
@@ -118,6 +121,7 @@ public partial class TableView : ContentView
         InitializeComponent();
 
         SelectedItems = _selectedItems;
+        UpdateHeaderItems(PlaybackContextItem);
         UpdateHeaderSelectionState();
     }
 
@@ -198,6 +202,16 @@ public partial class TableView : ContentView
         view.SyncSelectionAndHeaderState(clickedItem: null);
         view.UpdatePlayingStateForVisibleItems();
         view.UpdateFavoriteStateForVisibleItems();
+    }
+
+    private static void OnPlaybackContextItemChanged(BindableObject bindable, object oldValue, object newValue)
+    {
+        if (bindable is not TableView view)
+        {
+            return;
+        }
+
+        view.UpdateHeaderItems(newValue);
     }
 
     #endregion
@@ -776,6 +790,13 @@ public partial class TableView : ContentView
 
     #region Helpers
 
+    private void UpdateHeaderItems(object? context)
+    {
+        _headerItems.Clear();
+
+        _headerItems.Add(context ?? new Playlist());
+    }
+
     private int? GetIndexOf(MediaItem target)
     {
         var i = 0;
@@ -877,38 +898,17 @@ public sealed class TableViewHeaderTemplateSelector : DataTemplateSelector
 
     protected override DataTemplate OnSelectTemplate(object item, BindableObject container)
     {
-        var sample = GetSampleItem(item);
-
-        if (sample is QueueItem && QueueHeaderTemplate != null)
-        {
-            return QueueHeaderTemplate;
-        }
-
-        if (sample is Track && TrackHeaderTemplate != null)
+       if ((item is Playlist || item is Album || item is Artist) && TrackHeaderTemplate != null)
         {
             return TrackHeaderTemplate;
         }
 
+        if (item is PlayerQueue && QueueHeaderTemplate != null)
+        {
+            return QueueHeaderTemplate;
+        }    
 
         throw new InvalidOperationException("TableViewHeaderTemplateSelector requires a header template.");
-    }
-
-    private static object? GetSampleItem(object item)
-    {
-        if (item is IEnumerable enumerable)
-        {
-            foreach (var entry in enumerable)
-            {
-                if (entry != null)
-                {
-                    return entry;
-                }
-            }
-
-            return null;
-        }
-
-        return item;
     }
 }
 #endregion

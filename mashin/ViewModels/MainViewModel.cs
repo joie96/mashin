@@ -507,13 +507,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             await _playerService.ConnectAsync(uri);
         }
 
+        // Load playlists and store locally
+        await _playlistStore.RefreshAsync();
+
         // Build Context Menus
         BuildUserMenuItems();
         BuildQueueContextMenuItems();
-        BuildCurrentTrackContextMenuItems();
-
-        // Load playlists and store locally
-        await _playlistStore.RefreshAsync();
+        BuildCurrentTrackContextMenuItems();  
 
         // Set initial queue state
         await _queueSyncService.RefreshNowAsync();
@@ -844,6 +844,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private void OnCurrentQueueItemsUpdated(object? sender, QueueItemsChangedEventArgs e)
     {
+        _playerService.PositionSeconds = _queueSyncService.CurrentPlayerQueue.ElapsedTime;
+        
         if (e.ChangeSet.Changes.Count == 0)
         {
             return;
