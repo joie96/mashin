@@ -233,6 +233,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         // Subscribe to player state events
         _playerService.PropertyChanged += OnPlayerServicePropertyChanged;
+        ApplyPlaybackFlags(_playerService.PlayState);
 
         // Subscribe to queue sync updates
         _queueSyncService.CurrentPlayerQueueUpdated += OnCurrentPlayerQueueUpdated;
@@ -616,6 +617,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 QueueOption.Play);
 
             IsBuffering = true;
+            _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
         }
         catch (Exception ex)
         {
@@ -634,6 +636,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             var command = IsPlaying ? "pause" : "play";
             await _playerService.SendCommandAsync(command);
             IsBuffering = true;
+            _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
         }
         catch (Exception ex)
         {
@@ -647,6 +650,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         {
             await _playerService.SendCommandAsync("next");
             IsBuffering = true;
+            _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
         }
         catch (Exception ex)
         {
@@ -660,6 +664,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         {
             await _playerService.SendCommandAsync("previous");
             IsBuffering = true;
+            _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
         }
         catch (Exception ex)
         {
@@ -693,6 +698,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             var clamped = Math.Max(0, Math.Min(Duration, seconds));
             Position = clamped;
             SliderPosition = clamped;
+            _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Seeking, DateTimeOffset.UtcNow);
 
             var queueId = CurrentPlayerQueue?.QueueId;
             if (string.IsNullOrWhiteSpace(queueId))
@@ -740,12 +746,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         switch (e.PropertyName)
         {
-            case nameof(IPlayerService.IsPlaying):
-                IsPlaying = _playerService.IsPlaying;
-                break;
-
-            case nameof(IPlayerService.IsBuffering):
-                IsBuffering = _playerService.IsBuffering;
+            case nameof(IPlayerService.PlayState):
+                ApplyPlaybackFlags(_playerService.PlayState);
                 break;
 
             case nameof(IPlayerService.Volume):
@@ -801,6 +803,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 }
                 break;
         }
+    }
+
+    private void ApplyPlaybackFlags(PlayerPlayState playState)
+    {
+        IsPlaying = playState.State == PlayerPlaybackState.Playing || playState.State == PlayerPlaybackState.Seeking;
+        IsBuffering = playState.State == PlayerPlaybackState.Buffering;
     }
 
     private void OnNavigationServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
