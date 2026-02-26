@@ -516,6 +516,25 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         // Set initial queue state
         await _queueSyncService.RefreshNowAsync();
 
+        // Set position slider
+        if (_queueSyncService.CurrentPlayerQueue?.ElapsedTime is double elapsedTime
+            && _queueSyncService.CurrentPlayerQueue?.CurrentItem?.MediaItem?.Duration is int duration)
+        {
+            Duration = duration;
+            _playerService.PositionSeconds = elapsedTime;
+            Position = elapsedTime;
+            SliderPosition = elapsedTime;
+        }
+
+        // Set queue playing track
+        foreach (var item in _currentQueueItems)
+        {
+            if (item.QueueItemId == _queueSyncService.CurrentPlayerQueue?.CurrentItem?.QueueItemId)
+            {
+                item.MediaItem?.IsPlaying = true;
+            }
+        }
+
         // Start queue sync loop
         await _queueSyncService.StartAsync();
 
@@ -849,8 +868,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private void OnCurrentQueueItemsUpdated(object? sender, QueueItemsChangedEventArgs e)
     {
-        _playerService.PositionSeconds = _queueSyncService.CurrentPlayerQueue.ElapsedTime;
-        
+      
         if (e.ChangeSet.Changes.Count == 0)
         {
             return;
@@ -942,6 +960,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (!isEqual)
         {
             _currentQueueItems.ReplaceRange(serviceQueue);
+        }
+
+        // Set queue playing track
+        foreach (var item in _currentQueueItems)
+        {
+            if (item.QueueItemId == _queueSyncService.CurrentPlayerQueue?.CurrentItem?.QueueItemId)
+            {
+                item.MediaItem?.IsPlaying = true;
+            }
         }
     }
 
