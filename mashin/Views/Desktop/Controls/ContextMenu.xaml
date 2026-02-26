@@ -73,10 +73,10 @@
                                         Grid.Column="0"
                                         FontSize="18"
                                         IsVisible="{Binding HasIcon}"
-                                        mi:MauiIcon.Value="{mi:Fluent Icon={Binding Icon},
-                                                                 FontOverride=True,
-                                                                 IconSize=18,
-                                                                 IconColor={DynamicResource IconSecondary}}"
+                                        Text="{mi:Fluent Icon={Binding Icon},
+                                                         FontOverride=True,
+                                                         IconSize=18,
+                                                         IconColor={DynamicResource IconSecondary}}"
                                         TextColor="{DynamicResource IconSecondary}"
                                         VerticalOptions="Center">
                                         <Label.Triggers>
@@ -91,10 +91,10 @@
                                         Grid.Column="0"
                                         FontSize="18"
                                         IsVisible="False"
-                                        mi:MauiIcon.Value="{mi:FluentFilled Icon={Binding Icon},
-                                                                 FontOverride=True,
-                                                                 IconSize=18,
-                                                                 IconColor={DynamicResource IconSecondary}}"
+                                        Text="{mi:FluentFilled Icon={Binding Icon},
+                                                               FontOverride=True,
+                                                               IconSize=18,
+                                                               IconColor={DynamicResource IconSecondary}}"
                                         TextColor="{DynamicResource IconSecondary}"
                                         VerticalOptions="Center">
                                         <Label.Triggers>

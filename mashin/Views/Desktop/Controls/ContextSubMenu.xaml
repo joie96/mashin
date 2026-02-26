@@ -61,10 +61,10 @@
                                     Grid.Column="0"
                                     FontSize="16"
                                     IsVisible="{Binding HasIcon}"
-                                    mi:MauiIcon.Value="{mi:Fluent Icon={Binding Icon},
-                                                                  FontOverride=True,
-                                                                  IconSize=16,
-                                                                  IconColor={DynamicResource IconSecondary}}"
+                                    Text="{mi:Fluent Icon={Binding Icon},
+                                                      FontOverride=True,
+                                                      IconSize=16,
+                                                      IconColor={DynamicResource IconSecondary}}"
                                     TextColor="{DynamicResource IconSecondary}"
                                     VerticalOptions="Center">
                                     <Label.Triggers>
@@ -79,10 +79,10 @@
                                     Grid.Column="0"
                                     FontSize="16"
                                     IsVisible="False"
-                                    mi:MauiIcon.Value="{mi:FluentFilled Icon={Binding Icon},
-                                                                  FontOverride=True,
-                                                                  IconSize=16,
-                                                                  IconColor={DynamicResource IconSecondary}}"
+                                    Text="{mi:FluentFilled Icon={Binding Icon},
+                                                            FontOverride=True,
+                                                            IconSize=16,
+                                                            IconColor={DynamicResource IconSecondary}}"
                                     TextColor="{DynamicResource IconSecondary}"
                                     VerticalOptions="Center">
                                     <Label.Triggers>

@@ -88,6 +88,7 @@ public class MediaItemActions : IMediaItemActions
         }
 
         _logger.LogInformation("Playing {Count} item(s)", mediaItems.Count);
+        _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
 
         try
         {
@@ -409,6 +410,7 @@ public class MediaItemActions : IMediaItemActions
 
         try
         {
+            _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
             await _musicAssistant.PlayIndexAsync(queueId, index);
             await _queueSyncService.RefreshNowAsync();
         }

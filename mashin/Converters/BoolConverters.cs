@@ -1,4 +1,5 @@
 ﻿using System.Globalization;
+using mashin.Services;
 
 namespace mashin.Converters;
 
@@ -68,5 +69,33 @@ public class IntToBoolConverter : IValueConverter
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
         throw new NotImplementedException("IntToBoolConverter does not support two-way binding.");
+    }
+}
+
+public class PlayStateToBoolConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (value is not PlayerPlayState playState)
+        {
+            return false;
+        }
+
+        var mode = (parameter as string)?.Trim().ToLowerInvariant();
+        return mode switch
+        {
+            "playing" => playState.State is PlayerPlaybackState.Playing or PlayerPlaybackState.Seeking,
+            "not-playing" => playState.State is not (PlayerPlaybackState.Playing or PlayerPlaybackState.Seeking),
+            "buffering" => playState.State == PlayerPlaybackState.Buffering,
+            "seeking" => playState.State == PlayerPlaybackState.Seeking,
+            "show-play-icon" => playState.State is not (PlayerPlaybackState.Playing or PlayerPlaybackState.Seeking or PlayerPlaybackState.Buffering),
+            "show-pause-icon" => playState.State is PlayerPlaybackState.Playing or PlayerPlaybackState.Seeking,
+            _ => false,
+        };
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException("PlayStateToBoolConverter does not support two-way binding.");
     }
 }

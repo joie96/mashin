@@ -11,6 +11,18 @@ using System.Threading;
 
 namespace mashin.Services;
 
+public enum PlayerPlaybackState
+{
+    Unknown,
+    Stopped,
+    Paused,
+    Buffering,
+    Playing,
+    Seeking,
+}
+
+public sealed record PlayerPlayState(PlayerPlaybackState State, DateTimeOffset TimestampUtc);
+
 public interface IPlayerService : IAsyncDisposable, INotifyPropertyChanged
 {
     #region Properties
@@ -18,11 +30,10 @@ public interface IPlayerService : IAsyncDisposable, INotifyPropertyChanged
     string? ConnectedServerName { get; }
     string? ClientId { get; }
 
-    bool IsPlaying { get; }
-    bool IsBuffering { get; }
+    PlayerPlayState PlayState { get; set; }
     int Volume { get; }
     double DurationSeconds { get; }
-    double PositionSeconds { get; }
+    double PositionSeconds { get; set; }
     string? TrackTitle { get; }
     string? TrackArtist { get; }
     string? TrackAlbum { get; }
@@ -45,6 +56,7 @@ public sealed class PlayerService : IPlayerService
     #region Fields
     private readonly ILogger<PlayerService> _logger;
     private readonly ILoggerFactory _loggerFactory;
+    private readonly IAudioPlayer _audioPlayer;
     private readonly IAudioPipeline _audioPipeline;
     private readonly IClockSynchronizer _clockSynchronizer;
     private readonly SettingsService _settingsService;
@@ -56,8 +68,7 @@ public sealed class PlayerService : IPlayerService
     private readonly Timer _positionTimer;
     private readonly object _stateLock = new();
 
-    private bool _isPlaying;
-    private bool _isBuffering;
+    private PlayerPlayState _playState = new(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow);
     private int _volume;
     private double _durationSeconds;
     private double _positionSeconds;
@@ -83,16 +94,10 @@ public sealed class PlayerService : IPlayerService
     public string? ConnectedServerName => _client?.ServerName;
     public string? ClientId { get; private set; }
 
-    public bool IsPlaying
+    public PlayerPlayState PlayState
     {
-        get => _isPlaying;
-        private set => SetProperty(ref _isPlaying, value);
-    }
-
-    public bool IsBuffering
-    {
-        get => _isBuffering;
-        private set => SetProperty(ref _isBuffering, value);
+        get => _playState;
+        set => SetPlayState(value);
     }
 
     public int Volume
@@ -110,7 +115,7 @@ public sealed class PlayerService : IPlayerService
     public double PositionSeconds
     {
         get => _positionSeconds;
-        private set => SetProperty(ref _positionSeconds, value);
+        set => SetProperty(ref _positionSeconds, Math.Max(0d, value));
     }
 
     public string? TrackTitle
@@ -156,16 +161,19 @@ public sealed class PlayerService : IPlayerService
     public PlayerService(
         ILogger<PlayerService> logger,
         ILoggerFactory loggerFactory,
+        IAudioPlayer audioPlayer,
         IAudioPipeline audioPipeline,
         IClockSynchronizer clockSynchronizer,
         SettingsService settingsService)
     {
         _logger = logger;
         _loggerFactory = loggerFactory;
+        _audioPlayer = audioPlayer;
         _audioPipeline = audioPipeline;
         _clockSynchronizer = clockSynchronizer;
         _settingsService = settingsService;
         _positionTimer = new Timer(_ => UpdatePositionFromTimer(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
+        _audioPlayer.StateChanged += OnAudioPlayerStateChanged;
     }
     #endregion
 
@@ -249,8 +257,7 @@ public sealed class PlayerService : IPlayerService
     {
         if (e.NewState != ConnectionState.Connected)
         {
-            IsBuffering = false;
-            IsPlaying = false;
+            SetPlayState(new PlayerPlayState(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow));
         }
 
         OnPropertyChanged(nameof(IsConnected));
@@ -258,11 +265,10 @@ public sealed class PlayerService : IPlayerService
 
     private void OnGroupStateChanged(object? sender, GroupState group)
     {
-        // Playing state
-        var stateName = group.PlaybackState.ToString();
-        IsPlaying = stateName.Equals("Playing", StringComparison.OrdinalIgnoreCase);
-        IsBuffering = stateName.Equals("Buffering", StringComparison.OrdinalIgnoreCase)
-            || stateName.Equals("Loading", StringComparison.OrdinalIgnoreCase);
+        // Playing state -> use AudioPlayer state for more immediate feedback (instead of waiting for metadata update with progress info)
+        //var stateName = group.PlaybackState.ToString();
+        //var mappedPlayState = MapServerPlaybackState(stateName);
+        //SetPlayState(new PlayerPlayState(mappedPlayState, DateTimeOffset.UtcNow));
 
         // Volume and mute state
         var clampedVolume = Math.Max(0, Math.Min(100, group.Volume));
@@ -280,6 +286,16 @@ public sealed class PlayerService : IPlayerService
             _logger.LogDebug("Group update without metadata; keeping last known duration/track/position.");
             return;
         }
+
+        var trackChanged = !string.Equals(TrackTitle, md.Title, StringComparison.Ordinal)
+            || !string.Equals(TrackArtist, md.Artist, StringComparison.Ordinal)
+            || !string.Equals(TrackAlbum, md.Album, StringComparison.Ordinal);
+
+        if (trackChanged)
+        {
+            PositionSeconds = 0;
+        }
+
         TrackTitle = md.Title;
         TrackArtist = md.Artist;
         TrackAlbum = md.Album;
@@ -305,6 +321,21 @@ public sealed class PlayerService : IPlayerService
             _metadataPlaybackSpeed = Math.Max(0d, progress.PlaybackSpeed.Value);
         }
     }
+
+    private void OnAudioPlayerStateChanged(object? sender, AudioPlayerState state)
+    {
+        var mappedState = state switch
+        {
+            AudioPlayerState.Playing => PlayerPlaybackState.Playing,
+            AudioPlayerState.Paused => PlayerPlaybackState.Paused,
+            AudioPlayerState.Stopped => PlayerPlaybackState.Stopped,
+            AudioPlayerState.Uninitialized => PlayerPlaybackState.Stopped,
+            AudioPlayerState.Error => PlayerPlaybackState.Unknown,
+            _ => PlayerPlaybackState.Unknown,
+        };
+
+        SetPlayState(new PlayerPlayState(mappedState, DateTimeOffset.UtcNow));
+    }
     #endregion
 
     #region Position Tracking
@@ -314,11 +345,9 @@ public sealed class PlayerService : IPlayerService
 
     private void UpdatePositionFromTimer()
     {
-        if (!IsPlaying)
-        {
-            return;
-        }
+        var nowUtc = DateTimeOffset.UtcNow;
 
+        PlayerPlayState playState;
         long metadataTimestampUs;
         double trackProgressMs;
         double trackDurationMs;
@@ -326,10 +355,39 @@ public sealed class PlayerService : IPlayerService
 
         lock (_stateLock)
         {
+            playState = _playState;
             metadataTimestampUs = _metadataTimestampUs;
             trackProgressMs = _metadataTrackProgressMs;
             trackDurationMs = _metadataTrackDurationMs;
             playbackSpeed = _metadataPlaybackSpeed;
+        }
+
+        if (playState.State != PlayerPlaybackState.Playing && playState.State != PlayerPlaybackState.Seeking)
+        {
+            return;
+        }
+
+        var durationSeconds = Math.Max(0d, trackDurationMs / 1000d);
+        if (Math.Abs(durationSeconds - _durationSeconds) >= 0.001)
+        {
+            DurationSeconds = durationSeconds;
+        }
+
+        var stateAge = nowUtc - playState.TimestampUtc;
+        if (stateAge < TimeSpan.FromSeconds(5))
+        {
+            var localPosition = _positionSeconds + 0.5d;
+            if (durationSeconds > 0)
+            {
+                localPosition = Math.Min(localPosition, durationSeconds);
+            }
+
+            if (Math.Abs(localPosition - _positionSeconds) >= 0.01)
+            {
+                PositionSeconds = Math.Max(0d, localPosition);
+            }
+
+            return;
         }
 
         if (metadataTimestampUs <= 0)
@@ -357,12 +415,6 @@ public sealed class PlayerService : IPlayerService
             currentTrackProgressMs = Math.Max(0d, calculatedProgressMs);
         }
 
-        var durationSeconds = Math.Max(0d, trackDurationMs / 1000d);
-        if (Math.Abs(durationSeconds - _durationSeconds) >= 0.001)
-        {
-            DurationSeconds = durationSeconds;
-        }
-
         var nextPositionSeconds = currentTrackProgressMs / 1000d;
 
         if (Math.Abs(nextPositionSeconds - _positionSeconds) >= 0.1)
@@ -377,6 +429,45 @@ public sealed class PlayerService : IPlayerService
             PositionSeconds = nextPositionSeconds;
         }
     }
+    #endregion
+
+    #region State Helpers
+
+    private static PlayerPlaybackState MapServerPlaybackState(string? serverState)
+    {
+        if (serverState is null)
+        {
+            return PlayerPlaybackState.Unknown;
+        }
+
+        return serverState.ToLowerInvariant() switch
+        {
+            "playing" => PlayerPlaybackState.Playing,
+            "buffering" => PlayerPlaybackState.Buffering,
+            "loading" => PlayerPlaybackState.Buffering,
+            "paused" => PlayerPlaybackState.Paused,
+            "seeking" => PlayerPlaybackState.Seeking,
+            "stopped" => PlayerPlaybackState.Stopped,
+            "idle" => PlayerPlaybackState.Stopped,
+            _ => PlayerPlaybackState.Unknown,
+        };
+    }
+
+    private void SetPlayState(PlayerPlayState playState)
+    {
+        var normalizedTimestamp = playState.TimestampUtc == default
+            ? DateTimeOffset.UtcNow
+            : playState.TimestampUtc;
+        var normalizedPlayState = playState with { TimestampUtc = normalizedTimestamp };
+
+        var stateChanged = SetProperty(ref _playState, normalizedPlayState, nameof(PlayState));
+
+        if (!stateChanged)
+        {
+            return;
+        }
+    }
+
     #endregion
 
     #region Cleanup
@@ -413,6 +504,7 @@ public sealed class PlayerService : IPlayerService
 
     public async ValueTask DisposeAsync()
     {
+        _audioPlayer.StateChanged -= OnAudioPlayerStateChanged;
         await DisconnectAsync();
         _positionTimer.Dispose();
         _cleanupLock.Dispose();
