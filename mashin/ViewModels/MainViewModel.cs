@@ -694,12 +694,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             Position = clamped;
             SliderPosition = clamped;
 
-            await _playerService.SendCommandAsync(
-                "seek",
-                new Dictionary<string, object>
-                {
-                    ["position"] = clamped,
-                });
+            var queueId = CurrentPlayerQueue?.QueueId;
+            if (string.IsNullOrWhiteSpace(queueId))
+            {
+                _logger.LogWarning("No active queue available for seek");
+                return;
+            }
+
+            await _musicAssistant.SeekAsync(queueId, (int)Math.Round(clamped));
         }
         catch (Exception ex)
         {

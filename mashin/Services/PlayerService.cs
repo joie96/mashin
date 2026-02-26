@@ -365,7 +365,7 @@ public sealed class PlayerService : IPlayerService
 
         if (Math.Abs(nextPositionSeconds - _positionSeconds) >= 0.1)
         {
-            _logger.LogDebug(
+            _logger.LogInformation(
                 "Calculated position: {CalculatedPosition:F3}s (trackProgressMs={TrackProgressMs:F0}, speed={Speed:F0}, durationMs={DurationMs:F0})",
                 nextPositionSeconds,
                 trackProgressMs,

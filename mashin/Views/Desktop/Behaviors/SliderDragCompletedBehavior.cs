@@ -7,6 +7,8 @@ namespace mashin.Views.Desktop.Behaviors;
 /// </summary>
 public class SliderDragCompletedBehavior : Behavior<Slider>
 {
+    private Slider? _slider;
+
     public static readonly BindableProperty CommandProperty =
         BindableProperty.Create(nameof(Command), typeof(ICommand), typeof(SliderDragCompletedBehavior));
 
@@ -19,13 +21,26 @@ public class SliderDragCompletedBehavior : Behavior<Slider>
     protected override void OnAttachedTo(Slider slider)
     {
         base.OnAttachedTo(slider);
+        _slider = slider;
+        BindingContext = slider.BindingContext;
+        slider.BindingContextChanged += OnSliderBindingContextChanged;
         slider.DragCompleted += OnDragCompleted;
     }
 
     protected override void OnDetachingFrom(Slider slider)
     {
         base.OnDetachingFrom(slider);
+        slider.BindingContextChanged -= OnSliderBindingContextChanged;
         slider.DragCompleted -= OnDragCompleted;
+        _slider = null;
+    }
+
+    private void OnSliderBindingContextChanged(object? sender, EventArgs e)
+    {
+        if (_slider != null)
+        {
+            BindingContext = _slider.BindingContext;
+        }
     }
 
     private void OnDragCompleted(object? sender, EventArgs e)
