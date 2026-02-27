@@ -3,6 +3,7 @@ using mashin.Models;
 using mashin.Services;
 using Microsoft.Maui.Layouts;
 using System.Collections;
+using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Windows.Input;
 
@@ -56,7 +57,9 @@ public partial class RowView : ContentView
 
 
     private readonly ObservableRangeCollection<object> _selectedItems = new();
-    private readonly ObservableRangeCollection<object> _visibleItems = new();
+    private readonly ObservableRangeCollection<object> _visibleItemsPrimary = new();
+    private readonly ObservableRangeCollection<object> _visibleItemsSecondary = new();
+    private readonly HashSet<object> _pageVerticalInItems = new(ReferenceEqualityComparer.Instance);
     private List<object> _allItems = new();
     private INotifyCollectionChanged? _itemsSourceCollection;
     private IKeyboardService? _keyboardService;
@@ -66,6 +69,7 @@ public partial class RowView : ContentView
     private int _itemsPerPage = 1;
     private bool _isExpanded;
     private bool _isPageAnimating;
+    private bool _isPrimaryHostActive = true;
 
     #endregion
 
@@ -135,12 +139,23 @@ public partial class RowView : ContentView
 
     #region Construction
 
+    private ObservableRangeCollection<object> ActiveVisibleItems => _isPrimaryHostActive ? _visibleItemsPrimary : _visibleItemsSecondary;
+    private ObservableRangeCollection<object> InactiveVisibleItems => _isPrimaryHostActive ? _visibleItemsSecondary : _visibleItemsPrimary;
+    private Grid ActiveItemsLayer => _isPrimaryHostActive ? ItemsHostPrimaryLayer : ItemsHostSecondaryLayer;
+    private Grid InactiveItemsLayer => _isPrimaryHostActive ? ItemsHostSecondaryLayer : ItemsHostPrimaryLayer;
+    private ScrollView ActiveItemsScroll => _isPrimaryHostActive ? ItemsScrollPrimary : ItemsScrollSecondary;
+    private ScrollView InactiveItemsScroll => _isPrimaryHostActive ? ItemsScrollSecondary : ItemsScrollPrimary;
+    private FlexLayout ActiveItemsFlex => _isPrimaryHostActive ? ItemsFlexPrimary : ItemsFlexSecondary;
+    private FlexLayout InactiveItemsFlex => _isPrimaryHostActive ? ItemsFlexSecondary : ItemsFlexPrimary;
+
     public RowView()
     {
         InitializeComponent();
 
         SelectedItems = _selectedItems;
-        BindableLayout.SetItemsSource(ItemsFlex, _visibleItems);
+        BindableLayout.SetItemsSource(ItemsFlexPrimary, _visibleItemsPrimary);
+        BindableLayout.SetItemsSource(ItemsFlexSecondary, _visibleItemsSecondary);
+        EnsureSingleActiveHostVisible();
         UpdateNavigationState();
     }
 
@@ -184,7 +199,8 @@ public partial class RowView : ContentView
         ShowContextMenuAtPositionCommand = null;
         MediaActions = null;
 
-        BindableLayout.SetItemsSource(ItemsFlex, null);
+        BindableLayout.SetItemsSource(ItemsFlexPrimary, null);
+        BindableLayout.SetItemsSource(ItemsFlexSecondary, null);
 
         ItemsSource = null;
         BindingContext = null;
@@ -293,23 +309,24 @@ public partial class RowView : ContentView
 
     private async void OnPrevTapped(object? sender, EventArgs e)
     {
-        await SetPageAsync(_pageIndex - 1, direction: 1);
+        await SetPageAsync(_pageIndex - 1);
     }
 
     private async void OnNextTapped(object? sender, EventArgs e)
     {
-        await SetPageAsync(_pageIndex + 1, direction: -1);
+        await SetPageAsync(_pageIndex + 1);
     }
 
     private async void OnExpandTapped(object? sender, EventArgs e)
     {
         _isExpanded = !_isExpanded;
-        _pageIndex = 0;
 
         UpdateVisibleItems();
+
+        _pageIndex = 0;
     }
 
-    private async Task SetPageAsync(int pageIndex, int direction)
+    private async Task SetPageAsync(int pageIndex)
     {
         if (_isExpanded || _allItems.Count == 0)
         {
@@ -331,21 +348,46 @@ public partial class RowView : ContentView
         _isPageAnimating = true;
         try
         {
-            var offset = ItemsHost.Width > 0 ? ItemsHost.Width * 0.04 : 36;
-            var outX = direction < 0 ? -offset : offset;
-            var inX = direction < 0 ? offset : -offset;
+            var direction = nextIndex > _pageIndex ? -1 : 1;
+            var offset = 50;
+            var outX = offset * direction;
+            var inX = -outX;
+
+            var targetPageItems = GetPageItems(nextIndex);
+            if (targetPageItems.Count == 0)
+            {
+                return;
+            }
+
+            SetPagedLayout(ActiveItemsFlex, ActiveItemsScroll);
+            SetPagedLayout(InactiveItemsFlex, InactiveItemsScroll);
+
+            InactiveVisibleItems.Clear();
+            InactiveVisibleItems.AddRange(targetPageItems);
+
+            var activeLayer = ActiveItemsLayer;
+            var incomingLayer = InactiveItemsLayer;
+
+            incomingLayer.IsVisible = true;
+            incomingLayer.InputTransparent = true;
+            incomingLayer.Opacity = 0;
+            incomingLayer.TranslationX = inX;
 
             await Task.WhenAll(
-                ItemsHost.TranslateToAsync(outX, 0, 260, Easing.CubicOut),
-                ItemsHost.FadeToAsync(0, 120, Easing.CubicOut));
+                activeLayer.TranslateToAsync(outX, 0, 250, Easing.Linear),
+                activeLayer.FadeToAsync(0, 250, Easing.CubicIn));
+
+            await Task.WhenAll(
+                incomingLayer.TranslateToAsync(0, 0, 250, Easing.Linear),
+                incomingLayer.FadeToAsync(1, 250, Easing.CubicOut));
 
             _pageIndex = nextIndex;
-            UpdateVisibleItems();
+            _isPrimaryHostActive = !_isPrimaryHostActive;
+            EnsureSingleActiveHostVisible();
 
-            ItemsHost.TranslationX = inX;
-            await Task.WhenAll(
-                ItemsHost.TranslateToAsync(0, 0, 300, Easing.CubicOut),
-                ItemsHost.FadeToAsync(1, 140, Easing.CubicOut));
+            InactiveVisibleItems.Clear();
+
+            UpdateNavigationState();
         }
         finally
         {
@@ -355,63 +397,54 @@ public partial class RowView : ContentView
 
     private async void UpdateVisibleItems()
     {
+        if (Dispatcher?.IsDispatchRequired ?? false)
+        {
+            Dispatcher.Dispatch(UpdateVisibleItems);
+            return;
+        }
+
         if (_isExpanded)
         {
             // Set flex layout for expanded mode
-            ItemsFlex.Direction = FlexDirection.Row;
-            ItemsFlex.Wrap = FlexWrap.Wrap;
-            ItemsScroll.Orientation = ScrollOrientation.Vertical;
+            EnsureSingleActiveHostVisible();
+            SetExpandedLayout(ActiveItemsFlex, ActiveItemsScroll);
             ItemsHost.HeightRequest = -1;
 
             // Progressively load items in batches to keep UI responsive
-            _visibleItems.Clear();
-            var initial = _allItems.Take(_itemsPerPage).ToList();
-            _visibleItems.AddRange(initial);
+            _pageVerticalInItems.Clear();
+            var remainingItems = _allItems.ToList();
+            if (_pageIndex == 0)
+            {
+                remainingItems = _allItems.Skip(_itemsPerPage).ToList(); 
+            }
+            else
+            {
+                ActiveVisibleItems.Clear();
+            }
 
-            var remainingItems = _allItems.Skip(_itemsPerPage).ToList();
             foreach (var batch in remainingItems.Chunk(_itemsPerPage))
             {
-                _visibleItems.AddRange(batch);
-                await Task.Delay(50);
+                _pageVerticalInItems.UnionWith(batch);
+                ActiveVisibleItems.AddRange(batch);
+                await Task.Yield();
+                await Task.Delay(250);
             }
+
+            InactiveVisibleItems.Clear();
         }
         else
         {
             // Set flex layout for paged mode
-            ItemsFlex.Direction = FlexDirection.Row;
-            ItemsFlex.Wrap = FlexWrap.NoWrap;
-            ItemsScroll.Orientation = ScrollOrientation.Horizontal;
+            EnsureSingleActiveHostVisible();
+            SetPagedLayout(ActiveItemsFlex, ActiveItemsScroll);
+            SetPagedLayout(InactiveItemsFlex, InactiveItemsScroll);
             ItemsHost.HeightRequest = ItemWidth + ItemVerticalGap + ItemLabelHeight + (ItemSpacing * 2);
+            _pageVerticalInItems.Clear();
 
             // Update visible items based on current page
-            var pageStart = _pageIndex * _itemsPerPage;
-            var pageEnd = Math.Min(pageStart + _itemsPerPage, _allItems.Count);
+            SyncPageItems(ActiveVisibleItems, _pageIndex);
+            InactiveVisibleItems.Clear();
 
-            if (_allItems.Count == 0 || pageStart >= _allItems.Count)
-            {
-                _visibleItems.Clear();
-            }
-            else if (_visibleItems.Count == 0 || !ReferenceEquals(_visibleItems[0], _allItems[pageStart]))
-            {
-                _visibleItems.Clear();
-                _visibleItems.AddRange(_allItems.Skip(pageStart).Take(pageEnd - pageStart));
-            }
-            else
-            {
-                var desiredCount = pageEnd - pageStart;
-                if (_visibleItems.Count > desiredCount)
-                {
-                    for (var i = _visibleItems.Count - 1; i >= desiredCount; i--)
-                    {
-                        _visibleItems.RemoveAt(i);
-                    }
-                }
-                else if (_visibleItems.Count < desiredCount)
-                {
-                    var startIndex = pageStart + _visibleItems.Count;
-                    _visibleItems.AddRange(_allItems.Skip(startIndex).Take(pageEnd - startIndex));
-                }
-            }
         }
 
         UpdateNavigationState();
@@ -433,21 +466,118 @@ public partial class RowView : ContentView
 
     #endregion
 
+    #region Paging Helpers
+
+    private void EnsureSingleActiveHostVisible()
+    {
+        var activeLayer = ActiveItemsLayer;
+        var inactiveLayer = InactiveItemsLayer;
+
+        activeLayer.IsVisible = true;
+        activeLayer.InputTransparent = false;
+        activeLayer.Opacity = 1;
+        activeLayer.TranslationX = 0;
+
+        inactiveLayer.IsVisible = false;
+        inactiveLayer.InputTransparent = true;
+        inactiveLayer.Opacity = 0;
+        inactiveLayer.TranslationX = 0;
+    }
+
+    private static void SetPagedLayout(FlexLayout flexLayout, ScrollView scrollView)
+    {
+        flexLayout.Direction = FlexDirection.Row;
+        flexLayout.Wrap = FlexWrap.NoWrap;
+        scrollView.Orientation = ScrollOrientation.Horizontal;
+    }
+
+    private static void SetExpandedLayout(FlexLayout flexLayout, ScrollView scrollView)
+    {
+        flexLayout.Direction = FlexDirection.Row;
+        flexLayout.Wrap = FlexWrap.Wrap;
+        scrollView.Orientation = ScrollOrientation.Vertical;
+    }
+
+    private void SyncPageItems(ObservableRangeCollection<object> target, int pageIndex)
+    {
+        var items = GetPageItems(pageIndex);
+
+        if (items.Count == 0)
+        {
+            target.Clear();
+            return;
+        }
+
+        if (target.Count == 0 || !ReferenceEquals(target[0], items[0]))
+        {
+            target.Clear();
+            target.AddRange(items);
+            return;
+        }
+
+        if (target.Count > items.Count)
+        {
+            for (var i = target.Count - 1; i >= items.Count; i--)
+            {
+                target.RemoveAt(i);
+            }
+        }
+        else if (target.Count < items.Count)
+        {
+            target.AddRange(items.Skip(target.Count));
+        }
+    }
+
+    private List<object> GetPageItems(int pageIndex)
+    {
+        var pageStart = pageIndex * _itemsPerPage;
+        if (_allItems.Count == 0 || pageStart >= _allItems.Count)
+        {
+            return new List<object>();
+        }
+
+        var pageEnd = Math.Min(pageStart + _itemsPerPage, _allItems.Count);
+        return _allItems.Skip(pageStart).Take(pageEnd - pageStart).ToList();
+    }
+
+    #endregion
+
     #region Item Lifecycle
 
-    private void OnItemLoaded(object? sender, EventArgs e)
+    private async void OnItemLoaded(object? sender, EventArgs e)
     {
-        if (sender is BindableObject bindable && bindable.BindingContext is MediaItem item)
+        if (sender is not VisualElement element)
         {
-            //Debug.WriteLine($"RowView item loaded: {item.Name} ({item.MediaType})");
+            return;
         }
+
+        var item = element.BindingContext;
+        if (item == null)
+        {
+            return;
+        }
+
+        // Page extension animation
+        if (_pageVerticalInItems.Remove(item))
+        {
+            element.Opacity = 0;
+            element.TranslationY = -50;
+            await Task.WhenAll(
+                element.FadeToAsync(1, 200, Easing.CubicIn),
+                element.TranslateToAsync(0, 0, 200, Easing.Linear));
+            return;
+        }
+
+        //Default animation
+        element.Opacity = 0;
+        await element.FadeToAsync(1, 100, Easing.CubicOut);
     }
 
     private void OnItemUnloaded(object? sender, EventArgs e)
     {
-        if (sender is BindableObject bindable && bindable.BindingContext is MediaItem item)
+        if (sender is not VisualElement)
         {
-            //Debug.WriteLine($"RowView item unloaded: {item.Name} ({item.MediaType})");
+            return;
         }
     }
 

@@ -373,14 +373,27 @@
 
         <!--  Items Host  -->
         <Grid x:Name="ItemsHost" SizeChanged="OnItemsHostSizeChanged">
-            <ScrollView x:Name="ItemsScroll" Orientation="Neither">
-                <FlexLayout x:Name="ItemsFlex"
-                    Direction="Row"
-                    Wrap="NoWrap"
-                    AlignItems="Start"
-                    JustifyContent="Start"
-                    BindableLayout.ItemTemplateSelector="{StaticResource RowViewTemplateSelector}" />
-            </ScrollView>
+            <Grid x:Name="ItemsHostPrimaryLayer">
+                <ScrollView x:Name="ItemsScrollPrimary" Orientation="Neither">
+                    <FlexLayout x:Name="ItemsFlexPrimary"
+                        Direction="Row"
+                        Wrap="NoWrap"
+                        AlignItems="Start"
+                        JustifyContent="Start"
+                        BindableLayout.ItemTemplateSelector="{StaticResource RowViewTemplateSelector}" />
+                </ScrollView>
+            </Grid>
+
+            <Grid x:Name="ItemsHostSecondaryLayer" IsVisible="False" InputTransparent="True" Opacity="0">
+                <ScrollView x:Name="ItemsScrollSecondary" Orientation="Neither">
+                    <FlexLayout x:Name="ItemsFlexSecondary"
+                        Direction="Row"
+                        Wrap="NoWrap"
+                        AlignItems="Start"
+                        JustifyContent="Start"
+                        BindableLayout.ItemTemplateSelector="{StaticResource RowViewTemplateSelector}" />
+                </ScrollView>
+            </Grid>
         </Grid>
 
         <!--  Expand Button  -->
