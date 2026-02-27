@@ -50,7 +50,7 @@ public partial class RowView : ContentView
     private const double MinItemWidth = 125;
     private const double ItemSpacing = 12;
     private const double ItemLabelHeight = 32;
-    private const double ItemVerticalGap = 6;
+    private const double ItemVerticalGap = 12;
     private const double ItemBlockHeight = MinItemWidth + ItemVerticalGap + ItemLabelHeight;
 
 
@@ -65,8 +65,6 @@ public partial class RowView : ContentView
     private int _pageIndex;
     private int _itemsPerPage = 1;
     private bool _isExpanded;
-    private int _lastPageIndex = -1;
-    private int _lastItemsPerPage = -1;
     private bool _isPageAnimating;
 
     #endregion
@@ -142,6 +140,7 @@ public partial class RowView : ContentView
         InitializeComponent();
 
         SelectedItems = _selectedItems;
+        BindableLayout.SetItemsSource(ItemsFlex, _visibleItems);
         UpdateNavigationState();
     }
 
@@ -217,11 +216,9 @@ public partial class RowView : ContentView
         _allItems = items?.Cast<object>().ToList() ?? new List<object>();
         _pageIndex = 0;
         _anchorIndex = null;
-        _lastPageIndex = -1;
-        _lastItemsPerPage = -1;
         ClearAllSelections();
         SyncSelectionState();
-        UpdateVisibleItems(resetVisibleItems: true);
+        UpdateVisibleItems();
     }
 
     private void AttachItemsSourceCollection(IEnumerable<object>? items)
@@ -250,12 +247,7 @@ public partial class RowView : ContentView
         {
             _allItems = ItemsSource?.Cast<object>().ToList() ?? new List<object>();
 
-            var resetVisibleItems = e.Action is NotifyCollectionChangedAction.Reset
-                or NotifyCollectionChangedAction.Remove
-                or NotifyCollectionChangedAction.Replace
-                or NotifyCollectionChangedAction.Move;
-
-            UpdateVisibleItems(resetVisibleItems: resetVisibleItems);
+            UpdateVisibleItems();
         });
     }
 
@@ -293,7 +285,7 @@ public partial class RowView : ContentView
 
         if (itemsPerPageChanged || itemWidthChanged)
         {
-            UpdateVisibleItems(resetVisibleItems: false);
+            UpdateVisibleItems();
         }
 
         //Debug.WriteLine($"RowView: ItemsHost size changed, width={width}, calculated itemsPerPage={perPage}");
@@ -312,12 +304,9 @@ public partial class RowView : ContentView
     private async void OnExpandTapped(object? sender, EventArgs e)
     {
         _isExpanded = !_isExpanded;
-        if (!_isExpanded)
-        {
-            _pageIndex = 0;
-        }
+        _pageIndex = 0;
 
-        UpdateVisibleItems(resetVisibleItems: true);
+        UpdateVisibleItems();
     }
 
     private async Task SetPageAsync(int pageIndex, int direction)
@@ -351,7 +340,7 @@ public partial class RowView : ContentView
                 ItemsHost.FadeToAsync(0, 120, Easing.CubicOut));
 
             _pageIndex = nextIndex;
-            UpdateVisibleItems(resetVisibleItems: true);
+            UpdateVisibleItems();
 
             ItemsHost.TranslationX = inX;
             await Task.WhenAll(
@@ -364,60 +353,68 @@ public partial class RowView : ContentView
         }
     }
 
-    private void UpdateVisibleItems(bool resetVisibleItems)
+    private async void UpdateVisibleItems()
     {
         if (_isExpanded)
         {
+            // Set flex layout for expanded mode
             ItemsFlex.Direction = FlexDirection.Row;
             ItemsFlex.Wrap = FlexWrap.Wrap;
             ItemsScroll.Orientation = ScrollOrientation.Vertical;
-            BindableLayout.SetItemsSource(ItemsFlex, _allItems);
             ItemsHost.HeightRequest = -1;
+
+            // Progressively load items in batches to keep UI responsive
             _visibleItems.Clear();
+            var initial = _allItems.Take(_itemsPerPage).ToList();
+            _visibleItems.AddRange(initial);
+
+            var remainingItems = _allItems.Skip(_itemsPerPage).ToList();
+            foreach (var batch in remainingItems.Chunk(_itemsPerPage))
+            {
+                _visibleItems.AddRange(batch);
+                await Task.Delay(50);
+            }
         }
         else
         {
+            // Set flex layout for paged mode
             ItemsFlex.Direction = FlexDirection.Row;
             ItemsFlex.Wrap = FlexWrap.NoWrap;
             ItemsScroll.Orientation = ScrollOrientation.Horizontal;
             ItemsHost.HeightRequest = ItemWidth + ItemVerticalGap + ItemLabelHeight + (ItemSpacing * 2);
-            EnsureVisibleItems(resetVisibleItems);
-            BindableLayout.SetItemsSource(ItemsFlex, _visibleItems);
-        }
 
-        _lastPageIndex = _pageIndex;
-        _lastItemsPerPage = _itemsPerPage;
-        UpdateNavigationState();
-    }
+            // Update visible items based on current page
+            var pageStart = _pageIndex * _itemsPerPage;
+            var pageEnd = Math.Min(pageStart + _itemsPerPage, _allItems.Count);
 
-    private void EnsureVisibleItems(bool resetVisibleItems)
-    {
-        var pageChanged = _pageIndex != _lastPageIndex;
-        var pageStart = _pageIndex * _itemsPerPage;
-        var pageSize = _itemsPerPage;
-        var pageEnd = Math.Min(pageStart + pageSize, _allItems.Count);
-
-        if (resetVisibleItems || pageChanged)
-        {
-            _visibleItems.Clear();
-            _visibleItems.AddRange(_allItems.Skip(pageStart).Take(pageEnd - pageStart));
-
-            return;
-        }
-
-        var desiredCount = pageEnd - pageStart;
-        if (_visibleItems.Count > desiredCount)
-        {
-            for (var i = _visibleItems.Count - 1; i >= desiredCount; i--)
+            if (_allItems.Count == 0 || pageStart >= _allItems.Count)
             {
-                _visibleItems.RemoveAt(i);
+                _visibleItems.Clear();
+            }
+            else if (_visibleItems.Count == 0 || !ReferenceEquals(_visibleItems[0], _allItems[pageStart]))
+            {
+                _visibleItems.Clear();
+                _visibleItems.AddRange(_allItems.Skip(pageStart).Take(pageEnd - pageStart));
+            }
+            else
+            {
+                var desiredCount = pageEnd - pageStart;
+                if (_visibleItems.Count > desiredCount)
+                {
+                    for (var i = _visibleItems.Count - 1; i >= desiredCount; i--)
+                    {
+                        _visibleItems.RemoveAt(i);
+                    }
+                }
+                else if (_visibleItems.Count < desiredCount)
+                {
+                    var startIndex = pageStart + _visibleItems.Count;
+                    _visibleItems.AddRange(_allItems.Skip(startIndex).Take(pageEnd - startIndex));
+                }
             }
         }
-        else if (_visibleItems.Count < desiredCount)
-        {
-            var startIndex = pageStart + _visibleItems.Count;
-            _visibleItems.AddRange(_allItems.Skip(startIndex).Take(pageEnd - startIndex));
-        }
+
+        UpdateNavigationState();
     }
 
     private void UpdateNavigationState()
