@@ -480,25 +480,10 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 .OrderByDescending(a => a.Year ?? 0)
                 .ToList();
 
-            // Load albums progressively
-            var visibleAlbums = filteredAlbums.Take(10).ToList();
-            OtherAlbums = new ObservableRangeCollection<Album>(visibleAlbums);
+            OtherAlbums = new ObservableRangeCollection<Album>(filteredAlbums);
             IsLoadingOtherAlbums = false;
-            await Task.Delay(50);
 
             _ = BuildAlbumContextMenuAsync();
-
-            // Add remaining albums quickly (virtuallized in collection view)
-            var remainingAlbums = filteredAlbums.Skip(visibleAlbums.Count).ToList();
-            if (remainingAlbums.Count > 0)
-            {
-                // Add remaining albums in batches of 10
-                foreach (var batch in remainingAlbums.Chunk(10))
-                {
-                    OtherAlbums.AddRange(batch);
-                    await Task.Delay(50);
-                }
-            }
         }
         catch (Exception ex)
         {

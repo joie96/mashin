@@ -12,15 +12,6 @@
                    FontSize="32"
                    FontAttributes="Bold"
                    TextColor="{DynamicResource TextPrimary}"/>
-
-            <Grid HeightRequest="400">
-                <Label Text="Home Content wird hier angezeigt..."
-                       FontSize="18"
-                       HorizontalOptions="Center"
-                       VerticalOptions="Center"
-                       TextColor="{DynamicResource TextTertiary}"/>
-            </Grid>
-
         </VerticalStackLayout>
     </ScrollView>
 </ContentPage>

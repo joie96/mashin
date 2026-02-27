@@ -1,9 +1,9 @@
+using mashin.Collections;
 using mashin.Models;
 using mashin.Services;
+using Microsoft.Maui.Layouts;
 using System.Collections;
-using System.Collections.ObjectModel;
-using System.Diagnostics;
-using mashin.Extensions;
+using System.Collections.Specialized;
 using System.Windows.Input;
 
 
@@ -40,18 +40,34 @@ public partial class RowView : ContentView
     public static readonly BindableProperty ItemCornerRadiusProperty =
         BindableProperty.Create(nameof(ItemCornerRadius), typeof(float), typeof(RowView), defaultValue: 8f);
 
+    public static readonly BindableProperty ItemWidthProperty = 
+        BindableProperty.Create(nameof(ItemWidth), typeof(double), typeof(RowView), MinItemWidth);
 
     #endregion
 
     #region Fields
 
-    private readonly ObservableCollection<object> _selectedItems = new();
+    private const double MinItemWidth = 125;
+    private const double ItemSpacing = 12;
+    private const double ItemLabelHeight = 32;
+    private const double ItemVerticalGap = 6;
+    private const double ItemBlockHeight = MinItemWidth + ItemVerticalGap + ItemLabelHeight;
+
+
+
+    private readonly ObservableRangeCollection<object> _selectedItems = new();
+    private readonly ObservableRangeCollection<object> _visibleItems = new();
+    private List<object> _allItems = new();
+    private INotifyCollectionChanged? _itemsSourceCollection;
     private IKeyboardService? _keyboardService;
     private int? _anchorIndex;
     private bool _isCheckboxClick;
-    private double _currentScrollPosition = 0;
-    private const double ScrollPixelStep = 780;
-    private CancellationTokenSource? _scrollCts;
+    private int _pageIndex;
+    private int _itemsPerPage = 1;
+    private bool _isExpanded;
+    private int _lastPageIndex = -1;
+    private int _lastItemsPerPage = -1;
+    private bool _isPageAnimating;
 
     #endregion
 
@@ -111,6 +127,12 @@ public partial class RowView : ContentView
         set => SetValue(ItemCornerRadiusProperty, value);
     }
 
+    public double ItemWidth
+    {
+        get => (double)GetValue(ItemWidthProperty);
+        private set => SetValue(ItemWidthProperty, value);
+    }
+
     #endregion
 
     #region Construction
@@ -118,8 +140,9 @@ public partial class RowView : ContentView
     public RowView()
     {
         InitializeComponent();
-        
+
         SelectedItems = _selectedItems;
+        UpdateNavigationState();
     }
 
     protected override void OnHandlerChanged()
@@ -154,9 +177,7 @@ public partial class RowView : ContentView
             _keyboardService = null;
         }
 
-        _scrollCts?.Cancel();
-        _scrollCts?.Dispose();
-        _scrollCts = null;
+        DetachItemsSourceCollection();
 
         PrimaryInfoTappedCommand = null;
         SecondaryInfoTappedCommand = null;
@@ -164,12 +185,7 @@ public partial class RowView : ContentView
         ShowContextMenuAtPositionCommand = null;
         MediaActions = null;
 
-        if (collectionView != null)
-        {
-            collectionView.ItemsSource = null;
-            collectionView.BindingContext = null;
-            collectionView.Handler?.DisconnectHandler();
-        }
+        BindableLayout.SetItemsSource(ItemsFlex, null);
 
         ItemsSource = null;
         BindingContext = null;
@@ -189,19 +205,238 @@ public partial class RowView : ContentView
             return;
         }
 
-        view._anchorIndex = null;
-        view._currentScrollPosition = 0;
-        view.ClearAllSelections();
-        view.SyncSelectionState();
+        view.ApplyItemsSource(newValue as IEnumerable<object>);
     }
 
     #endregion
 
-    #region Scroll Operations
-
-    private void OnCollectionViewScrolled(object? sender, ItemsViewScrolledEventArgs e)
+    #region ItemSource handling
+    private void ApplyItemsSource(IEnumerable<object>? items)
     {
+        AttachItemsSourceCollection(items);
+        _allItems = items?.Cast<object>().ToList() ?? new List<object>();
+        _pageIndex = 0;
+        _anchorIndex = null;
+        _lastPageIndex = -1;
+        _lastItemsPerPage = -1;
+        ClearAllSelections();
+        SyncSelectionState();
+        UpdateVisibleItems(resetVisibleItems: true);
     }
+
+    private void AttachItemsSourceCollection(IEnumerable<object>? items)
+    {
+        DetachItemsSourceCollection();
+
+        if (items is INotifyCollectionChanged notifyCollection)
+        {
+            _itemsSourceCollection = notifyCollection;
+            _itemsSourceCollection.CollectionChanged += OnItemsSourceCollectionChanged;
+        }
+    }
+
+    private void DetachItemsSourceCollection()
+    {
+        if (_itemsSourceCollection != null)
+        {
+            _itemsSourceCollection.CollectionChanged -= OnItemsSourceCollectionChanged;
+            _itemsSourceCollection = null;
+        }
+    }
+
+    private void OnItemsSourceCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        Dispatcher.Dispatch(() =>
+        {
+            _allItems = ItemsSource?.Cast<object>().ToList() ?? new List<object>();
+
+            var resetVisibleItems = e.Action is NotifyCollectionChangedAction.Reset
+                or NotifyCollectionChangedAction.Remove
+                or NotifyCollectionChangedAction.Replace
+                or NotifyCollectionChangedAction.Move;
+
+            UpdateVisibleItems(resetVisibleItems: resetVisibleItems);
+        });
+    }
+
+    #endregion
+
+    #region Paging
+
+    private void OnItemsHostSizeChanged(object? sender, EventArgs e)
+    {
+        if (sender is not VisualElement element)
+        {
+            return;
+        }
+
+        var width = element.Width;
+        if (double.IsNaN(width) || double.IsInfinity(width) || width <= 0)
+        {
+            return;
+        }
+
+        var perPage = Math.Max(1, (int)Math.Floor(width / (MinItemWidth + ItemSpacing)));
+        var newItemWidth = Math.Max(MinItemWidth, Math.Floor((width / perPage) - ItemSpacing));
+        var itemsPerPageChanged = perPage != _itemsPerPage;
+        var itemWidthChanged = Math.Abs(newItemWidth - ItemWidth) > 0.1;
+
+        if (itemsPerPageChanged)
+        {
+            _itemsPerPage = perPage;
+        }
+
+        if (itemWidthChanged)
+        {
+            ItemWidth = newItemWidth;
+        }
+
+        if (itemsPerPageChanged || itemWidthChanged)
+        {
+            UpdateVisibleItems(resetVisibleItems: false);
+        }
+
+        //Debug.WriteLine($"RowView: ItemsHost size changed, width={width}, calculated itemsPerPage={perPage}");
+    }
+
+    private async void OnPrevTapped(object? sender, EventArgs e)
+    {
+        await SetPageAsync(_pageIndex - 1, direction: 1);
+    }
+
+    private async void OnNextTapped(object? sender, EventArgs e)
+    {
+        await SetPageAsync(_pageIndex + 1, direction: -1);
+    }
+
+    private async void OnExpandTapped(object? sender, EventArgs e)
+    {
+        _isExpanded = !_isExpanded;
+        if (!_isExpanded)
+        {
+            _pageIndex = 0;
+        }
+
+        UpdateVisibleItems(resetVisibleItems: true);
+    }
+
+    private async Task SetPageAsync(int pageIndex, int direction)
+    {
+        if (_isExpanded || _allItems.Count == 0)
+        {
+            return;
+        }
+
+        var totalPages = Math.Max(1, (int)Math.Ceiling((double)_allItems.Count / _itemsPerPage));
+        var nextIndex = Math.Clamp(pageIndex, 0, totalPages - 1);
+        if (nextIndex == _pageIndex)
+        {
+            return;
+        }
+
+        if (_isPageAnimating)
+        {
+            return;
+        }
+
+        _isPageAnimating = true;
+        try
+        {
+            var offset = ItemsHost.Width > 0 ? ItemsHost.Width * 0.04 : 36;
+            var outX = direction < 0 ? -offset : offset;
+            var inX = direction < 0 ? offset : -offset;
+
+            await Task.WhenAll(
+                ItemsHost.TranslateToAsync(outX, 0, 260, Easing.CubicOut),
+                ItemsHost.FadeToAsync(0, 120, Easing.CubicOut));
+
+            _pageIndex = nextIndex;
+            UpdateVisibleItems(resetVisibleItems: true);
+
+            ItemsHost.TranslationX = inX;
+            await Task.WhenAll(
+                ItemsHost.TranslateToAsync(0, 0, 300, Easing.CubicOut),
+                ItemsHost.FadeToAsync(1, 140, Easing.CubicOut));
+        }
+        finally
+        {
+            _isPageAnimating = false;
+        }
+    }
+
+    private void UpdateVisibleItems(bool resetVisibleItems)
+    {
+        if (_isExpanded)
+        {
+            ItemsFlex.Direction = FlexDirection.Row;
+            ItemsFlex.Wrap = FlexWrap.Wrap;
+            ItemsScroll.Orientation = ScrollOrientation.Vertical;
+            BindableLayout.SetItemsSource(ItemsFlex, _allItems);
+            ItemsHost.HeightRequest = -1;
+            _visibleItems.Clear();
+        }
+        else
+        {
+            ItemsFlex.Direction = FlexDirection.Row;
+            ItemsFlex.Wrap = FlexWrap.NoWrap;
+            ItemsScroll.Orientation = ScrollOrientation.Horizontal;
+            ItemsHost.HeightRequest = ItemWidth + ItemVerticalGap + ItemLabelHeight + (ItemSpacing * 2);
+            EnsureVisibleItems(resetVisibleItems);
+            BindableLayout.SetItemsSource(ItemsFlex, _visibleItems);
+        }
+
+        _lastPageIndex = _pageIndex;
+        _lastItemsPerPage = _itemsPerPage;
+        UpdateNavigationState();
+    }
+
+    private void EnsureVisibleItems(bool resetVisibleItems)
+    {
+        var pageChanged = _pageIndex != _lastPageIndex;
+        var pageStart = _pageIndex * _itemsPerPage;
+        var pageSize = _itemsPerPage;
+        var pageEnd = Math.Min(pageStart + pageSize, _allItems.Count);
+
+        if (resetVisibleItems || pageChanged)
+        {
+            _visibleItems.Clear();
+            _visibleItems.AddRange(_allItems.Skip(pageStart).Take(pageEnd - pageStart));
+
+            return;
+        }
+
+        var desiredCount = pageEnd - pageStart;
+        if (_visibleItems.Count > desiredCount)
+        {
+            for (var i = _visibleItems.Count - 1; i >= desiredCount; i--)
+            {
+                _visibleItems.RemoveAt(i);
+            }
+        }
+        else if (_visibleItems.Count < desiredCount)
+        {
+            var startIndex = pageStart + _visibleItems.Count;
+            _visibleItems.AddRange(_allItems.Skip(startIndex).Take(pageEnd - startIndex));
+        }
+    }
+
+    private void UpdateNavigationState()
+    {
+        var canGoPrev = !_isExpanded && _pageIndex > 0;
+        var canGoNext = !_isExpanded && _allItems.Count > (_pageIndex + 1) * _itemsPerPage;
+
+        PrevButton.IsEnabled = canGoPrev;
+        PrevButton.Opacity = canGoPrev ? 1 : 0.5;
+        NextButton.IsEnabled = canGoNext;
+        NextButton.Opacity = canGoNext ? 1 : 0.5;
+
+        ExpandDownIcon.IsVisible = !_isExpanded;
+        ExpandUpIcon.IsVisible = _isExpanded;
+    }
+
+    #endregion
+
+    #region Item Lifecycle
 
     private void OnItemLoaded(object? sender, EventArgs e)
     {
@@ -217,41 +452,6 @@ public partial class RowView : ContentView
         {
             //Debug.WriteLine($"RowView item unloaded: {item.Name} ({item.MediaType})");
         }
-    }
-
-    private async void OnScrollLeftClicked(object? sender, EventArgs e)
-    {
-        _scrollCts?.Cancel();
-        _scrollCts = new CancellationTokenSource();
-
-        var targetPosition = Math.Max(0, _currentScrollPosition - ScrollPixelStep);
-        _currentScrollPosition = targetPosition;
-
-        await collectionView.ScrollToPixelSmoothAsync(
-            targetPosition,
-            duration: 50,
-            ct: _scrollCts.Token);  
-    }
-
-    private async void OnScrollRightClicked(object? sender, EventArgs e)
-    {
-        _scrollCts?.Cancel();
-        _scrollCts = new CancellationTokenSource();
-
-        var targetPosition = collectionView.ClampHorizontalTargetX(_currentScrollPosition + ScrollPixelStep);
-        _currentScrollPosition = targetPosition;
-        
-        await collectionView.ScrollToPixelSmoothAsync(
-            targetPosition,
-            duration: 50,
-            ct: _scrollCts.Token);
-  
-    }
-
-    public void ResetScrollPosition()
-    {
-        _currentScrollPosition = 0;
-        collectionView?.ScrollTo(0, animate: false);
     }
 
     #endregion

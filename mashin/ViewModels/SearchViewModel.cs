@@ -504,63 +504,20 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
 
             case MediaType.Album:
                 var albums = results.Albums ?? new List<Album>();
-                
-                var visibleAlbums = albums.Take(10);
-               
-                Albums = new ObservableRangeCollection<Album>(visibleAlbums);
+                Albums = new ObservableRangeCollection<Album>(albums);
                 IsLoadingAlbums = false;
-                await Task.Delay(50);
-                
-                var remainingAlbums = albums.Skip(visibleAlbums.Count()).ToList();
-                if (remainingAlbums.Count > 0)
-                {
-                    foreach (var batch in remainingAlbums.Chunk(10))
-                    {
-                        Albums.AddRange(batch);       
-                        await Task.Delay(50);
-                    }
-                }
                 break;
 
             case MediaType.Playlist:
                 var playlists = results.Playlists ?? new List<Playlist>();
-                
-                var visiblePlaylists = playlists.Take(10);
-
-                Playlists = new ObservableRangeCollection<Playlist>(visiblePlaylists);
+                Playlists = new ObservableRangeCollection<Playlist>(playlists);
                 IsLoadingPlaylists = false;
-                await Task.Delay(50);
-                
-                var remainingPlaylists = playlists.Skip(visiblePlaylists.Count()).ToList();
-                if (remainingPlaylists.Count > 0)
-                {
-                    foreach (var batch in remainingPlaylists.Chunk(10))
-                    {
-                        Playlists.AddRange(batch);
-                        await Task.Delay(50);
-                    }
-                }
-                
                 break;
 
             case MediaType.Artist:
                 var artists = results.Artists ?? new List<Artist>();
-
-                var visibleArtists = artists.Take(10);
-
-                Artists = new ObservableRangeCollection<Artist>(visibleArtists);
+                Artists = new ObservableRangeCollection<Artist>(artists);
                 IsLoadingArtists = false;
-                await Task.Delay(50);
-                
-                var remainingArtists = artists.Skip(visibleArtists.Count()).ToList();
-                if (remainingArtists.Count > 0)
-                {
-                    foreach (var batch in remainingArtists.Chunk(10))
-                    {
-                        await Task.Delay(50);
-                        Artists.AddRange(batch);
-                    }
-                }            
                 break;
         }
     }

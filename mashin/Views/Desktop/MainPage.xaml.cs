@@ -46,6 +46,8 @@ public partial class MainPage : ContentPage
 
         _ = _viewModel.InitializeAsync();
 
+        _navigationService.IsNavigating = false;
+
         UpdateQueueIconColor();
     }
 

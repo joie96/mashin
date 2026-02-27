@@ -19,10 +19,11 @@
 
         <DataTemplate x:Key="AlbumTemplate">
             <Grid x:Name="GridItemContainer"
+                Margin="3"
                 Loaded="OnItemLoaded"
                 Unloaded="OnItemUnloaded"
                 RowDefinitions="Auto,Auto,Auto,Auto"
-                WidthRequest="125">
+                WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
 
                 <!--  Cover + Overlays  -->
                 <Border x:Name="CoverBorder"
@@ -30,9 +31,9 @@
                     behaviors:HoverBehavior.BaseBackgroundColor="Transparent"
                     behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                     BackgroundColor="Transparent"
-                    HeightRequest="125"
+                    HeightRequest="{Binding Source={x:Reference self}, Path=ItemWidth}"
                     StrokeThickness="0"
-                    WidthRequest="125">
+                    WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
                     <Border.GestureRecognizers>
                         <PointerGestureRecognizer Buttons="Primary" PointerPressed="OnGridItemPrimaryPointerPressed" />
                         <PointerGestureRecognizer Buttons="Secondary" PointerPressed="OnGridItemSecondaryPointerPressed" />
@@ -58,11 +59,7 @@
                                 <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
                             </Border.StrokeShape>
                             <Image Aspect="AspectFill"
-                                Source="{Binding ImageUrl}">
-                                <Image.Clip>
-                                    <RoundRectangleGeometry CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" Rect="0,0,125,125" />
-                                </Image.Clip>
-                            </Image>
+                                Source="{Binding ImageUrl}" />
                         </Border>
 
                         <!--  Provider Icon (Top-Left)  -->
@@ -307,8 +304,12 @@
 
         <DataTemplate x:Key="SkeletonTemplate" x:DataType="models:RowViewSkeleton">
             <ContentView>
-                <Grid RowDefinitions="125,14,14,14" WidthRequest="125">
-                    <controls:SkeletonLoader WidthRequest="125" HeightRequest="125" CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
+                <Grid Margin="3"
+                    RowDefinitions="Auto,14,14,14"
+                    WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
+                    <controls:SkeletonLoader WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}"
+                        HeightRequest="{Binding Source={x:Reference self}, Path=ItemWidth}"
+                        CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
                     <controls:SkeletonLoader Grid.Row="1" WidthRequest="120" HeightRequest="14" HorizontalOptions="Start" Margin="0,12,0,4" />
                     <controls:SkeletonLoader Grid.Row="2" WidthRequest="110" HeightRequest="14" HorizontalOptions="Start" Margin="0,0,0,2" />
                     <controls:SkeletonLoader Grid.Row="3" WidthRequest="60" HeightRequest="14" HorizontalOptions="Start" />
@@ -321,81 +322,99 @@
             SkeletonTemplate="{StaticResource SkeletonTemplate}" />
     </ContentView.Resources>
 
-    <Grid>
-        <CollectionView x:Name="collectionView"
-            ItemSizingStrategy="MeasureFirstItem"
-            ItemTemplate="{StaticResource RowViewTemplateSelector}"
-            ItemsSource="{Binding ItemsSource, Source={x:Reference self}}"
-            Scrolled="OnCollectionViewScrolled"
-            SelectionMode="None"
-            HorizontalOptions="Fill">
-            
-            <!--  DisableScrollBehavior   -->
-            <CollectionView.Behaviors>
-                <behaviors:DisableScrollBehavior
-                    DisableHorizontalScroll="True"
-                    DisableVerticalScroll="True" />
-            </CollectionView.Behaviors>
+    <VerticalStackLayout Spacing="8" Margin="0,-40,0,0">
+        <Grid ColumnDefinitions="*,Auto">
+            <BoxView Grid.Column="0" Opacity="0" />
+            <HorizontalStackLayout Grid.Column="1" Spacing="6">
+                
+                <!--  Previous Button  -->
+                <Border x:Name="PrevButton"
+                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                    BackgroundColor="Transparent"
+                    HeightRequest="24"
+                    WidthRequest="24"
+                    StrokeThickness="0">
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnPrevTapped" />
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="12" />
+                    </Border.StrokeShape>
+                    <Label FontSize="12"
+                        HorizontalOptions="Center"
+                        Text="{mi:Fluent Icon=ChevronLeft24,
+                                         FontOverride=True}"
+                        TextColor="{DynamicResource IconSecondary}"
+                        VerticalOptions="Center" />
+                </Border>
 
-            <CollectionView.ItemsLayout>
-                <LinearItemsLayout ItemSpacing="5" Orientation="Horizontal" />
-            </CollectionView.ItemsLayout>
-        </CollectionView>
+                <!--  Next Button  -->
+                <Border x:Name="NextButton"
+                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                    BackgroundColor="Transparent"
+                    HeightRequest="24"
+                    WidthRequest="24"
+                    StrokeThickness="0">
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnNextTapped" />
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="12" />
+                    </Border.StrokeShape>
+                    <Label FontSize="12"
+                        HorizontalOptions="Center"
+                        Text="{mi:Fluent Icon=ChevronRight24,
+                                         FontOverride=True}"
+                        TextColor="{DynamicResource IconSecondary}"
+                        VerticalOptions="Center" />
+                </Border>
+            </HorizontalStackLayout>
+        </Grid>
 
-        <!--  Scroll Navigation Buttons  -->
-        <HorizontalStackLayout Margin="0,-50,0,0"
-            HorizontalOptions="End"
-            Spacing="4"
-            VerticalOptions="Start">
+        <!--  Items Host  -->
+        <Grid x:Name="ItemsHost" SizeChanged="OnItemsHostSizeChanged">
+            <ScrollView x:Name="ItemsScroll" Orientation="Neither">
+                <FlexLayout x:Name="ItemsFlex"
+                    Direction="Row"
+                    Wrap="NoWrap"
+                    AlignItems="Start"
+                    JustifyContent="Start"
+                    BindableLayout.ItemTemplateSelector="{StaticResource RowViewTemplateSelector}" />
+            </ScrollView>
+        </Grid>
 
-            <Border x:Name="leftScrollButton"
-                behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource BackgroundPrimary}"
-                behaviors:HoverBehavior.EnableScaleHover="True"
-                behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-                BackgroundColor="{DynamicResource BackgroundPrimary}"
-                HeightRequest="40"
-                IsVisible="True"
-                Stroke="{DynamicResource BorderSecondary}"
-                StrokeThickness="0"
-                WidthRequest="40">
-                <Border.StrokeShape>
-                    <RoundRectangle CornerRadius="20" />
-                </Border.StrokeShape>
-                <Border.GestureRecognizers>
-                    <TapGestureRecognizer Tapped="OnScrollLeftClicked" />
-                </Border.GestureRecognizers>
-                <Label FontSize="20"
+        <!--  Expand Button  -->
+        <Border x:Name="ExpandButton"
+            behaviors:HoverBehavior.EnableScaleHover="True"
+            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+            BackgroundColor="Transparent"
+            HeightRequest="24"
+            WidthRequest="24"
+            HorizontalOptions="Center"
+            StrokeThickness="0">
+            <Border.StrokeShape>
+                <RoundRectangle CornerRadius="12" />
+            </Border.StrokeShape>
+            <Border.GestureRecognizers>
+                <TapGestureRecognizer Tapped="OnExpandTapped" />
+            </Border.GestureRecognizers>
+            <Grid>
+                <Label x:Name="ExpandDownIcon"
+                    FontSize="12"
                     HorizontalOptions="Center"
-                    Text="{mi:Fluent Icon=ChevronLeft24,
+                    Text="{mi:Fluent Icon=ChevronDown24,
                                      FontOverride=True}"
                     TextColor="{DynamicResource IconPrimary}"
                     VerticalOptions="Center" />
-            </Border>
-
-            <Border x:Name="rightScrollButton"
-                behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource BackgroundPrimary}"
-                behaviors:HoverBehavior.EnableScaleHover="True"
-                behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-                BackgroundColor="{DynamicResource BackgroundPrimary}"
-                HeightRequest="40"
-                IsVisible="True"
-                Stroke="{DynamicResource BorderSecondary}"
-                StrokeThickness="0"
-                WidthRequest="40">
-                <Border.StrokeShape>
-                    <RoundRectangle CornerRadius="20" />
-                </Border.StrokeShape>
-                <Border.GestureRecognizers>
-                    <TapGestureRecognizer Tapped="OnScrollRightClicked" />
-                </Border.GestureRecognizers>
-                <Label FontSize="20"
+                <Label x:Name="ExpandUpIcon"
+                    FontSize="12"
                     HorizontalOptions="Center"
-                    Text="{mi:Fluent Icon=ChevronRight24,
+                    IsVisible="False"
+                    Text="{mi:Fluent Icon=ChevronUp24,
                                      FontOverride=True}"
                     TextColor="{DynamicResource IconPrimary}"
                     VerticalOptions="Center" />
-            </Border>
-        </HorizontalStackLayout>
-        
-    </Grid>
+            </Grid>
+        </Border>
+    </VerticalStackLayout>
 </ContentView>

@@ -440,23 +440,12 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
             _allAlbums = sortedAlbums;
 
-            // Load albums progressively
-            var visibleAlbums = sortedAlbums.Take(10);
-            Albums = new ObservableRangeCollection<Album>(visibleAlbums);
+            // Load albums
+            Albums = new ObservableRangeCollection<Album>(_allAlbums);
             IsLoadingAlbums = false;        
-            await Task.Delay(50);
             
             _ = BuildAlbumContextMenuAsync();
 
-            var remainingAlbums = sortedAlbums.Skip(visibleAlbums.Count()).ToList();
-            if (remainingAlbums.Count > 0)
-            {
-                foreach (var batch in remainingAlbums.Chunk(10))
-                {
-                    Albums.AddRange(batch);    
-                    await Task.Delay(50);   
-                }
-            }
         }
         catch (Exception ex)
         {

@@ -442,21 +442,8 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                 .ToList();
 
             await _musicAssistant.EnrichWithProviderInfoAsync(favoriteAlbums);
-
-            var visibleAlbums = favoriteAlbums.Take(10);
-            Albums = new ObservableRangeCollection<Album>(visibleAlbums);
+            Albums = new ObservableRangeCollection<Album>(favoriteAlbums);
             IsLoadingAlbums = false;
-            await Task.Delay(50);
-
-            var remainingAlbums = favoriteAlbums.Skip(Albums.Count).ToList();
-            if (remainingAlbums.Count > 0)
-            {
-                foreach (var batch in remainingAlbums.Chunk(10))
-                {
-                    Albums.AddRange(batch);
-                    await Task.Delay(50);
-                }
-            }
         }
         catch (Exception ex)
         {
@@ -477,21 +464,8 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                 .ToList();
 
             await _musicAssistant.EnrichWithProviderInfoAsync(favoritePlaylists);
-
-            var visiblePlaylists = favoritePlaylists.Take(10).ToList();
-            Playlists = new ObservableRangeCollection<Playlist>(visiblePlaylists);
+            Playlists = new ObservableRangeCollection<Playlist>(favoritePlaylists);
             IsLoadingPlaylists = false;
-            await Task.Delay(50);
-
-            var remainingPlaylists = favoritePlaylists.Skip(Playlists.Count).ToList();
-            if (remainingPlaylists.Count > 0)
-            {
-                foreach (var batch in remainingPlaylists.Chunk(10))
-                {
-                    Playlists.AddRange(batch);
-                    await Task.Delay(50);
-                }
-            }
         }
         catch (Exception ex)
         {
@@ -512,21 +486,8 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                 .ToList();
 
             await _musicAssistant.EnrichWithProviderInfoAsync(favoriteArtists);
-
-            var visibleArtists = favoriteArtists.Take(10).ToList();
-            Artists = new ObservableRangeCollection<Artist>(visibleArtists);
+            Artists = new ObservableRangeCollection<Artist>(favoriteArtists);
             IsLoadingArtists = false;
-            await Task.Delay(50);
-
-            var remainingArtists = favoriteArtists.Skip(Artists.Count).ToList();
-            if (remainingArtists.Count > 0)
-            {
-                foreach (var batch in remainingArtists.Chunk(10))
-                {
-                    Artists.AddRange(batch);
-                    await Task.Delay(50);
-                }
-            }
         }
         catch (Exception ex)
         {
