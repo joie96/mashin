@@ -70,6 +70,7 @@ public partial class RowView : ContentView
     private bool _isExpanded;
     private bool _isPageAnimating;
     private bool _isPrimaryHostActive = true;
+    private double _lastItemsHostWidth = double.NaN;
 
     #endregion
 
@@ -234,7 +235,7 @@ public partial class RowView : ContentView
         _anchorIndex = null;
         ClearAllSelections();
         SyncSelectionState();
-        UpdateVisibleItems();
+        OnExpandedChanged();
     }
 
     private void AttachItemsSourceCollection(IEnumerable<object>? items)
@@ -259,17 +260,13 @@ public partial class RowView : ContentView
 
     private void OnItemsSourceCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        Dispatcher.Dispatch(() =>
-        {
-            _allItems = ItemsSource?.Cast<object>().ToList() ?? new List<object>();
-
-            UpdateVisibleItems();
-        });
+        _allItems = ItemsSource?.Cast<object>().ToList() ?? new List<object>();
+        OnExpandedChanged();
     }
 
     #endregion
 
-    #region Paging
+    #region Paging & Expansion
 
     private void OnItemsHostSizeChanged(object? sender, EventArgs e)
     {
@@ -278,12 +275,24 @@ public partial class RowView : ContentView
             return;
         }
 
+        // Get current itemost host width
         var width = element.Width;
         if (double.IsNaN(width) || double.IsInfinity(width) || width <= 0)
         {
             return;
         }
 
+        // If width changed and currently expanded, collapse to reduce items count for resizing
+        var widthChanged = !double.IsNaN(_lastItemsHostWidth) && Math.Abs(width - _lastItemsHostWidth) > 0.1;
+        _lastItemsHostWidth = width;
+
+        if (_isExpanded && widthChanged)
+        {
+            _isExpanded = false;
+            OnExpandedChanged();
+        }
+
+        // Calculate items per page and item width based on new item hostwidth
         var perPage = Math.Max(1, (int)Math.Floor(width / (MinItemWidth + ItemSpacing)));
         var newItemWidth = Math.Max(MinItemWidth, Math.Floor((width / perPage) - ItemSpacing));
         var itemsPerPageChanged = perPage != _itemsPerPage;
@@ -299,9 +308,12 @@ public partial class RowView : ContentView
             ItemWidth = newItemWidth;
         }
 
-        if (itemsPerPageChanged || itemWidthChanged)
+        // Paged mode: keep current page in sync when host size changes
+        if (!_isExpanded && (itemsPerPageChanged || itemWidthChanged))
         {
-            UpdateVisibleItems();
+            SyncPageItems(ActiveVisibleItems, _pageIndex);
+            InactiveVisibleItems.Clear();
+            UpdateNavigationState();
         }
 
         //Debug.WriteLine($"RowView: ItemsHost size changed, width={width}, calculated itemsPerPage={perPage}");
@@ -317,13 +329,31 @@ public partial class RowView : ContentView
         await SetPageAsync(_pageIndex + 1);
     }
 
-    private async void OnExpandTapped(object? sender, EventArgs e)
+    private void OnExpandTapped(object? sender, EventArgs e)
     {
         _isExpanded = !_isExpanded;
+        OnExpandedChanged();
+    }
 
-        UpdateVisibleItems();
-
+    private void OnExpandedChanged()
+    {
         _pageIndex = 0;
+
+        // Set specific layout fpr expansion or paging
+        UpdateLayout();
+
+        // Clear inactive itemshost and item animation hashset
+        InactiveVisibleItems.Clear();
+        _pageVerticalInItems.Clear();
+
+        // Load page items for page 0
+        SyncPageItems(ActiveVisibleItems, _pageIndex);
+
+        // Load Data expanded data if needed
+        if (_isExpanded)
+        {   
+            _ = LoadExpandedItemsAsync();
+        }
     }
 
     private async Task SetPageAsync(int pageIndex)
@@ -395,42 +425,14 @@ public partial class RowView : ContentView
         }
     }
 
-    private async void UpdateVisibleItems()
+    private void UpdateLayout()
     {
-        if (Dispatcher?.IsDispatchRequired ?? false)
-        {
-            Dispatcher.Dispatch(UpdateVisibleItems);
-            return;
-        }
-
         if (_isExpanded)
         {
             // Set flex layout for expanded mode
             EnsureSingleActiveHostVisible();
             SetExpandedLayout(ActiveItemsFlex, ActiveItemsScroll);
             ItemsHost.HeightRequest = -1;
-
-            // Progressively load items in batches to keep UI responsive
-            _pageVerticalInItems.Clear();
-            var remainingItems = _allItems.ToList();
-            if (_pageIndex == 0)
-            {
-                remainingItems = _allItems.Skip(_itemsPerPage).ToList(); 
-            }
-            else
-            {
-                ActiveVisibleItems.Clear();
-            }
-
-            foreach (var batch in remainingItems.Chunk(_itemsPerPage))
-            {
-                _pageVerticalInItems.UnionWith(batch);
-                ActiveVisibleItems.AddRange(batch);
-                await Task.Yield();
-                await Task.Delay(250);
-            }
-
-            InactiveVisibleItems.Clear();
         }
         else
         {
@@ -439,15 +441,43 @@ public partial class RowView : ContentView
             SetPagedLayout(ActiveItemsFlex, ActiveItemsScroll);
             SetPagedLayout(InactiveItemsFlex, InactiveItemsScroll);
             ItemsHost.HeightRequest = ItemWidth + ItemVerticalGap + ItemLabelHeight + (ItemSpacing * 2);
-            _pageVerticalInItems.Clear();
-
-            // Update visible items based on current page
-            SyncPageItems(ActiveVisibleItems, _pageIndex);
-            InactiveVisibleItems.Clear();
-
         }
 
         UpdateNavigationState();
+    }
+
+    private async Task LoadExpandedItemsAsync()
+    {
+        _pageVerticalInItems.Clear();
+
+        var remainingItems = _allItems.ToList();
+        if (_pageIndex == 0)
+        {
+            remainingItems = _allItems.Skip(_itemsPerPage).ToList();
+        }
+        else
+        {
+            ActiveVisibleItems.Clear();
+        }
+
+        foreach (var batch in remainingItems.Chunk(_itemsPerPage))
+        {
+            if (!_isExpanded)
+            {
+                return;
+            }
+
+            _pageVerticalInItems.UnionWith(batch);
+            ActiveVisibleItems.AddRange(batch);
+
+            await Task.Yield();
+            await Task.Delay(250);
+        }
+
+        if (_isExpanded)
+        {
+            InactiveVisibleItems.Clear();
+        }
     }
 
     private void UpdateNavigationState()
