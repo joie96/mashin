@@ -50,10 +50,6 @@ public partial class RowView : ContentView
 
     private const double MinItemWidth = 125;
     private const double ItemSpacing = 12;
-    private const double ItemLabelHeight = 32;
-    private const double ItemVerticalGap = 12;
-    private const double ItemBlockHeight = MinItemWidth + ItemVerticalGap + ItemLabelHeight;
-
 
 
     private readonly ObservableRangeCollection<object> _selectedItems = new();
@@ -432,7 +428,6 @@ public partial class RowView : ContentView
             // Set flex layout for expanded mode
             EnsureSingleActiveHostVisible();
             SetExpandedLayout(ActiveItemsFlex, ActiveItemsScroll);
-            ItemsHost.HeightRequest = -1;
         }
         else
         {
@@ -440,7 +435,6 @@ public partial class RowView : ContentView
             EnsureSingleActiveHostVisible();
             SetPagedLayout(ActiveItemsFlex, ActiveItemsScroll);
             SetPagedLayout(InactiveItemsFlex, InactiveItemsScroll);
-            ItemsHost.HeightRequest = ItemWidth + ItemVerticalGap + ItemLabelHeight + (ItemSpacing * 2);
         }
 
         UpdateNavigationState();
@@ -950,6 +944,8 @@ public partial class RowView : ContentView
 public sealed class RowViewTemplateSelector : DataTemplateSelector
 {
     public DataTemplate? AlbumTemplate { get; set; }
+    public DataTemplate? ArtistTemplate { get; set; }
+    public DataTemplate? PlaylistTemplate { get; set; }
     public DataTemplate? SkeletonTemplate { get; set; }
 
     protected override DataTemplate OnSelectTemplate(object item, BindableObject container)
@@ -957,6 +953,16 @@ public sealed class RowViewTemplateSelector : DataTemplateSelector
         if (item is RowViewSkeleton && SkeletonTemplate != null)
         {
             return SkeletonTemplate;
+        }
+
+        if (item is Artist && ArtistTemplate != null)
+        {
+            return ArtistTemplate;
+        }
+
+        if (item is Playlist && PlaylistTemplate != null)
+        {
+            return PlaylistTemplate;
         }
 
         if (AlbumTemplate != null)
@@ -969,7 +975,7 @@ public sealed class RowViewTemplateSelector : DataTemplateSelector
             return SkeletonTemplate;
         }
 
-        throw new InvalidOperationException("RowViewTemplateSelector requires AlbumTemplate or SkeletonTemplate.");
+        throw new InvalidOperationException("RowViewTemplateSelector requires AlbumTemplate, ArtistTemplate, PlaylistTemplate or SkeletonTemplate.");
     }
 }
 #endregion
