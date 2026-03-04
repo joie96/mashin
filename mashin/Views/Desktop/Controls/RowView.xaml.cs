@@ -67,6 +67,7 @@ public partial class RowView : ContentView
     private bool _isPageAnimating;
     private bool _isPrimaryHostActive = true;
     private double _lastItemsHostWidth = double.NaN;
+    private bool _isUnloaded;
 
     #endregion
 
@@ -163,6 +164,8 @@ public partial class RowView : ContentView
 
     private void OnRowViewLoaded(object? sender, EventArgs e)
     {
+        _isUnloaded = false;
+
         // KeyboardService
         if (_keyboardService == null)
         {
@@ -181,6 +184,8 @@ public partial class RowView : ContentView
 
     private void OnRowViewUnloaded(object? sender, EventArgs e)
     {
+        _isUnloaded = true;
+
         // Cleanup
         if (_keyboardService != null)
         {
@@ -256,6 +261,17 @@ public partial class RowView : ContentView
 
     private void OnItemsSourceCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        if (_isUnloaded || Handler == null)
+        {
+            return;
+        }
+
+        if (!MainThread.IsMainThread)
+        {
+            MainThread.BeginInvokeOnMainThread(() => OnItemsSourceCollectionChanged(sender, e));
+            return;
+        }
+
         _allItems = ItemsSource?.Cast<object>().ToList() ?? new List<object>();
         OnExpandedChanged();
     }

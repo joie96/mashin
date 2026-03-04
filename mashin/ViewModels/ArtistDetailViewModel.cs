@@ -8,7 +8,14 @@ using Microsoft.Extensions.Logging;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Globalization;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Windows.Input;
 
 namespace mashin.ViewModels;
@@ -23,6 +30,10 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
     private readonly ILogger<ArtistDetailViewModel> _logger;
+    private static readonly HttpClient DeezerHttpClient = new()
+    {
+        Timeout = TimeSpan.FromSeconds(20)
+    };
 
     private Artist? _artist;
     private List<Album> _allAlbums = new();
@@ -412,6 +423,22 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             Artist = await _musicAssistant.GetArtistAsync(artistId, provider);
             if (Artist != null)
             {
+                // Load deezer bio if deezer provider
+                if (provider.StartsWith("deezer", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(Artist.Metadata?.Description))
+                {
+                    var language = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+                    var deezerBio = await GetDeezerArtistBio(artistId, language);
+                    if (!string.IsNullOrWhiteSpace(deezerBio))
+                    {
+                        Artist.Metadata ??= new MediaItemMetadata();
+                        Artist.Metadata.Description = deezerBio;
+
+                        OnPropertyChanged(nameof(Artist));
+                        OnPropertyChanged(nameof(HasDescription));
+                    }
+                }
+
+                // Set favorite state
                 Artist.Favorite = await _userDataService.IsFavoriteAsync(Artist);
                 OnPropertyChanged(nameof(IsArtistFavorite));
             }
@@ -426,6 +453,109 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         finally
         {
             IsLoadingMetadata = false;
+        }
+    }
+
+    private async Task<string?> GetDeezerArtistBio(string artistId, string language)
+    {
+        var normalizedLanguage = string.IsNullOrWhiteSpace(language) ? "de" : language.Trim().ToLowerInvariant();
+
+        try
+        {
+            // Get anonymous JWT token from deezer (required for artist bio request)
+            var loginRequest = new HttpRequestMessage(HttpMethod.Get, "https://auth.deezer.com/login/anonymous?jo=p&rto=c");
+            loginRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            loginRequest.Headers.TryAddWithoutValidation("accept-language", normalizedLanguage);
+            loginRequest.Headers.Referrer = new Uri("https://www.deezer.com/");
+            loginRequest.Headers.UserAgent.ParseAdd("Mozilla/5.0");
+
+            using var loginResponse = await DeezerHttpClient.SendAsync(loginRequest);
+            if (!loginResponse.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("Deezer anonymous login failed with status code {StatusCode}", loginResponse.StatusCode);
+                return null;
+            }
+
+            var loginJson = await loginResponse.Content.ReadAsStringAsync();
+            using var loginDocument = JsonDocument.Parse(loginJson);
+            if (!loginDocument.RootElement.TryGetProperty("jwt", out var jwtElement))
+            {
+                return null;
+            }
+
+            var jwt = jwtElement.GetString();
+            if (string.IsNullOrWhiteSpace(jwt))
+            {
+                return null;
+            }
+
+            // Get artist bio using GraphQL API
+            var graphqlPayload = new
+            {
+                operationName = "ArtistBio",
+                variables = new { artistId },
+                query = "query ArtistBio($artistId: String!) { artist(artistId: $artistId) { id name bio { full } } }"
+            };
+
+            var gqlRequest = new HttpRequestMessage(HttpMethod.Post, "https://pipe.deezer.com/api")
+            {
+                Content = new StringContent(
+                    JsonSerializer.Serialize(graphqlPayload),
+                    Encoding.UTF8,
+                    "application/json")
+            };
+
+            gqlRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jwt);
+            gqlRequest.Headers.TryAddWithoutValidation("origin", "https://www.deezer.com");
+            gqlRequest.Headers.Referrer = new Uri("https://www.deezer.com/");
+            gqlRequest.Headers.TryAddWithoutValidation("accept-language", normalizedLanguage);
+
+            using var gqlResponse = await DeezerHttpClient.SendAsync(gqlRequest);
+            if (!gqlResponse.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("Deezer ArtistBio request failed with status code {StatusCode}", gqlResponse.StatusCode);
+                return null;
+            }
+
+            var gqlJson = await gqlResponse.Content.ReadAsStringAsync();
+            using var gqlDocument = JsonDocument.Parse(gqlJson);
+
+            if (gqlDocument.RootElement.TryGetProperty("data", out var dataElement)
+                && dataElement.TryGetProperty("artist", out var artistElement)
+                && artistElement.TryGetProperty("bio", out var bioElement)
+                && bioElement.TryGetProperty("full", out var fullElement))
+            {
+                var bio = fullElement.GetString();
+
+                if (string.IsNullOrWhiteSpace(bio))
+                {
+                    return null;
+                }
+
+                // Deezer bios often contain HTML tags and entities, so we need to clean that up
+                var text = bio;
+                text = Regex.Replace(text, "<\\s*br\\s*/?\\s*>", "\n", RegexOptions.IgnoreCase);
+                text = Regex.Replace(text, "<\\s*/\\s*p\\s*>", "\n\n", RegexOptions.IgnoreCase);
+                text = Regex.Replace(text, "<\\s*p[^>]*>", string.Empty, RegexOptions.IgnoreCase);
+
+                text = Regex.Replace(text, "<[^>]+>", string.Empty);
+                text = WebUtility.HtmlDecode(text);
+
+                text = text.Replace("\r\n", "\n").Replace("\r", "\n");
+                text = Regex.Replace(text, "[ \t]+\n", "\n");
+                text = Regex.Replace(text, "\n{3,}", "\n\n");
+                //text = AddParagraphs(text);
+
+                text = text.Trim();
+                return string.IsNullOrWhiteSpace(text) ? null : text;
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to fetch Deezer artist bio for artist {ArtistId}", artistId);
+            return null;
         }
     }
 
@@ -600,6 +730,8 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         }
     }
     #endregion
+
+
 
     #region Context Menu
 
@@ -922,6 +1054,58 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         _albums.Clear();
         _similarArtists.Clear();
         PropertyChanged = null;
+    }
+
+    #endregion
+
+        #region Helper Methods
+
+    private static string AddParagraphs(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var normalized = text.Replace("\r\n", "\n").Replace("\r", "\n");
+        normalized = Regex.Replace(normalized, "[ \t]+", " ").Trim();
+
+        var sentences = Regex.Split(normalized, @"(?<=[.!?])\s+")
+            .Where(part => !string.IsNullOrWhiteSpace(part))
+            .ToList();
+
+        if (sentences.Count <= 1)
+        {
+            return normalized;
+        }
+
+        const int maxParagraphLength = 600;
+        var paragraphs = new List<string>();
+        var currentParagraph = new StringBuilder();
+
+        foreach (var sentence in sentences)
+        {
+            if (currentParagraph.Length > 0
+                && currentParagraph.Length + 1 + sentence.Length > maxParagraphLength)
+            {
+                paragraphs.Add(currentParagraph.ToString().Trim());
+                currentParagraph.Clear();
+            }
+
+            if (currentParagraph.Length > 0)
+            {
+                currentParagraph.Append(' ');
+            }
+
+            currentParagraph.Append(sentence.Trim());
+        }
+
+        if (currentParagraph.Length > 0)
+        {
+            paragraphs.Add(currentParagraph.ToString().Trim());
+        }
+
+        return string.Join("\n\n", paragraphs);
     }
 
     #endregion
