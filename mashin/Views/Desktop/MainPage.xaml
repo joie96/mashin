@@ -342,39 +342,56 @@
                 Color="{DynamicResource BorderSecondary}" />
             <Grid Grid.Row="1"
                 Padding="20,0"
-                ColumnDefinitions="Auto,*,Auto"
+                ColumnDefinitions="300,*,300"
                 HeightRequest="90">
 
                 <!--  Left: Track Info  -->
-                <HorizontalStackLayout Spacing="12" VerticalOptions="Center">
-                    <Border BackgroundColor="{DynamicResource BackgroundTertiary}"
+                <Grid Grid.Column="0"
+                    ColumnDefinitions="Auto,*,Auto,Auto"
+                    ColumnSpacing="12"
+                    IsClippedToBounds="True"
+                    RowDefinitions="Auto,Auto"
+                    RowSpacing="4"
+                    VerticalOptions="Center">
+                    <Border Grid.RowSpan="2"
+                        BackgroundColor="{DynamicResource BackgroundTertiary}"
                         HeightRequest="60"
                         StrokeShape="RoundRectangle 4"
                         StrokeThickness="0"
+                        VerticalOptions="Center"
                         WidthRequest="60">
                         <Image Aspect="AspectFill" Source="{Binding CurrentTrack.ImageUrl}" />
                     </Border>
 
-                    <VerticalStackLayout
-                        Spacing="4"
-                        VerticalOptions="Center">
-                        <Label FontSize="13"
-                            LineBreakMode="TailTruncation"
-                            Text="{Binding CurrentTrack.Name}"
-                            TextColor="{DynamicResource TextPrimary}" />
-                        <Label FontSize="12"
-                            LineBreakMode="TailTruncation"
-                            Text="{Binding CurrentTrack.ArtistName}"
-                            TextColor="{DynamicResource TextSecondary}">
-                            <Label.Behaviors>
-                                <behaviors:LinkLabelBehavior Command="{Binding ArtistTappedCommand}"
-                                    CommandParameter="{Binding CurrentTrackPrimaryArtist}"
-                                    HoverTextColor="{DynamicResource TextPrimary}" />
-                            </Label.Behaviors>
-                        </Label>
-                    </VerticalStackLayout>
+                    <Label Grid.Column="1"
+                        FontSize="13"
+                        LineBreakMode="TailTruncation"
+                        MaxLines="1"
+                        Text="{Binding CurrentTrack.Name}"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="End">
+                        <Label.Behaviors>
+                            <behaviors:HoverMarqueeBehavior />
+                        </Label.Behaviors>
+                    </Label>
 
-                    <Border Margin="8,0,0,0"
+                    <Label Grid.Row="1"
+                        Grid.Column="1"
+                        FontSize="12"
+                        LineBreakMode="TailTruncation"
+                        MaxLines="1"
+                        Text="{Binding CurrentTrack.ArtistName}"
+                        TextColor="{DynamicResource TextSecondary}"
+                        VerticalOptions="Start">
+                        <Label.Behaviors>
+                            <behaviors:LinkLabelBehavior Command="{Binding ArtistTappedCommand}"
+                                CommandParameter="{Binding CurrentTrackPrimaryArtist}"
+                                HoverTextColor="{DynamicResource TextPrimary}" />
+                        </Label.Behaviors>
+                    </Label>
+
+                    <Border Grid.Column="2"
+                        Grid.RowSpan="2"
                         behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                         BackgroundColor="Transparent"
                         HeightRequest="32"
@@ -407,6 +424,8 @@
                     </Border>
 
                     <Border x:Name="CurrentTrackAddToPlaylistButton"
+                        Grid.Column="3"
+                        Grid.RowSpan="2"
                         behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                         BackgroundColor="Transparent"
                         HeightRequest="32"
@@ -428,7 +447,7 @@
                             TextColor="{DynamicResource IconSecondary}"
                             VerticalOptions="Center" />
                     </Border>
-                </HorizontalStackLayout>
+                </Grid>
 
                 <!--  Center: Controls  -->
                 <VerticalStackLayout Grid.Column="1"
@@ -584,11 +603,14 @@
                 </VerticalStackLayout>
 
                 <!--  Right: Queue  -->
-                <HorizontalStackLayout Grid.Column="2"
+                <Grid Grid.Column="2"
+                    ColumnDefinitions="Auto,Auto,Auto,Auto"
+                    ColumnSpacing="12"
                     HorizontalOptions="End"
-                    Spacing="12"
+                    IsClippedToBounds="True"
                     VerticalOptions="Center">
-                    <Border behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                    <Border Grid.Column="0"
+                        behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                         BackgroundColor="Transparent"
                         HeightRequest="32"
                         StrokeThickness="0"
@@ -611,7 +633,7 @@
                     </Border>
 
                     <!--  Don't Stop The Music  -->
-                    <Border
+                    <Border Grid.Column="1"
                         behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                         BackgroundColor="Transparent"
                         HeightRequest="32"
@@ -642,7 +664,8 @@
                     </Border>
                     
                     <!--  Volume  -->
-                    <Border behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                    <Border Grid.Column="2"
+                        behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                         BackgroundColor="Transparent"
                         HeightRequest="32"
                         StrokeThickness="0"
@@ -672,7 +695,8 @@
                         </Grid>
                     </Border>
 
-                    <Slider Maximum="100"
+                    <Slider Grid.Column="3"
+                        Maximum="100"
                         MaximumTrackColor="{DynamicResource BackgroundTertiary}"
                         Minimum="0"
                         MinimumTrackColor="{DynamicResource IconSecondary}"
@@ -680,7 +704,7 @@
                         VerticalOptions="Center"
                         WidthRequest="90"
                         Value="{Binding Volume, Mode=TwoWay}" />
-                </HorizontalStackLayout>
+                </Grid>
             </Grid>
         </Grid>
 

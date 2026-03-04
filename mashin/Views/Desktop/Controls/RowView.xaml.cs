@@ -5,7 +5,6 @@ using Microsoft.Maui.Layouts;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Specialized;
-using System.Diagnostics;
 using System.Windows.Input;
 
 
@@ -69,6 +68,8 @@ public partial class RowView : ContentView
     private bool _isPrimaryHostActive = true;
     private double _lastItemsHostWidth = double.NaN;
     private bool _isUnloaded;
+    private bool _hasMeasuredHostWidth;
+    private bool _hasPendingPagedSync;
 
     #endregion
 
@@ -186,6 +187,9 @@ public partial class RowView : ContentView
     private void OnRowViewUnloaded(object? sender, EventArgs e)
     {
         _isUnloaded = true;
+        _hasPendingPagedSync = false;
+        _hasMeasuredHostWidth = false;
+        _lastItemsHostWidth = double.NaN;
 
         // Cleanup
         if (_keyboardService != null)
@@ -295,6 +299,8 @@ public partial class RowView : ContentView
             return;
         }
 
+        _hasMeasuredHostWidth = true;
+
         // If width changed and currently expanded, collapse to reduce items count for resizing
         var widthChanged = !double.IsNaN(_lastItemsHostWidth) && Math.Abs(width - _lastItemsHostWidth) > 0.1;
         _lastItemsHostWidth = width;
@@ -322,14 +328,13 @@ public partial class RowView : ContentView
         }
 
         // Paged mode: keep current page in sync when host size changes
-        if (!_isExpanded && (itemsPerPageChanged || itemWidthChanged))
+        if (!_isExpanded && (itemsPerPageChanged || itemWidthChanged || _hasPendingPagedSync))
         {
+            _hasPendingPagedSync = false;
             SyncPageItems(ActiveVisibleItems, _pageIndex);
             InactiveVisibleItems.Clear();
             UpdateNavigationState();
         }
-
-        Debug.WriteLine($"RowView: ItemsHost size changed, width={width}, calculated itemsPerPage={perPage}");
     }
 
     private async void OnPrevTapped(object? sender, EventArgs e)
@@ -358,6 +363,13 @@ public partial class RowView : ContentView
         // Clear inactive itemshost and item animation hashset
         InactiveVisibleItems.Clear();
         _pageVerticalInItems.Clear();
+
+        if (!_isExpanded && !_hasMeasuredHostWidth && _allItems.Count > 1)
+        {
+            _hasPendingPagedSync = true;
+            ActiveVisibleItems.Clear();
+            return;
+        }
 
         // Load page items for page 0
         SyncPageItems(ActiveVisibleItems, _pageIndex);
@@ -573,6 +585,7 @@ public partial class RowView : ContentView
     private List<object> GetPageItems(int pageIndex)
     {
         var pageStart = pageIndex * _itemsPerPage;
+
         if (_allItems.Count == 0 || pageStart >= _allItems.Count)
         {
             return new List<object>();
