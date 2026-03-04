@@ -29,6 +29,8 @@ namespace mashin.Audio.Windows;
 /// </remarks>
 public sealed class WasapiAudioPlayer : IAudioPlayer
 {
+    private const int RequestedLatencyMs = 200;
+
     private readonly ILogger<WasapiAudioPlayer> _logger;
     private string? _deviceId;
     private WasapiOut? _wasapiOut;
@@ -127,14 +129,14 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
                         }
                     }
 
-                    // Create WASAPI output in shared mode with 200ms latency
+                    // Create WASAPI output in shared mode with event-based synchronization
                     if (device != null)
                     {
-                        _wasapiOut = new WasapiOut(device, AudioClientShareMode.Shared, useEventSync: false, latency: 200);
+                        _wasapiOut = new WasapiOut(device, AudioClientShareMode.Shared, useEventSync: true, latency: RequestedLatencyMs);
                     }
                     else
                     {
-                        _wasapiOut = new WasapiOut(AudioClientShareMode.Shared, useEventSync: false, latency: 200);
+                        _wasapiOut = new WasapiOut(AudioClientShareMode.Shared, useEventSync: true, latency: RequestedLatencyMs);
                     }
 
                     _wasapiOut.PlaybackStopped += OnPlaybackStopped;
@@ -142,7 +144,7 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
                     // Capture the output latency - this is the buffer latency we requested
                     // from WASAPI. The actual end-to-end latency also includes DAC/driver
                     // delays which vary by hardware and aren't directly queryable.
-                    _outputLatencyMs = 200; // Our requested latency in shared mode
+                    _outputLatencyMs = RequestedLatencyMs; // Our requested latency in shared mode
 
                     SetState(AudioPlayerState.Stopped);
                     _logger.LogInformation(
@@ -262,15 +264,15 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
                     // Create new WASAPI output
                     if (device != null)
                     {
-                        _wasapiOut = new WasapiOut(device, AudioClientShareMode.Shared, useEventSync: false, latency: 200);
+                        _wasapiOut = new WasapiOut(device, AudioClientShareMode.Shared, useEventSync: true, latency: RequestedLatencyMs);
                     }
                     else
                     {
-                        _wasapiOut = new WasapiOut(AudioClientShareMode.Shared, useEventSync: false, latency: 200);
+                        _wasapiOut = new WasapiOut(AudioClientShareMode.Shared, useEventSync: true, latency: RequestedLatencyMs);
                     }
 
                     _wasapiOut.PlaybackStopped += OnPlaybackStopped;
-                    _outputLatencyMs = 200;
+                    _outputLatencyMs = RequestedLatencyMs;
 
                     // Re-attach sample provider if we had one
                     if (currentSampleProvider != null)

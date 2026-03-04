@@ -5,6 +5,7 @@ using Microsoft.Maui.Layouts;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.Diagnostics;
 using System.Windows.Input;
 
 
@@ -328,7 +329,7 @@ public partial class RowView : ContentView
             UpdateNavigationState();
         }
 
-        //Debug.WriteLine($"RowView: ItemsHost size changed, width={width}, calculated itemsPerPage={perPage}");
+        Debug.WriteLine($"RowView: ItemsHost size changed, width={width}, calculated itemsPerPage={perPage}");
     }
 
     private async void OnPrevTapped(object? sender, EventArgs e)
@@ -538,6 +539,7 @@ public partial class RowView : ContentView
         scrollView.Orientation = ScrollOrientation.Vertical;
     }
 
+    // Sync target collection with page items for given page index (adding/removing/replacing items as needed if eg. page size changes)
     private void SyncPageItems(ObservableRangeCollection<object> target, int pageIndex)
     {
         var items = GetPageItems(pageIndex);

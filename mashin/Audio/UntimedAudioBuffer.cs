@@ -107,13 +107,13 @@ public sealed class UntimedAudioBuffer : ITimedAudioBuffer
         _writePos = writePos;
         
         // Update counters atomically only once at the end
-        var oldSamples = Interlocked.Add(ref _currentSamples, samplesToWrite);
+        var newSampleCount = Interlocked.Add(ref _currentSamples, samplesToWrite);
         Interlocked.Add(ref _totalWritten, samplesToWrite);
         
         // Handle overflow - drop oldest samples if buffer full
-        if (oldSamples + samplesToWrite > _bufferCapacitySamples)
+        if (newSampleCount > _bufferCapacitySamples)
         {
-            var overflow = (oldSamples + samplesToWrite) - _bufferCapacitySamples;
+            var overflow = newSampleCount - _bufferCapacitySamples;
             _readPos = (_readPos + overflow) % _bufferCapacitySamples;
             Interlocked.Add(ref _currentSamples, -overflow);
         }
