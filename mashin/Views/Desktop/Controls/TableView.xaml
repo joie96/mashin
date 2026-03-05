@@ -15,6 +15,7 @@
     <ContentView.Resources>
         <converters:IsLastItemConverter x:Key="IsLastItemConverter"/>
         <converters:InvertedBoolConverter x:Key="InvertedBoolConverter"/>
+        <converters:PlayStateToBoolConverter x:Key="PlayStateToBoolConverter"/>
         <converters:StringEqualsConverter x:Key="StringEqualsConverter"/>
 
         <DataTemplate x:Key="TrackHeaderTemplate">
@@ -363,15 +364,11 @@
                             </Label.Triggers>
                         </Label>
 
-                        <Label HorizontalOptions="Center"
-                               IsVisible="False"
-                               FontSize="14"
-                               Text="{mi:FluentFilled Icon=Pause12Filled,
-                                             FontOverride=True}"
-                               TextColor="{DynamicResource AccentColor}"
-                               VerticalOptions="Center">
-                            <Label.Triggers>
-                                <DataTrigger TargetType="Label"
+                        <Grid HorizontalOptions="Center"
+                              IsVisible="False"
+                              VerticalOptions="Center">
+                            <Grid.Triggers>
+                                <DataTrigger TargetType="Grid"
                                              Value="True">
                                     <DataTrigger.Binding>
                                         <MultiBinding Converter="{StaticResource StringEqualsConverter}">
@@ -383,8 +380,32 @@
                                     <Setter Property="IsVisible"
                                             Value="True"/>
                                 </DataTrigger>
-                            </Label.Triggers>
-                        </Label>
+                            </Grid.Triggers>
+
+                            <Label FontSize="14"
+                                   HorizontalOptions="Center"
+                                   IsVisible="{Binding Path=CurrentPlayState, Source={x:Reference self}, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=show-play-icon}"
+                                   Text="{mi:FluentFilled Icon=Play12Filled,
+                                                 FontOverride=True}"
+                                   TextColor="{DynamicResource AccentColor}"
+                                   VerticalOptions="Center"/>
+
+                            <Label FontSize="14"
+                                   HorizontalOptions="Center"
+                                   IsVisible="{Binding Path=CurrentPlayState, Source={x:Reference self}, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=show-pause-icon}"
+                                   Text="{mi:FluentFilled Icon=Pause12Filled,
+                                                 FontOverride=True}"
+                                   TextColor="{DynamicResource AccentColor}"
+                                   VerticalOptions="Center"/>
+
+                            <ActivityIndicator Color="{DynamicResource AccentColor}"
+                                         HeightRequest="12"
+                                         HorizontalOptions="Center"
+                                         IsRunning="{Binding Path=CurrentPlayState, Source={x:Reference self}, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
+                                         IsVisible="{Binding Path=CurrentPlayState, Source={x:Reference self}, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
+                                         VerticalOptions="Center"
+                                         WidthRequest="12"/>
+                        </Grid>
                     </Grid>
 
                     <!--  Cover + Play Overlay  -->
@@ -708,15 +729,11 @@
                             </Label.Triggers>
                         </Label>
 
-                        <Label HorizontalOptions="Center"
-                               IsVisible="False"
-                               FontSize="14"
-                               Text="{mi:FluentFilled Icon=Pause12Filled,
-                                             FontOverride=True}"
-                               TextColor="{DynamicResource AccentColor}"
-                               VerticalOptions="Center">
-                            <Label.Triggers>
-                                <DataTrigger TargetType="Label"
+                        <Grid HorizontalOptions="Center"
+                              IsVisible="False"
+                              VerticalOptions="Center">
+                            <Grid.Triggers>
+                                <DataTrigger TargetType="Grid"
                                              Value="True">
                                     <DataTrigger.Binding>
                                         <MultiBinding Converter="{StaticResource StringEqualsConverter}">
@@ -728,8 +745,32 @@
                                     <Setter Property="IsVisible"
                                             Value="True"/>
                                 </DataTrigger>
-                            </Label.Triggers>
-                        </Label>
+                            </Grid.Triggers>
+
+                            <Label FontSize="14"
+                                   HorizontalOptions="Center"
+                                   IsVisible="{Binding Path=CurrentPlayState, Source={x:Reference self}, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=show-play-icon}"
+                                   Text="{mi:FluentFilled Icon=Play12Filled,
+                                                 FontOverride=True}"
+                                   TextColor="{DynamicResource AccentColor}"
+                                   VerticalOptions="Center"/>
+
+                            <Label FontSize="14"
+                                   HorizontalOptions="Center"
+                                   IsVisible="{Binding Path=CurrentPlayState, Source={x:Reference self}, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=show-pause-icon}"
+                                   Text="{mi:FluentFilled Icon=Pause12Filled,
+                                                 FontOverride=True}"
+                                   TextColor="{DynamicResource AccentColor}"
+                                   VerticalOptions="Center"/>
+
+                            <ActivityIndicator Color="{DynamicResource AccentColor}"
+                                         HeightRequest="12"
+                                         HorizontalOptions="Center"
+                                         IsRunning="{Binding Path=CurrentPlayState, Source={x:Reference self}, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
+                                         IsVisible="{Binding Path=CurrentPlayState, Source={x:Reference self}, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
+                                         VerticalOptions="Center"
+                                         WidthRequest="12"/>
+                        </Grid>
                     </Grid>
 
                     <!--  Cover + Play Overlay  -->

@@ -43,6 +43,9 @@ public partial class TableView : ContentView
     public static readonly BindableProperty CurrentTrackUriProperty =
         BindableProperty.Create(nameof(CurrentTrackUri), typeof(string), typeof(TableView));
 
+    public static readonly BindableProperty CurrentPlayStateProperty =
+        BindableProperty.Create(nameof(CurrentPlayState), typeof(PlayerPlayState), typeof(TableView), defaultValue: new PlayerPlayState(PlayerPlaybackState.Stopped, DateTimeOffset.MinValue));
+
     #endregion
 
     #region Fields
@@ -51,6 +54,7 @@ public partial class TableView : ContentView
     private readonly ObservableCollection<object> _headerItems = new();
     private IKeyboardService? _keyboardService;
     private IQueueSyncService? _queueSyncService;
+    private IPlayerService? _playerService;
     private Track? _currentTrack;
     private int? _anchorIndex;
     private bool _isCheckboxClick;
@@ -117,6 +121,12 @@ public partial class TableView : ContentView
     {
         get => (string?)GetValue(CurrentTrackUriProperty);
         private set => SetValue(CurrentTrackUriProperty, value);
+    }
+
+    public PlayerPlayState CurrentPlayState
+    {
+        get => (PlayerPlayState)GetValue(CurrentPlayStateProperty);
+        private set => SetValue(CurrentPlayStateProperty, value);
     }
 
     public ObservableCollection<object> HeaderItems => _headerItems;
@@ -392,11 +402,12 @@ public partial class TableView : ContentView
         }
 
         // Context album, playlist, etc.: Play the container and start at clicked item if context is available.
+        /*
         if (PlaybackContextItem != null && !(PlaybackContextItem is PlayerQueue)) 
         {
             await MediaActions.PlayMediaAsync(PlaybackContextItem, item);
             return;
-        }
+        }*/
 
         // Fallback: Play clicked item immediately and append following visible items.
         await MediaActions.PlayMediaAsync(item);
@@ -640,7 +651,7 @@ public partial class TableView : ContentView
 
     private void AttachPlaybackStateSource()
     {
-        if (_queueSyncService != null)
+        if (_queueSyncService != null && _playerService != null)
         {
             return;
         }
@@ -652,39 +663,55 @@ public partial class TableView : ContentView
             return;
         }
 
-        _queueSyncService = mauiContext.Services.GetService<IQueueSyncService>();
         if (_queueSyncService == null)
         {
-            return;
+            _queueSyncService = mauiContext.Services.GetService<IQueueSyncService>();
+            if (_queueSyncService != null)
+            {
+                _currentTrack = _queueSyncService.CurrentTrack;
+                SetCurrentTrackUri(_currentTrack?.Uri);
+                _queueSyncService.CurrentTrackUpdated += OnCurrentTrackUpdated;
+
+                if (_currentTrack != null)
+                {
+                    _currentTrack.PropertyChanged += OnCurrentTrackPropertyChanged;
+                }
+            }
         }
 
-        _currentTrack = _queueSyncService.CurrentTrack;
-        SetCurrentTrackUri(_currentTrack?.Uri);
-        _queueSyncService.CurrentTrackUpdated += OnCurrentTrackUpdated;
-
-        if (_currentTrack != null)
+        if (_playerService == null)
         {
-            _currentTrack.PropertyChanged += OnCurrentTrackPropertyChanged;
+            _playerService = mauiContext.Services.GetService<IPlayerService>();
+            if (_playerService != null)
+            {
+                SetCurrentPlayState(_playerService.PlayState);
+                _playerService.PropertyChanged += OnPlayerServicePropertyChanged;
+            }
         }
     }
 
     private void DetachPlaybackStateSource()
     {
-        if (_queueSyncService == null)
+        if (_queueSyncService != null)
         {
-            return;
+            _queueSyncService.CurrentTrackUpdated -= OnCurrentTrackUpdated;
+
+            if (_currentTrack != null)
+            {
+                _currentTrack.PropertyChanged -= OnCurrentTrackPropertyChanged;
+            }
         }
 
-        _queueSyncService.CurrentTrackUpdated -= OnCurrentTrackUpdated;
-
-        if (_currentTrack != null)
+        if (_playerService != null)
         {
-            _currentTrack.PropertyChanged -= OnCurrentTrackPropertyChanged;
+            _playerService.PropertyChanged -= OnPlayerServicePropertyChanged;
         }
 
         _queueSyncService = null;
+        _playerService = null;
         _currentTrack = null;
         SetCurrentTrackUri(null);
+        SetCurrentPlayState(new PlayerPlayState(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow));
     }
 
     private void OnCurrentTrackUpdated(object? sender, EventArgs e)
@@ -778,6 +805,35 @@ public partial class TableView : ContentView
         }
 
         CurrentTrackUri = uri;
+    }
+
+    private void SetCurrentPlayState(PlayerPlayState playState)
+    {
+        if (CurrentPlayState == playState)
+        {
+            return;
+        }
+
+        CurrentPlayState = playState;
+    }
+
+    private void OnPlayerServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(IPlayerService.PlayState))
+        {
+            return;
+        }
+
+        var currentPlayState = _playerService?.PlayState
+            ?? new PlayerPlayState(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow);
+
+        if (MainThread.IsMainThread)
+        {
+            SetCurrentPlayState(currentPlayState);
+            return;
+        }
+
+        MainThread.BeginInvokeOnMainThread(() => SetCurrentPlayState(currentPlayState));
     }
 
     #endregion
