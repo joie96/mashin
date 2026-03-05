@@ -41,7 +41,6 @@ namespace mashin.Models
     public abstract class MediaItem : INotifyPropertyChanged
     {
         private bool _isSelected;
-        private bool _isPlaying;
         private bool _favorite;
         private ProviderManifest? _providerManifest;
         private string _name = string.Empty;
@@ -154,22 +153,6 @@ namespace mashin.Models
                 }
 
                 _isSelected = value;
-                OnPropertyChanged();
-            }
-        }
-
-        [JsonIgnore]
-        public bool IsPlaying
-        {
-            get => _isPlaying;
-            set
-            {
-                if (_isPlaying == value)
-                {
-                    return;
-                }
-
-                _isPlaying = value;
                 OnPropertyChanged();
             }
         }

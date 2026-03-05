@@ -44,6 +44,9 @@ public partial class RowView : ContentView
     public static readonly BindableProperty ItemWidthProperty = 
         BindableProperty.Create(nameof(ItemWidth), typeof(double), typeof(RowView), MinItemWidth);
 
+    public static readonly BindableProperty CurrentTrackUriProperty =
+        BindableProperty.Create(nameof(CurrentTrackUri), typeof(string), typeof(RowView));
+
     #endregion
 
     #region Fields
@@ -59,6 +62,7 @@ public partial class RowView : ContentView
     private List<object> _allItems = new();
     private INotifyCollectionChanged? _itemsSourceCollection;
     private IKeyboardService? _keyboardService;
+    private IQueueSyncService? _queueSyncService;
     private int? _anchorIndex;
     private bool _isCheckboxClick;
     private int _pageIndex;
@@ -135,6 +139,12 @@ public partial class RowView : ContentView
         private set => SetValue(ItemWidthProperty, value);
     }
 
+    public string? CurrentTrackUri
+    {
+        get => (string?)GetValue(CurrentTrackUriProperty);
+        private set => SetValue(CurrentTrackUriProperty, value);
+    }
+
     #endregion
 
     #region Construction
@@ -182,6 +192,8 @@ public partial class RowView : ContentView
             }
         }
 
+        AttachPlaybackStateSource();
+
     }
 
     private void OnRowViewUnloaded(object? sender, EventArgs e)
@@ -197,6 +209,8 @@ public partial class RowView : ContentView
             _keyboardService.KeyActionDetected -= OnKeyActionDetected;
             _keyboardService = null;
         }
+
+        DetachPlaybackStateSource();
 
         DetachItemsSourceCollection();
 
@@ -214,6 +228,69 @@ public partial class RowView : ContentView
 
         // Collections bereinigen
         _selectedItems.Clear();
+    }
+
+    #endregion
+
+    #region Playback state tracking
+
+    private void AttachPlaybackStateSource()
+    {
+        if (_queueSyncService != null)
+        {
+            return;
+        }
+
+        var mauiContext = Handler?.MauiContext
+            ?? Microsoft.Maui.Controls.Application.Current?.Handler?.MauiContext;
+        if (mauiContext == null)
+        {
+            return;
+        }
+
+        _queueSyncService = mauiContext.Services.GetService<IQueueSyncService>();
+        if (_queueSyncService == null)
+        {
+            return;
+        }
+
+        _queueSyncService.CurrentTrackUpdated += OnCurrentTrackUpdated;
+        SetCurrentTrackUri(_queueSyncService.CurrentTrack?.Uri);
+    }
+
+    private void DetachPlaybackStateSource()
+    {
+        if (_queueSyncService == null)
+        {
+            return;
+        }
+
+        _queueSyncService.CurrentTrackUpdated -= OnCurrentTrackUpdated;
+        _queueSyncService = null;
+        SetCurrentTrackUri(null);
+    }
+
+    private void OnCurrentTrackUpdated(object? sender, EventArgs e)
+    {
+        var currentTrackUri = _queueSyncService?.CurrentTrack?.Uri;
+
+        if (MainThread.IsMainThread)
+        {
+            SetCurrentTrackUri(currentTrackUri);
+            return;
+        }
+
+        MainThread.BeginInvokeOnMainThread(() => SetCurrentTrackUri(currentTrackUri));
+    }
+
+    private void SetCurrentTrackUri(string? uri)
+    {
+        if (string.Equals(CurrentTrackUri, uri, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        CurrentTrackUri = uri;
     }
 
     #endregion

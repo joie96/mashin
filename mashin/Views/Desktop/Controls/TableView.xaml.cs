@@ -40,6 +40,9 @@ public partial class TableView : ContentView
     public static readonly BindableProperty PlaybackContextItemProperty =
         BindableProperty.Create(nameof(PlaybackContextItem), typeof(object), typeof(TableView), propertyChanged: OnPlaybackContextItemChanged);
 
+    public static readonly BindableProperty CurrentTrackUriProperty =
+        BindableProperty.Create(nameof(CurrentTrackUri), typeof(string), typeof(TableView));
+
     #endregion
 
     #region Fields
@@ -110,6 +113,12 @@ public partial class TableView : ContentView
         set => SetValue(PlaybackContextItemProperty, value);
     }
 
+    public string? CurrentTrackUri
+    {
+        get => (string?)GetValue(CurrentTrackUriProperty);
+        private set => SetValue(CurrentTrackUriProperty, value);
+    }
+
     public ObservableCollection<object> HeaderItems => _headerItems;
 
     #endregion
@@ -147,7 +156,6 @@ public partial class TableView : ContentView
         }
 
         AttachPlaybackStateSource();
-        UpdatePlayingStateForVisibleItems();
         UpdateFavoriteStateForVisibleItems();
 
     }
@@ -163,7 +171,6 @@ public partial class TableView : ContentView
         }
 
         DetachPlaybackStateSource();
-        ResetPlayingStateForVisibleItems();
 
         PrimaryInfoTappedCommand = null;
         SecondaryInfoTappedCommand = null;
@@ -200,7 +207,6 @@ public partial class TableView : ContentView
         view._anchorIndex = null;
         view.ClearAllSelections();
         view.SyncSelectionAndHeaderState(clickedItem: null);
-        view.UpdatePlayingStateForVisibleItems();
         view.UpdateFavoriteStateForVisibleItems();
     }
 
@@ -653,6 +659,7 @@ public partial class TableView : ContentView
         }
 
         _currentTrack = _queueSyncService.CurrentTrack;
+        SetCurrentTrackUri(_currentTrack?.Uri);
         _queueSyncService.CurrentTrackUpdated += OnCurrentTrackUpdated;
 
         if (_currentTrack != null)
@@ -677,6 +684,7 @@ public partial class TableView : ContentView
 
         _queueSyncService = null;
         _currentTrack = null;
+        SetCurrentTrackUri(null);
     }
 
     private void OnCurrentTrackUpdated(object? sender, EventArgs e)
@@ -687,6 +695,7 @@ public partial class TableView : ContentView
         }
 
         _currentTrack = _queueSyncService?.CurrentTrack;
+        var currentTrackUri = _currentTrack?.Uri;
 
         if (_currentTrack != null)
         {
@@ -695,14 +704,14 @@ public partial class TableView : ContentView
 
         if (MainThread.IsMainThread)
         {
-            UpdatePlayingStateForVisibleItems();
+            SetCurrentTrackUri(currentTrackUri);
             UpdateFavoriteStateForVisibleItems();
             return;
         }
 
         MainThread.BeginInvokeOnMainThread(() =>
         {
-            UpdatePlayingStateForVisibleItems();
+            SetCurrentTrackUri(currentTrackUri);
             UpdateFavoriteStateForVisibleItems();
         });
     }
@@ -721,31 +730,6 @@ public partial class TableView : ContentView
         }
 
         MainThread.BeginInvokeOnMainThread(UpdateFavoriteStateForVisibleItems);
-    }
-
-    private void UpdatePlayingStateForVisibleItems()
-    {
-        var activeTrack = _currentTrack;
-
-        foreach (var item in EnumerateSelectableItems())
-        {
-            var isPlaying = activeTrack != null && IsSameTrack(item, activeTrack);
-            if (item.IsPlaying != isPlaying)
-            {
-                item.IsPlaying = isPlaying;
-            }
-        }
-    }
-
-    private void ResetPlayingStateForVisibleItems()
-    {
-        foreach (var item in EnumerateSelectableItems())
-        {
-            if (item.IsPlaying)
-            {
-                item.IsPlaying = false;
-            }
-        }
     }
 
     private void UpdateFavoriteStateForVisibleItems()
@@ -784,6 +768,16 @@ public partial class TableView : ContentView
         }
 
         return false;
+    }
+
+    private void SetCurrentTrackUri(string? uri)
+    {
+        if (string.Equals(CurrentTrackUri, uri, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        CurrentTrackUri = uri;
     }
 
     #endregion

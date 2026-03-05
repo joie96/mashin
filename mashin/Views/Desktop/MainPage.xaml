@@ -461,8 +461,12 @@
                             BackgroundColor="Transparent"
                             HeightRequest="32"
                             StrokeThickness="0"
+                            ToolTipProperties.Text="Zufallswiedergabe"
                             VerticalOptions="Center"
                             WidthRequest="32">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ToggleShuffleCommand}" />
+                            </Border.GestureRecognizers>
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="16" />
                             </Border.StrokeShape>
@@ -471,7 +475,15 @@
                                 Text="{mi:Fluent Icon=ArrowShuffle24,
                                                  FontOverride=True}"
                                 TextColor="{DynamicResource IconSecondary}"
-                                VerticalOptions="Center" />
+                                VerticalOptions="Center">
+                                <Label.Triggers>
+                                    <DataTrigger Binding="{Binding IsShuffleActive}"
+                                        TargetType="Label"
+                                        Value="True">
+                                        <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
+                                    </DataTrigger>
+                                </Label.Triggers>
+                            </Label>
                         </Border>
 
                         <!--  Previous  -->
@@ -558,17 +570,39 @@
                             BackgroundColor="Transparent"
                             HeightRequest="32"
                             StrokeThickness="0"
+                            ToolTipProperties.Text="Wiederholungsmodus"
                             VerticalOptions="Center"
                             WidthRequest="32">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ToggleRepeatModeCommand}" />
+                            </Border.GestureRecognizers>
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="16" />
                             </Border.StrokeShape>
-                            <Label FontSize="16"
-                                HorizontalOptions="Center"
-                                Text="{mi:Fluent Icon=ArrowRepeatAll24,
-                                                 FontOverride=True}"
-                                TextColor="{DynamicResource IconSecondary}"
-                                VerticalOptions="Center" />
+                            <Grid>
+                                <Label FontSize="16"
+                                    HorizontalOptions="Center"
+                                    Text="{mi:Fluent Icon=ArrowRepeatAll24,
+                                                     FontOverride=True}"
+                                    TextColor="{DynamicResource IconSecondary}"
+                                    VerticalOptions="Center">
+                                    <Label.Triggers>
+                                        <DataTrigger Binding="{Binding IsRepeatEnabled}"
+                                            TargetType="Label"
+                                            Value="True">
+                                            <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
+                                        </DataTrigger>
+                                    </Label.Triggers>
+                                </Label>
+                                <Label FontAttributes="Bold"
+                                    FontSize="9"
+                                    HorizontalOptions="End"
+                                    IsVisible="{Binding IsRepeatOne}"
+                                    Margin="0,0,3,4"
+                                    Text="1"
+                                    TextColor="{DynamicResource AccentColor}"
+                                    VerticalOptions="End" />
+                            </Grid>
                         </Border>
                     </HorizontalStackLayout>
 

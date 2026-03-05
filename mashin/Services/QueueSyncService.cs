@@ -84,7 +84,7 @@ public sealed class QueueSyncService : IQueueSyncService
 {
     #region Fields
 
-    private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(15);
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly IUserDataService _userDataService;

@@ -15,6 +15,7 @@
     <ContentView.Resources>
         <converters:IsLastItemConverter x:Key="IsLastItemConverter"/>
         <converters:InvertedBoolConverter x:Key="InvertedBoolConverter"/>
+        <converters:StringEqualsConverter x:Key="StringEqualsConverter"/>
 
         <DataTemplate x:Key="TrackHeaderTemplate">
             <Grid RowDefinitions="Auto,Auto,Auto"
@@ -347,9 +348,15 @@
                                TextColor="{DynamicResource TextTertiary}"
                                VerticalOptions="Center">
                             <Label.Triggers>
-                                <DataTrigger Binding="{Binding IsPlaying}"
-                                             TargetType="Label"
+                                <DataTrigger TargetType="Label"
                                              Value="True">
+                                    <DataTrigger.Binding>
+                                        <MultiBinding Converter="{StaticResource StringEqualsConverter}">
+                                            <Binding Path="Uri"/>
+                                            <Binding Path="CurrentTrackUri"
+                                                     Source="{x:Reference self}"/>
+                                        </MultiBinding>
+                                    </DataTrigger.Binding>
                                     <Setter Property="IsVisible"
                                             Value="False"/>
                                 </DataTrigger>
@@ -364,9 +371,15 @@
                                TextColor="{DynamicResource AccentColor}"
                                VerticalOptions="Center">
                             <Label.Triggers>
-                                <DataTrigger Binding="{Binding IsPlaying}"
-                                             TargetType="Label"
+                                <DataTrigger TargetType="Label"
                                              Value="True">
+                                    <DataTrigger.Binding>
+                                        <MultiBinding Converter="{StaticResource StringEqualsConverter}">
+                                            <Binding Path="Uri"/>
+                                            <Binding Path="CurrentTrackUri"
+                                                     Source="{x:Reference self}"/>
+                                        </MultiBinding>
+                                    </DataTrigger.Binding>
                                     <Setter Property="IsVisible"
                                             Value="True"/>
                                 </DataTrigger>
@@ -431,9 +444,15 @@
                            TextColor="{DynamicResource TextSecondary}"
                            VerticalOptions="Center">
                         <Label.Triggers>
-                            <DataTrigger Binding="{Binding IsPlaying}"
-                                         TargetType="Label"
+                            <DataTrigger TargetType="Label"
                                          Value="True">
+                                <DataTrigger.Binding>
+                                    <MultiBinding Converter="{StaticResource StringEqualsConverter}">
+                                        <Binding Path="Uri"/>
+                                        <Binding Path="CurrentTrackUri"
+                                                 Source="{x:Reference self}"/>
+                                    </MultiBinding>
+                                </DataTrigger.Binding>
                                 <Setter Property="TextColor"
                                         Value="{DynamicResource AccentColor}"/>
                             </DataTrigger>
@@ -674,9 +693,15 @@
                                TextColor="{DynamicResource TextTertiary}"
                                VerticalOptions="Center">
                             <Label.Triggers>
-                                <DataTrigger Binding="{Binding MediaItem.IsPlaying}"
-                                             TargetType="Label"
+                                <DataTrigger TargetType="Label"
                                              Value="True">
+                                    <DataTrigger.Binding>
+                                        <MultiBinding Converter="{StaticResource StringEqualsConverter}">
+                                            <Binding Path="MediaItem.Uri"/>
+                                            <Binding Path="CurrentTrackUri"
+                                                     Source="{x:Reference self}"/>
+                                        </MultiBinding>
+                                    </DataTrigger.Binding>
                                     <Setter Property="IsVisible"
                                             Value="False"/>
                                 </DataTrigger>
@@ -691,9 +716,15 @@
                                TextColor="{DynamicResource AccentColor}"
                                VerticalOptions="Center">
                             <Label.Triggers>
-                                <DataTrigger Binding="{Binding MediaItem.IsPlaying}"
-                                             TargetType="Label"
+                                <DataTrigger TargetType="Label"
                                              Value="True">
+                                    <DataTrigger.Binding>
+                                        <MultiBinding Converter="{StaticResource StringEqualsConverter}">
+                                            <Binding Path="MediaItem.Uri"/>
+                                            <Binding Path="CurrentTrackUri"
+                                                     Source="{x:Reference self}"/>
+                                        </MultiBinding>
+                                    </DataTrigger.Binding>
                                     <Setter Property="IsVisible"
                                             Value="True"/>
                                 </DataTrigger>
@@ -758,9 +789,15 @@
                            TextColor="{DynamicResource TextSecondary}"
                            VerticalOptions="Center">
                         <Label.Triggers>
-                            <DataTrigger Binding="{Binding MediaItem.IsPlaying}"
-                                         TargetType="Label"
+                            <DataTrigger TargetType="Label"
                                          Value="True">
+                                <DataTrigger.Binding>
+                                    <MultiBinding Converter="{StaticResource StringEqualsConverter}">
+                                        <Binding Path="MediaItem.Uri"/>
+                                        <Binding Path="CurrentTrackUri"
+                                                 Source="{x:Reference self}"/>
+                                    </MultiBinding>
+                                </DataTrigger.Binding>
                                 <Setter Property="TextColor"
                                         Value="{DynamicResource AccentColor}"/>
                             </DataTrigger>

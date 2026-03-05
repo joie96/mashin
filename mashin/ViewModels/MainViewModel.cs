@@ -14,6 +14,7 @@ using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using mashin.Collections;
 using MauiIcons.Fluent.Filled;
+using PlayerRepeatMode = mashin.Models.RepeatMode;
 
 namespace mashin.ViewModels;
 
@@ -201,6 +202,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         PreviousTrackCommand = new Command(async () => await PreviousTrackAsync());
         NextTrackCommand = new Command(async () => await NextTrackAsync());
         TogglePlayPauseCommand = new Command(async () => await TogglePlayPauseAsync());
+        ToggleShuffleCommand = new Command(async () => await ToggleShuffleAsync());
+        ToggleRepeatModeCommand = new Command(async () => await ToggleRepeatModeAsync());
         ToggleMuteCommand = new Command(async () => await ToggleMuteAsync());
         ToggleDontStopTheMusicCommand = new Command(() => IsDontStopTheMusicEnabled = !IsDontStopTheMusicEnabled);
         BeginSeekCommand = new Command<double>(_ => BeginSeek());
@@ -293,14 +296,33 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     public bool? ShuffleEnabled
     {
         get => _shuffleEnabled;
-        private set => SetProperty(ref _shuffleEnabled, value);
+        private set
+        {
+            if (SetProperty(ref _shuffleEnabled, value))
+            {
+                OnPropertyChanged(nameof(IsShuffleActive));
+            }
+        }
     }
 
     public string? RepeatMode
     {
         get => _repeatMode;
-        private set => SetProperty(ref _repeatMode, value);
+        private set
+        {
+            if (SetProperty(ref _repeatMode, value))
+            {
+                OnPropertyChanged(nameof(IsRepeatEnabled));
+                OnPropertyChanged(nameof(IsRepeatOne));
+            }
+        }
     }
+
+    public bool IsShuffleActive => ShuffleEnabled == true;
+
+    public bool IsRepeatEnabled => GetNormalizedRepeatMode(RepeatMode) is not PlayerRepeatMode.Off;
+
+    public bool IsRepeatOne => GetNormalizedRepeatMode(RepeatMode) == PlayerRepeatMode.One;
 
     public double Duration
     {
@@ -438,6 +460,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     public ICommand PreviousTrackCommand { get; }
     public ICommand NextTrackCommand { get; }
     public ICommand TogglePlayPauseCommand { get; }
+    public ICommand ToggleShuffleCommand { get; }
+    public ICommand ToggleRepeatModeCommand { get; }
     public ICommand ToggleMuteCommand { get; }
     public ICommand ToggleDontStopTheMusicCommand { get; }
     public ICommand ToggleCurrentTrackFavoriteCommand { get; }
@@ -524,15 +548,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             _playerService.PositionSeconds = elapsedTime;
             Position = elapsedTime;
             SliderPosition = elapsedTime;
-        }
-
-        // Set queue playing track
-        foreach (var item in _currentQueueItems)
-        {
-            if (item.QueueItemId == _queueSyncService.CurrentPlayerQueue?.CurrentItem?.QueueItemId)
-            {
-                item.MediaItem?.IsPlaying = true;
-            }
         }
 
         // Start queue sync loop
@@ -704,6 +719,51 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
     }
 
+    private async Task ToggleShuffleAsync()
+    {
+        try
+        {
+            var queueId = CurrentPlayerQueue?.QueueId;
+            if (string.IsNullOrWhiteSpace(queueId))
+            {
+                _logger.LogDebug("No active queue available for shuffle toggle");
+                return;
+            }
+
+            var nextShuffleEnabled = !(ShuffleEnabled ?? false);
+            await _musicAssistant.SetShuffleAsync(queueId, nextShuffleEnabled);
+            ShuffleEnabled = nextShuffleEnabled;
+
+            // Shuffle can reorder items server-side, so force an immediate queue resync.
+            await _queueSyncService.RefreshNowAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to toggle shuffle state");
+        }
+    }
+
+    private async Task ToggleRepeatModeAsync()
+    {
+        try
+        {
+            var queueId = CurrentPlayerQueue?.QueueId;
+            if (string.IsNullOrWhiteSpace(queueId))
+            {
+                _logger.LogDebug("No active queue available for repeat toggle");
+                return;
+            }
+
+            var nextRepeatMode = GetNextRepeatMode(RepeatMode);
+            await _musicAssistant.SetRepeatAsync(queueId, nextRepeatMode);
+            RepeatMode = nextRepeatMode.ToString();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to toggle repeat mode");
+        }
+    }
+
     private async Task SeekAsync(double seconds)
     {
         if (PlayState.State != PlayerPlaybackState.Seeking)
@@ -857,6 +917,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private void OnCurrentPlayerQueueUpdated(object? sender, EventArgs e)
     {
         CurrentPlayerQueue = _queueSyncService.CurrentPlayerQueue;
+        ShuffleEnabled = _queueSyncService.CurrentPlayerQueue?.ShuffleEnabled;
+        RepeatMode = _queueSyncService.CurrentPlayerQueue?.RepeatMode?.ToString();
         IsDontStopTheMusicEnabled = _queueSyncService.CurrentPlayerQueue?.DontStopTheMusicEnabled == true;
 
     }
@@ -962,14 +1024,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             _currentQueueItems.ReplaceRange(serviceQueue);
         }
 
-        // Set queue playing track
-        foreach (var item in _currentQueueItems)
-        {
-            if (item.QueueItemId == _queueSyncService.CurrentPlayerQueue?.CurrentItem?.QueueItemId)
-            {
-                item.MediaItem?.IsPlaying = true;
-            }
-        }
     }
 
     #endregion
@@ -1354,6 +1408,26 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
 
         return $"{ts.Minutes} Minuten";
+    }
+
+    private static PlayerRepeatMode GetNextRepeatMode(string? repeatMode)
+    {
+        return GetNormalizedRepeatMode(repeatMode) switch
+        {
+            PlayerRepeatMode.All => PlayerRepeatMode.One,
+            PlayerRepeatMode.One => PlayerRepeatMode.Off,
+            _ => PlayerRepeatMode.All,
+        };
+    }
+
+    private static PlayerRepeatMode GetNormalizedRepeatMode(string? repeatMode)
+    {
+        if (Enum.TryParse<PlayerRepeatMode>(repeatMode, true, out var parsedMode))
+        {
+            return parsedMode;
+        }
+
+        return PlayerRepeatMode.Off;
     }
 
     #endregion

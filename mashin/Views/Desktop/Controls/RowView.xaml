@@ -16,6 +16,7 @@
         <converters:IsLastItemConverter x:Key="IsLastItemConverter" />
         <converters:IsSelectedOrHoverVisibleConverter x:Key="IsSelectedOrHoverVisibleConverter" />
         <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
+        <converters:StringEqualsConverter x:Key="StringEqualsConverter" />
 
         <DataTemplate x:Key="AlbumTemplate" x:DataType="models:Album">
             <Grid x:Name="GridItemContainer"
@@ -242,9 +243,14 @@
                             HoverTextColor="{DynamicResource TextSecondary}" />
                     </Label.Behaviors>
                     <Label.Triggers>
-                        <DataTrigger Binding="{Binding IsPlaying}"
-                            TargetType="Label"
+                        <DataTrigger TargetType="Label"
                             Value="True">
+                            <DataTrigger.Binding>
+                                <MultiBinding Converter="{StaticResource StringEqualsConverter}">
+                                    <Binding Path="Uri" />
+                                    <Binding Path="CurrentTrackUri" Source="{x:Reference self}" />
+                                </MultiBinding>
+                            </DataTrigger.Binding>
                             <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
                         </DataTrigger>
                     </Label.Triggers>
@@ -522,9 +528,14 @@
                             HoverTextColor="{DynamicResource TextSecondary}" />
                     </Label.Behaviors>
                     <Label.Triggers>
-                        <DataTrigger Binding="{Binding IsPlaying}"
-                            TargetType="Label"
+                        <DataTrigger TargetType="Label"
                             Value="True">
+                            <DataTrigger.Binding>
+                                <MultiBinding Converter="{StaticResource StringEqualsConverter}">
+                                    <Binding Path="Uri" />
+                                    <Binding Path="CurrentTrackUri" Source="{x:Reference self}" />
+                                </MultiBinding>
+                            </DataTrigger.Binding>
                             <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
                         </DataTrigger>
                     </Label.Triggers>
@@ -753,9 +764,14 @@
                             HoverTextColor="{DynamicResource TextSecondary}" />
                     </Label.Behaviors>
                     <Label.Triggers>
-                        <DataTrigger Binding="{Binding IsPlaying}"
-                            TargetType="Label"
+                        <DataTrigger TargetType="Label"
                             Value="True">
+                            <DataTrigger.Binding>
+                                <MultiBinding Converter="{StaticResource StringEqualsConverter}">
+                                    <Binding Path="Uri" />
+                                    <Binding Path="CurrentTrackUri" Source="{x:Reference self}" />
+                                </MultiBinding>
+                            </DataTrigger.Binding>
                             <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
                         </DataTrigger>
                     </Label.Triggers>
