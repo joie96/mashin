@@ -30,8 +30,8 @@
 
         <Border.Shadow>
             <Shadow
-                Brush="Black"
-                Opacity="0.4"
+                Brush="{DynamicResource ShadowColorStrong}"
+                Opacity="{DynamicResource ShadowOpacityStrong}"
                 Radius="24"
                 Offset="0,8" />
         </Border.Shadow>

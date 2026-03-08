@@ -33,6 +33,11 @@
     <Color x:Key="HoverBackground25">#402a2a2a</Color>
     <Color x:Key="SelectionBackground">#3a3a3a</Color>
 
+    <Color x:Key="ShadowColorSoft">#000000</Color>
+    <Color x:Key="ShadowColorStrong">#000000</Color>
+    <x:Double x:Key="ShadowOpacitySoft">0.55</x:Double>
+    <x:Double x:Key="ShadowOpacityStrong">0.72</x:Double>
+
     <Color x:Key="White">#ffffff</Color>
     <Color x:Key="Black">#000000</Color>
 

@@ -384,35 +384,9 @@ public partial class TableView : ContentView
         SelectSingle(item);
         SyncSelectionAndHeaderState(item);
 
-        // Context queue: play item index
-        if (PlaybackContextItem is PlayerQueue queueContext)
-        {
-            if (!string.IsNullOrWhiteSpace(queueContext.QueueId))
-            {
-                var zeroBasedIndex = item is Track queueTrack && queueTrack.Index > 0
-                    ? queueTrack.Index - 1
-                    : (GetIndexOf(item) ?? -1);
-
-                if (zeroBasedIndex >= 0)
-                {
-                    await MediaActions.PlayIndexAsync(queueContext.QueueId, zeroBasedIndex);
-                    return;
-                }
-            }
-        }
-
-        // Context album, playlist, etc.: Play the container and start at clicked item if context is available.
-        /*
-        if (PlaybackContextItem != null && !(PlaybackContextItem is PlayerQueue)) 
-        {
-            await MediaActions.PlayMediaAsync(PlaybackContextItem, item);
-            return;
-        }*/
-
-        // Fallback: Play clicked item immediately and append following visible items.
         await MediaActions.PlayMediaAsync(item);
 
-        var itemsToQueue = GetItemsAfterIndex(item);
+        var itemsToQueue = GetItemsAfterIndex(item, inCycle: true);
         if (itemsToQueue.Count > 0)
         {
             await MediaActions.PlayMediaNextAsync(itemsToQueue);
@@ -435,34 +409,9 @@ public partial class TableView : ContentView
         SelectSingle(item);
         SyncSelectionAndHeaderState(item);
 
-        // Context queue: play item index
-        if (PlaybackContextItem is PlayerQueue queueContext)
-        {
-            if (!string.IsNullOrWhiteSpace(queueContext.QueueId))
-            {
-                var zeroBasedIndex = item is Track queueTrack && queueTrack.Index > 0
-                    ? queueTrack.Index - 1
-                    : (GetIndexOf(item) ?? -1);
-
-                if (zeroBasedIndex >= 0)
-                {
-                    await MediaActions.PlayIndexAsync(queueContext.QueueId, zeroBasedIndex);
-                    return;
-                }
-            }
-        }
-
-        // Context album, playlist, etc.: Play the container and start at clicked item if context is available.
-        if (PlaybackContextItem != null && !(PlaybackContextItem is PlayerQueue)) 
-        {
-            await MediaActions.PlayMediaAsync(PlaybackContextItem, item);
-            return;
-        }
-
-        // Fallback: Play clicked item immediately and append following visible items.
         await MediaActions.PlayMediaAsync(item);
 
-        var itemsToQueue = GetItemsAfterIndex(item);
+        var itemsToQueue = GetItemsAfterIndex(item, inCycle: true);
         if (itemsToQueue.Count > 0)
         {
             await MediaActions.PlayMediaNextAsync(itemsToQueue);
@@ -862,7 +811,7 @@ public partial class TableView : ContentView
         return null;
     }
 
-    private List<MediaItem> GetItemsAfterIndex(MediaItem startItem)
+    private List<MediaItem> GetItemsAfterIndex(MediaItem startItem, bool inCycle = false)
     {
         var startIndex = GetIndexOf(startItem);
         if (startIndex is null)
@@ -870,10 +819,27 @@ public partial class TableView : ContentView
             return new List<MediaItem>();
         }
 
-        var index = 0;
-        return EnumerateSelectableItems()
-            .Where(item => index++ > startIndex.Value)
-            .ToList();
+        var items = EnumerateSelectableItems().ToList();
+        if (items.Count <= 1)
+        {
+            return new List<MediaItem>();
+        }
+
+        var index = startIndex.Value;
+        var result = new List<MediaItem>(items.Count - 1);
+
+        var trailingCount = items.Count - index - 1;
+        if (trailingCount > 0)
+        {
+            result.AddRange(items.GetRange(index + 1, trailingCount));
+        }
+
+        if (inCycle && index > 0)
+        {
+            result.AddRange(items.GetRange(0, index));
+        }
+
+        return result;
     }
 
     private IEnumerable<MediaItem> EnumerateSelectableItems()

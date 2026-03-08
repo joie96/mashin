@@ -502,7 +502,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 Text = "Abspielen",
                 Icon = FluentIcons.Play12,
                 Command = new Command(async () =>
-                    await PlaySelectedTracksWithModesAsync(Tracks, Playlist))
+                    await PlaySelectedTracksWithModesAsync(Tracks))
             },
             new()
             {
@@ -576,7 +576,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         return Task.CompletedTask;
     }
 
-    private async Task PlaySelectedTracksWithModesAsync(IEnumerable<Track> tracks, MediaItem? playbackContextItem)
+    private async Task PlaySelectedTracksWithModesAsync(IEnumerable<Track> tracks)
     {
         var trackList = tracks.ToList();
         var selectedTracks = trackList.Where(t => t.IsSelected).ToList();
@@ -599,28 +599,33 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             return;
         }
 
-        // single track selected: play the track and queue the following tracks in the list
+        // single track selected: play track and queue remaining tracks in cyclic order
         var selectedTrack = selectedTracks.First();
+        await MediaActions.PlayMediaAsync(selectedTrack);
 
-        if (playbackContextItem == null)
+        var selectedIndex = trackList.IndexOf(selectedTrack);
+        if (selectedIndex < 0 || trackList.Count <= 1)
         {
-            await MediaActions.PlayMediaAsync(selectedTrack);
-
-            var selectedIndex = trackList.IndexOf(selectedTrack);
-            if (selectedIndex >= 0 && selectedIndex < trackList.Count - 1)
-            {
-                var followingTracks = trackList.Skip(selectedIndex + 1).ToList();
-                if (followingTracks.Count > 0)
-                {
-                    await MediaActions.PlayMediaNextAsync(followingTracks);
-                }
-            }
-
             return;
         }
 
-        // context item given: play the track with context
-        await MediaActions.PlayMediaAsync(playbackContextItem, selectedTrack);
+        var itemsToQueue = new List<Track>(trackList.Count - 1);
+        var trailingCount = trackList.Count - selectedIndex - 1;
+
+        if (trailingCount > 0)
+        {
+            itemsToQueue.AddRange(trackList.GetRange(selectedIndex + 1, trailingCount));
+        }
+
+        if (selectedIndex > 0)
+        {
+            itemsToQueue.AddRange(trackList.GetRange(0, selectedIndex));
+        }
+
+        if (itemsToQueue.Count > 0)
+        {
+            await MediaActions.PlayMediaNextAsync(itemsToQueue);
+        }
     }
 
     #endregion

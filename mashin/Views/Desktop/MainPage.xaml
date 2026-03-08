@@ -638,7 +638,7 @@
 
                 <!--  Right: Queue  -->
                 <Grid Grid.Column="2"
-                    ColumnDefinitions="Auto,Auto,Auto,Auto"
+                    ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
                     ColumnSpacing="12"
                     HorizontalOptions="End"
                     IsClippedToBounds="True"
@@ -649,7 +649,7 @@
                         HeightRequest="32"
                         StrokeThickness="0"
                         VerticalOptions="Center"
-                        ToolTipProperties.Text="Queue"
+                        ToolTipProperties.Text="Warteschlange"
                         WidthRequest="32">
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Tapped="OnQueueTapped" />
@@ -660,7 +660,7 @@
                         <Label FontSize="16"
                             x:Name="QueueIconLabel"
                             HorizontalOptions="Center"
-                            Text="{mi:Fluent Icon=AppsList24,
+                            Text="{mi:Fluent Icon=RowTriple24,
                                              FontOverride=True}"
                             TextColor="{DynamicResource IconSecondary}"
                             VerticalOptions="Center" />
@@ -697,8 +697,28 @@
                         </Label>
                     </Border>
                     
-                    <!--  Volume  -->
+                    <!--  Device Selection  -->
                     <Border Grid.Column="2"
+                        behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                        BackgroundColor="Transparent"
+                        HeightRequest="32"
+                        StrokeThickness="0"
+                        ToolTipProperties.Text="Gerätewahl"
+                        VerticalOptions="Center"
+                        WidthRequest="32">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="16" />
+                        </Border.StrokeShape>
+                        <Label FontSize="16"
+                            HorizontalOptions="Center"
+                            Text="{mi:Fluent Icon=PhoneDesktop24,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center" />
+                    </Border>
+
+                    <!--  Volume  -->
+                    <Border Grid.Column="3"
                         behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                         BackgroundColor="Transparent"
                         HeightRequest="32"
@@ -729,7 +749,7 @@
                         </Grid>
                     </Border>
 
-                    <Slider Grid.Column="3"
+                    <Slider Grid.Column="4"
                         Maximum="100"
                         MaximumTrackColor="{DynamicResource BackgroundTertiary}"
                         Minimum="0"
@@ -738,8 +758,148 @@
                         VerticalOptions="Center"
                         WidthRequest="90"
                         Value="{Binding Volume, Mode=TwoWay}" />
+
+                    <!--  Options  -->
+                    <Border Grid.Column="5"
+                        behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                        BackgroundColor="Transparent"
+                        HeightRequest="32"
+                        StrokeThickness="0"
+                        ToolTipProperties.Text="Optionen"
+                        VerticalOptions="Center"
+                        WidthRequest="32">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding ToggleAudioOptionsFlyoutCommand}" />
+                        </Border.GestureRecognizers>
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="16" />
+                        </Border.StrokeShape>
+                        <Label FontSize="16"
+                            HorizontalOptions="Center"
+                            Text="{mi:Fluent Icon=Options24,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center">
+                            <Label.Triggers>
+                                <DataTrigger Binding="{Binding IsAudioOptionsFlyoutOpen}"
+                                    TargetType="Label"
+                                    Value="True">
+                                    <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
+                                </DataTrigger>
+                            </Label.Triggers>
+                        </Label>
+                    </Border>
                 </Grid>
             </Grid>
+        </Grid>
+
+        <!--  Audio Options Flyout  -->
+        <Grid Grid.Row="0"
+            Grid.RowSpan="3"
+            Grid.Column="0"
+            Grid.ColumnSpan="2"
+            IsVisible="{Binding IsAudioOptionsFlyoutOpen}">
+            <BoxView BackgroundColor="Transparent">
+                <BoxView.GestureRecognizers>
+                    <TapGestureRecognizer Command="{Binding CloseAudioOptionsFlyoutCommand}" />
+                </BoxView.GestureRecognizers>
+            </BoxView>
+
+            <Border Margin="0,0,10,70"
+                Padding="12"
+                BackgroundColor="{DynamicResource BackgroundSecondary}"
+                HorizontalOptions="End"
+                VerticalOptions="End"
+                WidthRequest="200"
+                Stroke="{DynamicResource SeparatorColor}"
+                StrokeThickness="1">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="8" />
+                </Border.StrokeShape>
+                <Border.Shadow>
+                    <Shadow Brush="{DynamicResource ShadowColorStrong}"
+                        Opacity="{DynamicResource ShadowOpacityStrong}"
+                        Radius="20"
+                        Offset="0,8" />
+                </Border.Shadow>
+
+                <VerticalStackLayout Spacing="10">
+
+                    <Label 
+                        FontSize="14"
+                        Text="Klangqualität"
+                        Margin="0,0,0,8"
+                        TextColor="{DynamicResource TextPrimary}" />
+
+                    <Grid ColumnDefinitions="*,Auto"
+                        ColumnSpacing="10"
+                        RowDefinitions="Auto,Auto">
+                        <VerticalStackLayout Grid.Row="0"
+                            Grid.Column="0"
+                            Spacing="0">
+                            <Label FontSize="14"
+                                Text="Standard"
+                                TextColor="{DynamicResource TextPrimary}" />
+                            <Label FontSize="12"
+                                Text="Opus 256 kb/s"
+                                TextColor="{DynamicResource TextSecondary}" />
+                        </VerticalStackLayout>
+
+                        <RadioButton Grid.RowSpan="2"
+                            Grid.Column="1"
+                            GroupName="AudioQuality"
+                            HorizontalOptions="End"
+                            IsChecked="{Binding IsAudioQualityOpus, Mode=TwoWay}"
+                            VerticalOptions="Center" 
+                            MinimumWidthRequest="0"/>
+                    </Grid>
+
+
+                    <Grid ColumnDefinitions="*,Auto"
+                        ColumnSpacing="10"
+                        RowDefinitions="Auto,Auto">
+                        <Label Grid.Row="0"
+                            Grid.Column="0"
+                            FontSize="14"
+                            Text="High Fidelity"
+                            TextColor="{DynamicResource TextPrimary}" />
+                        <Label Grid.Row="1"
+                            Grid.Column="0"
+                            FontSize="12"
+                            Text="FLAC"
+                            TextColor="{DynamicResource TextSecondary}" />
+                        <RadioButton Grid.RowSpan="2"
+                            Grid.Column="1"
+                            GroupName="AudioQuality"
+                            HorizontalOptions="End"
+                            IsChecked="{Binding IsAudioQualityFlac, Mode=TwoWay}"
+                            VerticalOptions="Center"
+                            MinimumWidthRequest="0"/>
+                    </Grid>
+
+                    <Grid ColumnDefinitions="*,Auto"
+                        ColumnSpacing="10"
+                        RowDefinitions="Auto,Auto">
+                        <Label Grid.Row="0"
+                            Grid.Column="0"
+                            FontSize="14"
+                            Text="Studio"
+                            TextColor="{DynamicResource TextPrimary}" />
+                        <Label Grid.Row="1"
+                            Grid.Column="0"
+                            FontSize="12"
+                            Text="PCM"
+                            TextColor="{DynamicResource TextSecondary}" />
+                        <RadioButton Grid.RowSpan="2"
+                            Grid.Column="1"
+                            GroupName="AudioQuality"
+                            HorizontalOptions="End"
+                            IsChecked="{Binding IsAudioQualityPcm, Mode=TwoWay}"
+                            VerticalOptions="Center"
+                            MinimumWidthRequest="0"/>
+                    </Grid>
+                </VerticalStackLayout>
+            </Border>
         </Grid>
 
         <!--  Queue Overlay Host  -->

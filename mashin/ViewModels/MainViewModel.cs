@@ -45,6 +45,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private double _sliderPosition;
     private double _volume = 50;
     private bool _suppressVolumeCommand;
+    private bool _isAudioOptionsFlyoutOpen;
+    private string _selectedAudioQuality = "opus";
 
     private bool _isDontStopTheMusicEnabled;
 
@@ -206,6 +208,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         ToggleRepeatModeCommand = new Command(async () => await ToggleRepeatModeAsync());
         ToggleMuteCommand = new Command(async () => await ToggleMuteAsync());
         ToggleDontStopTheMusicCommand = new Command(() => IsDontStopTheMusicEnabled = !IsDontStopTheMusicEnabled);
+        ToggleAudioOptionsFlyoutCommand = new Command(() => IsAudioOptionsFlyoutOpen = !IsAudioOptionsFlyoutOpen);
+        CloseAudioOptionsFlyoutCommand = new Command(() => IsAudioOptionsFlyoutOpen = false);
         BeginSeekCommand = new Command<double>(_ => BeginSeek());
         SeekCommand = new Command<double>(async seconds => await SeekAsync(seconds));
         PlayPlaylistCommand = new Command<Playlist>(async playlist => await PlayPlaylistAsync(playlist));
@@ -436,6 +440,66 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
     }
 
+    public bool IsAudioOptionsFlyoutOpen
+    {
+        get => _isAudioOptionsFlyoutOpen;
+        set => SetProperty(ref _isAudioOptionsFlyoutOpen, value);
+    }
+
+    public string SelectedAudioQuality
+    {
+        get => _selectedAudioQuality;
+        set
+        {
+            if (!SetProperty(ref _selectedAudioQuality, value))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(IsAudioQualityOpus));
+            OnPropertyChanged(nameof(IsAudioQualityFlac));
+            OnPropertyChanged(nameof(IsAudioQualityPcm));
+
+            _ = ApplyAudioQualityAsync(_selectedAudioQuality);
+        }
+    }
+
+    public bool IsAudioQualityOpus
+    {
+        get => string.Equals(SelectedAudioQuality, "opus", StringComparison.OrdinalIgnoreCase);
+        set
+        {
+            if (value)
+            {
+                SelectedAudioQuality = "opus";
+            }
+        }
+    }
+
+    public bool IsAudioQualityFlac
+    {
+        get => string.Equals(SelectedAudioQuality, "flac", StringComparison.OrdinalIgnoreCase);
+        set
+        {
+            if (value)
+            {
+                SelectedAudioQuality = "flac";
+            }
+        }
+    }
+
+    public bool IsAudioQualityPcm
+    {
+        get => string.Equals(SelectedAudioQuality, "pcm", StringComparison.OrdinalIgnoreCase);
+        set
+        {
+            if (value)
+            {
+                SelectedAudioQuality = "pcm";
+            }
+        }
+    }
+
     #endregion
 
     #region Bindable Properties (Search)
@@ -464,6 +528,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     public ICommand ToggleRepeatModeCommand { get; }
     public ICommand ToggleMuteCommand { get; }
     public ICommand ToggleDontStopTheMusicCommand { get; }
+    public ICommand ToggleAudioOptionsFlyoutCommand { get; }
+    public ICommand CloseAudioOptionsFlyoutCommand { get; }
     public ICommand ToggleCurrentTrackFavoriteCommand { get; }
     public ICommand ShowCurrentTrackContextMenuCommand { get; }
     public ICommand BeginSeekCommand { get; }
@@ -527,6 +593,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         {
             var uri = new Uri(_settings.SendspinUrl);
             await _playerService.ConnectAsync(uri);
+            await _playerService.RequestAudioFormatAsync(SelectedAudioQuality);
         }
 
         // Load playlists and store locally
@@ -820,6 +887,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
     }
 
+    private async Task ApplyAudioQualityAsync(string codec)
+    {
+        try
+        {
+            await _playerService.RequestAudioFormatAsync(codec);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to request audio format change to {Codec}", codec);
+        }
+    }
+
     #endregion
 
     #region Event Handlers
@@ -1036,7 +1115,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         _userMenuItems.Add(new ContextMenuItem
         {
-            Text = "Logout",
+            Text = "Einstellungen",
+            Icon = FluentIcons.Settings24,
+            Command = new Command(async () => await ExecuteOpenSettingsAsync())
+        });
+
+        _userMenuItems.Add(new ContextMenuItem { IsSeparator = true });
+
+        _userMenuItems.Add(new ContextMenuItem
+        {
+            Text = "Abmelden",
+            Icon = FluentIcons.SignOut24,
             Command = new Command(async () => await ExecuteLogoutAsync())
         });
     }
@@ -1347,10 +1436,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             _logger.LogWarning(ex, "Failed to set dont-stop-the-music state to {Enabled}", dontStopTheMusicEnabled);
         }
     }
-
     #endregion
 
     #region Helpers
+    private Task ExecuteOpenSettingsAsync()
+    {
+        _logger.LogInformation("Einstellungen ist noch nicht implementiert.");
+        return Task.CompletedTask;
+    }
+
     private async Task ExecuteLogoutAsync()
     {
         try

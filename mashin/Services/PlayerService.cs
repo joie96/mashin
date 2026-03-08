@@ -49,6 +49,7 @@ public interface IPlayerService : IAsyncDisposable, INotifyPropertyChanged
 
     #region Commands
     Task SendCommandAsync(string command, Dictionary<string, object>? parameters = null);
+    Task RequestAudioFormatAsync(string codec, CancellationToken cancellationToken = default);
     #endregion
 }
 public sealed class PlayerService : IPlayerService
@@ -249,6 +250,30 @@ public sealed class PlayerService : IPlayerService
 
         await _client.SendCommandAsync(command, parameters);
     }
+
+    public async Task RequestAudioFormatAsync(string codec, CancellationToken cancellationToken = default)
+    {
+        var normalizedCodec = codec?.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalizedCodec))
+        {
+            _logger.LogWarning("Cannot request audio format: codec is empty");
+            return;
+        }
+
+        if (_client?.ConnectionState != ConnectionState.Connected || _connection == null)
+        {
+            _logger.LogWarning("Cannot request audio format {Codec}: not connected", normalizedCodec);
+            return;
+        }
+
+        _logger.LogInformation(
+            "Audio format switch requested ({Codec}) but runtime stream/request-format is currently disabled.",
+            normalizedCodec);
+
+            //TODO
+
+        await Task.CompletedTask;
+    }
     #endregion
 
     #region Event Handlers
@@ -336,6 +361,7 @@ public sealed class PlayerService : IPlayerService
 
         SetPlayState(new PlayerPlayState(mappedState, DateTimeOffset.UtcNow));
     }
+
     #endregion
 
     #region Position Tracking
