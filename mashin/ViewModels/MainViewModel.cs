@@ -111,6 +111,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _queueSyncService = queueSyncService;
         _logger = logger;
         MediaActions = mediaActions;
+        _selectedAudioQuality = _settings.GetPreferredAudioCodec();
         _currentQueueItems.CollectionChanged += OnCurrentQueueItemsCollectionChanged;
 
         // Navigation Commands
@@ -593,7 +594,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         {
             var uri = new Uri(_settings.SendspinUrl);
             await _playerService.ConnectAsync(uri);
-            await _playerService.RequestAudioFormatAsync(SelectedAudioQuality);
         }
 
         // Load playlists and store locally
@@ -891,11 +891,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         try
         {
-            await _playerService.RequestAudioFormatAsync(codec);
+            await _playerService.UpdatePreferredAudioCodecAsync(codec);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to request audio format change to {Codec}", codec);
+            _logger.LogWarning(ex, "Failed to apply preferred audio codec {Codec}", codec);
         }
     }
 

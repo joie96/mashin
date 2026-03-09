@@ -7,6 +7,7 @@ using Sendspin.SDK.Synchronization;
 using mashin.Audio;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Threading;
 
 namespace mashin.Services;
@@ -49,7 +50,7 @@ public interface IPlayerService : IAsyncDisposable, INotifyPropertyChanged
 
     #region Commands
     Task SendCommandAsync(string command, Dictionary<string, object>? parameters = null);
-    Task RequestAudioFormatAsync(string codec, CancellationToken cancellationToken = default);
+    Task UpdatePreferredAudioCodecAsync(string codec, CancellationToken cancellationToken = default);
     #endregion
 }
 public sealed class PlayerService : IPlayerService
@@ -214,8 +215,10 @@ public sealed class PlayerService : IPlayerService
             _client.ConnectionStateChanged += OnConnectionStateChanged;
             _client.GroupStateChanged += OnGroupStateChanged;
 
-            _logger.LogInformation("Connecting to Sendspin server: {ServerUri} (BufferCapacity: {BufferCapacity})",
-                serverUri, clientCapabilities.BufferCapacity);
+            _logger.LogInformation(
+                "Connecting to Sendspin server: {ServerUri}. ClientCapabilities: {ClientCapabilitiesJson}",
+                serverUri,
+                JsonSerializer.Serialize(clientCapabilities));
             await _client.ConnectAsync(serverUri, cancellationToken);
         }
         finally
@@ -251,28 +254,105 @@ public sealed class PlayerService : IPlayerService
         await _client.SendCommandAsync(command, parameters);
     }
 
-    public async Task RequestAudioFormatAsync(string codec, CancellationToken cancellationToken = default)
+    public async Task UpdatePreferredAudioCodecAsync(string codec, CancellationToken cancellationToken = default)
     {
         var normalizedCodec = codec?.Trim().ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(normalizedCodec))
         {
-            _logger.LogWarning("Cannot request audio format: codec is empty");
+            _logger.LogWarning("Cannot update preferred audio codec: codec is empty");
             return;
         }
 
-        if (_client?.ConnectionState != ConnectionState.Connected || _connection == null)
+        var changed = _settingsService.SetPreferredAudioCodec(normalizedCodec);
+        if (!changed)
         {
-            _logger.LogWarning("Cannot request audio format {Codec}: not connected", normalizedCodec);
+            _logger.LogDebug("Preferred audio codec is already {Codec}; skipping reconnect.", normalizedCodec);
+            return;
+        }
+
+        if (_client?.ConnectionState != ConnectionState.Connected)
+        {
+            _logger.LogInformation(
+                "Saved preferred audio codec {Codec} in settings. It will be applied on next connect.",
+                normalizedCodec);
+            return;
+        }
+
+        if (!Uri.TryCreate(_settingsService.SendspinUrl, UriKind.Absolute, out var serverUri))
+        {
+            _logger.LogWarning(
+                "Preferred audio codec {Codec} saved, but reconnect skipped due to invalid Sendspin URL: {Url}",
+                normalizedCodec,
+                _settingsService.SendspinUrl);
             return;
         }
 
         _logger.LogInformation(
-            "Audio format switch requested ({Codec}) but runtime stream/request-format is currently disabled.",
+            "Preferred audio codec updated to {Codec}. Reconnecting to apply updated client capabilities.",
             normalizedCodec);
 
-            //TODO
+        var wasPlayingBeforeReconnect = PlayState.State == PlayerPlaybackState.Playing;
 
-        await Task.CompletedTask;
+        await DisconnectAsync();
+        await ConnectAsync(serverUri, cancellationToken);
+
+        // If the player was playing before the reconnect, attempt to resume playback after reconnecting.
+        if (wasPlayingBeforeReconnect)
+        {
+            _logger.LogInformation("Resuming playback after codec reconnect.");
+
+            const int maxResumeAttempts = 5;
+            var playbackResumed = PlayState.State == PlayerPlaybackState.Playing;
+
+            for (var attempt = 1; attempt <= maxResumeAttempts; attempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (playbackResumed)
+                {
+                    break;
+                }
+
+                if (_client?.ConnectionState == ConnectionState.Connected)
+                {
+                    try
+                    {
+                        await _client.SendCommandAsync("play");
+                        PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+                        _logger.LogDebug(
+                            "Playback resume command issued after reconnect (attempt {Attempt}/{MaxAttempts}).",
+                            attempt,
+                            maxResumeAttempts);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(
+                            ex,
+                            "Failed to send resume command after reconnect (attempt {Attempt}/{MaxAttempts}).",
+                            attempt,
+                            maxResumeAttempts);
+                    }
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken);
+
+                playbackResumed = PlayState.State == PlayerPlaybackState.Playing;
+
+                if (playbackResumed)
+                {
+                    _logger.LogDebug(
+                        "Playback resume confirmed after reconnect (attempt {Attempt}/{MaxAttempts}).",
+                        attempt,
+                        maxResumeAttempts);
+                    break;
+                }
+            }
+
+            if (!playbackResumed)
+            {
+                _logger.LogWarning("Could not resume playback automatically after codec reconnect.");
+            }
+        }
     }
     #endregion
 

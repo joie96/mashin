@@ -5,6 +5,8 @@ namespace mashin.Services;
 
 public class SettingsService
 {
+    #region Constants
+
     // Central default values
     private const string DefaultMusicAssistantUrl = "http://192.168.1.2:8095";
     private const string DefaultSendspinUrl = "ws://192.168.1.2:8927/sendspin";
@@ -18,6 +20,10 @@ public class SettingsService
     private const string ThemeModeKey = "theme_mode";
     private const string BufferCapacityKey = "buffer_capacity";
     private const string AudioFormatsKey = "audio_formats"; // JSON serialized
+
+    #endregion
+
+    #region Properties
 
     // Server settings
     public string MusicAssistantUrl { get; set; }
@@ -33,6 +39,10 @@ public class SettingsService
     // Audio/streaming settings
     public int BufferCapacity { get; set; }
     public List<AudioFormat> AudioFormats { get; set; }
+
+    #endregion
+
+    #region Construction
 
     public SettingsService()
     {
@@ -56,18 +66,26 @@ public class SettingsService
             try
             {
                 AudioFormats = System.Text.Json.JsonSerializer.Deserialize<List<AudioFormat>>(formatsJson)
-                              ?? GetDefaultAudioFormats();
+                              ?? BuildPreferredAudioFormats("opus")!;
             }
             catch
             {
-                AudioFormats = GetDefaultAudioFormats();
+                AudioFormats = BuildPreferredAudioFormats("opus")!;
             }
         }
         else
         {
-            AudioFormats = GetDefaultAudioFormats();
+            AudioFormats = BuildPreferredAudioFormats("opus")!;
         }
+
+        // Keep a single preferred codec persisted in settings.
+        var normalizedCodec = AudioFormats.FirstOrDefault()?.Codec;
+        AudioFormats = BuildPreferredAudioFormats(normalizedCodec ?? "opus") ?? BuildPreferredAudioFormats("opus")!;
     }
+
+    #endregion
+
+    #region Public Methods
 
     public void Save()
     {
@@ -99,14 +117,54 @@ public class SettingsService
 
     public ClientCapabilities GetClientCapabilities()
     {
+        var clientName = GetClientName();
+
         return new ClientCapabilities
         {
-            ClientName = $"Mashin ({GetClientName()})",
-            ClientId = $"mashin-{GetClientName().Replace(" ", string.Empty).ToLowerInvariant()}",
+            ClientName = $"Mashin ({clientName})",
+            ClientId = $"mashin-{clientName.Replace(" ", string.Empty).ToLowerInvariant()}",
             BufferCapacity = BufferCapacity,
             AudioFormats = AudioFormats
         };
     }
+
+    public string GetPreferredAudioCodec()
+    {
+        var codec = AudioFormats.FirstOrDefault()?.Codec?.Trim().ToLowerInvariant();
+        return codec switch
+        {
+            "opus" => "opus",
+            "flac" => "flac",
+            "pcm" => "pcm",
+            _ => "opus",
+        };
+    }
+
+    public bool SetPreferredAudioCodec(string codec)
+    {
+        var normalizedCodec = codec?.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalizedCodec))
+        {
+            return false;
+        }
+
+        var preferredFormats = BuildPreferredAudioFormats(normalizedCodec);
+        if (preferredFormats == null)
+        {
+            return false;
+        }
+
+        var changed = AudioFormats.Count != preferredFormats.Count
+            || AudioFormats.Count == 0
+            || !string.Equals(AudioFormats[0].Codec, preferredFormats[0].Codec, StringComparison.OrdinalIgnoreCase);
+        AudioFormats = preferredFormats;
+        Save();
+        return changed;
+    }
+
+    #endregion
+
+    #region Helpers
 
     private static string GetClientName()
     {
@@ -117,10 +175,24 @@ public class SettingsService
 #endif
     }
 
-    private static List<AudioFormat> GetDefaultAudioFormats() => new()
+    private static List<AudioFormat>? BuildPreferredAudioFormats(string codec)
     {
-        new AudioFormat { Codec = "opus", SampleRate = 48000, Channels = 2, Bitrate = 256 },
-        new AudioFormat { Codec = "pcm", SampleRate = 48000, Channels = 2, BitDepth = 16 },
-        new AudioFormat { Codec = "flac", SampleRate = 48000, Channels = 2 }
-    };
+        var normalizedCodec = codec.Trim().ToLowerInvariant();
+        var preferred = normalizedCodec switch
+        {
+            "opus" => new AudioFormat { Codec = "opus", SampleRate = 48000, Channels = 2, Bitrate = 256 },
+            "pcm" => new AudioFormat { Codec = "pcm", SampleRate = 48000, Channels = 2, BitDepth = 16 },
+            "flac" => new AudioFormat { Codec = "flac", SampleRate = 48000, Channels = 2 },
+            _ => null,
+        };
+
+        if (preferred == null)
+        {
+            return null;
+        }
+
+        return new List<AudioFormat> { preferred };
+    }
+
+    #endregion
 }
