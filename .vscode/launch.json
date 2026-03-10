@@ -13,6 +13,13 @@
             "preLaunchTask": "maui: Build"
         },
         {
+            "name": "FP5",
+            "type": "dotnet",
+            "request": "launch",
+            "projectPath": "${workspaceFolder}/mashin/mashin.csproj",
+            "launchConfigurationId": "192.168.1.150:5555"
+        },
+        {
             "name": ".NET MAUI (Release)",
             "type": "maui",
             "request": "launch",
