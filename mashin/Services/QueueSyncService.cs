@@ -246,7 +246,7 @@ public sealed class QueueSyncService : IQueueSyncService
 
     private async Task RefreshStateCoreAsync(CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(_playerService.ClientId))
+        if (string.IsNullOrWhiteSpace(_playerService.PlayerId))
         {
             UpdateState(null, null, Array.Empty<QueueItem>());
             return;
@@ -255,7 +255,7 @@ public sealed class QueueSyncService : IQueueSyncService
         try
         {
             // Get active queue for player
-            var activeQueue = await _musicAssistant.GetActiveQueueForPlayerAsync(_playerService.ClientId);
+            var activeQueue = await _musicAssistant.GetActiveQueueForPlayerAsync(_playerService.PlayerId);
             if (activeQueue == null)
             {
                 UpdateState(null, null, Array.Empty<QueueItem>());

@@ -29,7 +29,7 @@ public interface IPlayerService : IAsyncDisposable, INotifyPropertyChanged
     #region Properties
     bool IsConnected { get; }
     string? ConnectedServerName { get; }
-    string? ClientId { get; }
+    string? PlayerId { get; }
 
     PlayerPlayState PlayState { get; set; }
     int Volume { get; }
@@ -94,7 +94,7 @@ public sealed class PlayerService : IPlayerService
     public bool IsConnected => _client?.ConnectionState == ConnectionState.Connected;
 
     public string? ConnectedServerName => _client?.ServerName;
-    public string? ClientId { get; private set; }
+    public string? PlayerId { get; private set; }
 
     public PlayerPlayState PlayState
     {
@@ -203,7 +203,9 @@ public sealed class PlayerService : IPlayerService
                 _loggerFactory.CreateLogger<SendspinConnection>());
 
             var clientCapabilities = _settingsService.GetClientCapabilities();
-            ClientId = clientCapabilities.ClientId;
+            PlayerId = string.IsNullOrWhiteSpace(clientCapabilities.ClientId)
+                ? null
+                : $"up{clientCapabilities.ClientId.Replace("-", string.Empty, StringComparison.Ordinal)}";
 
             _client = new SendspinClientService(
                 _loggerFactory.CreateLogger<SendspinClientService>(),
@@ -583,7 +585,7 @@ public sealed class PlayerService : IPlayerService
         if (_client == null)
         {
             _connection = null;
-            ClientId = null;
+            PlayerId = null;
             return;
         }
 
@@ -602,7 +604,7 @@ public sealed class PlayerService : IPlayerService
 
         _client = null;
         _connection = null;
-        ClientId = null;
+        PlayerId = null;
     }
     #endregion
 

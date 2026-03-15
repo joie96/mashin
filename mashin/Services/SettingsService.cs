@@ -123,6 +123,8 @@ public class SettingsService
         {
             ClientName = $"Mashin ({clientName})",
             ClientId = $"mashin-{clientName.Replace(" ", string.Empty).ToLowerInvariant()}",
+            ProductName = "Mashin Client",
+            SoftwareVersion = "0.0.1",
             BufferCapacity = BufferCapacity,
             AudioFormats = AudioFormats
         };

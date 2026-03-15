@@ -1908,7 +1908,7 @@ public class MusicAssistantService
     {
         _logger.LogInformation("Fetching provider manifest for: {Domain}", domain);
 
-        var args = new { domain = domain };
+        var args = new { instance_id_or_domain = domain };
         return await SendCommandAsync<ProviderManifest>("providers/manifests/get", args);
     }
 

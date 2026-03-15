@@ -698,10 +698,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             return;
         }
 
-        // Without a client id, we cannot send playback commands.
-        if (string.IsNullOrEmpty(_playerService.ClientId))
+        // Without a player id, we cannot send playback commands.
+        if (string.IsNullOrEmpty(_playerService.PlayerId))
         {
-            _logger.LogWarning("ClientId is not available. Player connection is missing.");
+            _logger.LogWarning("PlayerId is not available. Player connection is missing.");
             return;
         }
 
@@ -710,7 +710,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             _logger.LogInformation("Play playlist: {Name}", playlist.Name);
 
             await _musicAssistant.PlayMediaAsync(
-                _playerService.ClientId,
+                _playerService.PlayerId,
                 new List<MediaItem> { playlist },
                 QueueOption.Play);
 

@@ -81,9 +81,9 @@ public class MediaItemActions : IMediaItemActions
             return;
         }
 
-        if (string.IsNullOrEmpty(_playerService.ClientId))
+        if (string.IsNullOrEmpty(_playerService.PlayerId))
         {
-            _logger.LogWarning("ClientId is not available. Player connection is missing.");
+            _logger.LogWarning("PlayerId is not available. Player connection is missing.");
             return;
         }
 
@@ -93,7 +93,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.PlayMediaAsync(
-                _playerService.ClientId,
+                _playerService.PlayerId,
                 mediaItems,
                 QueueOption.Replace,
                 startItem: startItem);
@@ -117,9 +117,9 @@ public class MediaItemActions : IMediaItemActions
             return;
         }
 
-        if (string.IsNullOrEmpty(_playerService.ClientId))
+        if (string.IsNullOrEmpty(_playerService.PlayerId))
         {
-            _logger.LogWarning("ClientId is not available. Player connection is missing.");
+            _logger.LogWarning("PlayerId is not available. Player connection is missing.");
             return;
         }
 
@@ -128,7 +128,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.PlayMediaAsync(
-                _playerService.ClientId,
+                _playerService.PlayerId,
                 mediaItems,
                 QueueOption.Next,
                 startItem: startItem);
@@ -152,9 +152,9 @@ public class MediaItemActions : IMediaItemActions
             return;
         }
 
-        if (string.IsNullOrEmpty(_playerService.ClientId))
+        if (string.IsNullOrEmpty(_playerService.PlayerId))
         {
-            _logger.LogWarning("ClientId is not available. Player connection is missing.");
+            _logger.LogWarning("PlayerId is not available. Player connection is missing.");
             return;
         }
 
@@ -163,7 +163,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.PlayMediaAsync(
-                _playerService.ClientId,
+                _playerService.PlayerId,
                 mediaItems,
                 QueueOption.Add,
                 startItem: startItem);
