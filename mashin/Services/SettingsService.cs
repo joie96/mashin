@@ -20,6 +20,10 @@ public class SettingsService
     private const string ThemeModeKey = "theme_mode";
     private const string BufferCapacityKey = "buffer_capacity";
     private const string AudioFormatsKey = "audio_formats"; // JSON serialized
+    private const string InitialVolumeKey = "sendspin_initial_volume";
+    private const string InitialMutedKey = "sendspin_initial_muted";
+    private const int DefaultInitialVolume = 50;
+    private const bool DefaultInitialMuted = false;
 
     #endregion
 
@@ -39,6 +43,8 @@ public class SettingsService
     // Audio/streaming settings
     public int BufferCapacity { get; set; }
     public List<AudioFormat> AudioFormats { get; set; }
+    public int InitialVolume { get; private set; }
+    public bool InitialMuted { get; private set; }
 
     #endregion
 
@@ -81,6 +87,10 @@ public class SettingsService
         // Keep a single preferred codec persisted in settings.
         var normalizedCodec = AudioFormats.FirstOrDefault()?.Codec;
         AudioFormats = BuildPreferredAudioFormats(normalizedCodec ?? "opus") ?? BuildPreferredAudioFormats("opus")!;
+
+        // Load initial player state for Sendspin handshake
+        InitialVolume = Math.Clamp(Preferences.Get(InitialVolumeKey, DefaultInitialVolume), 0, 100);
+        InitialMuted = Preferences.Get(InitialMutedKey, DefaultInitialMuted);
     }
 
     #endregion
@@ -113,6 +123,10 @@ public class SettingsService
         // Save audio formats as JSON
         var formatsJson = System.Text.Json.JsonSerializer.Serialize(AudioFormats);
         Preferences.Set(AudioFormatsKey, formatsJson);
+
+        // Save initial Sendspin player state
+        Preferences.Set(InitialVolumeKey, InitialVolume);
+        Preferences.Set(InitialMutedKey, InitialMuted);
     }
 
     public ClientCapabilities GetClientCapabilities()
@@ -126,8 +140,37 @@ public class SettingsService
             ProductName = "Mashin Client",
             SoftwareVersion = "0.0.1",
             BufferCapacity = BufferCapacity,
-            AudioFormats = AudioFormats
+            AudioFormats = AudioFormats,
+            InitialVolume = InitialVolume,
+            InitialMuted = InitialMuted,
         };
+    }
+
+    public int GetInitialVolume() => InitialVolume;
+
+    public bool GetInitialMuted() => InitialMuted;
+
+    public void SetInitialVolume(int volume)
+    {
+        var clamped = Math.Clamp(volume, 0, 100);
+        if (InitialVolume == clamped)
+        {
+            return;
+        }
+
+        InitialVolume = clamped;
+        Preferences.Set(InitialVolumeKey, InitialVolume);
+    }
+
+    public void SetInitialMuted(bool muted)
+    {
+        if (InitialMuted == muted)
+        {
+            return;
+        }
+
+        InitialMuted = muted;
+        Preferences.Set(InitialMutedKey, InitialMuted);
     }
 
     public string GetPreferredAudioCodec()

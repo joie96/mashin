@@ -112,6 +112,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _logger = logger;
         MediaActions = mediaActions;
         _selectedAudioQuality = _settings.GetPreferredAudioCodec();
+        _volume = _settings.GetInitialVolume();
+        _isMuted = _settings.GetInitialMuted();
         _currentQueueItems.CollectionChanged += OnCurrentQueueItemsCollectionChanged;
 
         // Navigation Commands
@@ -771,14 +773,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private async Task ToggleMuteAsync()
     {
+        var nextMuted = !IsMuted;
+
         try
         {
             await _playerService.SendCommandAsync(
                 "mute",
                 new Dictionary<string, object>
                 {
-                    ["muted"] = !IsMuted,
+                    ["muted"] = nextMuted,
                 });
+
+            _settings.SetInitialMuted(nextMuted);
         }
         catch (Exception ex)
         {
@@ -880,6 +886,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 {
                     ["volume"] = clamped,
                 });
+
+            _settings.SetInitialVolume(clamped);
         }
         catch (Exception ex)
         {
@@ -916,6 +924,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 try
                 {
                     Volume = _playerService.Volume;
+                    _settings.SetInitialVolume(_playerService.Volume);
                 }
                 finally
                 {
@@ -925,10 +934,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
             case nameof(IPlayerService.IsMuted):
                 IsMuted = _playerService.IsMuted;
-                break;
-
-            case nameof(IPlayerService.ShuffleEnabled):
-                ShuffleEnabled = _playerService.ShuffleEnabled;
+                _settings.SetInitialMuted(_playerService.IsMuted);
                 break;
 
             case nameof(IPlayerService.RepeatMode):

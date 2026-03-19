@@ -295,6 +295,9 @@ public sealed class PlayerService : IPlayerService
 
         var wasPlayingBeforeReconnect = PlayState.State == PlayerPlaybackState.Playing;
 
+        // Reflect codec switch in the UI immediately while reconnect is in progress.
+        PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+
         await DisconnectAsync();
         await ConnectAsync(serverUri, cancellationToken);
 
