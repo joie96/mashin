@@ -26,7 +26,6 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
     private readonly INavigationService _navigationService;
     private readonly ILogger<FavoritesViewModel> _logger;
 
-    private List<Track> _allTracks = new();
     private ObservableRangeCollection<Track> _tracks = new();
     private ObservableRangeCollection<Album> _albums = new();
     private ObservableRangeCollection<Playlist> _playlists = new();
@@ -46,7 +45,6 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
         .Select(_ => new RowViewSkeleton())
         .ToList();
 
-    private bool _isTracksExpanded;
     private bool _isLoadingTracks;
     private bool _isLoadingAlbums;
     private bool _isLoadingPlaylists;
@@ -76,7 +74,6 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                 }
 
                 OnPropertyChanged(nameof(HasTracks));
-                OnPropertyChanged(nameof(HasMoreTracks));
                 OnPropertyChanged(nameof(HasResults));
                 OnPropertyChanged(nameof(ShowNoTracksMessage));
                 OnPropertyChanged(nameof(ShowTrackTable));
@@ -167,7 +164,6 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
     }
 
     public bool HasTracks => Tracks.Count > 0;
-    public bool HasMoreTracks => _allTracks.Count > 10;
     public bool HasAlbums => Albums.Count > 0;
     public bool HasPlaylists => Playlists.Count > 0;
     public bool HasArtists => Artists.Count > 0;
@@ -243,18 +239,6 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
     public bool ShowNoPlaylistsMessage => !IsLoadingPlaylists && !HasPlaylists;
     public bool ShowNoArtistsMessage => !IsLoadingArtists && !HasArtists;
 
-    public bool IsTracksExpanded
-    {
-        get => _isTracksExpanded;
-        set
-        {
-            if (SetProperty(ref _isTracksExpanded, value))
-            {
-                UpdateDisplayedTracks();
-            }
-        }
-    }
-
     public IMediaItemActions MediaActions { get; }
 
     public ICommand AlbumTappedCommand { get; }
@@ -262,7 +246,6 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
     public ICommand PlaylistTappedCommand { get; }
     public ICommand ShowContextMenuAtAnchorCommand { get; }
     public ICommand ShowContextMenuAtPositionCommand { get; }
-    public ICommand ToggleTracksCommand { get; }
 
     #endregion
 
@@ -327,7 +310,6 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
         AlbumTappedCommand = new Command<object>(async parameter => await _navigationService.NavigateToAsync<AlbumDetailPage>(parameter));
         ArtistTappedCommand = new Command<object>(async parameter => await _navigationService.NavigateToAsync<ArtistDetailPage>(parameter));
         PlaylistTappedCommand = new Command<Playlist>(async playlist => await _navigationService.NavigateToAsync<PlaylistDetailPage>(playlist));
-        ToggleTracksCommand = new Command(() => IsTracksExpanded = !IsTracksExpanded);
 
         ShowContextMenuAtAnchorCommand = new Command<View>(async anchor =>
         {
@@ -402,26 +384,21 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
     {
         try
         {
-            _allTracks = snapshot.Tracks
+            var tracks = snapshot.Tracks
                 .Select(BuildTrackFromSnapshot)
                 .ToList();
 
-            await _musicAssistant.EnrichWithProviderInfoAsync(_allTracks);
+            await _musicAssistant.EnrichWithProviderInfoAsync(tracks);
 
-            for (var i = 0; i < _allTracks.Count; i++)
+            for (var i = 0; i < tracks.Count; i++)
             {
-                _allTracks[i].Index = i + 1;
-                _allTracks[i].Favorite = true;
+                tracks[i].Index = i + 1;
+                tracks[i].Favorite = true;
             }
 
-            IsTracksExpanded = false;
-
-            var visibleTracks = _allTracks.Take(10).ToList();
-            Tracks = new ObservableRangeCollection<Track>(visibleTracks);
+            Tracks = new ObservableRangeCollection<Track>(tracks);
             IsLoadingTracks = false;
             await Task.Delay(50);
-
-            OnPropertyChanged(nameof(HasMoreTracks));
         }
         catch (Exception ex)
         {
@@ -496,40 +473,6 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
         finally
         {
             IsLoadingArtists = false;
-        }
-    }
-
-    #endregion
-
-    #region Track Display
-
-    private void UpdateDisplayedTracks()
-    {
-        if (_allTracks.Count == 0)
-        {
-            if (Tracks.Count > 0)
-            {
-                Tracks.Clear();
-            }
-            return;
-        }
-
-        if (IsTracksExpanded)
-        {
-            var missingTracks = _allTracks.Skip(Tracks.Count).ToList();
-            if (missingTracks.Count > 0)
-            {
-                Tracks.AddRange(missingTracks);
-            }
-        }
-        else
-        {
-            var desiredCount = Math.Min(10, _allTracks.Count);
-            var extraTracks = Tracks.Skip(desiredCount).ToList();
-            if (extraTracks.Count > 0)
-            {
-                Tracks.RemoveRange(extraTracks, NotifyCollectionChangedAction.Remove);
-            }
         }
     }
 
@@ -899,7 +842,6 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
         _artists.Clear();
         _playlists.Clear();
         _tracks.Clear();
-        _allTracks.Clear();
 
         PropertyChanged = null;
     }

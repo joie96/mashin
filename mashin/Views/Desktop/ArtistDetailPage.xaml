@@ -347,7 +347,7 @@
             <!--  Top Tracks Section  -->
             <Grid Grid.Row="5"
                 Margin="0,36,0,0"
-                RowDefinitions="Auto,*,Auto"
+                RowDefinitions="Auto,*"
                 RowSpacing="16">
                 <Label Grid.Row="0"
                     FontAttributes="Bold"
@@ -356,46 +356,13 @@
                     TextColor="{DynamicResource TextPrimary}" />
 
                 <controls:TableView Grid.Row="1"
+                    PageSize="10"
                     ItemsSource="{Binding TopTrackItems}"
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
                     SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
                     ShowContextMenuAtAnchorCommand="{Binding ShowTrackContextMenuAtAnchorCommand}"
                     ShowContextMenuAtPositionCommand="{Binding ShowTrackContextMenuAtPositionCommand}" />
-
-                <!--  Toggle Button  -->
-                <Border Grid.Row="2"
-                    Margin="0,-8,0,-24"
-                    behaviors:HoverBehavior.EnableScaleHover="True"
-                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-                    BackgroundColor="Transparent"
-                    HeightRequest="24"
-                    HorizontalOptions="Center"
-                    StrokeThickness="0"
-                    WidthRequest="24">
-                    <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="12" />
-                    </Border.StrokeShape>
-                    <Border.GestureRecognizers>
-                        <TapGestureRecognizer Command="{Binding ToggleTracksCommand}" />
-                    </Border.GestureRecognizers>
-                    <Grid>
-                        <Label FontSize="12"
-                            HorizontalOptions="Center"
-                            IsVisible="{Binding IsTracksExpanded, Converter={StaticResource InvertedBoolConverter}}"
-                            Text="{mi:Fluent Icon=ChevronDown24,
-                                             FontOverride=True}"
-                            TextColor="{DynamicResource IconPrimary}"
-                            VerticalOptions="Center" />
-                        <Label FontSize="12"
-                            HorizontalOptions="Center"
-                            IsVisible="{Binding IsTracksExpanded}"
-                            Text="{mi:Fluent Icon=ChevronUp24,
-                                             FontOverride=True}"
-                            TextColor="{DynamicResource IconPrimary}"
-                            VerticalOptions="Center" />
-                    </Grid>
-                </Border>
             </Grid>
 
         </Grid>

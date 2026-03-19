@@ -37,8 +37,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
     private Artist? _artist;
     private List<Album> _allAlbums = new();
-    private List<Track> _allTopTracks = new();
-
     private ObservableRangeCollection<Track> _topTracks = new();
     private ObservableRangeCollection<ContextMenuItem> _headerContextMenuItems = new();
     private ObservableRangeCollection<ContextMenuItem> _trackContextMenuItems = new();
@@ -63,7 +61,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     private bool _isLoadingTracks;
     private bool _isLoadingSimilarArtists;
     private bool _isDescriptionExpanded;
-    private bool _isTracksExpanded;
     private bool _disposed;
     #endregion
 
@@ -144,7 +141,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     public ICommand PlayArtistCommand { get; }
     public ICommand ToggleArtistFavoriteCommand { get; }
     public ICommand ToggleDescriptionCommand { get; }
-    public ICommand ToggleTracksCommand { get; }
 
     public bool IsLoading
     {
@@ -212,18 +208,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     public IEnumerable<object> AlbumItems => IsLoadingAlbums ? _albumSkeletons : _albums;
     public IEnumerable<object> SimilarArtistItems => IsLoadingSimilarArtists ? _artistSkeletons : _similarArtists;
 
-    public bool IsTracksExpanded
-    {
-        get => _isTracksExpanded;
-        set
-        {
-            if (SetProperty(ref _isTracksExpanded, value))
-            {
-                UpdateDisplayedTracks();
-            }
-        }
-    }
-
     #endregion
 
     #region Construction
@@ -282,7 +266,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
         // Toggle Commands
         ToggleDescriptionCommand = new Command(() => IsDescriptionExpanded = !IsDescriptionExpanded);
-        ToggleTracksCommand = new Command(() => IsTracksExpanded = !IsTracksExpanded);
 
         // Context Menu Commands
         ShowHeaderContextMenuAtAnchorCommand = new Command<View>(async (anchor) =>
@@ -612,13 +595,8 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                 processedTracks.Add(tracks[i]);
             }
 
-            _allTopTracks = processedTracks;
-            IsTracksExpanded = false;
-            
-            // Load tracks immediately
-            var visibleTracks = _allTopTracks.Take(10).ToList();
-            TopTracks = new ObservableRangeCollection<Track>(visibleTracks);
-            IsLoadingTracks = false;    
+            TopTracks = new ObservableRangeCollection<Track>(processedTracks);
+            IsLoadingTracks = false;
             await Task.Delay(50);
             
 
@@ -629,38 +607,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         {
             _logger.LogError(ex, "Failed to load tracks");
             IsLoadingTracks = false;
-        }
-    }
-
-    private void UpdateDisplayedTracks()
-    {
-        if (_allTopTracks.Count == 0)
-        {
-            if (TopTracks.Count > 0)
-            {
-                TopTracks.Clear();
-            }
-            return;
-        }
-
-        if (IsTracksExpanded)
-        {
-
-            var missingTracks = _allTopTracks.Skip(TopTracks.Count).ToList();
-            if (missingTracks.Count > 0)
-            {
-                TopTracks.AddRange(missingTracks);
-            }
-            
-        }
-        else
-        {
-            var desiredCount = Math.Min(10, _allTopTracks.Count);
-            var extraTracks = TopTracks.Skip(desiredCount).ToList();
-            if (extraTracks.Count > 0)
-            {
-                TopTracks.RemoveRange(extraTracks, NotifyCollectionChangedAction.Remove);
-            }  
         }
     }
 
@@ -1050,7 +996,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         _disposed = true;
 
         _allAlbums.Clear();
-        _allTopTracks.Clear();
         _topTracks.Clear();
         _headerContextMenuItems.Clear();
         _trackContextMenuItems.Clear();

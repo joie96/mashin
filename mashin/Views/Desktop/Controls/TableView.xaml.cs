@@ -1,10 +1,12 @@
+using mashin.Collections;
 using mashin.Models;
 using mashin.Services;
 using Microsoft.Maui.ApplicationModel;
 using System.Collections;
-using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Linq;
 using System.Windows.Input;
 
 namespace mashin.Views.Desktop.Controls;
@@ -46,17 +48,25 @@ public partial class TableView : ContentView
     public static readonly BindableProperty CurrentPlayStateProperty =
         BindableProperty.Create(nameof(CurrentPlayState), typeof(PlayerPlayState), typeof(TableView), defaultValue: new PlayerPlayState(PlayerPlaybackState.Stopped, DateTimeOffset.MinValue));
 
+    public static readonly BindableProperty PageSizeProperty =
+        BindableProperty.Create(nameof(PageSize), typeof(int), typeof(TableView), defaultValue: 10, propertyChanged: OnPageSizeChanged);
+
     #endregion
 
     #region Fields
 
-    private readonly ObservableCollection<object> _selectedItems = new();
-    private readonly ObservableCollection<object> _headerItems = new();
+    private readonly ObservableRangeCollection<object> _selectedItems = new();
+    private readonly ObservableRangeCollection<object> _headerItems = new();
+    private readonly ObservableRangeCollection<object> _visibleItems = new();
+    private INotifyCollectionChanged? _itemsSourceCollection;
+    private List<object> _allItems = new();
     private IKeyboardService? _keyboardService;
     private IQueueSyncService? _queueSyncService;
     private IPlayerService? _playerService;
     private Track? _currentTrack;
     private int? _anchorIndex;
+    private int _pageIndex;
+    private bool _isExpanded;
     private bool _isCheckboxClick;
 
     #endregion
@@ -129,7 +139,21 @@ public partial class TableView : ContentView
         private set => SetValue(CurrentPlayStateProperty, value);
     }
 
-    public ObservableCollection<object> HeaderItems => _headerItems;
+    public ObservableRangeCollection<object> HeaderItems => _headerItems;
+
+    public ObservableRangeCollection<object> VisibleItems => _visibleItems;
+
+    public int PageSize
+    {
+        get => (int)GetValue(PageSizeProperty);
+        set => SetValue(PageSizeProperty, value);
+    }
+
+    private bool HasExpandableItems => PageSize > 0 && _allItems.Count > PageSize;
+
+    private int TotalPages => PageSize <= 0
+        ? 1
+        : Math.Max(1, (int)Math.Ceiling((double)_allItems.Count / PageSize));
 
     #endregion
 
@@ -141,7 +165,9 @@ public partial class TableView : ContentView
 
         SelectedItems = _selectedItems;
         UpdateHeaderItems(PlaybackContextItem);
+        SyncVisibleItems();
         UpdateHeaderSelectionState();
+        UpdateNavigationState();
     }
 
     protected override void OnHandlerChanged()
@@ -181,6 +207,7 @@ public partial class TableView : ContentView
         }
 
         DetachPlaybackStateSource();
+        DetachItemsSourceCollection();
 
         PrimaryInfoTappedCommand = null;
         SecondaryInfoTappedCommand = null;
@@ -200,6 +227,8 @@ public partial class TableView : ContentView
 
         // Clear collections
         _selectedItems.Clear();
+        _visibleItems.Clear();
+        _allItems.Clear();
 
     }
 
@@ -214,10 +243,7 @@ public partial class TableView : ContentView
             return;
         }
 
-        view._anchorIndex = null;
-        view.ClearAllSelections();
-        view.SyncSelectionAndHeaderState(clickedItem: null);
-        view.UpdateFavoriteStateForVisibleItems();
+        view.ApplyItemsSource(newValue as IEnumerable<object>);
     }
 
     private static void OnPlaybackContextItemChanged(BindableObject bindable, object oldValue, object newValue)
@@ -228,6 +254,242 @@ public partial class TableView : ContentView
         }
 
         view.UpdateHeaderItems(newValue);
+    }
+
+    private static void OnPageSizeChanged(BindableObject bindable, object oldValue, object newValue)
+    {
+        if (bindable is not TableView view)
+        {
+            return;
+        }
+
+        view._pageIndex = 0;
+        view.SyncVisibleItems();
+        view.UpdateNavigationState();
+    }
+
+    private void ApplyItemsSource(IEnumerable<object>? items)
+    {
+        AttachItemsSourceCollection(items);
+
+        _allItems = items?.ToList() ?? new List<object>();
+        _pageIndex = 0;
+        _isExpanded = false;
+        _anchorIndex = null;
+
+        ClearAllSelections();
+        SyncVisibleItems();
+        SyncSelectionAndHeaderState(clickedItem: null);
+        UpdateNavigationState();
+        UpdateFavoriteStateForVisibleItems();
+    }
+
+    private void AttachItemsSourceCollection(IEnumerable<object>? items)
+    {
+        DetachItemsSourceCollection();
+
+        if (items is INotifyCollectionChanged notifyCollection)
+        {
+            _itemsSourceCollection = notifyCollection;
+            _itemsSourceCollection.CollectionChanged += OnItemsSourceCollectionChanged;
+        }
+    }
+
+    private void DetachItemsSourceCollection()
+    {
+        if (_itemsSourceCollection != null)
+        {
+            _itemsSourceCollection.CollectionChanged -= OnItemsSourceCollectionChanged;
+            _itemsSourceCollection = null;
+        }
+    }
+
+    private void OnItemsSourceCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (!MainThread.IsMainThread)
+        {
+            MainThread.BeginInvokeOnMainThread(() => OnItemsSourceCollectionChanged(sender, e));
+            return;
+        }
+
+        _allItems = ItemsSource?.ToList() ?? new List<object>();
+
+        if (_pageIndex >= TotalPages)
+        {
+            _pageIndex = Math.Max(0, TotalPages - 1);
+        }
+
+        SyncVisibleItems();
+        SyncSelectionAndHeaderState(clickedItem: null);
+        UpdateNavigationState();
+        UpdateFavoriteStateForVisibleItems();
+    }
+
+    #endregion
+
+    #region Paging & Expansion
+
+    private void OnPrevTapped(object? sender, EventArgs e)
+    {
+        if (_isExpanded || _pageIndex <= 0)
+        {
+            return;
+        }
+
+        _pageIndex--;
+        SyncVisibleItems();
+        UpdateNavigationState();
+    }
+
+    private void OnNextTapped(object? sender, EventArgs e)
+    {
+        if (_isExpanded || _pageIndex >= TotalPages - 1)
+        {
+            return;
+        }
+
+        _pageIndex++;
+        SyncVisibleItems();
+        UpdateNavigationState();
+    }
+
+    private async void OnExpandTapped(object? sender, EventArgs e)
+    {
+        if (!HasExpandableItems)
+        {
+            return;
+        }
+
+        _isExpanded = !_isExpanded;
+
+        if (_isExpanded)
+        {
+            // Expand dynamically in page-sized chunks from top to bottom.
+            // If page 0 is currently shown and still in sync, keep it and append the missing pages.
+            if (_pageIndex == 0
+                && PageSize > 0
+                && _visibleItems.Count == Math.Min(PageSize, _allItems.Count)
+                && _visibleItems.SequenceEqual(_allItems.Take(Math.Min(PageSize, _allItems.Count))))
+            {
+                await AppendExpandedPagesAsync(startPageIndex: 1);
+            }
+            else
+            {
+                // Different current page: start from page 0 so expanded mode contains the full ordered list.
+                if (PageSize <= 0)
+                {
+                    SyncVisibleItems();
+                }
+                else
+                {
+                    _visibleItems.ReplaceRange(_allItems.Take(PageSize));
+                    await AppendExpandedPagesAsync(startPageIndex: 1);
+                }
+            }
+        }
+        else
+        {
+            // Collapse: return to first page.
+            _pageIndex = 0;
+            SyncVisibleItems();
+        }
+
+        UpdateNavigationState();
+    }
+
+    private async Task AppendExpandedPagesAsync(int startPageIndex)
+    {
+        if (PageSize <= 0)
+        {
+            return;
+        }
+
+        for (var pageIndex = startPageIndex; pageIndex < TotalPages; pageIndex++)
+        {
+            if (!_isExpanded)
+            {
+                return;
+            }
+
+            // Append exactly one page per step (last page may be smaller naturally).
+            var pageItems = _allItems.Skip(pageIndex * PageSize).Take(PageSize).ToList();
+            if (pageItems.Count > 0)
+            {
+                _visibleItems.AddRange(pageItems);
+            }
+
+            await Task.Yield();
+        }
+    }
+
+    private void SyncVisibleItems()
+    {
+        IEnumerable<object> source;
+
+        if (_allItems.Count == 0)
+        {
+            source = Array.Empty<object>();
+        }
+        else if (_isExpanded || PageSize <= 0)
+        {
+            source = _allItems;
+        }
+        else
+        {
+            var start = _pageIndex * PageSize;
+            source = _allItems.Skip(start).Take(PageSize);
+        }
+
+        _visibleItems.ReplaceRange(source);
+    }
+
+    private void UpdateNavigationState()
+    {
+        var showExpansion = HasExpandableItems;
+
+        var expandButton = this.FindByName<Border>("ExpandButton");
+        var expandDownIcon = this.FindByName<Label>("ExpandDownIcon");
+        var expandUpIcon = this.FindByName<Label>("ExpandUpIcon");
+        var navigationHost = this.FindByName<HorizontalStackLayout>("NavigationHost");
+        var prevButton = this.FindByName<Border>("PrevButton");
+        var nextButton = this.FindByName<Border>("NextButton");
+
+        if (expandButton != null)
+        {
+            expandButton.IsVisible = showExpansion;
+        }
+
+        if (expandDownIcon != null)
+        {
+            expandDownIcon.IsVisible = showExpansion && !_isExpanded;
+        }
+
+        if (expandUpIcon != null)
+        {
+            expandUpIcon.IsVisible = showExpansion && _isExpanded;
+        }
+
+        var canPage = showExpansion && !_isExpanded && TotalPages > 1;
+
+        if (navigationHost != null)
+        {
+            navigationHost.IsVisible = canPage;
+        }
+
+        var canGoPrev = canPage && _pageIndex > 0;
+        var canGoNext = canPage && _pageIndex < TotalPages - 1;
+
+        if (prevButton != null)
+        {
+            prevButton.IsEnabled = canGoPrev;
+            prevButton.Opacity = canGoPrev ? 1 : 0.5;
+        }
+
+        if (nextButton != null)
+        {
+            nextButton.IsEnabled = canGoNext;
+            nextButton.Opacity = canGoNext ? 1 : 0.5;
+        }
     }
 
     #endregion
@@ -587,15 +849,7 @@ public partial class TableView : ContentView
 
     private void RebuildSelectedItems()
     {
-        _selectedItems.Clear();
-
-        foreach (var item in EnumerateSelectableItems())
-        {
-            if (item.IsSelected)
-            {
-                _selectedItems.Add(item);
-            }
-        }
+        _selectedItems.ReplaceRange(EnumerateSelectableItems().Where(item => item.IsSelected));
     }
 
     private void UpdateHeaderSelectionState()
@@ -813,9 +1067,7 @@ public partial class TableView : ContentView
 
     private void UpdateHeaderItems(object? context)
     {
-        _headerItems.Clear();
-
-        _headerItems.Add(context ?? new Playlist());
+        _headerItems.Replace(context ?? new Playlist());
     }
 
     private int? GetIndexOf(MediaItem target)

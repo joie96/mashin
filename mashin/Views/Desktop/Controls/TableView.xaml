@@ -1044,33 +1044,40 @@
                 <Grid ColumnDefinitions="40,48,5*,80,3*,3*,*,80,40,40,40"
                       ColumnSpacing="0"
                       HeightRequest="64">
+                    <!--  #  -->
                     <controls:SkeletonLoader WidthRequest="16"
                                              HeightRequest="16"
                                              HorizontalOptions="Center"
                                              VerticalOptions="Center"/>
+                    <!--  Cover  -->
                     <controls:SkeletonLoader Grid.Column="1"
                                              WidthRequest="48"
                                              HeightRequest="48"
                                              CornerRadius="4"
                                              VerticalOptions="Center"/>
+                    <!--  Title  -->
                     <controls:SkeletonLoader Grid.Column="2"
                                              WidthRequest="260"
                                              HeightRequest="18"
                                              VerticalOptions="Center"
                                              Margin="12,0,0,0"/>
+                    <!--  Duration  -->
                     <controls:SkeletonLoader Grid.Column="3"
                                              WidthRequest="32"
                                              HeightRequest="16"
                                              HorizontalOptions="Center"
                                              VerticalOptions="Center"/>
+                    <!--  Album  -->
                     <controls:SkeletonLoader Grid.Column="4"
                                              WidthRequest="160"
                                              HeightRequest="18"
                                              VerticalOptions="Center"/>
+                    <!--  Artist  -->
                     <controls:SkeletonLoader Grid.Column="5"
                                              WidthRequest="140"
                                              HeightRequest="18"
                                              VerticalOptions="Center"/>
+                    <!--  Year  -->
                     <controls:SkeletonLoader Grid.Column="6"
                                              WidthRequest="40"
                                              HeightRequest="16"
@@ -1090,21 +1097,115 @@
                                                   TrackHeaderTemplate="{StaticResource TrackHeaderTemplate}"/>
     </ContentView.Resources>
 
-    <Grid RowDefinitions="Auto,*">
+    <Grid RowDefinitions="Auto,Auto,*,Auto"
+          RowSpacing="8">
 
-        <CollectionView Grid.Row="0"
+        <!--  Paging Navigation (Prev / Next)  -->
+        <Grid Grid.Row="0"
+              ColumnDefinitions="*,Auto">
+            <BoxView Grid.Column="0"
+                    Opacity="0"/>
+            <HorizontalStackLayout x:Name="NavigationHost"
+                                   Grid.Column="1"
+                                   IsVisible="False"
+                                   Spacing="6">
+                <!--  Prev  -->
+                <Border x:Name="PrevButton"
+                        behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                        BackgroundColor="Transparent"
+                        HeightRequest="32"
+                        StrokeThickness="0"
+                        WidthRequest="32">
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnPrevTapped"/>
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="100"/>
+                    </Border.StrokeShape>
+                    <Label FontSize="16"
+                           HorizontalOptions="Center"
+                           Text="{mi:Fluent Icon=ChevronLeft24,
+                                     FontOverride=True}"
+                           TextColor="{DynamicResource IconSecondary}"
+                           VerticalOptions="Center"/>
+                </Border>
+
+                <!--  Next  -->
+                <Border x:Name="NextButton"
+                        behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                        BackgroundColor="Transparent"
+                        HeightRequest="32"
+                        StrokeThickness="0"
+                        WidthRequest="32">
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnNextTapped"/>
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="100"/>
+                    </Border.StrokeShape>
+                    <Label FontSize="16"
+                           HorizontalOptions="Center"
+                           Text="{mi:Fluent Icon=ChevronRight24,
+                                     FontOverride=True}"
+                           TextColor="{DynamicResource IconSecondary}"
+                           VerticalOptions="Center"/>
+                </Border>
+            </HorizontalStackLayout>
+        </Grid>
+
+        <!--  Header  -->
+        <CollectionView Grid.Row="1"
                         ItemsSource="{Binding HeaderItems, Source={x:Reference self}}"
                         ItemTemplate="{StaticResource TableViewHeaderTemplateSelector}"
                         SelectionMode="None">
         </CollectionView>
 
+        <!--  Items  -->
         <CollectionView x:Name="collectionView"
-                        Grid.Row="1"
+                        Grid.Row="2"
                         Margin="0,0"
                         ItemTemplate="{StaticResource TableViewTemplateSelector}"
                         ItemSizingStrategy="MeasureFirstItem"
-                        ItemsSource="{Binding ItemsSource, Source={x:Reference self}}"
+                        ItemsSource="{Binding VisibleItems, Source={x:Reference self}}"
                         SelectionMode="None">
         </CollectionView>
+
+        <!--  Expand / Collapse Button  -->
+        <Border x:Name="ExpandButton"
+                Grid.Row="3"
+                behaviors:HoverBehavior.EnableScaleHover="True"
+                behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                BackgroundColor="Transparent"
+                HeightRequest="24"
+                HorizontalOptions="Center"
+                IsVisible="False"
+                StrokeThickness="0"
+                WidthRequest="24">
+            <Border.StrokeShape>
+                <RoundRectangle CornerRadius="12"/>
+            </Border.StrokeShape>
+            <Border.GestureRecognizers>
+                <TapGestureRecognizer Tapped="OnExpandTapped"/>
+            </Border.GestureRecognizers>
+            <Grid>
+                <!--  Chevron Down (collapsed)  -->
+                <Label x:Name="ExpandDownIcon"
+                       FontSize="12"
+                       HorizontalOptions="Center"
+                       Text="{mi:Fluent Icon=ChevronDown24,
+                                 FontOverride=True}"
+                       TextColor="{DynamicResource IconPrimary}"
+                       VerticalOptions="Center"/>
+                <!--  Chevron Up (expanded)  -->
+                <Label x:Name="ExpandUpIcon"
+                       FontSize="12"
+                       HorizontalOptions="Center"
+                       IsVisible="False"
+                       Text="{mi:Fluent Icon=ChevronUp24,
+                                 FontOverride=True}"
+                       TextColor="{DynamicResource IconPrimary}"
+                       VerticalOptions="Center"/>
+            </Grid>
+        </Border>
     </Grid>
 </ContentView>

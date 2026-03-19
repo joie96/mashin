@@ -30,7 +30,7 @@
             <!--  Tracks  (incl. Skeletons)  -->
             <Grid Grid.Row="1"
                 Margin="0,36,0,0"
-                RowDefinitions="Auto,Auto,*,Auto"
+                RowDefinitions="Auto,Auto,*"
                 RowSpacing="16">
                 <Label Grid.Row="0"
                     FontAttributes="Bold"
@@ -43,6 +43,7 @@
                     Text="Keine Titel gefunden."
                     TextColor="{DynamicResource TextTertiary}" />
                 <controls:TableView Grid.Row="2"
+                    PageSize="10"
                     IsVisible="True"
                     ItemsSource="{Binding TrackItems}"
                     MediaActions="{Binding MediaActions}"
@@ -51,41 +52,6 @@
                     ShowContextMenuAtAnchorCommand="{Binding ShowContextMenuAtAnchorCommand}"
                     ShowContextMenuAtPositionCommand="{Binding ShowContextMenuAtPositionCommand}"
                     VerticalOptions="Fill" />
-
-                <!--  Toggle Button -->
-                <Border Grid.Row="3"
-                    Margin="0,0,0,0"
-                    behaviors:HoverBehavior.EnableScaleHover="True"
-                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-                    BackgroundColor="Transparent"
-                    HeightRequest="24"
-                    HorizontalOptions="Center"
-                    IsVisible="{Binding HasMoreTracks}"
-                    StrokeThickness="0"
-                    WidthRequest="24">
-                    <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="12" />
-                    </Border.StrokeShape>
-                    <Border.GestureRecognizers>
-                        <TapGestureRecognizer Command="{Binding ToggleTracksCommand}" />
-                    </Border.GestureRecognizers>
-                    <Grid>
-                        <Label FontSize="12"
-                            HorizontalOptions="Center"
-                            IsVisible="{Binding IsTracksExpanded, Converter={StaticResource InvertedBoolConverter}}"
-                            Text="{mi:Fluent Icon=ChevronDown24,
-                                             FontOverride=True}"
-                            TextColor="{DynamicResource IconPrimary}"
-                            VerticalOptions="Center" />
-                        <Label FontSize="12"
-                            HorizontalOptions="Center"
-                            IsVisible="{Binding IsTracksExpanded}"
-                            Text="{mi:Fluent Icon=ChevronUp24,
-                                             FontOverride=True}"
-                            TextColor="{DynamicResource IconPrimary}"
-                            VerticalOptions="Center" />
-                    </Grid>
-                </Border>
             </Grid>
 
             <!--  Albums  (incl. Skeletons) -->
