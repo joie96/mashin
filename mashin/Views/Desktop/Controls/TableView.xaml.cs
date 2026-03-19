@@ -384,6 +384,17 @@ public partial class TableView : ContentView
         SelectSingle(item);
         SyncSelectionAndHeaderState(item);
 
+        // if queue, play the queue index
+        var queueId = (PlaybackContextItem as PlayerQueue)?.QueueId;
+        var itemIndex = GetIndexOf(item);
+
+        if (!string.IsNullOrWhiteSpace(queueId) && itemIndex is >= 0)
+        {
+            await MediaActions.PlayIndexAsync(queueId, itemIndex.Value);
+            return;
+        }
+
+        // otherwise, play the media item directly and queue the rest of the items in the list
         await MediaActions.PlayMediaAsync(item);
 
         var itemsToQueue = GetItemsAfterIndex(item, inCycle: true);
@@ -409,6 +420,17 @@ public partial class TableView : ContentView
         SelectSingle(item);
         SyncSelectionAndHeaderState(item);
 
+        // if queue, play the queue index
+        var queueId = (PlaybackContextItem as PlayerQueue)?.QueueId;
+        var itemIndex = GetIndexOf(item);
+
+        if (!string.IsNullOrWhiteSpace(queueId) && itemIndex is >= 0)
+        {
+            await MediaActions.PlayIndexAsync(queueId, itemIndex.Value);
+            return;
+        }
+
+        // otherwise, play the media item directly and queue the rest of the items in the list
         await MediaActions.PlayMediaAsync(item);
 
         var itemsToQueue = GetItemsAfterIndex(item, inCycle: true);
