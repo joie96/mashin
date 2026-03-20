@@ -200,6 +200,7 @@
               Margin="0,36,0,0">
             <Grid>
                 <controls:TableView ItemsSource="{Binding TrackItems}"
+                                    PageSize="500"
                                     MediaActions="{Binding MediaActions}"
                                     PlaybackContextItem="{Binding Playlist}"
                                     PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"

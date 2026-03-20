@@ -13,6 +13,9 @@ namespace mashin.Views.Desktop.Controls;
 
 public partial class TableView : ContentView
 {
+    private static readonly BindableProperty LastAnimatedContextProperty =
+        BindableProperty.CreateAttached("LastAnimatedContext", typeof(object), typeof(TableView), defaultValue: null);
+
     #region Bindable properties
 
     public static readonly BindableProperty ItemsSourceProperty =
@@ -68,6 +71,7 @@ public partial class TableView : ContentView
     private int _pageIndex;
     private bool _isExpanded;
     private bool _isCheckboxClick;
+    private bool _isUnloaded;
 
     #endregion
 
@@ -155,6 +159,8 @@ public partial class TableView : ContentView
         ? 1
         : Math.Max(1, (int)Math.Ceiling((double)_allItems.Count / PageSize));
 
+    private bool CanExpandFromCurrentView => !_isExpanded && _allItems.Count > _visibleItems.Count;
+
     #endregion
 
     #region Construction
@@ -177,6 +183,8 @@ public partial class TableView : ContentView
 
     private void OnTableViewLoaded(object? sender, EventArgs e)
     {
+        _isUnloaded = false;
+
         // KeyboardService
         if (_keyboardService == null)
         {
@@ -198,6 +206,7 @@ public partial class TableView : ContentView
 
     private void OnTableViewUnloaded(object? sender, EventArgs e)
     {
+        _isUnloaded = true;
         
         // Cleanup
         if (_keyboardService != null)
@@ -418,7 +427,7 @@ public partial class TableView : ContentView
                 _visibleItems.AddRange(pageItems);
             }
 
-            await Task.Yield();
+            await Task.Delay(50);
         }
     }
 
@@ -445,7 +454,7 @@ public partial class TableView : ContentView
 
     private void UpdateNavigationState()
     {
-        var showExpansion = HasExpandableItems;
+        var showExpansion = CanExpandFromCurrentView || _isExpanded;
 
         var expandButton = this.FindByName<Border>("ExpandButton");
         var expandDownIcon = this.FindByName<Label>("ExpandDownIcon");
@@ -461,12 +470,12 @@ public partial class TableView : ContentView
 
         if (expandDownIcon != null)
         {
-            expandDownIcon.IsVisible = showExpansion && !_isExpanded;
+            expandDownIcon.IsVisible = CanExpandFromCurrentView;
         }
 
         if (expandUpIcon != null)
         {
-            expandUpIcon.IsVisible = showExpansion && _isExpanded;
+            expandUpIcon.IsVisible = _isExpanded;
         }
 
         var canPage = showExpansion && !_isExpanded && TotalPages > 1;
@@ -490,6 +499,80 @@ public partial class TableView : ContentView
             nextButton.IsEnabled = canGoNext;
             nextButton.Opacity = canGoNext ? 1 : 0.5;
         }
+    }
+
+    #endregion
+
+    #region Item Lifecycle & Animation
+
+    private async void OnItemBindingContextChanged(object? sender, EventArgs e)
+    {
+        if (_isUnloaded || sender is not VisualElement element)
+        {
+            return;
+        }
+
+        if (element.BindingContext == null)
+        {
+            return;
+        }
+
+        if (!ShouldAnimateForCurrentContext(element))
+        {
+            return;
+        }
+
+        await AnimateItemEntryAsync(element);
+    }
+
+    private async void OnItemLoaded(object? sender, EventArgs e)
+    {
+        if (_isUnloaded || sender is not VisualElement element)
+        {
+            return;
+        }
+
+        if (element.BindingContext == null)
+        {
+            return;
+        }
+
+        if (!ShouldAnimateForCurrentContext(element))
+        {
+            return;
+        }
+
+        await AnimateItemEntryAsync(element);
+    }
+
+    private void OnItemUnloaded(object? sender, EventArgs e)
+    {
+        if (sender is not VisualElement element)
+        {
+            return;
+        }
+
+        element.SetValue(LastAnimatedContextProperty, null);
+    }
+
+    private static bool ShouldAnimateForCurrentContext(VisualElement element)
+    {
+        var context = element.BindingContext;
+        var lastContext = element.GetValue(LastAnimatedContextProperty);
+
+        if (ReferenceEquals(lastContext, context))
+        {
+            return false;
+        }
+
+        element.SetValue(LastAnimatedContextProperty, context);
+        return true;
+    }
+
+    private static async Task AnimateItemEntryAsync(VisualElement element)
+    {
+        element.Opacity = 0;
+        await element.FadeToAsync(1, 500, Easing.CubicOut);
     }
 
     #endregion

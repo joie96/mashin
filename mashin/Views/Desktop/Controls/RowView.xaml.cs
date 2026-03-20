@@ -145,6 +145,8 @@ public partial class RowView : ContentView
         private set => SetValue(CurrentTrackUriProperty, value);
     }
 
+    private bool CanExpandFromCurrentView => !_isExpanded && _allItems.Count > ActiveVisibleItems.Count;
+
     #endregion
 
     #region Construction
@@ -426,6 +428,11 @@ public partial class RowView : ContentView
 
     private void OnExpandTapped(object? sender, EventArgs e)
     {
+        if (!_isExpanded && !CanExpandFromCurrentView)
+        {
+            return;
+        }
+
         _isExpanded = !_isExpanded;
         OnExpandedChanged();
     }
@@ -584,13 +591,15 @@ public partial class RowView : ContentView
     {
         var canGoPrev = !_isExpanded && _pageIndex > 0;
         var canGoNext = !_isExpanded && _allItems.Count > (_pageIndex + 1) * _itemsPerPage;
+        var showExpansion = CanExpandFromCurrentView || _isExpanded;
 
         PrevButton.IsEnabled = canGoPrev;
         PrevButton.Opacity = canGoPrev ? 1 : 0.5;
         NextButton.IsEnabled = canGoNext;
         NextButton.Opacity = canGoNext ? 1 : 0.5;
 
-        ExpandDownIcon.IsVisible = !_isExpanded;
+        ExpandButton.IsVisible = showExpansion;
+        ExpandDownIcon.IsVisible = CanExpandFromCurrentView;
         ExpandUpIcon.IsVisible = _isExpanded;
     }
 

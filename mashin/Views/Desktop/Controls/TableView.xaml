@@ -311,6 +311,9 @@
         <DataTemplate x:Key="TrackTemplate"
                       x:DataType="models:Track">
             <Border x:Name="RowBorder"
+                BindingContextChanged="OnItemBindingContextChanged"
+                Loaded="OnItemLoaded"
+                Unloaded="OnItemUnloaded"
                     behaviors:HoverBehavior.BaseBackgroundColor="Transparent"
                     behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                     BackgroundColor="Transparent"
@@ -676,6 +679,9 @@
         <DataTemplate x:Key="QueueItemTemplate"
                 x:DataType="models:QueueItem">
             <Border x:Name="RowBorder"
+                BindingContextChanged="OnItemBindingContextChanged"
+                Loaded="OnItemLoaded"
+                Unloaded="OnItemUnloaded"
                     behaviors:HoverBehavior.BaseBackgroundColor="Transparent"
                     behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                     BackgroundColor="Transparent"
@@ -1102,7 +1108,7 @@
 
         <!--  Paging Navigation (Prev / Next)  -->
         <Grid Grid.Row="0"
-              ColumnDefinitions="*,Auto">
+              ColumnDefinitions="*,Auto"  Margin="0,-40,0,0">
             <BoxView Grid.Column="0"
                     Opacity="0"/>
             <HorizontalStackLayout x:Name="NavigationHost"
