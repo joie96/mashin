@@ -338,22 +338,10 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             }
 
             // Load tracks progressively
-            var visibleTracks = tracks.Take(50).ToList();
-            Tracks = new ObservableRangeCollection<Track>(visibleTracks);
+            Tracks = new ObservableRangeCollection<Track>(tracks.ToList());
             IsLoadingTracks = false;
-            await Task.Delay(50);
 
             _ = BuildContentContextMenuAsync();
-
-            var remainingTracks = tracks.Skip(visibleTracks.Count).ToList();
-            if (remainingTracks.Count > 0)
-            {
-                foreach (var batch in remainingTracks.Chunk(50))
-                {
-                    Tracks.AddRange(batch);
-                    await Task.Delay(50);
-                }
-            }
 
             if (Playlist != null)
             {

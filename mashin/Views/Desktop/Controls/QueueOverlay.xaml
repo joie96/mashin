@@ -186,6 +186,7 @@
 
                     <!--  Queue Table  -->
                     <controls:TableView Grid.Row="1"
+                        PageSize="500"
                         ItemsSource="{Binding CurrentQueueItems}"
                         MediaActions="{Binding MediaActions}"
                         PlaybackContextItem="{Binding CurrentPlayerQueue}"
