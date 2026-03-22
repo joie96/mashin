@@ -49,6 +49,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private string _selectedAudioQuality = "opus";
 
     private bool _isDontStopTheMusicEnabled;
+    private bool _isDarkTheme;
 
     // Search
     private string _searchQuery = string.Empty;
@@ -235,6 +236,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             }
         });
 
+        // Theme Command
+        ToggleThemeCommand = new Command(ToggleTheme);
+
         _navigationService.PropertyChanged += OnNavigationServicePropertyChanged;
         IsNavigating = _navigationService.IsNavigating;
 
@@ -249,6 +253,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _queueSyncService.CurrentPlayerQueueUpdated += OnCurrentPlayerQueueUpdated;
         _queueSyncService.CurrentTrackUpdated += OnCurrentTrackUpdated;
         _queueSyncService.CurrentQueueItemsUpdated += OnCurrentQueueItemsUpdated;
+
+        // Keep the UI toggle in sync with persisted theme preference.
+        IsDarkTheme = _settings.ThemeMode != AppTheme.Light;
         
     }
 
@@ -299,6 +306,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         get => _isMuted;
         private set => SetProperty(ref _isMuted, value);
+    }
+
+    public bool IsDarkTheme
+    {
+        get => _isDarkTheme;
+        private set => SetProperty(ref _isDarkTheme, value);
     }
 
     public bool? ShuffleEnabled
@@ -531,6 +544,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     public ICommand ToggleShuffleCommand { get; }
     public ICommand ToggleRepeatModeCommand { get; }
     public ICommand ToggleMuteCommand { get; }
+    public ICommand ToggleThemeCommand { get; }
     public ICommand ToggleDontStopTheMusicCommand { get; }
     public ICommand ToggleAudioOptionsFlyoutCommand { get; }
     public ICommand CloseAudioOptionsFlyoutCommand { get; }
@@ -1450,6 +1464,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         _logger.LogInformation("Einstellungen ist noch nicht implementiert.");
         return Task.CompletedTask;
+    }
+
+    private void ToggleTheme()
+    {
+        var nextTheme = IsDarkTheme ? AppTheme.Light : AppTheme.Dark;
+
+        _settings.ThemeMode = nextTheme;
+        _settings.Save();
+
+        if (Application.Current is App app)
+        {
+            app.SetTheme(nextTheme);
+        }
+
+        IsDarkTheme = nextTheme == AppTheme.Dark;
     }
 
     private async Task ExecuteLogoutAsync()

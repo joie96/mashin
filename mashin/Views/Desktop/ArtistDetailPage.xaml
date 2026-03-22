@@ -231,11 +231,11 @@
                 Margin="0,36,0,0"
                 IsVisible="{Binding IsLoadingMetadata}"
                 RowDefinitions="Auto,Auto,Auto,Auto"
-                RowSpacing="16">
+                RowSpacing="0">
                 <controls:SkeletonLoader Grid.Row="0" HeightRequest="18" HorizontalOptions="Start" WidthRequest="200" />
-                <controls:SkeletonLoader Grid.Row="1" HeightRequest="14" HorizontalOptions="Fill" />
-                <controls:SkeletonLoader Grid.Row="2" HeightRequest="14" HorizontalOptions="Fill" />
-                <controls:SkeletonLoader Grid.Row="3" HeightRequest="14" HorizontalOptions="Fill" />
+                <controls:SkeletonLoader Grid.Row="1" Margin="0,16,0,0" HeightRequest="14" HorizontalOptions="Fill" />
+                <controls:SkeletonLoader Grid.Row="2" Margin="0,16,0,0" HeightRequest="14" HorizontalOptions="Fill" />
+                <controls:SkeletonLoader Grid.Row="3" Margin="0,16,0,0" HeightRequest="14" HorizontalOptions="Fill" />
             </Grid>
 
             <!--  Description - Actual  -->
@@ -243,7 +243,7 @@
                 Margin="0,36,0,0"
                 IsVisible="{Binding HasDescription}"
                 RowDefinitions="Auto,Auto,Auto"
-                RowSpacing="16">
+                RowSpacing="0">
                 <Grid.Triggers>
                     <DataTrigger Binding="{Binding IsLoadingMetadata}"
                         TargetType="Grid"
@@ -257,6 +257,7 @@
                     Text="{Binding ArtistName, StringFormat='Über {0}'}"
                     TextColor="{DynamicResource TextPrimary}" />
                 <Label Grid.Row="1"
+                    Margin="0,16,0,0"
                     FontSize="14"
                     LineBreakMode="WordWrap"
                     MaxLines="{Binding DescriptionMaxLines}"
@@ -267,7 +268,7 @@
                     </Label.GestureRecognizers>
                 </Label>
                 <Border Grid.Row="2"
-                    Margin="0,-8,0,-36"
+                    Margin="0,8,0,-36"
                     behaviors:HoverBehavior.EnableScaleHover="True"
                     behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                     BackgroundColor="Transparent"
@@ -304,7 +305,7 @@
             <Grid Grid.Row="3"
                 Margin="0,36,0,0"
                 RowDefinitions="Auto,*"
-                RowSpacing="16">
+                RowSpacing="0">
                 <Label Grid.Row="0"
                     FontAttributes="Bold"
                     FontSize="18"
@@ -313,6 +314,7 @@
 
                 <!--  Albums  -->
                 <controls:RowView Grid.Row="1"
+                    Margin="0,16,0,0"
                     ItemCornerRadius="8"
                     ItemsSource="{Binding AlbumItems}"
                     MediaActions="{Binding MediaActions}"
@@ -326,7 +328,7 @@
             <Grid Grid.Row="4"
                 Margin="0,36,0,0"
                 RowDefinitions="Auto,*"
-                RowSpacing="16">
+                RowSpacing="0">
                 <Label Grid.Row="0"
                     FontAttributes="Bold"
                     FontSize="18"
@@ -335,6 +337,7 @@
 
                 <!--  Similar Artists  -->
                 <controls:RowView Grid.Row="1"
+                    Margin="0,16,0,0"
                     ItemCornerRadius="100"
                     ItemsSource="{Binding SimilarArtistItems}"
                     MediaActions="{Binding MediaActions}"
@@ -348,7 +351,7 @@
             <Grid Grid.Row="5"
                 Margin="0,36,0,0"
                 RowDefinitions="Auto,*"
-                RowSpacing="16">
+                RowSpacing="0">
                 <Label Grid.Row="0"
                     FontAttributes="Bold"
                     FontSize="18"
@@ -356,6 +359,7 @@
                     TextColor="{DynamicResource TextPrimary}" />
 
                 <controls:TableView Grid.Row="1"
+                    Margin="0,16,0,0"
                     PageSize="10"
                     ItemsSource="{Binding TopTrackItems}"
                     MediaActions="{Binding MediaActions}"

@@ -1,9 +1,9 @@
 ﻿using mashin.Services;
 using mashin.Views.Desktop;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using FFImageLoading;
 using FFImageLoading.Config;
+using mashin.Resources.Styles;
 
 namespace mashin;
 
@@ -17,36 +17,34 @@ public partial class App : Application
         InitializeComponent();
 
         _settings = settings;
+        SetTheme(_settings.ThemeMode);
     }
 
     public void SetTheme(AppTheme theme)
     {
+        if (Resources == null)
+        {
+            return;
+        }
+
         var dictionaries = Resources.MergedDictionaries;
-        var themeSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "Resources/Styles/DarkTheme.xaml",
-            "Resources/Styles/LightTheme.xaml"
-        };
+        var existingThemes = dictionaries
+            .Where(dictionary => dictionary is DarkTheme || dictionary is LightTheme)
+            .ToList();
 
-        foreach (var dictionary in dictionaries.ToList())
+        foreach (var existingTheme in existingThemes)
         {
-            var source = dictionary.Source?.OriginalString;
-            if (!string.IsNullOrWhiteSpace(source) && themeSources.Contains(source))
-            {
-                dictionaries.Remove(dictionary);
-            }
+            dictionaries.Remove(existingTheme);
         }
 
-        var resolvedTheme = theme == AppTheme.Unspecified ? RequestedTheme : theme;
-        var nextSource = resolvedTheme == AppTheme.Dark
-            ? "Resources/Styles/DarkTheme.xaml"
-            : "Resources/Styles/LightTheme.xaml";
+        var resolvedTheme = theme == AppTheme.Unspecified
+            ? (Application.Current?.RequestedTheme ?? AppTheme.Dark)
+            : theme;
+        ResourceDictionary nextThemeDictionary = resolvedTheme == AppTheme.Dark
+            ? new DarkTheme()
+            : new LightTheme();
 
-        if (!dictionaries.Any(dictionary =>
-                string.Equals(dictionary.Source?.OriginalString, nextSource, StringComparison.OrdinalIgnoreCase)))
-        {
-            dictionaries.Add(new ResourceDictionary { Source = new Uri(nextSource, UriKind.Relative) });
-        }
+        dictionaries.Add(nextThemeDictionary);
 
         UserAppTheme = theme;
     }

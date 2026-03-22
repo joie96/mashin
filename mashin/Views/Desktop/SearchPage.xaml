@@ -31,26 +31,28 @@
             <Grid Grid.Row="1"
                 Margin="0,36,0,0"
                 RowDefinitions="Auto,Auto,*"
-                RowSpacing="16">
+                RowSpacing="0">
                 <Label Grid.Row="0"
                     FontAttributes="Bold"
                     FontSize="18"
                     Text="Titel"
                     TextColor="{DynamicResource TextPrimary}" />
                 <Label Grid.Row="1"
+                    Margin="0,16,0,0"
                     FontSize="14"
                     IsVisible="{Binding ShowNoTracksMessage}"
                     Text="Keine Titel gefunden."
                     TextColor="{DynamicResource TextTertiary}" />
                 <controls:TableView Grid.Row="2"
+                    Margin="0,16,0,0"
                     PageSize="10"
-                    IsVisible="True"
+                    IsVisible="{Binding ShowTrackTable}"
                     ItemsSource="{Binding TrackItems}"
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
                     SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    ShowContextMenuAtAnchorCommand="{Binding ShowContextMenuAtAnchorCommand}"
-                    ShowContextMenuAtPositionCommand="{Binding ShowContextMenuAtPositionCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowTrackContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowTrackContextMenuAtPositionCommand}"
                     VerticalOptions="Fill" />
             </Grid>
 
@@ -58,71 +60,83 @@
             <Grid Grid.Row="2"
                 Margin="0,36,0,0"
                 RowDefinitions="Auto,Auto,*"
-                RowSpacing="16">
+                RowSpacing="0">
                 <Label Grid.Row="0"
                     FontAttributes="Bold"
                     FontSize="18"
                     Text="Alben"
                     TextColor="{DynamicResource TextPrimary}" />
                 <Label Grid.Row="1"
+                    Margin="0,16,0,0"
                     FontSize="14"
                     IsVisible="{Binding ShowNoAlbumsMessage}"
                     Text="Keine Alben gefunden."
                     TextColor="{DynamicResource TextTertiary}" />
                 <controls:RowView Grid.Row="2"
-                    IsVisible="True"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding ShowAlbumsRowView}"
                     ItemCornerRadius="8"
                     ItemsSource="{Binding AlbumItems}"
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
-                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowAlbumContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowAlbumContextMenuAtPositionCommand}" />
             </Grid>
 
             <!--  Playlists  (incl. Skeletons) -->
             <Grid Grid.Row="3"
                 Margin="0,36,0,0"
                 RowDefinitions="Auto,Auto,*"
-                RowSpacing="16">
+                RowSpacing="0">
                 <Label Grid.Row="0"
                     FontAttributes="Bold"
                     FontSize="18"
                     Text="Playlists"
                     TextColor="{DynamicResource TextPrimary}" />
                 <Label Grid.Row="1"
+                    Margin="0,16,0,0"
                     FontSize="14"
                     IsVisible="{Binding ShowNoPlaylistsMessage}"
                     Text="Keine Playlists gefunden."
                     TextColor="{DynamicResource TextTertiary}" />
                 <controls:RowView Grid.Row="2"
-                    IsVisible="True"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding ShowPlaylistsRowView}"
                     ItemCornerRadius="8"
                     ItemsSource="{Binding PlaylistItems}"
                     MediaActions="{Binding MediaActions}"
-                    PrimaryInfoTappedCommand="{Binding PlaylistTappedCommand}" />
+                    PrimaryInfoTappedCommand="{Binding PlaylistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowPlaylistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowPlaylistContextMenuAtPositionCommand}" />
             </Grid>
 
             <!--  Artists  (incl. Skeletons) -->
             <Grid Grid.Row="4"
                 Margin="0,36,0,0"
                 RowDefinitions="Auto,Auto,*"
-                RowSpacing="16">
+                RowSpacing="0">
                 <Label Grid.Row="0"
                     FontAttributes="Bold"
                     FontSize="18"
                     Text="Artists"
                     TextColor="{DynamicResource TextPrimary}" />
                 <Label Grid.Row="1"
+                    Margin="0,16,0,0"
                     FontSize="14"
                     IsVisible="{Binding ShowNoArtistsMessage}"
                     Text="Keine Artists gefunden."
                     TextColor="{DynamicResource TextTertiary}" />
                 <controls:RowView Grid.Row="2"
-                    IsVisible="True"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding ShowArtistsRowView}"
                     ItemCornerRadius="100"
                     ItemsSource="{Binding ArtistItems}"
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
             </Grid>
 
         </Grid>

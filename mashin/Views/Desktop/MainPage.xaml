@@ -227,7 +227,7 @@
             RowDefinitions="Auto,1">
             <Grid Grid.Row="0"
                 Padding="24,16,24,20"
-                ColumnDefinitions="*,Auto">
+                ColumnDefinitions="*,Auto,Auto">
                 <HorizontalStackLayout HorizontalOptions="Start" Spacing="12">
 
                     <!--  Back Button  -->
@@ -284,9 +284,42 @@
                     </Border>
                 </HorizontalStackLayout>
 
+                <!--  Theme Toggle Button  -->
+                <Border Grid.Column="1"
+                    Margin="12,0,0,0"
+                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                    BackgroundColor="Transparent"
+                    HeightRequest="32"
+                    HorizontalOptions="End"
+                    StrokeThickness="0"
+                    ToolTipProperties.Text="Theme wechseln"
+                    VerticalOptions="Center"
+                    WidthRequest="32">
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding ToggleThemeCommand}" />
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="16" />
+                    </Border.StrokeShape>
+                    <Grid>
+                        <Label FontSize="16"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsDarkTheme}"
+                            Text="☀"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center" />
+                        <Label FontSize="16"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsDarkTheme, Converter={StaticResource InvertedBoolConverter}}"
+                            Text="🌙"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center" />
+                    </Grid>
+                </Border>
+
                 <!--!-  User Profile Button  -->
                 <Border x:Name="UserProfileButton"
-                    Grid.Column="1"
+                    Grid.Column="2"
                     Margin="12,0,0,0"
                     behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                     BackgroundColor="Transparent"
@@ -351,7 +384,7 @@
                     ColumnSpacing="12"
                     IsClippedToBounds="True"
                     RowDefinitions="Auto,Auto"
-                    RowSpacing="4"
+                    RowSpacing="0"
                     VerticalOptions="Center">
                     <Border Grid.RowSpan="2"
                         BackgroundColor="{DynamicResource BackgroundTertiary}"
@@ -377,6 +410,7 @@
 
                     <Label Grid.Row="1"
                         Grid.Column="1"
+                        Margin="0,4,0,0"
                         FontSize="12"
                         LineBreakMode="TailTruncation"
                         MaxLines="1"
