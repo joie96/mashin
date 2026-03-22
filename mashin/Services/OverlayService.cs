@@ -19,7 +19,9 @@ public interface IOverlayService
     Task<bool> ShowDeletePlaylistAsync(Playlist playlist);
     Task<bool> ShowLoginAsync(
         string? initialUsername,
-        Func<string, string, Task<(bool Success, string? ErrorMessage)>> authenticateAsync);
+        Func<string, string, Task<(bool Success, string? ErrorMessage)>> authenticateAsync,
+        Func<Task<(bool Success, string? ErrorMessage)>>? tryAutoLoginAsync = null,
+        string? autoLoginStatusMessage = null);
 }
 
 /// <summary>
@@ -181,7 +183,9 @@ public sealed class OverlayService : IOverlayService
 
     public async Task<bool> ShowLoginAsync(
         string? initialUsername,
-        Func<string, string, Task<(bool Success, string? ErrorMessage)>> authenticateAsync)
+        Func<string, string, Task<(bool Success, string? ErrorMessage)>> authenticateAsync,
+        Func<Task<(bool Success, string? ErrorMessage)>>? tryAutoLoginAsync = null,
+        string? autoLoginStatusMessage = null)
     {
         if (authenticateAsync is null)
         {
@@ -202,10 +206,78 @@ public sealed class OverlayService : IOverlayService
                 _loginOverlay.Username = initialUsername ?? string.Empty;
                 _loginOverlay.Password = string.Empty;
                 _loginOverlay.HideError();
+                _loginOverlay.SetStatusMessage(string.Empty);
                 _loginOverlay.SetLoadingState(false);
                 ShowOverlay(_loginOverlay, null);
-                _loginOverlay.FocusPassword();
+
+                if (string.IsNullOrWhiteSpace(_loginOverlay.Username))
+                {
+                    _loginOverlay.FocusUsername();
+                }
+                else
+                {
+                    _loginOverlay.FocusPassword();
+                }
             });
+
+            if (tryAutoLoginAsync is not null)
+            {
+                await MainThread.InvokeOnMainThreadAsync(() =>
+                {
+                    _loginOverlay.SetStatusMessage(autoLoginStatusMessage ?? "Verbindung wird getestet...");
+                    _loginOverlay.SetLoadingState(true);
+                });
+
+                try
+                {
+                    var (success, errorMessage) = await tryAutoLoginAsync();
+                    if (success)
+                    {
+                        _loginTcs.TrySetResult(true);
+                    }
+                    else
+                    {
+                        await MainThread.InvokeOnMainThreadAsync(() =>
+                        {
+                            _loginOverlay.SetLoadingState(false);
+                            _loginOverlay.SetStatusMessage(string.Empty);
+
+                            if (!string.IsNullOrWhiteSpace(errorMessage))
+                            {
+                                _loginOverlay.ShowError(errorMessage);
+                            }
+
+                            if (string.IsNullOrWhiteSpace(_loginOverlay.Username))
+                            {
+                                _loginOverlay.FocusUsername();
+                            }
+                            else
+                            {
+                                _loginOverlay.FocusPassword();
+                            }
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Auto login failed in overlay service");
+                    await MainThread.InvokeOnMainThreadAsync(() =>
+                    {
+                        _loginOverlay.SetLoadingState(false);
+                        _loginOverlay.SetStatusMessage(string.Empty);
+                        _loginOverlay.ShowError($"Verbindungsfehler: {ex.Message}");
+
+                        if (string.IsNullOrWhiteSpace(_loginOverlay.Username))
+                        {
+                            _loginOverlay.FocusUsername();
+                        }
+                        else
+                        {
+                            _loginOverlay.FocusPassword();
+                        }
+                    });
+                }
+            }
 
             return await _loginTcs.Task;
         }
@@ -213,7 +285,11 @@ public sealed class OverlayService : IOverlayService
         {
             _authenticateLoginAsync = null;
             _loginTcs = null;
-            await MainThread.InvokeOnMainThreadAsync(_loginOverlay.ClearPassword);
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                _loginOverlay.ClearPassword();
+                _loginOverlay.SetStatusMessage(string.Empty);
+            });
             await HideOverlayAsync();
             _overlayLock.Release();
         }

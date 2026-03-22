@@ -67,6 +67,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     // Navigation
     private bool _isNavigating;
     private NavigationSection _currentSection = NavigationSection.Home;
+    private bool _isLoginOverlayActive;
 
     public event EventHandler<Track?>? CurrentTrackChanged;
     public event Func<Task>? CloseQueueViewRequested;
@@ -591,6 +592,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public async Task InitializeAsync()
     {
+        await EnsureAuthenticatedAtStartupAsync();
+
+        if (!_musicAssistant.IsAuthenticated)
+        {
+            _logger.LogWarning("Startup initialization paused because user is not authenticated.");
+            return;
+        }
+
         // Establish connection to Sendspin server (if configured).
         if (!string.IsNullOrWhiteSpace(_settings.SendspinUrl))
         {
@@ -648,30 +657,22 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private async void OnLoginRequired(object? sender, EventArgs e)
     {
-        await _overlayService.ShowLoginAsync(
-            _settings.Username,
-            async (username, password) =>
-            {
-                try
-                {
-                    _logger.LogInformation("Attempting login for user: {Username}", username);
-                    var success = await _musicAssistant.LoginAsync(username, password);
+        if (_isLoginOverlayActive)
+        {
+            return;
+        }
 
-                    if (success)
-                    {
-                        _logger.LogInformation("Login successful for user: {Username}", username);
-                        return (true, null);
-                    }
-
-                    _logger.LogWarning("Login failed for user: {Username}", username);
-                    return (false, "Anmeldung fehlgeschlagen. Bitte überprüfen Sie Ihre Anmeldedaten.");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Login error for user: {Username}", username);
-                    return (false, $"Verbindungsfehler: {ex.Message}");
-                }
-            });
+        _isLoginOverlayActive = true;
+        try
+        {
+            await _overlayService.ShowLoginAsync(
+                _settings.Username,
+                AuthenticateWithCredentialsAsync);
+        }
+        finally
+        {
+            _isLoginOverlayActive = false;
+        }
     }
 
     #endregion
@@ -1461,6 +1462,53 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "Logout failed");
+        }
+    }
+
+    private async Task EnsureAuthenticatedAtStartupAsync()
+    {
+        _isLoginOverlayActive = true;
+
+        try
+        {
+            await _overlayService.ShowLoginAsync(
+                _settings.Username,
+                AuthenticateWithCredentialsAsync,
+                async () =>
+                {
+                    var success = await _musicAssistant.TryAutoLoginAsync(raiseLoginRequiredEvent: false);
+                    return success
+                        ? (true, null)
+                        : (false, (string?)null);
+                },
+                "Sie werden angemeldet...");
+        }
+        finally
+        {
+            _isLoginOverlayActive = false;
+        }
+    }
+
+    private async Task<(bool Success, string? ErrorMessage)> AuthenticateWithCredentialsAsync(string username, string password)
+    {
+        try
+        {
+            _logger.LogInformation("Attempting login for user: {Username}", username);
+            var success = await _musicAssistant.LoginAsync(username, password);
+
+            if (success)
+            {
+                _logger.LogInformation("Login successful for user: {Username}", username);
+                return (true, null);
+            }
+
+            _logger.LogWarning("Login failed for user: {Username}", username);
+            return (false, "Anmeldung fehlgeschlagen. Bitte ueberpruefen Sie Ihre Anmeldedaten.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Login error for user: {Username}", username);
+            return (false, $"Verbindungsfehler: {ex.Message}");
         }
     }
 

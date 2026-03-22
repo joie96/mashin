@@ -41,6 +41,7 @@ public partial class LoginOverlay : ContentView
 
     public void ShowError(string message)
     {
+        SetStatusMessage(string.Empty);
         LoginErrorLabel.Text = message;
         LoginErrorBorder.IsVisible = true;
     }
@@ -49,6 +50,12 @@ public partial class LoginOverlay : ContentView
     {
         LoginErrorBorder.IsVisible = false;
         LoginErrorLabel.Text = string.Empty;
+    }
+
+    public void SetStatusMessage(string? message)
+    {
+        LoginStatusLabel.Text = message ?? string.Empty;
+        LoginStatusLabel.IsVisible = !string.IsNullOrWhiteSpace(message);
     }
 
     private void OnLoginUsernameCompleted(object? sender, EventArgs e)

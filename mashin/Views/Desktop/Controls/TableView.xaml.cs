@@ -287,6 +287,7 @@ public partial class TableView : ContentView
         _anchorIndex = null;
 
         ClearAllSelections();
+
         SyncVisibleItems();
         SyncSelectionAndHeaderState(clickedItem: null);
         UpdateNavigationState();
@@ -321,6 +322,15 @@ public partial class TableView : ContentView
             return;
         }
 
+        // Prefer incremental updates to preserve row containers and avoid unnecessary image rebinds.
+        if (TryApplyIncrementalCollectionChange(e))
+        {
+            SyncSelectionAndHeaderState(clickedItem: null);
+            UpdateNavigationState();
+            UpdateFavoriteStateForVisibleItems();
+            return;
+        }
+
         _allItems = ItemsSource?.ToList() ?? new List<object>();
 
         if (_pageIndex >= TotalPages)
@@ -332,6 +342,133 @@ public partial class TableView : ContentView
         SyncSelectionAndHeaderState(clickedItem: null);
         UpdateNavigationState();
         UpdateFavoriteStateForVisibleItems();
+    }
+
+    private bool TryApplyIncrementalCollectionChange(NotifyCollectionChangedEventArgs e)
+    {
+        // Incremental updates are only safe when the visible list mirrors all items.
+        if (!IsShowingAllItems())
+        {
+            return false;
+        }
+
+        switch (e.Action)
+        {
+            case NotifyCollectionChangedAction.Add:
+                if (e.NewItems == null || e.NewItems.Count == 0)
+                {
+                    return true;
+                }
+
+                // Insert at source index so virtualization can move only affected rows.
+                var addIndex = e.NewStartingIndex >= 0 ? e.NewStartingIndex : _allItems.Count;
+                addIndex = Math.Clamp(addIndex, 0, _allItems.Count);
+
+                for (var i = 0; i < e.NewItems.Count; i++)
+                {
+                    var item = e.NewItems[i];
+                    _allItems.Insert(addIndex + i, item!);
+                    _visibleItems.Insert(Math.Clamp(addIndex + i, 0, _visibleItems.Count), item!);
+                }
+
+                return true;
+
+            case NotifyCollectionChangedAction.Remove:
+                if (e.OldItems == null || e.OldItems.Count == 0)
+                {
+                    return true;
+                }
+
+                // Remove by event index if available; otherwise fallback to identity-based removal.
+                if (e.OldStartingIndex >= 0)
+                {
+                    for (var i = 0; i < e.OldItems.Count; i++)
+                    {
+                        if (e.OldStartingIndex < _allItems.Count)
+                        {
+                            _allItems.RemoveAt(e.OldStartingIndex);
+                        }
+
+                        if (e.OldStartingIndex < _visibleItems.Count)
+                        {
+                            _visibleItems.RemoveAt(e.OldStartingIndex);
+                        }
+                    }
+                }
+                else
+                {
+                    foreach (var oldItem in e.OldItems)
+                    {
+                        _allItems.Remove(oldItem!);
+                        _visibleItems.Remove(oldItem!);
+                    }
+                }
+
+                return true;
+
+            case NotifyCollectionChangedAction.Move:
+                if (e.OldStartingIndex < 0 || e.NewStartingIndex < 0 || e.OldItems == null || e.OldItems.Count == 0)
+                {
+                    return false;
+                }
+
+                // Single-item move is the common queue reorder case and keeps UI churn minimal.
+                if (e.OldItems.Count == 1)
+                {
+                    if (e.OldStartingIndex < _allItems.Count && e.NewStartingIndex < _allItems.Count)
+                    {
+                        var moved = _allItems[e.OldStartingIndex];
+                        _allItems.RemoveAt(e.OldStartingIndex);
+                        _allItems.Insert(Math.Clamp(e.NewStartingIndex, 0, _allItems.Count), moved);
+                    }
+
+                    if (e.OldStartingIndex < _visibleItems.Count && e.NewStartingIndex < _visibleItems.Count)
+                    {
+                        _visibleItems.Move(e.OldStartingIndex, e.NewStartingIndex);
+                    }
+
+                    return true;
+                }
+
+                return false;
+
+            case NotifyCollectionChangedAction.Replace:
+                if (e.NewItems == null || e.NewItems.Count == 0)
+                {
+                    return true;
+                }
+
+                // Replace in place to preserve list shape and selection state.
+                var replaceIndex = e.NewStartingIndex;
+                if (replaceIndex < 0)
+                {
+                    return false;
+                }
+
+                for (var i = 0; i < e.NewItems.Count; i++)
+                {
+                    var index = replaceIndex + i;
+                    if (index < 0 || index >= _allItems.Count || index >= _visibleItems.Count)
+                    {
+                        return false;
+                    }
+
+                    _allItems[index] = e.NewItems[i]!;
+                    _visibleItems[index] = e.NewItems[i]!;
+                }
+
+                return true;
+
+            case NotifyCollectionChangedAction.Reset:
+            default:
+                // Reset or unsupported patterns fall back to full resync in caller.
+                return false;
+        }
+    }
+
+    private bool IsShowingAllItems()
+    {
+        return _isExpanded || PageSize <= 0 || _allItems.Count <= PageSize;
     }
 
     #endregion

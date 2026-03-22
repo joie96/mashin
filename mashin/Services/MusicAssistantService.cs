@@ -366,7 +366,7 @@ public class MusicAssistantService
     /// <summary>
     /// Try Auto-Login with saved Token in settings (internal use)
     /// </summary>
-    public async Task<bool> TryAutoLoginAsync()
+    public async Task<bool> TryAutoLoginAsync(bool raiseLoginRequiredEvent = true)
     {
         if (!string.IsNullOrEmpty(_settings.AuthToken))
         {
@@ -388,7 +388,11 @@ public class MusicAssistantService
 
         // No valid token available - notify that login is required
         _logger.LogInformation("No valid auth token available, login required");
-        LoginRequired?.Invoke(this, EventArgs.Empty);
+        if (raiseLoginRequiredEvent)
+        {
+            LoginRequired?.Invoke(this, EventArgs.Empty);
+        }
+
         return false;
     }
 

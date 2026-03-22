@@ -44,6 +44,12 @@
                     HorizontalTextAlignment="Center" />
             </Border>
 
+            <Label x:Name="LoginStatusLabel"
+                IsVisible="False"
+                FontSize="13"
+                TextColor="{DynamicResource TextSecondary}"
+                HorizontalTextAlignment="Center" />
+
             <VerticalStackLayout Spacing="16">
                 <VerticalStackLayout Spacing="6">
                     <Label Text="Benutzername"
