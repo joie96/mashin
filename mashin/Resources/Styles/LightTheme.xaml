@@ -4,35 +4,35 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
     x:Class="mashin.Resources.Styles.LightTheme">
 
-    <Color x:Key="BackgroundPrimary">#ffffff</Color>
-    <Color x:Key="BackgroundSecondary">#f5f5f5</Color>
-    <Color x:Key="BackgroundTertiary">#eeeeee</Color>
+    <Color x:Key="BackgroundPrimary">#F3F4F6</Color>
+    <Color x:Key="BackgroundSecondary">#ECEEF2</Color>
+    <Color x:Key="BackgroundTertiary">#E3E6EC</Color>
 
-    <Color x:Key="TextPrimary">#000000</Color>
-    <Color x:Key="TextSecondary">#666666</Color>
-    <Color x:Key="TextTertiary">#999999</Color>
+    <Color x:Key="TextPrimary">#17181B</Color>
+    <Color x:Key="TextSecondary">#595D66</Color>
+    <Color x:Key="TextTertiary">#8B909C</Color>
 
-    <Color x:Key="SeparatorColor">#dddddd</Color>
+    <Color x:Key="SeparatorColor">#D8DBE2</Color>
 
-    <Color x:Key="BorderPrimary">#d0d0d0</Color>
-    <Color x:Key="BorderSecondary">#e0e0e0</Color>
+    <Color x:Key="BorderPrimary">#C9CED8</Color>
+    <Color x:Key="BorderSecondary">#D9DDE6</Color>
 
-    <Color x:Key="IconPrimary">#000000</Color>
-    <Color x:Key="IconPrimary90">#E6000000</Color>
-    <Color x:Key="IconPrimary80">#CC000000</Color>
-    <Color x:Key="IconPrimary75">#BF000000</Color>
-    <Color x:Key="IconPrimary70">#B3000000</Color>
-    <Color x:Key="IconPrimary60">#99000000</Color>
-    <Color x:Key="IconPrimary50">#80000000</Color>
-    <Color x:Key="IconSecondary">#666666</Color>
-    <Color x:Key="IconTertiary">#999999</Color>
+    <Color x:Key="IconPrimary">#17181B</Color>
+    <Color x:Key="IconPrimary90">#E617181B</Color>
+    <Color x:Key="IconPrimary80">#CC17181B</Color>
+    <Color x:Key="IconPrimary75">#BF17181B</Color>
+    <Color x:Key="IconPrimary70">#B317181B</Color>
+    <Color x:Key="IconPrimary60">#9917181B</Color>
+    <Color x:Key="IconPrimary50">#8017181B</Color>
+    <Color x:Key="IconSecondary">#595D66</Color>
+    <Color x:Key="IconTertiary">#8B909C</Color>
 
     <Color x:Key="AccentColor">#ff4757</Color>
     <Color x:Key="AccentHover">#ee5a6f</Color>
-    <Color x:Key="HoverBackground">#eeeeee</Color>
-    <Color x:Key="HoverBackground50">#80EEEEEE</Color>
-    <Color x:Key="HoverBackground25">#40EEEEEE</Color>
-    <Color x:Key="SelectionBackground">#e0e0e0</Color>
+    <Color x:Key="HoverBackground">#E6E9EF</Color>
+    <Color x:Key="HoverBackground50">#80E6E9EF</Color>
+    <Color x:Key="HoverBackground25">#40E6E9EF</Color>
+    <Color x:Key="SelectionBackground">#DCE0E8</Color>
 
     <Color x:Key="ShadowColorSoft">#1A000000</Color>
     <Color x:Key="ShadowColorStrong">#33000000</Color>

@@ -305,13 +305,15 @@
                         <Label FontSize="16"
                             HorizontalOptions="Center"
                             IsVisible="{Binding IsDarkTheme}"
-                            Text="☀"
+                            Text="{mi:FluentFilled Icon=WeatherSunny24Filled,
+                                             FontOverride=True}"
                             TextColor="{DynamicResource IconSecondary}"
                             VerticalOptions="Center" />
                         <Label FontSize="16"
                             HorizontalOptions="Center"
                             IsVisible="{Binding IsDarkTheme, Converter={StaticResource InvertedBoolConverter}}"
-                            Text="🌙"
+                            Text="{mi:FluentFilled Icon=WeatherMoon24Filled,
+                                             FontOverride=True}"
                             TextColor="{DynamicResource IconSecondary}"
                             VerticalOptions="Center" />
                     </Grid>
