@@ -185,7 +185,7 @@
                     </Grid>
 
                     <!--  Queue Table  -->
-                    <controls:TableView Grid.Row="1"
+                    <controls:TableView Grid.Row="1" Margin="0,40,0,0"
                         PageSize="500"
                         ItemsSource="{Binding CurrentQueueItems}"
                         MediaActions="{Binding MediaActions}"
