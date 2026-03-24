@@ -41,7 +41,6 @@ public static class MauiProgram
         // Services registrieren
         builder.Services.AddSingleton<SettingsService>();
         builder.Services.AddSingleton<MusicAssistantService>();
-            builder.Services.AddSingleton<ListenBrainzService>();
         builder.Services.AddSingleton<IUserDataService, UserDataService>();
         builder.Services.AddSingleton<IMediaItemActions, MediaItemActions>();
         builder.Services.AddSingleton<INavigationService, NavigationService>();
@@ -95,7 +94,6 @@ public static class MauiProgram
 
         // ViewModels registrieren
         builder.Services.AddSingleton<MainViewModel>();
-        builder.Services.AddTransient<HomeViewModel>();
         builder.Services.AddTransient<FavoritesViewModel>();
         builder.Services.AddTransient<PlaylistDetailViewModel>();
         builder.Services.AddTransient<ArtistDetailViewModel>();

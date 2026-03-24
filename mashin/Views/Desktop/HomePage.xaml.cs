@@ -1,16 +1,26 @@
+using mashin.Services;
 using mashin.ViewModels;
 
 namespace mashin.Views.Desktop;
 
 public partial class HomePage : ContentPage
 {
-    private readonly HomeViewModel _viewModel;
+    private readonly MainViewModel _viewModel;
+    private readonly MusicAssistantService _musicAssistant;
 
-    public HomePage(HomeViewModel viewModel)
+    public HomePage(MainViewModel mainViewModel, MusicAssistantService musicAssistant)
     {
         InitializeComponent();
-        _viewModel = viewModel;
+        _viewModel = mainViewModel;
+        _musicAssistant = musicAssistant;
         BindingContext = _viewModel;
+
+    }
+
+    private async void OnUserIconTapped(object sender, EventArgs e)
+    {
+        // Navigation zu Settings
+        
     }
 
     protected override void OnDisappearing()
@@ -18,5 +28,13 @@ public partial class HomePage : ContentPage
         base.OnDisappearing();
 
         BindingContext = null;
+
     }
+
+    protected override async void OnAppearing()
+    {
+        base.OnAppearing();
+    }
+
+
 }
