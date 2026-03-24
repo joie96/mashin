@@ -1209,6 +1209,15 @@ public class MusicAssistantService
     }
 
     /// <summary>
+    /// Return recommendation folders.
+    /// </summary>
+    public async Task<List<RecommendationFolder>> GetRecommendationsAsync()
+    {
+        var result = await SendCommandAsync<List<RecommendationFolder>>("music/recommendations");
+        return result ?? new List<RecommendationFolder>();
+    }
+
+    /// <summary>
     /// Get single music item by id and media type.
     /// </summary>
     public async Task<object?> GetMusicItemAsync(MediaType mediaType, string itemId, string providerInstanceIdOrDomain)

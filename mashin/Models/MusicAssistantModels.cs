@@ -332,6 +332,57 @@ namespace mashin.Models
     }
 
     /// <summary>
+    /// Music Assistant API RecommendationFolder wrapper
+    /// </summary>
+    public class RecommendationFolder
+    {
+        [JsonPropertyName("item_id")]
+        public string ItemId { get; set; } = string.Empty;
+
+        [JsonPropertyName("provider")]
+        public string Provider { get; set; } = string.Empty;
+
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+
+        [JsonPropertyName("version")]
+        public string? Version { get; set; }
+
+        [JsonPropertyName("sort_name")]
+        public string? SortName { get; set; }
+
+        [JsonPropertyName("uri")]
+        public string? Uri { get; set; }
+
+        [JsonPropertyName("external_ids")]
+        public List<List<string>>? ExternalIds { get; set; }
+
+        [JsonPropertyName("is_playable")]
+        public bool? IsPlayable { get; set; }
+
+        [JsonPropertyName("translation_key")]
+        public string? TranslationKey { get; set; }
+
+        [JsonPropertyName("media_type")]
+        public MediaType? MediaType { get; set; }
+
+        [JsonPropertyName("path")]
+        public string? Path { get; set; }
+
+        [JsonPropertyName("image")]
+        public MediaItemImage? Image { get; set; }
+
+        [JsonPropertyName("icon")]
+        public string? Icon { get; set; }
+
+        [JsonPropertyName("items")]
+        public List<JsonElement>? Items { get; set; }
+
+        [JsonPropertyName("subtitle")]
+        public string? Subtitle { get; set; }
+    }
+
+    /// <summary>
     /// Music Assistant API MediaItemMetadata wrapper
     /// </summary>
     public class MediaItemMetadata

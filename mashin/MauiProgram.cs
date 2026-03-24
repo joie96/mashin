@@ -95,6 +95,7 @@ public static class MauiProgram
         // ViewModels registrieren
         builder.Services.AddSingleton<MainViewModel>();
         builder.Services.AddTransient<FavoritesViewModel>();
+        builder.Services.AddTransient<HomeViewModel>();
         builder.Services.AddTransient<PlaylistDetailViewModel>();
         builder.Services.AddTransient<ArtistDetailViewModel>();
         builder.Services.AddTransient<AlbumDetailViewModel>();

@@ -1,17 +1,52 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             xmlns:controls="clr-namespace:mashin.Views.Desktop.Controls"
-             x:Class="mashin.Views.Desktop.HomePage"
-             BackgroundColor="{DynamicResource BackgroundPrimary}">
+<ContentPage x:Class="mashin.Views.Desktop.HomePage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:controls="clr-namespace:mashin.Views.Desktop.Controls"
+    xmlns:vm="clr-namespace:mashin.ViewModels"
+    x:DataType="vm:HomeViewModel"
+    BackgroundColor="{DynamicResource BackgroundPrimary}">
 
-    <ScrollView Padding="30,20">
-        <VerticalStackLayout Spacing="30">
+    <ScrollView x:Name="scrollView">
+        <Grid Padding="40,30,40,30"
+            RowDefinitions="Auto,Auto"
+            RowSpacing="0">
 
-            <Label Text="Willkommen zurück!"
-                   FontSize="32"
-                   FontAttributes="Bold"
-                   TextColor="{DynamicResource TextPrimary}"/>
-        </VerticalStackLayout>
+            <!--  Header  -->
+            <VerticalStackLayout Grid.Row="0" Spacing="6">
+                <Label FontAttributes="Bold"
+                    FontSize="24"
+                    Text="Willkommen zurueck!"
+                    TextColor="{DynamicResource TextPrimary}" />
+            </VerticalStackLayout>
+
+            <!--  ListenBrainz Weekly Top Artists  -->
+            <Grid Grid.Row="1"
+                Margin="0,36,0,0"
+                RowDefinitions="Auto,Auto,*"
+                RowSpacing="0">
+                <Label Grid.Row="0"
+                    FontAttributes="Bold"
+                    FontSize="18"
+                    Text="ListenBrainz: Top Artists weltweit (Woche)"
+                    TextColor="{DynamicResource TextPrimary}" />
+                <Label Grid.Row="1"
+                    Margin="0,16,0,0"
+                    FontSize="14"
+                    IsVisible="{Binding ShowNoArtistsMessage}"
+                    Text="Keine ListenBrainz-Empfehlungen gefunden."
+                    TextColor="{DynamicResource TextTertiary}" />
+                <controls:RowView Grid.Row="2"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding ShowArtistsRowView}"
+                    ItemCornerRadius="100"
+                    ItemsSource="{Binding ArtistItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
+            </Grid>
+        </Grid>
     </ScrollView>
 </ContentPage>
