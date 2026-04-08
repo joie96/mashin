@@ -2,7 +2,6 @@
 <ContentPage x:Class="mashin.Views.Desktop.PlaylistDetailPage"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-    xmlns:behaviors="clr-namespace:mashin.Views.Desktop.Behaviors"
     xmlns:controls="clr-namespace:mashin.Views.Desktop.Controls"
     xmlns:converters="clr-namespace:mashin.Converters"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
@@ -19,129 +18,40 @@
         RowSpacing="0">
         <!--  Playlist Header  -->
         <Grid Grid.Row="0">
-            <Grid ColumnDefinitions="150,*" ColumnSpacing="30">
+            <Grid ColumnDefinitions="200,*" ColumnSpacing="30">
 
                 <!--  Playlist Cover - Loading State  -->
                 <Border Grid.Column="0"
-                    HeightRequest="150"
+                    HeightRequest="200"
                     IsVisible="{Binding IsLoadingMetadata}"
                     StrokeThickness="0"
-                    WidthRequest="150">
+                    WidthRequest="200">
                     <Border.StrokeShape>
                         <RoundRectangle CornerRadius="8" />
                     </Border.StrokeShape>
-                    <controls:SkeletonLoader CornerRadius="8" HeightRequest="150" WidthRequest="150" />
+                    <controls:SkeletonLoader CornerRadius="8" HeightRequest="200" WidthRequest="200" />
                 </Border>
 
                 <!--  Playlist Cover - Actual  -->
                 <Border Grid.Column="0"
                     BackgroundColor="{DynamicResource BackgroundTertiary}"
-                    HeightRequest="150"
+                    HeightRequest="200"
                     IsVisible="{Binding IsLoadingMetadata, Converter={StaticResource InvertedBoolConverter}}"
                     StrokeThickness="0"
-                    WidthRequest="150">
+                    WidthRequest="200">
                     <Border.StrokeShape>
                         <RoundRectangle CornerRadius="8" />
                     </Border.StrokeShape>
-                    <Grid x:Name="PlaylistCoverContainer" behaviors:HoverBehavior.ShowOnHoverTarget="{x:Reference PlaylistCoverHoverOverlay}">
+                    <Grid>
                         <Grid.GestureRecognizers>
                             <PointerGestureRecognizer Buttons="Secondary" PointerPressed="OnPlaylistCoverSecondaryPointerPressed" />
                         </Grid.GestureRecognizers>
                         <Image Aspect="AspectFill"
-                            HeightRequest="150"
+                            HeightRequest="200"
                             HorizontalOptions="Center"
                             Source="{Binding ImageUrl}"
                             VerticalOptions="Center"
-                            WidthRequest="150" />
-
-                        <Border x:Name="PlaylistCoverHoverOverlay"
-                            BackgroundColor="#80000000"
-                            Opacity="0"
-                            StrokeThickness="0">
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="8" />
-                            </Border.StrokeShape>
-                            <Grid RowDefinitions="Auto,*,Auto">
-
-                                <Border Grid.RowSpan="3"
-                                    behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource IconPrimary75}"
-                                    behaviors:HoverBehavior.EnableScaleHover="True"
-                                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource IconPrimary}"
-                                    BackgroundColor="{DynamicResource IconPrimary75}"
-                                    HeightRequest="64"
-                                    HorizontalOptions="Center"
-                                    StrokeThickness="0"
-                                    VerticalOptions="Center"
-                                    WidthRequest="64">
-                                    <Border.GestureRecognizers>
-                                        <TapGestureRecognizer Command="{Binding PlayPlaylistCommand}" />
-                                    </Border.GestureRecognizers>
-                                    <Border.StrokeShape>
-                                        <RoundRectangle CornerRadius="100" />
-                                    </Border.StrokeShape>
-                                    <Label FontSize="28"
-                                        HorizontalOptions="Center"
-                                        Text="{mi:FluentFilled Icon=Play12Filled,
-                                                               FontOverride=True}"
-                                        TextColor="{DynamicResource BackgroundPrimary}"
-                                        VerticalOptions="Center" />
-                                </Border>
-
-                                <Grid Grid.Row="2"
-                                    Margin="8"
-                                    ColumnDefinitions="*,Auto">
-                                    <Label Grid.Column="0"
-                                        Margin="0,0,12,0"
-                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
-                                        behaviors:HoverBehavior.EnableScaleHover="True"
-                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
-                                        FontSize="18"
-                                        HorizontalOptions="End"
-                                        IsVisible="{Binding IsPlaylistFavorite, Converter={StaticResource InvertedBoolConverter}}"
-                                        Text="{mi:Fluent Icon=Heart48,
-                                                         FontOverride=True}"
-                                        TextColor="{DynamicResource IconSecondary}"
-                                        VerticalOptions="Center">
-                                        <Label.GestureRecognizers>
-                                            <TapGestureRecognizer Command="{Binding TogglePlaylistFavoriteCommand}" />
-                                        </Label.GestureRecognizers>
-                                    </Label>
-
-                                    <Label Grid.Column="0"
-                                        Margin="0,0,12,0"
-                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
-                                        behaviors:HoverBehavior.EnableScaleHover="True"
-                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
-                                        FontSize="18"
-                                        HorizontalOptions="End"
-                                        IsVisible="{Binding IsPlaylistFavorite}"
-                                        Text="{mi:FluentFilled Icon=Heart48Filled,
-                                                               FontOverride=True}"
-                                        TextColor="{DynamicResource IconSecondary}"
-                                        VerticalOptions="Center">
-                                        <Label.GestureRecognizers>
-                                            <TapGestureRecognizer Command="{Binding TogglePlaylistFavoriteCommand}" />
-                                        </Label.GestureRecognizers>
-                                    </Label>
-
-                                    <Label x:Name="PlaylistMoreIconLabel"
-                                        Grid.Column="1"
-                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
-                                        behaviors:HoverBehavior.EnableScaleHover="True"
-                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
-                                        FontSize="18"
-                                        HorizontalOptions="End"
-                                        Text="{mi:Fluent Icon=MoreHorizontal48,
-                                                         FontOverride=True}"
-                                        TextColor="{DynamicResource IconSecondary}"
-                                        VerticalOptions="Center">
-                                        <Label.GestureRecognizers>
-                                            <TapGestureRecognizer Command="{Binding ShowHeaderContextMenuAtAnchorCommand}" CommandParameter="{x:Reference PlaylistMoreIconLabel}" />
-                                        </Label.GestureRecognizers>
-                                    </Label>
-                                </Grid>
-                            </Grid>
-                        </Border>
+                            WidthRequest="200" />
                     </Grid>
                 </Border>
 
@@ -156,20 +66,24 @@
                 </VerticalStackLayout>
 
                 <!--  Playlist Info - Actual  -->
-                <VerticalStackLayout Grid.Column="1"
+                <Grid Grid.Column="1"
+                    HeightRequest="200"
                     IsVisible="{Binding IsLoadingMetadata, Converter={StaticResource InvertedBoolConverter}}"
-                    Spacing="12"
-                    VerticalOptions="Center">
+                    RowDefinitions="*,Auto,Auto,Auto,Auto"
+                    VerticalOptions="Fill">
 
                     <!--  Type Label  -->
-                    <Label Margin="0,0,0,8"
+                    <Label Grid.Row="1"
+                        Margin="0,0,0,16"
                         FontAttributes="Bold"
                         FontSize="12"
                         Text="WIEDERGABELISTE"
                         TextColor="{DynamicResource TextSecondary}" />
 
                     <!--  Playlist Name  -->
-                    <Label FontAttributes="Bold"
+                    <Label Grid.Row="2"
+                        Margin="0,0,0,8"
+                        FontAttributes="Bold"
                         FontSize="28"
                         LineBreakMode="WordWrap"
                         MaxLines="2"
@@ -177,16 +91,94 @@
                         TextColor="{DynamicResource TextPrimary}" />
 
                     <!--  Track Count  -->
-                    <HorizontalStackLayout Spacing="8">
-                        <Label FontSize="14" TextColor="{DynamicResource TextSecondary}">
-                            <Label.Text>
-                                <MultiBinding StringFormat="{}{0} Titel">
-                                    <Binding Path="Tracks.Count" />
-                                </MultiBinding>
-                            </Label.Text>
-                        </Label>
+                    <HorizontalStackLayout Grid.Row="3"
+                        Margin="0,0,0,16"
+                        Spacing="8">
+                        <Label FontSize="14"
+                            Text="{Binding Tracks.Count, StringFormat='{0} Titel'}"
+                            TextColor="{DynamicResource TextSecondary}" />
+                        <Label FontSize="14"
+                            Text="•"
+                            TextColor="{DynamicResource TextSecondary}" />
+                        <Label FontSize="14"
+                            Text="{Binding PlaylistTotalDurationText}"
+                            TextColor="{DynamicResource TextSecondary}" />
                     </HorizontalStackLayout>
-                </VerticalStackLayout>
+
+                    <!--  Buttons  -->
+                    <Grid Grid.Row="4"
+                        ColumnDefinitions="Auto,Auto,Auto"
+                        ColumnSpacing="12">
+                        <Border Grid.Column="0"
+                            Padding="20,8"
+                            BackgroundColor="{DynamicResource TextPrimary}"
+                            StrokeThickness="0">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="16" />
+                            </Border.StrokeShape>
+                            <HorizontalStackLayout HorizontalOptions="Center"
+                                Spacing="8"
+                                VerticalOptions="Center">
+                                <Label FontSize="14"
+                                    Text="{mi:FluentFilled Icon=Play16Filled,
+                                                           FontOverride=True}"
+                                    TextColor="{DynamicResource BackgroundPrimary}"
+                                    VerticalTextAlignment="Center" />
+                                <Label FontAttributes="Bold"
+                                    FontSize="14"
+                                    Text="Abspielen"
+                                    TextColor="{DynamicResource BackgroundPrimary}"
+                                    VerticalTextAlignment="Center" />
+                            </HorizontalStackLayout>
+                        </Border>
+
+                        <Border Grid.Column="1"
+                            Padding="20,8"
+                            BackgroundColor="{DynamicResource TextPrimary}"
+                            StrokeThickness="0">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="16" />
+                            </Border.StrokeShape>
+                            <HorizontalStackLayout HorizontalOptions="Center"
+                                Spacing="8"
+                                VerticalOptions="Center">
+                                <Label FontSize="14"
+                                    Text="{mi:Fluent Icon=ArrowShuffle16,
+                                                     FontOverride=True}"
+                                    TextColor="{DynamicResource BackgroundPrimary}"
+                                    VerticalTextAlignment="Center" />
+                                <Label FontAttributes="Bold"
+                                    FontSize="14"
+                                    Text="Zufällig"
+                                    TextColor="{DynamicResource BackgroundPrimary}"
+                                    VerticalTextAlignment="Center" />
+                            </HorizontalStackLayout>
+                        </Border>
+
+                        <Border Grid.Column="2"
+                            Padding="20,8"
+                            BackgroundColor="{DynamicResource TextPrimary}"
+                            StrokeThickness="0">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="16" />
+                            </Border.StrokeShape>
+                            <HorizontalStackLayout HorizontalOptions="Center"
+                                Spacing="8"
+                                VerticalOptions="Center">
+                                <Label FontSize="14"
+                                    Text="{mi:Fluent Icon=MoreHorizontal16,
+                                                     FontOverride=True}"
+                                    TextColor="{DynamicResource BackgroundPrimary}"
+                                    VerticalTextAlignment="Center" />
+                                <Label FontAttributes="Bold"
+                                    FontSize="14"
+                                    Text="Mehr"
+                                    TextColor="{DynamicResource BackgroundPrimary}"
+                                    VerticalTextAlignment="Center" />
+                            </HorizontalStackLayout>
+                        </Border>
+                    </Grid>
+                </Grid>
             </Grid>
         </Grid>
 

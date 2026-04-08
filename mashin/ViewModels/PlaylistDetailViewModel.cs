@@ -78,6 +78,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             OnPropertyChanged(nameof(HasTracks));
             OnPropertyChanged(nameof(ShowTrackTable));
             OnPropertyChanged(nameof(TrackItems));
+            OnPropertyChanged(nameof(PlaylistTotalDurationText));
         }
     }
 
@@ -109,6 +110,15 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
     public IEnumerable<object> TrackItems => IsLoadingTracks ? _trackSkeletons : _tracks;
 
+    public string PlaylistTotalDurationText
+    {
+        get
+        {
+            var totalSeconds = _tracks.Sum(track => Math.Max(0, track.Duration));
+            return FormatTotalDuration(totalSeconds);
+        }
+    }
+
     public IMediaItemActions MediaActions { get; }
     public ICommand AlbumTappedCommand { get; }
     public ICommand ArtistTappedCommand { get; }
@@ -126,6 +136,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     private void OnTracksCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         OnPropertyChanged(nameof(HasTracks));
+        OnPropertyChanged(nameof(PlaylistTotalDurationText));
         OnPropertyChanged(nameof(ShowTrackTable));
         OnPropertyChanged(nameof(TrackItems));
     }
@@ -628,6 +639,24 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         }
 
         return string.Concat(username, "--");
+    }
+
+    private static string FormatTotalDuration(int totalSeconds)
+    {
+        if (totalSeconds <= 0)
+        {
+            return "0m";
+        }
+
+        var ts = TimeSpan.FromSeconds(totalSeconds);
+        var totalHours = (int)ts.TotalHours;
+
+        if (totalHours > 0)
+        {
+            return $"{totalHours}h {ts.Minutes}m";
+        }
+
+        return $"{Math.Max(1, ts.Minutes)}m";
     }
 
     #endregion
