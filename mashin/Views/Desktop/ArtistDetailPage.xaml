@@ -18,7 +18,7 @@
     </ContentPage.Resources>
 
     <ScrollView>
-        <Grid Padding="40,30,40,30"
+        <Grid Padding="{StaticResource PagePaddingDesktop}"
             RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
             RowSpacing="0">
 
@@ -191,10 +191,10 @@
                     Spacing="12"
                     VerticalOptions="Center">
 
-                    <Label FontAttributes="Bold"
+                    <Label Style="{StaticResource LabelSecondary}"
+                        FontAttributes="Bold"
                         FontSize="12"
-                        Text="ARTIST/INTERPRET"
-                        TextColor="{DynamicResource TextSecondary}" />
+                        Text="ARTIST/INTERPRET" />
 
                     <!--  Artist Name + Provider Icon  -->
                     <HorizontalStackLayout Spacing="16" VerticalOptions="Center">
@@ -219,16 +219,15 @@
                         </ffimageloading:SvgCachedImage>
                     </HorizontalStackLayout>
 
-                    <Label FontSize="14"
-                        Text="{Binding Albums.Count, StringFormat='{0} Alben'}"
-                        TextColor="{DynamicResource TextSecondary}" />
+                    <Label Style="{StaticResource LabelSecondary}"
+                        Text="{Binding Albums.Count, StringFormat='{0} Alben'}" />
 
                 </VerticalStackLayout>
             </Grid>
 
             <!--  Description - Loading State  -->
             <Grid Grid.Row="1"
-                Margin="0,36,0,0"
+                Margin="{StaticResource SectionTopMargin}"
                 IsVisible="{Binding IsLoadingMetadata}"
                 RowDefinitions="Auto,Auto,Auto,Auto"
                 RowSpacing="0">
@@ -240,7 +239,7 @@
 
             <!--  Description - Actual  -->
             <Grid Grid.Row="2"
-                Margin="0,36,0,0"
+                Margin="{StaticResource SectionTopMargin}"
                 IsVisible="{Binding HasDescription}"
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
@@ -252,17 +251,14 @@
                     </DataTrigger>
                 </Grid.Triggers>
                 <Label Grid.Row="0"
-                    FontAttributes="Bold"
-                    FontSize="18"
-                    Text="{Binding ArtistName, StringFormat='Über {0}'}"
-                    TextColor="{DynamicResource TextPrimary}" />
+                    Style="{StaticResource LabelSectionTitle}"
+                    Text="{Binding ArtistName, StringFormat='Über {0}'}" />
                 <Label Grid.Row="1"
+                    Style="{StaticResource LabelSecondary}"
                     Margin="0,16,0,0"
-                    FontSize="14"
                     LineBreakMode="WordWrap"
                     MaxLines="{Binding DescriptionMaxLines}"
-                    Text="{Binding Artist.Metadata.Description, Converter={StaticResource RemoveBlankLinesConverter}}"
-                    TextColor="{DynamicResource TextSecondary}">
+                    Text="{Binding Artist.Metadata.Description, Converter={StaticResource RemoveBlankLinesConverter}}">
                     <Label.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding ToggleDescriptionCommand}" />
                     </Label.GestureRecognizers>
@@ -303,14 +299,12 @@
 
             <!--  Albums/Releases Section  -->
             <Grid Grid.Row="3"
-                Margin="0,36,0,0"
+                Margin="{StaticResource SectionTopMargin}"
                 RowDefinitions="Auto,*"
                 RowSpacing="0">
                 <Label Grid.Row="0"
-                    FontAttributes="Bold"
-                    FontSize="18"
-                    Text="Veröffentlichungen"
-                    TextColor="{DynamicResource TextPrimary}" />
+                    Style="{StaticResource LabelSectionTitle}"
+                    Text="Veröffentlichungen" />
 
                 <!--  Albums  -->
                 <controls:RowView Grid.Row="1"
@@ -326,14 +320,12 @@
 
             <!--  Similar Artists Section  -->
             <Grid Grid.Row="4"
-                Margin="0,36,0,0"
+                Margin="{StaticResource SectionTopMargin}"
                 RowDefinitions="Auto,*"
                 RowSpacing="0">
                 <Label Grid.Row="0"
-                    FontAttributes="Bold"
-                    FontSize="18"
-                    Text="Ähnliche Interpreten"
-                    TextColor="{DynamicResource TextPrimary}" />
+                    Style="{StaticResource LabelSectionTitle}"
+                    Text="Ähnliche Interpreten" />
 
                 <!--  Similar Artists  -->
                 <controls:RowView Grid.Row="1"
@@ -349,14 +341,12 @@
 
             <!--  Top Tracks Section  -->
             <Grid Grid.Row="5"
-                Margin="0,36,0,0"
+                Margin="{StaticResource SectionTopMargin}"
                 RowDefinitions="Auto,*"
                 RowSpacing="0">
                 <Label Grid.Row="0"
-                    FontAttributes="Bold"
-                    FontSize="18"
-                    Text="Toplieder"
-                    TextColor="{DynamicResource TextPrimary}" />
+                    Style="{StaticResource LabelSectionTitle}"
+                    Text="Toplieder" />
 
                 <controls:TableView Grid.Row="1"
                     Margin="0,16,0,0"

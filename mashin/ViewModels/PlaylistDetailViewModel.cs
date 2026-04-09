@@ -36,6 +36,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         .ToList();
     private bool _isLoadingMetadata;
     private bool _isLoadingTracks;
+    private bool _isHeaderCollapsed;
     private bool _disposed;
 
     #endregion
@@ -102,6 +103,12 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         private set => SetProperty(ref _isLoadingMetadata, value);
     }
 
+    public bool IsHeaderCollapsed
+    {
+        get => _isHeaderCollapsed;
+        set => SetProperty(ref _isHeaderCollapsed, value);
+    }
+
     public bool HasTracks => Tracks.Count > 0;
 
     public bool ShowTrackTable => IsLoadingTracks || HasTracks;
@@ -128,6 +135,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     public ICommand ShowContentContextMenuAtPositionCommand { get; }
     public ICommand PlayPlaylistCommand { get; }
     public ICommand TogglePlaylistFavoriteCommand { get; }
+    public ICommand ToggleHeaderCollapsedCommand { get; }
 
     #endregion
 
@@ -244,6 +252,11 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
             OnPropertyChanged(nameof(IsPlaylistFavorite));
             _ = BuildHeaderContextMenuAsync();
+        });
+
+        ToggleHeaderCollapsedCommand = new Command(() =>
+        {
+            IsHeaderCollapsed = !IsHeaderCollapsed;
         });
     }
 

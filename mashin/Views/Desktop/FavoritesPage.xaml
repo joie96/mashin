@@ -15,34 +15,29 @@
 
     <ScrollView x:Name="scrollView">
         <Grid 
-            Padding="40,30,40,30"
+            Padding="{StaticResource PagePaddingDesktop}"
             RowDefinitions="Auto,Auto,Auto,Auto,Auto"
             RowSpacing="0">
 
             <!--  Header  -->
             <VerticalStackLayout Grid.Row="0" Spacing="6">
-                <Label FontAttributes="Bold"
-                    FontSize="24"
-                    Text="Favoriten"
-                    TextColor="{DynamicResource TextPrimary}" />
+                <Label Style="{StaticResource LabelPageTitle}"
+                    Text="Favoriten" />
             </VerticalStackLayout>
 
             <!--  Tracks  (incl. Skeletons)  -->
             <Grid Grid.Row="1"
-                Margin="0,36,0,0"
+                Margin="{StaticResource SectionTopMargin}"
                 RowDefinitions="Auto,Auto,*"
                 RowSpacing="0">
                 <Label Grid.Row="0"
-                    FontAttributes="Bold"
-                    FontSize="18"
-                    Text="Titel"
-                    TextColor="{DynamicResource TextPrimary}" />
+                    Style="{StaticResource LabelSectionTitle}"
+                    Text="Titel" />
                 <Label Grid.Row="1"
+                    Style="{StaticResource LabelTertiary}"
                     Margin="0,16,0,0"
-                    FontSize="14"
                     IsVisible="{Binding ShowNoTracksMessage}"
-                    Text="Keine favorisierten Titel."
-                    TextColor="{DynamicResource TextTertiary}" />
+                    Text="Keine favorisierten Titel." />
                 <controls:TableView Grid.Row="2"
                     Margin="0,16,0,0"
                     PageSize="10"
@@ -58,20 +53,17 @@
 
             <!--  Albums  (incl. Skeletons) -->
             <Grid Grid.Row="2"
-                Margin="0,36,0,0"
+                Margin="{StaticResource SectionTopMargin}"
                 RowDefinitions="Auto,Auto,*"
                 RowSpacing="0">
                 <Label Grid.Row="0"
-                    FontAttributes="Bold"
-                    FontSize="18"
-                    Text="Alben"
-                    TextColor="{DynamicResource TextPrimary}" />
+                    Style="{StaticResource LabelSectionTitle}"
+                    Text="Alben" />
                 <Label Grid.Row="1"
+                    Style="{StaticResource LabelTertiary}"
                     Margin="0,16,0,0"
-                    FontSize="14"
                     IsVisible="{Binding ShowNoAlbumsMessage}"
-                    Text="Keine favorisierten Alben."
-                    TextColor="{DynamicResource TextTertiary}" />
+                    Text="Keine favorisierten Alben." />
                 <controls:RowView Grid.Row="2"
                     Margin="0,16,0,0"
                     IsVisible="True"
@@ -86,20 +78,17 @@
 
             <!--  Playlists  (incl. Skeletons) -->
             <Grid Grid.Row="3"
-                Margin="0,36,0,0"
+                Margin="{StaticResource SectionTopMargin}"
                 RowDefinitions="Auto,Auto,*"
                 RowSpacing="0">
                 <Label Grid.Row="0"
-                    FontAttributes="Bold"
-                    FontSize="18"
-                    Text="Playlists"
-                    TextColor="{DynamicResource TextPrimary}" />
+                    Style="{StaticResource LabelSectionTitle}"
+                    Text="Playlists" />
                 <Label Grid.Row="1"
+                    Style="{StaticResource LabelTertiary}"
                     Margin="0,16,0,0"
-                    FontSize="14"
                     IsVisible="{Binding ShowNoPlaylistsMessage}"
-                    Text="Keine favorisierten Playlists."
-                    TextColor="{DynamicResource TextTertiary}" />
+                    Text="Keine favorisierten Playlists." />
                 <controls:RowView Grid.Row="2"
                     Margin="0,16,0,0"
                     IsVisible="True"
@@ -113,20 +102,17 @@
 
             <!--  Artists  (incl. Skeletons) -->
             <Grid Grid.Row="4"
-                Margin="0,36,0,0"
+                Margin="{StaticResource SectionTopMargin}"
                 RowDefinitions="Auto,Auto,*"
                 RowSpacing="0">
                 <Label Grid.Row="0"
-                    FontAttributes="Bold"
-                    FontSize="18"
-                    Text="Artists"
-                    TextColor="{DynamicResource TextPrimary}" />
+                    Style="{StaticResource LabelSectionTitle}"
+                    Text="Artists" />
                 <Label Grid.Row="1"
+                    Style="{StaticResource LabelTertiary}"
                     Margin="0,16,0,0"
-                    FontSize="14"
                     IsVisible="{Binding ShowNoArtistsMessage}"
-                    Text="Keine favorisierten Artists."
-                    TextColor="{DynamicResource TextTertiary}" />
+                    Text="Keine favorisierten Artists." />
                 <controls:RowView Grid.Row="2"
                     Margin="0,16,0,0"
                     IsVisible="True"

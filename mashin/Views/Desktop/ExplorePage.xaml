@@ -5,13 +5,12 @@
              BackgroundColor="{DynamicResource BackgroundPrimary}">
     <ScrollView Padding="30,20">
         <VerticalStackLayout Spacing="30">
-            <Label Text="Entdecken"
-                   FontSize="32"
-                   FontAttributes="Bold"
-                   TextColor="{DynamicResource TextPrimary}"/>
-            <Label Text="Hier kannst du neue Musik entdecken."
-                   FontSize="18"
-                   TextColor="{DynamicResource TextTertiary}"/>
+         <Label Text="Entdecken"
+             Style="{StaticResource LabelPageTitle}"
+             FontSize="32"/>
+         <Label Text="Hier kannst du neue Musik entdecken."
+             Style="{StaticResource LabelTertiary}"
+             FontSize="18"/>
         </VerticalStackLayout>
     </ScrollView>
 </ContentPage>

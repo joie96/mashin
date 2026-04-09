@@ -8,34 +8,29 @@
     BackgroundColor="{DynamicResource BackgroundPrimary}">
 
     <ScrollView x:Name="scrollView">
-        <Grid Padding="40,30,40,30"
+        <Grid Padding="{StaticResource PagePaddingDesktop}"
             RowDefinitions="Auto,Auto"
             RowSpacing="0">
 
             <!--  Header  -->
             <VerticalStackLayout Grid.Row="0" Spacing="6">
-                <Label FontAttributes="Bold"
-                    FontSize="24"
-                    Text="Willkommen zurueck!"
-                    TextColor="{DynamicResource TextPrimary}" />
+                <Label Style="{StaticResource LabelPageTitle}"
+                    Text="Willkommen zurueck!" />
             </VerticalStackLayout>
 
             <!--  ListenBrainz Weekly Top Artists  -->
             <Grid Grid.Row="1"
-                Margin="0,36,0,0"
+                Margin="{StaticResource SectionTopMargin}"
                 RowDefinitions="Auto,Auto,*"
                 RowSpacing="0">
                 <Label Grid.Row="0"
-                    FontAttributes="Bold"
-                    FontSize="18"
-                    Text="ListenBrainz: Top Artists weltweit (Woche)"
-                    TextColor="{DynamicResource TextPrimary}" />
+                    Style="{StaticResource LabelSectionTitle}"
+                    Text="ListenBrainz: Top Artists weltweit (Woche)" />
                 <Label Grid.Row="1"
+                    Style="{StaticResource LabelTertiary}"
                     Margin="0,16,0,0"
-                    FontSize="14"
                     IsVisible="{Binding ShowNoArtistsMessage}"
-                    Text="Keine ListenBrainz-Empfehlungen gefunden."
-                    TextColor="{DynamicResource TextTertiary}" />
+                    Text="Keine ListenBrainz-Empfehlungen gefunden." />
                 <controls:RowView Grid.Row="2"
                     Margin="0,16,0,0"
                     IsVisible="{Binding ShowArtistsRowView}"

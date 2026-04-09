@@ -17,7 +17,7 @@
     </ContentPage.Resources>
 
     <ScrollView>
-        <Grid Padding="40,30,40,30"
+        <Grid Padding="{StaticResource PagePaddingDesktop}"
             RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
             RowSpacing="0">
 
@@ -40,10 +40,9 @@
 
                 <!--  Album Cover - Actual  -->
                 <Border Grid.Column="0"
-                    BackgroundColor="{DynamicResource BackgroundTertiary}"
+                    Style="{StaticResource SurfaceBorder}"
                     HeightRequest="150"
                     IsVisible="{Binding IsLoadingMetadata, Converter={StaticResource InvertedBoolConverter}}"
-                    StrokeThickness="0"
                     WidthRequest="150">
                     <Border.StrokeShape>
                         <RoundRectangle CornerRadius="8" />
@@ -180,10 +179,10 @@
                     VerticalOptions="Center">
 
                     <Label Margin="0,0,0,8"
+                        Style="{StaticResource LabelSecondary}"
                         FontAttributes="Bold"
                         FontSize="12"
-                        Text="ALBUM"
-                        TextColor="{DynamicResource TextSecondary}" />
+                        Text="ALBUM" />
 
                     <HorizontalStackLayout Spacing="16" VerticalOptions="Center">
                         <Label FontAttributes="Bold"
@@ -208,21 +207,16 @@
                     </HorizontalStackLayout>
 
                     <HorizontalStackLayout Spacing="8">
-                        <Label FontSize="14"
-                            Text="{Binding ArtistName}"
-                            TextColor="{DynamicResource TextSecondary}" />
-                        <Label FontSize="14"
-                            Text="•"
-                            TextColor="{DynamicResource TextSecondary}" />
-                        <Label FontSize="14"
-                            Text="{Binding AlbumYearText}"
-                            TextColor="{DynamicResource TextSecondary}" />
-                        <Label FontSize="14"
-                            Text="•"
-                            TextColor="{DynamicResource TextSecondary}" />
-                        <Label FontSize="14"
-                            Text="{Binding Tracks.Count, StringFormat='{0} Titel'}"
-                            TextColor="{DynamicResource TextSecondary}" />
+                        <Label Style="{StaticResource LabelSecondary}"
+                            Text="{Binding ArtistName}" />
+                        <Label Style="{StaticResource LabelSecondary}"
+                            Text="•" />
+                        <Label Style="{StaticResource LabelSecondary}"
+                            Text="{Binding AlbumYearText}" />
+                        <Label Style="{StaticResource LabelSecondary}"
+                            Text="•" />
+                        <Label Style="{StaticResource LabelSecondary}"
+                            Text="{Binding Tracks.Count, StringFormat='{0} Titel'}" />
                     </HorizontalStackLayout>
 
                 </VerticalStackLayout>
@@ -230,7 +224,7 @@
 
             <!--  Description - Loading State  -->
             <Grid Grid.Row="1"
-                Margin="0,36,0,0"
+                Margin="{StaticResource SectionTopMargin}"
                 IsVisible="{Binding IsLoadingMetadata}"
                 RowDefinitions="Auto,Auto,Auto,Auto"
                 RowSpacing="0">
@@ -242,7 +236,7 @@
 
             <!--  Description - Actual  -->
             <Grid Grid.Row="2"
-                Margin="0,36,0,0"
+                Margin="{StaticResource SectionTopMargin}"
                 IsVisible="{Binding HasDescription}"
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
@@ -254,17 +248,14 @@
                     </DataTrigger>
                 </Grid.Triggers>
                 <Label Grid.Row="0"
-                    FontAttributes="Bold"
-                    FontSize="18"
-                    Text="{Binding AlbumName, StringFormat='Über {0}'}"
-                    TextColor="{DynamicResource TextPrimary}" />
+                    Style="{StaticResource LabelSectionTitle}"
+                    Text="{Binding AlbumName, StringFormat='Über {0}'}" />
                 <Label Grid.Row="1"
+                    Style="{StaticResource LabelSecondary}"
                     Margin="0,16,0,0"
-                    FontSize="14"
                     LineBreakMode="WordWrap"
                     MaxLines="{Binding DescriptionMaxLines}"
-                    Text="{Binding AlbumDescription, Converter={StaticResource RemoveBlankLinesConverter}}"
-                    TextColor="{DynamicResource TextSecondary}">
+                    Text="{Binding AlbumDescription, Converter={StaticResource RemoveBlankLinesConverter}}">
                     <Label.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding ToggleDescriptionCommand}" />
                     </Label.GestureRecognizers>
@@ -305,14 +296,12 @@
 
             <!--  Tracks Section  -->
             <Grid Grid.Row="3"
-                Margin="0,36,0,0"
+                Margin="{StaticResource SectionTopMargin}"
                 RowDefinitions="Auto,*"
                 RowSpacing="0">
                 <Label Grid.Row="0"
-                    FontAttributes="Bold"
-                    FontSize="18"
-                    Text="Titel"
-                    TextColor="{DynamicResource TextPrimary}" />
+                    Style="{StaticResource LabelSectionTitle}"
+                    Text="Titel" />
 
                 <controls:TableView Grid.Row="1"
                     Margin="0,16,0,0"
@@ -327,14 +316,12 @@
 
             <!--  Other Albums Section  -->
             <Grid Grid.Row="4"
-                Margin="0,36,0,0"
+                Margin="{StaticResource SectionTopMargin}"
                 RowDefinitions="Auto,*"
                 RowSpacing="0">
                 <Label Grid.Row="0"
-                    FontAttributes="Bold"
-                    FontSize="18"
-                    Text="{Binding ArtistName, StringFormat='Weitere Alben von {0}'}"
-                    TextColor="{DynamicResource TextPrimary}" />
+                    Style="{StaticResource LabelSectionTitle}"
+                    Text="{Binding ArtistName, StringFormat='Weitere Alben von {0}'}" />
 
                 <!--  Other Albums  -->
                 <controls:RowView Grid.Row="1"
@@ -350,14 +337,12 @@
 
             <!--  Similar Artists Section  -->
             <Grid Grid.Row="5"
-                Margin="0,36,0,0"
+                Margin="{StaticResource SectionTopMargin}"
                 RowDefinitions="Auto,*"
                 RowSpacing="0">
                 <Label Grid.Row="0"
-                    FontAttributes="Bold"
-                    FontSize="18"
-                    Text="Ähnliche Interpreten"
-                    TextColor="{DynamicResource TextPrimary}" />
+                    Style="{StaticResource LabelSectionTitle}"
+                    Text="Ähnliche Interpreten" />
 
                 <!--  Similar Artists  -->
                 <controls:RowView Grid.Row="1"
