@@ -57,14 +57,14 @@
 
     <Style x:Key="ActionButtonIconLabel" TargetType="Label" BasedOn="{StaticResource BaseLabelStyle}">
         <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
-        <Setter Property="TextColor" Value="{DynamicResource BackgroundPrimary}" />
+        <Setter Property="TextColor" Value="{DynamicResource BackgroundTertiary}" />
         <Setter Property="VerticalTextAlignment" Value="Center" />
     </Style>
 
     <Style x:Key="ActionButtonTextLabel" TargetType="Label" BasedOn="{StaticResource BaseLabelStyle}">
         <Setter Property="FontFamily" Value="PoppinsSemibold" />
         <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
-        <Setter Property="TextColor" Value="{DynamicResource BackgroundPrimary}" />
+        <Setter Property="TextColor" Value="{DynamicResource BackgroundTertiary}" />
         <Setter Property="VerticalTextAlignment" Value="Center" />
     </Style>
 

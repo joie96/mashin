@@ -51,9 +51,6 @@
                             <RoundRectangle CornerRadius="8" />
                         </Border.StrokeShape>
                         <Grid>
-                            <Grid.GestureRecognizers>
-                                <PointerGestureRecognizer Buttons="Secondary" PointerPressed="OnPlaylistCoverSecondaryPointerPressed" />
-                            </Grid.GestureRecognizers>
                             <Image Aspect="AspectFill"
                                 HeightRequest="200"
                                 HorizontalOptions="Center"
@@ -110,7 +107,11 @@
                             ColumnDefinitions="Auto,Auto,Auto"
                             ColumnSpacing="12">
                             <Border Grid.Column="0"
+                                behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource ActionButtonsHoverBackground}"
                                 Style="{StaticResource ActionButtonBorder}">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Command="{Binding PlayPlaylistCommand}" />
+                                </Border.GestureRecognizers>
                                 <HorizontalStackLayout HorizontalOptions="Center"
                                     Spacing="8"
                                     VerticalOptions="Center">
@@ -123,7 +124,11 @@
                             </Border>
 
                             <Border Grid.Column="1"
+                                behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource ActionButtonsHoverBackground}"
                                 Style="{StaticResource ActionButtonBorder}">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Command="{Binding ShufflePlaylistCommand}" />
+                                </Border.GestureRecognizers>
                                 <HorizontalStackLayout HorizontalOptions="Center"
                                     Spacing="8"
                                     VerticalOptions="Center">
@@ -137,6 +142,7 @@
 
                             <Border x:Name="ExpandedMoreButton"
                                 Grid.Column="2"
+                                behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource ActionButtonsHoverBackground}"
                                 Style="{StaticResource ActionButtonBorder}">
                                 <Border.GestureRecognizers>
                                     <TapGestureRecognizer Command="{Binding ShowHeaderContextMenuAtAnchorCommand}"
@@ -234,8 +240,12 @@
                         ColumnSpacing="12"
                         VerticalOptions="Center">
                         <Border Grid.Column="0"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource ActionButtonsHoverBackground}"
                             Style="{StaticResource ActionButtonBorder}"
                             VerticalOptions="Center">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding PlayPlaylistCommand}" />
+                            </Border.GestureRecognizers>
                             <HorizontalStackLayout HorizontalOptions="Center"
                                 Spacing="8"
                                 VerticalOptions="Center">
@@ -250,8 +260,12 @@
                         </Border>
 
                         <Border Grid.Column="1"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource ActionButtonsHoverBackground}"
                             Style="{StaticResource ActionButtonBorder}"
                             VerticalOptions="Center">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ShufflePlaylistCommand}" />
+                            </Border.GestureRecognizers>
                             <HorizontalStackLayout HorizontalOptions="Center"
                                 Spacing="8"
                                 VerticalOptions="Center">
@@ -267,6 +281,7 @@
 
                         <Border x:Name="CollapsedMoreButton"
                             Grid.Column="2"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource ActionButtonsHoverBackground}"
                             Style="{StaticResource ActionButtonBorder}"
                             VerticalOptions="Center">
                             <Border.GestureRecognizers>

@@ -29,9 +29,12 @@
 
     <Color x:Key="AccentColor">#ff4757</Color>
     <Color x:Key="AccentHover">#ee5a6f</Color>
-    <Color x:Key="HoverBackground">#E6E9EF</Color>
-    <Color x:Key="HoverBackground50">#80E6E9EF</Color>
+    <Color x:Key="ActionButtonsHoverBackground">#3A3F48</Color>
+    <Color x:Key="HoverBackground10">#1AE6E9EF</Color>
     <Color x:Key="HoverBackground25">#40E6E9EF</Color>
+    <Color x:Key="HoverBackground50">#80E6E9EF</Color>
+    <Color x:Key="HoverBackground90">#E6E6E9EF</Color>
+    <Color x:Key="HoverBackground">#E6E9EF</Color>
     <Color x:Key="SelectionBackground">#DCE0E8</Color>
 
     <Color x:Key="ShadowColorSoft">#1A000000</Color>

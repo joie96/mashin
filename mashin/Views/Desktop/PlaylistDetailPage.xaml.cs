@@ -22,15 +22,4 @@ public partial class PlaylistDetailPage : ContentPage
         BindingContext = null;
 
     }
-
-    private void OnPlaylistCoverSecondaryPointerPressed(object? sender, PointerEventArgs e)
-    {
-        if (BindingContext is not PlaylistDetailViewModel viewModel)
-        {
-            return;
-        }
-
-        var position = e.GetPosition(null);
-        viewModel.ShowHeaderContextMenuAtPositionCommand?.Execute(position);
-    }
 }
