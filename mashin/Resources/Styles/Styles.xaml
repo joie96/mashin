@@ -1,166 +1,157 @@
 ﻿<?xml version="1.0" encoding="UTF-8" ?>
 <ResourceDictionary 
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
-    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-    xmlns:behaviors="clr-namespace:mashin.Views.Desktop.Behaviors">
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml">
 
-    <!-- ============================================ -->
-    <!-- BASE PAGE & SHELL STYLES                     -->
-    <!-- ============================================ -->
+    <!-- TOKENS -->
+    <x:Double x:Key="FontSizeBody">14</x:Double>
+    <x:Double x:Key="FontSizeSectionTitle">18</x:Double>
+    <x:Double x:Key="FontSizePageTitle">24</x:Double>
 
+    <x:Double x:Key="Spacing4">4</x:Double>
+    <x:Double x:Key="Spacing8">8</x:Double>
+    <x:Double x:Key="Spacing12">12</x:Double>
+    <x:Double x:Key="Spacing16">16</x:Double>
+    <x:Double x:Key="Spacing24">24</x:Double>
+    <x:Double x:Key="Spacing36">36</x:Double>
+
+    <Thickness x:Key="PagePaddingDesktop">40,20,40,20</Thickness>
+    <Thickness x:Key="SectionTopMargin">0,36,0,0</Thickness>
+
+    <!-- PAGE -->
     <Style TargetType="Page" ApplyToDerivedTypes="True">
         <Setter Property="Padding" Value="0"/>
         <Setter Property="BackgroundColor" Value="{DynamicResource BackgroundPrimary}" />
     </Style>
 
-    <Style TargetType="Shell" ApplyToDerivedTypes="True">
-        <Setter Property="Shell.BackgroundColor" Value="{DynamicResource BackgroundSecondary}" />
-        <Setter Property="Shell.ForegroundColor" Value="{DynamicResource TextPrimary}" />
-        <Setter Property="Shell.TitleColor" Value="{DynamicResource TextPrimary}" />
-        <Setter Property="Shell.DisabledColor" Value="{DynamicResource TextTertiary}" />
-        <Setter Property="Shell.UnselectedColor" Value="{DynamicResource TextSecondary}" />
-        <Setter Property="Shell.NavBarHasShadow" Value="False" />
-        <Setter Property="Shell.TabBarBackgroundColor" Value="{DynamicResource BackgroundSecondary}" />
-        <Setter Property="Shell.TabBarForegroundColor" Value="{StaticResource AccentColor}" />
-        <Setter Property="Shell.TabBarTitleColor" Value="{DynamicResource TextPrimary}" />
-        <Setter Property="Shell.TabBarUnselectedColor" Value="{DynamicResource TextSecondary}" />
-    </Style>
 
-    <!-- ============================================ -->
-    <!-- NAV (SIDEBAR) STYLES                         -->
-    <!-- ============================================ -->
-
-    <Style TargetType="Border" x:Key="NavItemBorder">
+    <!-- LABEL -->
+    <Style x:Key="BaseLabelStyle" TargetType="Label">
+        <Setter Property="TextColor" Value="{DynamicResource TextPrimary}" />
         <Setter Property="BackgroundColor" Value="Transparent" />
-        <Setter Property="Padding" Value="12,0" />
-        <Setter Property="HeightRequest" Value="40" />
-        <Setter Property="behaviors:HoverBehavior.HoverBackgroundColor" Value="{DynamicResource HoverBackground}" />
-        <Setter Property="behaviors:HoverBehavior.BaseBackgroundColor" Value="Transparent" />
+        <Setter Property="FontFamily" Value="PoppinsRegular" />
+        <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
     </Style>
 
-    <Style TargetType="Label" x:Key="NavItemText">
-        <Setter Property="FontSize" Value="14" />
+    <Style TargetType="Label" BasedOn="{StaticResource BaseLabelStyle}" />
+
+    <Style x:Key="LabelPageTitle" TargetType="Label" BasedOn="{StaticResource BaseLabelStyle}">
+        <Setter Property="FontFamily" Value="PoppinsSemibold" />
+        <Setter Property="FontSize" Value="{StaticResource FontSizePageTitle}" />
+        <Setter Property="TextColor" Value="{DynamicResource TextPrimary}" />
+    </Style>
+
+    <Style x:Key="LabelSectionTitle" TargetType="Label" BasedOn="{StaticResource BaseLabelStyle}">
+        <Setter Property="FontFamily" Value="PoppinsSemibold" />
+        <Setter Property="FontSize" Value="{StaticResource FontSizeSectionTitle}" />
+        <Setter Property="TextColor" Value="{DynamicResource TextPrimary}" />
+    </Style>
+
+    <Style x:Key="LabelSecondary" TargetType="Label" BasedOn="{StaticResource BaseLabelStyle}">
         <Setter Property="TextColor" Value="{DynamicResource TextSecondary}" />
-        <Setter Property="VerticalOptions" Value="Center" />
     </Style>
 
-    <!-- ============================================ -->
-    <!-- LABEL STYLES                                 -->
-    <!-- ============================================ -->
+    <Style x:Key="LabelTertiary" TargetType="Label" BasedOn="{StaticResource BaseLabelStyle}">
+        <Setter Property="TextColor" Value="{DynamicResource TextTertiary}" />
+    </Style>
 
-    <Style TargetType="Label">
+    <Style x:Key="ActionButtonIconLabel" TargetType="Label" BasedOn="{StaticResource BaseLabelStyle}">
+        <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
+        <Setter Property="TextColor" Value="{DynamicResource BackgroundPrimary}" />
+        <Setter Property="VerticalTextAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="ActionButtonTextLabel" TargetType="Label" BasedOn="{StaticResource BaseLabelStyle}">
+        <Setter Property="FontFamily" Value="PoppinsSemibold" />
+        <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
+        <Setter Property="TextColor" Value="{DynamicResource BackgroundPrimary}" />
+        <Setter Property="VerticalTextAlignment" Value="Center" />
+    </Style>
+
+
+    <!-- ENTRY -->
+    <Style x:Key="BaseEntryStyle" TargetType="Entry">
         <Setter Property="TextColor" Value="{DynamicResource TextPrimary}" />
         <Setter Property="BackgroundColor" Value="Transparent" />
-        <Setter Property="FontFamily" Value="OpenSansRegular" />
-        <Setter Property="FontSize" Value="14" />
-    </Style>
-
-    <Style TargetType="Label" x:Key="Headline">
-        <Setter Property="TextColor" Value="{DynamicResource TextPrimary}" />
-        <Setter Property="FontSize" Value="32" />
-        <Setter Property="FontAttributes" Value="Bold" />
-        <Setter Property="FontFamily" Value="OpenSansSemibold" />
-    </Style>
-
-    <Style TargetType="Label" x:Key="SubHeadline">
-        <Setter Property="TextColor" Value="{DynamicResource TextPrimary}" />
-        <Setter Property="FontSize" Value="24" />
-        <Setter Property="FontAttributes" Value="Bold" />
-        <Setter Property="FontFamily" Value="OpenSansSemibold" />
-    </Style>
-
-    <Style TargetType="Label" x:Key="SidebarItem">
-        <Setter Property="TextColor" Value="{DynamicResource TextSecondary}" />
-        <Setter Property="FontSize" Value="16" />
-        <Setter Property="FontFamily" Value="OpenSansRegular" />
-        <Setter Property="VerticalOptions" Value="Center" />
-    </Style>
-
-    <!-- ============================================ -->
-    <!-- ENTRY & SEARCH STYLES                        -->
-    <!-- ============================================ -->
-
-    <Style TargetType="Entry">
-        <Setter Property="TextColor" Value="{DynamicResource TextPrimary}" />
-        <Setter Property="BackgroundColor" Value="Transparent" />
-        <Setter Property="FontFamily" Value="OpenSansRegular"/>
-        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontFamily" Value="PoppinsRegular"/>
+        <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
         <Setter Property="PlaceholderColor" Value="{DynamicResource TextTertiary}" />
         <Setter Property="MinimumHeightRequest" Value="44"/>
     </Style>
+
+    <Style TargetType="Entry" BasedOn="{StaticResource BaseEntryStyle}" />
 
     <Style TargetType="SearchBar">
         <Setter Property="TextColor" Value="{DynamicResource TextPrimary}" />
         <Setter Property="PlaceholderColor" Value="{DynamicResource TextTertiary}" />
         <Setter Property="CancelButtonColor" Value="{DynamicResource TextSecondary}" />
         <Setter Property="BackgroundColor" Value="Transparent" />
-        <Setter Property="FontFamily" Value="OpenSansRegular" />
-        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontFamily" Value="PoppinsRegular" />
+        <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
         <Setter Property="MinimumHeightRequest" Value="44"/>
     </Style>
 
-    <!-- ============================================ -->
-    <!-- BUTTON STYLES                                -->
-    <!-- ============================================ -->
 
-    <Style TargetType="Button">
-        <Setter Property="TextColor" Value="{DynamicResource TextPrimary}" />
-        <Setter Property="BackgroundColor" Value="{StaticResource AccentColor}" />
-        <Setter Property="FontFamily" Value="OpenSansSemibold"/>
-        <Setter Property="FontSize" Value="14"/>
+    <!-- BUTTON -->
+    <Style x:Key="BaseButtonStyle" TargetType="Button">
+        <Setter Property="TextColor" Value="{DynamicResource BackgroundPrimary}" />
+        <Setter Property="BackgroundColor" Value="{DynamicResource TextPrimary}" />
+        <Setter Property="FontFamily" Value="PoppinsSemibold"/>
+        <Setter Property="FontSize" Value="{StaticResource FontSizeBody}"/>
         <Setter Property="BorderWidth" Value="0"/>
-        <Setter Property="CornerRadius" Value="8"/>
-        <Setter Property="Padding" Value="14,10"/>
-        <Setter Property="MinimumHeightRequest" Value="44"/>
+        <Setter Property="CornerRadius" Value="18"/>
+        <Setter Property="Padding" Value="20,8"/>
+        <Setter Property="MinimumHeightRequest" Value="40"/>
     </Style>
 
-    <!-- ============================================ -->
-    <!-- BORDER STYLES                                -->
-    <!-- ============================================ -->
+    <Style TargetType="Button" BasedOn="{StaticResource BaseButtonStyle}" />
 
-    <Style TargetType="Border">
+    <!-- BORDER STYLES -->
+    <Style x:Key="BaseBorderStyle" TargetType="Border">
         <Setter Property="Stroke" Value="Transparent" />
         <Setter Property="StrokeShape" Value="Rectangle"/>
         <Setter Property="StrokeThickness" Value="0"/>
         <Setter Property="BackgroundColor" Value="Transparent"/>
     </Style>
 
-    <!-- ============================================ -->
-    <!-- BOX VIEW (Separators)                        -->
-    <!-- ============================================ -->
+    <Style TargetType="Border" BasedOn="{StaticResource BaseBorderStyle}" />
 
+    <Style x:Key="SurfaceBorder" TargetType="Border" BasedOn="{StaticResource BaseBorderStyle}">
+        <Setter Property="BackgroundColor" Value="{DynamicResource BackgroundTertiary}" />
+    </Style>
+
+    <Style x:Key="ActionButtonBorder" TargetType="Border" BasedOn="{StaticResource BaseBorderStyle}">
+        <Setter Property="BackgroundColor" Value="{DynamicResource TextPrimary}" />
+        <Setter Property="Padding" Value="20,8" />
+        <Setter Property="StrokeShape" Value="RoundRectangle 18" />
+    </Style>
+
+
+    <!-- BOX VIEW (Separators) -->
     <Style TargetType="BoxView">
         <Setter Property="BackgroundColor" Value="{DynamicResource SeparatorColor}" />
     </Style>
 
-    <!-- ============================================ -->
-    <!-- SCROLL VIEW                                  -->
-    <!-- ============================================ -->
 
+    <!-- SCROLL VIEW -->
     <Style TargetType="ScrollView">
         <Setter Property="BackgroundColor" Value="Transparent" />
     </Style>
 
-    <!-- ============================================ -->
-    <!-- ACTIVITY INDICATOR (Loading)                 -->
-    <!-- ============================================ -->
 
+    <!-- ACTIVITY INDICATOR (Loading) -->
     <Style TargetType="ActivityIndicator">
         <Setter Property="Color" Value="{StaticResource AccentColor}" />
     </Style>
 
-    <!-- ============================================ -->
-    <!-- COLLECTION VIEW                              -->
-    <!-- ============================================ -->
 
+    <!-- COLLECTION VIEW -->
     <Style TargetType="CollectionView">
         <Setter Property="BackgroundColor" Value="Transparent" />
     </Style>
 
-    <!-- ============================================ -->
-    <!-- IMAGE                                        -->
-    <!-- ============================================ -->
 
+    <!-- IMAGE -->
     <Style TargetType="Image">
         <Setter Property="Aspect" Value="AspectFill" />
     </Style>
