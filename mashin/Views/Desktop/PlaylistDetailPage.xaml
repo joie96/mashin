@@ -104,7 +104,7 @@
                         </HorizontalStackLayout>
 
                         <Grid Grid.Row="4"
-                            ColumnDefinitions="Auto,Auto,Auto"
+                            ColumnDefinitions="Auto,Auto,Auto,Auto"
                             ColumnSpacing="12">
                             <Border Grid.Column="0"
                                 behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource ActionButtonsHoverBackground}"
@@ -140,24 +140,57 @@
                                 </HorizontalStackLayout>
                             </Border>
 
-                            <Border x:Name="ExpandedMoreButton"
-                                Grid.Column="2"
-                                behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource ActionButtonsHoverBackground}"
-                                Style="{StaticResource ActionButtonBorder}">
-                                <Border.GestureRecognizers>
+                            <Label Grid.Column="2"
+                                Margin="12,0,0,0"
+                                behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                                behaviors:HoverBehavior.EnableScaleHover="True"
+                                behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                                FontSize="18"
+                                HorizontalOptions="Center"
+                                IsVisible="{Binding IsPlaylistFavorite, Converter={StaticResource InvertedBoolConverter}}"
+                                Text="{mi:Fluent Icon=Heart48,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center">
+                                <Label.GestureRecognizers>
+                                    <TapGestureRecognizer Command="{Binding TogglePlaylistFavoriteCommand}" />
+                                </Label.GestureRecognizers>
+                            </Label>
+
+                            <Label Grid.Column="2"
+                                Margin="12,0,0,0"
+                                behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                                behaviors:HoverBehavior.EnableScaleHover="True"
+                                behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                                FontSize="18"
+                                HorizontalOptions="Center"
+                                IsVisible="{Binding IsPlaylistFavorite}"
+                                Text="{mi:FluentFilled Icon=Heart48Filled,
+                                                       FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center">
+                                <Label.GestureRecognizers>
+                                    <TapGestureRecognizer Command="{Binding TogglePlaylistFavoriteCommand}" />
+                                </Label.GestureRecognizers>
+                            </Label>
+
+                            <Label x:Name="ExpandedMoreIconLabel"
+                                Grid.Column="3"
+                                Margin="12,0,0,0"
+                                behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                                behaviors:HoverBehavior.EnableScaleHover="True"
+                                behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                                FontSize="18"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=MoreHorizontal48,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center">
+                                <Label.GestureRecognizers>
                                     <TapGestureRecognizer Command="{Binding ShowHeaderContextMenuAtAnchorCommand}"
-                                        CommandParameter="{x:Reference ExpandedMoreButton}" />
-                                </Border.GestureRecognizers>
-                                <HorizontalStackLayout HorizontalOptions="Center"
-                                    Spacing="8"
-                                    VerticalOptions="Center">
-                                    <Label Style="{StaticResource ActionButtonIconLabel}"
-                                        Text="{mi:FluentFilled Icon=MoreHorizontal16Filled,
-                                                         FontOverride=True}" />
-                                    <Label Style="{StaticResource ActionButtonTextLabel}"
-                                        Text="Mehr" />
-                                </HorizontalStackLayout>
-                            </Border>
+                                                          CommandParameter="{x:Reference ExpandedMoreIconLabel}" />
+                                </Label.GestureRecognizers>
+                            </Label>
                         </Grid>
                     </Grid>
                 <Border Grid.Column="2"
@@ -236,7 +269,7 @@
                             Text="{Binding PlaylistTotalDurationText}" />
                     </HorizontalStackLayout>
 
-                    <Grid ColumnDefinitions="Auto,Auto,Auto"
+                    <Grid ColumnDefinitions="Auto,Auto,Auto,Auto"
                         ColumnSpacing="12"
                         VerticalOptions="Center">
                         <Border Grid.Column="0"
@@ -279,27 +312,57 @@
                             </HorizontalStackLayout>
                         </Border>
 
-                        <Border x:Name="CollapsedMoreButton"
-                            Grid.Column="2"
-                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource ActionButtonsHoverBackground}"
-                            Style="{StaticResource ActionButtonBorder}"
+                        <Label Grid.Column="2"
+                            Margin="12,0,0,0"
+                            behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                            behaviors:HoverBehavior.EnableScaleHover="True"
+                            behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                            FontSize="18"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsPlaylistFavorite, Converter={StaticResource InvertedBoolConverter}}"
+                            Text="{mi:Fluent Icon=Heart48,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
                             VerticalOptions="Center">
-                            <Border.GestureRecognizers>
+                            <Label.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding TogglePlaylistFavoriteCommand}" />
+                            </Label.GestureRecognizers>
+                        </Label>
+
+                        <Label Grid.Column="2"
+                            Margin="12,0,0,0"
+                            behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                            behaviors:HoverBehavior.EnableScaleHover="True"
+                            behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                            FontSize="18"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsPlaylistFavorite}"
+                            Text="{mi:FluentFilled Icon=Heart48Filled,
+                                                   FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center">
+                            <Label.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding TogglePlaylistFavoriteCommand}" />
+                            </Label.GestureRecognizers>
+                        </Label>
+
+                        <Label x:Name="CollapsedMoreIconLabel"
+                            Grid.Column="3"
+                            Margin="6,0,0,0"
+                            behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                            behaviors:HoverBehavior.EnableScaleHover="True"
+                            behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                            FontSize="18"
+                            HorizontalOptions="Center"
+                            Text="{mi:Fluent Icon=MoreHorizontal48,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center">
+                            <Label.GestureRecognizers>
                                 <TapGestureRecognizer Command="{Binding ShowHeaderContextMenuAtAnchorCommand}"
-                                    CommandParameter="{x:Reference CollapsedMoreButton}" />
-                            </Border.GestureRecognizers>
-                            <HorizontalStackLayout HorizontalOptions="Center"
-                                Spacing="8"
-                                VerticalOptions="Center">
-                                <Label Style="{StaticResource ActionButtonIconLabel}"
-                                    Text="{mi:FluentFilled Icon=MoreHorizontal16Filled,
-                                                     FontOverride=True}" />
-                                <Label Style="{StaticResource ActionButtonTextLabel}"
-                                    FontAttributes="None"
-                                    FontSize="12"
-                                    Text="Mehr" />
-                            </HorizontalStackLayout>
-                        </Border>
+                                                      CommandParameter="{x:Reference CollapsedMoreIconLabel}" />
+                            </Label.GestureRecognizers>
+                        </Label>
                     </Grid>
                 </HorizontalStackLayout>
 
