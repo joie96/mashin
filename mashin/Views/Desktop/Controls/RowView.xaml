@@ -801,112 +801,27 @@
             SkeletonTemplate="{StaticResource SkeletonTemplate}" />
     </ContentView.Resources>
 
-    <VerticalStackLayout Spacing="8" Margin="0,-40,0,0">
-        <Grid ColumnDefinitions="*,Auto">
-            <BoxView Grid.Column="0" Opacity="0" />
-            <HorizontalStackLayout Grid.Column="1" Spacing="6">
-                
-                <!--  Previous Button  -->
-                <Border x:Name="PrevButton"
-                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-                    BackgroundColor="Transparent"
-                    HeightRequest="32"
-                    WidthRequest="32"
-                    StrokeThickness="0">
-                    <Border.GestureRecognizers>
-                        <TapGestureRecognizer Tapped="OnPrevTapped" />
-                    </Border.GestureRecognizers>
-                    <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="100" />
-                    </Border.StrokeShape>
-                    <Label FontSize="16"
-                        HorizontalOptions="Center"
-                        Text="{mi:Fluent Icon=ChevronLeft24,
-                                         FontOverride=True}"
-                        TextColor="{DynamicResource IconSecondary}"
-                        VerticalOptions="Center" />
-                </Border>
-
-                <!--  Next Button  -->
-                <Border x:Name="NextButton"
-                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-                    BackgroundColor="Transparent"
-                    HeightRequest="32"
-                    WidthRequest="32"
-                    StrokeThickness="0">
-                    <Border.GestureRecognizers>
-                        <TapGestureRecognizer Tapped="OnNextTapped" />
-                    </Border.GestureRecognizers>
-                    <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="100" />
-                    </Border.StrokeShape>
-                    <Label FontSize="16"
-                        HorizontalOptions="Center"
-                        Text="{mi:Fluent Icon=ChevronRight24,
-                                         FontOverride=True}"
-                        TextColor="{DynamicResource IconSecondary}"
-                        VerticalOptions="Center" />
-                </Border>
-            </HorizontalStackLayout>
+    <Grid x:Name="ItemsHost" SizeChanged="OnItemsHostSizeChanged">
+        <Grid x:Name="ItemsHostPrimaryLayer">
+            <ScrollView x:Name="ItemsScrollPrimary" Orientation="Neither">
+                <FlexLayout x:Name="ItemsFlexPrimary"
+                    Direction="Row"
+                    Wrap="NoWrap"
+                    AlignItems="Start"
+                    JustifyContent="Start"
+                    BindableLayout.ItemTemplateSelector="{StaticResource RowViewTemplateSelector}" />
+            </ScrollView>
         </Grid>
 
-        <!--  Items Host  -->
-        <Grid x:Name="ItemsHost" SizeChanged="OnItemsHostSizeChanged">
-            <Grid x:Name="ItemsHostPrimaryLayer">
-                <ScrollView x:Name="ItemsScrollPrimary" Orientation="Neither">
-                    <FlexLayout x:Name="ItemsFlexPrimary"
-                        Direction="Row"
-                        Wrap="NoWrap"
-                        AlignItems="Start"
-                        JustifyContent="Start"
-                        BindableLayout.ItemTemplateSelector="{StaticResource RowViewTemplateSelector}" />
-                </ScrollView>
-            </Grid>
-
-            <Grid x:Name="ItemsHostSecondaryLayer" IsVisible="False" InputTransparent="True" Opacity="0">
-                <ScrollView x:Name="ItemsScrollSecondary" Orientation="Neither">
-                    <FlexLayout x:Name="ItemsFlexSecondary"
-                        Direction="Row"
-                        Wrap="NoWrap"
-                        AlignItems="Start"
-                        JustifyContent="Start"
-                        BindableLayout.ItemTemplateSelector="{StaticResource RowViewTemplateSelector}" />
-                </ScrollView>
-            </Grid>
+        <Grid x:Name="ItemsHostSecondaryLayer" IsVisible="False" InputTransparent="True" Opacity="0">
+            <ScrollView x:Name="ItemsScrollSecondary" Orientation="Neither">
+                <FlexLayout x:Name="ItemsFlexSecondary"
+                    Direction="Row"
+                    Wrap="NoWrap"
+                    AlignItems="Start"
+                    JustifyContent="Start"
+                    BindableLayout.ItemTemplateSelector="{StaticResource RowViewTemplateSelector}" />
+            </ScrollView>
         </Grid>
-
-        <!--  Expand Button  -->
-        <Border x:Name="ExpandButton"
-            behaviors:HoverBehavior.EnableScaleHover="True"
-            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-            BackgroundColor="Transparent"
-            HeightRequest="24"
-            WidthRequest="24"
-            HorizontalOptions="Center"
-            StrokeThickness="0">
-            <Border.StrokeShape>
-                <RoundRectangle CornerRadius="12" />
-            </Border.StrokeShape>
-            <Border.GestureRecognizers>
-                <TapGestureRecognizer Tapped="OnExpandTapped" />
-            </Border.GestureRecognizers>
-            <Grid>
-                <Label x:Name="ExpandDownIcon"
-                    FontSize="12"
-                    HorizontalOptions="Center"
-                    Text="{mi:Fluent Icon=ChevronDown24,
-                                     FontOverride=True}"
-                    TextColor="{DynamicResource IconPrimary}"
-                    VerticalOptions="Center" />
-                <Label x:Name="ExpandUpIcon"
-                    FontSize="12"
-                    HorizontalOptions="Center"
-                    IsVisible="False"
-                    Text="{mi:Fluent Icon=ChevronUp24,
-                                     FontOverride=True}"
-                    TextColor="{DynamicResource IconPrimary}"
-                    VerticalOptions="Center" />
-            </Grid>
-        </Border>
-    </VerticalStackLayout>
+    </Grid>
 </ContentView>

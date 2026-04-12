@@ -1103,65 +1103,12 @@
                                                   TrackHeaderTemplate="{StaticResource TrackHeaderTemplate}"/>
     </ContentView.Resources>
 
-        <Grid Margin="0,-40,0,0"
-                    RowDefinitions="Auto,Auto,*,Auto"
+        <Grid Margin="0,0,0,0"
+                    RowDefinitions="Auto,*"
                     RowSpacing="8">
 
-        <!--  Paging Navigation (Prev / Next)  -->
-                <Grid Grid.Row="0"
-                            ColumnDefinitions="*,Auto">
-            <BoxView Grid.Column="0"
-                    Opacity="0"/>
-            <HorizontalStackLayout x:Name="NavigationHost"
-                                   Grid.Column="1"
-                                   IsVisible="False"
-                                   Spacing="6">
-                <!--  Prev  -->
-                <Border x:Name="PrevButton"
-                        behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-                        BackgroundColor="Transparent"
-                        HeightRequest="32"
-                        StrokeThickness="0"
-                        WidthRequest="32">
-                    <Border.GestureRecognizers>
-                        <TapGestureRecognizer Tapped="OnPrevTapped"/>
-                    </Border.GestureRecognizers>
-                    <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="100"/>
-                    </Border.StrokeShape>
-                    <Label FontSize="16"
-                           HorizontalOptions="Center"
-                           Text="{mi:Fluent Icon=ChevronLeft24,
-                                     FontOverride=True}"
-                           TextColor="{DynamicResource IconSecondary}"
-                           VerticalOptions="Center"/>
-                </Border>
-
-                <!--  Next  -->
-                <Border x:Name="NextButton"
-                        behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-                        BackgroundColor="Transparent"
-                        HeightRequest="32"
-                        StrokeThickness="0"
-                        WidthRequest="32">
-                    <Border.GestureRecognizers>
-                        <TapGestureRecognizer Tapped="OnNextTapped"/>
-                    </Border.GestureRecognizers>
-                    <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="100"/>
-                    </Border.StrokeShape>
-                    <Label FontSize="16"
-                           HorizontalOptions="Center"
-                           Text="{mi:Fluent Icon=ChevronRight24,
-                                     FontOverride=True}"
-                           TextColor="{DynamicResource IconSecondary}"
-                           VerticalOptions="Center"/>
-                </Border>
-            </HorizontalStackLayout>
-        </Grid>
-
         <!--  Header  -->
-        <CollectionView Grid.Row="1"
+        <CollectionView Grid.Row="0"
                 ItemsSource="{Binding HeaderItems, Source={x:Reference self}}"
                         ItemTemplate="{StaticResource TableViewHeaderTemplateSelector}"
                         SelectionMode="None">
@@ -1169,50 +1116,12 @@
 
         <!--  Items  -->
         <CollectionView x:Name="collectionView"
-                Grid.Row="2"
+                Grid.Row="1"
                         Margin="0,0"
                         ItemTemplate="{StaticResource TableViewTemplateSelector}"
                         ItemSizingStrategy="MeasureFirstItem"
                         ItemsSource="{Binding VisibleItems, Source={x:Reference self}}"
                         SelectionMode="None">
         </CollectionView>
-
-        <!--  Expand / Collapse Button  -->
-        <Border x:Name="ExpandButton"
-            Grid.Row="3"
-                behaviors:HoverBehavior.EnableScaleHover="True"
-                behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-                BackgroundColor="Transparent"
-                HeightRequest="24"
-                HorizontalOptions="Center"
-                IsVisible="False"
-                StrokeThickness="0"
-                WidthRequest="24">
-            <Border.StrokeShape>
-                <RoundRectangle CornerRadius="12"/>
-            </Border.StrokeShape>
-            <Border.GestureRecognizers>
-                <TapGestureRecognizer Tapped="OnExpandTapped"/>
-            </Border.GestureRecognizers>
-            <Grid>
-                <!--  Chevron Down (collapsed)  -->
-                <Label x:Name="ExpandDownIcon"
-                       FontSize="12"
-                       HorizontalOptions="Center"
-                       Text="{mi:Fluent Icon=ChevronDown24,
-                                 FontOverride=True}"
-                       TextColor="{DynamicResource IconPrimary}"
-                       VerticalOptions="Center"/>
-                <!--  Chevron Up (expanded)  -->
-                <Label x:Name="ExpandUpIcon"
-                       FontSize="12"
-                       HorizontalOptions="Center"
-                       IsVisible="False"
-                       Text="{mi:Fluent Icon=ChevronUp24,
-                                 FontOverride=True}"
-                       TextColor="{DynamicResource IconPrimary}"
-                       VerticalOptions="Center"/>
-            </Grid>
-        </Border>
     </Grid>
 </ContentView>

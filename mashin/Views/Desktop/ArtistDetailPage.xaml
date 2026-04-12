@@ -24,180 +24,88 @@
 
             <!--  Artist Header  -->
             <Grid Grid.Row="0"
-                ColumnDefinitions="150,*"
+                ColumnDefinitions="200,*"
                 ColumnSpacing="30">
 
                 <!--  Artist Image - Loading State  -->
                 <Border Grid.Column="0"
-                    HeightRequest="150"
+                    HeightRequest="200"
                     IsVisible="{Binding IsLoadingMetadata}"
                     StrokeThickness="0"
-                    WidthRequest="150">
+                    WidthRequest="200">
                     <Border.StrokeShape>
                         <RoundRectangle CornerRadius="100" />
                     </Border.StrokeShape>
-                    <controls:SkeletonLoader CornerRadius="100" HeightRequest="150" WidthRequest="150" />
+                    <controls:SkeletonLoader CornerRadius="100" HeightRequest="200" WidthRequest="200" />
                 </Border>
 
                 <!--  Artist Image - Actual  -->
                 <Border Grid.Column="0"
-                    behaviors:HoverBehavior.BaseBackgroundColor="Transparent"
-                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                     BackgroundColor="Transparent"
-                    HeightRequest="150"
+                    HeightRequest="200"
                     IsVisible="{Binding IsLoadingMetadata, Converter={StaticResource InvertedBoolConverter}}"
                     StrokeThickness="0"
-                    WidthRequest="150">
+                    WidthRequest="200">
                     <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="8" />
+                        <RoundRectangle CornerRadius="100" />
                     </Border.StrokeShape>
 
-                    <!--  Cover + Overlays  -->
-                    <Grid x:Name="ArtistCoverContainer"
-                          behaviors:HoverBehavior.ShowOnHoverTarget="{x:Reference ArtistCoverHoverOverlay}">
-                        <Grid.GestureRecognizers>
-                            <PointerGestureRecognizer Buttons="Secondary"
-                                PointerPressed="OnArtistCoverSecondaryPointerPressed" />
-                        </Grid.GestureRecognizers>
-
-                        <!--  Artist Cover  -->
-                        <Border StrokeThickness="0">
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="100" />
-                            </Border.StrokeShape>
-                            <Image Aspect="AspectFill"
-                                HeightRequest="150"
-                                HorizontalOptions="Center"
-                                Source="{Binding ImageUrl}"
-                                VerticalOptions="Center"
-                                WidthRequest="150">
-                                <Image.Clip>
-                                    <RoundRectangleGeometry CornerRadius="100" Rect="0,0,150,150" />
-                                </Image.Clip>
-                            </Image>
-                        </Border>
-
-                        <!--  Hover Overlay  -->
-                        <Border x:Name="ArtistCoverHoverOverlay"
-                            BackgroundColor="#80000000"
-                            Opacity="0"
-                            StrokeThickness="0">
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="8" />
-                            </Border.StrokeShape>
-                            <Grid RowDefinitions="Auto,*,Auto">
-
-                                <!--  Play Button  -->
-                                <Border Grid.RowSpan="3"
-                                    behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource IconPrimary75}"
-                                    behaviors:HoverBehavior.EnableScaleHover="True"
-                                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource IconPrimary}"
-                                    BackgroundColor="{DynamicResource IconPrimary75}"
-                                    HeightRequest="64"
-                                    HorizontalOptions="Center"
-                                    StrokeThickness="0"
-                                    VerticalOptions="Center"
-                                    WidthRequest="64">
-                                    <Border.GestureRecognizers>
-                                        <TapGestureRecognizer Command="{Binding PlayArtistCommand}" />
-                                    </Border.GestureRecognizers>
-                                    <Border.StrokeShape>
-                                        <RoundRectangle CornerRadius="100" />
-                                    </Border.StrokeShape>
-                                    <Label FontSize="28"
-                                        HorizontalOptions="Center"
-                                        Text="{mi:FluentFilled Icon=Play12Filled,
-                                                         FontOverride=True}"
-                                        TextColor="{DynamicResource BackgroundPrimary}"
-                                        VerticalOptions="Center" />
-                                </Border>
-
-                                <!--  Bottom Row: Favorite & More  -->
-                                <Grid Grid.Row="2"
-                                    Margin="8"
-                                    ColumnDefinitions="*,Auto">
-                                    <!--  Favorite Outline  -->
-                                    <Label Grid.Column="0"
-                                        Margin="0,0,12,0"
-                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
-                                        behaviors:HoverBehavior.EnableScaleHover="True"
-                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
-                                        FontSize="18"
-                                        HorizontalOptions="End"
-                                        IsVisible="{Binding IsArtistFavorite, Converter={StaticResource InvertedBoolConverter}}"
-                                        Text="{mi:Fluent Icon=Heart48,
-                                                         FontOverride=True}"
-                                        TextColor="{DynamicResource IconSecondary}"
-                                        VerticalOptions="Center">
-                                        <Label.GestureRecognizers>
-                                            <TapGestureRecognizer Command="{Binding ToggleArtistFavoriteCommand}" />
-                                        </Label.GestureRecognizers>
-                                    </Label>
-
-                                    <!--  Favorite Filled  -->
-                                    <Label Grid.Column="0"
-                                        Margin="0,0,12,0"
-                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
-                                        behaviors:HoverBehavior.EnableScaleHover="True"
-                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
-                                        FontSize="18"
-                                        HorizontalOptions="End"
-                                        IsVisible="{Binding IsArtistFavorite}"
-                                        Text="{mi:FluentFilled Icon=Heart48Filled,
-                                                               FontOverride=True}"
-                                        TextColor="{DynamicResource IconSecondary}"
-                                        VerticalOptions="Center">
-                                        <Label.GestureRecognizers>
-                                            <TapGestureRecognizer Command="{Binding ToggleArtistFavoriteCommand}" />
-                                        </Label.GestureRecognizers>
-                                    </Label>
-
-                                    <!--  More  -->
-                                    <Label x:Name="ArtistMoreIconLabel"
-                                        Grid.Column="1"
-                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
-                                        behaviors:HoverBehavior.EnableScaleHover="True"
-                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
-                                        FontSize="18"
-                                        HorizontalOptions="End"
-                                        Text="{mi:Fluent Icon=MoreHorizontal48,
-                                                         FontOverride=True}"
-                                        TextColor="{DynamicResource IconSecondary}"
-                                        VerticalOptions="Center">
-                                        <Label.GestureRecognizers>
-                                            <TapGestureRecognizer Command="{Binding ShowHeaderContextMenuAtAnchorCommand}"
-                                                                  CommandParameter="{x:Reference ArtistMoreIconLabel}" />
-                                        </Label.GestureRecognizers>
-                                    </Label>
-                                </Grid>
-                            </Grid>
-                        </Border>
+                    <Grid>
+                        <Image Aspect="AspectFill"
+                            HeightRequest="200"
+                            HorizontalOptions="Center"
+                            Source="{Binding ImageUrl}"
+                            VerticalOptions="Center"
+                            WidthRequest="200">
+                            <Image.Clip>
+                                <RoundRectangleGeometry CornerRadius="100" Rect="0,0,200,200" />
+                            </Image.Clip>
+                        </Image>
                     </Grid>
                 </Border>
 
                 <!--  Artist Info - Loading State  -->
-                <VerticalStackLayout Grid.Column="1"
+                <Grid Grid.Column="1"
+                    HeightRequest="200"
                     IsVisible="{Binding IsLoadingMetadata}"
-                    Spacing="12"
-                    VerticalOptions="Center">
-                    <controls:SkeletonLoader HeightRequest="12" HorizontalOptions="Start" WidthRequest="120" />
-                    <controls:SkeletonLoader HeightRequest="32" HorizontalOptions="Start" WidthRequest="300" />
-                    <controls:SkeletonLoader HeightRequest="14" HorizontalOptions="Start" WidthRequest="150" />
-                </VerticalStackLayout>
+                    RowDefinitions="*,Auto,Auto,Auto,40"
+                    VerticalOptions="Fill">
+                    <controls:SkeletonLoader Grid.Row="1"
+                        HeightRequest="12"
+                        HorizontalOptions="Start"
+                        Margin="0,0,0,16"
+                        WidthRequest="120" />
+                    <controls:SkeletonLoader Grid.Row="2"
+                        HeightRequest="32"
+                        HorizontalOptions="Start"
+                        Margin="0,0,0,8"
+                        WidthRequest="320" />
+                    <controls:SkeletonLoader Grid.Row="3"
+                        HeightRequest="14"
+                        HorizontalOptions="Start"
+                        Margin="0,0,0,16"
+                        WidthRequest="150" />
+                </Grid>
 
                 <!--  Artist Info - Actual  -->
-                <VerticalStackLayout Grid.Column="1"
+                <Grid Grid.Column="1"
+                    HeightRequest="200"
                     IsVisible="{Binding IsLoadingMetadata, Converter={StaticResource InvertedBoolConverter}}"
-                    Spacing="12"
-                    VerticalOptions="Center">
+                    RowDefinitions="*,Auto,Auto,Auto,Auto"
+                    VerticalOptions="Fill">
 
-                    <Label Style="{StaticResource LabelSecondary}"
+                    <Label Grid.Row="1"
+                        Margin="0,0,0,16"
+                        Style="{StaticResource LabelSecondary}"
                         FontAttributes="Bold"
                         FontSize="12"
                         Text="ARTIST/INTERPRET" />
 
                     <!--  Artist Name + Provider Icon  -->
-                    <HorizontalStackLayout Spacing="16" VerticalOptions="Center">
+                    <HorizontalStackLayout Grid.Row="2"
+                        Margin="0,0,0,8"
+                        Spacing="16"
+                        VerticalOptions="Center">
                         <Label FontAttributes="Bold"
                             FontSize="32"
                             LineBreakMode="WordWrap"
@@ -219,10 +127,102 @@
                         </ffimageloading:SvgCachedImage>
                     </HorizontalStackLayout>
 
-                    <Label Style="{StaticResource LabelSecondary}"
+                    <Label Grid.Row="3"
+                        Margin="0,0,0,16"
+                        Style="{StaticResource LabelSecondary}"
                         Text="{Binding Albums.Count, StringFormat='{0} Alben'}" />
 
-                </VerticalStackLayout>
+                    <Grid Grid.Row="4"
+                        ColumnDefinitions="Auto,Auto,Auto,Auto"
+                        ColumnSpacing="12">
+                        <Border Grid.Column="0"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource ActionButtonsHoverBackground}"
+                            Style="{StaticResource ActionButtonBorder}">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding PlayArtistCommand}" />
+                            </Border.GestureRecognizers>
+                            <HorizontalStackLayout HorizontalOptions="Center"
+                                Spacing="8"
+                                VerticalOptions="Center">
+                                <Label Style="{StaticResource ActionButtonIconLabel}"
+                                    Text="{mi:FluentFilled Icon=Play16Filled,
+                                                     FontOverride=True}" />
+                                <Label Style="{StaticResource ActionButtonTextLabel}"
+                                    Text="Abspielen" />
+                            </HorizontalStackLayout>
+                        </Border>
+
+                        <Border Grid.Column="1"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource ActionButtonsHoverBackground}"
+                            Style="{StaticResource ActionButtonBorder}">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ShuffleArtistCommand}" />
+                            </Border.GestureRecognizers>
+                            <HorizontalStackLayout HorizontalOptions="Center"
+                                Spacing="8"
+                                VerticalOptions="Center">
+                                <Label Style="{StaticResource ActionButtonIconLabel}"
+                                    Text="{mi:FluentFilled Icon=ArrowShuffle16Filled,
+                                                     FontOverride=True}" />
+                                <Label Style="{StaticResource ActionButtonTextLabel}"
+                                    Text="Zufällig" />
+                            </HorizontalStackLayout>
+                        </Border>
+
+                        <Label Grid.Column="2"
+                            Margin="12,0,0,0"
+                            behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                            behaviors:HoverBehavior.EnableScaleHover="True"
+                            behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                            FontSize="18"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsArtistFavorite, Converter={StaticResource InvertedBoolConverter}}"
+                            Text="{mi:Fluent Icon=Heart48,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center">
+                            <Label.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ToggleArtistFavoriteCommand}" />
+                            </Label.GestureRecognizers>
+                        </Label>
+
+                        <Label Grid.Column="2"
+                            Margin="12,0,0,0"
+                            behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                            behaviors:HoverBehavior.EnableScaleHover="True"
+                            behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                            FontSize="18"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsArtistFavorite}"
+                            Text="{mi:FluentFilled Icon=Heart48Filled,
+                                           FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center">
+                            <Label.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ToggleArtistFavoriteCommand}" />
+                            </Label.GestureRecognizers>
+                        </Label>
+
+                        <Label x:Name="ArtistHeaderMoreIconLabel"
+                            Grid.Column="3"
+                            Margin="6,0,0,0"
+                            behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                            behaviors:HoverBehavior.EnableScaleHover="True"
+                            behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                            FontSize="18"
+                            HorizontalOptions="Center"
+                            Text="{mi:Fluent Icon=MoreHorizontal48,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center">
+                            <Label.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ShowHeaderContextMenuAtAnchorCommand}"
+                                                      CommandParameter="{x:Reference ArtistHeaderMoreIconLabel}" />
+                            </Label.GestureRecognizers>
+                        </Label>
+                    </Grid>
+
+                </Grid>
             </Grid>
 
             <!--  Description - Loading State  -->
@@ -300,14 +300,139 @@
             <!--  Albums/Releases Section  -->
             <Grid Grid.Row="3"
                 Margin="{StaticResource SectionTopMargin}"
-                RowDefinitions="Auto,*"
+                RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
-                <Label Grid.Row="0"
-                    Style="{StaticResource LabelSectionTitle}"
-                    Text="Veröffentlichungen" />
+                <Grid Grid.Row="0"
+                    ColumnDefinitions="Auto,*,Auto"
+                    ColumnSpacing="16">
+                    <Label Grid.Column="0"
+                        Style="{StaticResource LabelSectionTitle}"
+                        Text="Veröffentlichungen"
+                        VerticalOptions="Center" />
+
+                    <BoxView Grid.Column="1"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+
+                    <Grid Grid.Column="2"
+                        ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
+                        ColumnSpacing="8"
+                        VerticalOptions="Center">
+                        <!--  Play button for the whole releases section  -->
+                        <Border Grid.Column="0"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding PlayAlbumsCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=Play16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                            <!--  Shuffle button for the whole releases section  -->
+                        <Border Grid.Column="1"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ShuffleAlbumsCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ArrowShuffle16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                        <!--  Separator between section actions and paging  -->
+                        <BoxView Grid.Column="2"
+                            HeightRequest="18"
+                            Margin="4,0"
+                            Opacity="0.75"
+                            VerticalOptions="Center"
+                            WidthRequest="1" />
+
+                        <!--  Previous page in RowView  -->
+                        <Border Grid.Column="3"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            InputTransparent="{Binding Source={x:Reference AlbumsRowView}, Path=CanGoPrev, Converter={StaticResource InvertedBoolConverter}}"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding Source={x:Reference AlbumsRowView}, Path=CanGoPrev}"
+                                    TargetType="Border"
+                                    Value="False">
+                                    <Setter Property="Opacity" Value="0.35" />
+                                </DataTrigger>
+                            </Border.Triggers>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding Source={x:Reference AlbumsRowView}, Path=PrevPageCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ChevronLeft24,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                            <!--  Next page in RowView  -->
+                        <Border Grid.Column="4"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            InputTransparent="{Binding Source={x:Reference AlbumsRowView}, Path=CanGoNext, Converter={StaticResource InvertedBoolConverter}}"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding Source={x:Reference AlbumsRowView}, Path=CanGoNext}"
+                                    TargetType="Border"
+                                    Value="False">
+                                    <Setter Property="Opacity" Value="0.35" />
+                                </DataTrigger>
+                            </Border.Triggers>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding Source={x:Reference AlbumsRowView}, Path=NextPageCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ChevronRight24,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                    </Grid>
+                </Grid>
 
                 <!--  Albums  -->
-                <controls:RowView Grid.Row="1"
+                <controls:RowView x:Name="AlbumsRowView"
+                    Grid.Row="1"
                     Margin="0,16,0,0"
                     ItemCornerRadius="8"
                     ItemsSource="{Binding AlbumItems}"
@@ -316,19 +441,179 @@
                     SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
                     ShowContextMenuAtAnchorCommand="{Binding ShowAlbumContextMenuAtAnchorCommand}"
                     ShowContextMenuAtPositionCommand="{Binding ShowAlbumContextMenuAtPositionCommand}" />
+
+                <!--  Expand/collapse for the releases card list  -->
+                <Border Grid.Row="2"
+                    Margin="0,8,0,0"
+                    behaviors:HoverBehavior.EnableScaleHover="True"
+                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                    BackgroundColor="Transparent"
+                    HeightRequest="24"
+                    HorizontalOptions="Center"
+                    IsVisible="{Binding Source={x:Reference AlbumsRowView}, Path=CanToggleExpand}"
+                    StrokeThickness="0"
+                    WidthRequest="24">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="12" />
+                    </Border.StrokeShape>
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding Source={x:Reference AlbumsRowView}, Path=ToggleExpandCommand}" />
+                    </Border.GestureRecognizers>
+                    <Grid>
+                        <Label FontSize="12"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding Source={x:Reference AlbumsRowView}, Path=IsExpanded, Converter={StaticResource InvertedBoolConverter}}"
+                            Text="{mi:Fluent Icon=ChevronDown24,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                        <Label FontSize="12"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding Source={x:Reference AlbumsRowView}, Path=IsExpanded}"
+                            Text="{mi:Fluent Icon=ChevronUp24,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                    </Grid>
+                </Border>
             </Grid>
 
             <!--  Similar Artists Section  -->
             <Grid Grid.Row="4"
                 Margin="{StaticResource SectionTopMargin}"
-                RowDefinitions="Auto,*"
+                RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
-                <Label Grid.Row="0"
-                    Style="{StaticResource LabelSectionTitle}"
-                    Text="Ähnliche Interpreten" />
+                <Grid Grid.Row="0"
+                    ColumnDefinitions="Auto,*,Auto"
+                    ColumnSpacing="16">
+                    <Label Grid.Column="0"
+                        Style="{StaticResource LabelSectionTitle}"
+                        Text="Ähnliche Interpreten"
+                        VerticalOptions="Center" />
+
+                    <BoxView Grid.Column="1"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+
+                    <Grid Grid.Column="2"
+                        ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
+                        ColumnSpacing="8"
+                        VerticalOptions="Center">
+                        <!--  Play button for the similar artists section  -->
+                        <Border Grid.Column="0"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding PlaySimilarArtistsCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=Play16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                            <!--  Shuffle button for the similar artists section  -->
+                        <Border Grid.Column="1"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ShuffleSimilarArtistsCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ArrowShuffle16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                        <!--  Separator between section actions and paging  -->
+                        <BoxView Grid.Column="2"
+                            HeightRequest="18"
+                            Margin="4,0"
+                            Opacity="0.75"
+                            VerticalOptions="Center"
+                            WidthRequest="1" />
+
+                        <!--  Previous page in RowView  -->
+                        <Border Grid.Column="3"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            InputTransparent="{Binding Source={x:Reference SimilarArtistsRowView}, Path=CanGoPrev, Converter={StaticResource InvertedBoolConverter}}"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding Source={x:Reference SimilarArtistsRowView}, Path=CanGoPrev}"
+                                    TargetType="Border"
+                                    Value="False">
+                                    <Setter Property="Opacity" Value="0.35" />
+                                </DataTrigger>
+                            </Border.Triggers>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding Source={x:Reference SimilarArtistsRowView}, Path=PrevPageCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ChevronLeft24,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                            <!--  Next page in RowView  -->
+                        <Border Grid.Column="4"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            InputTransparent="{Binding Source={x:Reference SimilarArtistsRowView}, Path=CanGoNext, Converter={StaticResource InvertedBoolConverter}}"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding Source={x:Reference SimilarArtistsRowView}, Path=CanGoNext}"
+                                    TargetType="Border"
+                                    Value="False">
+                                    <Setter Property="Opacity" Value="0.35" />
+                                </DataTrigger>
+                            </Border.Triggers>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding Source={x:Reference SimilarArtistsRowView}, Path=NextPageCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ChevronRight24,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                    </Grid>
+                </Grid>
 
                 <!--  Similar Artists  -->
-                <controls:RowView Grid.Row="1"
+                <controls:RowView x:Name="SimilarArtistsRowView"
+                    Grid.Row="1"
                     Margin="0,16,0,0"
                     ItemCornerRadius="100"
                     ItemsSource="{Binding SimilarArtistItems}"
@@ -337,18 +622,178 @@
                     SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
                     ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
                     ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
+
+                <!--  Expand/collapse for the similar artists card list  -->
+                <Border Grid.Row="2"
+                    Margin="0,8,0,0"
+                    behaviors:HoverBehavior.EnableScaleHover="True"
+                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                    BackgroundColor="Transparent"
+                    HeightRequest="24"
+                    HorizontalOptions="Center"
+                    IsVisible="{Binding Source={x:Reference SimilarArtistsRowView}, Path=CanToggleExpand}"
+                    StrokeThickness="0"
+                    WidthRequest="24">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="12" />
+                    </Border.StrokeShape>
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding Source={x:Reference SimilarArtistsRowView}, Path=ToggleExpandCommand}" />
+                    </Border.GestureRecognizers>
+                    <Grid>
+                        <Label FontSize="12"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding Source={x:Reference SimilarArtistsRowView}, Path=IsExpanded, Converter={StaticResource InvertedBoolConverter}}"
+                            Text="{mi:Fluent Icon=ChevronDown24,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                        <Label FontSize="12"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding Source={x:Reference SimilarArtistsRowView}, Path=IsExpanded}"
+                            Text="{mi:Fluent Icon=ChevronUp24,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                    </Grid>
+                </Border>
             </Grid>
 
             <!--  Top Tracks Section  -->
             <Grid Grid.Row="5"
                 Margin="{StaticResource SectionTopMargin}"
-                RowDefinitions="Auto,*"
+                RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
-                <Label Grid.Row="0"
-                    Style="{StaticResource LabelSectionTitle}"
-                    Text="Toplieder" />
+                <Grid Grid.Row="0"
+                    ColumnDefinitions="Auto,*,Auto"
+                    ColumnSpacing="16">
+                    <Label Grid.Column="0"
+                        Style="{StaticResource LabelSectionTitle}"
+                        Text="Toplieder"
+                        VerticalOptions="Center" />
 
-                <controls:TableView Grid.Row="1"
+                    <BoxView Grid.Column="1"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+
+                    <Grid Grid.Column="2"
+                        ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
+                        ColumnSpacing="8"
+                        VerticalOptions="Center">
+                        <!--  Play button for top tracks section  -->
+                        <Border Grid.Column="0"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding PlayArtistCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=Play16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                        <!--  Shuffle button for top tracks section  -->
+                        <Border Grid.Column="1"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ShuffleArtistCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ArrowShuffle16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                        <!--  Separator between section actions and paging  -->
+                        <BoxView Grid.Column="2"
+                            HeightRequest="18"
+                            Margin="4,0"
+                            Opacity="0.75"
+                            VerticalOptions="Center"
+                            WidthRequest="1" />
+
+                        <!--  Previous page in TableView  -->
+                        <Border Grid.Column="3"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            InputTransparent="{Binding Source={x:Reference TopTracksTableView}, Path=CanGoPrev, Converter={StaticResource InvertedBoolConverter}}"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding Source={x:Reference TopTracksTableView}, Path=CanGoPrev}"
+                                    TargetType="Border"
+                                    Value="False">
+                                    <Setter Property="Opacity" Value="0.35" />
+                                </DataTrigger>
+                            </Border.Triggers>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding Source={x:Reference TopTracksTableView}, Path=PrevPageCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ChevronLeft24,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                        <!--  Next page in TableView  -->
+                        <Border Grid.Column="4"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            InputTransparent="{Binding Source={x:Reference TopTracksTableView}, Path=CanGoNext, Converter={StaticResource InvertedBoolConverter}}"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding Source={x:Reference TopTracksTableView}, Path=CanGoNext}"
+                                    TargetType="Border"
+                                    Value="False">
+                                    <Setter Property="Opacity" Value="0.35" />
+                                </DataTrigger>
+                            </Border.Triggers>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding Source={x:Reference TopTracksTableView}, Path=NextPageCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ChevronRight24,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                    </Grid>
+                </Grid>
+
+                <controls:TableView x:Name="TopTracksTableView"
+                    Grid.Row="1"
                     Margin="0,16,0,0"
                     PageSize="10"
                     ItemsSource="{Binding TopTrackItems}"
@@ -357,6 +802,41 @@
                     SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
                     ShowContextMenuAtAnchorCommand="{Binding ShowTrackContextMenuAtAnchorCommand}"
                     ShowContextMenuAtPositionCommand="{Binding ShowTrackContextMenuAtPositionCommand}" />
+
+                <!--  Expand/collapse for top tracks list  -->
+                <Border Grid.Row="2"
+                    Margin="0,8,0,0"
+                    behaviors:HoverBehavior.EnableScaleHover="True"
+                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                    BackgroundColor="Transparent"
+                    HeightRequest="24"
+                    HorizontalOptions="Center"
+                    IsVisible="{Binding Source={x:Reference TopTracksTableView}, Path=CanToggleExpand}"
+                    StrokeThickness="0"
+                    WidthRequest="24">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="12" />
+                    </Border.StrokeShape>
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding Source={x:Reference TopTracksTableView}, Path=ToggleExpandCommand}" />
+                    </Border.GestureRecognizers>
+                    <Grid>
+                        <Label FontSize="12"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding Source={x:Reference TopTracksTableView}, Path=IsExpanded, Converter={StaticResource InvertedBoolConverter}}"
+                            Text="{mi:Fluent Icon=ChevronDown24,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                        <Label FontSize="12"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding Source={x:Reference TopTracksTableView}, Path=IsExpanded}"
+                            Text="{mi:Fluent Icon=ChevronUp24,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                    </Grid>
+                </Border>
             </Grid>
 
         </Grid>

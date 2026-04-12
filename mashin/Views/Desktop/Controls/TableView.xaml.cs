@@ -54,6 +54,24 @@ public partial class TableView : ContentView
     public static readonly BindableProperty PageSizeProperty =
         BindableProperty.Create(nameof(PageSize), typeof(int), typeof(TableView), defaultValue: 10, propertyChanged: OnPageSizeChanged);
 
+    public static readonly BindableProperty CanGoPrevProperty =
+        BindableProperty.Create(nameof(CanGoPrev), typeof(bool), typeof(TableView), false);
+
+    public static readonly BindableProperty CanGoNextProperty =
+        BindableProperty.Create(nameof(CanGoNext), typeof(bool), typeof(TableView), false);
+
+    public static readonly BindableProperty CanToggleExpandProperty =
+        BindableProperty.Create(nameof(CanToggleExpand), typeof(bool), typeof(TableView), false);
+
+    public static readonly BindableProperty IsExpandedProperty =
+        BindableProperty.Create(nameof(IsExpanded), typeof(bool), typeof(TableView), false);
+
+    public static readonly BindableProperty CurrentPageProperty =
+        BindableProperty.Create(nameof(CurrentPage), typeof(int), typeof(TableView), 1);
+
+    public static readonly BindableProperty TotalPagesProperty =
+        BindableProperty.Create(nameof(TotalPages), typeof(int), typeof(TableView), 1);
+
     #endregion
 
     #region Fields
@@ -153,9 +171,49 @@ public partial class TableView : ContentView
         set => SetValue(PageSizeProperty, value);
     }
 
+    public bool CanGoPrev
+    {
+        get => (bool)GetValue(CanGoPrevProperty);
+        private set => SetValue(CanGoPrevProperty, value);
+    }
+
+    public bool CanGoNext
+    {
+        get => (bool)GetValue(CanGoNextProperty);
+        private set => SetValue(CanGoNextProperty, value);
+    }
+
+    public bool CanToggleExpand
+    {
+        get => (bool)GetValue(CanToggleExpandProperty);
+        private set => SetValue(CanToggleExpandProperty, value);
+    }
+
+    public bool IsExpanded
+    {
+        get => (bool)GetValue(IsExpandedProperty);
+        private set => SetValue(IsExpandedProperty, value);
+    }
+
+    public int CurrentPage
+    {
+        get => (int)GetValue(CurrentPageProperty);
+        private set => SetValue(CurrentPageProperty, value);
+    }
+
+    public int TotalPages
+    {
+        get => (int)GetValue(TotalPagesProperty);
+        private set => SetValue(TotalPagesProperty, value);
+    }
+
+    public ICommand PrevPageCommand { get; }
+    public ICommand NextPageCommand { get; }
+    public ICommand ToggleExpandCommand { get; }
+
     private bool HasExpandableItems => PageSize > 0 && _allItems.Count > PageSize;
 
-    private int TotalPages => PageSize <= 0
+    private int ComputedTotalPages => PageSize <= 0
         ? 1
         : Math.Max(1, (int)Math.Ceiling((double)_allItems.Count / PageSize));
 
@@ -168,6 +226,10 @@ public partial class TableView : ContentView
     public TableView()
     {
         InitializeComponent();
+
+        PrevPageCommand = new Command(async () => await GoToPreviousPageAsync(), () => CanGoPrev);
+        NextPageCommand = new Command(async () => await GoToNextPageAsync(), () => CanGoNext);
+        ToggleExpandCommand = new Command(async () => await ToggleExpandedAsync(), () => CanToggleExpand);
 
         SelectedItems = _selectedItems;
         UpdateHeaderItems(PlaybackContextItem);
@@ -333,9 +395,9 @@ public partial class TableView : ContentView
 
         _allItems = ItemsSource?.ToList() ?? new List<object>();
 
-        if (_pageIndex >= TotalPages)
+        if (_pageIndex >= ComputedTotalPages)
         {
-            _pageIndex = Math.Max(0, TotalPages - 1);
+            _pageIndex = Math.Max(0, ComputedTotalPages - 1);
         }
 
         SyncVisibleItems();
@@ -475,7 +537,7 @@ public partial class TableView : ContentView
 
     #region Paging & Expansion
 
-    private void OnPrevTapped(object? sender, EventArgs e)
+    public async Task GoToPreviousPageAsync()
     {
         if (_isExpanded || _pageIndex <= 0)
         {
@@ -485,11 +547,13 @@ public partial class TableView : ContentView
         _pageIndex--;
         SyncVisibleItems();
         UpdateNavigationState();
+
+        await Task.CompletedTask;
     }
 
-    private void OnNextTapped(object? sender, EventArgs e)
+    public async Task GoToNextPageAsync()
     {
-        if (_isExpanded || _pageIndex >= TotalPages - 1)
+        if (_isExpanded || _pageIndex >= ComputedTotalPages - 1)
         {
             return;
         }
@@ -497,11 +561,13 @@ public partial class TableView : ContentView
         _pageIndex++;
         SyncVisibleItems();
         UpdateNavigationState();
+
+        await Task.CompletedTask;
     }
 
-    private async void OnExpandTapped(object? sender, EventArgs e)
+    public async Task ToggleExpandedAsync()
     {
-        if (!HasExpandableItems)
+        if (!_isExpanded && !CanExpandFromCurrentView)
         {
             return;
         }
@@ -550,7 +616,7 @@ public partial class TableView : ContentView
             return;
         }
 
-        for (var pageIndex = startPageIndex; pageIndex < TotalPages; pageIndex++)
+        for (var pageIndex = startPageIndex; pageIndex < ComputedTotalPages; pageIndex++)
         {
             if (!_isExpanded)
             {
@@ -591,50 +657,30 @@ public partial class TableView : ContentView
 
     private void UpdateNavigationState()
     {
+        var canGoPrev = !_isExpanded && _pageIndex > 0;
+        var canGoNext = !_isExpanded && _pageIndex < ComputedTotalPages - 1;
         var showExpansion = CanExpandFromCurrentView || _isExpanded;
 
-        var expandButton = this.FindByName<Border>("ExpandButton");
-        var expandDownIcon = this.FindByName<Label>("ExpandDownIcon");
-        var expandUpIcon = this.FindByName<Label>("ExpandUpIcon");
-        var navigationHost = this.FindByName<HorizontalStackLayout>("NavigationHost");
-        var prevButton = this.FindByName<Border>("PrevButton");
-        var nextButton = this.FindByName<Border>("NextButton");
+        CanGoPrev = canGoPrev;
+        CanGoNext = canGoNext;
+        CanToggleExpand = showExpansion;
+        IsExpanded = _isExpanded;
+        TotalPages = ComputedTotalPages;
+        CurrentPage = Math.Min(ComputedTotalPages, Math.Max(1, _pageIndex + 1));
 
-        if (expandButton != null)
+        if (PrevPageCommand is Command prevCmd)
         {
-            expandButton.IsVisible = showExpansion;
+            prevCmd.ChangeCanExecute();
         }
 
-        if (expandDownIcon != null)
+        if (NextPageCommand is Command nextCmd)
         {
-            expandDownIcon.IsVisible = CanExpandFromCurrentView;
+            nextCmd.ChangeCanExecute();
         }
 
-        if (expandUpIcon != null)
+        if (ToggleExpandCommand is Command expandCmd)
         {
-            expandUpIcon.IsVisible = _isExpanded;
-        }
-
-        var canPage = showExpansion && !_isExpanded && TotalPages > 1;
-
-        if (navigationHost != null)
-        {
-            navigationHost.IsVisible = canPage;
-        }
-
-        var canGoPrev = canPage && _pageIndex > 0;
-        var canGoNext = canPage && _pageIndex < TotalPages - 1;
-
-        if (prevButton != null)
-        {
-            prevButton.IsEnabled = canGoPrev;
-            prevButton.Opacity = canGoPrev ? 1 : 0.5;
-        }
-
-        if (nextButton != null)
-        {
-            nextButton.IsEnabled = canGoNext;
-            nextButton.Opacity = canGoNext ? 1 : 0.5;
+            expandCmd.ChangeCanExecute();
         }
     }
 

@@ -61,14 +61,27 @@
                     </Border>
 
                     <!--  Playlist Info - Loading State  -->
-                    <VerticalStackLayout Grid.Column="1"
+                    <Grid Grid.Column="1"
+                        HeightRequest="200"
                         IsVisible="{Binding IsLoadingMetadata}"
-                        Spacing="12"
-                        VerticalOptions="Center">
-                        <controls:SkeletonLoader HeightRequest="12" HorizontalOptions="Start" WidthRequest="120" />
-                        <controls:SkeletonLoader HeightRequest="28" HorizontalOptions="Start" WidthRequest="280" />
-                        <controls:SkeletonLoader HeightRequest="14" HorizontalOptions="Start" WidthRequest="150" />
-                    </VerticalStackLayout>
+                        RowDefinitions="*,Auto,Auto,Auto,40"
+                        VerticalOptions="Fill">
+                        <controls:SkeletonLoader Grid.Row="1"
+                            HeightRequest="12"
+                            HorizontalOptions="Start"
+                            Margin="0,0,0,16"
+                            WidthRequest="120" />
+                        <controls:SkeletonLoader Grid.Row="2"
+                            HeightRequest="32"
+                            HorizontalOptions="Start"
+                            Margin="0,0,0,8"
+                            WidthRequest="320" />
+                        <controls:SkeletonLoader Grid.Row="3"
+                            HeightRequest="14"
+                            HorizontalOptions="Start"
+                            Margin="0,0,0,16"
+                            WidthRequest="170" />
+                    </Grid>
 
                     <!--  Playlist Info - Actual  -->
                     <Grid Grid.Column="1"
@@ -86,7 +99,7 @@
                         <Label Grid.Row="2"
                             Margin="0,0,0,8"
                             FontAttributes="Bold"
-                            FontSize="28"
+                            FontSize="32"
                             LineBreakMode="WordWrap"
                             MaxLines="2"
                             Text="{Binding PlaylistName}"

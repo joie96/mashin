@@ -17,26 +17,11 @@ public partial class RowView : ContentView
     public static readonly BindableProperty ItemsSourceProperty =
         BindableProperty.Create(nameof(ItemsSource), typeof(IEnumerable<object>), typeof(RowView), propertyChanged: OnItemsSourceChanged);
 
-    public static readonly BindableProperty SelectedItemsProperty =
-        BindableProperty.Create(nameof(SelectedItems), typeof(IList), typeof(RowView), defaultBindingMode: BindingMode.TwoWay);
-
-    public static readonly BindableProperty PrimaryInfoTappedCommandProperty =
-        BindableProperty.Create(nameof(PrimaryInfoTappedCommand), typeof(ICommand), typeof(RowView));
-
-    public static readonly BindableProperty SecondaryInfoTappedCommandProperty =
-        BindableProperty.Create(nameof(SecondaryInfoTappedCommand), typeof(ICommand), typeof(RowView));
-
     public static readonly BindableProperty MediaActionsProperty =
         BindableProperty.Create(nameof(MediaActions), typeof(IMediaItemActions), typeof(RowView));
 
-    public static readonly BindableProperty ShowContextMenuAtAnchorCommandProperty =
-        BindableProperty.Create(nameof(ShowContextMenuAtAnchorCommand), typeof(ICommand), typeof(RowView));
-
-    public static readonly BindableProperty ShowContextMenuAtPositionCommandProperty =
-        BindableProperty.Create(nameof(ShowContextMenuAtPositionCommand), typeof(ICommand), typeof(RowView));
-
-    public static readonly BindableProperty IsAllSelectedProperty =
-    BindableProperty.Create(nameof(IsAllSelected), typeof(bool), typeof(RowView), defaultValue: false);
+    public static readonly BindableProperty CurrentTrackUriProperty =
+        BindableProperty.Create(nameof(CurrentTrackUri), typeof(string), typeof(RowView));
 
     public static readonly BindableProperty ItemCornerRadiusProperty =
         BindableProperty.Create(nameof(ItemCornerRadius), typeof(float), typeof(RowView), defaultValue: 8f);
@@ -44,8 +29,41 @@ public partial class RowView : ContentView
     public static readonly BindableProperty ItemWidthProperty = 
         BindableProperty.Create(nameof(ItemWidth), typeof(double), typeof(RowView), MinItemWidth);
 
-    public static readonly BindableProperty CurrentTrackUriProperty =
-        BindableProperty.Create(nameof(CurrentTrackUri), typeof(string), typeof(RowView));
+    public static readonly BindableProperty PrimaryInfoTappedCommandProperty =
+        BindableProperty.Create(nameof(PrimaryInfoTappedCommand), typeof(ICommand), typeof(RowView));
+
+    public static readonly BindableProperty SecondaryInfoTappedCommandProperty =
+        BindableProperty.Create(nameof(SecondaryInfoTappedCommand), typeof(ICommand), typeof(RowView));
+
+    public static readonly BindableProperty ShowContextMenuAtAnchorCommandProperty =
+        BindableProperty.Create(nameof(ShowContextMenuAtAnchorCommand), typeof(ICommand), typeof(RowView));
+
+    public static readonly BindableProperty ShowContextMenuAtPositionCommandProperty =
+        BindableProperty.Create(nameof(ShowContextMenuAtPositionCommand), typeof(ICommand), typeof(RowView));
+
+    public static readonly BindableProperty SelectedItemsProperty =
+        BindableProperty.Create(nameof(SelectedItems), typeof(IList), typeof(RowView), defaultBindingMode: BindingMode.TwoWay);
+
+    public static readonly BindableProperty IsAllSelectedProperty =
+    BindableProperty.Create(nameof(IsAllSelected), typeof(bool), typeof(RowView), defaultValue: false);
+
+    public static readonly BindableProperty CanGoPrevProperty =
+        BindableProperty.Create(nameof(CanGoPrev), typeof(bool), typeof(RowView), false);
+
+    public static readonly BindableProperty CanGoNextProperty =
+        BindableProperty.Create(nameof(CanGoNext), typeof(bool), typeof(RowView), false);
+
+    public static readonly BindableProperty CanToggleExpandProperty =
+        BindableProperty.Create(nameof(CanToggleExpand), typeof(bool), typeof(RowView), false);
+
+    public static readonly BindableProperty IsExpandedProperty =
+        BindableProperty.Create(nameof(IsExpanded), typeof(bool), typeof(RowView), false);
+
+    public static readonly BindableProperty CurrentPageProperty =
+        BindableProperty.Create(nameof(CurrentPage), typeof(int), typeof(RowView), 1);
+
+    public static readonly BindableProperty TotalPagesProperty =
+        BindableProperty.Create(nameof(TotalPages), typeof(int), typeof(RowView), 1);
 
     #endregion
 
@@ -145,6 +163,46 @@ public partial class RowView : ContentView
         private set => SetValue(CurrentTrackUriProperty, value);
     }
 
+    public bool CanGoPrev
+    {
+        get => (bool)GetValue(CanGoPrevProperty);
+        private set => SetValue(CanGoPrevProperty, value);
+    }
+
+    public bool CanGoNext
+    {
+        get => (bool)GetValue(CanGoNextProperty);
+        private set => SetValue(CanGoNextProperty, value);
+    }
+
+    public bool CanToggleExpand
+    {
+        get => (bool)GetValue(CanToggleExpandProperty);
+        private set => SetValue(CanToggleExpandProperty, value);
+    }
+
+    public bool IsExpanded
+    {
+        get => (bool)GetValue(IsExpandedProperty);
+        private set => SetValue(IsExpandedProperty, value);
+    }
+
+    public int CurrentPage
+    {
+        get => (int)GetValue(CurrentPageProperty);
+        private set => SetValue(CurrentPageProperty, value);
+    }
+
+    public int TotalPages
+    {
+        get => (int)GetValue(TotalPagesProperty);
+        private set => SetValue(TotalPagesProperty, value);
+    }
+
+    public ICommand PrevPageCommand { get; }
+    public ICommand NextPageCommand { get; }
+    public ICommand ToggleExpandCommand { get; }
+
     private bool CanExpandFromCurrentView => !_isExpanded && _allItems.Count > ActiveVisibleItems.Count;
 
     #endregion
@@ -163,6 +221,10 @@ public partial class RowView : ContentView
     public RowView()
     {
         InitializeComponent();
+
+        PrevPageCommand = new Command(async () => await GoToPreviousPageAsync(), () => CanGoPrev);
+        NextPageCommand = new Command(async () => await GoToNextPageAsync(), () => CanGoNext);
+        ToggleExpandCommand = new Command(ToggleExpanded, () => CanToggleExpand);
 
         SelectedItems = _selectedItems;
         BindableLayout.SetItemsSource(ItemsFlexPrimary, _visibleItemsPrimary);
@@ -416,17 +478,17 @@ public partial class RowView : ContentView
         }
     }
 
-    private async void OnPrevTapped(object? sender, EventArgs e)
+    public async Task GoToPreviousPageAsync()
     {
         await SetPageAsync(_pageIndex - 1);
     }
 
-    private async void OnNextTapped(object? sender, EventArgs e)
+    public async Task GoToNextPageAsync()
     {
         await SetPageAsync(_pageIndex + 1);
     }
 
-    private void OnExpandTapped(object? sender, EventArgs e)
+    public void ToggleExpanded()
     {
         if (!_isExpanded && !CanExpandFromCurrentView)
         {
@@ -457,6 +519,9 @@ public partial class RowView : ContentView
 
         // Load page items for page 0
         SyncPageItems(ActiveVisibleItems, _pageIndex);
+
+        // Refresh nav visibility after visible-items changed (e.g. collapse from expanded view)
+        UpdateNavigationState();
 
         // Load Data expanded data if needed
         if (_isExpanded)
@@ -592,15 +657,29 @@ public partial class RowView : ContentView
         var canGoPrev = !_isExpanded && _pageIndex > 0;
         var canGoNext = !_isExpanded && _allItems.Count > (_pageIndex + 1) * _itemsPerPage;
         var showExpansion = CanExpandFromCurrentView || _isExpanded;
+        var totalPages = Math.Max(1, (int)Math.Ceiling((double)Math.Max(1, _allItems.Count) / _itemsPerPage));
 
-        PrevButton.IsEnabled = canGoPrev;
-        PrevButton.Opacity = canGoPrev ? 1 : 0.5;
-        NextButton.IsEnabled = canGoNext;
-        NextButton.Opacity = canGoNext ? 1 : 0.5;
+        CanGoPrev = canGoPrev;
+        CanGoNext = canGoNext;
+        CanToggleExpand = showExpansion;
+        IsExpanded = _isExpanded;
+        TotalPages = totalPages;
+        CurrentPage = Math.Min(totalPages, Math.Max(1, _pageIndex + 1));
 
-        ExpandButton.IsVisible = showExpansion;
-        ExpandDownIcon.IsVisible = CanExpandFromCurrentView;
-        ExpandUpIcon.IsVisible = _isExpanded;
+        if (PrevPageCommand is Command prevCmd)
+        {
+            prevCmd.ChangeCanExecute();
+        }
+
+        if (NextPageCommand is Command nextCmd)
+        {
+            nextCmd.ChangeCanExecute();
+        }
+
+        if (ToggleExpandCommand is Command expandCmd)
+        {
+            expandCmd.ChangeCanExecute();
+        }
     }
 
     #endregion

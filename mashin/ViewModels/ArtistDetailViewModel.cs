@@ -30,6 +30,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
     private readonly ILogger<ArtistDetailViewModel> _logger;
+    private readonly Random _shuffleRandom = new();
     private static readonly HttpClient DeezerHttpClient = new()
     {
         Timeout = TimeSpan.FromSeconds(20)
@@ -138,7 +139,12 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     public ICommand ShowAlbumContextMenuAtPositionCommand { get; }
     public ICommand ShowArtistContextMenuAtAnchorCommand { get; }
     public ICommand ShowArtistContextMenuAtPositionCommand { get; }
+    public ICommand PlayAlbumsCommand { get; }
+    public ICommand ShuffleAlbumsCommand { get; }
+    public ICommand PlaySimilarArtistsCommand { get; }
+    public ICommand ShuffleSimilarArtistsCommand { get; }
     public ICommand PlayArtistCommand { get; }
+    public ICommand ShuffleArtistCommand { get; }
     public ICommand ToggleArtistFavoriteCommand { get; }
     public ICommand ToggleDescriptionCommand { get; }
 
@@ -236,11 +242,90 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
         ArtistTappedCommand = new Command<object>(async parameter => await _navigationService.NavigateToAsync<ArtistDetailPage>(parameter));
 
+        // Playback Commands
+        PlayAlbumsCommand = new Command(async () =>
+        {
+            var albums = Albums.ToList();
+            if (albums.Count == 0)
+            {
+                return;
+            }
+
+            await MediaActions.PlayMediaAsync(albums[0]);
+        });
+
+        ShuffleAlbumsCommand = new Command(async () =>
+        {
+            var albums = Albums.ToList();
+            if (albums.Count == 0)
+            {
+                return;
+            }
+
+            var randomIndex = _shuffleRandom.Next(albums.Count);
+            await MediaActions.PlayMediaAsync(albums[randomIndex]);
+        });
+
+        PlaySimilarArtistsCommand = new Command(async () =>
+        {
+            var similarArtists = SimilarArtists.ToList();
+            if (similarArtists.Count == 0)
+            {
+                return;
+            }
+
+            await MediaActions.PlayMediaAsync(similarArtists[0]);
+        });
+
+        ShuffleSimilarArtistsCommand = new Command(async () =>
+        {
+            var similarArtists = SimilarArtists.ToList();
+            if (similarArtists.Count == 0)
+            {
+                return;
+            }
+
+            var randomIndex = _shuffleRandom.Next(similarArtists.Count);
+            await MediaActions.PlayMediaAsync(similarArtists[randomIndex]);
+        });
+
         PlayArtistCommand = new Command(async () =>
         {
-            if (Artist != null)
+            var topTracks = TopTracks.ToList();
+            if (topTracks.Count == 0)
             {
-                await MediaActions.PlayMediaAsync(Artist);
+                return;
+            }
+
+            await MediaActions.PlayMediaAsync(topTracks[0]);
+
+            var remainingTracks = topTracks.Skip(1).ToList();
+            if (remainingTracks.Count > 0)
+            {
+                await MediaActions.PlayMediaNextAsync(remainingTracks);
+            }
+        });
+
+        ShuffleArtistCommand = new Command(async () =>
+        {
+            var shuffledTracks = TopTracks.ToList();
+            if (shuffledTracks.Count == 0)
+            {
+                return;
+            }
+
+            for (var i = shuffledTracks.Count - 1; i > 0; i--)
+            {
+                var j = _shuffleRandom.Next(i + 1);
+                (shuffledTracks[i], shuffledTracks[j]) = (shuffledTracks[j], shuffledTracks[i]);
+            }
+
+            await MediaActions.PlayMediaAsync(shuffledTracks[0]);
+
+            var remainingTracks = shuffledTracks.Skip(1).ToList();
+            if (remainingTracks.Count > 0)
+            {
+                await MediaActions.PlayMediaNextAsync(remainingTracks);
             }
         });
 
@@ -691,12 +776,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
         var menu = new ObservableRangeCollection<ContextMenuItem>
         {
-            new()
-            {
-                Text = "Abspielen",
-                Icon = FluentIcons.Play12,
-                Command = new Command(async () => await MediaActions.PlayMediaAsync(Artist))
-            },
             new()
             {
                 Text = "Als Nächstes spielen",
