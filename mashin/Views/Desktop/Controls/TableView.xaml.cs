@@ -924,13 +924,11 @@ public partial class TableView : ContentView
 
         // otherwise, play the media item directly and queue the rest of the items in the list
         await MediaActions.PlayMediaAsync(item);
-
-        /*
-        var itemsToQueue = GetItemsAfterIndex(item, inCycle: true);
+        var itemsToQueue = GetItemsAfterIndex(item, inCycle: false);
         if (itemsToQueue.Count > 0)
         {
             await MediaActions.PlayMediaNextAsync(itemsToQueue);
-        }*/
+        }
     }
 
     private async void OnPlayOverlayClicked(object? sender, Microsoft.Maui.Controls.TappedEventArgs e)
@@ -962,12 +960,11 @@ public partial class TableView : ContentView
         // otherwise, play the media item directly and queue the rest of the items in the list
         await MediaActions.PlayMediaAsync(item);
 
-        /*
-        var itemsToQueue = GetItemsAfterIndex(item, inCycle: true);
+        var itemsToQueue = GetItemsAfterIndex(item, inCycle: false);
         if (itemsToQueue.Count > 0)
         {
             await MediaActions.PlayMediaNextAsync(itemsToQueue);
-        }*/
+        }
     }
 
     private async void OnFavoriteIconTapped(object? sender, Microsoft.Maui.Controls.TappedEventArgs e)
