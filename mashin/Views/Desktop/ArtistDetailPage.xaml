@@ -303,20 +303,39 @@
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
                 <Grid Grid.Row="0"
-                    ColumnDefinitions="Auto,*,Auto"
+                    ColumnDefinitions="Auto,Auto,*,Auto"
                     ColumnSpacing="16">
                     <Label Grid.Column="0"
                         Style="{StaticResource LabelSectionTitle}"
                         Text="Veröffentlichungen"
                         VerticalOptions="Center" />
 
-                    <BoxView Grid.Column="1"
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Margin="-6,0,0,0"
+                        Padding="4,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding AlbumItems.Count}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+
+                    <BoxView Grid.Column="2"
                         HeightRequest="1"
                         HorizontalOptions="Fill"
                         Opacity="0.75"
                         VerticalOptions="Center" />
 
-                    <Grid Grid.Column="2"
+                    <Grid Grid.Column="3"
                         ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
                         ColumnSpacing="8"
                         VerticalOptions="Center">
@@ -484,20 +503,39 @@
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
                 <Grid Grid.Row="0"
-                    ColumnDefinitions="Auto,*,Auto"
+                    ColumnDefinitions="Auto,Auto,*,Auto"
                     ColumnSpacing="16">
                     <Label Grid.Column="0"
                         Style="{StaticResource LabelSectionTitle}"
                         Text="Ähnliche Interpreten"
                         VerticalOptions="Center" />
 
-                    <BoxView Grid.Column="1"
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Margin="-6,0,0,0"
+                        Padding="4,-8"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding SimilarArtistItems.Count}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+
+                    <BoxView Grid.Column="2"
                         HeightRequest="1"
                         HorizontalOptions="Fill"
                         Opacity="0.75"
                         VerticalOptions="Center" />
 
-                    <Grid Grid.Column="2"
+                    <Grid Grid.Column="3"
                         ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
                         ColumnSpacing="8"
                         VerticalOptions="Center">
@@ -665,20 +703,39 @@
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
                 <Grid Grid.Row="0"
-                    ColumnDefinitions="Auto,*,Auto"
+                    ColumnDefinitions="Auto,Auto,*,Auto"
                     ColumnSpacing="16">
                     <Label Grid.Column="0"
                         Style="{StaticResource LabelSectionTitle}"
                         Text="Toplieder"
                         VerticalOptions="Center" />
 
-                    <BoxView Grid.Column="1"
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Margin="-6,0,0,0"
+                        Padding="4,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding TopTrackItems.Count}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+
+                    <BoxView Grid.Column="2"
                         HeightRequest="1"
                         HorizontalOptions="Fill"
                         Opacity="0.75"
                         VerticalOptions="Center" />
 
-                    <Grid Grid.Column="2"
+                    <Grid Grid.Column="3"
                         ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
                         ColumnSpacing="8"
                         VerticalOptions="Center">
