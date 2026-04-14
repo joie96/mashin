@@ -3,4 +3,5 @@
 **/obj/
 .vs/
 .vscode/
+*.lscache
 mashin/mashin.csproj.lscache
