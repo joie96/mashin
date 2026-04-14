@@ -405,9 +405,9 @@
         </Grid>
 
         <!--  Playlist Tracks  -->
-        <Grid Grid.Row="1" Margin="0,12,0,0">
+        <Grid Grid.Row="1" Margin="0,24,0,0">
             <Grid>
-                <controls:TableView Margin="0,40,0,0"
+                <controls:TableView Margin="0,0,0,0"
                     IsVisible="{Binding ShowTrackTable}"
                     ItemsSource="{Binding TrackItems}"
                     MediaActions="{Binding MediaActions}"

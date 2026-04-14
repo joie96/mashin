@@ -314,6 +314,7 @@
                 BindingContextChanged="OnItemBindingContextChanged"
                 Loaded="OnItemLoaded"
                 Unloaded="OnItemUnloaded"
+                    behaviors:HoverBehavior.ShowOnHoverTarget="{x:Reference RowSelectionCheckBox}"
                     behaviors:HoverBehavior.BaseBackgroundColor="Transparent"
                     behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                     BackgroundColor="Transparent"
@@ -634,12 +635,15 @@
                     </Label>
 
                     <!--  Custom Checkbox (Row Selection)  -->
-                    <Border Grid.Column="10"
+                        <Border x:Name="RowSelectionCheckBox"
+                            Grid.Column="10"
                             behaviors:HoverBehavior.BaseBackgroundColor="Transparent"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground50}"
                             BackgroundColor="Transparent"
                             HeightRequest="20"
                             HorizontalOptions="Center"
+                            InputTransparent="True"
+                            Opacity="0"
                             Stroke="{DynamicResource IconSecondary}"
                             StrokeThickness="0.75"
                             VerticalOptions="Center"
@@ -656,6 +660,10 @@
                                         Value="{DynamicResource AccentColor}"/>
                                 <Setter Property="Stroke"
                                         Value="{DynamicResource AccentColor}"/>
+                            <Setter Property="Opacity"
+                                Value="1"/>
+                            <Setter Property="InputTransparent"
+                                Value="False"/>
                             </DataTrigger>
                         </Border.Triggers>
 
@@ -682,6 +690,7 @@
                 BindingContextChanged="OnItemBindingContextChanged"
                 Loaded="OnItemLoaded"
                 Unloaded="OnItemUnloaded"
+                    behaviors:HoverBehavior.ShowOnHoverTarget="{x:Reference RowSelectionCheckBox}"
                     behaviors:HoverBehavior.BaseBackgroundColor="Transparent"
                     behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                     BackgroundColor="Transparent"
@@ -1002,12 +1011,15 @@
                     </Label>
 
                     <!--  Custom Checkbox (Row Selection)  -->
-                    <Border Grid.Column="10"
+                        <Border x:Name="RowSelectionCheckBox"
+                            Grid.Column="10"
                             behaviors:HoverBehavior.BaseBackgroundColor="Transparent"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground50}"
                             BackgroundColor="Transparent"
                             HeightRequest="20"
                             HorizontalOptions="Center"
+                            InputTransparent="True"
+                            Opacity="0"
                             Stroke="{DynamicResource IconSecondary}"
                             StrokeThickness="0.75"
                             VerticalOptions="Center"
@@ -1024,6 +1036,10 @@
                                         Value="{DynamicResource AccentColor}"/>
                                 <Setter Property="Stroke"
                                         Value="{DynamicResource AccentColor}"/>
+                            <Setter Property="Opacity"
+                                Value="1"/>
+                            <Setter Property="InputTransparent"
+                                Value="False"/>
                             </DataTrigger>
                         </Border.Triggers>
 
