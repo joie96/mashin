@@ -8,7 +8,8 @@ public sealed class HoverMarqueeBehavior : Behavior<Label>
 {
     #region Constants
 
-    const string TranslationAnimationName = "HoverMarqueeBehavior_Translate";
+    const double MeasureSafetyPadding = 24;
+    const double EndRevealPadding = 8;
 
     #endregion
 
@@ -27,10 +28,10 @@ public sealed class HoverMarqueeBehavior : Behavior<Label>
     Label? associatedObject;
     PointerGestureRecognizer? pointerGesture;
     Layout? clippedParent;
+    CancellationTokenSource? animationCancellation;
 
     bool isHovering;
     bool isAnimating;
-    int animationVersion;
     bool hasCapturedTextLayout;
     bool originalParentClipState;
     LineBreakMode originalLineBreakMode;
@@ -144,10 +145,7 @@ public sealed class HoverMarqueeBehavior : Behavior<Label>
         }
 
         isHovering = true;
-        CaptureTextLayout();
-        TryApplyParentClipping();
-        ApplyMarqueeTextLayout();
-        TryStartAnimation();
+        _ = StartHoverMarqueeAsync();
     }
 
     void OnPointerExited(object? sender, PointerEventArgs e)
@@ -167,96 +165,108 @@ public sealed class HoverMarqueeBehavior : Behavior<Label>
 
     #region Animation
 
-    void TryStartAnimation()
+    async Task StartHoverMarqueeAsync()
+    {
+        if (!isHovering || associatedObject == null)
+        {
+            return;
+        }
+
+        await Task.Yield();
+
+        if (!isHovering || associatedObject == null)
+        {
+            return;
+        }
+
+        CaptureTextLayout();
+        TryApplyParentClipping();
+
+        if (!TryApplyMarqueeTextLayout())
+        {
+            RestoreTextLayout();
+            RestoreParentClipping();
+            return;
+        }
+
+        StartAnimationLoop();
+    }
+
+    void StartAnimationLoop()
     {
         if (isAnimating || associatedObject == null)
         {
             return;
         }
 
-        var overflow = GetOverflowWidth();
-        if (overflow <= 1)
-        {
-            return;
-        }
-
         isAnimating = true;
-        StartForwardPhase();
+        animationCancellation?.Cancel();
+        animationCancellation?.Dispose();
+        animationCancellation = new CancellationTokenSource();
+        _ = RunAnimationLoopAsync(animationCancellation.Token);
     }
 
-    void StartForwardPhase()
+    async Task RunAnimationLoopAsync(CancellationToken cancellationToken)
     {
-        if (!CanContinueAnimation(out var overflow))
+        try
         {
-            EndAnimation(resetPosition: true);
-            return;
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                if (!CanContinueAnimation(out var overflow))
+                {
+                    break;
+                }
+
+                var label = associatedObject;
+                if (label == null)
+                {
+                    break;
+                }
+
+                var speed = Math.Max(8d, PixelsPerSecond);
+                var totalTravel = overflow + EndRevealPadding;
+                var durationMilliseconds = (uint)Math.Max(300d, totalTravel / speed * 1000d);
+
+                if (PauseMilliseconds > 0)
+                {
+                    await Task.Delay(PauseMilliseconds, cancellationToken);
+                }
+
+                if (cancellationToken.IsCancellationRequested || !isHovering)
+                {
+                    break;
+                }
+
+                var forwardCanceled = await label.TranslateTo(-totalTravel, 0, durationMilliseconds, Easing.Linear);
+                if (forwardCanceled || cancellationToken.IsCancellationRequested || !isHovering)
+                {
+                    break;
+                }
+
+                if (PauseMilliseconds > 0)
+                {
+                    await Task.Delay(PauseMilliseconds, cancellationToken);
+                }
+
+                if (cancellationToken.IsCancellationRequested || !isHovering)
+                {
+                    break;
+                }
+
+                var returnCanceled = await label.TranslateTo(0, 0, 220, Easing.CubicOut);
+                if (returnCanceled)
+                {
+                    break;
+                }
+            }
         }
-
-        var speed = Math.Max(8d, PixelsPerSecond);
-        var durationMilliseconds = (uint)Math.Max(300d, overflow / speed * 1000d);
-
-        ScheduleOrRun(() =>
+        catch (TaskCanceledException)
         {
-            if (associatedObject == null)
-            {
-                EndAnimation(resetPosition: true);
-                return;
-            }
-
-            associatedObject.Animate(
-                name: TranslationAnimationName,
-                callback: value => associatedObject.TranslationX = value,
-                start: associatedObject.TranslationX,
-                end: -overflow,
-                length: durationMilliseconds,
-                easing: Easing.Linear,
-                finished: (_, canceled) =>
-                {
-                    if (canceled || !isHovering)
-                    {
-                        EndAnimation(resetPosition: true);
-                        return;
-                    }
-
-                    StartReturnPhase();
-                });
-        });
-    }
-
-    void StartReturnPhase()
-    {
-        ScheduleOrRun(() =>
+        }
+        finally
         {
-            if (associatedObject == null)
-            {
-                EndAnimation(resetPosition: true);
-                return;
-            }
-
-            associatedObject.Animate(
-                name: TranslationAnimationName,
-                callback: value => associatedObject.TranslationX = value,
-                start: associatedObject.TranslationX,
-                end: 0,
-                length: 220,
-                easing: Easing.CubicOut,
-                finished: (_, canceled) =>
-                {
-                    if (canceled || !isHovering)
-                    {
-                        EndAnimation(resetPosition: true);
-                        return;
-                    }
-
-                    if (CanContinueAnimation(out _))
-                    {
-                        StartForwardPhase();
-                        return;
-                    }
-
-                    EndAnimation(resetPosition: false);
-                });
-        });
+            EndAnimation(resetPosition: !isHovering);
+        }
     }
 
     bool CanContinueAnimation(out double overflow)
@@ -265,34 +275,11 @@ public sealed class HoverMarqueeBehavior : Behavior<Label>
         return associatedObject != null && isHovering && overflow > 1;
     }
 
-    void ScheduleOrRun(Action action)
-    {
-        if (associatedObject == null)
-        {
-            return;
-        }
-
-        if (PauseMilliseconds <= 0)
-        {
-            action();
-            return;
-        }
-
-        var version = animationVersion;
-        associatedObject.Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(PauseMilliseconds), () =>
-        {
-            if (version != animationVersion || !isHovering || associatedObject == null)
-            {
-                return;
-            }
-
-            action();
-        });
-    }
-
     void StopAnimation(bool resetPosition)
     {
-        animationVersion++;
+        animationCancellation?.Cancel();
+        animationCancellation?.Dispose();
+        animationCancellation = null;
         isAnimating = false;
 
         if (associatedObject == null)
@@ -300,7 +287,7 @@ public sealed class HoverMarqueeBehavior : Behavior<Label>
             return;
         }
 
-        associatedObject.AbortAnimation(TranslationAnimationName);
+        associatedObject.CancelAnimations();
         if (resetPosition)
         {
             associatedObject.TranslationX = 0;
@@ -349,37 +336,39 @@ public sealed class HoverMarqueeBehavior : Behavior<Label>
             return 0;
         }
 
-        var measured = label.Measure(double.PositiveInfinity, label.Height);
+        var measured = label.Measure(double.PositiveInfinity, double.PositiveInfinity);
         return Math.Max(0, measured.Width - label.Width);
     }
 
-    void ApplyMarqueeTextLayout()
+    bool TryApplyMarqueeTextLayout()
     {
         if (associatedObject == null)
         {
-            return;
+            return false;
         }
 
         var label = associatedObject;
 
         hoverViewportWidth = label.Width;
+        if (hoverViewportWidth <= 0)
+        {
+            return false;
+        }
+
         label.LineBreakMode = LineBreakMode.NoWrap;
         label.MaxLines = 1;
 
-        if (hoverViewportWidth <= 0)
-        {
-            return;
-        }
-
-        hoverContentWidth = Math.Ceiling(MeasureFullTextWidth(label)) + 12;
+        var contentWidth = MeasureFullTextWidth(label);
+        hoverContentWidth = Math.Ceiling(contentWidth) + GetSafetyPadding(label);
 
         if (hoverContentWidth <= hoverViewportWidth + 1)
         {
-            return;
+            return false;
         }
 
         label.WidthRequest = hoverContentWidth;
         label.HorizontalOptions = LayoutOptions.Start;
+        return true;
     }
 
     void RestoreTextLayout()
@@ -400,13 +389,31 @@ public sealed class HoverMarqueeBehavior : Behavior<Label>
 
     static double MeasureFullTextWidth(Label label)
     {
-        if (string.IsNullOrWhiteSpace(label.Text))
+        if (string.IsNullOrWhiteSpace(label.Text) && label.FormattedText == null)
         {
             return 0;
         }
 
-        var measured = label.Measure(double.PositiveInfinity, double.PositiveInfinity);
-        return measured.Width;
+        var originalWidthRequest = label.WidthRequest;
+        var originalHorizontalOptions = label.HorizontalOptions;
+
+        label.WidthRequest = -1;
+        label.HorizontalOptions = LayoutOptions.Start;
+        label.InvalidateMeasure();
+
+        var measured = label.Measure(double.PositiveInfinity, double.PositiveInfinity).Width;
+
+        label.WidthRequest = originalWidthRequest;
+        label.HorizontalOptions = originalHorizontalOptions;
+
+        return measured;
+    }
+
+    static double GetSafetyPadding(Label label)
+    {
+        var characterPadding = Math.Max(0, label.CharacterSpacing) * 2;
+        var fontPadding = Math.Ceiling(Math.Max(0, label.FontSize));
+        return Math.Max(MeasureSafetyPadding, fontPadding + characterPadding + 8);
     }
 
     #endregion

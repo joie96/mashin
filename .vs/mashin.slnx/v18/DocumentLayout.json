@@ -1,7 +1,20 @@
 {
   "Version": 1,
   "WorkspaceRootPath": "C:\\Users\\ericb\\source\\repos\\mashin\\",
-  "Documents": [],
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{97215E46-5E0A-B7FC-202B-A86E101E4055}|mashin.csproj|c:\\users\\ericb\\source\\repos\\mashin\\views\\desktop\\behaviors\\hovermarqueebehavior.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{97215E46-5E0A-B7FC-202B-A86E101E4055}|mashin.csproj|solutionrelative:views\\desktop\\behaviors\\hovermarqueebehavior.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{97215E46-5E0A-B7FC-202B-A86E101E4055}|mashin.csproj|c:\\users\\ericb\\source\\repos\\mashin\\views\\desktop\\controls\\rowview.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
+      "RelativeMoniker": "D:0:0:{97215E46-5E0A-B7FC-202B-A86E101E4055}|mashin.csproj|solutionrelative:views\\desktop\\controls\\rowview.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{97215E46-5E0A-B7FC-202B-A86E101E4055}|mashin.csproj|c:\\users\\ericb\\source\\repos\\mashin\\views\\desktop\\artistdetailpage.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
+      "RelativeMoniker": "D:0:0:{97215E46-5E0A-B7FC-202B-A86E101E4055}|mashin.csproj|solutionrelative:views\\desktop\\artistdetailpage.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
+    }
+  ],
   "DocumentGroupContainers": [
     {
       "Orientation": 0,
@@ -9,7 +22,7 @@
       "DocumentGroups": [
         {
           "DockedWidth": 297,
-          "SelectedChildIndex": -1,
+          "SelectedChildIndex": 4,
           "Children": [
             {
               "$type": "Bookmark",
@@ -22,6 +35,49 @@
             {
               "$type": "Bookmark",
               "Name": "ST:1:0:{dcc4ea97-1c0c-482b-b205-e541c0df9728}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{1c4feeaa-4718-4aa9-859d-94ce25d182ba}"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "HoverMarqueeBehavior.cs",
+              "DocumentMoniker": "C:\\Users\\ericb\\source\\repos\\mashin\\Views\\Desktop\\Behaviors\\HoverMarqueeBehavior.cs",
+              "RelativeDocumentMoniker": "Views\\Desktop\\Behaviors\\HoverMarqueeBehavior.cs",
+              "ToolTip": "C:\\Users\\ericb\\source\\repos\\mashin\\Views\\Desktop\\Behaviors\\HoverMarqueeBehavior.cs",
+              "RelativeToolTip": "Views\\Desktop\\Behaviors\\HoverMarqueeBehavior.cs",
+              "ViewState": "AgIAAI0BAAAAAAAAAAAAAJ8BAAAyAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-04-16T08:00:25.377Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "RowView.xaml",
+              "DocumentMoniker": "C:\\Users\\ericb\\source\\repos\\mashin\\Views\\Desktop\\Controls\\RowView.xaml",
+              "RelativeDocumentMoniker": "Views\\Desktop\\Controls\\RowView.xaml",
+              "ToolTip": "C:\\Users\\ericb\\source\\repos\\mashin\\Views\\Desktop\\Controls\\RowView.xaml",
+              "RelativeToolTip": "Views\\Desktop\\Controls\\RowView.xaml",
+              "ViewState": "AgIAAOMAAAAAAAAAAAAvwO8AAAAtAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
+              "WhenOpened": "2026-04-16T07:57:35.102Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "ArtistDetailPage.xaml",
+              "DocumentMoniker": "C:\\Users\\ericb\\source\\repos\\mashin\\Views\\Desktop\\ArtistDetailPage.xaml",
+              "RelativeDocumentMoniker": "Views\\Desktop\\ArtistDetailPage.xaml",
+              "ToolTip": "C:\\Users\\ericb\\source\\repos\\mashin\\Views\\Desktop\\ArtistDetailPage.xaml",
+              "RelativeToolTip": "Views\\Desktop\\ArtistDetailPage.xaml",
+              "ViewState": "AgIAAMMCAAAAAAAAAAAmwMwCAAAYAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
+              "WhenOpened": "2026-04-16T07:50:01.464Z",
+              "EditorCaption": ""
             }
           ]
         },

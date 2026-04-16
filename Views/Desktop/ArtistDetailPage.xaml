@@ -314,7 +314,7 @@
                         BackgroundColor="Transparent"
                         HeightRequest="22"
                         Margin="-6,0,0,0"
-                        Padding="4,0"
+                        Padding="6,0"
                         Stroke="{DynamicResource BorderPrimary}"
                         StrokeThickness="1"
                         VerticalOptions="Center">
@@ -514,7 +514,7 @@
                         BackgroundColor="Transparent"
                         HeightRequest="22"
                         Margin="-6,0,0,0"
-                        Padding="4,-8"
+                        Padding="6,0"
                         Stroke="{DynamicResource BorderPrimary}"
                         StrokeThickness="1"
                         VerticalOptions="Center">
@@ -714,7 +714,7 @@
                         BackgroundColor="Transparent"
                         HeightRequest="22"
                         Margin="-6,0,0,0"
-                        Padding="4,0"
+                        Padding="6,0"
                         Stroke="{DynamicResource BorderPrimary}"
                         StrokeThickness="1"
                         VerticalOptions="Center">
