@@ -31,7 +31,7 @@
                         <HorizontalStackLayout Spacing="12" VerticalOptions="Center">
                             <Label FontAttributes="Bold"
                                 FontSize="18"
-                                Text="Music Assistant"
+                                Text="Music Assistantt"
                                 TextColor="{DynamicResource TextPrimary}" />
                         </HorizontalStackLayout>
                     </Grid>
