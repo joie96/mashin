@@ -229,21 +229,20 @@
                 </Border>
 
                 <!--  Title  -->
-                <Label Grid.Row="1"
+                <controls:MarqueeLabel Grid.Row="1"
                     Margin="0,12,0,4"
                     FontSize="15"
                     LineBreakMode="TailTruncation"
                     MaxLines="1"
                     Text="{Binding DisplayName}"
                     TextColor="{DynamicResource TextSecondary}">
-                    <Label.Behaviors>
-                        <behaviors:HoverMarqueeBehavior />
+                    <controls:MarqueeLabel.Behaviors>
                         <behaviors:LinkLabelBehavior Command="{Binding PrimaryInfoTappedCommand, Source={x:Reference self}}"
                             CommandParameter="{Binding .}"
                             HoverTextColor="{DynamicResource TextSecondary}" />
-                    </Label.Behaviors>
-                    <Label.Triggers>
-                        <DataTrigger TargetType="Label"
+                    </controls:MarqueeLabel.Behaviors>
+                    <controls:MarqueeLabel.Triggers>
+                        <DataTrigger TargetType="controls:MarqueeLabel"
                             Value="True">
                             <DataTrigger.Binding>
                                 <MultiBinding Converter="{StaticResource StringEqualsConverter}">
@@ -253,8 +252,8 @@
                             </DataTrigger.Binding>
                             <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
                         </DataTrigger>
-                    </Label.Triggers>
-                </Label>
+                    </controls:MarqueeLabel.Triggers>
+                </controls:MarqueeLabel>
 
                 <!--  Artists  -->
                 <HorizontalStackLayout x:Name="ArtistContainer"
@@ -514,21 +513,20 @@
                 </Border>
 
                 <!--  Title  -->
-                <Label Grid.Row="1"
+                <controls:MarqueeLabel Grid.Row="1"
                     Margin="0,12,0,4"
                     FontSize="15"
                     LineBreakMode="TailTruncation"
                     MaxLines="1"
                     Text="{Binding DisplayName}"
                     TextColor="{DynamicResource TextSecondary}">
-                    <Label.Behaviors>
-                        <behaviors:HoverMarqueeBehavior />
+                    <controls:MarqueeLabel.Behaviors>
                         <behaviors:LinkLabelBehavior Command="{Binding PrimaryInfoTappedCommand, Source={x:Reference self}}"
                             CommandParameter="{Binding .}"
                             HoverTextColor="{DynamicResource TextSecondary}" />
-                    </Label.Behaviors>
-                    <Label.Triggers>
-                        <DataTrigger TargetType="Label"
+                    </controls:MarqueeLabel.Behaviors>
+                    <controls:MarqueeLabel.Triggers>
+                        <DataTrigger TargetType="controls:MarqueeLabel"
                             Value="True">
                             <DataTrigger.Binding>
                                 <MultiBinding Converter="{StaticResource StringEqualsConverter}">
@@ -538,8 +536,8 @@
                             </DataTrigger.Binding>
                             <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
                         </DataTrigger>
-                    </Label.Triggers>
-                </Label>
+                    </controls:MarqueeLabel.Triggers>
+                </controls:MarqueeLabel>
             </Grid>
         </DataTemplate>
 
@@ -750,21 +748,20 @@
                 </Border>
 
                 <!--  Title  -->
-                <Label Grid.Row="1"
+                <controls:MarqueeLabel Grid.Row="1"
                     Margin="0,12,0,4"
                     FontSize="15"
                     LineBreakMode="TailTruncation"
                     MaxLines="1"
                     Text="{Binding DisplayName}"
                     TextColor="{DynamicResource TextSecondary}">
-                    <Label.Behaviors>
-                        <behaviors:HoverMarqueeBehavior />
+                    <controls:MarqueeLabel.Behaviors>
                         <behaviors:LinkLabelBehavior Command="{Binding PrimaryInfoTappedCommand, Source={x:Reference self}}"
                             CommandParameter="{Binding .}"
                             HoverTextColor="{DynamicResource TextSecondary}" />
-                    </Label.Behaviors>
-                    <Label.Triggers>
-                        <DataTrigger TargetType="Label"
+                    </controls:MarqueeLabel.Behaviors>
+                    <controls:MarqueeLabel.Triggers>
+                        <DataTrigger TargetType="controls:MarqueeLabel"
                             Value="True">
                             <DataTrigger.Binding>
                                 <MultiBinding Converter="{StaticResource StringEqualsConverter}">
@@ -774,8 +771,8 @@
                             </DataTrigger.Binding>
                             <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
                         </DataTrigger>
-                    </Label.Triggers>
-                </Label>
+                    </controls:MarqueeLabel.Triggers>
+                </controls:MarqueeLabel>
             </Grid>
         </DataTemplate>
 

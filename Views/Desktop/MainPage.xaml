@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
     xmlns:behaviors="clr-namespace:mashin.Views.Desktop.Behaviors"
     xmlns:controls="clr-namespace:mashin.Views.Desktop.Controls"
+    xmlns:desktopControls="clr-namespace:mashin.Views.Desktop.Controls;assembly=mashin"
     xmlns:converters="clr-namespace:mashin.Converters"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
     xmlns:models="clr-namespace:mashin.Models"
@@ -31,7 +32,7 @@
                         <HorizontalStackLayout Spacing="12" VerticalOptions="Center">
                             <Label FontAttributes="Bold"
                                 FontSize="18"
-                                Text="Music Assistantt"
+                                Text="Music Assistant"
                                 TextColor="{DynamicResource TextPrimary}" />
                         </HorizontalStackLayout>
                     </Grid>
@@ -398,17 +399,13 @@
                         <Image Aspect="AspectFill" Source="{Binding CurrentTrack.ImageUrl}" />
                     </Border>
 
-                    <Label Grid.Column="1"
+                    <desktopControls:MarqueeLabel Grid.Column="1"
                         FontSize="13"
                         LineBreakMode="TailTruncation"
                         MaxLines="1"
                         Text="{Binding CurrentTrack.Name}"
                         TextColor="{DynamicResource TextPrimary}"
-                        VerticalOptions="End">
-                        <Label.Behaviors>
-                            <behaviors:HoverMarqueeBehavior />
-                        </Label.Behaviors>
-                    </Label>
+                        VerticalOptions="End" />
 
                     <Label Grid.Row="1"
                         Grid.Column="1"
