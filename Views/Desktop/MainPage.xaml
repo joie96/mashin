@@ -399,29 +399,33 @@
                         <Image Aspect="AspectFill" Source="{Binding CurrentTrack.ImageUrl}" />
                     </Border>
 
-                    <desktopControls:MarqueeLabel Grid.Column="1"
-                        FontSize="13"
-                        LineBreakMode="TailTruncation"
-                        MaxLines="1"
-                        Text="{Binding CurrentTrack.Name}"
-                        TextColor="{DynamicResource TextPrimary}"
-                        VerticalOptions="End" />
+                    <Grid Grid.Column="1"
+                        IsClippedToBounds="True">
+                        <desktopControls:MarqueeLabel FontSize="13"
+                            LineBreakMode="TailTruncation"
+                            MaxLines="1"
+                            Text="{Binding CurrentTrack.Name}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="End" />
+                    </Grid>
 
-                    <Label Grid.Row="1"
+                    <Grid Grid.Row="1"
                         Grid.Column="1"
-                        Margin="0,4,0,0"
-                        FontSize="12"
-                        LineBreakMode="TailTruncation"
-                        MaxLines="1"
-                        Text="{Binding CurrentTrack.ArtistName}"
-                        TextColor="{DynamicResource TextSecondary}"
-                        VerticalOptions="Start">
-                        <Label.Behaviors>
-                            <behaviors:LinkLabelBehavior Command="{Binding ArtistTappedCommand}"
-                                CommandParameter="{Binding CurrentTrackPrimaryArtist}"
-                                HoverTextColor="{DynamicResource TextPrimary}" />
-                        </Label.Behaviors>
-                    </Label>
+                        IsClippedToBounds="True">
+                        <desktopControls:MarqueeLabel Margin="0,4,0,0"
+                            FontSize="12"
+                            LineBreakMode="TailTruncation"
+                            MaxLines="1"
+                            Text="{Binding CurrentTrack.ArtistName}"
+                            TextColor="{DynamicResource TextSecondary}"
+                            VerticalOptions="Start">
+                            <desktopControls:MarqueeLabel.Behaviors>
+                                <behaviors:LinkLabelBehavior Command="{Binding ArtistTappedCommand}"
+                                    CommandParameter="{Binding CurrentTrackPrimaryArtist}"
+                                    HoverTextColor="{DynamicResource TextPrimary}" />
+                            </desktopControls:MarqueeLabel.Behaviors>
+                        </desktopControls:MarqueeLabel>
+                    </Grid>
 
                     <Border Grid.Column="2"
                         Grid.RowSpan="2"

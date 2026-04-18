@@ -16,7 +16,7 @@
     <x:Double x:Key="Spacing36">36</x:Double>
 
     <Thickness x:Key="PagePaddingDesktop">40,20,40,20</Thickness>
-    <Thickness x:Key="SectionTopMargin">0,36,0,0</Thickness>
+    <Thickness x:Key="SectionTopMargin">0,32,0,0</Thickness>
 
     <!-- PAGE -->
     <Style TargetType="Page" ApplyToDerivedTypes="True">

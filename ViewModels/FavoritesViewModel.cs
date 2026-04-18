@@ -27,6 +27,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
     private readonly ILogger<FavoritesViewModel> _logger;
+    private readonly Random _shuffleRandom = new();
 
     private ObservableRangeCollection<Track> _tracks = new();
     private ObservableRangeCollection<Album> _albums = new();
@@ -257,6 +258,14 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
     public ICommand ShowPlaylistContextMenuAtPositionCommand { get; }
     public ICommand ShowArtistContextMenuAtAnchorCommand { get; }
     public ICommand ShowArtistContextMenuAtPositionCommand { get; }
+    public ICommand PlayTracksCommand { get; }
+    public ICommand ShuffleTracksCommand { get; }
+    public ICommand PlayAlbumsCommand { get; }
+    public ICommand ShuffleAlbumsCommand { get; }
+    public ICommand PlayPlaylistsCommand { get; }
+    public ICommand ShufflePlaylistsCommand { get; }
+    public ICommand PlayArtistsCommand { get; }
+    public ICommand ShuffleArtistsCommand { get; }
 
     #endregion
 
@@ -323,6 +332,115 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
         AlbumTappedCommand = new Command<object>(async parameter => await _navigationService.NavigateToAsync<AlbumDetailPage>(parameter));
         ArtistTappedCommand = new Command<object>(async parameter => await _navigationService.NavigateToAsync<ArtistDetailPage>(parameter));
         PlaylistTappedCommand = new Command<Playlist>(async playlist => await _navigationService.NavigateToAsync<PlaylistDetailPage>(playlist));
+
+        PlayTracksCommand = new Command(async () =>
+        {
+            var tracks = Tracks.ToList();
+            if (tracks.Count == 0)
+            {
+                return;
+            }
+
+            await MediaActions.PlayMediaAsync(tracks[0]);
+
+            var remainingTracks = tracks.Skip(1).ToList();
+            if (remainingTracks.Count > 0)
+            {
+                await MediaActions.PlayMediaNextAsync(remainingTracks);
+            }
+        });
+
+        ShuffleTracksCommand = new Command(async () =>
+        {
+            var shuffledTracks = Tracks.ToList();
+            if (shuffledTracks.Count == 0)
+            {
+                return;
+            }
+
+            for (var i = shuffledTracks.Count - 1; i > 0; i--)
+            {
+                var j = _shuffleRandom.Next(i + 1);
+                (shuffledTracks[i], shuffledTracks[j]) = (shuffledTracks[j], shuffledTracks[i]);
+            }
+
+            await MediaActions.PlayMediaAsync(shuffledTracks[0]);
+
+            var remainingTracks = shuffledTracks.Skip(1).ToList();
+            if (remainingTracks.Count > 0)
+            {
+                await MediaActions.PlayMediaNextAsync(remainingTracks);
+            }
+        });
+
+        PlayAlbumsCommand = new Command(async () =>
+        {
+            var albums = Albums.ToList();
+            if (albums.Count == 0)
+            {
+                return;
+            }
+
+            await MediaActions.PlayMediaAsync(albums[0]);
+        });
+
+        ShuffleAlbumsCommand = new Command(async () =>
+        {
+            var albums = Albums.ToList();
+            if (albums.Count == 0)
+            {
+                return;
+            }
+
+            var randomIndex = _shuffleRandom.Next(albums.Count);
+            await MediaActions.PlayMediaAsync(albums[randomIndex]);
+        });
+
+        PlayPlaylistsCommand = new Command(async () =>
+        {
+            var playlists = Playlists.ToList();
+            if (playlists.Count == 0)
+            {
+                return;
+            }
+
+            await MediaActions.PlayMediaAsync(playlists[0]);
+        });
+
+        ShufflePlaylistsCommand = new Command(async () =>
+        {
+            var playlists = Playlists.ToList();
+            if (playlists.Count == 0)
+            {
+                return;
+            }
+
+            var randomIndex = _shuffleRandom.Next(playlists.Count);
+            await MediaActions.PlayMediaAsync(playlists[randomIndex]);
+        });
+
+        PlayArtistsCommand = new Command(async () =>
+        {
+            var artists = Artists.ToList();
+            if (artists.Count == 0)
+            {
+                return;
+            }
+
+            await MediaActions.PlayMediaAsync(artists[0]);
+        });
+
+        ShuffleArtistsCommand = new Command(async () =>
+        {
+            var artists = Artists.ToList();
+            if (artists.Count == 0)
+            {
+                return;
+            }
+
+            var randomIndex = _shuffleRandom.Next(artists.Count);
+            await MediaActions.PlayMediaAsync(artists[randomIndex]);
+        });
 
         ShowTrackContextMenuAtAnchorCommand = new Command<View>(async anchor =>
         {
