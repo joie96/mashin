@@ -460,29 +460,31 @@
                     </Grid>
 
                     <!--  Title  -->
-                    <Label Grid.Column="2"
-                           Margin="12,0,0,0"
-                           FontSize="15"
-                           LineBreakMode="TailTruncation"
-                           MaxLines="1"
-                           Text="{Binding Name}"
-                           TextColor="{DynamicResource TextSecondary}"
-                           VerticalOptions="Center">
-                        <Label.Triggers>
-                            <DataTrigger TargetType="Label"
-                                         Value="True">
-                                <DataTrigger.Binding>
-                                    <MultiBinding Converter="{StaticResource StringEqualsConverter}">
-                                        <Binding Path="Uri"/>
-                                        <Binding Path="CurrentTrackUri"
-                                                 Source="{x:Reference self}"/>
-                                    </MultiBinding>
-                                </DataTrigger.Binding>
-                                <Setter Property="TextColor"
-                                        Value="{DynamicResource AccentColor}"/>
-                            </DataTrigger>
-                        </Label.Triggers>
-                    </Label>
+                    <Grid Grid.Column="2"
+                          IsClippedToBounds="True">
+                        <controls:MarqueeLabel Margin="12,0,0,0"
+                                               FontSize="15"
+                                               LineBreakMode="TailTruncation"
+                                               MaxLines="1"
+                                               Text="{Binding Name}"
+                                               TextColor="{DynamicResource TextSecondary}"
+                                               VerticalOptions="Center">
+                            <controls:MarqueeLabel.Triggers>
+                                <DataTrigger TargetType="controls:MarqueeLabel"
+                                             Value="True">
+                                    <DataTrigger.Binding>
+                                        <MultiBinding Converter="{StaticResource StringEqualsConverter}">
+                                            <Binding Path="Uri"/>
+                                            <Binding Path="CurrentTrackUri"
+                                                     Source="{x:Reference self}"/>
+                                        </MultiBinding>
+                                    </DataTrigger.Binding>
+                                    <Setter Property="TextColor"
+                                            Value="{DynamicResource AccentColor}"/>
+                                </DataTrigger>
+                            </controls:MarqueeLabel.Triggers>
+                        </controls:MarqueeLabel>
+                    </Grid>
 
                     <!--  Duration  -->
                     <Label Grid.Column="3"
@@ -492,45 +494,48 @@
                            VerticalOptions="Center"/>
 
                     <!--  Album  -->
-                    <Label Grid.Column="4"
-                           x:Name="AlbumLabel"
-                           FontSize="14"
-                           LineBreakMode="TailTruncation"
-                           MaxLines="1"
-                           Text="{Binding Album.Name}"
-                           TextColor="{DynamicResource TextTertiary}"
-                           VerticalOptions="Center">
-                        <Label.Behaviors>
-                            <behaviors:LinkLabelBehavior Command="{Binding Source={x:Reference self}, Path=PrimaryInfoTappedCommand}"
-                                                         CommandParameter="{Binding Album}"
-                                                         HoverTextColor="{DynamicResource TextSecondary}">
-                            </behaviors:LinkLabelBehavior>
-                        </Label.Behaviors>
-                    </Label>
+                    <Grid Grid.Column="4"
+                          IsClippedToBounds="True">
+                        <controls:MarqueeLabel x:Name="AlbumLabel"
+                                               FontSize="14"
+                                               LineBreakMode="TailTruncation"
+                                               MaxLines="1"
+                                               Text="{Binding Album.Name}"
+                                               TextColor="{DynamicResource TextTertiary}"
+                                               VerticalOptions="Center">
+                            <controls:MarqueeLabel.Behaviors>
+                                <behaviors:LinkLabelBehavior Command="{Binding Source={x:Reference self}, Path=PrimaryInfoTappedCommand}"
+                                                             CommandParameter="{Binding Album}"
+                                                             HoverTextColor="{DynamicResource TextSecondary}">
+                                </behaviors:LinkLabelBehavior>
+                            </controls:MarqueeLabel.Behaviors>
+                        </controls:MarqueeLabel>
+                    </Grid>
 
                     <!--  Artist  -->
                     <HorizontalStackLayout x:Name="ArtistContainer"
                                            Grid.Column="5"
                                            BindableLayout.ItemsSource="{Binding Artists}"
+                                           IsClippedToBounds="True"
                                            VerticalOptions="Center">
                         <BindableLayout.ItemTemplate>
                             <DataTemplate x:DataType="models:Artist">
                                 <HorizontalStackLayout Spacing="0"
                                                        VerticalOptions="Center">
-                                    <Label x:Name="ArtistLabel"
-                                           FontSize="14"
-                                           LineBreakMode="TailTruncation"
-                                           MaxLines="1"
-                                           Text="{Binding Name}"
-                                           TextColor="{DynamicResource TextTertiary}"
-                                           VerticalOptions="Center">
-                                        <Label.Behaviors>
+                                    <controls:MarqueeLabel x:Name="ArtistLabel"
+                                                           FontSize="14"
+                                                           LineBreakMode="TailTruncation"
+                                                           MaxLines="1"
+                                                           Text="{Binding Name}"
+                                                           TextColor="{DynamicResource TextTertiary}"
+                                                           VerticalOptions="Center">
+                                        <controls:MarqueeLabel.Behaviors>
                                             <behaviors:LinkLabelBehavior Command="{Binding Source={x:Reference self}, Path=SecondaryInfoTappedCommand}"
                                                                          CommandParameter="{Binding .}"
                                                                          HoverTextColor="{DynamicResource TextSecondary}">
                                             </behaviors:LinkLabelBehavior>
-                                        </Label.Behaviors>
-                                    </Label>
+                                        </controls:MarqueeLabel.Behaviors>
+                                    </controls:MarqueeLabel>
 
                                     <Label x:Name="CommaLabel"
                                            Margin="0,0,4,0"
@@ -836,29 +841,31 @@
                     </Grid>
 
                     <!--  Title  -->
-                    <Label Grid.Column="2"
-                           Margin="12,0,0,0"
-                           FontSize="16"
-                           LineBreakMode="TailTruncation"
-                           MaxLines="1"
-                           Text="{Binding MediaItem.Name}"
-                           TextColor="{DynamicResource TextSecondary}"
-                           VerticalOptions="Center">
-                        <Label.Triggers>
-                            <DataTrigger TargetType="Label"
-                                         Value="True">
-                                <DataTrigger.Binding>
-                                    <MultiBinding Converter="{StaticResource StringEqualsConverter}">
-                                        <Binding Path="MediaItem.Uri"/>
-                                        <Binding Path="CurrentTrackUri"
-                                                 Source="{x:Reference self}"/>
-                                    </MultiBinding>
-                                </DataTrigger.Binding>
-                                <Setter Property="TextColor"
-                                        Value="{DynamicResource AccentColor}"/>
-                            </DataTrigger>
-                        </Label.Triggers>
-                    </Label>
+                    <Grid Grid.Column="2"
+                          IsClippedToBounds="True">
+                        <controls:MarqueeLabel Margin="12,0,0,0"
+                                               FontSize="16"
+                                               LineBreakMode="TailTruncation"
+                                               MaxLines="1"
+                                               Text="{Binding MediaItem.Name}"
+                                               TextColor="{DynamicResource TextSecondary}"
+                                               VerticalOptions="Center">
+                            <controls:MarqueeLabel.Triggers>
+                                <DataTrigger TargetType="controls:MarqueeLabel"
+                                             Value="True">
+                                    <DataTrigger.Binding>
+                                        <MultiBinding Converter="{StaticResource StringEqualsConverter}">
+                                            <Binding Path="MediaItem.Uri"/>
+                                            <Binding Path="CurrentTrackUri"
+                                                     Source="{x:Reference self}"/>
+                                        </MultiBinding>
+                                    </DataTrigger.Binding>
+                                    <Setter Property="TextColor"
+                                            Value="{DynamicResource AccentColor}"/>
+                                </DataTrigger>
+                            </controls:MarqueeLabel.Triggers>
+                        </controls:MarqueeLabel>
+                    </Grid>
 
                     <!--  Duration  -->
                     <Label Grid.Column="3"
@@ -868,45 +875,48 @@
                            VerticalOptions="Center"/>
 
                     <!--  Album  -->
-                    <Label Grid.Column="4"
-                           x:Name="AlbumLabel"
-                           FontSize="14"
-                           LineBreakMode="TailTruncation"
-                           MaxLines="1"
-                           Text="{Binding MediaItem.Album.Name}"
-                           TextColor="{DynamicResource TextTertiary}"
-                           VerticalOptions="Center">
-                        <Label.Behaviors>
-                            <behaviors:LinkLabelBehavior Command="{Binding Source={x:Reference self}, Path=PrimaryInfoTappedCommand}"
-                                                         CommandParameter="{Binding MediaItem.Album}"
-                                                         HoverTextColor="{DynamicResource TextSecondary}">
-                            </behaviors:LinkLabelBehavior>
-                        </Label.Behaviors>
-                    </Label>
+                    <Grid Grid.Column="4"
+                          IsClippedToBounds="True">
+                        <controls:MarqueeLabel x:Name="AlbumLabel"
+                                               FontSize="14"
+                                               LineBreakMode="TailTruncation"
+                                               MaxLines="1"
+                                               Text="{Binding MediaItem.Album.Name}"
+                                               TextColor="{DynamicResource TextTertiary}"
+                                               VerticalOptions="Center">
+                            <controls:MarqueeLabel.Behaviors>
+                                <behaviors:LinkLabelBehavior Command="{Binding Source={x:Reference self}, Path=PrimaryInfoTappedCommand}"
+                                                             CommandParameter="{Binding MediaItem.Album}"
+                                                             HoverTextColor="{DynamicResource TextSecondary}">
+                                </behaviors:LinkLabelBehavior>
+                            </controls:MarqueeLabel.Behaviors>
+                        </controls:MarqueeLabel>
+                    </Grid>
 
                     <!--  Artist  -->
                     <HorizontalStackLayout x:Name="ArtistContainer"
                                            Grid.Column="5"
                                            BindableLayout.ItemsSource="{Binding MediaItem.Artists}"
+                                           IsClippedToBounds="True"
                                            VerticalOptions="Center">
                         <BindableLayout.ItemTemplate>
                             <DataTemplate x:DataType="models:Artist">
                                 <HorizontalStackLayout Spacing="0"
                                         VerticalOptions="Center">
-                                    <Label x:Name="ArtistLabel"
-                                           FontSize="14"
-                                           LineBreakMode="TailTruncation"
-                                           MaxLines="1"
-                                           Text="{Binding Name}"
-                                           TextColor="{DynamicResource TextTertiary}"
-                                           VerticalOptions="Center">
-                                        <Label.Behaviors>
+                                    <controls:MarqueeLabel x:Name="ArtistLabel"
+                                                           FontSize="14"
+                                                           LineBreakMode="TailTruncation"
+                                                           MaxLines="1"
+                                                           Text="{Binding Name}"
+                                                           TextColor="{DynamicResource TextTertiary}"
+                                                           VerticalOptions="Center">
+                                        <controls:MarqueeLabel.Behaviors>
                                             <behaviors:LinkLabelBehavior Command="{Binding Source={x:Reference self}, Path=SecondaryInfoTappedCommand}"
                                                                          CommandParameter="{Binding .}"
                                                                          HoverTextColor="{DynamicResource TextSecondary}">
                                             </behaviors:LinkLabelBehavior>
-                                        </Label.Behaviors>
-                                    </Label>
+                                        </controls:MarqueeLabel.Behaviors>
+                                    </controls:MarqueeLabel>
 
                                     <Label x:Name="CommaLabel"
                                            Margin="0,0,4,0"
