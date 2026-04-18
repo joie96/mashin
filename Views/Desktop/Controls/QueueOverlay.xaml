@@ -28,7 +28,7 @@
             BackgroundColor="{DynamicResource BackgroundSecondary}"
             StrokeThickness="0"
             TranslationY="2000">
-            <Grid Padding="48,52,48,30"
+            <Grid Padding="48,52,48,10"
                 ColumnDefinitions="300,*"
                 ColumnSpacing="40">
                 
@@ -131,7 +131,7 @@
                 <Grid Grid.Column="1"
                     HorizontalOptions="Fill"
                     RowDefinitions="Auto,*"
-                    RowSpacing="8">
+                    RowSpacing="16">
                     <!--  Queue Header  -->
                     <Grid Padding="0,0,0,0"
                         HorizontalOptions="Fill">
@@ -185,15 +185,17 @@
                     </Grid>
 
                     <!--  Queue Table  -->
-                    <controls:TableView Grid.Row="1" Margin="0,40,0,0"
-                        PageSize="500"
+                    <controls:TableView Grid.Row="1"
+                        Margin="0,0,0,0"
+                        PageSize="0"
                         ItemsSource="{Binding CurrentQueueItems}"
                         MediaActions="{Binding MediaActions}"
                         PlaybackContextItem="{Binding CurrentPlayerQueue}"
                         PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
                         SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
                         ShowContextMenuAtAnchorCommand="{Binding ShowQueueContextMenuAtAnchorCommand}"
-                        ShowContextMenuAtPositionCommand="{Binding ShowQueueContextMenuAtPositionCommand}" />
+                        ShowContextMenuAtPositionCommand="{Binding ShowQueueContextMenuAtPositionCommand}"
+                        VerticalOptions="Fill" />
                 </Grid>
             </Grid>
         </Border>

@@ -195,7 +195,7 @@
                 <Grid Grid.Row="1"
                       Padding="0,5,0,5"
                       BackgroundColor="Transparent"
-                      ColumnDefinitions="40,48,6*,4*,80,40,40"
+                      ColumnDefinitions="40,48,5*,80,3*,3*,*,80,40,40,40"
                       VerticalOptions="Center">
                     <!--  #  -->
                     <Label Grid.Column="0"
@@ -223,16 +223,8 @@
                            VerticalOptions="Center"
                            VerticalTextAlignment="Center"/>
 
-                    <!--  Artist  -->
-                    <Label Grid.Column="3"
-                           FontSize="12"
-                           Text="ARTIST"
-                           TextColor="{DynamicResource TextSecondary}"
-                           VerticalOptions="Center"
-                           VerticalTextAlignment="Center"/>
-
                     <!--  Duration  -->
-                    <Label Grid.Column="4"
+                    <Label Grid.Column="3"
                            FontSize="20"
                            HorizontalOptions="Center"
                            Text="{mi:Fluent Icon=Timer48,
@@ -241,8 +233,52 @@
                            VerticalOptions="Center"
                            VerticalTextAlignment="Center"/>
 
-                    <!--  More  -->
+                    <!--  Album  -->
+                    <Label Grid.Column="4"
+                           FontSize="12"
+                           Text="ALBUM"
+                           TextColor="{DynamicResource TextSecondary}"
+                           VerticalOptions="Center"
+                           VerticalTextAlignment="Center"/>
+
+                    <!--  Artist  -->
                     <Label Grid.Column="5"
+                           FontSize="12"
+                           Text="ARTIST"
+                           TextColor="{DynamicResource TextSecondary}"
+                           VerticalOptions="Center"
+                           VerticalTextAlignment="Center"/>
+
+                    <!--  Year  -->
+                    <Label Grid.Column="6"
+                           FontSize="12"
+                           HorizontalOptions="Center"
+                           Text="YEAR"
+                           TextColor="{DynamicResource TextSecondary}"
+                           VerticalOptions="Center"
+                           VerticalTextAlignment="Center"/>
+
+                    <!--  Provider  -->
+                    <Label Grid.Column="7"
+                           FontSize="12"
+                           HorizontalOptions="Center"
+                           Text="PROVIDER"
+                           TextColor="{DynamicResource TextSecondary}"
+                           VerticalOptions="Center"
+                           VerticalTextAlignment="Center"/>
+
+                    <!--  Favorite  -->
+                    <Label Grid.Column="8"
+                           FontSize="20"
+                           HorizontalOptions="Center"
+                           Text="{mi:Fluent Icon=Heart48,
+                                     FontOverride=True}"
+                           TextColor="{DynamicResource IconSecondary}"
+                           VerticalOptions="Center"
+                           VerticalTextAlignment="Center"/>
+
+                    <!--  More  -->
+                    <Label Grid.Column="9"
                            behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
                            behaviors:HoverBehavior.EnableScaleHover="True"
                            behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
@@ -259,7 +295,7 @@
                     </Label>
 
                     <!--  Select All  -->
-                    <Border Grid.Column="6"
+                    <Border Grid.Column="10"
                             behaviors:HoverBehavior.BaseBackgroundColor="Transparent"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground50}"
                             BackgroundColor="Transparent"
