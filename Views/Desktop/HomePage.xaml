@@ -27,7 +27,7 @@
             </VerticalStackLayout>
 
             <!--  Genre-Playlists  -->
-            <Grid Grid.Row="1"
+            <Grid Grid.Row="2"
                 Margin="{StaticResource SectionTopMargin}"
                 RowDefinitions="Auto,Auto,Auto,Auto"
                 RowSpacing="0">
@@ -121,7 +121,7 @@
             </Grid>
 
             <!--  Lieblings-Playlists  -->
-            <Grid Grid.Row="2"
+            <Grid Grid.Row="3"
                 Margin="{StaticResource SectionTopMargin}"
                 RowDefinitions="Auto,Auto,Auto,Auto"
                 RowSpacing="0">
@@ -215,7 +215,7 @@
             </Grid>
 
             <!--  Mixe  -->
-            <Grid Grid.Row="3"
+            <Grid Grid.Row="1"
                 Margin="{StaticResource SectionTopMargin}"
                 RowDefinitions="Auto,Auto,Auto,Auto"
                 RowSpacing="0">
@@ -224,7 +224,7 @@
                     ColumnSpacing="16">
                     <Label Grid.Column="0"
                         Style="{StaticResource LabelSectionTitle}"
-                        Text="Mixe, inspiriert von"
+                        Text="Mixe, inspiriert von deinen Lieblingssongs"
                         VerticalOptions="Center" />
                     <BoxView Grid.Column="1"
                         HeightRequest="1"
@@ -239,18 +239,18 @@
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
-                            InputTransparent="{Binding Source={x:Reference MixTracksRowView}, Path=CanGoPrev, Converter={StaticResource InvertedBoolConverter}}"
+                            InputTransparent="{Binding Source={x:Reference MixTracksSlideView}, Path=CanGoPrev, Converter={StaticResource InvertedBoolConverter}}"
                             StrokeThickness="0"
                             WidthRequest="28">
                             <Border.Triggers>
-                                <DataTrigger Binding="{Binding Source={x:Reference MixTracksRowView}, Path=CanGoPrev}"
+                                <DataTrigger Binding="{Binding Source={x:Reference MixTracksSlideView}, Path=CanGoPrev}"
                                     TargetType="Border"
                                     Value="False">
                                     <Setter Property="Opacity" Value="0.35" />
                                 </DataTrigger>
                             </Border.Triggers>
                             <Border.GestureRecognizers>
-                                <TapGestureRecognizer Command="{Binding Source={x:Reference MixTracksRowView}, Path=PrevPageCommand}" />
+                                <TapGestureRecognizer Command="{Binding Source={x:Reference MixTracksSlideView}, Path=PrevPageCommand}" />
                             </Border.GestureRecognizers>
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="14" />
@@ -266,18 +266,18 @@
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
-                            InputTransparent="{Binding Source={x:Reference MixTracksRowView}, Path=CanGoNext, Converter={StaticResource InvertedBoolConverter}}"
+                            InputTransparent="{Binding Source={x:Reference MixTracksSlideView}, Path=CanGoNext, Converter={StaticResource InvertedBoolConverter}}"
                             StrokeThickness="0"
                             WidthRequest="28">
                             <Border.Triggers>
-                                <DataTrigger Binding="{Binding Source={x:Reference MixTracksRowView}, Path=CanGoNext}"
+                                <DataTrigger Binding="{Binding Source={x:Reference MixTracksSlideView}, Path=CanGoNext}"
                                     TargetType="Border"
                                     Value="False">
                                     <Setter Property="Opacity" Value="0.35" />
                                 </DataTrigger>
                             </Border.Triggers>
                             <Border.GestureRecognizers>
-                                <TapGestureRecognizer Command="{Binding Source={x:Reference MixTracksRowView}, Path=NextPageCommand}" />
+                                <TapGestureRecognizer Command="{Binding Source={x:Reference MixTracksSlideView}, Path=NextPageCommand}" />
                             </Border.GestureRecognizers>
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="14" />
@@ -296,9 +296,10 @@
                     IsVisible="{Binding ShowNoMixTracksMessage}"
                     Style="{StaticResource LabelTertiary}"
                     Text="Keine Mixe verfügbar." />
-                <controls:RowView x:Name="MixTracksRowView"
+                <controls:SlideView x:Name="MixTracksSlideView"
                     Grid.Row="2"
                     Margin="0,16,0,0"
+                    CoverSize="175"
                     IsVisible="{Binding ShowMixTracks}"
                     ItemCornerRadius="8"
                     ItemsSource="{Binding MixTrackItems}"

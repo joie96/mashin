@@ -32,7 +32,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     private ObservableRangeCollection<Playlist> _genrePlaylists = new();
     private ObservableRangeCollection<Playlist> _favoritePlaylists = new();
-    private ObservableRangeCollection<HomeMixTrackCard> _mixTracks = new();
+    private ObservableRangeCollection<Track> _mixTracks = new();
     private ObservableRangeCollection<Playlist> _artistPlaylists = new();
     private ObservableRangeCollection<Artist> _topArtists = new();
     private ObservableRangeCollection<Track> _recommendationTracks = new();
@@ -104,13 +104,13 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
         }
     }
 
-    public ObservableRangeCollection<HomeMixTrackCard> MixTracks
+    public ObservableRangeCollection<Track> MixTracks
     {
         get => _mixTracks;
         private set
         {
-            var normalizedValue = value ?? new ObservableRangeCollection<HomeMixTrackCard>();
-            if (!EqualityComparer<ObservableRangeCollection<HomeMixTrackCard>>.Default.Equals(_mixTracks, normalizedValue))
+            var normalizedValue = value ?? new ObservableRangeCollection<Track>();
+            if (!EqualityComparer<ObservableRangeCollection<Track>>.Default.Equals(_mixTracks, normalizedValue))
             {
                 _mixTracks = normalizedValue;
                 OnPropertyChanged(nameof(MixTracks));
@@ -322,12 +322,12 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
         MixTrackTappedCommand = new Command<object>(async parameter =>
         {
-            if (parameter is not HomeMixTrackCard mixCard)
+            if (parameter is not Track track)
             {
                 return;
             }
 
-            await PlayMixTrackWithShuffleAsync(mixCard.SourceTrack);
+            await PlayMixTrackWithShuffleAsync(track);
         });
 
         ShowPlaylistContextMenuAtAnchorCommand = new Command<View>(async anchor =>
@@ -460,13 +460,9 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             ApplyPlaylistDisplayNames(favoritePlaylists);
             ApplyPlaylistDisplayNames(artistPlaylists);
 
-            var mixCards = topTracks
-                .Select(track => new HomeMixTrackCard(track))
-                .ToList();
-
             GenrePlaylists = new ObservableRangeCollection<Playlist>(genrePlaylists);
             FavoritePlaylists = new ObservableRangeCollection<Playlist>(favoritePlaylists);
-            MixTracks = new ObservableRangeCollection<HomeMixTrackCard>(mixCards);
+            MixTracks = new ObservableRangeCollection<Track>(topTracks);
             ArtistPlaylists = new ObservableRangeCollection<Playlist>(artistPlaylists);
             TopArtists = new ObservableRangeCollection<Artist>(topArtists);
             RecommendationTracks = new ObservableRangeCollection<Track>(recommendationTracks);
@@ -482,7 +478,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 "Home recommendations loaded: genrePlaylists={GenrePlaylists}, favoritePlaylists={FavoritePlaylists}, mixTracks={MixTracks}, artistPlaylists={ArtistPlaylists}, topArtists={TopArtists}, recommendationTracks={RecommendationTracks}, genreArtistSections={GenreSections}, similarArtistSections={SimilarSections}",
                 genrePlaylists.Count,
                 favoritePlaylists.Count,
-                mixCards.Count,
+                topTracks.Count,
                 artistPlaylists.Count,
                 topArtists.Count,
                 recommendationTracks.Count,
@@ -495,7 +491,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
             GenrePlaylists = new ObservableRangeCollection<Playlist>();
             FavoritePlaylists = new ObservableRangeCollection<Playlist>();
-            MixTracks = new ObservableRangeCollection<HomeMixTrackCard>();
+            MixTracks = new ObservableRangeCollection<Track>();
             ArtistPlaylists = new ObservableRangeCollection<Playlist>();
             TopArtists = new ObservableRangeCollection<Artist>();
             RecommendationTracks = new ObservableRangeCollection<Track>();
@@ -951,7 +947,6 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
     {
         return MixTracks
             .Where(mixTrack => mixTrack.IsSelected)
-            .Select(mixTrack => mixTrack.SourceTrack)
             .ToList();
     }
 
@@ -1137,56 +1132,4 @@ public sealed class HomeArtistSection
     public string Title { get; }
     public ObservableRangeCollection<Artist> Artists { get; }
     public IEnumerable<object> ArtistItems => Artists.Cast<object>();
-}
-
-public sealed class HomeMixTrackCard : Playlist
-{
-    public HomeMixTrackCard(Track sourceTrack)
-    {
-        SourceTrack = sourceTrack;
-
-        ItemId = sourceTrack.ItemId;
-        Provider = sourceTrack.Provider;
-        Name = sourceTrack.Name;
-        DisplayName = sourceTrack.DisplayName;
-        Uri = sourceTrack.Uri;
-        Favorite = sourceTrack.Favorite;
-        ProviderMappings = sourceTrack.ProviderMappings;
-        ProviderManifest = sourceTrack.ProviderManifest;
-        Metadata = sourceTrack.Metadata;
-        Owner = sourceTrack.ArtistName;
-
-        // Reuse Playlist card UI but keep play semantics as a Track.
-        MediaType = MediaType.Track;
-    }
-
-    public HomeMixTrackCard(Playlist sourcePlaylist)
-    {
-        SourceTrack = new Track
-        {
-            ItemId = sourcePlaylist.ItemId,
-            Provider = sourcePlaylist.Provider,
-            Name = sourcePlaylist.Name,
-            DisplayName = sourcePlaylist.DisplayName,
-            Uri = sourcePlaylist.Uri,
-            Favorite = sourcePlaylist.Favorite,
-            ProviderMappings = sourcePlaylist.ProviderMappings,
-            ProviderManifest = sourcePlaylist.ProviderManifest,
-            Metadata = sourcePlaylist.Metadata
-        };
-
-        ItemId = sourcePlaylist.ItemId;
-        Provider = sourcePlaylist.Provider;
-        Name = sourcePlaylist.Name;
-        DisplayName = sourcePlaylist.DisplayName;
-        Uri = sourcePlaylist.Uri;
-        Favorite = sourcePlaylist.Favorite;
-        ProviderMappings = sourcePlaylist.ProviderMappings;
-        ProviderManifest = sourcePlaylist.ProviderManifest;
-        Metadata = sourcePlaylist.Metadata;
-        Owner = sourcePlaylist.Owner;
-    }
-
-    [JsonIgnore]
-    public Track SourceTrack { get; }
 }

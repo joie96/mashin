@@ -1214,7 +1214,82 @@ public class MusicAssistantService
     public async Task<List<RecommendationFolder>> GetRecommendationsAsync()
     {
         var result = await SendCommandAsync<List<RecommendationFolder>>("music/recommendations");
+        if (result != null)
+        {
+            NormalizeRecommendationFolderImages(result);
+        }
         return result ?? new List<RecommendationFolder>();
+    }
+
+    /// <summary>
+    /// Normalize image paths in recommendation folders (convert relative paths to imageproxy URLs).
+    /// </summary>
+    private void NormalizeRecommendationFolderImages(List<RecommendationFolder> folders)
+    {
+        foreach (var folder in folders)
+        {
+            // Normalize folder's own image if present
+            if (folder.Image != null)
+            {
+                folder.Image.Path = NormalizeImagePath(folder.Image.Path, folder.Image.Provider, _settings.MusicAssistantUrl);
+            }
+
+            // Normalize images in folder items by deserializing to concrete types
+            if (folder.Items != null)
+            {
+                var normalizedItems = new List<JsonElement>();
+                foreach (var itemElement in folder.Items)
+                {
+                    if (itemElement.ValueKind != JsonValueKind.Object)
+                    {
+                        normalizedItems.Add(itemElement);
+                        continue;
+                    }
+
+                    // Get media_type to deserialize to correct type
+                    if (itemElement.TryGetProperty("media_type", out var mediaTypeElement))
+                    {
+                        try
+                        {
+                            var mediaType = mediaTypeElement.GetString()?.ToLowerInvariant();
+                            MediaItem? mediaItem = mediaType switch
+                            {
+                                "artist" => JsonSerializer.Deserialize<Artist>(itemElement.GetRawText(), JsonOptions),
+                                "album" => JsonSerializer.Deserialize<Album>(itemElement.GetRawText(), JsonOptions),
+                                "track" => JsonSerializer.Deserialize<Track>(itemElement.GetRawText(), JsonOptions),
+                                "playlist" => JsonSerializer.Deserialize<Playlist>(itemElement.GetRawText(), JsonOptions),
+                                _ => null
+                            };
+
+                            // Normalize images in deserialized item
+                            if (mediaItem?.Metadata?.Images != null)
+                            {
+                                foreach (var image in mediaItem.Metadata.Images)
+                                {
+                                    image.Path = NormalizeImagePath(image.Path, image.Provider, _settings.MusicAssistantUrl);
+                                }
+                            }
+
+                            // Re-serialize back to JsonElement
+                            var json = JsonSerializer.Serialize(mediaItem, JsonOptions);
+                            normalizedItems.Add(JsonSerializer.Deserialize<JsonElement>(json, JsonOptions));
+                        }
+                        catch
+                        {
+                            // Silently skip if deserialization fails, keep original
+                            normalizedItems.Add(itemElement);
+                        }
+                    }
+                    else
+                    {
+                        normalizedItems.Add(itemElement);
+                    }
+                }
+
+                // Replace items list with normalized items
+                folder.Items = normalizedItems;
+            }
+        }
     }
 
     /// <summary>
