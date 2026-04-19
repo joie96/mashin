@@ -3,320 +3,166 @@
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
     xmlns:behaviors="clr-namespace:mashin.Views.Desktop.Behaviors"
-    xmlns:controls="clr-namespace:mashin.Views.Desktop.Controls"
-    xmlns:converters="clr-namespace:mashin.Converters"
-    xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
-    xmlns:models="clr-namespace:mashin.Models"
-    x:Name="self"
-    Loaded="OnRowViewLoaded"
-    Unloaded="OnRowViewUnloaded">
+    x:Name="self">
 
-    <ContentView.Resources>
-        <converters:IsSelectedOrHoverVisibleConverter x:Key="IsSelectedOrHoverVisibleConverter" />
-        <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
+    <Grid>
+        <Border x:Name="SlideCardBorder"
+            Padding="20"
+            HeightRequest="200"
+            StrokeThickness="0">
+            <Border.StrokeShape>
+                <RoundRectangle CornerRadius="10" />
+            </Border.StrokeShape>
 
-        <DataTemplate x:Key="TrackTemplate" x:DataType="models:Track">
-            <Grid x:Name="GridItemContainer"
-                Margin="3"
-                Loaded="OnItemLoaded"
-                Unloaded="OnItemUnloaded"
-                WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
+            <Grid x:Name="SlideContentHost"
+                ColumnDefinitions="Auto,*"
+                ColumnSpacing="20">
 
-                <!--  Slide Card  -->
-                <Border x:Name="SlideCardBorder"
-                    Padding="20,24"
-                    Background="#293548"
-                    HeightRequest="350"
-                    StrokeThickness="0">
+                <Border Grid.Column="0"
+                    HeightRequest="{Binding Source={x:Reference self}, Path=CoverSize}"
+                    HorizontalOptions="Start"
+                    StrokeThickness="0"
+                    VerticalOptions="Center"
+                    WidthRequest="{Binding Source={x:Reference self}, Path=CoverSize}">
                     <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="10" />
+                        <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
                     </Border.StrokeShape>
-                    <Border.Triggers>
-                        <DataTrigger Binding="{Binding IsSelected}"
-                            TargetType="Border"
-                            Value="True">
-                            <Setter Property="BackgroundColor" Value="{DynamicResource SelectionBackground}" />
-                        </DataTrigger>
-                    </Border.Triggers>
 
-                    <Grid RowDefinitions="Auto,*,Auto,Auto"
-                        RowSpacing="14">
-                        <controls:MarqueeLabel Grid.Row="0"
-                            FontAttributes="Bold"
-                            FontSize="15"
-                            HorizontalTextAlignment="Center"
-                            LineBreakMode="TailTruncation"
-                            MaxLines="2"
-                            Text="{Binding DisplayName}"
-                            TextColor="{DynamicResource TextSecondary}">
-                            <controls:MarqueeLabel.Behaviors>
-                                <behaviors:LinkLabelBehavior Command="{Binding PrimaryInfoTappedCommand, Source={x:Reference self}}"
-                                    CommandParameter="{Binding .}"
-                                    HoverTextColor="{DynamicResource TextSecondary}" />
-                            </controls:MarqueeLabel.Behaviors>
-                        </controls:MarqueeLabel>
+                    <Grid behaviors:HoverBehavior.ShowOnHoverTarget="{x:Reference CoverHoverOverlay}">
+                        <Grid.GestureRecognizers>
+                            <PointerGestureRecognizer Buttons="Secondary" PointerPressed="OnCoverSecondaryPointerPressed" />
+                        </Grid.GestureRecognizers>
 
-                        <!--  Cover + Overlays  -->
-                        <Border x:Name="CoverBorder"
-                            Grid.Row="1"
-                            Margin="0,8"
-                            behaviors:HoverBehavior.BaseBackgroundColor="Transparent"
-                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-                            BackgroundColor="Transparent"
-                            HeightRequest="{Binding Source={x:Reference self}, Path=CoverSize}"
-                            HorizontalOptions="Center"
-                            StrokeThickness="0"
-                            VerticalOptions="Center"
-                            WidthRequest="{Binding Source={x:Reference self}, Path=CoverSize}">
-                            <Border.GestureRecognizers>
-                                <PointerGestureRecognizer Buttons="Primary" PointerPressed="OnGridItemPrimaryPointerPressed" />
-                                <PointerGestureRecognizer Buttons="Secondary" PointerPressed="OnGridItemSecondaryPointerPressed" />
-                                <TapGestureRecognizer NumberOfTapsRequired="2" Tapped="OnGridItemDoubleTapped" />
-                            </Border.GestureRecognizers>
+                        <Image Aspect="AspectFill"
+                            Source="{Binding ImageUrl}" />
 
+                        <Border x:Name="CoverHoverOverlay"
+                            BackgroundColor="#80000000"
+                            Opacity="0"
+                            StrokeThickness="0">
                             <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="8" />
+                                <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
                             </Border.StrokeShape>
 
-                            <Grid behaviors:HoverBehavior.ShowOnHoverTarget="{x:Reference HoverOverlay}">
-                                <!--  Track Cover  -->
-                                <Border StrokeThickness="0">
-                                    <Border.StrokeShape>
-                                        <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
-                                    </Border.StrokeShape>
-                                    <Image Aspect="AspectFill"
-                                        Source="{Binding ImageUrl}" />
-                                </Border>
-
-                                <!--  Provider Icon (Top-Left)  -->
-                                <ffimageloading:SvgCachedImage Margin="3,3,0,0"
-                                    HeightRequest="18"
-                                    HorizontalOptions="Start"
-                                    Source="{Binding ProviderManifest.IconSvg}"
-                                    ToolTipProperties.Text="{Binding ProviderName}"
-                                    VerticalOptions="Start"
-                                    WidthRequest="18">
-                                    <ffimageloading:SvgCachedImage.Triggers>
-                                        <DataTrigger Binding="{Binding ProviderManifest.IconSvg}"
-                                            TargetType="ffimageloading:SvgCachedImage"
-                                            Value="{x:Null}">
-                                            <Setter Property="IsVisible" Value="False" />
-                                        </DataTrigger>
-                                    </ffimageloading:SvgCachedImage.Triggers>
-                                </ffimageloading:SvgCachedImage>
-
-                                <!--  Selection Overlay  -->
-                                <Border BackgroundColor="{DynamicResource SelectionBackground}"
-                                    InputTransparent="True"
-                                    IsVisible="{Binding IsSelected}"
-                                    Opacity="0.55"
-                                    StrokeThickness="0">
-                                    <Border.StrokeShape>
-                                        <RoundRectangle CornerRadius="8" />
-                                    </Border.StrokeShape>
-                                </Border>
-
-                                <!--  Hover Overlay  -->
-                                <Border x:Name="HoverOverlay"
-                                    BackgroundColor="#80000000"
-                                    Opacity="0"
-                                    StrokeThickness="0">
-                                    <Border.StrokeShape>
-                                        <RoundRectangle CornerRadius="8" />
-                                    </Border.StrokeShape>
-                                    <Grid RowDefinitions="Auto,*,Auto">
-                                        <!--  Play Button  -->
-                                        <Border Grid.RowSpan="3"
-                                            behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource IconPrimary75}"
-                                            behaviors:HoverBehavior.EnableScaleHover="True"
-                                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource IconPrimary}"
-                                            BackgroundColor="{DynamicResource IconPrimary75}"
-                                            HeightRequest="56"
-                                            HorizontalOptions="Center"
-                                            StrokeThickness="0"
-                                            VerticalOptions="Center"
-                                            WidthRequest="56">
-                                            <Border.GestureRecognizers>
-                                                <TapGestureRecognizer Tapped="OnPlayOverlayClicked" />
-                                            </Border.GestureRecognizers>
-                                            <Border.StrokeShape>
-                                                <RoundRectangle CornerRadius="28" />
-                                            </Border.StrokeShape>
-                                            <Label FontSize="28"
-                                                HorizontalOptions="Center"
-                                                Text="{mi:FluentFilled Icon=Play48Filled,
-                                                                 FontOverride=True}"
-                                                TextColor="{DynamicResource BackgroundPrimary}"
-                                                VerticalOptions="Center" />
-                                        </Border>
-
-                                        <!--  Bottom Row: Favorite & More  -->
-                                        <Grid Grid.Row="2"
-                                            Margin="8"
-                                            ColumnDefinitions="*,Auto">
-                                            <!--  Favorite Outline  -->
-                                            <Label Grid.Column="0"
-                                                Margin="0,0,12,0"
-                                                behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
-                                                behaviors:HoverBehavior.EnableScaleHover="True"
-                                                behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
-                                                FontSize="18"
-                                                HorizontalOptions="End"
-                                                IsVisible="{Binding Favorite, Converter={StaticResource InvertedBoolConverter}}"
-                                                Text="{mi:Fluent Icon=Heart48,
-                                                                 FontOverride=True}"
-                                                TextColor="{DynamicResource IconSecondary}"
-                                                VerticalOptions="Center">
-                                                <Label.GestureRecognizers>
-                                                    <TapGestureRecognizer Tapped="OnFavoriteIconTapped" />
-                                                </Label.GestureRecognizers>
-                                            </Label>
-
-                                            <!--  Favorite Filled  -->
-                                            <Label Grid.Column="0"
-                                                Margin="0,0,12,0"
-                                                behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
-                                                behaviors:HoverBehavior.EnableScaleHover="True"
-                                                behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
-                                                FontSize="18"
-                                                HorizontalOptions="End"
-                                                IsVisible="{Binding Favorite}"
-                                                Text="{mi:FluentFilled Icon=Heart48Filled,
-                                                                       FontOverride=True}"
-                                                TextColor="{DynamicResource IconSecondary}"
-                                                VerticalOptions="Center">
-                                                <Label.GestureRecognizers>
-                                                    <TapGestureRecognizer Tapped="OnFavoriteIconTapped" />
-                                                </Label.GestureRecognizers>
-                                            </Label>
-
-                                            <!--  More  -->
-                                            <Label x:Name="MoreIconLabel"
-                                                Grid.Column="1"
-                                                behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
-                                                behaviors:HoverBehavior.EnableScaleHover="True"
-                                                behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
-                                                FontSize="18"
-                                                HorizontalOptions="End"
-                                                Text="{mi:Fluent Icon=MoreHorizontal48,
-                                                                 FontOverride=True}"
-                                                TextColor="{DynamicResource IconSecondary}"
-                                                VerticalOptions="Center">
-                                                <Label.GestureRecognizers>
-                                                    <TapGestureRecognizer Tapped="OnMoreIconTapped" />
-                                                </Label.GestureRecognizers>
-                                            </Label>
-                                        </Grid>
-                                    </Grid>
-                                </Border>
-
-                                <!--  Checkbox  -->
-                                <Border Margin="0,3,3,0"
-                                    behaviors:HoverBehavior.BaseBackgroundColor="Transparent"
-                                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground50}"
-                                    BackgroundColor="Transparent"
-                                    HeightRequest="20"
-                                    HorizontalOptions="End"
-                                    Stroke="{DynamicResource IconSecondary}"
-                                    StrokeThickness="0.75"
-                                    VerticalOptions="Start"
-                                    WidthRequest="20">
-                                    <Border.StrokeShape>
-                                        <RoundRectangle CornerRadius="4" />
-                                    </Border.StrokeShape>
-                                    <Border.Triggers>
-                                        <DataTrigger Binding="{Binding IsSelected}"
-                                            TargetType="Border"
-                                            Value="True">
-                                            <Setter Property="BackgroundColor" Value="{DynamicResource AccentColor}" />
-                                            <Setter Property="Stroke" Value="{DynamicResource AccentColor}" />
-                                        </DataTrigger>
-                                    </Border.Triggers>
+                            <Grid RowDefinitions="Auto,*,Auto">
+                                <Border Grid.RowSpan="3"
+                                    behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource IconPrimary75}"
+                                    behaviors:HoverBehavior.EnableScaleHover="True"
+                                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource IconPrimary}"
+                                    BackgroundColor="{DynamicResource IconPrimary75}"
+                                    HeightRequest="56"
+                                    HorizontalOptions="Center"
+                                    StrokeThickness="0"
+                                    VerticalOptions="Center"
+                                    WidthRequest="56">
                                     <Border.GestureRecognizers>
-                                        <PointerGestureRecognizer PointerPressed="OnCustomCheckBoxPointerPressed" />
+                                        <TapGestureRecognizer Tapped="OnPlayOverlayClicked" />
                                     </Border.GestureRecognizers>
-                                    <Label FontSize="14"
+                                    <Border.StrokeShape>
+                                        <RoundRectangle CornerRadius="28" />
+                                    </Border.StrokeShape>
+                                    <Label FontSize="28"
                                         HorizontalOptions="Center"
-                                        IsVisible="{Binding IsSelected}"
-                                        Text="{mi:Fluent Icon=Checkmark16,
+                                        Text="{mi:FluentFilled Icon=Play48Filled,
                                                          FontOverride=True}"
-                                        TextColor="{DynamicResource IconPrimary}"
+                                        TextColor="{DynamicResource BackgroundPrimary}"
                                         VerticalOptions="Center" />
-                                    <Border.IsVisible>
-                                        <MultiBinding Converter="{StaticResource IsSelectedOrHoverVisibleConverter}">
-                                            <Binding Path="IsSelected" />
-                                            <Binding Path="Opacity" Source="{x:Reference HoverOverlay}" />
-                                        </MultiBinding>
-                                    </Border.IsVisible>
                                 </Border>
+
+                                <Grid Grid.Row="2"
+                                    Margin="8"
+                                    ColumnDefinitions="*,Auto">
+                                    <Label Grid.Column="0"
+                                        Margin="0,0,12,0"
+                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                                        behaviors:HoverBehavior.EnableScaleHover="True"
+                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                                        FontSize="18"
+                                        HorizontalOptions="End"
+                                        IsVisible="{Binding Favorite, Converter={StaticResource InvertedBoolConverter}}"
+                                        Text="{mi:Fluent Icon=Heart48,
+                                                         FontOverride=True}"
+                                        TextColor="{DynamicResource IconSecondary}"
+                                        VerticalOptions="Center">
+                                        <Label.GestureRecognizers>
+                                            <TapGestureRecognizer Tapped="OnFavoriteIconTapped" />
+                                        </Label.GestureRecognizers>
+                                    </Label>
+
+                                    <Label Grid.Column="0"
+                                        Margin="0,0,12,0"
+                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                                        behaviors:HoverBehavior.EnableScaleHover="True"
+                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                                        FontSize="18"
+                                        HorizontalOptions="End"
+                                        IsVisible="{Binding Favorite}"
+                                        Text="{mi:FluentFilled Icon=Heart48Filled,
+                                                                       FontOverride=True}"
+                                        TextColor="{DynamicResource IconSecondary}"
+                                        VerticalOptions="Center">
+                                        <Label.GestureRecognizers>
+                                            <TapGestureRecognizer Tapped="OnFavoriteIconTapped" />
+                                        </Label.GestureRecognizers>
+                                    </Label>
+
+                                    <Label x:Name="MoreIconLabel"
+                                        Grid.Column="1"
+                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                                        behaviors:HoverBehavior.EnableScaleHover="True"
+                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                                        FontSize="18"
+                                        HorizontalOptions="End"
+                                        Text="{mi:Fluent Icon=MoreHorizontal48,
+                                                                 FontOverride=True}"
+                                        TextColor="{DynamicResource IconSecondary}"
+                                        VerticalOptions="Center">
+                                        <Label.GestureRecognizers>
+                                            <TapGestureRecognizer Tapped="OnMoreIconTapped" />
+                                        </Label.GestureRecognizers>
+                                    </Label>
+                                </Grid>
                             </Grid>
                         </Border>
-
-                        <!--  Artist  -->
-                        <controls:MarqueeLabel Grid.Row="2"
-                            FontAttributes="Bold"
-                            FontSize="20"
-                            HorizontalTextAlignment="Center"
-                            LineBreakMode="TailTruncation"
-                            MaxLines="1"
-                            Text="{Binding ArtistName}"
-                            TextColor="{DynamicResource TextSecondary}" />
-
-                        <!--  Year  -->
-                        <Label Grid.Row="3"
-                            FontAttributes="Bold"
-                            FontSize="14"
-                            HorizontalOptions="Center"
-                            Text="{Binding Album.Year}"
-                            TextColor="{DynamicResource TextTertiary}" />
                     </Grid>
                 </Border>
-            </Grid>
-        </DataTemplate>
 
-        <DataTemplate x:Key="SkeletonTemplate" x:DataType="models:RowViewSkeleton">
-            <ContentView>
-                <Grid Margin="3"
-                    RowDefinitions="Auto,14,14,14"
-                    WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
-                    <controls:SkeletonLoader WidthRequest="{Binding Source={x:Reference self}, Path=CoverSize}"
-                        HeightRequest="{Binding Source={x:Reference self}, Path=CoverSize}"
-                        CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}"
-                        HorizontalOptions="Center" />
-                    <controls:SkeletonLoader Grid.Row="1" WidthRequest="120" HeightRequest="14" HorizontalOptions="Start" Margin="0,12,0,4" />
-                    <controls:SkeletonLoader Grid.Row="2" WidthRequest="110" HeightRequest="14" HorizontalOptions="Start" Margin="0,0,0,2" />
-                    <controls:SkeletonLoader Grid.Row="3" WidthRequest="60" HeightRequest="14" HorizontalOptions="Start" />
+                <Grid Grid.Column="1"
+                    RowDefinitions="Auto,Auto,Auto"
+                    RowSpacing="6"
+                    VerticalOptions="Center">
+                    <Label Grid.Row="0"
+                        FontAttributes="Bold"
+                        FontSize="56"
+                        LineBreakMode="TailTruncation"
+                        MaxLines="2"
+                        Text="{Binding DisplayName}"
+                        TextColor="{DynamicResource TextSecondary}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Tapped="OnPrimaryInfoTapped" />
+                        </Label.GestureRecognizers>
+                    </Label>
+
+                    <Label Grid.Row="1"
+                        FontAttributes="Bold"
+                        FontSize="24"
+                        LineBreakMode="TailTruncation"
+                        MaxLines="1"
+                        Text="{Binding ArtistName}"
+                        TextColor="{DynamicResource TextSecondary}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Tapped="OnPrimaryInfoTapped" />
+                        </Label.GestureRecognizers>
+                    </Label>
+
+                    <Label Grid.Row="2"
+                        FontAttributes="Bold"
+                        FontSize="20"
+                        Text="{Binding Album.Year}"
+                        TextColor="{DynamicResource TextTertiary}" />
                 </Grid>
-            </ContentView>
-        </DataTemplate>
-
-        <controls:SlideViewTemplateSelector x:Key="SlideViewTemplateSelector"
-            TrackTemplate="{StaticResource TrackTemplate}"
-            SkeletonTemplate="{StaticResource SkeletonTemplate}" />
-    </ContentView.Resources>
-
-    <Grid x:Name="ItemsHost" SizeChanged="OnItemsHostSizeChanged">
-        <Grid x:Name="ItemsHostPrimaryLayer">
-            <ScrollView x:Name="ItemsScrollPrimary" Orientation="Neither">
-                <FlexLayout x:Name="ItemsFlexPrimary"
-                    Direction="Row"
-                    Wrap="NoWrap"
-                    AlignItems="Start"
-                    JustifyContent="Start"
-                    BindableLayout.ItemTemplateSelector="{StaticResource SlideViewTemplateSelector}" />
-            </ScrollView>
-        </Grid>
-
-        <Grid x:Name="ItemsHostSecondaryLayer" IsVisible="False" InputTransparent="True" Opacity="0">
-            <ScrollView x:Name="ItemsScrollSecondary" Orientation="Neither">
-                <FlexLayout x:Name="ItemsFlexSecondary"
-                    Direction="Row"
-                    Wrap="NoWrap"
-                    AlignItems="Start"
-                    JustifyContent="Start"
-                    BindableLayout.ItemTemplateSelector="{StaticResource SlideViewTemplateSelector}" />
-            </ScrollView>
-        </Grid>
+            </Grid>
+        </Border>
     </Grid>
 </ContentView>
