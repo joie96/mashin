@@ -16,7 +16,7 @@
     <ScrollView x:Name="scrollView">
         <Grid
             Padding="{StaticResource PagePaddingDesktop}"
-            RowDefinitions="Auto,Auto"
+            RowDefinitions="Auto,Auto,Auto"
             RowSpacing="0">
 
             <!--  Header  -->
@@ -135,9 +135,62 @@
                     ItemCornerRadius="8"
                     ItemsSource="{Binding RecommendationTrackItems}"
                     MediaActions="{Binding MediaActions}"
-                    PrimaryInfoTappedCommand="{Binding RecommendationTrackTappedCommand}"
+                    PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
                     ShowContextMenuAtAnchorCommand="{Binding ShowTrackContextMenuAtAnchorCommand}"
                     ShowContextMenuAtPositionCommand="{Binding ShowTrackContextMenuAtPositionCommand}" />
+            </Grid>
+
+            <!--  Genre Playlists List (incl. Skeletons)  -->
+            <Grid Grid.Row="2"
+                Margin="{StaticResource SectionTopMargin}"
+                RowDefinitions="Auto,Auto,Auto"
+                RowSpacing="0">
+                <Grid Grid.Row="0"
+                    ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="16">
+                    <Label Grid.Column="0"
+                        Style="{StaticResource LabelSectionTitle}"
+                        Text="Meine Genres"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Margin="-6,0,0,0"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding GenrePlaylistItems.Count}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <Label Grid.Row="1"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding ShowNoGenrePlaylistsMessage}"
+                    Style="{StaticResource LabelTertiary}"
+                    Text="Keine Genre-Playlists verfuegbar." />
+
+                <controls:ListView Grid.Row="2"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding ShowGenrePlaylistsListView}"
+                    ItemsSource="{Binding GenrePlaylistItems}"
+                    MaxItems="9"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding PlaylistTappedCommand}" />
             </Grid>
         </Grid>
     </ScrollView>

@@ -140,14 +140,14 @@
                 <Grid Grid.Column="1"
                     RowDefinitions="Auto,Auto,Auto"
                     RowSpacing="6"
-                    VerticalOptions="Center">
+                    VerticalOptions="End">
                     <Label Grid.Row="0"
                         FontAttributes="Bold"
                         FontSize="32"
                         LineBreakMode="TailTruncation"
                         MaxLines="1"
                         Text="{Binding DisplayName}"
-                        TextColor="{DynamicResource TextSecondary}" />
+                        TextColor="{DynamicResource TextPrimary}" />
 
                     <Label Grid.Row="1"
                         FontAttributes="Bold"
@@ -169,7 +169,7 @@
                         LineBreakMode="TailTruncation"
                         MaxLines="1"
                         Text="{Binding AlbumName}"
-                        TextColor="{DynamicResource TextTertiary}">
+                        TextColor="{DynamicResource TextSecondary}">
                         <Label.Behaviors>
                             <behaviors:LinkLabelBehavior Command="{Binding Source={x:Reference self}, Path=PrimaryInfoTappedCommand}"
                                 CommandParameter="{Binding Album}"

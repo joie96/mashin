@@ -17,5 +17,9 @@ public sealed class SlideViewSkeleton : SkeletonItem
 {
 }
 
+public sealed class ListViewSkeleton : SkeletonItem
+{
+}
+
 
 

@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView x:Class="mashin.Views.Desktop.Controls.ListView"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:behaviors="clr-namespace:mashin.Views.Desktop.Behaviors"
+    xmlns:controls="clr-namespace:mashin.Views.Desktop.Controls"
+    xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
+    xmlns:models="clr-namespace:mashin.Models"
+    x:Name="self">
+
+    <ContentView.Resources>
+        <!--  DataTemplate for Playlists  -->
+        <DataTemplate x:Key="PlaylistTemplate" x:DataType="models:Playlist">
+            <Border
+                HeightRequest="74"
+                StrokeThickness="0"
+                BackgroundColor="{DynamicResource BackgroundSecondary}">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="10" />
+                </Border.StrokeShape>
+
+                <Grid ColumnDefinitions="10,*">
+                    <!--  Accent Bar  -->
+                    <Border Grid.Column="0"
+                        StrokeThickness="0"
+                        BackgroundColor="{DynamicResource AccentColor}">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="10,0,0,10" />
+                        </Border.StrokeShape>
+                    </Border>
+
+                    <Grid Grid.Column="1"
+                        Padding="12,6"
+                        behaviors:HoverBehavior.ShowOnHoverTarget="{x:Reference HoverOverlay}">
+                        <!--  Playlist Name  -->
+                        <Label
+                            FontAttributes="Bold"
+                            FontSize="14"
+                            LineBreakMode="TailTruncation"
+                            MaxLines="1"
+                            Text="{Binding DisplayName}"
+                            TextColor="{DynamicResource TextSecondary}"
+                            VerticalOptions="Center">
+                            <Label.Behaviors>
+                                <behaviors:LinkLabelBehavior Command="{Binding Source={x:Reference self}, Path=PrimaryInfoTappedCommand}"
+                                    CommandParameter="{Binding .}"
+                                    HoverTextColor="{DynamicResource TextSecondary}" />
+                            </Label.Behaviors>
+                        </Label>
+
+                        <!--  Hover Overlay (Play only)  -->
+                        <Border x:Name="HoverOverlay"
+                            HorizontalOptions="End"
+                            WidthRequest="88"
+                            StrokeThickness="0"
+                            Opacity="0"
+                            BackgroundColor="Transparent">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="0,10,10,0" />
+                            </Border.StrokeShape>
+
+                            <!--  Play Button  -->
+                            <Border
+                                behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource IconPrimary75}"
+                                behaviors:HoverBehavior.EnableScaleHover="True"
+                                behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource IconPrimary}"
+                                BackgroundColor="{DynamicResource IconPrimary75}"
+                                HeightRequest="32"
+                                HorizontalOptions="End"
+                                Margin="0,0,10,0"
+                                StrokeThickness="0"
+                                VerticalOptions="Center"
+                                WidthRequest="32">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Tapped="OnPlayOverlayClicked" />
+                                </Border.GestureRecognizers>
+                                <Border.StrokeShape>
+                                    <RoundRectangle CornerRadius="16" />
+                                </Border.StrokeShape>
+
+                                <Label
+                                    FontSize="16"
+                                    HorizontalOptions="Center"
+                                    Text="{mi:FluentFilled Icon=Play48Filled, FontOverride=True}"
+                                    TextColor="{DynamicResource BackgroundPrimary}"
+                                    VerticalOptions="Center" />
+                            </Border>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <!--  DataTemplate for Skeletons  -->
+        <DataTemplate x:Key="SkeletonTemplate" x:DataType="models:ListViewSkeleton">
+            <Border
+                HeightRequest="74"
+                StrokeThickness="0"
+                BackgroundColor="{DynamicResource BackgroundSecondary}">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="10" />
+                </Border.StrokeShape>
+
+                <Grid ColumnDefinitions="10,*">
+                    <controls:SkeletonLoader Grid.Column="0"
+                        CornerRadius="8"
+                        HeightRequest="74"
+                        WidthRequest="10" />
+                    <Grid Grid.Column="1"
+                        Padding="12,6">
+                        <controls:SkeletonLoader
+                            CornerRadius="8"
+                            HeightRequest="26"
+                            HorizontalOptions="Start"
+                            VerticalOptions="Center"
+                            WidthRequest="180" />
+                    </Grid>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <!--  TemplateSelector to choose between DataTemplates  -->
+        <controls:ListViewTemplateSelector x:Key="ListViewTemplateSelector"
+            PlaylistTemplate="{StaticResource PlaylistTemplate}"
+            SkeletonTemplate="{StaticResource SkeletonTemplate}" />
+    </ContentView.Resources>
+
+    <!--  Items Grid (max 3x3 via MaxItems in code-behind)  -->
+    <CollectionView x:Name="ItemsCollectionView"
+        SelectionMode="None"
+        VerticalScrollBarVisibility="Never">
+        <CollectionView.ItemsLayout>
+            <GridItemsLayout Orientation="Vertical"
+                Span="3"
+                VerticalItemSpacing="12"
+                HorizontalItemSpacing="12" />
+        </CollectionView.ItemsLayout>
+        <CollectionView.ItemTemplate>
+            <StaticResource Key="ListViewTemplateSelector" />
+        </CollectionView.ItemTemplate>
+    </CollectionView>
+</ContentView>
