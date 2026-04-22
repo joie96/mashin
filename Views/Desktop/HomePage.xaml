@@ -7,7 +7,6 @@
     xmlns:converters="clr-namespace:mashin.Converters"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
     xmlns:vm="clr-namespace:mashin.ViewModels"
-    x:Name="HomePageRoot"
     x:DataType="vm:HomeViewModel"
     BackgroundColor="{DynamicResource BackgroundPrimary}">
     <ContentPage.Resources>
@@ -17,221 +16,51 @@
     <ScrollView x:Name="scrollView">
         <Grid
             Padding="{StaticResource PagePaddingDesktop}"
-            RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+            RowDefinitions="Auto,Auto"
             RowSpacing="0">
 
             <!--  Header  -->
             <VerticalStackLayout Grid.Row="0" Spacing="6">
                 <Label Style="{StaticResource LabelPageTitle}"
-                    Text="Willkommen zurück!" />
+                    Text="Willkommen zur neuen Startseite" />
             </VerticalStackLayout>
 
-            <!--  Genre-Playlists  -->
-            <Grid Grid.Row="2"
-                Margin="{StaticResource SectionTopMargin}"
-                RowDefinitions="Auto,Auto,Auto,Auto"
-                RowSpacing="0">
-                <Grid Grid.Row="0"
-                    ColumnDefinitions="Auto,*,Auto"
-                    ColumnSpacing="16">
-                    <Label Grid.Column="0"
-                        Style="{StaticResource LabelSectionTitle}"
-                        Text="Playlists, die du lieben wirst"
-                        VerticalOptions="Center" />
-                    <BoxView Grid.Column="1"
-                        HeightRequest="1"
-                        HorizontalOptions="Fill"
-                        Opacity="0.75"
-                        VerticalOptions="Center" />
-                    <Grid Grid.Column="2"
-                        ColumnDefinitions="Auto,Auto"
-                        ColumnSpacing="8"
-                        VerticalOptions="Center">
-                        <Border Grid.Column="0"
-                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-                            BackgroundColor="Transparent"
-                            HeightRequest="28"
-                            InputTransparent="{Binding Source={x:Reference GenrePlaylistsRowView}, Path=CanGoPrev, Converter={StaticResource InvertedBoolConverter}}"
-                            StrokeThickness="0"
-                            WidthRequest="28">
-                            <Border.Triggers>
-                                <DataTrigger Binding="{Binding Source={x:Reference GenrePlaylistsRowView}, Path=CanGoPrev}"
-                                    TargetType="Border"
-                                    Value="False">
-                                    <Setter Property="Opacity" Value="0.35" />
-                                </DataTrigger>
-                            </Border.Triggers>
-                            <Border.GestureRecognizers>
-                                <TapGestureRecognizer Command="{Binding Source={x:Reference GenrePlaylistsRowView}, Path=PrevPageCommand}" />
-                            </Border.GestureRecognizers>
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="14" />
-                            </Border.StrokeShape>
-                            <Label FontSize="14"
-                                HorizontalOptions="Center"
-                                Text="{mi:Fluent Icon=ChevronLeft24,
-                                                 FontOverride=True}"
-                                TextColor="{DynamicResource IconSecondary}"
-                                VerticalOptions="Center" />
-                        </Border>
-                        <Border Grid.Column="1"
-                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-                            BackgroundColor="Transparent"
-                            HeightRequest="28"
-                            InputTransparent="{Binding Source={x:Reference GenrePlaylistsRowView}, Path=CanGoNext, Converter={StaticResource InvertedBoolConverter}}"
-                            StrokeThickness="0"
-                            WidthRequest="28">
-                            <Border.Triggers>
-                                <DataTrigger Binding="{Binding Source={x:Reference GenrePlaylistsRowView}, Path=CanGoNext}"
-                                    TargetType="Border"
-                                    Value="False">
-                                    <Setter Property="Opacity" Value="0.35" />
-                                </DataTrigger>
-                            </Border.Triggers>
-                            <Border.GestureRecognizers>
-                                <TapGestureRecognizer Command="{Binding Source={x:Reference GenrePlaylistsRowView}, Path=NextPageCommand}" />
-                            </Border.GestureRecognizers>
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="14" />
-                            </Border.StrokeShape>
-                            <Label FontSize="14"
-                                HorizontalOptions="Center"
-                                Text="{mi:Fluent Icon=ChevronRight24,
-                                                 FontOverride=True}"
-                                TextColor="{DynamicResource IconSecondary}"
-                                VerticalOptions="Center" />
-                        </Border>
-                    </Grid>
-                </Grid>
-                <Label Grid.Row="1"
-                    Margin="0,16,0,0"
-                    IsVisible="{Binding ShowNoGenrePlaylistsMessage}"
-                    Style="{StaticResource LabelTertiary}"
-                    Text="Keine Genre-Playlists verfügbar." />
-                <controls:RowView x:Name="GenrePlaylistsRowView"
-                    Grid.Row="2"
-                    Margin="0,16,0,0"
-                    IsVisible="{Binding ShowGenrePlaylists}"
-                    ItemCornerRadius="8"
-                    ItemsSource="{Binding GenrePlaylistItems}"
-                    MediaActions="{Binding MediaActions}"
-                    PrimaryInfoTappedCommand="{Binding PlaylistTappedCommand}"
-                    ShowContextMenuAtAnchorCommand="{Binding ShowPlaylistContextMenuAtAnchorCommand}"
-                    ShowContextMenuAtPositionCommand="{Binding ShowPlaylistContextMenuAtPositionCommand}" />
-            </Grid>
-
-            <!--  Lieblings-Playlists  -->
-            <Grid Grid.Row="3"
-                Margin="{StaticResource SectionTopMargin}"
-                RowDefinitions="Auto,Auto,Auto,Auto"
-                RowSpacing="0">
-                <Grid Grid.Row="0"
-                    ColumnDefinitions="Auto,*,Auto"
-                    ColumnSpacing="16">
-                    <Label Grid.Column="0"
-                        Style="{StaticResource LabelSectionTitle}"
-                        Text="Playlists, die du liebst"
-                        VerticalOptions="Center" />
-                    <BoxView Grid.Column="1"
-                        HeightRequest="1"
-                        HorizontalOptions="Fill"
-                        Opacity="0.75"
-                        VerticalOptions="Center" />
-                    <Grid Grid.Column="2"
-                        ColumnDefinitions="Auto,Auto"
-                        ColumnSpacing="8"
-                        VerticalOptions="Center">
-                        <Border Grid.Column="0"
-                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-                            BackgroundColor="Transparent"
-                            HeightRequest="28"
-                            InputTransparent="{Binding Source={x:Reference FavoritePlaylistsRowView}, Path=CanGoPrev, Converter={StaticResource InvertedBoolConverter}}"
-                            StrokeThickness="0"
-                            WidthRequest="28">
-                            <Border.Triggers>
-                                <DataTrigger Binding="{Binding Source={x:Reference FavoritePlaylistsRowView}, Path=CanGoPrev}"
-                                    TargetType="Border"
-                                    Value="False">
-                                    <Setter Property="Opacity" Value="0.35" />
-                                </DataTrigger>
-                            </Border.Triggers>
-                            <Border.GestureRecognizers>
-                                <TapGestureRecognizer Command="{Binding Source={x:Reference FavoritePlaylistsRowView}, Path=PrevPageCommand}" />
-                            </Border.GestureRecognizers>
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="14" />
-                            </Border.StrokeShape>
-                            <Label FontSize="14"
-                                HorizontalOptions="Center"
-                                Text="{mi:Fluent Icon=ChevronLeft24,
-                                                 FontOverride=True}"
-                                TextColor="{DynamicResource IconSecondary}"
-                                VerticalOptions="Center" />
-                        </Border>
-                        <Border Grid.Column="1"
-                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-                            BackgroundColor="Transparent"
-                            HeightRequest="28"
-                            InputTransparent="{Binding Source={x:Reference FavoritePlaylistsRowView}, Path=CanGoNext, Converter={StaticResource InvertedBoolConverter}}"
-                            StrokeThickness="0"
-                            WidthRequest="28">
-                            <Border.Triggers>
-                                <DataTrigger Binding="{Binding Source={x:Reference FavoritePlaylistsRowView}, Path=CanGoNext}"
-                                    TargetType="Border"
-                                    Value="False">
-                                    <Setter Property="Opacity" Value="0.35" />
-                                </DataTrigger>
-                            </Border.Triggers>
-                            <Border.GestureRecognizers>
-                                <TapGestureRecognizer Command="{Binding Source={x:Reference FavoritePlaylistsRowView}, Path=NextPageCommand}" />
-                            </Border.GestureRecognizers>
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="14" />
-                            </Border.StrokeShape>
-                            <Label FontSize="14"
-                                HorizontalOptions="Center"
-                                Text="{mi:Fluent Icon=ChevronRight24,
-                                                 FontOverride=True}"
-                                TextColor="{DynamicResource IconSecondary}"
-                                VerticalOptions="Center" />
-                        </Border>
-                    </Grid>
-                </Grid>
-                <Label Grid.Row="1"
-                    Margin="0,16,0,0"
-                    IsVisible="{Binding ShowNoFavoritePlaylistsMessage}"
-                    Style="{StaticResource LabelTertiary}"
-                    Text="Keine favorisierten Playlists gefunden." />
-                <controls:RowView x:Name="FavoritePlaylistsRowView"
-                    Grid.Row="2"
-                    Margin="0,16,0,0"
-                    IsVisible="{Binding ShowFavoritePlaylists}"
-                    ItemCornerRadius="8"
-                    ItemsSource="{Binding FavoritePlaylistItems}"
-                    MediaActions="{Binding MediaActions}"
-                    PrimaryInfoTappedCommand="{Binding PlaylistTappedCommand}"
-                    ShowContextMenuAtAnchorCommand="{Binding ShowPlaylistContextMenuAtAnchorCommand}"
-                    ShowContextMenuAtPositionCommand="{Binding ShowPlaylistContextMenuAtPositionCommand}" />
-            </Grid>
-
-            <!--  Mixe  -->
+            <!--  Recommendations Slide (incl. Skeletons)  -->
             <Grid Grid.Row="1"
                 Margin="{StaticResource SectionTopMargin}"
-                RowDefinitions="Auto,Auto,Auto,Auto"
+                RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
                 <Grid Grid.Row="0"
-                    ColumnDefinitions="Auto,*,Auto"
+                    ColumnDefinitions="Auto,Auto,*,Auto"
                     ColumnSpacing="16">
                     <Label Grid.Column="0"
                         Style="{StaticResource LabelSectionTitle}"
-                        Text="Mixe, inspiriert von deinen Lieblingssongs"
+                        Text="ListenBrainz Recommendations"
                         VerticalOptions="Center" />
-                    <BoxView Grid.Column="1"
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Margin="-6,0,0,0"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding RecommendationFolderItems.Count}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
                         HeightRequest="1"
                         HorizontalOptions="Fill"
                         Opacity="0.75"
                         VerticalOptions="Center" />
-                    <Grid Grid.Column="2"
+                    <Grid Grid.Column="3"
                         ColumnDefinitions="Auto,Auto"
                         ColumnSpacing="8"
                         VerticalOptions="Center">
@@ -239,18 +68,18 @@
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
-                            InputTransparent="{Binding Source={x:Reference MixTracksSlideView}, Path=CanGoPrev, Converter={StaticResource InvertedBoolConverter}}"
+                            InputTransparent="{Binding Source={x:Reference RecommendationFolderSlideView}, Path=CanGoPrev, Converter={StaticResource InvertedBoolConverter}}"
                             StrokeThickness="0"
                             WidthRequest="28">
                             <Border.Triggers>
-                                <DataTrigger Binding="{Binding Source={x:Reference MixTracksSlideView}, Path=CanGoPrev}"
+                                <DataTrigger Binding="{Binding Source={x:Reference RecommendationFolderSlideView}, Path=CanGoPrev}"
                                     TargetType="Border"
                                     Value="False">
                                     <Setter Property="Opacity" Value="0.35" />
                                 </DataTrigger>
                             </Border.Triggers>
                             <Border.GestureRecognizers>
-                                <TapGestureRecognizer Command="{Binding Source={x:Reference MixTracksSlideView}, Path=PrevPageCommand}" />
+                                <TapGestureRecognizer Command="{Binding Source={x:Reference RecommendationFolderSlideView}, Path=PrevPageCommand}" />
                             </Border.GestureRecognizers>
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="14" />
@@ -266,18 +95,18 @@
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
-                            InputTransparent="{Binding Source={x:Reference MixTracksSlideView}, Path=CanGoNext, Converter={StaticResource InvertedBoolConverter}}"
+                            InputTransparent="{Binding Source={x:Reference RecommendationFolderSlideView}, Path=CanGoNext, Converter={StaticResource InvertedBoolConverter}}"
                             StrokeThickness="0"
                             WidthRequest="28">
                             <Border.Triggers>
-                                <DataTrigger Binding="{Binding Source={x:Reference MixTracksSlideView}, Path=CanGoNext}"
+                                <DataTrigger Binding="{Binding Source={x:Reference RecommendationFolderSlideView}, Path=CanGoNext}"
                                     TargetType="Border"
                                     Value="False">
                                     <Setter Property="Opacity" Value="0.35" />
                                 </DataTrigger>
                             </Border.Triggers>
                             <Border.GestureRecognizers>
-                                <TapGestureRecognizer Command="{Binding Source={x:Reference MixTracksSlideView}, Path=NextPageCommand}" />
+                                <TapGestureRecognizer Command="{Binding Source={x:Reference RecommendationFolderSlideView}, Path=NextPageCommand}" />
                             </Border.GestureRecognizers>
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="14" />
@@ -291,340 +120,25 @@
                         </Border>
                     </Grid>
                 </Grid>
+
                 <Label Grid.Row="1"
                     Margin="0,16,0,0"
-                    IsVisible="{Binding ShowNoMixTracksMessage}"
+                    IsVisible="{Binding ShowNoRecommendationFolderMessage}"
                     Style="{StaticResource LabelTertiary}"
-                    Text="Keine Mixe verfügbar." />
-                <controls:SlideView x:Name="MixTracksSlideView"
+                    Text="Keine ListenBrainz-Recommendation-Folder verfuegbar." />
+
+                <controls:SlideView x:Name="RecommendationFolderSlideView"
                     Grid.Row="2"
                     Margin="0,16,0,0"
                     CoverSize="175"
-                    IsVisible="{Binding ShowMixTracks}"
+                    IsVisible="{Binding ShowRecommendationFolderSlideView}"
                     ItemCornerRadius="8"
-                    ItemsSource="{Binding MixTrackItems}"
+                    ItemsSource="{Binding RecommendationFolderItems}"
                     MediaActions="{Binding MediaActions}"
-                    PrimaryInfoTappedCommand="{Binding MixTrackTappedCommand}"
-                    ShowContextMenuAtAnchorCommand="{Binding ShowMixTrackContextMenuAtAnchorCommand}"
-                    ShowContextMenuAtPositionCommand="{Binding ShowMixTrackContextMenuAtPositionCommand}" />
-            </Grid>
-
-            <!--  Künstler-Playlists  -->
-            <Grid Grid.Row="4"
-                Margin="{StaticResource SectionTopMargin}"
-                RowDefinitions="Auto,Auto,Auto,Auto"
-                RowSpacing="0">
-                <Grid Grid.Row="0"
-                    ColumnDefinitions="Auto,*,Auto"
-                    ColumnSpacing="16">
-                    <Label Grid.Column="0"
-                        Style="{StaticResource LabelSectionTitle}"
-                        Text="Für dich erstellt"
-                        VerticalOptions="Center" />
-                    <BoxView Grid.Column="1"
-                        HeightRequest="1"
-                        HorizontalOptions="Fill"
-                        Opacity="0.75"
-                        VerticalOptions="Center" />
-                    <Grid Grid.Column="2"
-                        ColumnDefinitions="Auto,Auto"
-                        ColumnSpacing="8"
-                        VerticalOptions="Center">
-                        <Border Grid.Column="0"
-                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-                            BackgroundColor="Transparent"
-                            HeightRequest="28"
-                            InputTransparent="{Binding Source={x:Reference ArtistPlaylistsRowView}, Path=CanGoPrev, Converter={StaticResource InvertedBoolConverter}}"
-                            StrokeThickness="0"
-                            WidthRequest="28">
-                            <Border.Triggers>
-                                <DataTrigger Binding="{Binding Source={x:Reference ArtistPlaylistsRowView}, Path=CanGoPrev}"
-                                    TargetType="Border"
-                                    Value="False">
-                                    <Setter Property="Opacity" Value="0.35" />
-                                </DataTrigger>
-                            </Border.Triggers>
-                            <Border.GestureRecognizers>
-                                <TapGestureRecognizer Command="{Binding Source={x:Reference ArtistPlaylistsRowView}, Path=PrevPageCommand}" />
-                            </Border.GestureRecognizers>
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="14" />
-                            </Border.StrokeShape>
-                            <Label FontSize="14"
-                                HorizontalOptions="Center"
-                                Text="{mi:Fluent Icon=ChevronLeft24,
-                                                 FontOverride=True}"
-                                TextColor="{DynamicResource IconSecondary}"
-                                VerticalOptions="Center" />
-                        </Border>
-                        <Border Grid.Column="1"
-                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-                            BackgroundColor="Transparent"
-                            HeightRequest="28"
-                            InputTransparent="{Binding Source={x:Reference ArtistPlaylistsRowView}, Path=CanGoNext, Converter={StaticResource InvertedBoolConverter}}"
-                            StrokeThickness="0"
-                            WidthRequest="28">
-                            <Border.Triggers>
-                                <DataTrigger Binding="{Binding Source={x:Reference ArtistPlaylistsRowView}, Path=CanGoNext}"
-                                    TargetType="Border"
-                                    Value="False">
-                                    <Setter Property="Opacity" Value="0.35" />
-                                </DataTrigger>
-                            </Border.Triggers>
-                            <Border.GestureRecognizers>
-                                <TapGestureRecognizer Command="{Binding Source={x:Reference ArtistPlaylistsRowView}, Path=NextPageCommand}" />
-                            </Border.GestureRecognizers>
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="14" />
-                            </Border.StrokeShape>
-                            <Label FontSize="14"
-                                HorizontalOptions="Center"
-                                Text="{mi:Fluent Icon=ChevronRight24,
-                                                 FontOverride=True}"
-                                TextColor="{DynamicResource IconSecondary}"
-                                VerticalOptions="Center" />
-                        </Border>
-                    </Grid>
-                </Grid>
-                <Label Grid.Row="1"
-                    Margin="0,16,0,0"
-                    IsVisible="{Binding ShowNoArtistPlaylistsMessage}"
-                    Style="{StaticResource LabelTertiary}"
-                    Text="Keine Künstler-Playlists verfügbar." />
-                <controls:RowView x:Name="ArtistPlaylistsRowView"
-                    Grid.Row="2"
-                    Margin="0,16,0,0"
-                    IsVisible="{Binding ShowArtistPlaylists}"
-                    ItemCornerRadius="8"
-                    ItemsSource="{Binding ArtistPlaylistItems}"
-                    MediaActions="{Binding MediaActions}"
-                    PrimaryInfoTappedCommand="{Binding PlaylistTappedCommand}"
-                    ShowContextMenuAtAnchorCommand="{Binding ShowPlaylistContextMenuAtAnchorCommand}"
-                    ShowContextMenuAtPositionCommand="{Binding ShowPlaylistContextMenuAtPositionCommand}" />
-            </Grid>
-
-            <!--  Top-Künstler  -->
-            <Grid Grid.Row="5"
-                Margin="{StaticResource SectionTopMargin}"
-                RowDefinitions="Auto,Auto,Auto,Auto"
-                RowSpacing="0">
-                <Grid Grid.Row="0"
-                    ColumnDefinitions="Auto,*,Auto"
-                    ColumnSpacing="16">
-                    <Label Grid.Column="0"
-                        Style="{StaticResource LabelSectionTitle}"
-                        Text="In letzter Zeit liebst du"
-                        VerticalOptions="Center" />
-                    <BoxView Grid.Column="1"
-                        HeightRequest="1"
-                        HorizontalOptions="Fill"
-                        Opacity="0.75"
-                        VerticalOptions="Center" />
-                    <Grid Grid.Column="2"
-                        ColumnDefinitions="Auto,Auto"
-                        ColumnSpacing="8"
-                        VerticalOptions="Center">
-                        <Border Grid.Column="0"
-                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-                            BackgroundColor="Transparent"
-                            HeightRequest="28"
-                            InputTransparent="{Binding Source={x:Reference TopArtistsRowView}, Path=CanGoPrev, Converter={StaticResource InvertedBoolConverter}}"
-                            StrokeThickness="0"
-                            WidthRequest="28">
-                            <Border.Triggers>
-                                <DataTrigger Binding="{Binding Source={x:Reference TopArtistsRowView}, Path=CanGoPrev}"
-                                    TargetType="Border"
-                                    Value="False">
-                                    <Setter Property="Opacity" Value="0.35" />
-                                </DataTrigger>
-                            </Border.Triggers>
-                            <Border.GestureRecognizers>
-                                <TapGestureRecognizer Command="{Binding Source={x:Reference TopArtistsRowView}, Path=PrevPageCommand}" />
-                            </Border.GestureRecognizers>
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="14" />
-                            </Border.StrokeShape>
-                            <Label FontSize="14"
-                                HorizontalOptions="Center"
-                                Text="{mi:Fluent Icon=ChevronLeft24,
-                                                 FontOverride=True}"
-                                TextColor="{DynamicResource IconSecondary}"
-                                VerticalOptions="Center" />
-                        </Border>
-                        <Border Grid.Column="1"
-                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-                            BackgroundColor="Transparent"
-                            HeightRequest="28"
-                            InputTransparent="{Binding Source={x:Reference TopArtistsRowView}, Path=CanGoNext, Converter={StaticResource InvertedBoolConverter}}"
-                            StrokeThickness="0"
-                            WidthRequest="28">
-                            <Border.Triggers>
-                                <DataTrigger Binding="{Binding Source={x:Reference TopArtistsRowView}, Path=CanGoNext}"
-                                    TargetType="Border"
-                                    Value="False">
-                                    <Setter Property="Opacity" Value="0.35" />
-                                </DataTrigger>
-                            </Border.Triggers>
-                            <Border.GestureRecognizers>
-                                <TapGestureRecognizer Command="{Binding Source={x:Reference TopArtistsRowView}, Path=NextPageCommand}" />
-                            </Border.GestureRecognizers>
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="14" />
-                            </Border.StrokeShape>
-                            <Label FontSize="14"
-                                HorizontalOptions="Center"
-                                Text="{mi:Fluent Icon=ChevronRight24,
-                                                 FontOverride=True}"
-                                TextColor="{DynamicResource IconSecondary}"
-                                VerticalOptions="Center" />
-                        </Border>
-                    </Grid>
-                </Grid>
-                <Label Grid.Row="1"
-                    Margin="0,16,0,0"
-                    IsVisible="{Binding ShowNoTopArtistsMessage}"
-                    Style="{StaticResource LabelTertiary}"
-                    Text="Keine Top-Künstler verfügbar." />
-                <controls:RowView x:Name="TopArtistsRowView"
-                    Grid.Row="2"
-                    Margin="0,16,0,0"
-                    IsVisible="{Binding ShowTopArtists}"
-                    ItemCornerRadius="100"
-                    ItemsSource="{Binding TopArtistItems}"
-                    MediaActions="{Binding MediaActions}"
-                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
-                    ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
-            </Grid>
-
-            <!--  Empfehlungen  -->
-            <Grid Grid.Row="6"
-                Margin="{StaticResource SectionTopMargin}"
-                RowDefinitions="Auto,Auto,Auto,Auto"
-                RowSpacing="0">
-                <Grid Grid.Row="0"
-                    ColumnDefinitions="Auto,*"
-                    ColumnSpacing="16">
-                    <Label Grid.Column="0"
-                        Style="{StaticResource LabelSectionTitle}"
-                        Text="Neuheiten für dich"
-                        VerticalOptions="Center" />
-                    <BoxView Grid.Column="1"
-                        HeightRequest="1"
-                        HorizontalOptions="Fill"
-                        Opacity="0.75"
-                        VerticalOptions="Center" />
-                </Grid>
-                <Label Grid.Row="1"
-                    Margin="0,16,0,0"
-                    IsVisible="{Binding ShowNoRecommendationTracksMessage}"
-                    Style="{StaticResource LabelTertiary}"
-                    Text="Keine Empfehlungen gefunden." />
-                <controls:TableView Grid.Row="2"
-                    Margin="0,16,0,0"
-                    IsVisible="{Binding ShowRecommendationTracks}"
-                    ItemsSource="{Binding RecommendationTrackItems}"
-                    MediaActions="{Binding MediaActions}"
-                    PageSize="10"
-                    PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
-                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    PrimaryInfoTappedCommand="{Binding RecommendationTrackTappedCommand}"
                     ShowContextMenuAtAnchorCommand="{Binding ShowTrackContextMenuAtAnchorCommand}"
                     ShowContextMenuAtPositionCommand="{Binding ShowTrackContextMenuAtPositionCommand}" />
             </Grid>
-
-            <!--  Genre-Künstler-Sektionen  -->
-            <Grid Grid.Row="7"
-                Margin="{StaticResource SectionTopMargin}"
-                RowDefinitions="Auto,Auto"
-                RowSpacing="0">
-                <Label Grid.Row="0"
-                    Margin="0,16,0,0"
-                    IsVisible="{Binding ShowNoGenreArtistSectionsMessage}"
-                    Style="{StaticResource LabelTertiary}"
-                    Text="Keine Genre-Künstler-Sektionen verfügbar." />
-                <VerticalStackLayout Grid.Row="1"
-                    IsVisible="{Binding ShowGenreArtistSections}"
-                    BindableLayout.ItemsSource="{Binding GenreArtistSections}"
-                    Spacing="24">
-                    <BindableLayout.ItemTemplate>
-                        <DataTemplate x:DataType="vm:HomeArtistSection">
-                            <Grid RowDefinitions="Auto,Auto"
-                                RowSpacing="0">
-                                <Grid Grid.Row="0"
-                                    ColumnDefinitions="Auto,*"
-                                    ColumnSpacing="16">
-                                    <Label Grid.Column="0"
-                                        Style="{StaticResource LabelSectionTitle}"
-                                        Text="{Binding Title}"
-                                        VerticalOptions="Center" />
-                                    <BoxView Grid.Column="1"
-                                        HeightRequest="1"
-                                        HorizontalOptions="Fill"
-                                        Opacity="0.75"
-                                        VerticalOptions="Center" />
-                                </Grid>
-                                <controls:RowView Grid.Row="1"
-                                    Margin="0,16,0,0"
-                                    ItemCornerRadius="100"
-                                    ItemsSource="{Binding ArtistItems}"
-                                    MediaActions="{Binding Source={x:Reference HomePageRoot}, Path=BindingContext.MediaActions}"
-                                    PrimaryInfoTappedCommand="{Binding Source={x:Reference HomePageRoot}, Path=BindingContext.ArtistTappedCommand}"
-                                    SecondaryInfoTappedCommand="{Binding Source={x:Reference HomePageRoot}, Path=BindingContext.ArtistTappedCommand}"
-                                    ShowContextMenuAtAnchorCommand="{Binding Source={x:Reference HomePageRoot}, Path=BindingContext.ShowArtistContextMenuAtAnchorCommand}"
-                                    ShowContextMenuAtPositionCommand="{Binding Source={x:Reference HomePageRoot}, Path=BindingContext.ShowArtistContextMenuAtPositionCommand}" />
-                            </Grid>
-                        </DataTemplate>
-                    </BindableLayout.ItemTemplate>
-                </VerticalStackLayout>
-            </Grid>
-
-            <!--  Ähnliche-Künstler-Sektionen  -->
-            <Grid Grid.Row="8"
-                Margin="{StaticResource SectionTopMargin}"
-                RowDefinitions="Auto,Auto"
-                RowSpacing="0">
-                <Label Grid.Row="0"
-                    Margin="0,16,0,0"
-                    IsVisible="{Binding ShowNoSimilarArtistSectionsMessage}"
-                    Style="{StaticResource LabelTertiary}"
-                    Text="Keine ähnliche-Künstler-Sektionen verfügbar." />
-                <VerticalStackLayout Grid.Row="1"
-                    IsVisible="{Binding ShowSimilarArtistSections}"
-                    BindableLayout.ItemsSource="{Binding SimilarArtistSections}"
-                    Spacing="24">
-                    <BindableLayout.ItemTemplate>
-                        <DataTemplate x:DataType="vm:HomeArtistSection">
-                            <Grid RowDefinitions="Auto,Auto"
-                                RowSpacing="0">
-                                <Grid Grid.Row="0"
-                                    ColumnDefinitions="Auto,*"
-                                    ColumnSpacing="16">
-                                    <Label Grid.Column="0"
-                                        Style="{StaticResource LabelSectionTitle}"
-                                        Text="{Binding Title}"
-                                        VerticalOptions="Center" />
-                                    <BoxView Grid.Column="1"
-                                        HeightRequest="1"
-                                        HorizontalOptions="Fill"
-                                        Opacity="0.75"
-                                        VerticalOptions="Center" />
-                                </Grid>
-                                <controls:RowView Grid.Row="1"
-                                    Margin="0,16,0,0"
-                                    ItemCornerRadius="100"
-                                    ItemsSource="{Binding ArtistItems}"
-                                    MediaActions="{Binding Source={x:Reference HomePageRoot}, Path=BindingContext.MediaActions}"
-                                    PrimaryInfoTappedCommand="{Binding Source={x:Reference HomePageRoot}, Path=BindingContext.ArtistTappedCommand}"
-                                    SecondaryInfoTappedCommand="{Binding Source={x:Reference HomePageRoot}, Path=BindingContext.ArtistTappedCommand}"
-                                    ShowContextMenuAtAnchorCommand="{Binding Source={x:Reference HomePageRoot}, Path=BindingContext.ShowArtistContextMenuAtAnchorCommand}"
-                                    ShowContextMenuAtPositionCommand="{Binding Source={x:Reference HomePageRoot}, Path=BindingContext.ShowArtistContextMenuAtPositionCommand}" />
-                            </Grid>
-                        </DataTemplate>
-                    </BindableLayout.ItemTemplate>
-                </VerticalStackLayout>
-            </Grid>
-
         </Grid>
     </ScrollView>
 </ContentPage>

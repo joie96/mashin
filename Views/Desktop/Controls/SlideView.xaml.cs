@@ -1,5 +1,6 @@
 using mashin.Models;
 using mashin.Services;
+using mashin.Collections;
 using MauiColor = Microsoft.Maui.Graphics.Color;
 using MauiPoint = Microsoft.Maui.Graphics.Point;
 using ImageSharpImage = SixLabors.ImageSharp.Image;
@@ -7,6 +8,7 @@ using SixLabors.ImageSharp.PixelFormats;
 using System.Collections.Concurrent;
 using System.Collections.Specialized;
 using System.Windows.Input;
+using Windows.Devices.Printers;
 
 namespace mashin.Views.Desktop.Controls;
 
@@ -23,6 +25,9 @@ public partial class SlideView : ContentView
     public static readonly BindableProperty PrimaryInfoTappedCommandProperty =
         BindableProperty.Create(nameof(PrimaryInfoTappedCommand), typeof(ICommand), typeof(SlideView));
 
+    public static readonly BindableProperty SecondaryInfoTappedCommandProperty =
+        BindableProperty.Create(nameof(SecondaryInfoTappedCommand), typeof(ICommand), typeof(SlideView));
+
     public static readonly BindableProperty ShowContextMenuAtAnchorCommandProperty =
         BindableProperty.Create(nameof(ShowContextMenuAtAnchorCommand), typeof(ICommand), typeof(SlideView));
 
@@ -30,7 +35,7 @@ public partial class SlideView : ContentView
         BindableProperty.Create(nameof(ShowContextMenuAtPositionCommand), typeof(ICommand), typeof(SlideView));
 
     public static readonly BindableProperty CoverSizeProperty =
-        BindableProperty.Create(nameof(CoverSize), typeof(double), typeof(SlideView), 250d);
+        BindableProperty.Create(nameof(CoverSize), typeof(double), typeof(SlideView), 200d);
 
     public static readonly BindableProperty ItemCornerRadiusProperty =
         BindableProperty.Create(nameof(ItemCornerRadius), typeof(float), typeof(SlideView), 8f);
@@ -58,20 +63,28 @@ public partial class SlideView : ContentView
     #region Fields
 
     private static readonly HttpClient PaletteHttpClient = new() { Timeout = TimeSpan.FromSeconds(8) };
-    private static readonly MauiColor DefaultSlideCardColor = MauiColor.FromArgb("#293548");
-
     private readonly ConcurrentDictionary<string, MauiColor> _dominantColorCache = new(StringComparer.OrdinalIgnoreCase);
+
     private readonly List<object> _allItems = new();
+    private readonly ObservableRangeCollection<object> _visibleItemsPrimary = new();
+    private readonly ObservableRangeCollection<object> _visibleItemsSecondary = new();
 
     private INotifyCollectionChanged? _itemsSourceCollection;
+    private CancellationTokenSource? _pagingAnimationCts;
+    private int? _pendingTargetIndex;
+    private int? _inFlightTargetIndex;
     private bool _isSynchronizingExternalState;
+    private bool _isAnimating;
+    private bool _isPrimaryHostActive = true;
 
-    private Grid? SlideContentHostElement => this.FindByName<Grid>("SlideContentHost");
-    private Border? SlideCardBorderElement => this.FindByName<Border>("SlideCardBorder");
+    private Border? SlideCardBorderPrimaryElement => this.FindByName<Border>("SlideCardBorderPrimary");
+    private Border? SlideCardBorderSecondaryElement => this.FindByName<Border>("SlideCardBorderSecondary");
+    private Grid? SlideItemHostPrimaryElement => this.FindByName<Grid>("SlideItemHostPrimary");
+    private Grid? SlideItemHostSecondaryElement => this.FindByName<Grid>("SlideItemHostSecondary");
 
     #endregion
 
-    #region Public properties
+    #region Properties
 
     public IEnumerable<object>? ItemsSource
     {
@@ -89,6 +102,12 @@ public partial class SlideView : ContentView
     {
         get => (ICommand?)GetValue(PrimaryInfoTappedCommandProperty);
         set => SetValue(PrimaryInfoTappedCommandProperty, value);
+    }
+
+    public ICommand? SecondaryInfoTappedCommand
+    {
+        get => (ICommand?)GetValue(SecondaryInfoTappedCommandProperty);
+        set => SetValue(SecondaryInfoTappedCommandProperty, value);
     }
 
     public ICommand? ShowContextMenuAtAnchorCommand
@@ -158,14 +177,29 @@ public partial class SlideView : ContentView
 
     #region Construction
 
+    private ObservableRangeCollection<object> ActiveVisibleItems => _isPrimaryHostActive ? _visibleItemsPrimary : _visibleItemsSecondary;
+    private ObservableRangeCollection<object> InactiveVisibleItems => _isPrimaryHostActive ? _visibleItemsSecondary : _visibleItemsPrimary;
+    private Border? ActiveCardBorder => _isPrimaryHostActive ? SlideCardBorderPrimaryElement : SlideCardBorderSecondaryElement;
+    private Border? InactiveCardBorder => _isPrimaryHostActive ? SlideCardBorderSecondaryElement : SlideCardBorderPrimaryElement;
+
     public SlideView()
     {
         InitializeComponent();
 
-        PrevPageCommand = new Command(() => GoToPreviousIndex(), () => CanGoPrev);
-        NextPageCommand = new Command(() => GoToNextIndex(), () => CanGoNext);
+        PrevPageCommand = new Command(async () => await GoToPreviousIndexAsync(), () => CanGoPrev);
+        NextPageCommand = new Command(async () => await GoToNextIndexAsync(), () => CanGoNext);
 
-        SetDefaultBackground();
+        if (SlideItemHostPrimaryElement != null)
+        {
+            BindableLayout.SetItemsSource(SlideItemHostPrimaryElement, _visibleItemsPrimary);
+        }
+
+        if (SlideItemHostSecondaryElement != null)
+        {
+            BindableLayout.SetItemsSource(SlideItemHostSecondaryElement, _visibleItemsSecondary);
+        }
+
+        EnsureSingleActiveHostVisible();
         UpdateItemStateFromSource();
     }
 
@@ -191,7 +225,7 @@ public partial class SlideView : ContentView
         }
 
         view.SyncIndexFromCurrentItem();
-        view.OnCurrentItemChangedAsync(newValue).SafeFireAndForget();
+        view.HandleCurrentItemChanged(newValue);
     }
 
     private static void OnCurrentIndexChanged(BindableObject bindable, object oldValue, object newValue)
@@ -396,24 +430,147 @@ public partial class SlideView : ContentView
 
     #region Index navigation commands
 
-    private void GoToPreviousIndex()
+    private async Task GoToPreviousIndexAsync()
     {
-        if (!CanGoPrev)
+        var baseIndex = GetNavigationCursorIndex();
+        if (baseIndex <= 0)
         {
             return;
         }
 
-        CurrentIndex = Math.Max(0, CurrentIndex - 1);
+        await SetIndexAsync(baseIndex - 1);
     }
 
-    private void GoToNextIndex()
+    private async Task GoToNextIndexAsync()
     {
-        if (!CanGoNext)
+        var lastIndex = Math.Max(0, _allItems.Count - 1);
+        var baseIndex = GetNavigationCursorIndex();
+        if (baseIndex >= lastIndex)
         {
             return;
         }
 
-        CurrentIndex = Math.Min(Math.Max(0, _allItems.Count - 1), CurrentIndex + 1);
+        await SetIndexAsync(baseIndex + 1);
+    }
+
+    private async Task SetIndexAsync(int targetIndex)
+    {
+        if (_allItems.Count == 0)
+        {
+            return;
+        }
+
+        var clampedIndex = Math.Clamp(targetIndex, 0, _allItems.Count - 1);
+
+        if (_isAnimating)
+        {
+            _pendingTargetIndex = clampedIndex;
+            _pagingAnimationCts?.Cancel();
+            return;
+        }
+
+        _pendingTargetIndex = clampedIndex;
+        _isAnimating = true;
+        try
+        {
+            while (_pendingTargetIndex.HasValue)
+            {
+                var nextIndex = Math.Clamp(_pendingTargetIndex.Value, 0, _allItems.Count - 1);
+                _pendingTargetIndex = null;
+
+                if (nextIndex == CurrentIndex)
+                {
+                    continue;
+                }
+
+                _pagingAnimationCts?.Dispose();
+                _pagingAnimationCts = new CancellationTokenSource();
+                _inFlightTargetIndex = nextIndex;
+
+                try
+                {
+                    await AnimateToIndexAsync(nextIndex, _pagingAnimationCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    // A newer click canceled this transition; loop and apply latest pending target.
+                }
+                finally
+                {
+                    _inFlightTargetIndex = null;
+                }
+            }
+        }
+        finally
+        {
+            _pagingAnimationCts?.Dispose();
+            _pagingAnimationCts = null;
+            _pendingTargetIndex = null;
+            _inFlightTargetIndex = null;
+            _isAnimating = false;
+        }
+    }
+
+    private int GetNavigationCursorIndex()
+        => _pendingTargetIndex ?? _inFlightTargetIndex ?? CurrentIndex;
+
+    private async Task AnimateToIndexAsync(int targetIndex, CancellationToken cancellationToken)
+    {
+        var direction = targetIndex > CurrentIndex ? -1 : 1;
+        var slideOffset = 20;
+        var outX = slideOffset * direction;
+        var inX = -outX;
+        const uint animationDurationMs = 250;
+
+        var targetItem = _allItems[targetIndex];
+        var activeCard = ActiveCardBorder;
+        var inactiveCard = InactiveCardBorder;
+
+        if (targetItem == null || activeCard == null || inactiveCard == null)
+        {
+            return;
+        }
+
+        InactiveVisibleItems.Clear();
+        InactiveVisibleItems.Add(targetItem);
+
+        await ApplySlideCardBackgroundToCardAsync(inactiveCard, targetItem as MediaItem);
+
+        inactiveCard.IsVisible = true;
+        inactiveCard.InputTransparent = true;
+        inactiveCard.Opacity = 0;
+        inactiveCard.TranslationX = inX;
+
+        try
+        {
+            await Task.WhenAll(
+                activeCard.TranslateToAsync(outX, 0, animationDurationMs, Easing.CubicIn),
+                activeCard.FadeToAsync(0, animationDurationMs, Easing.CubicIn)).WaitAsync(cancellationToken);
+
+            await Task.WhenAll(
+                inactiveCard.TranslateToAsync(0, 0, animationDurationMs, Easing.CubicOut),
+                inactiveCard.FadeToAsync(1, animationDurationMs, Easing.CubicOut)).WaitAsync(cancellationToken);
+
+            // Animation completed successfully
+            _isPrimaryHostActive = !_isPrimaryHostActive;
+            CurrentIndex = targetIndex;
+            EnsureSingleActiveHostVisible();
+            InactiveVisibleItems.Clear();
+        }
+        catch (OperationCanceledException)
+        {
+            // Animation was canceled - immediately commit the in-flight page and prepare for next animation
+            activeCard.CancelAnimations();
+            inactiveCard.CancelAnimations();
+
+            // Swap hosts immediately: inactive becomes active
+            _isPrimaryHostActive = !_isPrimaryHostActive;
+            CurrentIndex = targetIndex;
+            EnsureSingleActiveHostVisible();
+            InactiveVisibleItems.Clear();
+
+            throw;
+        }
     }
 
     private void UpdateIndexNavigationState()
@@ -445,15 +602,27 @@ public partial class SlideView : ContentView
 
     #region UI event handlers
 
-    private async Task OnCurrentItemChangedAsync(object? item)
+    private async void HandleCurrentItemChanged(object? item)
     {
-        var slideContentHost = SlideContentHostElement;
-        if (slideContentHost != null)
+        SyncVisibleItem(item);
+        await ApplySlideCardBackgroundToCardAsync(ActiveCardBorder, item as MediaItem);
+    }
+
+    private void SyncVisibleItem(object? item)
+    {
+        if (item == null)
         {
-            slideContentHost.BindingContext = item;
+            ActiveVisibleItems.Clear();
+            return;
         }
 
-        await ApplyTrackCardPaletteAsync(item as Track);
+        if (ActiveVisibleItems.Count == 1 && ReferenceEquals(ActiveVisibleItems[0], item))
+        {
+            return;
+        }
+
+        ActiveVisibleItems.Clear();
+        ActiveVisibleItems.Add(item);
     }
 
     private async void OnPlayOverlayClicked(object? sender, TappedEventArgs e)
@@ -505,57 +674,55 @@ public partial class SlideView : ContentView
         ShowContextMenuAtPositionCommand?.Execute(position);
     }
 
-    private void OnPrimaryInfoTapped(object? sender, TappedEventArgs e)
-    {
-        if (CurrentItem == null)
-        {
-            return;
-        }
-
-        if (PrimaryInfoTappedCommand?.CanExecute(CurrentItem) == true)
-        {
-            PrimaryInfoTappedCommand.Execute(CurrentItem);
-        }
-    }
-
     #endregion
 
     #region Card palette
 
-    private async Task ApplyTrackCardPaletteAsync(Track? track)
+    private async Task ApplySlideCardBackgroundToCardAsync(Border? cardBorder, MediaItem? mediaItem)
     {
-        var slideCardBorder = SlideCardBorderElement;
-        if (slideCardBorder == null)
+        if (cardBorder == null)
         {
             return;
         }
 
-        if (track == null)
+        if (mediaItem == null)
         {
-            SetDefaultBackground();
+            cardBorder.Background = null;
+            cardBorder.Shadow = new Shadow { Opacity = 0 };
             return;
         }
 
-        var baseColor = await GetDominantColorAsync(track.ImageUrl);
+        var baseColor = await GetDominantColorAsync(mediaItem.ImageUrl);
+        if (baseColor == null)
+        {
+            cardBorder.Background = null;
+            cardBorder.Shadow = new Shadow { Opacity = 0 };
+            return;
+        }
+
         var topColor = Lighten(baseColor, 0.16f);
         var centerColor = Saturate(baseColor, 1.08f);
         var bottomColor = Darken(baseColor, 0.28f);
 
+        // Adjust colors based on current theme and text color contrast
+        var textColor = GetCurrentThemeTextColor();
+        (var adjustedTop, var adjustedCenter, var adjustedBottom) = EnsureTextContrast(topColor, centerColor, bottomColor, textColor);
+
         await MainThread.InvokeOnMainThreadAsync(() =>
         {
-            slideCardBorder.Background = new LinearGradientBrush(
+            cardBorder.Background = new LinearGradientBrush(
                 new GradientStopCollection
                 {
-                    new GradientStop(topColor, 0f),
-                    new GradientStop(centerColor, 0.56f),
-                    new GradientStop(bottomColor, 1f)
+                    new GradientStop(adjustedTop, 0f),
+                    new GradientStop(adjustedCenter, 0.56f),
+                    new GradientStop(adjustedBottom, 1f)
                 },
                 new MauiPoint(0, 0),
                 new MauiPoint(1, 1));
 
-            slideCardBorder.Shadow = new Shadow
+            cardBorder.Shadow = new Shadow
             {
-                Brush = new SolidColorBrush(Darken(centerColor, 0.45f).WithAlpha(0.72f)),
+                Brush = new SolidColorBrush(Darken(adjustedCenter, 0.45f).WithAlpha(0.72f)),
                 Offset = new MauiPoint(0, 18),
                 Radius = 28,
                 Opacity = 0.95f
@@ -563,32 +730,11 @@ public partial class SlideView : ContentView
         });
     }
 
-    private void SetDefaultBackground()
-    {
-        var slideCardBorder = SlideCardBorderElement;
-        if (slideCardBorder == null)
-        {
-            return;
-        }
-
-        slideCardBorder.Background = new LinearGradientBrush(
-            new GradientStopCollection
-            {
-                new GradientStop(MauiColor.FromArgb("#6F5330"), 0f),
-                new GradientStop(MauiColor.FromArgb("#A7602E"), 0.6f),
-                new GradientStop(MauiColor.FromArgb("#8D3527"), 1f)
-            },
-            new MauiPoint(0, 0),
-            new MauiPoint(1, 1));
-
-        slideCardBorder.Shadow = new Shadow { Opacity = 0 };
-    }
-
-    private async Task<MauiColor> GetDominantColorAsync(string? imageUrl)
+    private async Task<MauiColor?> GetDominantColorAsync(string? imageUrl)
     {
         if (string.IsNullOrWhiteSpace(imageUrl))
         {
-            return DefaultSlideCardColor;
+            return null;
         }
 
         if (_dominantColorCache.TryGetValue(imageUrl, out var cachedColor))
@@ -597,27 +743,105 @@ public partial class SlideView : ContentView
         }
 
         var computed = await ComputeDominantColorAsync(imageUrl);
-        _dominantColorCache[imageUrl] = computed;
+
+        if (computed != null)
+        {
+            _dominantColorCache[imageUrl] = computed;
+        }
+
         return computed;
+    }
+
+    #endregion
+
+    #region Theme and contrast
+
+    private MauiColor GetCurrentThemeTextColor()
+    {
+        // Get the primary text color used for info labels on the background
+        if (Application.Current?.Resources.TryGetValue("TextPrimary", out var textPrimaryObj) == true
+            && textPrimaryObj is MauiColor textPrimary)
+        {
+            return textPrimary;
+        }
+
+        // Fallback
+        return Colors.Black;
+    }
+
+    private (MauiColor top, MauiColor center, MauiColor bottom) EnsureTextContrast(
+        MauiColor topColor, MauiColor centerColor, MauiColor bottomColor, MauiColor textColor)
+    {
+        const float minLuminanceDifference = 0.75f;
+
+        var centerLuminance = GetRelativeLuminance(centerColor);
+        var textLuminance = GetRelativeLuminance(textColor);
+        var luminanceDiff = Math.Abs(centerLuminance - textLuminance);
+
+        System.Diagnostics.Debug.WriteLine($"Contrast check - Text Luminance: {textLuminance:F3}, Center Luminance: {centerLuminance:F3}, Difference: {luminanceDiff:F3}");
+        
+        // If contrast is sufficient, keep original colors
+        if (luminanceDiff >= minLuminanceDifference)
+        {
+            return (topColor, centerColor, bottomColor);
+        }
+
+        // Adjust colors based on which direction gives better contrast
+        if (textLuminance > 0.5f)
+        {
+            // Light text (dark theme) - darken the background
+            var darkenAmount = minLuminanceDifference - luminanceDiff + 0.05f;
+            return (
+                Darken(topColor, darkenAmount),
+                Darken(centerColor, darkenAmount),
+                Darken(bottomColor, darkenAmount)
+            );
+        }
+        else
+        {
+            // Dark text (light theme) - lighten the background
+            var lightenAmount = minLuminanceDifference - luminanceDiff + 0.05f;
+            return (
+                Lighten(topColor, lightenAmount),
+                Lighten(centerColor, lightenAmount),
+                Lighten(bottomColor, lightenAmount)
+            );
+        }
+    }
+
+    private static float GetRelativeLuminance(MauiColor color)
+    {
+        // WCAG relative luminance calculation
+        var r = Linearize(color.Red);
+        var g = Linearize(color.Green);
+        var b = Linearize(color.Blue);
+        return (0.2126f * r) + (0.7152f * g) + (0.0722f * b);
+    }
+
+    private static float Linearize(float value)
+    {
+        return value <= 0.03928f
+            ? value / 12.92f
+            : (float)Math.Pow((value + 0.055f) / 1.055f, 2.4f);
     }
 
     #endregion
 
     #region Color analysis
 
-    private static async Task<MauiColor> ComputeDominantColorAsync(string imageUrl)
+    private static async Task<MauiColor?> ComputeDominantColorAsync(string imageUrl)
     {
         try
         {
             if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out _))
             {
-                return DefaultSlideCardColor;
+                return null;
             }
 
             var bytes = await PaletteHttpClient.GetByteArrayAsync(imageUrl);
             if (bytes.Length == 0)
             {
-                return DefaultSlideCardColor;
+                return null;
             }
 
             await using var ms = new MemoryStream(bytes);
@@ -627,7 +851,7 @@ public partial class SlideView : ContentView
             var height = image.Height;
             if (width == 0 || height == 0)
             {
-                return DefaultSlideCardColor;
+                return null;
             }
 
             var step = Math.Max(1, Math.Max(width, height) / 42);
@@ -670,7 +894,7 @@ public partial class SlideView : ContentView
 
             if (totalWeight <= 0.001)
             {
-                return DefaultSlideCardColor;
+                return null;
             }
 
             var baseColor = MauiColor.FromRgba(
@@ -683,7 +907,7 @@ public partial class SlideView : ContentView
         }
         catch
         {
-            return DefaultSlideCardColor;
+            return null;
         }
     }
 
@@ -717,6 +941,32 @@ public partial class SlideView : ContentView
 
     #endregion
 
+    #region Host management
+
+    private void EnsureSingleActiveHostVisible()
+    {
+        var activeCard = ActiveCardBorder;
+        var inactiveCard = InactiveCardBorder;
+
+        if (activeCard != null)
+        {
+            activeCard.IsVisible = true;
+            activeCard.InputTransparent = false;
+            activeCard.Opacity = 1;
+            activeCard.TranslationX = 0;
+        }
+
+        if (inactiveCard != null)
+        {
+            inactiveCard.IsVisible = false;
+            inactiveCard.InputTransparent = true;
+            inactiveCard.Opacity = 0;
+            inactiveCard.TranslationX = 0;
+        }
+    }
+
+    #endregion
+
     #region Lifecycle
 
     protected override void OnHandlerChanging(HandlerChangingEventArgs args)
@@ -725,6 +975,9 @@ public partial class SlideView : ContentView
 
         if (args.NewHandler == null)
         {
+            _pagingAnimationCts?.Cancel();
+            _pagingAnimationCts?.Dispose();
+            _pagingAnimationCts = null;
             DetachItemsSourceCollection();
         }
     }
@@ -732,17 +985,33 @@ public partial class SlideView : ContentView
     #endregion
 }
 
-internal static class TaskExtensions
+public sealed class SlideViewTemplateSelector : DataTemplateSelector
 {
-    public static async void SafeFireAndForget(this Task task)
+    public DataTemplate? TrackTemplate { get; set; }
+    public DataTemplate? SkeletonTemplate { get; set; }
+
+    protected override DataTemplate OnSelectTemplate(object item, BindableObject container)
     {
-        try
+        if (item is SkeletonItem && SkeletonTemplate != null)
         {
-            await task;
+            return SkeletonTemplate;
         }
-        catch
+
+        if (item is Track && TrackTemplate != null)
         {
-            // Ignore background task failures for visual updates.
+            return TrackTemplate;
         }
+
+        if (TrackTemplate != null)
+        {
+            return TrackTemplate;
+        }
+
+        if (SkeletonTemplate != null)
+        {
+            return SkeletonTemplate;
+        }
+
+        throw new InvalidOperationException("SlideViewTemplateSelector requires TrackTemplate or SkeletonTemplate.");
     }
 }
