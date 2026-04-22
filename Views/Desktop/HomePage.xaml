@@ -51,7 +51,7 @@
                         <Label FontAttributes="Bold"
                             FontSize="10"
                             HorizontalOptions="Center"
-                            Text="{Binding RecommendationFolderItems.Count}"
+                            Text="{Binding RecommendationTrackItems.Count}"
                             TextColor="{DynamicResource TextPrimary}"
                             VerticalOptions="Center" />
                     </Border>
@@ -133,7 +133,7 @@
                     CoverSize="175"
                     IsVisible="{Binding ShowRecommendationFolderSlideView}"
                     ItemCornerRadius="8"
-                    ItemsSource="{Binding RecommendationFolderItems}"
+                    ItemsSource="{Binding RecommendationTrackItems}"
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding RecommendationTrackTappedCommand}"
                     ShowContextMenuAtAnchorCommand="{Binding ShowTrackContextMenuAtAnchorCommand}"

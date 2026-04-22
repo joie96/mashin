@@ -229,8 +229,17 @@
             <Border.StrokeShape>
                 <RoundRectangle CornerRadius="10" />
             </Border.StrokeShape>
-            <Grid x:Name="SlideItemHostPrimary"
-                BindableLayout.ItemTemplateSelector="{StaticResource SlideViewTemplateSelector}" />
+            <Grid>
+                <Image x:Name="SlideCardBackgroundImagePrimary"
+                    Aspect="AspectFill"
+                    HeightRequest="{Binding Source={x:Reference SlideItemHostPrimary}, Path=Height}"
+                    InputTransparent="True"
+                    Scale="1.18"
+                    VerticalOptions="Center"
+                    WidthRequest="{Binding Source={x:Reference SlideItemHostPrimary}, Path=Width}" />
+                <Grid x:Name="SlideItemHostPrimary"
+                    BindableLayout.ItemTemplateSelector="{StaticResource SlideViewTemplateSelector}" />
+            </Grid>
         </Border>
 
         <!--  Secondary Card Layer (Preload/Animate)  -->
@@ -243,8 +252,17 @@
             <Border.StrokeShape>
                 <RoundRectangle CornerRadius="10" />
             </Border.StrokeShape>
-            <Grid x:Name="SlideItemHostSecondary"
-                BindableLayout.ItemTemplateSelector="{StaticResource SlideViewTemplateSelector}" />
+            <Grid>
+                <Image x:Name="SlideCardBackgroundImageSecondary"
+                    Aspect="AspectFill"
+                    HeightRequest="{Binding Source={x:Reference SlideItemHostSecondary}, Path=Height}"
+                    InputTransparent="True"
+                    Scale="1.18"
+                    VerticalOptions="Center"
+                    WidthRequest="{Binding Source={x:Reference SlideItemHostSecondary}, Path=Width}" />
+                <Grid x:Name="SlideItemHostSecondary"
+                    BindableLayout.ItemTemplateSelector="{StaticResource SlideViewTemplateSelector}" />
+            </Grid>
         </Border>
     </Grid>
 </ContentView>

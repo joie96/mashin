@@ -1,14 +1,13 @@
 using mashin.Models;
 using mashin.Services;
 using mashin.Collections;
-using MauiColor = Microsoft.Maui.Graphics.Color;
-using MauiPoint = Microsoft.Maui.Graphics.Point;
 using ImageSharpImage = SixLabors.ImageSharp.Image;
 using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Formats.Png;
+using SixLabors.ImageSharp.Processing;
 using System.Collections.Concurrent;
 using System.Collections.Specialized;
 using System.Windows.Input;
-using Windows.Devices.Printers;
 
 namespace mashin.Views.Desktop.Controls;
 
@@ -63,7 +62,7 @@ public partial class SlideView : ContentView
     #region Fields
 
     private static readonly HttpClient PaletteHttpClient = new() { Timeout = TimeSpan.FromSeconds(8) };
-    private readonly ConcurrentDictionary<string, MauiColor> _dominantColorCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte[]> _blurredCoverCache = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly List<object> _allItems = new();
     private readonly ObservableRangeCollection<object> _visibleItemsPrimary = new();
@@ -79,6 +78,8 @@ public partial class SlideView : ContentView
 
     private Border? SlideCardBorderPrimaryElement => this.FindByName<Border>("SlideCardBorderPrimary");
     private Border? SlideCardBorderSecondaryElement => this.FindByName<Border>("SlideCardBorderSecondary");
+    private Image? SlideCardBackgroundImagePrimaryElement => this.FindByName<Image>("SlideCardBackgroundImagePrimary");
+    private Image? SlideCardBackgroundImageSecondaryElement => this.FindByName<Image>("SlideCardBackgroundImageSecondary");
     private Grid? SlideItemHostPrimaryElement => this.FindByName<Grid>("SlideItemHostPrimary");
     private Grid? SlideItemHostSecondaryElement => this.FindByName<Grid>("SlideItemHostSecondary");
 
@@ -181,6 +182,8 @@ public partial class SlideView : ContentView
     private ObservableRangeCollection<object> InactiveVisibleItems => _isPrimaryHostActive ? _visibleItemsSecondary : _visibleItemsPrimary;
     private Border? ActiveCardBorder => _isPrimaryHostActive ? SlideCardBorderPrimaryElement : SlideCardBorderSecondaryElement;
     private Border? InactiveCardBorder => _isPrimaryHostActive ? SlideCardBorderSecondaryElement : SlideCardBorderPrimaryElement;
+    private Image? ActiveBackgroundImage => _isPrimaryHostActive ? SlideCardBackgroundImagePrimaryElement : SlideCardBackgroundImageSecondaryElement;
+    private Image? InactiveBackgroundImage => _isPrimaryHostActive ? SlideCardBackgroundImageSecondaryElement : SlideCardBackgroundImagePrimaryElement;
 
     public SlideView()
     {
@@ -534,7 +537,7 @@ public partial class SlideView : ContentView
         InactiveVisibleItems.Clear();
         InactiveVisibleItems.Add(targetItem);
 
-        await ApplySlideCardBackgroundToCardAsync(inactiveCard, targetItem as MediaItem);
+        await ApplySlideCardBackgroundToCardAsync(InactiveBackgroundImage, targetItem as MediaItem);
 
         inactiveCard.IsVisible = true;
         inactiveCard.InputTransparent = true;
@@ -605,7 +608,7 @@ public partial class SlideView : ContentView
     private async void HandleCurrentItemChanged(object? item)
     {
         SyncVisibleItem(item);
-        await ApplySlideCardBackgroundToCardAsync(ActiveCardBorder, item as MediaItem);
+        await ApplySlideCardBackgroundToCardAsync(ActiveBackgroundImage, item as MediaItem);
     }
 
     private void SyncVisibleItem(object? item)
@@ -678,159 +681,39 @@ public partial class SlideView : ContentView
 
     #region Card palette
 
-    private async Task ApplySlideCardBackgroundToCardAsync(Border? cardBorder, MediaItem? mediaItem)
+    private async Task ApplySlideCardBackgroundToCardAsync(Image? backgroundImage, MediaItem? mediaItem)
     {
-        if (cardBorder == null)
+        if (backgroundImage == null)
         {
             return;
         }
 
         if (mediaItem == null)
         {
-            cardBorder.Background = null;
-            cardBorder.Shadow = new Shadow { Opacity = 0 };
+            backgroundImage.Source = null;
             return;
         }
 
-        var baseColor = await GetDominantColorAsync(mediaItem.ImageUrl);
-        if (baseColor == null)
-        {
-            cardBorder.Background = null;
-            cardBorder.Shadow = new Shadow { Opacity = 0 };
-            return;
-        }
-
-        var topColor = Lighten(baseColor, 0.16f);
-        var centerColor = Saturate(baseColor, 1.08f);
-        var bottomColor = Darken(baseColor, 0.28f);
-
-        // Adjust colors based on current theme and text color contrast
-        var textColor = GetCurrentThemeTextColor();
-        (var adjustedTop, var adjustedCenter, var adjustedBottom) = EnsureTextContrast(topColor, centerColor, bottomColor, textColor);
+        var blurredCoverSource = await GetBlurredCoverSourceAsync(mediaItem.ImageUrl);
 
         await MainThread.InvokeOnMainThreadAsync(() =>
         {
-            cardBorder.Background = new LinearGradientBrush(
-                new GradientStopCollection
-                {
-                    new GradientStop(adjustedTop, 0f),
-                    new GradientStop(adjustedCenter, 0.56f),
-                    new GradientStop(adjustedBottom, 1f)
-                },
-                new MauiPoint(0, 0),
-                new MauiPoint(1, 1));
-
-            cardBorder.Shadow = new Shadow
-            {
-                Brush = new SolidColorBrush(Darken(adjustedCenter, 0.45f).WithAlpha(0.72f)),
-                Offset = new MauiPoint(0, 18),
-                Radius = 28,
-                Opacity = 0.95f
-            };
+            backgroundImage.Source = blurredCoverSource;
         });
     }
 
-    private async Task<MauiColor?> GetDominantColorAsync(string? imageUrl)
+    private async Task<ImageSource?> GetBlurredCoverSourceAsync(string? imageUrl)
     {
         if (string.IsNullOrWhiteSpace(imageUrl))
         {
             return null;
         }
 
-        if (_dominantColorCache.TryGetValue(imageUrl, out var cachedColor))
+        if (_blurredCoverCache.TryGetValue(imageUrl, out var cachedBytes))
         {
-            return cachedColor;
+            return ImageSource.FromStream(() => new MemoryStream(cachedBytes));
         }
 
-        var computed = await ComputeDominantColorAsync(imageUrl);
-
-        if (computed != null)
-        {
-            _dominantColorCache[imageUrl] = computed;
-        }
-
-        return computed;
-    }
-
-    #endregion
-
-    #region Theme and contrast
-
-    private MauiColor GetCurrentThemeTextColor()
-    {
-        // Get the primary text color used for info labels on the background
-        if (Application.Current?.Resources.TryGetValue("TextPrimary", out var textPrimaryObj) == true
-            && textPrimaryObj is MauiColor textPrimary)
-        {
-            return textPrimary;
-        }
-
-        // Fallback
-        return Colors.Black;
-    }
-
-    private (MauiColor top, MauiColor center, MauiColor bottom) EnsureTextContrast(
-        MauiColor topColor, MauiColor centerColor, MauiColor bottomColor, MauiColor textColor)
-    {
-        const float minLuminanceDifference = 0.75f;
-
-        var centerLuminance = GetRelativeLuminance(centerColor);
-        var textLuminance = GetRelativeLuminance(textColor);
-        var luminanceDiff = Math.Abs(centerLuminance - textLuminance);
-
-        System.Diagnostics.Debug.WriteLine($"Contrast check - Text Luminance: {textLuminance:F3}, Center Luminance: {centerLuminance:F3}, Difference: {luminanceDiff:F3}");
-        
-        // If contrast is sufficient, keep original colors
-        if (luminanceDiff >= minLuminanceDifference)
-        {
-            return (topColor, centerColor, bottomColor);
-        }
-
-        // Adjust colors based on which direction gives better contrast
-        if (textLuminance > 0.5f)
-        {
-            // Light text (dark theme) - darken the background
-            var darkenAmount = minLuminanceDifference - luminanceDiff + 0.05f;
-            return (
-                Darken(topColor, darkenAmount),
-                Darken(centerColor, darkenAmount),
-                Darken(bottomColor, darkenAmount)
-            );
-        }
-        else
-        {
-            // Dark text (light theme) - lighten the background
-            var lightenAmount = minLuminanceDifference - luminanceDiff + 0.05f;
-            return (
-                Lighten(topColor, lightenAmount),
-                Lighten(centerColor, lightenAmount),
-                Lighten(bottomColor, lightenAmount)
-            );
-        }
-    }
-
-    private static float GetRelativeLuminance(MauiColor color)
-    {
-        // WCAG relative luminance calculation
-        var r = Linearize(color.Red);
-        var g = Linearize(color.Green);
-        var b = Linearize(color.Blue);
-        return (0.2126f * r) + (0.7152f * g) + (0.0722f * b);
-    }
-
-    private static float Linearize(float value)
-    {
-        return value <= 0.03928f
-            ? value / 12.92f
-            : (float)Math.Pow((value + 0.055f) / 1.055f, 2.4f);
-    }
-
-    #endregion
-
-    #region Color analysis
-
-    private static async Task<MauiColor?> ComputeDominantColorAsync(string imageUrl)
-    {
         try
         {
             if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out _))
@@ -844,100 +727,27 @@ public partial class SlideView : ContentView
                 return null;
             }
 
-            await using var ms = new MemoryStream(bytes);
-            using var image = await ImageSharpImage.LoadAsync<Rgba32>(ms);
+            await using var sourceStream = new MemoryStream(bytes);
+            using var image = await ImageSharpImage.LoadAsync<Rgba32>(sourceStream);
 
-            var width = image.Width;
-            var height = image.Height;
-            if (width == 0 || height == 0)
+            image.Mutate(ctx =>
             {
-                return null;
-            }
+                ctx.GaussianBlur(24f);
+            });
 
-            var step = Math.Max(1, Math.Max(width, height) / 42);
-            double weightedR = 0;
-            double weightedG = 0;
-            double weightedB = 0;
-            double totalWeight = 0;
+            await using var outputStream = new MemoryStream();
+            await image.SaveAsync(outputStream, new PngEncoder());
 
-            for (var y = 0; y < height; y += step)
-            {
-                for (var x = 0; x < width; x += step)
-                {
-                    var px = image[x, y];
-                    if (px.A < 20)
-                    {
-                        continue;
-                    }
+            var blurredBytes = outputStream.ToArray();
+            _blurredCoverCache[imageUrl] = blurredBytes;
 
-                    var r = px.R;
-                    var g = px.G;
-                    var b = px.B;
-
-                    var max = Math.Max(r, Math.Max(g, b));
-                    var min = Math.Min(r, Math.Min(g, b));
-                    var saturation = max == 0 ? 0.0 : (max - min) / (double)max;
-                    var luminance = (0.2126 * r) + (0.7152 * g) + (0.0722 * b);
-
-                    var weight = (0.35 + (0.65 * saturation)) * (px.A / 255.0);
-                    if (luminance < 16 || luminance > 242)
-                    {
-                        weight *= 0.35;
-                    }
-
-                    weightedR += r * weight;
-                    weightedG += g * weight;
-                    weightedB += b * weight;
-                    totalWeight += weight;
-                }
-            }
-
-            if (totalWeight <= 0.001)
-            {
-                return null;
-            }
-
-            var baseColor = MauiColor.FromRgba(
-                (float)(weightedR / totalWeight) / 255f,
-                (float)(weightedG / totalWeight) / 255f,
-                (float)(weightedB / totalWeight) / 255f,
-                1f);
-
-            return Saturate(Lighten(baseColor, 0.03f), 1.1f);
+            return ImageSource.FromStream(() => new MemoryStream(blurredBytes));
         }
         catch
         {
             return null;
         }
     }
-
-    private static MauiColor Lighten(MauiColor color, float amount)
-        => Blend(color, Colors.White, amount);
-
-    private static MauiColor Darken(MauiColor color, float amount)
-        => Blend(color, Colors.Black, amount);
-
-    private static MauiColor Saturate(MauiColor color, float factor)
-    {
-        var avg = (color.Red + color.Green + color.Blue) / 3f;
-        var r = Clamp01(avg + ((color.Red - avg) * factor));
-        var g = Clamp01(avg + ((color.Green - avg) * factor));
-        var b = Clamp01(avg + ((color.Blue - avg) * factor));
-        return MauiColor.FromRgba(r, g, b, color.Alpha);
-    }
-
-    private static MauiColor Blend(MauiColor from, MauiColor to, float amount)
-    {
-        var t = Clamp01(amount);
-        return MauiColor.FromRgba(
-            from.Red + ((to.Red - from.Red) * t),
-            from.Green + ((to.Green - from.Green) * t),
-            from.Blue + ((to.Blue - from.Blue) * t),
-            from.Alpha + ((to.Alpha - from.Alpha) * t));
-    }
-
-    private static float Clamp01(float value)
-        => Math.Max(0f, Math.Min(1f, value));
 
     #endregion
 

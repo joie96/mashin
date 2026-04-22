@@ -311,6 +311,54 @@ namespace mashin.Models
     }
 
     /// <summary>
+    /// Music Assistant API Folder wrapper
+    /// </summary>
+    public class FolderItem : MediaItem
+    {
+        public override MediaType MediaType { get; set; } = MediaType.Folder;
+    }
+
+    /// <summary>
+    /// Music Assistant API Announcement wrapper
+    /// </summary>
+    public class Announcement : MediaItem
+    {
+        public override MediaType MediaType { get; set; } = MediaType.Announcement;
+    }
+
+    /// <summary>
+    /// Music Assistant API FlowStream wrapper
+    /// </summary>
+    public class FlowStream : MediaItem
+    {
+        public override MediaType MediaType { get; set; } = MediaType.FlowStream;
+    }
+
+    /// <summary>
+    /// Music Assistant API PluginSource wrapper
+    /// </summary>
+    public class PluginSource : MediaItem
+    {
+        public override MediaType MediaType { get; set; } = MediaType.PluginSource;
+    }
+
+    /// <summary>
+    /// Music Assistant API SoundEffect wrapper
+    /// </summary>
+    public class SoundEffect : MediaItem
+    {
+        public override MediaType MediaType { get; set; } = MediaType.SoundEffect;
+    }
+
+    /// <summary>
+    /// Music Assistant API Unknown wrapper
+    /// </summary>
+    public class UnknownMediaItem : MediaItem
+    {
+        public override MediaType MediaType { get; set; } = MediaType.Unknown;
+    }
+
+    /// <summary>
     /// Music Assistant API BrowseFolder wrapper
     /// </summary>
     public class BrowseFolder
@@ -376,7 +424,7 @@ namespace mashin.Models
         public string? Icon { get; set; }
 
         [JsonPropertyName("items")]
-        public List<JsonElement>? Items { get; set; }
+        public List<MediaItem>? Items { get; set; }
 
         [JsonPropertyName("subtitle")]
         public string? Subtitle { get; set; }
@@ -437,8 +485,16 @@ namespace mashin.Models
         Radio,
         Audiobook,
         Podcast,
+        [JsonStringEnumMemberName("podcast_episode")]
         PodcastEpisode,
         Folder,
+        Announcement,
+        [JsonStringEnumMemberName("flow_stream")]
+        FlowStream,
+        [JsonStringEnumMemberName("plugin_source")]
+        PluginSource,
+        [JsonStringEnumMemberName("sound_effect")]
+        SoundEffect,
         Genre,
         Unknown
     }

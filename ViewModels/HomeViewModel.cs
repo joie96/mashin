@@ -1,12 +1,9 @@
 using mashin.Collections;
-using mashin.Converters;
 using mashin.Models;
 using mashin.Services;
 using Microsoft.Extensions.Logging;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Windows.Input;
 
 namespace mashin.ViewModels;
@@ -21,22 +18,12 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
     private readonly INavigationService _navigationService;
     private readonly ILogger<HomeViewModel> _logger;
 
-    private ObservableRangeCollection<Track> _recommendationFolderTracks = new();
+    private ObservableRangeCollection<Track> _recommendationTracks = new();
     private ObservableRangeCollection<ContextMenuItem> _trackContextMenuItems = new();
 
     private readonly IReadOnlyList<SlideViewSkeleton> _slideSkeletons = Enumerable.Range(0, 10)
         .Select(_ => new SlideViewSkeleton())
         .ToList();
-
-    private static readonly JsonSerializerOptions RecommendationItemJsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        Converters =
-        {
-            new JsonStringEnumConverter(),
-            new FlexibleIntConverter()
-        }
-    };
 
     private bool _isLoadingHome;
     private bool _disposed;
@@ -45,31 +32,31 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     #region Properties
 
-    public ObservableRangeCollection<Track> RecommendationFolderTracks
+    public ObservableRangeCollection<Track> RecommendationTracks
     {
-        get => _recommendationFolderTracks;
+        get => _recommendationTracks;
         private set
         {
             var normalizedValue = value ?? new ObservableRangeCollection<Track>();
-            if (!EqualityComparer<ObservableRangeCollection<Track>>.Default.Equals(_recommendationFolderTracks, normalizedValue))
+            if (!EqualityComparer<ObservableRangeCollection<Track>>.Default.Equals(_recommendationTracks, normalizedValue))
             {
-                _recommendationFolderTracks = normalizedValue;
-                OnPropertyChanged(nameof(RecommendationFolderTracks));
+                _recommendationTracks = normalizedValue;
+                OnPropertyChanged(nameof(RecommendationTracks));
                 OnPropertyChanged(nameof(HasRecommendationFolderTracks));
                 OnPropertyChanged(nameof(ShowRecommendationFolderSlideView));
                 OnPropertyChanged(nameof(ShowNoRecommendationFolderMessage));
-                OnPropertyChanged(nameof(RecommendationFolderItems));
+                OnPropertyChanged(nameof(RecommendationTrackItems));
             }
         }
     }
 
-    public bool HasRecommendationFolderTracks => RecommendationFolderTracks.Count > 0;
+    public bool HasRecommendationFolderTracks => RecommendationTracks.Count > 0;
 
     public bool ShowRecommendationFolderSlideView => IsLoadingHome || HasRecommendationFolderTracks;
 
     public bool ShowNoRecommendationFolderMessage => !IsLoadingHome && !HasRecommendationFolderTracks;
 
-    public IEnumerable<object> RecommendationFolderItems => IsLoadingHome ? _slideSkeletons : _recommendationFolderTracks;
+    public IEnumerable<object> RecommendationTrackItems => IsLoadingHome ? _slideSkeletons : _recommendationTracks;
 
     public bool IsLoadingHome
     {
@@ -80,7 +67,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             {
                 OnPropertyChanged(nameof(ShowRecommendationFolderSlideView));
                 OnPropertyChanged(nameof(ShowNoRecommendationFolderMessage));
-                OnPropertyChanged(nameof(RecommendationFolderItems));
+                OnPropertyChanged(nameof(RecommendationTrackItems));
             }
         }
     }
@@ -164,32 +151,47 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
         try
         {
+            // Get all listenbrainz recommendation folders
             var recommendations = await _musicAssistant.GetRecommendationsAsync();
             var lbFolders = recommendations
                 .Where(IsListenBrainzFolder)
                 .ToList();
 
-            var recommendationTracks = ParseTracksFromRecommendationFolder(
-                FindRecommendationFolderById(lbFolders, "recommendations"));
-
-            await _musicAssistant.EnrichWithProviderInfoAsync(recommendationTracks);
-
-            RecommendationFolderTracks = new ObservableRangeCollection<Track>(recommendationTracks);
-            _ = BuildTrackContextMenuAsync();
-
-            _logger.LogInformation(
-                "Home recommendation folder loaded: recommendationTracks={RecommendationTracks}",
-                recommendationTracks.Count);
+            await LoadRecommendationTracksAsync(lbFolders);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to load ListenBrainz recommendation folder");
-            RecommendationFolderTracks = new ObservableRangeCollection<Track>();
+            _logger.LogWarning(ex, "Failed to load home sections");
+            RecommendationTracks = new ObservableRangeCollection<Track>();
         }
         finally
         {
             IsLoadingHome = false;
         }
+    }
+
+    private async Task LoadRecommendationTracksAsync(IEnumerable<RecommendationFolder> lbFolders)
+    {
+
+        var recommendationTracks = FindRecommendationFolderById(lbFolders, "recommendations")?.Items?
+            .OfType<Track>()
+            .Where(track => !string.IsNullOrWhiteSpace(track.ItemId) && !string.IsNullOrWhiteSpace(track.Provider))
+            .Select(track =>
+            {
+                track.DisplayName = track.Name;
+                return track;
+            })
+            .ToList()
+            ?? new List<Track>();
+
+        await _musicAssistant.EnrichWithProviderInfoAsync(recommendationTracks);
+
+        RecommendationTracks = new ObservableRangeCollection<Track>(recommendationTracks);
+        _ = BuildTrackContextMenuAsync();
+
+        _logger.LogInformation(
+            "Home recommendation folder loaded: recommendationTracks={RecommendationTracks}",
+            recommendationTracks.Count);
     }
 
     #endregion
@@ -253,44 +255,9 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             string.Equals(folder.ItemId, itemId, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static List<Track> ParseTracksFromRecommendationFolder(RecommendationFolder? folder)
-    {
-        if (folder?.Items == null || folder.Items.Count == 0)
-        {
-            return new List<Track>();
-        }
-
-        var tracks = new List<Track>();
-
-        foreach (var item in folder.Items)
-        {
-            if (item.ValueKind != JsonValueKind.Object)
-            {
-                continue;
-            }
-
-            if (!item.TryGetProperty("media_type", out var mediaTypeProperty)
-                || !string.Equals(mediaTypeProperty.GetString(), "track", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            var track = JsonSerializer.Deserialize<Track>(item.GetRawText(), RecommendationItemJsonOptions);
-            if (track == null || string.IsNullOrWhiteSpace(track.ItemId) || string.IsNullOrWhiteSpace(track.Provider))
-            {
-                continue;
-            }
-
-            track.DisplayName = track.Name;
-            tracks.Add(track);
-        }
-
-        return tracks;
-    }
-
     private IEnumerable<Track> GetSelectedRecommendationTracks()
     {
-        return RecommendationFolderTracks.Where(track => track.IsSelected).ToList();
+        return RecommendationTracks.Where(track => track.IsSelected).ToList();
     }
 
     private async Task PlaySelectedRecommendationTracksAsync()
@@ -322,7 +289,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
         _disposed = true;
 
-        _recommendationFolderTracks.Clear();
+        _recommendationTracks.Clear();
         _trackContextMenuItems.Clear();
 
         PropertyChanged = null;
