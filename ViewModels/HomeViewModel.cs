@@ -260,7 +260,10 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             .Where(playlist => !string.IsNullOrWhiteSpace(playlist.ItemId) && !string.IsNullOrWhiteSpace(playlist.Provider))
             .Select(playlist =>
             {
-                playlist.DisplayName = playlist.Name;
+                var playlistName = playlist.Name ?? string.Empty;
+                playlist.DisplayName = playlistName.StartsWith("Radio: ", StringComparison.OrdinalIgnoreCase)
+                    ? playlistName[7..].TrimStart()
+                    : playlistName;
                 return playlist;
             })
             .ToList()

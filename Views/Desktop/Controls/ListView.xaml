@@ -12,7 +12,7 @@
         <!--  DataTemplate for Playlists  -->
         <DataTemplate x:Key="PlaylistTemplate" x:DataType="models:Playlist">
             <Border
-                HeightRequest="74"
+                HeightRequest="50"
                 StrokeThickness="0"
                 BackgroundColor="{DynamicResource BackgroundSecondary}">
                 <Border.StrokeShape>
@@ -22,6 +22,7 @@
                 <Grid ColumnDefinitions="10,*">
                     <!--  Accent Bar  -->
                     <Border Grid.Column="0"
+                        Loaded="OnAccentBarLoaded"
                         StrokeThickness="0"
                         BackgroundColor="{DynamicResource AccentColor}">
                         <Border.StrokeShape>
@@ -31,9 +32,10 @@
 
                     <Grid Grid.Column="1"
                         Padding="12,6"
+                        ColumnDefinitions="*,44"
                         behaviors:HoverBehavior.ShowOnHoverTarget="{x:Reference HoverOverlay}">
                         <!--  Playlist Name  -->
-                        <Label
+                        <Label Grid.Column="0"
                             FontAttributes="Bold"
                             FontSize="14"
                             LineBreakMode="TailTruncation"
@@ -50,8 +52,7 @@
 
                         <!--  Hover Overlay (Play only)  -->
                         <Border x:Name="HoverOverlay"
-                            HorizontalOptions="End"
-                            WidthRequest="88"
+                            Grid.Column="1"
                             StrokeThickness="0"
                             Opacity="0"
                             BackgroundColor="Transparent">
@@ -67,7 +68,7 @@
                                 BackgroundColor="{DynamicResource IconPrimary75}"
                                 HeightRequest="32"
                                 HorizontalOptions="End"
-                                Margin="0,0,10,0"
+                                Margin="0,0,4,0"
                                 StrokeThickness="0"
                                 VerticalOptions="Center"
                                 WidthRequest="32">
@@ -94,7 +95,7 @@
         <!--  DataTemplate for Skeletons  -->
         <DataTemplate x:Key="SkeletonTemplate" x:DataType="models:ListViewSkeleton">
             <Border
-                HeightRequest="74"
+                HeightRequest="50"
                 StrokeThickness="0"
                 BackgroundColor="{DynamicResource BackgroundSecondary}">
                 <Border.StrokeShape>

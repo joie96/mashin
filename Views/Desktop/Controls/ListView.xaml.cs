@@ -1,7 +1,11 @@
 using mashin.Collections;
 using mashin.Models;
 using mashin.Services;
+using FuzzySharp;
 using System.Collections.Specialized;
+using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Windows.Input;
 
 namespace mashin.Views.Desktop.Controls;
@@ -59,12 +63,18 @@ public partial class ListView : ContentView
 
     #endregion
 
+    #region Construction
+
     public ListView()
     {
         InitializeComponent();
         ItemsCollectionView.ItemsSource = _visibleItems;
         RefreshVisibleItems();
     }
+
+    #endregion
+
+    #region Property Changed Handlers
 
     private static void OnItemsSourceChanged(BindableObject bindable, object oldValue, object newValue)
     {
@@ -86,6 +96,10 @@ public partial class ListView : ContentView
 
         view.RefreshVisibleItems();
     }
+
+    #endregion
+
+    #region ItemSource handling
 
     private void AttachItemsSourceCollection(IEnumerable<object>? source)
     {
@@ -128,6 +142,10 @@ public partial class ListView : ContentView
         _visibleItems.ReplaceRange(items);
     }
 
+    #endregion
+
+    #region UI event handlers
+
     private async void OnPlayOverlayClicked(object? sender, TappedEventArgs e)
     {
         if (sender is not Border playButton || playButton.BindingContext is not MediaItem item || MediaActions == null)
@@ -137,7 +155,124 @@ public partial class ListView : ContentView
 
         await MediaActions.PlayMediaAsync(item);
     }
+
+    private void OnAccentBarLoaded(object? sender, EventArgs e)
+    {
+        if (sender is not Border accentBar)
+        {
+            return;
+        }
+
+        var text = accentBar.BindingContext switch
+        {
+            Playlist playlist => playlist.DisplayName,
+            _ => null
+        };
+
+        accentBar.BackgroundColor = GetAccentColorFromText(text);
+    }
+
+    #endregion
+
+    #region Helpers
+
+    private static Color GetAccentColorFromText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return Color.FromArgb("#5A8DFF");
+        }
+
+        // Normalize to improve fuzzy matching consistency across accents and punctuation.
+        var normalized = text.Trim().ToLowerInvariant().Normalize(NormalizationForm.FormD);
+        var normalizedBuilder = new StringBuilder(normalized.Length);
+        foreach (var c in normalized)
+        {
+            var category = CharUnicodeInfo.GetUnicodeCategory(c);
+            if (category != UnicodeCategory.NonSpacingMark)
+            {
+                normalizedBuilder.Append(char.IsLetterOrDigit(c) ? c : ' ');
+            }
+        }
+
+        var normalizedText = Regex.Replace(normalizedBuilder.ToString(), "\\s+", " ").Trim();
+        if (string.IsNullOrWhiteSpace(normalizedText))
+        {
+            return Color.FromArgb("#5A8DFF");
+        }
+
+        var tokens = normalizedText.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (tokens.Length == 0)
+        {
+            return Color.FromArgb("#5A8DFF");
+        }
+
+        var anchors = new (string Token, float Hue)[]
+        {
+            ("metal", 8f),
+            ("rock", 20f),
+            ("punk", 32f),
+            ("electro", 56f),
+            ("edm", 68f),
+            ("house", 82f),
+            ("techno", 98f),
+            ("trance", 116f),
+            ("ambient", 138f),
+            ("chill", 152f),
+            ("jazz", 172f),
+            ("blues", 188f),
+            ("funk", 206f),
+            ("disco", 222f),
+            ("pop", 244f),
+            ("indie", 260f),
+            ("folk", 276f),
+            ("classical", 294f),
+            ("orchestral", 306f),
+            ("cinematic", 320f),
+            ("soundtrack", 336f),
+            ("hiphop", 350f)
+        };
+
+        var sumX = 0.0;
+        var sumY = 0.0;
+        foreach (var token in tokens)
+        {
+            var bestScore = 0;
+            var bestHue = 0f;
+
+            foreach (var anchor in anchors)
+            {
+                var score = Fuzz.TokenSetRatio(token, anchor.Token);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestHue = anchor.Hue;
+                }
+            }
+
+            var weight = Math.Clamp(bestScore / 100.0, 0.2, 1.0);
+            var radians = bestHue * Math.PI / 180.0;
+            sumX += Math.Cos(radians) * weight;
+            sumY += Math.Sin(radians) * weight;
+        }
+
+        if (Math.Abs(sumX) < 0.0001 && Math.Abs(sumY) < 0.0001)
+        {
+            sumX = 1;
+            sumY = 0;
+        }
+
+        var hue = (Math.Atan2(sumY, sumX) * 180.0 / Math.PI + 360.0) % 360.0;
+        var saturation = 0.66f;
+        var lightness = 0.52f;
+
+        return Color.FromHsla(hue / 360.0, saturation, lightness);
+    }
+
+    #endregion
 }
+
+#region TemplateSelector
 
 public sealed class ListViewTemplateSelector : DataTemplateSelector
 {
@@ -164,3 +299,5 @@ public sealed class ListViewTemplateSelector : DataTemplateSelector
         throw new InvalidOperationException("ListViewTemplateSelector requires PlaylistTemplate or SkeletonTemplate.");
     }
 }
+
+#endregion
