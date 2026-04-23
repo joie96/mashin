@@ -16,13 +16,13 @@
     <ScrollView x:Name="scrollView">
         <Grid
             Padding="{StaticResource PagePaddingDesktop}"
-            RowDefinitions="Auto,Auto,Auto"
+            RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
             RowSpacing="0">
 
             <!--  Header  -->
             <VerticalStackLayout Grid.Row="0" Spacing="6">
                 <Label Style="{StaticResource LabelPageTitle}"
-                    Text="Willkommen zur neuen Startseite" />
+                    Text="Willkommen zurück!" />
             </VerticalStackLayout>
 
             <!--  Recommendations Slide (incl. Skeletons)  -->
@@ -35,7 +35,7 @@
                     ColumnSpacing="16">
                     <Label Grid.Column="0"
                         Style="{StaticResource LabelSectionTitle}"
-                        Text="ListenBrainz Recommendations"
+                        Text="Unsere Empfehlungen für dich"
                         VerticalOptions="Center" />
                     <Border Grid.Column="1"
                         BackgroundColor="Transparent"
@@ -151,7 +151,7 @@
                     ColumnSpacing="16">
                     <Label Grid.Column="0"
                         Style="{StaticResource LabelSectionTitle}"
-                        Text="Meine Genres"
+                        Text="Genres, die du liebst"
                         VerticalOptions="Center" />
                     <Border Grid.Column="1"
                         BackgroundColor="Transparent"
@@ -191,6 +191,277 @@
                     MaxItems="9"
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding PlaylistTappedCommand}" />
+            </Grid>
+
+            <!--  Genre Artists 1  -->
+            <Grid Grid.Row="3"
+                Margin="{StaticResource SectionTopMargin}"
+                RowDefinitions="Auto,Auto,Auto"
+                RowSpacing="0"
+                IsVisible="{Binding GenreArtistSections[0].IsVisible}">
+                <controls:RowView
+                    Grid.Row="2"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding GenreArtistSections[0].ShowRowView}"
+                    ItemCornerRadius="100"
+                    ItemsSource="{Binding GenreArtistSections[0].Items}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
+
+                <Grid Grid.Row="0"
+                    ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="16">
+                    <Label Grid.Column="0"
+                        Style="{StaticResource LabelSectionTitle}"
+                        Text="{Binding GenreArtistSections[0].Title}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Margin="-6,0,0,0"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding GenreArtistSections[0].ItemCount}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <Label Grid.Row="1"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding GenreArtistSections[0].ShowEmptyMessage}"
+                    Style="{StaticResource LabelTertiary}"
+                    Text="Keine Genre-Artists verfuegbar." />
+            </Grid>
+
+            <!--  Genre Artists 2  -->
+            <Grid Grid.Row="4"
+                Margin="{StaticResource SectionTopMargin}"
+                RowDefinitions="Auto,Auto,Auto"
+                RowSpacing="0"
+                IsVisible="{Binding GenreArtistSections[1].IsVisible}">
+                <controls:RowView Grid.Row="2"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding GenreArtistSections[1].ShowRowView}"
+                    ItemCornerRadius="100"
+                    ItemsSource="{Binding GenreArtistSections[1].Items}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
+
+                <Grid Grid.Row="0"
+                    ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="16">
+                    <Label Grid.Column="0"
+                        Style="{StaticResource LabelSectionTitle}"
+                        Text="{Binding GenreArtistSections[1].Title}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Margin="-6,0,0,0"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding GenreArtistSections[1].ItemCount}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <Label Grid.Row="1"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding GenreArtistSections[1].ShowEmptyMessage}"
+                    Style="{StaticResource LabelTertiary}"
+                    Text="Keine Genre-Artists verfuegbar." />
+            </Grid>
+
+            <!--  Genre Artists 3  -->
+            <Grid Grid.Row="5"
+                Margin="{StaticResource SectionTopMargin}"
+                RowDefinitions="Auto,Auto,Auto"
+                RowSpacing="0"
+                IsVisible="{Binding GenreArtistSections[2].IsVisible}">
+                <controls:RowView Grid.Row="2"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding GenreArtistSections[2].ShowRowView}"
+                    ItemCornerRadius="100"
+                    ItemsSource="{Binding GenreArtistSections[2].Items}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
+
+                <Grid Grid.Row="0"
+                    ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="16">
+                    <Label Grid.Column="0"
+                        Style="{StaticResource LabelSectionTitle}"
+                        Text="{Binding GenreArtistSections[2].Title}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Margin="-6,0,0,0"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding GenreArtistSections[2].ItemCount}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <Label Grid.Row="1"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding GenreArtistSections[2].ShowEmptyMessage}"
+                    Style="{StaticResource LabelTertiary}"
+                    Text="Keine Genre-Artists verfuegbar." />
+            </Grid>
+
+            <!--  Genre Artists 4  -->
+            <Grid Grid.Row="6"
+                Margin="{StaticResource SectionTopMargin}"
+                RowDefinitions="Auto,Auto,Auto"
+                RowSpacing="0"
+                IsVisible="{Binding GenreArtistSections[3].IsVisible}">
+                <controls:RowView Grid.Row="2"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding GenreArtistSections[3].ShowRowView}"
+                    ItemCornerRadius="100"
+                    ItemsSource="{Binding GenreArtistSections[3].Items}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
+
+                <Grid Grid.Row="0"
+                    ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="16">
+                    <Label Grid.Column="0"
+                        Style="{StaticResource LabelSectionTitle}"
+                        Text="{Binding GenreArtistSections[3].Title}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Margin="-6,0,0,0"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding GenreArtistSections[3].ItemCount}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <Label Grid.Row="1"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding GenreArtistSections[3].ShowEmptyMessage}"
+                    Style="{StaticResource LabelTertiary}"
+                    Text="Keine Genre-Artists verfuegbar." />
+            </Grid>
+
+            <!--  Genre Artists 5  -->
+            <Grid Grid.Row="7"
+                Margin="{StaticResource SectionTopMargin}"
+                RowDefinitions="Auto,Auto,Auto"
+                RowSpacing="0"
+                IsVisible="{Binding GenreArtistSections[4].IsVisible}">
+                <controls:RowView Grid.Row="2"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding GenreArtistSections[4].ShowRowView}"
+                    ItemCornerRadius="100"
+                    ItemsSource="{Binding GenreArtistSections[4].Items}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
+
+                <Grid Grid.Row="0"
+                    ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="16">
+                    <Label Grid.Column="0"
+                        Style="{StaticResource LabelSectionTitle}"
+                        Text="{Binding GenreArtistSections[4].Title}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Margin="-6,0,0,0"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding GenreArtistSections[4].ItemCount}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <Label Grid.Row="1"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding GenreArtistSections[4].ShowEmptyMessage}"
+                    Style="{StaticResource LabelTertiary}"
+                    Text="Keine Genre-Artists verfuegbar." />
             </Grid>
         </Grid>
     </ScrollView>

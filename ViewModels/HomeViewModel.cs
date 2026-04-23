@@ -13,6 +13,8 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 {
     #region Fields
 
+    private const int GenreArtistSectionCount = 5;
+
     private readonly MusicAssistantService _musicAssistant;
     private readonly IMediaItemActions _mediaActions;
     private readonly IContextMenuService _contextMenuService;
@@ -22,12 +24,16 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
     private ObservableRangeCollection<Track> _recommendationTracks = new();
     private ObservableRangeCollection<Playlist> _genrePlaylists = new();
     private ObservableRangeCollection<ContextMenuItem> _trackContextMenuItems = new();
+    private readonly ObservableRangeCollection<HomeGenreArtistSection> _genreArtistSections = new();
 
     private readonly IReadOnlyList<SlideViewSkeleton> _slideSkeletons = Enumerable.Range(0, 10)
         .Select(_ => new SlideViewSkeleton())
         .ToList();
     private readonly IReadOnlyList<ListViewSkeleton> _listSkeletons = Enumerable.Range(0, 9)
         .Select(_ => new ListViewSkeleton())
+        .ToList();
+    private readonly IReadOnlyList<RowViewSkeleton> _rowSkeletons = Enumerable.Range(0, 10)
+        .Select(_ => new RowViewSkeleton())
         .ToList();
 
     private bool _isLoadingHome;
@@ -77,6 +83,8 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     public bool HasGenrePlaylists => GenrePlaylists.Count > 0;
 
+    public ObservableRangeCollection<HomeGenreArtistSection> GenreArtistSections => _genreArtistSections;
+
     public bool ShowRecommendationFolderSlideView => IsLoadingHome || HasRecommendationFolderTracks;
 
     public bool ShowGenrePlaylistsListView => IsLoadingHome || HasGenrePlaylists;
@@ -102,6 +110,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 OnPropertyChanged(nameof(ShowGenrePlaylistsListView));
                 OnPropertyChanged(nameof(ShowNoGenrePlaylistsMessage));
                 OnPropertyChanged(nameof(GenrePlaylistItems));
+                OnPropertyChanged(nameof(GenreArtistSections));
             }
         }
     }
@@ -136,6 +145,8 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
         _logger = logger;
+
+        SetGenreArtistSectionsLoadingState();
 
         // Navigation commands
         AlbumTappedCommand = new Command<object>(async parameter =>
@@ -198,6 +209,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
     private async Task LoadHomeAsync()
     {
         IsLoadingHome = true;
+        SetGenreArtistSectionsLoadingState();
 
         try
         {
@@ -209,12 +221,14 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
             await LoadRecommendationTracksAsync(lbFolders);
             await LoadGenrePlaylistsAsync(lbFolders);
+            await LoadGenreArtistsAsync(lbFolders);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to load home sections");
             RecommendationTracks = new ObservableRangeCollection<Track>();
             GenrePlaylists = new ObservableRangeCollection<Playlist>();
+            SetGenreArtistSectionsEmptyState();
         }
         finally
         {
@@ -278,6 +292,61 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             genrePlaylists.Count);
     }
 
+    private async Task LoadGenreArtistsAsync(IEnumerable<RecommendationFolder> lbFolders)
+    {
+        var genreArtistsFolders = FindRecommendationFoldersByPrefix(lbFolders, "genre_artists_").ToList();
+        if (genreArtistsFolders.Count == 0)
+        {
+            SetGenreArtistSectionsEmptyState();
+            return;
+        }
+
+        // Keep room for future UI expansion by loading and shuffling all sections now.
+        ShuffleInPlace(genreArtistsFolders);
+
+        var sections = new List<HomeGenreArtistSection>(GenreArtistSectionCount);
+        for (var i = 0; i < GenreArtistSectionCount; i++)
+        {
+            if (i >= genreArtistsFolders.Count)
+            {
+                sections.Add(CreateHiddenGenreArtistSection(i));
+                continue;
+            }
+
+            var folder = genreArtistsFolders[i];
+            var artists = folder.Items?
+                .OfType<Artist>()
+                .Where(artist => !string.IsNullOrWhiteSpace(artist.ItemId) && !string.IsNullOrWhiteSpace(artist.Provider))
+                .Select(artist =>
+                {
+                    artist.DisplayName = artist.Name;
+                    return artist;
+                })
+                .ToList()
+                ?? new List<Artist>();
+
+            await _musicAssistant.EnrichWithProviderInfoAsync(artists);
+
+            var title = BuildGenreArtistsSectionTitle(folder.ItemId, folder.Name, i);
+            sections.Add(new HomeGenreArtistSection
+            {
+                Title = title,
+                Items = artists.Cast<object>().ToList(),
+                ShowRowView = artists.Count > 0,
+                ShowEmptyMessage = artists.Count == 0,
+                IsVisible = true,
+            });
+        }
+
+        _genreArtistSections.ReplaceRange(sections);
+        OnPropertyChanged(nameof(GenreArtistSections));
+
+        _logger.LogInformation(
+            "Home genre artists loaded: sections={SectionCount}, firstSectionArtists={GenreArtists}",
+            _genreArtistSections.Count,
+            _genreArtistSections[0].ItemCount);
+    }
+
     #endregion
 
     #region Context Menu
@@ -339,6 +408,96 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             string.Equals(folder.ItemId, itemId, StringComparison.OrdinalIgnoreCase));
     }
 
+    private static IEnumerable<RecommendationFolder> FindRecommendationFoldersByPrefix(IEnumerable<RecommendationFolder> folders, string prefix)
+    {
+        return folders.Where(folder =>
+            !string.IsNullOrWhiteSpace(folder.ItemId)
+            && NormalizeFolderId(folder.ItemId).StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string NormalizeFolderId(string folderId)
+    {
+        var normalized = folderId.Trim();
+        if (normalized.StartsWith("-", StringComparison.Ordinal))
+        {
+            normalized = normalized[1..].TrimStart();
+        }
+
+        return normalized;
+    }
+
+    private static string BuildGenreArtistsSectionTitle(string itemId, string folderName, int sectionIndex)
+    {
+        if (!string.IsNullOrWhiteSpace(folderName))
+        {
+            return folderName;
+        }
+
+        var normalizedId = NormalizeFolderId(itemId);
+        const string prefix = "genre_artists_";
+        if (!normalizedId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Genre Artists {sectionIndex + 1}";
+        }
+
+        var suffix = normalizedId[prefix.Length..].Trim('_', ' ');
+        if (string.IsNullOrWhiteSpace(suffix))
+        {
+            return $"Genre Artists {sectionIndex + 1}";
+        }
+
+        var displaySuffix = suffix.Replace('_', ' ');
+        return $"Genre Artists: {displaySuffix}";
+    }
+
+    private void SetGenreArtistSectionsLoadingState()
+    {
+        var loadingSections = Enumerable.Range(0, GenreArtistSectionCount)
+            .Select(index => new HomeGenreArtistSection
+            {
+                Title = $"Genre Artists {index + 1}",
+                Items = _rowSkeletons.Cast<object>().ToList(),
+                ShowRowView = true,
+                ShowEmptyMessage = false,
+                IsVisible = true,
+            })
+            .ToList();
+
+        _genreArtistSections.ReplaceRange(loadingSections);
+        OnPropertyChanged(nameof(GenreArtistSections));
+    }
+
+    private void SetGenreArtistSectionsEmptyState()
+    {
+        var emptySections = Enumerable.Range(0, GenreArtistSectionCount)
+            .Select(CreateHiddenGenreArtistSection)
+            .ToList();
+
+        _genreArtistSections.ReplaceRange(emptySections);
+        OnPropertyChanged(nameof(GenreArtistSections));
+    }
+
+    private static HomeGenreArtistSection CreateHiddenGenreArtistSection(int index)
+    {
+        return new HomeGenreArtistSection
+        {
+            Title = $"Genre Artists {index + 1}",
+            Items = Array.Empty<object>(),
+            ShowRowView = false,
+            ShowEmptyMessage = false,
+            IsVisible = false,
+        };
+    }
+
+    private static void ShuffleInPlace<T>(IList<T> items)
+    {
+        for (var i = items.Count - 1; i > 0; i--)
+        {
+            var swapIndex = Random.Shared.Next(i + 1);
+            (items[i], items[swapIndex]) = (items[swapIndex], items[i]);
+        }
+    }
+
     private IEnumerable<Track> GetSelectedRecommendationTracks()
     {
         return RecommendationTracks.Where(track => track.IsSelected).ToList();
@@ -375,6 +534,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
         _recommendationTracks.Clear();
         _genrePlaylists.Clear();
+        _genreArtistSections.Clear();
         _trackContextMenuItems.Clear();
 
         PropertyChanged = null;
@@ -383,6 +543,21 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
     #endregion
 
     #region INotifyPropertyChanged
+
+    public sealed class HomeGenreArtistSection
+    {
+        public string Title { get; init; } = "Genre Artists";
+
+        public IReadOnlyList<object> Items { get; init; } = Array.Empty<object>();
+
+        public bool ShowRowView { get; init; }
+
+        public bool ShowEmptyMessage { get; init; }
+
+        public bool IsVisible { get; init; }
+
+        public int ItemCount => Items.Count;
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 

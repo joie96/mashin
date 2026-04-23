@@ -69,6 +69,7 @@ public partial class ListView : ContentView
     {
         InitializeComponent();
         ItemsCollectionView.ItemsSource = _visibleItems;
+        SizeChanged += OnListViewSizeChanged;
         RefreshVisibleItems();
     }
 
@@ -170,6 +171,26 @@ public partial class ListView : ContentView
         };
 
         accentBar.BackgroundColor = GetAccentColorFromText(text);
+    }
+
+    private void OnListViewSizeChanged(object? sender, EventArgs e)
+    {
+        if (ItemsCollectionView.Width <= 0)
+        {
+            return;
+        }
+
+        if (ItemsCollectionView.ItemsLayout is not GridItemsLayout gridLayout)
+        {
+            return;
+        }
+
+        // Recreate layout to avoid stale item size cache at specific window widths.
+        ItemsCollectionView.ItemsLayout = new GridItemsLayout(3, gridLayout.Orientation)
+        {
+            HorizontalItemSpacing = gridLayout.HorizontalItemSpacing,
+            VerticalItemSpacing = gridLayout.VerticalItemSpacing
+        };
     }
 
     #endregion

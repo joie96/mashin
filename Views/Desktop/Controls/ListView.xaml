@@ -126,15 +126,18 @@
             SkeletonTemplate="{StaticResource SkeletonTemplate}" />
     </ContentView.Resources>
 
-    <!--  Items Grid (max 3x3 via MaxItems in code-behind)  -->
+    <!--  Items Grid  -->
     <CollectionView x:Name="ItemsCollectionView"
+        Margin="-6"
+        HorizontalOptions="Fill"
+        ItemSizingStrategy="MeasureAllItems"
         SelectionMode="None"
         VerticalScrollBarVisibility="Never">
         <CollectionView.ItemsLayout>
             <GridItemsLayout Orientation="Vertical"
                 Span="3"
-                VerticalItemSpacing="12"
-                HorizontalItemSpacing="12" />
+                VerticalItemSpacing="6"
+                HorizontalItemSpacing="6" />
         </CollectionView.ItemsLayout>
         <CollectionView.ItemTemplate>
             <StaticResource Key="ListViewTemplateSelector" />
