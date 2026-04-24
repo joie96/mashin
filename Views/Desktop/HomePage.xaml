@@ -16,7 +16,7 @@
     <ScrollView x:Name="scrollView">
         <Grid
             Padding="{StaticResource PagePaddingDesktop}"
-            RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+            RowDefinitions="Auto,Auto,Auto,Auto,Auto"
             RowSpacing="0">
 
             <!--  Header  -->
@@ -193,28 +193,17 @@
                     PrimaryInfoTappedCommand="{Binding PlaylistTappedCommand}" />
             </Grid>
 
-            <!--  Genre Artists 1  -->
+            <!--  Artist Playlists Row (incl. Skeletons, Actions, Paging)  -->
             <Grid Grid.Row="3"
                 Margin="{StaticResource SectionTopMargin}"
                 RowDefinitions="Auto,Auto,Auto"
-                RowSpacing="0"
-                IsVisible="{Binding GenreArtistSections[0].IsVisible}">
-                <controls:RowView
-                    Grid.Row="2"
-                    Margin="0,16,0,0"
-                    IsVisible="{Binding GenreArtistSections[0].ShowRowView}"
-                    ItemCornerRadius="100"
-                    ItemsSource="{Binding GenreArtistSections[0].Items}"
-                    MediaActions="{Binding MediaActions}"
-                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
-
+                RowSpacing="0">
                 <Grid Grid.Row="0"
-                    ColumnDefinitions="Auto,Auto,*"
+                    ColumnDefinitions="Auto,Auto,*,Auto"
                     ColumnSpacing="16">
                     <Label Grid.Column="0"
                         Style="{StaticResource LabelSectionTitle}"
-                        Text="{Binding GenreArtistSections[0].Title}"
+                        Text="Playlists zu deinen Kuenstlern"
                         VerticalOptions="Center" />
                     <Border Grid.Column="1"
                         BackgroundColor="Transparent"
@@ -230,7 +219,7 @@
                         <Label FontAttributes="Bold"
                             FontSize="10"
                             HorizontalOptions="Center"
-                            Text="{Binding GenreArtistSections[0].ItemCount}"
+                            Text="{Binding ArtistPlaylistItems.Count}"
                             TextColor="{DynamicResource TextPrimary}"
                             VerticalOptions="Center" />
                     </Border>
@@ -239,36 +228,144 @@
                         HorizontalOptions="Fill"
                         Opacity="0.75"
                         VerticalOptions="Center" />
+
+                    <Grid Grid.Column="3"
+                        ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
+                        ColumnSpacing="8"
+                        VerticalOptions="Center">
+                        <Border Grid.Column="0"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding PlayArtistPlaylistsCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=Play16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                        <Border Grid.Column="1"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ShuffleArtistPlaylistsCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ArrowShuffle16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                        <BoxView Grid.Column="2"
+                            HeightRequest="18"
+                            Margin="4,0"
+                            Opacity="0.75"
+                            VerticalOptions="Center"
+                            WidthRequest="1" />
+
+                        <Border Grid.Column="3"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            InputTransparent="{Binding Source={x:Reference ArtistPlaylistsRowView}, Path=CanGoPrev, Converter={StaticResource InvertedBoolConverter}}"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding Source={x:Reference ArtistPlaylistsRowView}, Path=CanGoPrev}"
+                                    TargetType="Border"
+                                    Value="False">
+                                    <Setter Property="Opacity" Value="0.35" />
+                                </DataTrigger>
+                            </Border.Triggers>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding Source={x:Reference ArtistPlaylistsRowView}, Path=PrevPageCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ChevronLeft24,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                        <Border Grid.Column="4"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            InputTransparent="{Binding Source={x:Reference ArtistPlaylistsRowView}, Path=CanGoNext, Converter={StaticResource InvertedBoolConverter}}"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding Source={x:Reference ArtistPlaylistsRowView}, Path=CanGoNext}"
+                                    TargetType="Border"
+                                    Value="False">
+                                    <Setter Property="Opacity" Value="0.35" />
+                                </DataTrigger>
+                            </Border.Triggers>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding Source={x:Reference ArtistPlaylistsRowView}, Path=NextPageCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ChevronRight24,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                    </Grid>
                 </Grid>
 
                 <Label Grid.Row="1"
                     Margin="0,16,0,0"
-                    IsVisible="{Binding GenreArtistSections[0].ShowEmptyMessage}"
+                    IsVisible="{Binding ShowNoArtistPlaylistsMessage}"
                     Style="{StaticResource LabelTertiary}"
-                    Text="Keine Genre-Artists verfuegbar." />
+                    Text="Keine Artist-Playlists verfuegbar." />
+
+                <controls:RowView x:Name="ArtistPlaylistsRowView"
+                    Grid.Row="2"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding ShowArtistPlaylistsRowView}"
+                    ItemCornerRadius="8"
+                    ItemsSource="{Binding ArtistPlaylistItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding PlaylistTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
             </Grid>
 
-            <!--  Genre Artists 2  -->
+            <!--  Top Tracks Row (incl. Skeletons, Paging)  -->
             <Grid Grid.Row="4"
                 Margin="{StaticResource SectionTopMargin}"
                 RowDefinitions="Auto,Auto,Auto"
-                RowSpacing="0"
-                IsVisible="{Binding GenreArtistSections[1].IsVisible}">
-                <controls:RowView Grid.Row="2"
-                    Margin="0,16,0,0"
-                    IsVisible="{Binding GenreArtistSections[1].ShowRowView}"
-                    ItemCornerRadius="100"
-                    ItemsSource="{Binding GenreArtistSections[1].Items}"
-                    MediaActions="{Binding MediaActions}"
-                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
-
+                RowSpacing="0">
                 <Grid Grid.Row="0"
-                    ColumnDefinitions="Auto,Auto,*"
+                    ColumnDefinitions="Auto,Auto,*,Auto"
                     ColumnSpacing="16">
                     <Label Grid.Column="0"
                         Style="{StaticResource LabelSectionTitle}"
-                        Text="{Binding GenreArtistSections[1].Title}"
+                        Text="Top Tracks"
                         VerticalOptions="Center" />
                     <Border Grid.Column="1"
                         BackgroundColor="Transparent"
@@ -284,7 +381,7 @@
                         <Label FontAttributes="Bold"
                             FontSize="10"
                             HorizontalOptions="Center"
-                            Text="{Binding GenreArtistSections[1].ItemCount}"
+                            Text="{Binding TopTrackItems.Count}"
                             TextColor="{DynamicResource TextPrimary}"
                             VerticalOptions="Center" />
                     </Border>
@@ -293,175 +390,84 @@
                         HorizontalOptions="Fill"
                         Opacity="0.75"
                         VerticalOptions="Center" />
-                </Grid>
 
-                <Label Grid.Row="1"
-                    Margin="0,16,0,0"
-                    IsVisible="{Binding GenreArtistSections[1].ShowEmptyMessage}"
-                    Style="{StaticResource LabelTertiary}"
-                    Text="Keine Genre-Artists verfuegbar." />
-            </Grid>
-
-            <!--  Genre Artists 3  -->
-            <Grid Grid.Row="5"
-                Margin="{StaticResource SectionTopMargin}"
-                RowDefinitions="Auto,Auto,Auto"
-                RowSpacing="0"
-                IsVisible="{Binding GenreArtistSections[2].IsVisible}">
-                <controls:RowView Grid.Row="2"
-                    Margin="0,16,0,0"
-                    IsVisible="{Binding GenreArtistSections[2].ShowRowView}"
-                    ItemCornerRadius="100"
-                    ItemsSource="{Binding GenreArtistSections[2].Items}"
-                    MediaActions="{Binding MediaActions}"
-                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
-
-                <Grid Grid.Row="0"
-                    ColumnDefinitions="Auto,Auto,*"
-                    ColumnSpacing="16">
-                    <Label Grid.Column="0"
-                        Style="{StaticResource LabelSectionTitle}"
-                        Text="{Binding GenreArtistSections[2].Title}"
-                        VerticalOptions="Center" />
-                    <Border Grid.Column="1"
-                        BackgroundColor="Transparent"
-                        HeightRequest="22"
-                        Margin="-6,0,0,0"
-                        Padding="6,0"
-                        Stroke="{DynamicResource BorderPrimary}"
-                        StrokeThickness="1"
+                    <Grid Grid.Column="3"
+                        ColumnDefinitions="Auto,Auto"
+                        ColumnSpacing="8"
                         VerticalOptions="Center">
-                        <Border.StrokeShape>
-                            <RoundRectangle CornerRadius="3" />
-                        </Border.StrokeShape>
-                        <Label FontAttributes="Bold"
-                            FontSize="10"
-                            HorizontalOptions="Center"
-                            Text="{Binding GenreArtistSections[2].ItemCount}"
-                            TextColor="{DynamicResource TextPrimary}"
-                            VerticalOptions="Center" />
-                    </Border>
-                    <BoxView Grid.Column="2"
-                        HeightRequest="1"
-                        HorizontalOptions="Fill"
-                        Opacity="0.75"
-                        VerticalOptions="Center" />
+                        <Border Grid.Column="0"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            InputTransparent="{Binding Source={x:Reference TopTracksRowView}, Path=CanGoPrev, Converter={StaticResource InvertedBoolConverter}}"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding Source={x:Reference TopTracksRowView}, Path=CanGoPrev}"
+                                    TargetType="Border"
+                                    Value="False">
+                                    <Setter Property="Opacity" Value="0.35" />
+                                </DataTrigger>
+                            </Border.Triggers>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding Source={x:Reference TopTracksRowView}, Path=PrevPageCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ChevronLeft24,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                        <Border Grid.Column="1"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            InputTransparent="{Binding Source={x:Reference TopTracksRowView}, Path=CanGoNext, Converter={StaticResource InvertedBoolConverter}}"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding Source={x:Reference TopTracksRowView}, Path=CanGoNext}"
+                                    TargetType="Border"
+                                    Value="False">
+                                    <Setter Property="Opacity" Value="0.35" />
+                                </DataTrigger>
+                            </Border.Triggers>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding Source={x:Reference TopTracksRowView}, Path=NextPageCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ChevronRight24,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                    </Grid>
                 </Grid>
 
                 <Label Grid.Row="1"
                     Margin="0,16,0,0"
-                    IsVisible="{Binding GenreArtistSections[2].ShowEmptyMessage}"
+                    IsVisible="{Binding ShowNoTopTracksMessage}"
                     Style="{StaticResource LabelTertiary}"
-                    Text="Keine Genre-Artists verfuegbar." />
-            </Grid>
+                    Text="Keine Top-Tracks verfuegbar." />
 
-            <!--  Genre Artists 4  -->
-            <Grid Grid.Row="6"
-                Margin="{StaticResource SectionTopMargin}"
-                RowDefinitions="Auto,Auto,Auto"
-                RowSpacing="0"
-                IsVisible="{Binding GenreArtistSections[3].IsVisible}">
-                <controls:RowView Grid.Row="2"
+                <controls:RowView x:Name="TopTracksRowView"
+                    Grid.Row="2"
                     Margin="0,16,0,0"
-                    IsVisible="{Binding GenreArtistSections[3].ShowRowView}"
-                    ItemCornerRadius="100"
-                    ItemsSource="{Binding GenreArtistSections[3].Items}"
+                    IsVisible="{Binding ShowTopTracksRowView}"
+                    ItemCornerRadius="8"
+                    ItemsSource="{Binding TopTrackItems}"
                     MediaActions="{Binding MediaActions}"
-                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    PrimaryInfoTappedCommand="{Binding RecommendationTrackTappedCommand}"
                     SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
-
-                <Grid Grid.Row="0"
-                    ColumnDefinitions="Auto,Auto,*"
-                    ColumnSpacing="16">
-                    <Label Grid.Column="0"
-                        Style="{StaticResource LabelSectionTitle}"
-                        Text="{Binding GenreArtistSections[3].Title}"
-                        VerticalOptions="Center" />
-                    <Border Grid.Column="1"
-                        BackgroundColor="Transparent"
-                        HeightRequest="22"
-                        Margin="-6,0,0,0"
-                        Padding="6,0"
-                        Stroke="{DynamicResource BorderPrimary}"
-                        StrokeThickness="1"
-                        VerticalOptions="Center">
-                        <Border.StrokeShape>
-                            <RoundRectangle CornerRadius="3" />
-                        </Border.StrokeShape>
-                        <Label FontAttributes="Bold"
-                            FontSize="10"
-                            HorizontalOptions="Center"
-                            Text="{Binding GenreArtistSections[3].ItemCount}"
-                            TextColor="{DynamicResource TextPrimary}"
-                            VerticalOptions="Center" />
-                    </Border>
-                    <BoxView Grid.Column="2"
-                        HeightRequest="1"
-                        HorizontalOptions="Fill"
-                        Opacity="0.75"
-                        VerticalOptions="Center" />
-                </Grid>
-
-                <Label Grid.Row="1"
-                    Margin="0,16,0,0"
-                    IsVisible="{Binding GenreArtistSections[3].ShowEmptyMessage}"
-                    Style="{StaticResource LabelTertiary}"
-                    Text="Keine Genre-Artists verfuegbar." />
-            </Grid>
-
-            <!--  Genre Artists 5  -->
-            <Grid Grid.Row="7"
-                Margin="{StaticResource SectionTopMargin}"
-                RowDefinitions="Auto,Auto,Auto"
-                RowSpacing="0"
-                IsVisible="{Binding GenreArtistSections[4].IsVisible}">
-                <controls:RowView Grid.Row="2"
-                    Margin="0,16,0,0"
-                    IsVisible="{Binding GenreArtistSections[4].ShowRowView}"
-                    ItemCornerRadius="100"
-                    ItemsSource="{Binding GenreArtistSections[4].Items}"
-                    MediaActions="{Binding MediaActions}"
-                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
-
-                <Grid Grid.Row="0"
-                    ColumnDefinitions="Auto,Auto,*"
-                    ColumnSpacing="16">
-                    <Label Grid.Column="0"
-                        Style="{StaticResource LabelSectionTitle}"
-                        Text="{Binding GenreArtistSections[4].Title}"
-                        VerticalOptions="Center" />
-                    <Border Grid.Column="1"
-                        BackgroundColor="Transparent"
-                        HeightRequest="22"
-                        Margin="-6,0,0,0"
-                        Padding="6,0"
-                        Stroke="{DynamicResource BorderPrimary}"
-                        StrokeThickness="1"
-                        VerticalOptions="Center">
-                        <Border.StrokeShape>
-                            <RoundRectangle CornerRadius="3" />
-                        </Border.StrokeShape>
-                        <Label FontAttributes="Bold"
-                            FontSize="10"
-                            HorizontalOptions="Center"
-                            Text="{Binding GenreArtistSections[4].ItemCount}"
-                            TextColor="{DynamicResource TextPrimary}"
-                            VerticalOptions="Center" />
-                    </Border>
-                    <BoxView Grid.Column="2"
-                        HeightRequest="1"
-                        HorizontalOptions="Fill"
-                        Opacity="0.75"
-                        VerticalOptions="Center" />
-                </Grid>
-
-                <Label Grid.Row="1"
-                    Margin="0,16,0,0"
-                    IsVisible="{Binding GenreArtistSections[4].ShowEmptyMessage}"
-                    Style="{StaticResource LabelTertiary}"
-                    Text="Keine Genre-Artists verfuegbar." />
             </Grid>
         </Grid>
     </ScrollView>

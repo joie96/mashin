@@ -1140,6 +1140,7 @@ public partial class RowView : ContentView
 public sealed class RowViewTemplateSelector : DataTemplateSelector
 {
     public DataTemplate? AlbumTemplate { get; set; }
+    public DataTemplate? TrackTemplate { get; set; }
     public DataTemplate? ArtistTemplate { get; set; }
     public DataTemplate? PlaylistTemplate { get; set; }
     public DataTemplate? SkeletonTemplate { get; set; }
@@ -1154,6 +1155,11 @@ public sealed class RowViewTemplateSelector : DataTemplateSelector
         if (item is Artist && ArtistTemplate != null)
         {
             return ArtistTemplate;
+        }
+
+        if (item is Track && TrackTemplate != null)
+        {
+            return TrackTemplate;
         }
 
         if (item is Playlist && PlaylistTemplate != null)
@@ -1171,7 +1177,7 @@ public sealed class RowViewTemplateSelector : DataTemplateSelector
             return SkeletonTemplate;
         }
 
-        throw new InvalidOperationException("RowViewTemplateSelector requires AlbumTemplate, ArtistTemplate, PlaylistTemplate or SkeletonTemplate.");
+        throw new InvalidOperationException("RowViewTemplateSelector requires AlbumTemplate, TrackTemplate, ArtistTemplate, PlaylistTemplate or SkeletonTemplate.");
     }
 }
 #endregion
