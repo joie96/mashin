@@ -23,6 +23,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
     private ObservableRangeCollection<Track> _topTracks = new();
     private ObservableRangeCollection<Track> _recentListens = new();
     private ObservableRangeCollection<Artist> _topArtists = new();
+    private ObservableRangeCollection<SimilarArtistSection> _similarArtistSections = new();
     private ObservableRangeCollection<Playlist> _genrePlaylists = new();
     private ObservableRangeCollection<Playlist> _artistPlaylists = new();
     private ObservableRangeCollection<ContextMenuItem> _trackContextMenuItems = new();
@@ -124,6 +125,21 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     public bool HasTopArtists => TopArtists.Count > 0;
 
+    public ObservableRangeCollection<SimilarArtistSection> SimilarArtistSections
+    {
+        get => _similarArtistSections;
+        private set
+        {
+            var normalizedValue = value ?? new ObservableRangeCollection<SimilarArtistSection>();
+            if (!EqualityComparer<ObservableRangeCollection<SimilarArtistSection>>.Default.Equals(_similarArtistSections, normalizedValue))
+            {
+                _similarArtistSections = normalizedValue;
+                OnPropertyChanged(nameof(SimilarArtistSections));
+                NotifySimilarArtistSectionPropertiesChanged();
+            }
+        }
+    }
+
     public ObservableRangeCollection<Playlist> GenrePlaylists
     {
         get => _genrePlaylists;
@@ -182,6 +198,36 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     public bool ShowNoTopArtistsMessage => !IsLoadingHome && !HasTopArtists;
 
+    public bool ShowSimilarArtistSectionContainer0 => GetShowSimilarArtistSectionContainer(0);
+
+    public bool ShowSimilarArtistSectionContainer1 => GetShowSimilarArtistSectionContainer(1);
+
+    public bool ShowSimilarArtistSectionContainer2 => GetShowSimilarArtistSectionContainer(2);
+
+    public bool ShowSimilarArtistSectionContainer3 => GetShowSimilarArtistSectionContainer(3);
+
+    public bool ShowSimilarArtistSectionContainer4 => GetShowSimilarArtistSectionContainer(4);
+
+    public bool ShowSimilarArtistSectionRowView0 => GetShowSimilarArtistSectionRowView(0);
+
+    public bool ShowSimilarArtistSectionRowView1 => GetShowSimilarArtistSectionRowView(1);
+
+    public bool ShowSimilarArtistSectionRowView2 => GetShowSimilarArtistSectionRowView(2);
+
+    public bool ShowSimilarArtistSectionRowView3 => GetShowSimilarArtistSectionRowView(3);
+
+    public bool ShowSimilarArtistSectionRowView4 => GetShowSimilarArtistSectionRowView(4);
+
+    public bool ShowNoSimilarArtistSectionMessage0 => GetShowNoSimilarArtistSectionMessage(0);
+
+    public bool ShowNoSimilarArtistSectionMessage1 => GetShowNoSimilarArtistSectionMessage(1);
+
+    public bool ShowNoSimilarArtistSectionMessage2 => GetShowNoSimilarArtistSectionMessage(2);
+
+    public bool ShowNoSimilarArtistSectionMessage3 => GetShowNoSimilarArtistSectionMessage(3);
+
+    public bool ShowNoSimilarArtistSectionMessage4 => GetShowNoSimilarArtistSectionMessage(4);
+
     public bool ShowNoGenrePlaylistsMessage => !IsLoadingHome && !HasGenrePlaylists;
 
     public bool ShowArtistPlaylistsRowView => IsLoadingHome || HasArtistPlaylists;
@@ -195,6 +241,36 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
     public IEnumerable<object> RecentListenItems => IsLoadingHome ? _rowSkeletons : _recentListens;
 
     public IEnumerable<object> TopArtistItems => IsLoadingHome ? _rowSkeletons : _topArtists;
+
+    public string SimilarArtistSectionTitle0 => GetSimilarArtistSectionTitle(0);
+
+    public string SimilarArtistSectionTitle1 => GetSimilarArtistSectionTitle(1);
+
+    public string SimilarArtistSectionTitle2 => GetSimilarArtistSectionTitle(2);
+
+    public string SimilarArtistSectionTitle3 => GetSimilarArtistSectionTitle(3);
+
+    public string SimilarArtistSectionTitle4 => GetSimilarArtistSectionTitle(4);
+
+    public int SimilarArtistSectionCount0 => GetSimilarArtistSectionCount(0);
+
+    public int SimilarArtistSectionCount1 => GetSimilarArtistSectionCount(1);
+
+    public int SimilarArtistSectionCount2 => GetSimilarArtistSectionCount(2);
+
+    public int SimilarArtistSectionCount3 => GetSimilarArtistSectionCount(3);
+
+    public int SimilarArtistSectionCount4 => GetSimilarArtistSectionCount(4);
+
+    public IEnumerable<object> SimilarArtistSectionItems0 => GetSimilarArtistSectionItems(0);
+
+    public IEnumerable<object> SimilarArtistSectionItems1 => GetSimilarArtistSectionItems(1);
+
+    public IEnumerable<object> SimilarArtistSectionItems2 => GetSimilarArtistSectionItems(2);
+
+    public IEnumerable<object> SimilarArtistSectionItems3 => GetSimilarArtistSectionItems(3);
+
+    public IEnumerable<object> SimilarArtistSectionItems4 => GetSimilarArtistSectionItems(4);
 
     public IEnumerable<object> GenrePlaylistItems => IsLoadingHome ? _listSkeletons : _genrePlaylists;
 
@@ -219,6 +295,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 OnPropertyChanged(nameof(ShowTopArtistsRowView));
                 OnPropertyChanged(nameof(ShowNoTopArtistsMessage));
                 OnPropertyChanged(nameof(TopArtistItems));
+                NotifySimilarArtistSectionPropertiesChanged();
                 OnPropertyChanged(nameof(ShowGenrePlaylistsListView));
                 OnPropertyChanged(nameof(ShowNoGenrePlaylistsMessage));
                 OnPropertyChanged(nameof(GenrePlaylistItems));
@@ -342,6 +419,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             await LoadTopTracksAsync(lbFolders);
             await LoadRecentListensAsync();
             await LoadTopArtistsAsync(lbFolders);
+            await LoadSimilarArtistsSectionsAsync(lbFolders);
             await LoadGenrePlaylistsAsync(lbFolders);
             await LoadArtistPlaylistsAsync(lbFolders);
         }
@@ -352,6 +430,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             TopTracks = new ObservableRangeCollection<Track>();
             RecentListens = new ObservableRangeCollection<Track>();
             TopArtists = new ObservableRangeCollection<Artist>();
+            SimilarArtistSections = new ObservableRangeCollection<SimilarArtistSection>();
             GenrePlaylists = new ObservableRangeCollection<Playlist>();
             ArtistPlaylists = new ObservableRangeCollection<Playlist>();
         }
@@ -482,6 +561,53 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             topArtists.Count);
     }
 
+    private async Task LoadSimilarArtistsSectionsAsync(IEnumerable<RecommendationFolder> lbFolders)
+    {
+        var similarArtistSections = new List<SimilarArtistSection>();
+
+        var similarArtistFolders = lbFolders
+            .Where(folder =>
+                !string.IsNullOrWhiteSpace(folder.ItemId)
+                && folder.ItemId.StartsWith("similar_artists_", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        foreach (var folder in similarArtistFolders)
+        {
+            var artists = folder.Items?
+                .OfType<Artist>()
+                .Where(artist => !string.IsNullOrWhiteSpace(artist.ItemId) && !string.IsNullOrWhiteSpace(artist.Provider))
+                .Select(artist =>
+                {
+                    artist.DisplayName = artist.Name;
+                    return artist;
+                })
+                .ToList()
+                ?? new List<Artist>();
+
+            await _musicAssistant.EnrichWithProviderInfoAsync(artists);
+
+            var sectionName = string.IsNullOrWhiteSpace(folder.Name) ? folder.ItemId : folder.Name;
+            sectionName = sectionName.Replace("Similar Artists for", "Ähnlich zu", StringComparison.OrdinalIgnoreCase);
+
+            similarArtistSections.Add(new SimilarArtistSection(
+                sectionName,
+                new ObservableRangeCollection<Artist>(artists)));
+        }
+
+        // Shuffle section order so the displayed folders vary on each load.
+        for (var i = similarArtistSections.Count - 1; i > 0; i--)
+        {
+            var swapIndex = Random.Shared.Next(i + 1);
+            (similarArtistSections[i], similarArtistSections[swapIndex]) = (similarArtistSections[swapIndex], similarArtistSections[i]);
+        }
+
+        SimilarArtistSections = new ObservableRangeCollection<SimilarArtistSection>(similarArtistSections);
+
+        _logger.LogInformation(
+            "Home similar artists sections loaded: similarArtistSections={SimilarArtistSections}",
+            similarArtistSections.Count);
+    }
+
     private async Task LoadGenrePlaylistsAsync(IEnumerable<RecommendationFolder> lbFolders)
     {
         var genrePlaylists = FindRecommendationFolderById(lbFolders, "genre_playlists")?.Items?
@@ -598,6 +724,96 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             : normalizedPlaylistName;
     }
 
+    private SimilarArtistSection? GetSimilarArtistSection(int index)
+    {
+        if (index < 0 || index >= SimilarArtistSections.Count)
+        {
+            return null;
+        }
+
+        return SimilarArtistSections[index];
+    }
+
+    private string GetSimilarArtistSectionTitle(int index)
+    {
+        return GetSimilarArtistSection(index)?.Name ?? string.Empty;
+    }
+
+    private int GetSimilarArtistSectionCount(int index)
+    {
+        if (IsLoadingHome)
+        {
+            return _rowSkeletons.Count;
+        }
+
+        return GetSimilarArtistSection(index)?.Artists.Count ?? 0;
+    }
+
+    private bool GetShowSimilarArtistSectionContainer(int index)
+    {
+        return IsLoadingHome || GetSimilarArtistSection(index) != null;
+    }
+
+    private bool GetShowSimilarArtistSectionRowView(int index)
+    {
+        return IsLoadingHome || (GetSimilarArtistSection(index)?.Artists.Count > 0);
+    }
+
+    private bool GetShowNoSimilarArtistSectionMessage(int index)
+    {
+        var section = GetSimilarArtistSection(index);
+        return !IsLoadingHome && section != null && section.Artists.Count == 0;
+    }
+
+    private IEnumerable<object> GetSimilarArtistSectionItems(int index)
+    {
+        if (IsLoadingHome)
+        {
+            return _rowSkeletons;
+        }
+
+        return GetSimilarArtistSection(index)?.Artists ?? Enumerable.Empty<Artist>();
+    }
+
+    private void NotifySimilarArtistSectionPropertiesChanged()
+    {
+        OnPropertyChanged(nameof(ShowSimilarArtistSectionContainer0));
+        OnPropertyChanged(nameof(ShowSimilarArtistSectionContainer1));
+        OnPropertyChanged(nameof(ShowSimilarArtistSectionContainer2));
+        OnPropertyChanged(nameof(ShowSimilarArtistSectionContainer3));
+        OnPropertyChanged(nameof(ShowSimilarArtistSectionContainer4));
+
+        OnPropertyChanged(nameof(ShowSimilarArtistSectionRowView0));
+        OnPropertyChanged(nameof(ShowSimilarArtistSectionRowView1));
+        OnPropertyChanged(nameof(ShowSimilarArtistSectionRowView2));
+        OnPropertyChanged(nameof(ShowSimilarArtistSectionRowView3));
+        OnPropertyChanged(nameof(ShowSimilarArtistSectionRowView4));
+
+        OnPropertyChanged(nameof(ShowNoSimilarArtistSectionMessage0));
+        OnPropertyChanged(nameof(ShowNoSimilarArtistSectionMessage1));
+        OnPropertyChanged(nameof(ShowNoSimilarArtistSectionMessage2));
+        OnPropertyChanged(nameof(ShowNoSimilarArtistSectionMessage3));
+        OnPropertyChanged(nameof(ShowNoSimilarArtistSectionMessage4));
+
+        OnPropertyChanged(nameof(SimilarArtistSectionTitle0));
+        OnPropertyChanged(nameof(SimilarArtistSectionTitle1));
+        OnPropertyChanged(nameof(SimilarArtistSectionTitle2));
+        OnPropertyChanged(nameof(SimilarArtistSectionTitle3));
+        OnPropertyChanged(nameof(SimilarArtistSectionTitle4));
+
+        OnPropertyChanged(nameof(SimilarArtistSectionCount0));
+        OnPropertyChanged(nameof(SimilarArtistSectionCount1));
+        OnPropertyChanged(nameof(SimilarArtistSectionCount2));
+        OnPropertyChanged(nameof(SimilarArtistSectionCount3));
+        OnPropertyChanged(nameof(SimilarArtistSectionCount4));
+
+        OnPropertyChanged(nameof(SimilarArtistSectionItems0));
+        OnPropertyChanged(nameof(SimilarArtistSectionItems1));
+        OnPropertyChanged(nameof(SimilarArtistSectionItems2));
+        OnPropertyChanged(nameof(SimilarArtistSectionItems3));
+        OnPropertyChanged(nameof(SimilarArtistSectionItems4));
+    }
+
 
     private IEnumerable<Track> GetSelectedRecommendationTracks()
     {
@@ -660,6 +876,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
         _topTracks.Clear();
         _recentListens.Clear();
         _topArtists.Clear();
+        _similarArtistSections.Clear();
         _genrePlaylists.Clear();
         _artistPlaylists.Clear();
         _trackContextMenuItems.Clear();
@@ -670,6 +887,19 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
     #endregion
 
     #region INotifyPropertyChanged
+
+    public sealed class SimilarArtistSection
+    {
+        public SimilarArtistSection(string name, ObservableRangeCollection<Artist> artists)
+        {
+            Name = name;
+            Artists = artists;
+        }
+
+        public string Name { get; }
+
+        public ObservableRangeCollection<Artist> Artists { get; }
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
