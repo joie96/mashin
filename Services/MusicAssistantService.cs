@@ -1331,9 +1331,15 @@ public class MusicAssistantService
     }
 
     /// <summary>
-    /// Return a list of the last played items. Returns various media types
+    /// Return a list of the last played items. Returns various media types.
     /// </summary>
-    public async Task<List<MediaItem>> GetRecentlyPlayedItemsAsync(int limit = 50, MediaType[]? mediaTypes = null)
+    public async Task<List<MediaItem>> GetRecentlyPlayedItemsAsync(
+        int limit = 50,
+        MediaType[]? mediaTypes = null,
+        string? userId = null,
+        string? queueId = null,
+        bool? fullyPlayedOnly = null,
+        bool? userInitiatedOnly = null)
     {
         var args = new Dictionary<string, object>
         {
@@ -1343,6 +1349,26 @@ public class MusicAssistantService
         if (mediaTypes != null && mediaTypes.Length > 0)
         {
             args["media_types"] = mediaTypes.Select(mt => mt.ToString().ToLowerInvariant()).ToList();
+        }
+
+        if (!string.IsNullOrWhiteSpace(userId))
+        {
+            args["user_id"] = userId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(queueId))
+        {
+            args["queue_id"] = queueId;
+        }
+
+        if (fullyPlayedOnly.HasValue)
+        {
+            args["fully_played_only"] = fullyPlayedOnly.Value;
+        }
+
+        if (userInitiatedOnly.HasValue)
+        {
+            args["user_initiated_only"] = userInitiatedOnly.Value;
         }
 
         var result = await SendCommandAsync<List<MediaItem>>("music/recently_played_items", args);

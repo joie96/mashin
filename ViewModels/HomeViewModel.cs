@@ -21,6 +21,8 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     private ObservableRangeCollection<Track> _recommendationTracks = new();
     private ObservableRangeCollection<Track> _topTracks = new();
+    private ObservableRangeCollection<Track> _recentListens = new();
+    private ObservableRangeCollection<Artist> _topArtists = new();
     private ObservableRangeCollection<Playlist> _genrePlaylists = new();
     private ObservableRangeCollection<Playlist> _artistPlaylists = new();
     private ObservableRangeCollection<ContextMenuItem> _trackContextMenuItems = new();
@@ -82,6 +84,46 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     public bool HasTopTracks => TopTracks.Count > 0;
 
+    public ObservableRangeCollection<Track> RecentListens
+    {
+        get => _recentListens;
+        private set
+        {
+            var normalizedValue = value ?? new ObservableRangeCollection<Track>();
+            if (!EqualityComparer<ObservableRangeCollection<Track>>.Default.Equals(_recentListens, normalizedValue))
+            {
+                _recentListens = normalizedValue;
+                OnPropertyChanged(nameof(RecentListens));
+                OnPropertyChanged(nameof(HasRecentListens));
+                OnPropertyChanged(nameof(ShowRecentListensRowView));
+                OnPropertyChanged(nameof(ShowNoRecentListensMessage));
+                OnPropertyChanged(nameof(RecentListenItems));
+            }
+        }
+    }
+
+    public bool HasRecentListens => RecentListens.Count > 0;
+
+    public ObservableRangeCollection<Artist> TopArtists
+    {
+        get => _topArtists;
+        private set
+        {
+            var normalizedValue = value ?? new ObservableRangeCollection<Artist>();
+            if (!EqualityComparer<ObservableRangeCollection<Artist>>.Default.Equals(_topArtists, normalizedValue))
+            {
+                _topArtists = normalizedValue;
+                OnPropertyChanged(nameof(TopArtists));
+                OnPropertyChanged(nameof(HasTopArtists));
+                OnPropertyChanged(nameof(ShowTopArtistsRowView));
+                OnPropertyChanged(nameof(ShowNoTopArtistsMessage));
+                OnPropertyChanged(nameof(TopArtistItems));
+            }
+        }
+    }
+
+    public bool HasTopArtists => TopArtists.Count > 0;
+
     public ObservableRangeCollection<Playlist> GenrePlaylists
     {
         get => _genrePlaylists;
@@ -132,6 +174,14 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     public bool ShowNoTopTracksMessage => !IsLoadingHome && !HasTopTracks;
 
+    public bool ShowRecentListensRowView => IsLoadingHome || HasRecentListens;
+
+    public bool ShowNoRecentListensMessage => !IsLoadingHome && !HasRecentListens;
+
+    public bool ShowTopArtistsRowView => IsLoadingHome || HasTopArtists;
+
+    public bool ShowNoTopArtistsMessage => !IsLoadingHome && !HasTopArtists;
+
     public bool ShowNoGenrePlaylistsMessage => !IsLoadingHome && !HasGenrePlaylists;
 
     public bool ShowArtistPlaylistsRowView => IsLoadingHome || HasArtistPlaylists;
@@ -141,6 +191,10 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
     public IEnumerable<object> RecommendationTrackItems => IsLoadingHome ? _slideSkeletons : _recommendationTracks;
 
     public IEnumerable<object> TopTrackItems => IsLoadingHome ? _rowSkeletons : _topTracks;
+
+    public IEnumerable<object> RecentListenItems => IsLoadingHome ? _rowSkeletons : _recentListens;
+
+    public IEnumerable<object> TopArtistItems => IsLoadingHome ? _rowSkeletons : _topArtists;
 
     public IEnumerable<object> GenrePlaylistItems => IsLoadingHome ? _listSkeletons : _genrePlaylists;
 
@@ -159,6 +213,12 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 OnPropertyChanged(nameof(ShowTopTracksRowView));
                 OnPropertyChanged(nameof(ShowNoTopTracksMessage));
                 OnPropertyChanged(nameof(TopTrackItems));
+                OnPropertyChanged(nameof(ShowRecentListensRowView));
+                OnPropertyChanged(nameof(ShowNoRecentListensMessage));
+                OnPropertyChanged(nameof(RecentListenItems));
+                OnPropertyChanged(nameof(ShowTopArtistsRowView));
+                OnPropertyChanged(nameof(ShowNoTopArtistsMessage));
+                OnPropertyChanged(nameof(TopArtistItems));
                 OnPropertyChanged(nameof(ShowGenrePlaylistsListView));
                 OnPropertyChanged(nameof(ShowNoGenrePlaylistsMessage));
                 OnPropertyChanged(nameof(GenrePlaylistItems));
@@ -280,6 +340,8 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
             await LoadRecommendationTracksAsync(lbFolders);
             await LoadTopTracksAsync(lbFolders);
+            await LoadRecentListensAsync();
+            await LoadTopArtistsAsync(lbFolders);
             await LoadGenrePlaylistsAsync(lbFolders);
             await LoadArtistPlaylistsAsync(lbFolders);
         }
@@ -288,6 +350,8 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             _logger.LogWarning(ex, "Failed to load home sections");
             RecommendationTracks = new ObservableRangeCollection<Track>();
             TopTracks = new ObservableRangeCollection<Track>();
+            RecentListens = new ObservableRangeCollection<Track>();
+            TopArtists = new ObservableRangeCollection<Artist>();
             GenrePlaylists = new ObservableRangeCollection<Playlist>();
             ArtistPlaylists = new ObservableRangeCollection<Playlist>();
         }
@@ -348,6 +412,74 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
         _logger.LogInformation(
             "Home top tracks loaded: topTracks={TopTracks}",
             topTracks.Count);
+    }
+
+    private async Task LoadRecentListensAsync()
+    {
+        var currentUser = await _musicAssistant.GetCurrentUserAsync();
+        var recentItems = await _musicAssistant.GetRecentlyPlayedItemsAsync(
+            limit: 50,
+            mediaTypes: new[] { MediaType.Track },
+            userId: currentUser?.UserId);
+
+        var recentTrackRefs = recentItems
+            .OfType<Track>()
+            .Where(track => !string.IsNullOrWhiteSpace(track.ItemId) && !string.IsNullOrWhiteSpace(track.Provider))
+            .ToList();
+
+        var fullTrackTasks = recentTrackRefs.Select(async trackRef =>
+        {
+            try
+            {
+                var fullTrack = await _musicAssistant.GetTrackAsync(trackRef.ItemId, trackRef.Provider);
+                return fullTrack ?? trackRef;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load full recent track details for track: {TrackId}", trackRef.ItemId);
+                return trackRef;
+            }
+        });
+
+        var recentTracks = (await Task.WhenAll(fullTrackTasks))
+            .Where(track => track != null)
+            .Select(track =>
+            {
+                track!.DisplayName = track.Name;
+                return track;
+            })
+            .ToList();
+
+        await _musicAssistant.EnrichWithProviderInfoAsync(recentTracks);
+
+        RecentListens = new ObservableRangeCollection<Track>(recentTracks);
+
+        _logger.LogInformation(
+            "Home recent listens loaded: recentTracks={RecentTracks}, userId={UserId}",
+            recentTracks.Count,
+            currentUser?.UserId ?? string.Empty);
+    }
+
+    private async Task LoadTopArtistsAsync(IEnumerable<RecommendationFolder> lbFolders)
+    {
+        var topArtists = FindRecommendationFolderById(lbFolders, "top_artists")?.Items?
+            .OfType<Artist>()
+            .Where(artist => !string.IsNullOrWhiteSpace(artist.ItemId) && !string.IsNullOrWhiteSpace(artist.Provider))
+            .Select(artist =>
+            {
+                artist.DisplayName = artist.Name;
+                return artist;
+            })
+            .ToList()
+            ?? new List<Artist>();
+
+        await _musicAssistant.EnrichWithProviderInfoAsync(topArtists);
+
+        TopArtists = new ObservableRangeCollection<Artist>(topArtists);
+
+        _logger.LogInformation(
+            "Home top artists loaded: topArtists={TopArtists}",
+            topArtists.Count);
     }
 
     private async Task LoadGenrePlaylistsAsync(IEnumerable<RecommendationFolder> lbFolders)
@@ -526,6 +658,8 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
         _recommendationTracks.Clear();
         _topTracks.Clear();
+        _recentListens.Clear();
+        _topArtists.Clear();
         _genrePlaylists.Clear();
         _artistPlaylists.Clear();
         _trackContextMenuItems.Clear();

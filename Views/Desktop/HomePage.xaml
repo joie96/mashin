@@ -16,7 +16,7 @@
     <ScrollView x:Name="scrollView">
         <Grid
             Padding="{StaticResource PagePaddingDesktop}"
-            RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+            RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto"
             RowSpacing="0">
 
             <!--  Header  -->
@@ -203,7 +203,7 @@
                     ColumnSpacing="16">
                     <Label Grid.Column="0"
                         Style="{StaticResource LabelSectionTitle}"
-                        Text="Playlists zu deinen Kuenstlern"
+                        Text="Playlists, die du lieben wirst"
                         VerticalOptions="Center" />
                     <Border Grid.Column="1"
                         BackgroundColor="Transparent"
@@ -365,7 +365,7 @@
                     ColumnSpacing="16">
                     <Label Grid.Column="0"
                         Style="{StaticResource LabelSectionTitle}"
-                        Text="Top Tracks"
+                        Text="Deine Lieblingssongs"
                         VerticalOptions="Center" />
                     <Border Grid.Column="1"
                         BackgroundColor="Transparent"
@@ -465,6 +465,236 @@
                     IsVisible="{Binding ShowTopTracksRowView}"
                     ItemCornerRadius="8"
                     ItemsSource="{Binding TopTrackItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding RecommendationTrackTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
+            </Grid>
+
+            <!--  Top Artists Row (incl. Skeletons, Paging)  -->
+            <Grid Grid.Row="5"
+                Margin="{StaticResource SectionTopMargin}"
+                RowDefinitions="Auto,Auto,Auto"
+                RowSpacing="0">
+                <Grid Grid.Row="0"
+                    ColumnDefinitions="Auto,Auto,*,Auto"
+                    ColumnSpacing="16">
+                    <Label Grid.Column="0"
+                        Style="{StaticResource LabelSectionTitle}"
+                        Text="Deine Lieblingskünstler:innen"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Margin="-6,0,0,0"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding TopArtistItems.Count}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+
+                    <Grid Grid.Column="3"
+                        ColumnDefinitions="Auto,Auto"
+                        ColumnSpacing="8"
+                        VerticalOptions="Center">
+                        <Border Grid.Column="0"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            InputTransparent="{Binding Source={x:Reference TopArtistsRowView}, Path=CanGoPrev, Converter={StaticResource InvertedBoolConverter}}"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding Source={x:Reference TopArtistsRowView}, Path=CanGoPrev}"
+                                    TargetType="Border"
+                                    Value="False">
+                                    <Setter Property="Opacity" Value="0.35" />
+                                </DataTrigger>
+                            </Border.Triggers>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding Source={x:Reference TopArtistsRowView}, Path=PrevPageCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ChevronLeft24,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                        <Border Grid.Column="1"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            InputTransparent="{Binding Source={x:Reference TopArtistsRowView}, Path=CanGoNext, Converter={StaticResource InvertedBoolConverter}}"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding Source={x:Reference TopArtistsRowView}, Path=CanGoNext}"
+                                    TargetType="Border"
+                                    Value="False">
+                                    <Setter Property="Opacity" Value="0.35" />
+                                </DataTrigger>
+                            </Border.Triggers>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding Source={x:Reference TopArtistsRowView}, Path=NextPageCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ChevronRight24,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                    </Grid>
+                </Grid>
+
+                <Label Grid.Row="1"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding ShowNoTopArtistsMessage}"
+                    Style="{StaticResource LabelTertiary}"
+                    Text="Keine Top-Artists verfuegbar." />
+
+                <controls:RowView x:Name="TopArtistsRowView"
+                    Grid.Row="2"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding ShowTopArtistsRowView}"
+                    ItemCornerRadius="100"
+                    ItemsSource="{Binding TopArtistItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
+            </Grid>
+
+            <!--  Recent Listens Row (incl. Skeletons, Paging)  -->
+            <Grid Grid.Row="6"
+                Margin="{StaticResource SectionTopMargin}"
+                RowDefinitions="Auto,Auto,Auto"
+                RowSpacing="0">
+                <Grid Grid.Row="0"
+                    ColumnDefinitions="Auto,Auto,*,Auto"
+                    ColumnSpacing="16">
+                    <Label Grid.Column="0"
+                        Style="{StaticResource LabelSectionTitle}"
+                        Text="Kürzlich gespielt"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Margin="-6,0,0,0"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding RecentListenItems.Count}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+
+                    <Grid Grid.Column="3"
+                        ColumnDefinitions="Auto,Auto"
+                        ColumnSpacing="8"
+                        VerticalOptions="Center">
+                        <Border Grid.Column="0"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            InputTransparent="{Binding Source={x:Reference RecentListensRowView}, Path=CanGoPrev, Converter={StaticResource InvertedBoolConverter}}"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding Source={x:Reference RecentListensRowView}, Path=CanGoPrev}"
+                                    TargetType="Border"
+                                    Value="False">
+                                    <Setter Property="Opacity" Value="0.35" />
+                                </DataTrigger>
+                            </Border.Triggers>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding Source={x:Reference RecentListensRowView}, Path=PrevPageCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ChevronLeft24,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                        <Border Grid.Column="1"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            InputTransparent="{Binding Source={x:Reference RecentListensRowView}, Path=CanGoNext, Converter={StaticResource InvertedBoolConverter}}"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding Source={x:Reference RecentListensRowView}, Path=CanGoNext}"
+                                    TargetType="Border"
+                                    Value="False">
+                                    <Setter Property="Opacity" Value="0.35" />
+                                </DataTrigger>
+                            </Border.Triggers>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding Source={x:Reference RecentListensRowView}, Path=NextPageCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ChevronRight24,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                    </Grid>
+                </Grid>
+
+                <Label Grid.Row="1"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding ShowNoRecentListensMessage}"
+                    Style="{StaticResource LabelTertiary}"
+                    Text="Keine kuerzlich gehoerten Tracks verfuegbar." />
+
+                <controls:RowView x:Name="RecentListensRowView"
+                    Grid.Row="2"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding ShowRecentListensRowView}"
+                    ItemCornerRadius="8"
+                    ItemsSource="{Binding RecentListenItems}"
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding RecommendationTrackTappedCommand}"
                     SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
