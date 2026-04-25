@@ -5,6 +5,7 @@ using Microsoft.Maui.Layouts;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.Threading;
 using System.Windows.Input;
 
 
@@ -71,6 +72,7 @@ public partial class RowView : ContentView
 
     private const double MinItemWidth = 125;
     private const double ItemSpacing = 12;
+    private const int ResizeDebounceMilliseconds = 180;
 
 
     private readonly ObservableRangeCollection<object> _selectedItems = new();
@@ -92,6 +94,8 @@ public partial class RowView : ContentView
     private bool _isUnloaded;
     private bool _hasMeasuredHostWidth;
     private bool _hasPendingPagedSync;
+    private CancellationTokenSource? _resizeDebounceCts;
+    private double _pendingItemsHostWidth = double.NaN;
 
     #endregion
 
@@ -266,6 +270,14 @@ public partial class RowView : ContentView
         _hasPendingPagedSync = false;
         _hasMeasuredHostWidth = false;
         _lastItemsHostWidth = double.NaN;
+        _pendingItemsHostWidth = double.NaN;
+
+        if (_resizeDebounceCts != null)
+        {
+            _resizeDebounceCts.Cancel();
+            _resizeDebounceCts.Dispose();
+            _resizeDebounceCts = null;
+        }
 
         // Cleanup
         if (_keyboardService != null)
@@ -433,8 +445,62 @@ public partial class RowView : ContentView
             return;
         }
 
-        // Get current itemost host width
+        // Get current item host width
         var width = element.Width;
+        if (double.IsNaN(width) || double.IsInfinity(width) || width <= 0)
+        {
+            return;
+        }
+
+        // First valid measure should apply immediately so initial layout is correct.
+        if (!_hasMeasuredHostWidth)
+        {
+            ApplyItemsHostWidth(width);
+            return;
+        }
+
+        _pendingItemsHostWidth = width;
+        DebounceItemsHostWidthApply();
+    }
+
+    private void DebounceItemsHostWidthApply()
+    {
+        _resizeDebounceCts?.Cancel();
+        _resizeDebounceCts?.Dispose();
+
+        _resizeDebounceCts = new CancellationTokenSource();
+        var token = _resizeDebounceCts.Token;
+
+        _ = ApplyItemsHostWidthAfterDelayAsync(token);
+    }
+
+    private async Task ApplyItemsHostWidthAfterDelayAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(ResizeDebounceMilliseconds, token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+
+        if (token.IsCancellationRequested || _isUnloaded || Handler == null)
+        {
+            return;
+        }
+
+        if (!MainThread.IsMainThread)
+        {
+            MainThread.BeginInvokeOnMainThread(() => ApplyItemsHostWidth(_pendingItemsHostWidth));
+            return;
+        }
+
+        ApplyItemsHostWidth(_pendingItemsHostWidth);
+    }
+
+    private void ApplyItemsHostWidth(double width)
+    {
         if (double.IsNaN(width) || double.IsInfinity(width) || width <= 0)
         {
             return;
