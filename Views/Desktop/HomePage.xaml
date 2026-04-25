@@ -813,7 +813,7 @@
             </Grid>
 
             <!--  Similar Artists Section 2  -->
-            <!-- <Grid Grid.Row="8"
+            <Grid Grid.Row="8"
                 Margin="{StaticResource SectionTopMargin}"
                 IsVisible="{Binding ShowSimilarArtistSectionContainer1}"
                 RowDefinitions="Auto,Auto,Auto"
@@ -922,10 +922,10 @@
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
                     SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
-            </Grid> -->
+            </Grid>
 
             <!--  Similar Artists Section 3  -->
-            <!-- <Grid Grid.Row="9"
+            <Grid Grid.Row="9"
                 Margin="{StaticResource SectionTopMargin}"
                 IsVisible="{Binding ShowSimilarArtistSectionContainer2}"
                 RowDefinitions="Auto,Auto,Auto"
@@ -1034,10 +1034,10 @@
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
                     SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
-            </Grid> -->
+            </Grid>
 
             <!--  Similar Artists Section 4  -->
-            <!-- <Grid Grid.Row="10"
+            <Grid Grid.Row="10"
                 Margin="{StaticResource SectionTopMargin}"
                 IsVisible="{Binding ShowSimilarArtistSectionContainer3}"
                 RowDefinitions="Auto,Auto,Auto"
@@ -1146,10 +1146,10 @@
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
                     SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
-            </Grid> -->
+            </Grid>
 
             <!--  Similar Artists Section 5  -->
-            <!-- <Grid Grid.Row="11"
+            <Grid Grid.Row="11"
                 Margin="{StaticResource SectionTopMargin}"
                 IsVisible="{Binding ShowSimilarArtistSectionContainer4}"
                 RowDefinitions="Auto,Auto,Auto"
@@ -1258,7 +1258,7 @@
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
                     SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
-            </Grid> -->
+            </Grid>
         </Grid>
     </ScrollView>
 </ContentPage>

@@ -262,6 +262,27 @@ public partial class RowView : ContentView
 
         AttachPlaybackStateSource();
 
+        _ = BootstrapInitialLayoutAsync();
+
+    }
+
+    private async Task BootstrapInitialLayoutAsync()
+    {
+        // Wait one UI turn so host width is available, then perform one initial sync.
+        await Task.Yield();
+
+        if (_isUnloaded || Handler == null || _hasMeasuredHostWidth || !IsVisible)
+        {
+            return;
+        }
+
+        var width = ItemsHost?.Width ?? Width;
+        if (double.IsNaN(width) || double.IsInfinity(width) || width <= 0)
+        {
+            return;
+        }
+
+        ApplyItemsHostWidth(width);
     }
 
     private void OnRowViewUnloaded(object? sender, EventArgs e)
@@ -445,9 +466,32 @@ public partial class RowView : ContentView
             return;
         }
 
+        if (_isUnloaded || Handler == null)
+        {
+            return;
+        }
+
         // Get current item host width
         var width = element.Width;
         if (double.IsNaN(width) || double.IsInfinity(width) || width <= 0)
+        {
+            return;
+        }
+
+        // Hidden rows must not trigger relayout work.
+        if (!IsVisible)
+        {
+            _resizeDebounceCts?.Cancel();
+            return;
+        }
+
+        if (element.Height <= 0 || Height <= 0)
+        {
+            _resizeDebounceCts?.Cancel();
+            return;
+        }
+
+        if (_allItems.Count == 0 && !_hasPendingPagedSync)
         {
             return;
         }
@@ -485,7 +529,12 @@ public partial class RowView : ContentView
             return;
         }
 
-        if (token.IsCancellationRequested || _isUnloaded || Handler == null)
+        if (token.IsCancellationRequested || _isUnloaded || Handler == null || !IsVisible)
+        {
+            return;
+        }
+
+        if (ItemsHost.Height <= 0 || Height <= 0)
         {
             return;
         }
