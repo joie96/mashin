@@ -352,7 +352,9 @@
                     ItemsSource="{Binding ArtistPlaylistItems}"
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding PlaylistTappedCommand}"
-                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowPlaylistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowPlaylistContextMenuAtPositionCommand}" />
             </Grid>
 
             <!--  Top Tracks Row (incl. Skeletons, Paging)  -->
@@ -467,7 +469,9 @@
                     ItemsSource="{Binding TopTrackItems}"
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding RecommendationTrackTappedCommand}"
-                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowTrackContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowTrackContextMenuAtPositionCommand}" />
             </Grid>
 
             <!--  Top Artists Row (incl. Skeletons, Paging)  -->
@@ -582,7 +586,9 @@
                     ItemsSource="{Binding TopArtistItems}"
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
             </Grid>
 
             <!--  Recent Listens Row (incl. Skeletons, Paging)  -->
@@ -697,7 +703,9 @@
                     ItemsSource="{Binding RecentListenItems}"
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding RecommendationTrackTappedCommand}"
-                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowTrackContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowTrackContextMenuAtPositionCommand}" />
             </Grid>
 
             <!--  Similar Artists Section 1  -->
@@ -809,7 +817,9 @@
                     ItemsSource="{Binding SimilarArtistSectionItems0}"
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
             </Grid>
 
             <!--  Similar Artists Section 2  -->
@@ -921,7 +931,9 @@
                     ItemsSource="{Binding SimilarArtistSectionItems1}"
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
             </Grid>
 
             <!--  Similar Artists Section 3  -->
@@ -1033,7 +1045,9 @@
                     ItemsSource="{Binding SimilarArtistSectionItems2}"
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
             </Grid>
 
             <!--  Similar Artists Section 4  -->
@@ -1145,7 +1159,9 @@
                     ItemsSource="{Binding SimilarArtistSectionItems3}"
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
             </Grid>
 
             <!--  Similar Artists Section 5  -->
@@ -1257,7 +1273,9 @@
                     ItemsSource="{Binding SimilarArtistSectionItems4}"
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
-                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}" />
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
             </Grid>
         </Grid>
     </ScrollView>

@@ -2,6 +2,8 @@ using mashin.Collections;
 using mashin.Models;
 using mashin.Services;
 using mashin.Views.Desktop;
+using MauiIcons.Fluent;
+using MauiIcons.Fluent.Filled;
 using Microsoft.Extensions.Logging;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
@@ -27,6 +29,8 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
     private ObservableRangeCollection<Playlist> _genrePlaylists = new();
     private ObservableRangeCollection<Playlist> _artistPlaylists = new();
     private ObservableRangeCollection<ContextMenuItem> _trackContextMenuItems = new();
+    private ObservableRangeCollection<ContextMenuItem> _playlistContextMenuItems = new();
+    private ObservableRangeCollection<ContextMenuItem> _artistContextMenuItems = new();
 
     private readonly IReadOnlyList<SlideViewSkeleton> _slideSkeletons = Enumerable.Range(0, 10)
         .Select(_ => new SlideViewSkeleton())
@@ -404,6 +408,14 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     public ICommand ShowTrackContextMenuAtPositionCommand { get; }
 
+    public ICommand ShowPlaylistContextMenuAtAnchorCommand { get; }
+
+    public ICommand ShowPlaylistContextMenuAtPositionCommand { get; }
+
+    public ICommand ShowArtistContextMenuAtAnchorCommand { get; }
+
+    public ICommand ShowArtistContextMenuAtPositionCommand { get; }
+
     public ICommand PlayArtistPlaylistsCommand { get; }
 
     public ICommand ShuffleArtistPlaylistsCommand { get; }
@@ -460,6 +472,42 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 await _contextMenuService.ShowContextMenuAsync(_trackContextMenuItems, position);
             }
         });
+
+        ShowPlaylistContextMenuAtAnchorCommand = new Command<View>(async anchor =>
+        {
+            if (_playlistContextMenuItems.Count > 0 && anchor != null)
+            {
+                await _contextMenuService.ShowContextMenuAsync(_playlistContextMenuItems, anchor);
+            }
+        });
+
+        ShowPlaylistContextMenuAtPositionCommand = new Command<Point>(async position =>
+        {
+            if (_playlistContextMenuItems.Count > 0)
+            {
+                await _contextMenuService.ShowContextMenuAsync(_playlistContextMenuItems, position);
+            }
+        });
+
+        ShowArtistContextMenuAtAnchorCommand = new Command<View>(async anchor =>
+        {
+            if (_artistContextMenuItems.Count > 0 && anchor != null)
+            {
+                await _contextMenuService.ShowContextMenuAsync(_artistContextMenuItems, anchor);
+            }
+        });
+
+        ShowArtistContextMenuAtPositionCommand = new Command<Point>(async position =>
+        {
+            if (_artistContextMenuItems.Count > 0)
+            {
+                await _contextMenuService.ShowContextMenuAsync(_artistContextMenuItems, position);
+            }
+        });
+
+        _ = BuildTrackContextMenuAsync();
+        _ = BuildPlaylistContextMenuAsync();
+        _ = BuildArtistContextMenuAsync();
 
         PlayArtistPlaylistsCommand = new Command(async () => await PlayArtistPlaylistsAsync());
 
@@ -571,7 +619,6 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             }
 
             RecommendationTracks = new ObservableRangeCollection<Track>(recommendationTracks);
-            _ = BuildTrackContextMenuAsync();
 
             _logger.LogInformation(
                 "Home recommendation folder loaded: recommendationTracks={RecommendationTracks}",
@@ -861,32 +908,128 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             new()
             {
                 Text = "Abspielen",
-                Command = new Command(async () => await PlaySelectedRecommendationTracksAsync())
+                Icon = FluentIcons.Play12,
+                Command = new Command(async () => await PlaySelectedTracksWithModesAsync())
             },
             new()
             {
-                Text = "Als Naechstes spielen",
+                Text = "Als Nächstes spielen",
+                Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
-                    await _mediaActions.PlayMediaNextAsync(GetSelectedRecommendationTracks()))
+                    await _mediaActions.PlayMediaNextAsync(GetSelectedTracks()))
             },
             new()
             {
                 Text = "Als Letztes spielen",
+                Icon = FluentIcons.ArrowNext12,
                 Command = new Command(async () =>
-                    await _mediaActions.PlayMediaLastAsync(GetSelectedRecommendationTracks()))
+                    await _mediaActions.PlayMediaLastAsync(GetSelectedTracks()))
             },
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Favoriten hinzufuegen",
+                Text = "Zu Favoriten hinzufügen",
+                Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
-                    await _mediaActions.AddToFavoritesAsync(GetSelectedRecommendationTracks()))
+                    await _mediaActions.AddToFavoritesAsync(GetSelectedTracks()))
             },
             new()
             {
                 Text = "Aus Favoriten entfernen",
+                Icon = FluentFilledIcons.Heart12Filled,
+                IconIsFilled = true,
                 Command = new Command(async () =>
-                    await _mediaActions.RemoveFromFavoritesAsync(GetSelectedRecommendationTracks()))
+                    await _mediaActions.RemoveFromFavoritesAsync(GetSelectedTracks()))
+            }
+        };
+
+        return Task.CompletedTask;
+    }
+
+    private Task BuildPlaylistContextMenuAsync()
+    {
+        _playlistContextMenuItems = new ObservableRangeCollection<ContextMenuItem>
+        {
+            new()
+            {
+                Text = "Abspielen",
+                Icon = FluentIcons.Play12,
+                Command = new Command(async () => await _mediaActions.PlayMediaAsync(GetSelectedPlaylists()))
+            },
+            new()
+            {
+                Text = "Als Nächstes spielen",
+                Icon = FluentIcons.ArrowForward16,
+                Command = new Command(async () =>
+                    await _mediaActions.PlayMediaNextAsync(GetSelectedPlaylists()))
+            },
+            new()
+            {
+                Text = "Als Letztes spielen",
+                Icon = FluentIcons.ArrowNext12,
+                Command = new Command(async () =>
+                    await _mediaActions.PlayMediaLastAsync(GetSelectedPlaylists()))
+            },
+            new() { IsSeparator = true },
+            new()
+            {
+                Text = "Zu Favoriten hinzufügen",
+                Icon = FluentIcons.Heart12,
+                Command = new Command(async () =>
+                    await _mediaActions.AddToFavoritesAsync(GetSelectedPlaylists()))
+            },
+            new()
+            {
+                Text = "Aus Favoriten entfernen",
+                Icon = FluentFilledIcons.Heart12Filled,
+                IconIsFilled = true,
+                Command = new Command(async () =>
+                    await _mediaActions.RemoveFromFavoritesAsync(GetSelectedPlaylists()))
+            }
+        };
+
+        return Task.CompletedTask;
+    }
+
+    private Task BuildArtistContextMenuAsync()
+    {
+        _artistContextMenuItems = new ObservableRangeCollection<ContextMenuItem>
+        {
+            new()
+            {
+                Text = "Abspielen",
+                Icon = FluentIcons.Play12,
+                Command = new Command(async () => await _mediaActions.PlayMediaAsync(GetSelectedArtists()))
+            },
+            new()
+            {
+                Text = "Als Nächstes spielen",
+                Icon = FluentIcons.ArrowForward16,
+                Command = new Command(async () =>
+                    await _mediaActions.PlayMediaNextAsync(GetSelectedArtists()))
+            },
+            new()
+            {
+                Text = "Als Letztes spielen",
+                Icon = FluentIcons.ArrowNext12,
+                Command = new Command(async () =>
+                    await _mediaActions.PlayMediaLastAsync(GetSelectedArtists()))
+            },
+            new() { IsSeparator = true },
+            new()
+            {
+                Text = "Zu Favoriten hinzufügen",
+                Icon = FluentIcons.Heart12,
+                Command = new Command(async () =>
+                    await _mediaActions.AddToFavoritesAsync(GetSelectedArtists()))
+            },
+            new()
+            {
+                Text = "Aus Favoriten entfernen",
+                Icon = FluentFilledIcons.Heart12Filled,
+                IconIsFilled = true,
+                Command = new Command(async () =>
+                    await _mediaActions.RemoveFromFavoritesAsync(GetSelectedArtists()))
             }
         };
 
@@ -1021,14 +1164,34 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
     }
 
 
-    private IEnumerable<Track> GetSelectedRecommendationTracks()
+    private IEnumerable<Track> GetSelectedTracks()
     {
-        return RecommendationTracks.Where(track => track.IsSelected).ToList();
+        return RecommendationTracks
+            .Concat(TopTracks)
+            .Concat(RecentListens)
+            .Where(track => track.IsSelected)
+            .ToList();
     }
 
-    private async Task PlaySelectedRecommendationTracksAsync()
+    private IEnumerable<Playlist> GetSelectedPlaylists()
     {
-        var selectedTracks = GetSelectedRecommendationTracks().ToList();
+        return GenrePlaylists
+            .Concat(ArtistPlaylists)
+            .Where(playlist => playlist.IsSelected)
+            .ToList();
+    }
+
+    private IEnumerable<Artist> GetSelectedArtists()
+    {
+        return TopArtists
+            .Concat(SimilarArtistSections.SelectMany(section => section.Artists))
+            .Where(artist => artist.IsSelected)
+            .ToList();
+    }
+
+    private async Task PlaySelectedTracksWithModesAsync()
+    {
+        var selectedTracks = GetSelectedTracks().ToList();
         if (selectedTracks.Count == 0)
         {
             return;
@@ -1086,6 +1249,8 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
         _genrePlaylists.Clear();
         _artistPlaylists.Clear();
         _trackContextMenuItems.Clear();
+        _playlistContextMenuItems.Clear();
+        _artistContextMenuItems.Clear();
 
         PropertyChanged = null;
     }
