@@ -70,7 +70,8 @@ public partial class RowView : ContentView
 
     #region Fields
 
-    private const double MinItemWidth = 125;
+    private const double MinItemWidth = 150;
+    private const double MaxItemWidth = 175;
     private const double ItemSpacing = 12;
     private const int ResizeDebounceMilliseconds = 180;
 
@@ -569,7 +570,8 @@ public partial class RowView : ContentView
 
         // Calculate items per page and item width based on new item hostwidth
         var perPage = Math.Max(1, (int)Math.Floor(width / (MinItemWidth + ItemSpacing)));
-        var newItemWidth = Math.Max(MinItemWidth, Math.Floor((width / perPage) - ItemSpacing));
+        var calculatedItemWidth = Math.Floor((width / perPage) - ItemSpacing);
+        var newItemWidth = Math.Clamp(calculatedItemWidth, MinItemWidth, MaxItemWidth);
         var itemsPerPageChanged = perPage != _itemsPerPage;
         var itemWidthChanged = Math.Abs(newItemWidth - ItemWidth) > 0.1;
 
