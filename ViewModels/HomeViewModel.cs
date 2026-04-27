@@ -39,6 +39,13 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
         .ToList();
 
     private bool _isLoadingHome;
+    private bool _isLoadingRecommendationTracks;
+    private bool _isLoadingTopTracks;
+    private bool _isLoadingRecentListens;
+    private bool _isLoadingTopArtists;
+    private bool _isLoadingSimilarArtistSections;
+    private bool _isLoadingGenrePlaylists;
+    private bool _isLoadingArtistPlaylists;
     private bool _disposed;
 
     #endregion
@@ -180,23 +187,23 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     public bool HasArtistPlaylists => ArtistPlaylists.Count > 0;
 
-    public bool ShowRecommendationFolderSlideView => IsLoadingHome || HasRecommendationFolderTracks;
+    public bool ShowRecommendationFolderSlideView => IsLoadingRecommendationTracks || HasRecommendationFolderTracks;
 
-    public bool ShowGenrePlaylistsListView => IsLoadingHome || HasGenrePlaylists;
+    public bool ShowGenrePlaylistsListView => IsLoadingGenrePlaylists || HasGenrePlaylists;
 
-    public bool ShowNoRecommendationFolderMessage => !IsLoadingHome && !HasRecommendationFolderTracks;
+    public bool ShowNoRecommendationFolderMessage => !IsLoadingRecommendationTracks && !HasRecommendationFolderTracks;
 
-    public bool ShowTopTracksRowView => IsLoadingHome || HasTopTracks;
+    public bool ShowTopTracksRowView => IsLoadingTopTracks || HasTopTracks;
 
-    public bool ShowNoTopTracksMessage => !IsLoadingHome && !HasTopTracks;
+    public bool ShowNoTopTracksMessage => !IsLoadingTopTracks && !HasTopTracks;
 
-    public bool ShowRecentListensRowView => IsLoadingHome || HasRecentListens;
+    public bool ShowRecentListensRowView => IsLoadingRecentListens || HasRecentListens;
 
-    public bool ShowNoRecentListensMessage => !IsLoadingHome && !HasRecentListens;
+    public bool ShowNoRecentListensMessage => !IsLoadingRecentListens && !HasRecentListens;
 
-    public bool ShowTopArtistsRowView => IsLoadingHome || HasTopArtists;
+    public bool ShowTopArtistsRowView => IsLoadingTopArtists || HasTopArtists;
 
-    public bool ShowNoTopArtistsMessage => !IsLoadingHome && !HasTopArtists;
+    public bool ShowNoTopArtistsMessage => !IsLoadingTopArtists && !HasTopArtists;
 
     public bool ShowSimilarArtistSectionContainer0 => GetShowSimilarArtistSectionContainer(0);
 
@@ -228,19 +235,19 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     public bool ShowNoSimilarArtistSectionMessage4 => GetShowNoSimilarArtistSectionMessage(4);
 
-    public bool ShowNoGenrePlaylistsMessage => !IsLoadingHome && !HasGenrePlaylists;
+    public bool ShowNoGenrePlaylistsMessage => !IsLoadingGenrePlaylists && !HasGenrePlaylists;
 
-    public bool ShowArtistPlaylistsRowView => IsLoadingHome || HasArtistPlaylists;
+    public bool ShowArtistPlaylistsRowView => IsLoadingArtistPlaylists || HasArtistPlaylists;
 
-    public bool ShowNoArtistPlaylistsMessage => !IsLoadingHome && !HasArtistPlaylists;
+    public bool ShowNoArtistPlaylistsMessage => !IsLoadingArtistPlaylists && !HasArtistPlaylists;
 
-    public IEnumerable<object> RecommendationTrackItems => IsLoadingHome ? _slideSkeletons : _recommendationTracks;
+    public IEnumerable<object> RecommendationTrackItems => IsLoadingRecommendationTracks ? _slideSkeletons : _recommendationTracks;
 
-    public IEnumerable<object> TopTrackItems => IsLoadingHome ? _rowSkeletons : _topTracks;
+    public IEnumerable<object> TopTrackItems => IsLoadingTopTracks ? _rowSkeletons : _topTracks;
 
-    public IEnumerable<object> RecentListenItems => IsLoadingHome ? _rowSkeletons : _recentListens;
+    public IEnumerable<object> RecentListenItems => IsLoadingRecentListens ? _rowSkeletons : _recentListens;
 
-    public IEnumerable<object> TopArtistItems => IsLoadingHome ? _rowSkeletons : _topArtists;
+    public IEnumerable<object> TopArtistItems => IsLoadingTopArtists ? _rowSkeletons : _topArtists;
 
     public string SimilarArtistSectionTitle0 => GetSimilarArtistSectionTitle(0);
 
@@ -272,9 +279,9 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     public IEnumerable<object> SimilarArtistSectionItems4 => GetSimilarArtistSectionItems(4);
 
-    public IEnumerable<object> GenrePlaylistItems => IsLoadingHome ? _listSkeletons : _genrePlaylists;
+    public IEnumerable<object> GenrePlaylistItems => IsLoadingGenrePlaylists ? _listSkeletons : _genrePlaylists;
 
-    public IEnumerable<object> ArtistPlaylistItems => IsLoadingHome ? _rowSkeletons : _artistPlaylists;
+    public IEnumerable<object> ArtistPlaylistItems => IsLoadingArtistPlaylists ? _rowSkeletons : _artistPlaylists;
 
     public bool IsLoadingHome
     {
@@ -283,22 +290,99 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
         {
             if (SetProperty(ref _isLoadingHome, value))
             {
+            }
+        }
+    }
+
+    public bool IsLoadingRecommendationTracks
+    {
+        get => _isLoadingRecommendationTracks;
+        private set
+        {
+            if (SetProperty(ref _isLoadingRecommendationTracks, value))
+            {
                 OnPropertyChanged(nameof(ShowRecommendationFolderSlideView));
                 OnPropertyChanged(nameof(ShowNoRecommendationFolderMessage));
                 OnPropertyChanged(nameof(RecommendationTrackItems));
+            }
+        }
+    }
+
+    public bool IsLoadingTopTracks
+    {
+        get => _isLoadingTopTracks;
+        private set
+        {
+            if (SetProperty(ref _isLoadingTopTracks, value))
+            {
                 OnPropertyChanged(nameof(ShowTopTracksRowView));
                 OnPropertyChanged(nameof(ShowNoTopTracksMessage));
                 OnPropertyChanged(nameof(TopTrackItems));
+            }
+        }
+    }
+
+    public bool IsLoadingRecentListens
+    {
+        get => _isLoadingRecentListens;
+        private set
+        {
+            if (SetProperty(ref _isLoadingRecentListens, value))
+            {
                 OnPropertyChanged(nameof(ShowRecentListensRowView));
                 OnPropertyChanged(nameof(ShowNoRecentListensMessage));
                 OnPropertyChanged(nameof(RecentListenItems));
+            }
+        }
+    }
+
+    public bool IsLoadingTopArtists
+    {
+        get => _isLoadingTopArtists;
+        private set
+        {
+            if (SetProperty(ref _isLoadingTopArtists, value))
+            {
                 OnPropertyChanged(nameof(ShowTopArtistsRowView));
                 OnPropertyChanged(nameof(ShowNoTopArtistsMessage));
                 OnPropertyChanged(nameof(TopArtistItems));
+            }
+        }
+    }
+
+    public bool IsLoadingSimilarArtistSections
+    {
+        get => _isLoadingSimilarArtistSections;
+        private set
+        {
+            if (SetProperty(ref _isLoadingSimilarArtistSections, value))
+            {
                 NotifySimilarArtistSectionPropertiesChanged();
+            }
+        }
+    }
+
+    public bool IsLoadingGenrePlaylists
+    {
+        get => _isLoadingGenrePlaylists;
+        private set
+        {
+            if (SetProperty(ref _isLoadingGenrePlaylists, value))
+            {
                 OnPropertyChanged(nameof(ShowGenrePlaylistsListView));
                 OnPropertyChanged(nameof(ShowNoGenrePlaylistsMessage));
                 OnPropertyChanged(nameof(GenrePlaylistItems));
+            }
+        }
+    }
+
+    public bool IsLoadingArtistPlaylists
+    {
+        get => _isLoadingArtistPlaylists;
+        private set
+        {
+            if (SetProperty(ref _isLoadingArtistPlaylists, value))
+            {
                 OnPropertyChanged(nameof(ShowArtistPlaylistsRowView));
                 OnPropertyChanged(nameof(ShowNoArtistPlaylistsMessage));
                 OnPropertyChanged(nameof(ArtistPlaylistItems));
@@ -406,6 +490,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
     private async Task LoadHomeAsync()
     {
         IsLoadingHome = true;
+        SetSectionLoadingState(true);
 
         try
         {
@@ -415,13 +500,25 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 .Where(IsListenBrainzFolder)
                 .ToList();
 
-            await LoadRecommendationTracksAsync(lbFolders);
-            await LoadTopTracksAsync(lbFolders);
-            await LoadRecentListensAsync();
-            await LoadTopArtistsAsync(lbFolders);
-            await LoadSimilarArtistsSectionsAsync(lbFolders);
-            await LoadGenrePlaylistsAsync(lbFolders);
-            await LoadArtistPlaylistsAsync(lbFolders);
+            var recommendationTask = LoadRecommendationTracksAsync(lbFolders);
+            var topTracksTask = LoadTopTracksAsync(lbFolders);
+            var recentListensTask = LoadRecentListensAsync();
+            var topArtistsTask = LoadTopArtistsAsync(lbFolders);
+            var similarArtistSectionsTask = LoadSimilarArtistsSectionsAsync(lbFolders);
+            var genrePlaylistsTask = LoadGenrePlaylistsAsync(lbFolders);
+            var artistPlaylistsTask = LoadArtistPlaylistsAsync(lbFolders);
+
+            // Show the upper page content as soon as the first section is available.
+            await recommendationTask;
+            IsLoadingHome = false;
+
+            await Task.WhenAll(
+                topTracksTask,
+                recentListensTask,
+                topArtistsTask,
+                similarArtistSectionsTask,
+                genrePlaylistsTask,
+                artistPlaylistsTask);
         }
         catch (Exception ex)
         {
@@ -433,147 +530,164 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             SimilarArtistSections = new ObservableRangeCollection<SimilarArtistSection>();
             GenrePlaylists = new ObservableRangeCollection<Playlist>();
             ArtistPlaylists = new ObservableRangeCollection<Playlist>();
+            SetSectionLoadingState(false);
+            IsLoadingHome = false;
         }
         finally
         {
-            IsLoadingHome = false;
+            SetSectionLoadingState(false);
+            if (IsLoadingHome)
+            {
+                IsLoadingHome = false;
+            }
         }
     }
 
     private async Task LoadRecommendationTracksAsync(IEnumerable<RecommendationFolder> lbFolders)
     {
+        IsLoadingRecommendationTracks = true;
 
-        var recommendationTracks = FindRecommendationFolderById(lbFolders, "recommendations")?.Items?
-            .OfType<Track>()
-            .Where(track => !string.IsNullOrWhiteSpace(track.ItemId) && !string.IsNullOrWhiteSpace(track.Provider))
-            .Select(track =>
-            {
-                track.DisplayName = track.Name;
-                return track;
-            })
-            .ToList()
-            ?? new List<Track>();
-
-        await _musicAssistant.EnrichWithProviderInfoAsync(recommendationTracks);
-
-        // Shuffle recommendations on each load so the slide order varies.
-        for (var i = recommendationTracks.Count - 1; i > 0; i--)
+        try
         {
-            var swapIndex = Random.Shared.Next(i + 1);
-            (recommendationTracks[i], recommendationTracks[swapIndex]) = (recommendationTracks[swapIndex], recommendationTracks[i]);
+
+            var recommendationTracks = FindRecommendationFolderById(lbFolders, "recommendations")?.Items?
+                .OfType<Track>()
+                .Where(track => !string.IsNullOrWhiteSpace(track.ItemId) && !string.IsNullOrWhiteSpace(track.Provider))
+                .Select(track =>
+                {
+                    track.DisplayName = track.Name;
+                    return track;
+                })
+                .ToList()
+                ?? new List<Track>();
+
+            await _musicAssistant.EnrichWithProviderInfoAsync(recommendationTracks);
+
+            // Shuffle recommendations on each load so the slide order varies.
+            for (var i = recommendationTracks.Count - 1; i > 0; i--)
+            {
+                var swapIndex = Random.Shared.Next(i + 1);
+                (recommendationTracks[i], recommendationTracks[swapIndex]) = (recommendationTracks[swapIndex], recommendationTracks[i]);
+            }
+
+            RecommendationTracks = new ObservableRangeCollection<Track>(recommendationTracks);
+            _ = BuildTrackContextMenuAsync();
+
+            _logger.LogInformation(
+                "Home recommendation folder loaded: recommendationTracks={RecommendationTracks}",
+                recommendationTracks.Count);
         }
-
-        RecommendationTracks = new ObservableRangeCollection<Track>(recommendationTracks);
-        _ = BuildTrackContextMenuAsync();
-
-        _logger.LogInformation(
-            "Home recommendation folder loaded: recommendationTracks={RecommendationTracks}",
-            recommendationTracks.Count);
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load home recommendation folder");
+            RecommendationTracks = new ObservableRangeCollection<Track>();
+        }
+        finally
+        {
+            IsLoadingRecommendationTracks = false;
+        }
     }
 
     private async Task LoadTopTracksAsync(IEnumerable<RecommendationFolder> lbFolders)
     {
-        var topTracks = FindRecommendationFolderById(lbFolders, "top_tracks")?.Items?
-            .OfType<Track>()
-            .Where(track => !string.IsNullOrWhiteSpace(track.ItemId) && !string.IsNullOrWhiteSpace(track.Provider))
-            .Select(track =>
-            {
-                track.DisplayName = track.Name;
-                return track;
-            })
-            .ToList()
-            ?? new List<Track>();
+        IsLoadingTopTracks = true;
+        try
+        {
+            var topTracks = FindRecommendationFolderById(lbFolders, "top_tracks")?.Items?
+                .OfType<Track>()
+                .Where(track => !string.IsNullOrWhiteSpace(track.ItemId) && !string.IsNullOrWhiteSpace(track.Provider))
+                .Select(track =>
+                {
+                    track.DisplayName = track.Name;
+                    return track;
+                })
+                .ToList()
+                ?? new List<Track>();
 
-        await _musicAssistant.EnrichWithProviderInfoAsync(topTracks);
+            await _musicAssistant.EnrichWithProviderInfoAsync(topTracks);
 
-        TopTracks = new ObservableRangeCollection<Track>(topTracks);
+            TopTracks = new ObservableRangeCollection<Track>(topTracks);
 
-        _logger.LogInformation(
-            "Home top tracks loaded: topTracks={TopTracks}",
-            topTracks.Count);
+            _logger.LogInformation(
+                "Home top tracks loaded: topTracks={TopTracks}",
+                topTracks.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load home top tracks");
+            TopTracks = new ObservableRangeCollection<Track>();
+        }
+        finally
+        {
+            IsLoadingTopTracks = false;
+        }
     }
 
     private async Task LoadRecentListensAsync()
     {
-        var currentUser = await _musicAssistant.GetCurrentUserAsync();
-        var recentItems = await _musicAssistant.GetRecentlyPlayedItemsAsync(
-            limit: 50,
-            mediaTypes: new[] { MediaType.Track },
-            userId: currentUser?.UserId);
-
-        var recentTrackRefs = recentItems
-            .OfType<Track>()
-            .Where(track => !string.IsNullOrWhiteSpace(track.ItemId) && !string.IsNullOrWhiteSpace(track.Provider))
-            .ToList();
-
-        var fullTrackTasks = recentTrackRefs.Select(async trackRef =>
+        IsLoadingRecentListens = true;
+        try
         {
-            try
+            var currentUser = await _musicAssistant.GetCurrentUserAsync();
+            var recentItems = await _musicAssistant.GetRecentlyPlayedItemsAsync(
+                limit: 50,
+                mediaTypes: new[] { MediaType.Track },
+                userId: currentUser?.UserId);
+
+            var recentTrackRefs = recentItems
+                .OfType<Track>()
+                .Where(track => !string.IsNullOrWhiteSpace(track.ItemId) && !string.IsNullOrWhiteSpace(track.Provider))
+                .ToList();
+
+            var fullTrackTasks = recentTrackRefs.Select(async trackRef =>
             {
-                var fullTrack = await _musicAssistant.GetTrackAsync(trackRef.ItemId, trackRef.Provider);
-                return fullTrack ?? trackRef;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to load full recent track details for track: {TrackId}", trackRef.ItemId);
-                return trackRef;
-            }
-        });
+                try
+                {
+                    var fullTrack = await _musicAssistant.GetTrackAsync(trackRef.ItemId, trackRef.Provider);
+                    return fullTrack ?? trackRef;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to load full recent track details for track: {TrackId}", trackRef.ItemId);
+                    return trackRef;
+                }
+            });
 
-        var recentTracks = (await Task.WhenAll(fullTrackTasks))
-            .Where(track => track != null)
-            .Select(track =>
-            {
-                track!.DisplayName = track.Name;
-                return track;
-            })
-            .ToList();
+            var recentTracks = (await Task.WhenAll(fullTrackTasks))
+                .Where(track => track != null)
+                .Select(track =>
+                {
+                    track!.DisplayName = track.Name;
+                    return track;
+                })
+                .ToList();
 
-        await _musicAssistant.EnrichWithProviderInfoAsync(recentTracks);
+            await _musicAssistant.EnrichWithProviderInfoAsync(recentTracks);
 
-        RecentListens = new ObservableRangeCollection<Track>(recentTracks);
+            RecentListens = new ObservableRangeCollection<Track>(recentTracks);
 
-        _logger.LogInformation(
-            "Home recent listens loaded: recentTracks={RecentTracks}, userId={UserId}",
-            recentTracks.Count,
-            currentUser?.UserId ?? string.Empty);
+            _logger.LogInformation(
+                "Home recent listens loaded: recentTracks={RecentTracks}, userId={UserId}",
+                recentTracks.Count,
+                currentUser?.UserId ?? string.Empty);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load home recent listens");
+            RecentListens = new ObservableRangeCollection<Track>();
+        }
+        finally
+        {
+            IsLoadingRecentListens = false;
+        }
     }
 
     private async Task LoadTopArtistsAsync(IEnumerable<RecommendationFolder> lbFolders)
     {
-        var topArtists = FindRecommendationFolderById(lbFolders, "top_artists")?.Items?
-            .OfType<Artist>()
-            .Where(artist => !string.IsNullOrWhiteSpace(artist.ItemId) && !string.IsNullOrWhiteSpace(artist.Provider))
-            .Select(artist =>
-            {
-                artist.DisplayName = artist.Name;
-                return artist;
-            })
-            .ToList()
-            ?? new List<Artist>();
-
-        await _musicAssistant.EnrichWithProviderInfoAsync(topArtists);
-
-        TopArtists = new ObservableRangeCollection<Artist>(topArtists);
-
-        _logger.LogInformation(
-            "Home top artists loaded: topArtists={TopArtists}",
-            topArtists.Count);
-    }
-
-    private async Task LoadSimilarArtistsSectionsAsync(IEnumerable<RecommendationFolder> lbFolders)
-    {
-        var similarArtistSections = new List<SimilarArtistSection>();
-
-        var similarArtistFolders = lbFolders
-            .Where(folder =>
-                !string.IsNullOrWhiteSpace(folder.ItemId)
-                && folder.ItemId.StartsWith("similar_artists_", StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        foreach (var folder in similarArtistFolders)
+        IsLoadingTopArtists = true;
+        try
         {
-            var artists = folder.Items?
+            var topArtists = FindRecommendationFolderById(lbFolders, "top_artists")?.Items?
                 .OfType<Artist>()
                 .Where(artist => !string.IsNullOrWhiteSpace(artist.ItemId) && !string.IsNullOrWhiteSpace(artist.Provider))
                 .Select(artist =>
@@ -584,75 +698,156 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 .ToList()
                 ?? new List<Artist>();
 
-            await _musicAssistant.EnrichWithProviderInfoAsync(artists);
+            await _musicAssistant.EnrichWithProviderInfoAsync(topArtists);
 
-            var sectionName = string.IsNullOrWhiteSpace(folder.Name) ? folder.ItemId : folder.Name;
-            sectionName = sectionName.Replace("Similar Artists for", "Ähnlich zu", StringComparison.OrdinalIgnoreCase);
+            TopArtists = new ObservableRangeCollection<Artist>(topArtists);
 
-            similarArtistSections.Add(new SimilarArtistSection(
-                sectionName,
-                new ObservableRangeCollection<Artist>(artists)));
+            _logger.LogInformation(
+                "Home top artists loaded: topArtists={TopArtists}",
+                topArtists.Count);
         }
-
-        // Shuffle section order so the displayed folders vary on each load.
-        for (var i = similarArtistSections.Count - 1; i > 0; i--)
+        catch (Exception ex)
         {
-            var swapIndex = Random.Shared.Next(i + 1);
-            (similarArtistSections[i], similarArtistSections[swapIndex]) = (similarArtistSections[swapIndex], similarArtistSections[i]);
+            _logger.LogWarning(ex, "Failed to load home top artists");
+            TopArtists = new ObservableRangeCollection<Artist>();
         }
+        finally
+        {
+            IsLoadingTopArtists = false;
+        }
+    }
 
-        SimilarArtistSections = new ObservableRangeCollection<SimilarArtistSection>(similarArtistSections);
+    private async Task LoadSimilarArtistsSectionsAsync(IEnumerable<RecommendationFolder> lbFolders)
+    {
+        IsLoadingSimilarArtistSections = true;
+        try
+        {
+            var similarArtistSections = new List<SimilarArtistSection>();
 
-        _logger.LogInformation(
-            "Home similar artists sections loaded: similarArtistSections={SimilarArtistSections}",
-            similarArtistSections.Count);
+            var similarArtistFolders = lbFolders
+                .Where(folder =>
+                    !string.IsNullOrWhiteSpace(folder.ItemId)
+                    && folder.ItemId.StartsWith("similar_artists_", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            foreach (var folder in similarArtistFolders)
+            {
+                var artists = folder.Items?
+                    .OfType<Artist>()
+                    .Where(artist => !string.IsNullOrWhiteSpace(artist.ItemId) && !string.IsNullOrWhiteSpace(artist.Provider))
+                    .Select(artist =>
+                    {
+                        artist.DisplayName = artist.Name;
+                        return artist;
+                    })
+                    .ToList()
+                    ?? new List<Artist>();
+
+                await _musicAssistant.EnrichWithProviderInfoAsync(artists);
+
+                var sectionName = string.IsNullOrWhiteSpace(folder.Name) ? folder.ItemId : folder.Name;
+                sectionName = sectionName.Replace("Similar Artists for", "Ähnlich zu", StringComparison.OrdinalIgnoreCase);
+
+                similarArtistSections.Add(new SimilarArtistSection(
+                    sectionName,
+                    new ObservableRangeCollection<Artist>(artists)));
+            }
+
+            // Shuffle section order so the displayed folders vary on each load.
+            for (var i = similarArtistSections.Count - 1; i > 0; i--)
+            {
+                var swapIndex = Random.Shared.Next(i + 1);
+                (similarArtistSections[i], similarArtistSections[swapIndex]) = (similarArtistSections[swapIndex], similarArtistSections[i]);
+            }
+
+            SimilarArtistSections = new ObservableRangeCollection<SimilarArtistSection>(similarArtistSections);
+
+            _logger.LogInformation(
+                "Home similar artists sections loaded: similarArtistSections={SimilarArtistSections}",
+                similarArtistSections.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load home similar artist sections");
+            SimilarArtistSections = new ObservableRangeCollection<SimilarArtistSection>();
+        }
+        finally
+        {
+            IsLoadingSimilarArtistSections = false;
+        }
     }
 
     private async Task LoadGenrePlaylistsAsync(IEnumerable<RecommendationFolder> lbFolders)
     {
-        var genrePlaylists = FindRecommendationFolderById(lbFolders, "genre_playlists")?.Items?
-            .OfType<Playlist>()
-            .Where(playlist => !string.IsNullOrWhiteSpace(playlist.ItemId) && !string.IsNullOrWhiteSpace(playlist.Provider))
-            .Select(playlist =>
-            {
-                var playlistName = playlist.Name ?? string.Empty;
-                playlist.DisplayName = playlistName.StartsWith("Radio: ", StringComparison.OrdinalIgnoreCase)
-                    ? playlistName[7..].TrimStart()
-                    : playlistName;
-                return playlist;
-            })
-            .ToList()
-            ?? new List<Playlist>();
+        IsLoadingGenrePlaylists = true;
+        try
+        {
+            var genrePlaylists = FindRecommendationFolderById(lbFolders, "genre_playlists")?.Items?
+                .OfType<Playlist>()
+                .Where(playlist => !string.IsNullOrWhiteSpace(playlist.ItemId) && !string.IsNullOrWhiteSpace(playlist.Provider))
+                .Select(playlist =>
+                {
+                    var playlistName = playlist.Name ?? string.Empty;
+                    playlist.DisplayName = playlistName.StartsWith("Radio: ", StringComparison.OrdinalIgnoreCase)
+                        ? playlistName[7..].TrimStart()
+                        : playlistName;
+                    return playlist;
+                })
+                .ToList()
+                ?? new List<Playlist>();
 
-        await _musicAssistant.EnrichWithProviderInfoAsync(genrePlaylists);
+            await _musicAssistant.EnrichWithProviderInfoAsync(genrePlaylists);
 
-        GenrePlaylists = new ObservableRangeCollection<Playlist>(genrePlaylists);
+            GenrePlaylists = new ObservableRangeCollection<Playlist>(genrePlaylists);
 
-        _logger.LogInformation(
-            "Home genre playlists loaded: genrePlaylists={GenrePlaylists}",
-            genrePlaylists.Count);
+            _logger.LogInformation(
+                "Home genre playlists loaded: genrePlaylists={GenrePlaylists}",
+                genrePlaylists.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load home genre playlists");
+            GenrePlaylists = new ObservableRangeCollection<Playlist>();
+        }
+        finally
+        {
+            IsLoadingGenrePlaylists = false;
+        }
     }
 
     private async Task LoadArtistPlaylistsAsync(IEnumerable<RecommendationFolder> lbFolders)
     {
-        var artistPlaylists = FindRecommendationFolderById(lbFolders, "artist_playlists")?.Items?
-            .OfType<Playlist>()
-            .Where(playlist => !string.IsNullOrWhiteSpace(playlist.ItemId) && !string.IsNullOrWhiteSpace(playlist.Provider))
-            .Select(playlist =>
-            {
-                playlist.DisplayName = NormalizePlaylistDisplayName(playlist.Name);
-                return playlist;
-            })
-            .ToList()
-            ?? new List<Playlist>();
+        IsLoadingArtistPlaylists = true;
+        try
+        {
+            var artistPlaylists = FindRecommendationFolderById(lbFolders, "artist_playlists")?.Items?
+                .OfType<Playlist>()
+                .Where(playlist => !string.IsNullOrWhiteSpace(playlist.ItemId) && !string.IsNullOrWhiteSpace(playlist.Provider))
+                .Select(playlist =>
+                {
+                    playlist.DisplayName = NormalizePlaylistDisplayName(playlist.Name);
+                    return playlist;
+                })
+                .ToList()
+                ?? new List<Playlist>();
 
-        await _musicAssistant.EnrichWithProviderInfoAsync(artistPlaylists);
+            await _musicAssistant.EnrichWithProviderInfoAsync(artistPlaylists);
 
-        ArtistPlaylists = new ObservableRangeCollection<Playlist>(artistPlaylists);
+            ArtistPlaylists = new ObservableRangeCollection<Playlist>(artistPlaylists);
 
-        _logger.LogInformation(
-            "Home artist playlists loaded: artistPlaylists={ArtistPlaylists}",
-            artistPlaylists.Count);
+            _logger.LogInformation(
+                "Home artist playlists loaded: artistPlaylists={ArtistPlaylists}",
+                artistPlaylists.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load home artist playlists");
+            ArtistPlaylists = new ObservableRangeCollection<Playlist>();
+        }
+        finally
+        {
+            IsLoadingArtistPlaylists = false;
+        }
     }
 
     #endregion
@@ -741,7 +936,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     private int GetSimilarArtistSectionCount(int index)
     {
-        if (IsLoadingHome)
+        if (IsLoadingSimilarArtistSections)
         {
             return _rowSkeletons.Count;
         }
@@ -751,23 +946,23 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     private bool GetShowSimilarArtistSectionContainer(int index)
     {
-        return IsLoadingHome || GetSimilarArtistSection(index) != null;
+        return IsLoadingSimilarArtistSections || GetSimilarArtistSection(index) != null;
     }
 
     private bool GetShowSimilarArtistSectionRowView(int index)
     {
-        return IsLoadingHome || (GetSimilarArtistSection(index)?.Artists.Count > 0);
+        return IsLoadingSimilarArtistSections || (GetSimilarArtistSection(index)?.Artists.Count > 0);
     }
 
     private bool GetShowNoSimilarArtistSectionMessage(int index)
     {
         var section = GetSimilarArtistSection(index);
-        return !IsLoadingHome && section != null && section.Artists.Count == 0;
+        return !IsLoadingSimilarArtistSections && section != null && section.Artists.Count == 0;
     }
 
     private IEnumerable<object> GetSimilarArtistSectionItems(int index)
     {
-        if (IsLoadingHome)
+        if (IsLoadingSimilarArtistSections)
         {
             return _rowSkeletons;
         }
@@ -812,6 +1007,17 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
         OnPropertyChanged(nameof(SimilarArtistSectionItems2));
         OnPropertyChanged(nameof(SimilarArtistSectionItems3));
         OnPropertyChanged(nameof(SimilarArtistSectionItems4));
+    }
+
+    private void SetSectionLoadingState(bool value)
+    {
+        IsLoadingRecommendationTracks = value;
+        IsLoadingTopTracks = value;
+        IsLoadingRecentListens = value;
+        IsLoadingTopArtists = value;
+        IsLoadingSimilarArtistSections = value;
+        IsLoadingGenrePlaylists = value;
+        IsLoadingArtistPlaylists = value;
     }
 
 
