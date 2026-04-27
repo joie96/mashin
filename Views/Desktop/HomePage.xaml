@@ -31,7 +31,7 @@
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
                 <Grid Grid.Row="0"
-                    ColumnDefinitions="Auto,Auto,*,Auto"
+                    ColumnDefinitions="Auto,Auto,*"
                     ColumnSpacing="16">
                     <Label Grid.Column="0"
                         Style="{StaticResource LabelSectionTitle}"
@@ -61,10 +61,54 @@
                         Opacity="0.75"
                         VerticalOptions="Center" />
                     <Grid Grid.Column="3"
-                        ColumnDefinitions="Auto,Auto"
+                        ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
                         ColumnSpacing="8"
                         VerticalOptions="Center">
                         <Border Grid.Column="0"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding PlayRecommendationTracksCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=Play16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                        <Border Grid.Column="1"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ShuffleRecommendationTracksCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ArrowShuffle16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                        <BoxView Grid.Column="2"
+                            HeightRequest="18"
+                            Margin="4,0"
+                            Opacity="0.75"
+                            VerticalOptions="Center"
+                            WidthRequest="1" />
+                        <Border Grid.Column="3"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
@@ -91,7 +135,7 @@
                                 TextColor="{DynamicResource IconSecondary}"
                                 VerticalOptions="Center" />
                         </Border>
-                        <Border Grid.Column="1"
+                        <Border Grid.Column="4"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
@@ -147,7 +191,7 @@
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
                 <Grid Grid.Row="0"
-                    ColumnDefinitions="Auto,Auto,*"
+                    ColumnDefinitions="Auto,Auto,*,Auto"
                     ColumnSpacing="16">
                     <Label Grid.Column="0"
                         Style="{StaticResource LabelSectionTitle}"
@@ -394,10 +438,57 @@
                         VerticalOptions="Center" />
 
                     <Grid Grid.Column="3"
-                        ColumnDefinitions="Auto,Auto"
+                        ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
                         ColumnSpacing="8"
                         VerticalOptions="Center">
                         <Border Grid.Column="0"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding PlayTopTracksCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=Play16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                        <Border Grid.Column="1"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ShuffleTopTracksCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ArrowShuffle16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                        <BoxView Grid.Column="2"
+                            HeightRequest="18"
+                            Margin="4,0"
+                            Opacity="0.75"
+                            VerticalOptions="Center"
+                            WidthRequest="1" />
+
+                        <Border Grid.Column="3"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
@@ -425,7 +516,7 @@
                                 VerticalOptions="Center" />
                         </Border>
 
-                        <Border Grid.Column="1"
+                        <Border Grid.Column="4"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
@@ -511,10 +602,57 @@
                         VerticalOptions="Center" />
 
                     <Grid Grid.Column="3"
-                        ColumnDefinitions="Auto,Auto"
+                        ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
                         ColumnSpacing="8"
                         VerticalOptions="Center">
                         <Border Grid.Column="0"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding PlayTopArtistsCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=Play16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                        <Border Grid.Column="1"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ShuffleTopArtistsCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ArrowShuffle16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+
+                        <BoxView Grid.Column="2"
+                            HeightRequest="18"
+                            Margin="4,0"
+                            Opacity="0.75"
+                            VerticalOptions="Center"
+                            WidthRequest="1" />
+
+                        <Border Grid.Column="3"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
@@ -542,7 +680,7 @@
                                 VerticalOptions="Center" />
                         </Border>
 
-                        <Border Grid.Column="1"
+                        <Border Grid.Column="4"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
@@ -628,10 +766,54 @@
                         VerticalOptions="Center" />
 
                     <Grid Grid.Column="3"
-                        ColumnDefinitions="Auto,Auto"
+                        ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
                         ColumnSpacing="8"
                         VerticalOptions="Center">
                         <Border Grid.Column="0"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding PlayRecentListensCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=Play16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                        <Border Grid.Column="1"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ShuffleRecentListensCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ArrowShuffle16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                        <BoxView Grid.Column="2"
+                            HeightRequest="18"
+                            Margin="4,0"
+                            Opacity="0.75"
+                            VerticalOptions="Center"
+                            WidthRequest="1" />
+                        <Border Grid.Column="3"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
@@ -659,7 +841,7 @@
                                 VerticalOptions="Center" />
                         </Border>
 
-                        <Border Grid.Column="1"
+                        <Border Grid.Column="4"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
@@ -745,10 +927,54 @@
                         Opacity="0.75"
                         VerticalOptions="Center" />
                     <Grid Grid.Column="3"
-                        ColumnDefinitions="Auto,Auto"
+                        ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
                         ColumnSpacing="8"
                         VerticalOptions="Center">
                         <Border Grid.Column="0"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding PlaySimilarArtistSection0Command}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=Play16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                        <Border Grid.Column="1"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ShuffleSimilarArtistSection0Command}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ArrowShuffle16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                        <BoxView Grid.Column="2"
+                            HeightRequest="18"
+                            Margin="4,0"
+                            Opacity="0.75"
+                            VerticalOptions="Center"
+                            WidthRequest="1" />
+                        <Border Grid.Column="3"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
@@ -775,7 +1001,7 @@
                                 TextColor="{DynamicResource IconSecondary}"
                                 VerticalOptions="Center" />
                         </Border>
-                        <Border Grid.Column="1"
+                        <Border Grid.Column="4"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
@@ -859,10 +1085,54 @@
                         Opacity="0.75"
                         VerticalOptions="Center" />
                     <Grid Grid.Column="3"
-                        ColumnDefinitions="Auto,Auto"
+                        ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
                         ColumnSpacing="8"
                         VerticalOptions="Center">
                         <Border Grid.Column="0"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding PlaySimilarArtistSection1Command}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=Play16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                        <Border Grid.Column="1"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ShuffleSimilarArtistSection1Command}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ArrowShuffle16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                        <BoxView Grid.Column="2"
+                            HeightRequest="18"
+                            Margin="4,0"
+                            Opacity="0.75"
+                            VerticalOptions="Center"
+                            WidthRequest="1" />
+                        <Border Grid.Column="3"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
@@ -889,7 +1159,7 @@
                                 TextColor="{DynamicResource IconSecondary}"
                                 VerticalOptions="Center" />
                         </Border>
-                        <Border Grid.Column="1"
+                        <Border Grid.Column="4"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
@@ -973,10 +1243,54 @@
                         Opacity="0.75"
                         VerticalOptions="Center" />
                     <Grid Grid.Column="3"
-                        ColumnDefinitions="Auto,Auto"
+                        ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
                         ColumnSpacing="8"
                         VerticalOptions="Center">
                         <Border Grid.Column="0"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding PlaySimilarArtistSection2Command}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=Play16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                        <Border Grid.Column="1"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ShuffleSimilarArtistSection2Command}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ArrowShuffle16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                        <BoxView Grid.Column="2"
+                            HeightRequest="18"
+                            Margin="4,0"
+                            Opacity="0.75"
+                            VerticalOptions="Center"
+                            WidthRequest="1" />
+                        <Border Grid.Column="3"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
@@ -1003,7 +1317,7 @@
                                 TextColor="{DynamicResource IconSecondary}"
                                 VerticalOptions="Center" />
                         </Border>
-                        <Border Grid.Column="1"
+                        <Border Grid.Column="4"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
@@ -1087,10 +1401,54 @@
                         Opacity="0.75"
                         VerticalOptions="Center" />
                     <Grid Grid.Column="3"
-                        ColumnDefinitions="Auto,Auto"
+                        ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
                         ColumnSpacing="8"
                         VerticalOptions="Center">
                         <Border Grid.Column="0"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding PlaySimilarArtistSection3Command}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=Play16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                        <Border Grid.Column="1"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ShuffleSimilarArtistSection3Command}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ArrowShuffle16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                        <BoxView Grid.Column="2"
+                            HeightRequest="18"
+                            Margin="4,0"
+                            Opacity="0.75"
+                            VerticalOptions="Center"
+                            WidthRequest="1" />
+                        <Border Grid.Column="3"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
@@ -1117,7 +1475,7 @@
                                 TextColor="{DynamicResource IconSecondary}"
                                 VerticalOptions="Center" />
                         </Border>
-                        <Border Grid.Column="1"
+                        <Border Grid.Column="4"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
@@ -1201,10 +1559,54 @@
                         Opacity="0.75"
                         VerticalOptions="Center" />
                     <Grid Grid.Column="3"
-                        ColumnDefinitions="Auto,Auto"
+                        ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
                         ColumnSpacing="8"
                         VerticalOptions="Center">
                         <Border Grid.Column="0"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding PlaySimilarArtistSection4Command}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=Play16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                        <Border Grid.Column="1"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                            BackgroundColor="Transparent"
+                            HeightRequest="28"
+                            StrokeThickness="0"
+                            WidthRequest="28">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ShuffleSimilarArtistSection4Command}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ArrowShuffle16,
+                                                 FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                        <BoxView Grid.Column="2"
+                            HeightRequest="18"
+                            Margin="4,0"
+                            Opacity="0.75"
+                            VerticalOptions="Center"
+                            WidthRequest="1" />
+                        <Border Grid.Column="3"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"
@@ -1231,7 +1633,7 @@
                                 TextColor="{DynamicResource IconSecondary}"
                                 VerticalOptions="Center" />
                         </Border>
-                        <Border Grid.Column="1"
+                        <Border Grid.Column="4"
                             behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="28"

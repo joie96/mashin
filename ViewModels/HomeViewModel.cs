@@ -420,6 +420,46 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     public ICommand ShuffleArtistPlaylistsCommand { get; }
 
+    public ICommand PlayRecommendationTracksCommand { get; }
+
+    public ICommand ShuffleRecommendationTracksCommand { get; }
+
+    public ICommand PlayGenrePlaylistsCommand { get; }
+
+    public ICommand ShuffleGenrePlaylistsCommand { get; }
+
+    public ICommand PlayTopTracksCommand { get; }
+
+    public ICommand ShuffleTopTracksCommand { get; }
+
+    public ICommand PlayTopArtistsCommand { get; }
+
+    public ICommand ShuffleTopArtistsCommand { get; }
+
+    public ICommand PlayRecentListensCommand { get; }
+
+    public ICommand ShuffleRecentListensCommand { get; }
+
+    public ICommand PlaySimilarArtistSection0Command { get; }
+
+    public ICommand ShuffleSimilarArtistSection0Command { get; }
+
+    public ICommand PlaySimilarArtistSection1Command { get; }
+
+    public ICommand ShuffleSimilarArtistSection1Command { get; }
+
+    public ICommand PlaySimilarArtistSection2Command { get; }
+
+    public ICommand ShuffleSimilarArtistSection2Command { get; }
+
+    public ICommand PlaySimilarArtistSection3Command { get; }
+
+    public ICommand ShuffleSimilarArtistSection3Command { get; }
+
+    public ICommand PlaySimilarArtistSection4Command { get; }
+
+    public ICommand ShuffleSimilarArtistSection4Command { get; }
+
     #endregion
 
     #region Construction
@@ -512,6 +552,46 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
         PlayArtistPlaylistsCommand = new Command(async () => await PlayArtistPlaylistsAsync());
 
         ShuffleArtistPlaylistsCommand = new Command(async () => await ShuffleArtistPlaylistsAsync());
+
+        PlayRecommendationTracksCommand = new Command(async () => await PlayCollectionFirstAsync(RecommendationTracks));
+
+        ShuffleRecommendationTracksCommand = new Command(async () => await PlayCollectionRandomAsync(RecommendationTracks));
+
+        PlayGenrePlaylistsCommand = new Command(async () => await PlayCollectionFirstAsync(GenrePlaylists));
+
+        ShuffleGenrePlaylistsCommand = new Command(async () => await PlayCollectionRandomAsync(GenrePlaylists));
+
+        PlayTopTracksCommand = new Command(async () => await PlayCollectionFirstAsync(TopTracks));
+
+        ShuffleTopTracksCommand = new Command(async () => await PlayCollectionRandomAsync(TopTracks));
+
+        PlayTopArtistsCommand = new Command(async () => await PlayCollectionFirstAsync(TopArtists));
+
+        ShuffleTopArtistsCommand = new Command(async () => await PlayCollectionRandomAsync(TopArtists));
+
+        PlayRecentListensCommand = new Command(async () => await PlayCollectionFirstAsync(RecentListens));
+
+        ShuffleRecentListensCommand = new Command(async () => await PlayCollectionRandomAsync(RecentListens));
+
+        PlaySimilarArtistSection0Command = new Command(async () => await PlaySimilarArtistSectionByIndexAsync(0));
+
+        ShuffleSimilarArtistSection0Command = new Command(async () => await ShuffleSimilarArtistSectionByIndexAsync(0));
+
+        PlaySimilarArtistSection1Command = new Command(async () => await PlaySimilarArtistSectionByIndexAsync(1));
+
+        ShuffleSimilarArtistSection1Command = new Command(async () => await ShuffleSimilarArtistSectionByIndexAsync(1));
+
+        PlaySimilarArtistSection2Command = new Command(async () => await PlaySimilarArtistSectionByIndexAsync(2));
+
+        ShuffleSimilarArtistSection2Command = new Command(async () => await ShuffleSimilarArtistSectionByIndexAsync(2));
+
+        PlaySimilarArtistSection3Command = new Command(async () => await PlaySimilarArtistSectionByIndexAsync(3));
+
+        ShuffleSimilarArtistSection3Command = new Command(async () => await ShuffleSimilarArtistSectionByIndexAsync(3));
+
+        PlaySimilarArtistSection4Command = new Command(async () => await PlaySimilarArtistSectionByIndexAsync(4));
+
+        ShuffleSimilarArtistSection4Command = new Command(async () => await ShuffleSimilarArtistSectionByIndexAsync(4));
     }
 
     #endregion
@@ -1207,25 +1287,67 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     private async Task PlayArtistPlaylistsAsync()
     {
-        var playlists = ArtistPlaylists.ToList();
-        if (playlists.Count == 0)
-        {
-            return;
-        }
-
-        await _mediaActions.PlayMediaAsync(playlists[0]);
+        await PlayCollectionFirstAsync(ArtistPlaylists);
     }
 
     private async Task ShuffleArtistPlaylistsAsync()
     {
-        var playlists = ArtistPlaylists.ToList();
-        if (playlists.Count == 0)
+        await PlayCollectionRandomAsync(ArtistPlaylists);
+    }
+
+    private async Task PlaySimilarArtistSectionByIndexAsync(int index)
+    {
+        var sectionArtists = GetSimilarArtistSection(index)?.Artists;
+        if (sectionArtists == null)
         {
             return;
         }
 
-        var randomIndex = Random.Shared.Next(playlists.Count);
-        await _mediaActions.PlayMediaAsync(playlists[randomIndex]);
+        await PlayCollectionFirstAsync(sectionArtists);
+    }
+
+    private async Task ShuffleSimilarArtistSectionByIndexAsync(int index)
+    {
+        var sectionArtists = GetSimilarArtistSection(index)?.Artists;
+        if (sectionArtists == null)
+        {
+            return;
+        }
+
+        await PlayCollectionRandomAsync(sectionArtists);
+    }
+
+    private async Task PlayCollectionFirstAsync<T>(IEnumerable<T>? items) where T : class
+    {
+        if (items == null)
+        {
+            return;
+        }
+
+        var firstItem = items.FirstOrDefault();
+        if (firstItem == null)
+        {
+            return;
+        }
+
+        await _mediaActions.PlayMediaAsync(firstItem);
+    }
+
+    private async Task PlayCollectionRandomAsync<T>(IEnumerable<T>? items) where T : class
+    {
+        if (items == null)
+        {
+            return;
+        }
+
+        var entries = items.Where(entry => entry != null).ToList();
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        var randomIndex = Random.Shared.Next(entries.Count);
+        await _mediaActions.PlayMediaAsync(entries[randomIndex]);
     }
 
     #endregion
