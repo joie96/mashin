@@ -19,6 +19,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
     private readonly IMediaItemActions _mediaActions;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
+    private readonly IUserDataService _userDataService;
     private readonly ILogger<HomeViewModel> _logger;
 
     private ObservableRangeCollection<Track> _recommendationTracks = new();
@@ -469,12 +470,14 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
         IMediaItemActions mediaActions,
         IContextMenuService contextMenuService,
         INavigationService navigationService,
+        IUserDataService userDataService,
         ILogger<HomeViewModel> logger)
     {
         _musicAssistant = musicAssistant;
         _mediaActions = mediaActions;
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
+        _userDataService = userDataService;
         _logger = logger;
 
         // Navigation commands
@@ -690,6 +693,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 ?? new List<Track>();
 
             await _musicAssistant.EnrichWithProviderInfoAsync(recommendationTracks);
+            await ApplyFavoriteStateAsync(recommendationTracks);
 
             // Shuffle recommendations on each load so the slide order varies.
             for (var i = recommendationTracks.Count - 1; i > 0; i--)
@@ -732,6 +736,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 ?? new List<Track>();
 
             await _musicAssistant.EnrichWithProviderInfoAsync(topTracks);
+            await ApplyFavoriteStateAsync(topTracks);
 
             TopTracks = new ObservableRangeCollection<Track>(topTracks);
 
@@ -790,6 +795,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 .ToList();
 
             await _musicAssistant.EnrichWithProviderInfoAsync(recentTracks);
+            await ApplyFavoriteStateAsync(recentTracks);
 
             RecentListens = new ObservableRangeCollection<Track>(recentTracks);
 
@@ -826,6 +832,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 ?? new List<Artist>();
 
             await _musicAssistant.EnrichWithProviderInfoAsync(topArtists);
+            await ApplyFavoriteStateAsync(topArtists);
 
             TopArtists = new ObservableRangeCollection<Artist>(topArtists);
 
@@ -871,6 +878,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                     ?? new List<Artist>();
 
                 await _musicAssistant.EnrichWithProviderInfoAsync(artists);
+                await ApplyFavoriteStateAsync(artists);
 
                 var sectionName = string.IsNullOrWhiteSpace(folder.Name) ? folder.ItemId : folder.Name;
                 sectionName = sectionName.Replace("Similar Artists for", "Ähnlich zu", StringComparison.OrdinalIgnoreCase);
@@ -924,6 +932,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 ?? new List<Playlist>();
 
             await _musicAssistant.EnrichWithProviderInfoAsync(genrePlaylists);
+            await ApplyFavoriteStateAsync(genrePlaylists);
 
             GenrePlaylists = new ObservableRangeCollection<Playlist>(genrePlaylists);
 
@@ -959,6 +968,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 ?? new List<Playlist>();
 
             await _musicAssistant.EnrichWithProviderInfoAsync(artistPlaylists);
+            await ApplyFavoriteStateAsync(artistPlaylists);
 
             ArtistPlaylists = new ObservableRangeCollection<Playlist>(artistPlaylists);
 
@@ -1348,6 +1358,19 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
         var randomIndex = Random.Shared.Next(entries.Count);
         await _mediaActions.PlayMediaAsync(entries[randomIndex]);
+    }
+
+    private async Task ApplyFavoriteStateAsync<T>(IEnumerable<T> items) where T : MediaItem
+    {
+        if (items == null)
+        {
+            return;
+        }
+
+        foreach (var item in items)
+        {
+            item.Favorite = await _userDataService.IsFavoriteAsync(item);
+        }
     }
 
     #endregion
