@@ -928,6 +928,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                         : playlistName;
                     return playlist;
                 })
+                .Take(9)
                 .ToList()
                 ?? new List<Playlist>();
 
