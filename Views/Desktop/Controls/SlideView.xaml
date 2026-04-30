@@ -12,6 +12,16 @@
     <ContentView.Resources>
         <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
 
+        <!--  Always use Dark Theme colors regardless of system theme  -->
+        <Color x:Key="TextPrimary">#ffffff</Color>
+        <Color x:Key="TextSecondary">#dddddd</Color>
+        <Color x:Key="TextTertiary">#a0a0a0</Color>
+        <Color x:Key="IconPrimary">#ffffff</Color>
+        <Color x:Key="IconPrimary75">#BFFFFFFF</Color>
+        <Color x:Key="IconSecondary">#dddddd</Color>
+        <Color x:Key="BackgroundPrimary">#0a0a0a</Color>
+        <Color x:Key="BackgroundSecondary">#141414</Color>
+
         <!--  DataTemplate for Tracks  -->
         <DataTemplate x:Key="TrackTemplate" x:DataType="models:Track">
             <Grid x:Name="SlideContentHost"
@@ -163,19 +173,6 @@
                         </Label.Behaviors>
                     </Label>
 
-                    <Label Grid.Row="2"
-                        FontAttributes="Bold"
-                        FontSize="16"
-                        LineBreakMode="TailTruncation"
-                        MaxLines="1"
-                        Text="{Binding AlbumName}"
-                        TextColor="{DynamicResource TextSecondary}">
-                        <Label.Behaviors>
-                            <behaviors:LinkLabelBehavior Command="{Binding Source={x:Reference self}, Path=PrimaryInfoTappedCommand}"
-                                CommandParameter="{Binding Album}"
-                                HoverTextColor="{DynamicResource TextSecondary}" />
-                        </Label.Behaviors>
-                    </Label>
                 </Grid>
             </Grid>
         </DataTemplate>
