@@ -631,25 +631,18 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 .Where(IsListenBrainzFolder)
                 .ToList();
 
+            // First render wave: load recommendations and genre playlists in parallel.
             var recommendationTask = LoadRecommendationTracksAsync(lbFolders);
-            var topTracksTask = LoadTopTracksAsync(lbFolders);
-            var recentListensTask = LoadRecentListensAsync();
-            var topArtistsTask = LoadTopArtistsAsync(lbFolders);
-            var similarArtistSectionsTask = LoadSimilarArtistsSectionsAsync(lbFolders);
             var genrePlaylistsTask = LoadGenrePlaylistsAsync(lbFolders);
-            var artistPlaylistsTask = LoadArtistPlaylistsAsync(lbFolders);
-
-            // Show the upper page content as soon as the first section is available.
-            await recommendationTask;
+            await Task.WhenAll(recommendationTask, genrePlaylistsTask);
             IsLoadingHome = false;
 
-            await Task.WhenAll(
-                topTracksTask,
-                recentListensTask,
-                topArtistsTask,
-                similarArtistSectionsTask,
-                genrePlaylistsTask,
-                artistPlaylistsTask);
+            // Then load remaining sections sequentially to avoid heavy simultaneous UI updates.
+            await LoadArtistPlaylistsAsync(lbFolders);
+            await LoadTopTracksAsync(lbFolders);
+            await LoadTopArtistsAsync(lbFolders);
+            await LoadSimilarArtistsSectionsAsync(lbFolders);
+            await LoadRecentListensAsync();
         }
         catch (Exception ex)
         {
@@ -703,6 +696,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             }
 
             RecommendationTracks = new ObservableRangeCollection<Track>(recommendationTracks);
+            await Task.Delay(50);
 
             _logger.LogInformation(
                 "Home recommendation folder loaded: recommendationTracks={RecommendationTracks}",
@@ -739,6 +733,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             await ApplyFavoriteStateAsync(topTracks);
 
             TopTracks = new ObservableRangeCollection<Track>(topTracks);
+            await Task.Delay(50);
 
             _logger.LogInformation(
                 "Home top tracks loaded: topTracks={TopTracks}",
@@ -798,6 +793,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             await ApplyFavoriteStateAsync(recentTracks);
 
             RecentListens = new ObservableRangeCollection<Track>(recentTracks);
+            await Task.Delay(50);
 
             _logger.LogInformation(
                 "Home recent listens loaded: recentTracks={RecentTracks}, userId={UserId}",
@@ -835,6 +831,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             await ApplyFavoriteStateAsync(topArtists);
 
             TopArtists = new ObservableRangeCollection<Artist>(topArtists);
+            await Task.Delay(50);
 
             _logger.LogInformation(
                 "Home top artists loaded: topArtists={TopArtists}",
@@ -896,6 +893,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             }
 
             SimilarArtistSections = new ObservableRangeCollection<SimilarArtistSection>(similarArtistSections);
+            await Task.Delay(50);
 
             _logger.LogInformation(
                 "Home similar artists sections loaded: similarArtistSections={SimilarArtistSections}",
@@ -936,6 +934,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             await ApplyFavoriteStateAsync(genrePlaylists);
 
             GenrePlaylists = new ObservableRangeCollection<Playlist>(genrePlaylists);
+            await Task.Delay(50);
 
             _logger.LogInformation(
                 "Home genre playlists loaded: genrePlaylists={GenrePlaylists}",
@@ -972,6 +971,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             await ApplyFavoriteStateAsync(artistPlaylists);
 
             ArtistPlaylists = new ObservableRangeCollection<Playlist>(artistPlaylists);
+            await Task.Delay(50);
 
             _logger.LogInformation(
                 "Home artist playlists loaded: artistPlaylists={ArtistPlaylists}",
