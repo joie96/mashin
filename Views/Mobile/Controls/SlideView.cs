@@ -6,7 +6,7 @@ namespace mashin.Views.Mobile.Controls;
 
 public partial class SlideView : ContentView
 {
-    #region Bindable Properties
+    #region Bindable properties
 
     public static readonly BindableProperty ItemsSourceProperty =
         BindableProperty.Create(nameof(ItemsSource), typeof(IEnumerable<object>), typeof(SlideView));
@@ -37,7 +37,7 @@ public partial class SlideView : ContentView
 
     #endregion
 
-    #region CLR Wrappers
+    #region Properties
 
     public IEnumerable<object>? ItemsSource
     {
@@ -95,7 +95,7 @@ public partial class SlideView : ContentView
 
     #endregion
 
-    #region Lifecycle
+    #region Construction
 
     public SlideView()
     {

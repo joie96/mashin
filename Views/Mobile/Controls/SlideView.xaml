@@ -14,7 +14,7 @@
         <Color x:Key="BackgroundSecondary">#141414</Color>
 
         <DataTemplate x:Key="TrackTemplate" x:DataType="models:Track">
-            <Border Padding="12"
+            <Border Padding="6"
                 BackgroundColor="{DynamicResource BackgroundSecondary}"
                 StrokeThickness="0"
                 WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
@@ -24,6 +24,11 @@
 
                 <Grid ColumnDefinitions="Auto,*"
                     ColumnSpacing="12">
+
+                    <Border BackgroundColor="#7F141414"
+                        Grid.ColumnSpan="2"
+                        InputTransparent="True"
+                        StrokeThickness="0" />
 
                     <Border Grid.Column="0"
                         HeightRequest="{Binding Source={x:Reference self}, Path=CoverSize}"
@@ -39,29 +44,29 @@
                             <Image Aspect="AspectFill"
                                 Source="{Binding ImageUrl}" />
 
-                            <Border BackgroundColor="#50000000"
+                            <Border BackgroundColor="#26000000"
                                 StrokeThickness="0">
                                 <Border.StrokeShape>
                                     <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
                                 </Border.StrokeShape>
                             </Border>
 
-                            <Grid Padding="8,0,0,8"
+                            <Grid Padding="4,0,0,4"
                                 HorizontalOptions="Fill"
                                 VerticalOptions="Fill">
                                 <Border BackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
-                                    HeightRequest="44"
+                                    HeightRequest="28"
                                     HorizontalOptions="Start"
                                     StrokeThickness="0"
                                     VerticalOptions="End"
-                                    WidthRequest="44">
+                                    WidthRequest="28">
                                     <Border.GestureRecognizers>
                                         <TapGestureRecognizer Tapped="OnPlayOverlayClicked" />
                                     </Border.GestureRecognizers>
                                     <Border.StrokeShape>
-                                        <RoundRectangle CornerRadius="22" />
+                                        <RoundRectangle CornerRadius="15" />
                                     </Border.StrokeShape>
-                                    <Label FontSize="20"
+                                    <Label FontSize="16"
                                         HorizontalOptions="Center"
                                         Text="{mi:FluentFilled Icon=Play48Filled, FontOverride=True}"
                                         TextColor="{DynamicResource OverlayPlayIconColor}"

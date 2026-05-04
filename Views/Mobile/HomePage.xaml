@@ -16,15 +16,15 @@
                     Text="Home"
                     TextColor="{DynamicResource TextPrimary}" />
                 <Label FontSize="13"
-                    Text="Unsere Empfehlungen fuer dich"
+                    Text="Unsere Empfehlungen für dich"
                     TextColor="{DynamicResource TextSecondary}" />
             </VerticalStackLayout>
 
             <Label IsVisible="{Binding ShowNoRecommendationFolderMessage}"
-                Text="Keine ListenBrainz-Recommendations verfuegbar."
+                Text="Keine ListenBrainz-Empfehlungen verfügbar."
                 TextColor="{DynamicResource TextTertiary}" />
 
-            <controls:SlideView CoverSize="145"
+            <controls:SlideView CoverSize="75"
                 IsVisible="{Binding ShowRecommendationFolderSlideView}"
                 ItemCornerRadius="8"
                 ItemsSource="{Binding RecommendationTrackItems}"
