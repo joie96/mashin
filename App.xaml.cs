@@ -1,5 +1,7 @@
 ﻿using mashin.Services;
 using mashin.Views.Desktop;
+using DesktopMainPage = mashin.Views.Desktop.MainPage;
+using MobileMainPage = mashin.Views.Mobile.MainPage;
 using Microsoft.Extensions.DependencyInjection;
 using FFImageLoading;
 using FFImageLoading.Config;
@@ -69,8 +71,15 @@ public partial class App : Application
 
         var services = Handler!.MauiContext!.Services;
 
-        // MainPage als Window
-        var mainPage = services.GetRequiredService<MainPage>();
+        Page mainPage;
+        if (DeviceInfo.Current.Platform == DevicePlatform.Android)
+        {
+            mainPage = services.GetRequiredService<MobileMainPage>();
+        }
+        else
+        {
+            mainPage = services.GetRequiredService<DesktopMainPage>();
+        }
         
         var window = new Window(mainPage);
 

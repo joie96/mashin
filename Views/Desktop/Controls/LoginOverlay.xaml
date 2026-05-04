@@ -15,8 +15,7 @@
 
         <VerticalStackLayout Spacing="24">
             <VerticalStackLayout Spacing="8">
-                <Label Text="&#xE72E;"
-                    FontFamily="SegoeFluentIcons"
+                <Label Text="{mi:Fluent Icon=LockClosed32, FontOverride=True}"
                     FontSize="48"
                     TextColor="{DynamicResource AccentColor}"
                     HorizontalOptions="Center" />

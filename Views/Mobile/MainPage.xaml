@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage x:Class="mashin.Views.Mobile.MainPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:vm="clr-namespace:mashin.ViewModels"
+    xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
+    x:DataType="vm:MainViewModel"
+    BackgroundColor="{DynamicResource BackgroundPrimary}">
+
+    <Grid x:Name="RootGrid" RowDefinitions="*,Auto">
+
+        <ContentView x:Name="ContentContainer" Grid.Row="0" />
+
+        <Border Grid.Row="1"
+            Padding="12,10,12,14"
+            BackgroundColor="{DynamicResource BackgroundSecondary}"
+            StrokeThickness="0">
+            <Border.StrokeShape>
+                <RoundRectangle CornerRadius="24,24,0,0" />
+            </Border.StrokeShape>
+
+            <Grid ColumnDefinitions="*,*,*,*,*,*"
+                ColumnSpacing="4">
+
+                <VerticalStackLayout Grid.Column="0"
+                    Spacing="4"
+                    HorizontalOptions="Center"
+                    VerticalOptions="Center">
+                    <Label FontSize="22"
+                        HorizontalTextAlignment="Center"
+                        Text="{mi:Fluent Icon=Home24, FontOverride=True}"
+                        TextColor="{DynamicResource AccentColor}" />
+                    <Label FontSize="11"
+                        HorizontalTextAlignment="Center"
+                        Text="Home"
+                        TextColor="{DynamicResource AccentColor}" />
+                </VerticalStackLayout>
+
+                <VerticalStackLayout Grid.Column="1"
+                    Spacing="4"
+                    HorizontalOptions="Center"
+                    VerticalOptions="Center">
+                    <Label FontSize="22"
+                        HorizontalTextAlignment="Center"
+                        Text="{mi:Fluent Icon=CompassNorthwest24, FontOverride=True}"
+                        TextColor="{DynamicResource IconSecondary}" />
+                    <Label FontSize="11"
+                        HorizontalTextAlignment="Center"
+                        Text="Entdecken"
+                        TextColor="{DynamicResource TextSecondary}" />
+                </VerticalStackLayout>
+
+                <VerticalStackLayout Grid.Column="2"
+                    Spacing="4"
+                    HorizontalOptions="Center"
+                    VerticalOptions="Center">
+                    <Label FontSize="22"
+                        HorizontalTextAlignment="Center"
+                        Text="{mi:Fluent Icon=Heart24, FontOverride=True}"
+                        TextColor="{DynamicResource IconSecondary}" />
+                    <Label FontSize="11"
+                        HorizontalTextAlignment="Center"
+                        Text="Favoriten"
+                        TextColor="{DynamicResource TextSecondary}" />
+                </VerticalStackLayout>
+
+                <VerticalStackLayout Grid.Column="3"
+                    Spacing="4"
+                    HorizontalOptions="Center"
+                    VerticalOptions="Center">
+                    <Label FontSize="22"
+                        HorizontalTextAlignment="Center"
+                        Text="{mi:Fluent Icon=TextBulletListLtr24, FontOverride=True}"
+                        TextColor="{DynamicResource IconSecondary}" />
+                    <Label FontSize="11"
+                        HorizontalTextAlignment="Center"
+                        Text="Playlists"
+                        TextColor="{DynamicResource TextSecondary}" />
+                </VerticalStackLayout>
+
+                <VerticalStackLayout Grid.Column="4"
+                    Spacing="4"
+                    HorizontalOptions="Center"
+                    VerticalOptions="Center">
+                    <Label FontSize="22"
+                        HorizontalTextAlignment="Center"
+                        Text="{mi:Fluent Icon=Search24, FontOverride=True}"
+                        TextColor="{DynamicResource IconSecondary}" />
+                    <Label FontSize="11"
+                        HorizontalTextAlignment="Center"
+                        Text="Suche"
+                        TextColor="{DynamicResource TextSecondary}" />
+                </VerticalStackLayout>
+
+                <VerticalStackLayout Grid.Column="5"
+                    Spacing="4"
+                    HorizontalOptions="Center"
+                    VerticalOptions="Center">
+                    <Label FontSize="22"
+                        HorizontalTextAlignment="Center"
+                        Text="{mi:Fluent Icon=Settings24, FontOverride=True}"
+                        TextColor="{DynamicResource IconSecondary}" />
+                    <Label FontSize="11"
+                        HorizontalTextAlignment="Center"
+                        Text="Einstellungen"
+                        TextColor="{DynamicResource TextSecondary}" />
+                </VerticalStackLayout>
+            </Grid>
+        </Border>
+        <!--! Overlay Host -->
+        <Grid x:Name="OverlayHost"
+            Grid.Row="0"
+            Grid.RowSpan="2"
+            BackgroundColor="Transparent"
+            InputTransparent="False"
+            IsVisible="False">
+            <Grid>
+                <BoxView BackgroundColor="#80000000">
+                    <BoxView.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnOverlayBackdropTapped" />
+                    </BoxView.GestureRecognizers>
+                </BoxView>
+                <ContentPresenter x:Name="OverlayContent"
+                    HorizontalOptions="Center"
+                    VerticalOptions="Center" />
+            </Grid>
+        </Grid>
+
+    </Grid>
+</ContentPage>

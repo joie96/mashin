@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage x:Class="mashin.Views.Mobile.HomePage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:controls="clr-namespace:mashin.Views.Mobile.Controls"
+    xmlns:vm="clr-namespace:mashin.ViewModels"
+    x:DataType="vm:HomeViewModel"
+    BackgroundColor="{DynamicResource BackgroundPrimary}">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="18,20,18,24" Spacing="14">
+            <VerticalStackLayout Spacing="4">
+                <Label FontAttributes="Bold"
+                    FontFamily="PoppinsSemibold"
+                    FontSize="24"
+                    Text="Home"
+                    TextColor="{DynamicResource TextPrimary}" />
+                <Label FontSize="13"
+                    Text="Unsere Empfehlungen fuer dich"
+                    TextColor="{DynamicResource TextSecondary}" />
+            </VerticalStackLayout>
+
+            <Label IsVisible="{Binding ShowNoRecommendationFolderMessage}"
+                Text="Keine ListenBrainz-Recommendations verfuegbar."
+                TextColor="{DynamicResource TextTertiary}" />
+
+            <controls:SlideView CoverSize="145"
+                IsVisible="{Binding ShowRecommendationFolderSlideView}"
+                ItemCornerRadius="8"
+                ItemsSource="{Binding RecommendationTrackItems}"
+                MediaActions="{Binding MediaActions}"
+                PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
+                SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                ShowContextMenuAtAnchorCommand="{Binding ShowTrackContextMenuAtAnchorCommand}"
+                ShowContextMenuAtPositionCommand="{Binding ShowTrackContextMenuAtPositionCommand}" />
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

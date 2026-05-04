@@ -3,6 +3,10 @@ using mashin.Audio;
 using mashin.Services;
 using mashin.ViewModels;
 using mashin.Views.Desktop;
+using DesktopHomePage = mashin.Views.Desktop.HomePage;
+using DesktopMainPage = mashin.Views.Desktop.MainPage;
+using MobileHomePage = mashin.Views.Mobile.HomePage;
+using MobileMainPage = mashin.Views.Mobile.MainPage;
 using MauiIcons.Fluent;
 using MauiIcons.Fluent.Filled;
 using Microsoft.Extensions.Logging;
@@ -104,8 +108,10 @@ public static class MauiProgram
         builder.Services.AddTransient<SearchViewModel>();
 
         // Views registrieren
-        builder.Services.AddSingleton<MainPage>();
-        builder.Services.AddTransient<HomePage>();
+        builder.Services.AddSingleton<DesktopMainPage>();
+        builder.Services.AddSingleton<MobileMainPage>();
+        builder.Services.AddTransient<DesktopHomePage>();
+        builder.Services.AddTransient<MobileHomePage>();
         builder.Services.AddTransient<ExplorePage>();
         builder.Services.AddTransient<FavoritesPage>();
         builder.Services.AddTransient<PlaylistDetailPage>();
