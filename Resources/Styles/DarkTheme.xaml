@@ -27,6 +27,16 @@
     <Color x:Key="IconSecondary">#dddddd</Color>
     <Color x:Key="IconTertiary">#a0a0a0</Color>
 
+    <Color x:Key="OverlayPlayButtonBackground">#E6FFFFFF</Color>
+    <Color x:Key="OverlayPlayButtonHoverBackground">#FFFFFFFF</Color>
+    <Color x:Key="OverlayPlayIconColor">#111111</Color>
+
+    <Color x:Key="OverlayOppositeButtonBackground">#E6FFFFFF</Color>
+    <Color x:Key="OverlayOppositeButtonHoverBackground">#FFFFFFFF</Color>
+    <Color x:Key="OverlayOppositeIconColor">#595D66</Color>
+    <Color x:Key="OverlayOppositeIconHoverColor">#17181B</Color>
+    <Color x:Key="OverlayOppositePlayIconColor">#111111</Color>
+
     <Color x:Key="AccentColor">#ff4757</Color>
     <Color x:Key="AccentHover">#ee5a6f</Color>
     <Color x:Key="HoverBackground">#2a2a2a</Color>

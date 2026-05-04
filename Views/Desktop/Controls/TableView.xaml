@@ -118,7 +118,7 @@
                     <Label Grid.Column="9"
                            behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
                            behaviors:HoverBehavior.EnableScaleHover="True"
-                           behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                              behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
                            FontSize="20"
                            HorizontalOptions="Center"
                            Text="{mi:Fluent Icon=MoreHorizontal48,
@@ -281,7 +281,7 @@
                     <Label Grid.Column="9"
                            behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
                            behaviors:HoverBehavior.EnableScaleHover="True"
-                           behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                              behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
                            FontSize="20"
                            HorizontalOptions="Center"
                            Text="{mi:Fluent Icon=MoreHorizontal48,
@@ -470,10 +470,10 @@
 
                         <!--  PlayOverlay  -->
                         <Border x:Name="PlayOverlay"
-                                behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource IconPrimary75}"
+                            behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
                                 behaviors:HoverBehavior.EnableScaleHover="True"
-                                behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource IconPrimary}"
-                                BackgroundColor="{DynamicResource IconPrimary75}"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource OverlayPlayButtonHoverBackground}"
+                            BackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
                                 HeightRequest="35"
                                 HorizontalOptions="Center"
                                 Opacity="0"
@@ -490,7 +490,7 @@
                                    HorizontalOptions="Center"
                                    Text="{mi:FluentFilled Icon=Play48Filled,
                                                  FontOverride=True}"
-                                   TextColor="{DynamicResource BackgroundPrimary}"
+                                TextColor="{DynamicResource OverlayPlayIconColor}"
                                    VerticalOptions="Center"/>
                         </Border>
                     </Grid>
@@ -851,10 +851,10 @@
 
                         <!--  PlayOverlay  -->
                         <Border x:Name="PlayOverlay"
-                                behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource IconPrimary75}"
+                            behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
                                 behaviors:HoverBehavior.EnableScaleHover="True"
-                                behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource IconPrimary}"
-                                BackgroundColor="{DynamicResource IconPrimary75}"
+                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource OverlayPlayButtonHoverBackground}"
+                            BackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
                                 HeightRequest="35"
                                 HorizontalOptions="Center"
                                 Opacity="0"
@@ -871,7 +871,7 @@
                                    HorizontalOptions="Center"
                                    Text="{mi:FluentFilled Icon=Play48Filled,
                                                  FontOverride=True}"
-                                   TextColor="{DynamicResource BackgroundPrimary}"
+                                TextColor="{DynamicResource OverlayPlayIconColor}"
                                    VerticalOptions="Center"/>
                         </Border>
                     </Grid>
@@ -1187,3 +1187,4 @@
         </CollectionView>
     </Grid>
 </ContentView>
+

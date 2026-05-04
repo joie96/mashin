@@ -61,10 +61,10 @@
                             <Grid RowDefinitions="Auto,*,Auto">
                                 <!--  Play Button  -->
                                 <Border Grid.RowSpan="3"
-                                    behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource IconPrimary75}"
+                                    behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
                                     behaviors:HoverBehavior.EnableScaleHover="True"
-                                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource IconPrimary}"
-                                    BackgroundColor="{DynamicResource IconPrimary75}"
+                                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource OverlayPlayButtonHoverBackground}"
+                                    BackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
                                     HeightRequest="56"
                                     HorizontalOptions="Center"
                                     StrokeThickness="0"
@@ -80,7 +80,7 @@
                                         HorizontalOptions="Center"
                                         Text="{mi:FluentFilled Icon=Play48Filled,
                                                          FontOverride=True}"
-                                        TextColor="{DynamicResource BackgroundPrimary}"
+                                        TextColor="{DynamicResource OverlayPlayIconColor}"
                                         VerticalOptions="Center" />
                                 </Border>
 
@@ -91,15 +91,15 @@
                                     <!--  Favorite Outline  -->
                                     <Label Grid.Column="0"
                                         Margin="0,0,12,0"
-                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource OverlayOppositeIconColor}"
                                         behaviors:HoverBehavior.EnableScaleHover="True"
-                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource OverlayOppositeIconHoverColor}"
                                         FontSize="18"
                                         HorizontalOptions="End"
                                         IsVisible="{Binding Favorite, Converter={StaticResource InvertedBoolConverter}}"
                                         Text="{mi:Fluent Icon=Heart48,
                                                          FontOverride=True}"
-                                        TextColor="{DynamicResource IconSecondary}"
+                                        TextColor="{DynamicResource OverlayOppositeIconColor}"
                                         VerticalOptions="Center">
                                         <Label.GestureRecognizers>
                                             <TapGestureRecognizer Tapped="OnFavoriteIconTapped" />
@@ -109,15 +109,15 @@
                                     <!--  Favorite Filled  -->
                                     <Label Grid.Column="0"
                                         Margin="0,0,12,0"
-                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource OverlayOppositeIconColor}"
                                         behaviors:HoverBehavior.EnableScaleHover="True"
-                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource OverlayOppositeIconHoverColor}"
                                         FontSize="18"
                                         HorizontalOptions="End"
                                         IsVisible="{Binding Favorite}"
                                         Text="{mi:FluentFilled Icon=Heart48Filled,
                                                                        FontOverride=True}"
-                                        TextColor="{DynamicResource IconSecondary}"
+                                        TextColor="{DynamicResource OverlayOppositeIconColor}"
                                         VerticalOptions="Center">
                                         <Label.GestureRecognizers>
                                             <TapGestureRecognizer Tapped="OnFavoriteIconTapped" />
@@ -127,14 +127,14 @@
                                     <!--  More  -->
                                     <Label x:Name="MoreIconLabel"
                                         Grid.Column="1"
-                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource IconSecondary}"
+                                        behaviors:HoverBehavior.BaseTextColor="{DynamicResource OverlayOppositeIconColor}"
                                         behaviors:HoverBehavior.EnableScaleHover="True"
-                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource IconPrimary}"
+                                        behaviors:HoverBehavior.HoverTextColor="{DynamicResource OverlayOppositeIconHoverColor}"
                                         FontSize="18"
                                         HorizontalOptions="End"
                                         Text="{mi:Fluent Icon=MoreHorizontal48,
                                                                  FontOverride=True}"
-                                        TextColor="{DynamicResource IconSecondary}"
+                                        TextColor="{DynamicResource OverlayOppositeIconColor}"
                                         VerticalOptions="Center">
                                         <Label.GestureRecognizers>
                                             <TapGestureRecognizer Tapped="OnMoreIconTapped" />
@@ -263,3 +263,4 @@
         </Border>
     </Grid>
 </ContentView>
+

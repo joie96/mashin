@@ -62,10 +62,10 @@
 
                             <!--  Play Button  -->
                             <Border
-                                behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource IconPrimary75}"
+                                behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource OverlayOppositeButtonBackground}"
                                 behaviors:HoverBehavior.EnableScaleHover="True"
-                                behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource IconPrimary}"
-                                BackgroundColor="{DynamicResource IconPrimary75}"
+                                behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource OverlayOppositeButtonHoverBackground}"
+                                BackgroundColor="{DynamicResource OverlayOppositeButtonBackground}"
                                 HeightRequest="32"
                                 HorizontalOptions="End"
                                 Margin="0,0,4,0"
@@ -83,7 +83,7 @@
                                     FontSize="16"
                                     HorizontalOptions="Center"
                                     Text="{mi:FluentFilled Icon=Play48Filled, FontOverride=True}"
-                                    TextColor="{DynamicResource BackgroundPrimary}"
+                                    TextColor="{DynamicResource OverlayOppositePlayIconColor}"
                                     VerticalOptions="Center" />
                             </Border>
                         </Border>
@@ -144,3 +144,4 @@
         </CollectionView.ItemTemplate>
     </CollectionView>
 </ContentView>
+

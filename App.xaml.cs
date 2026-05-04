@@ -70,16 +70,17 @@ public partial class App : Application
         }
 
         var services = Handler!.MauiContext!.Services;
-
-        Page mainPage;
-        if (DeviceInfo.Current.Platform == DevicePlatform.Android)
-        {
-            mainPage = services.GetRequiredService<MobileMainPage>();
-        }
-        else
-        {
-            mainPage = services.GetRequiredService<DesktopMainPage>();
-        }
+        // Temporarily force mobile UI on all platforms for faster mobile iteration.
+        // Page mainPage;
+        // if (DeviceInfo.Current.Platform == DevicePlatform.Android)
+        // {
+        //     mainPage = services.GetRequiredService<MobileMainPage>();
+        // }
+        // else
+        // {
+        //     mainPage = services.GetRequiredService<DesktopMainPage>();
+        // }
+        var mainPage = services.GetRequiredService<DesktopMainPage>();
         
         var window = new Window(mainPage);
 

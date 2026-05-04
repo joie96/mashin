@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView x:Class="mashin.Views.Mobile.Controls.SlideView"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:controls="clr-namespace:mashin.Views.Mobile.Controls"
+    xmlns:desktopControls="clr-namespace:mashin.Views.Desktop.Controls"
+    xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
+    xmlns:models="clr-namespace:mashin.Models"
+    x:Name="self">
+
+    <ContentView.Resources>
+        <Color x:Key="TextPrimary">#ffffff</Color>
+        <Color x:Key="TextSecondary">#dddddd</Color>
+        <Color x:Key="BackgroundSecondary">#141414</Color>
+
+        <DataTemplate x:Key="TrackTemplate" x:DataType="models:Track">
+            <Grid x:Name="SlideContentHost"
+                Padding="12"
+                ColumnDefinitions="Auto,*"
+                ColumnSpacing="12">
+
+                <Border Grid.Column="0"
+                    HeightRequest="{Binding Source={x:Reference self}, Path=CoverSize}"
+                    HorizontalOptions="Start"
+                    StrokeThickness="0"
+                    VerticalOptions="Center"
+                    WidthRequest="{Binding Source={x:Reference self}, Path=CoverSize}">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
+                    </Border.StrokeShape>
+
+                    <Grid>
+                        <Image Aspect="AspectFill"
+                            Source="{Binding ImageUrl}" />
+
+                        <Border BackgroundColor="#50000000"
+                            StrokeThickness="0">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
+                            </Border.StrokeShape>
+                        </Border>
+
+                        <Border Margin="0,0,8,8"
+                            BackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
+                            HeightRequest="44"
+                            HorizontalOptions="End"
+                            StrokeThickness="0"
+                            VerticalOptions="End"
+                            WidthRequest="44">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Tapped="OnPlayOverlayClicked" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="22" />
+                            </Border.StrokeShape>
+                            <Label FontSize="20"
+                                HorizontalOptions="Center"
+                                Text="{mi:FluentFilled Icon=Play48Filled, FontOverride=True}"
+                                TextColor="{DynamicResource OverlayPlayIconColor}"
+                                VerticalOptions="Center" />
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Column="1"
+                    RowDefinitions="Auto,Auto"
+                    RowSpacing="3"
+                    VerticalOptions="Center">
+                    <Label Grid.Row="0"
+                        FontAttributes="Bold"
+                        FontFamily="PoppinsSemibold"
+                        FontSize="17"
+                        LineBreakMode="TailTruncation"
+                        MaxLines="1"
+                        Text="{Binding DisplayName}"
+                        TextColor="{DynamicResource TextPrimary}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Source={x:Reference self}, Path=PrimaryInfoTappedCommand}"
+                                CommandParameter="{Binding Album}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+
+                    <Label Grid.Row="1"
+                        FontFamily="PoppinsRegular"
+                        FontSize="12"
+                        LineBreakMode="TailTruncation"
+                        MaxLines="1"
+                        Text="{Binding ArtistName}"
+                        TextColor="{DynamicResource TextSecondary}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Source={x:Reference self}, Path=SecondaryInfoTappedCommand}"
+                                CommandParameter="{Binding Artists[0]}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </Grid>
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate x:Key="SkeletonTemplate" x:DataType="models:SkeletonItem">
+            <Grid ColumnDefinitions="Auto,*"
+                ColumnSpacing="12"
+                Padding="12"
+                BackgroundColor="{DynamicResource BackgroundSecondary}">
+                <desktopControls:SkeletonLoader Grid.Column="0"
+                    HeightRequest="{Binding Source={x:Reference self}, Path=CoverSize}"
+                    WidthRequest="{Binding Source={x:Reference self}, Path=CoverSize}"
+                    CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
+
+                <Grid Grid.Column="1"
+                    RowDefinitions="Auto,Auto"
+                    RowSpacing="8"
+                    VerticalOptions="Center">
+                    <desktopControls:SkeletonLoader Grid.Row="0"
+                        HeightRequest="18"
+                        WidthRequest="150"
+                        HorizontalOptions="Start"
+                        CornerRadius="8" />
+                    <desktopControls:SkeletonLoader Grid.Row="1"
+                        HeightRequest="14"
+                        WidthRequest="110"
+                        HorizontalOptions="Start"
+                        CornerRadius="8" />
+                </Grid>
+            </Grid>
+        </DataTemplate>
+
+        <controls:SlideViewTemplateSelector x:Key="SlideViewTemplateSelector"
+            TrackTemplate="{StaticResource TrackTemplate}"
+            SkeletonTemplate="{StaticResource SkeletonTemplate}" />
+
+    </ContentView.Resources>
+
+    <Grid>
+        <Border x:Name="SlideCardBorderPrimary"
+            BackgroundColor="{DynamicResource BackgroundSecondary}"
+            StrokeThickness="0">
+            <Border.StrokeShape>
+                <RoundRectangle CornerRadius="12" />
+            </Border.StrokeShape>
+            <Grid>
+                <Image x:Name="SlideCardBackgroundImagePrimary"
+                    Aspect="AspectFill"
+                    HeightRequest="{Binding Source={x:Reference SlideItemHostPrimary}, Path=Height}"
+                    InputTransparent="True"
+                    Scale="1.2"
+                    VerticalOptions="Center"
+                    WidthRequest="{Binding Source={x:Reference SlideItemHostPrimary}, Path=Width}" />
+                <Grid x:Name="SlideItemHostPrimary"
+                    BindableLayout.ItemTemplateSelector="{StaticResource SlideViewTemplateSelector}" />
+            </Grid>
+        </Border>
+
+        <Border x:Name="SlideCardBorderSecondary"
+            BackgroundColor="{DynamicResource BackgroundSecondary}"
+            IsVisible="False"
+            InputTransparent="True"
+            Opacity="0"
+            StrokeThickness="0">
+            <Border.StrokeShape>
+                <RoundRectangle CornerRadius="12" />
+            </Border.StrokeShape>
+            <Grid>
+                <Image x:Name="SlideCardBackgroundImageSecondary"
+                    Aspect="AspectFill"
+                    HeightRequest="{Binding Source={x:Reference SlideItemHostSecondary}, Path=Height}"
+                    InputTransparent="True"
+                    Scale="1.2"
+                    VerticalOptions="Center"
+                    WidthRequest="{Binding Source={x:Reference SlideItemHostSecondary}, Path=Width}" />
+                <Grid x:Name="SlideItemHostSecondary"
+                    BindableLayout.ItemTemplateSelector="{StaticResource SlideViewTemplateSelector}" />
+            </Grid>
+        </Border>
+    </Grid>
+</ContentView>
+
