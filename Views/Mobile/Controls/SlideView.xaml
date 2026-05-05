@@ -9,10 +9,8 @@
     x:Name="self">
 
     <ContentView.Resources>
-        <Color x:Key="TextPrimary">#ffffff</Color>
-        <Color x:Key="TextSecondary">#dddddd</Color>
-        <Color x:Key="BackgroundSecondary">#141414</Color>
 
+        <!--  DataTemplate for Tracks  -->
         <DataTemplate x:Key="TrackTemplate" x:DataType="models:Track">
             <Border Padding="6"
                 BackgroundColor="{DynamicResource BackgroundSecondary}"
@@ -22,14 +20,29 @@
                     <RoundRectangle CornerRadius="12" />
                 </Border.StrokeShape>
 
-                <Grid ColumnDefinitions="Auto,*"
-                    ColumnSpacing="12">
+                <Grid x:Name="TrackContentHost"
+                    ColumnDefinitions="Auto,*"
+                    ColumnSpacing="12"
+                    IsClippedToBounds="True">
 
+                    <!--  Blurred Card Background  -->
+                    <Image Grid.ColumnSpan="2"
+                        Aspect="AspectFill"
+                        BindingContextChanged="OnTrackBackgroundBindingContextChanged"
+                        HeightRequest="{Binding Source={x:Reference TrackContentHost}, Path=Height}"
+                        InputTransparent="True"
+                        Opacity="0.85"
+                        Scale="1.18"
+                        VerticalOptions="Center"
+                        WidthRequest="{Binding Source={x:Reference TrackContentHost}, Path=Width}" />
+
+                    <!--  Dark Tint for Readability  -->
                     <Border BackgroundColor="#7F141414"
                         Grid.ColumnSpan="2"
                         InputTransparent="True"
                         StrokeThickness="0" />
 
+                    <!--  Cover + Play Overlay  -->
                     <Border Grid.Column="0"
                         HeightRequest="{Binding Source={x:Reference self}, Path=CoverSize}"
                         HorizontalOptions="Start"
@@ -41,9 +54,11 @@
                         </Border.StrokeShape>
 
                         <Grid>
+                            <!--  Cover Image  -->
                             <Image Aspect="AspectFill"
                                 Source="{Binding ImageUrl}" />
 
+                            <!--  Cover Shade  -->
                             <Border BackgroundColor="#26000000"
                                 StrokeThickness="0">
                                 <Border.StrokeShape>
@@ -51,6 +66,7 @@
                                 </Border.StrokeShape>
                             </Border>
 
+                            <!--  Bottom-Left Play Button  -->
                             <Grid Padding="4,0,0,4"
                                 HorizontalOptions="Fill"
                                 VerticalOptions="Fill">
@@ -76,6 +92,7 @@
                         </Grid>
                     </Border>
 
+                    <!--  Primary Infos  -->
                     <Grid Grid.Column="1"
                         RowDefinitions="Auto,Auto"
                         RowSpacing="3"
@@ -111,6 +128,7 @@
             </Border>
         </DataTemplate>
 
+        <!--  DataTemplate for Skeletons  -->
         <DataTemplate x:Key="SkeletonTemplate" x:DataType="models:SkeletonItem">
             <Border Padding="12"
                 BackgroundColor="{DynamicResource BackgroundSecondary}"
@@ -146,12 +164,14 @@
             </Border>
         </DataTemplate>
 
+        <!--  TemplateSelector to choose between DataTemplates  -->
         <controls:SlideViewTemplateSelector x:Key="SlideViewTemplateSelector"
             TrackTemplate="{StaticResource TrackTemplate}"
             SkeletonTemplate="{StaticResource SkeletonTemplate}" />
 
     </ContentView.Resources>
 
+    <!--  Horizontal Items   -->
     <CollectionView x:Name="ItemsCollectionView"
         HorizontalScrollBarVisibility="Never"
         ItemSizingStrategy="MeasureAllItems"

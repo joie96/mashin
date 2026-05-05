@@ -1,5 +1,10 @@
 using mashin.Models;
 using mashin.Services;
+using ImageSharpImage = SixLabors.ImageSharp.Image;
+using SixLabors.ImageSharp.Formats.Png;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
+using System.Collections.Concurrent;
 using System.Windows.Input;
 
 namespace mashin.Views.Mobile.Controls;
@@ -34,6 +39,13 @@ public partial class SlideView : ContentView
 
     public static readonly BindableProperty ItemWidthProperty =
         BindableProperty.Create(nameof(ItemWidth), typeof(double), typeof(SlideView), 320d);
+
+    #endregion
+
+    #region Fields
+
+    private static readonly HttpClient PaletteHttpClient = new() { Timeout = TimeSpan.FromSeconds(8) };
+    private readonly ConcurrentDictionary<string, byte[]> _blurredCoverCache = new(StringComparer.OrdinalIgnoreCase);
 
     #endregion
 
@@ -106,6 +118,39 @@ public partial class SlideView : ContentView
 
     #region UI Events
 
+    private async void OnTrackBackgroundBindingContextChanged(object? sender, EventArgs e)
+    {
+        if (sender is not Image backgroundImage)
+        {
+            return;
+        }
+
+        if (backgroundImage.BindingContext is not MediaItem mediaItem)
+        {
+            backgroundImage.Source = null;
+            return;
+        }
+
+        var imageUrl = mediaItem.ImageUrl;
+        if (string.IsNullOrWhiteSpace(imageUrl))
+        {
+            backgroundImage.Source = null;
+            return;
+        }
+
+        var blurredSource = await GetBlurredCoverSourceAsync(imageUrl);
+
+        await MainThread.InvokeOnMainThreadAsync(() =>
+        {
+            if (!ReferenceEquals(backgroundImage.BindingContext, mediaItem))
+            {
+                return;
+            }
+
+            backgroundImage.Source = blurredSource;
+        });
+    }
+
     private async void OnPlayOverlayClicked(object? sender, TappedEventArgs e)
     {
         if (sender is not BindableObject { BindingContext: MediaItem item } || MediaActions == null)
@@ -114,6 +159,53 @@ public partial class SlideView : ContentView
         }
 
         await MediaActions.PlayMediaAsync(item);
+    }
+
+    private async Task<ImageSource?> GetBlurredCoverSourceAsync(string? imageUrl)
+    {
+        if (string.IsNullOrWhiteSpace(imageUrl))
+        {
+            return null;
+        }
+
+        if (_blurredCoverCache.TryGetValue(imageUrl, out var cachedBytes))
+        {
+            return ImageSource.FromStream(() => new MemoryStream(cachedBytes));
+        }
+
+        try
+        {
+            if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out _))
+            {
+                return null;
+            }
+
+            var bytes = await PaletteHttpClient.GetByteArrayAsync(imageUrl);
+            if (bytes.Length == 0)
+            {
+                return null;
+            }
+
+            await using var sourceStream = new MemoryStream(bytes);
+            using var image = await ImageSharpImage.LoadAsync<Rgba32>(sourceStream);
+
+            image.Mutate(ctx =>
+            {
+                ctx.GaussianBlur(24f);
+            });
+
+            await using var outputStream = new MemoryStream();
+            await image.SaveAsync(outputStream, new PngEncoder());
+
+            var blurredBytes = outputStream.ToArray();
+            _blurredCoverCache[imageUrl] = blurredBytes;
+
+            return ImageSource.FromStream(() => new MemoryStream(blurredBytes));
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     #endregion
