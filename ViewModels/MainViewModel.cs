@@ -5,6 +5,7 @@ using MauiIcons.Fluent;
 using Microsoft.Extensions.Logging;
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Dispatching;
+using Microsoft.Maui.Graphics;
 using Sendspin.SDK.Connection;
 using Sendspin.SDK.Models;
 using System.Collections.ObjectModel;
@@ -32,6 +33,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private readonly IPlaylistStoreService _playlistStore;
     private readonly IContextMenuService _contextMenuService;
     private readonly IQueueSyncService _queueSyncService;
+    private readonly IArtworkService _artworkService;
     private readonly ILogger<MainViewModel> _logger;
 
 
@@ -50,6 +52,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private bool _isDontStopTheMusicEnabled;
     private bool _isDarkTheme;
+    private Color _playerBarAccentColor = Color.FromArgb("#141414");
+    private Color _playerBarForegroundColor = Color.FromArgb("#5C4436");
+    private CancellationTokenSource? _playerBarAccentCts;
 
     // Search
     private string _searchQuery = string.Empty;
@@ -100,6 +105,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         IMediaItemActions mediaActions,
         IContextMenuService contextMenuService,
         IQueueSyncService queueSyncService,
+        IArtworkService artworkService,
         ILogger<MainViewModel> logger)
     {
         _settings = settings;
@@ -111,6 +117,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _playlistStore = playlistStore;
         _contextMenuService = contextMenuService;
         _queueSyncService = queueSyncService;
+        _artworkService = artworkService;
         _logger = logger;
         MediaActions = mediaActions;
         _selectedAudioQuality = _settings.GetPreferredAudioCodec();
@@ -353,6 +360,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             if (SetProperty(ref _duration, value))
             {
                 OnPropertyChanged(nameof(DurationText));
+                OnPropertyChanged(nameof(PlayerBarProgress));
             }
         }
     }
@@ -365,6 +373,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             if (SetProperty(ref _position, value))
             {
                 OnPropertyChanged(nameof(PositionText));
+                OnPropertyChanged(nameof(PlayerBarProgress));
             }
         }
     }
@@ -410,6 +419,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             if (SetProperty(ref _currentTrack, value))
             {
                 OnPropertyChanged(nameof(CurrentTrackPrimaryArtist));
+                _ = UpdatePlayerBarAccentColorAsync(value);
 
                 if (oldTrack?.Uri != value?.Uri)
                 {
@@ -418,6 +428,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             }
         }
     }
+
+    public Color PlayerBarAccentColor
+    {
+        get => _playerBarAccentColor;
+        private set => SetProperty(ref _playerBarAccentColor, value);
+    }
+
+    public Color PlayerBarForegroundColor
+    {
+        get => _playerBarForegroundColor;
+        private set => SetProperty(ref _playerBarForegroundColor, value);
+    }
+
+    public double PlayerBarProgress => Duration <= 0 ? 0 : Math.Clamp(Position / Duration, 0, 1);
 
     public Artist? CurrentTrackPrimaryArtist => CurrentTrack?.Artists?.FirstOrDefault();
 
@@ -650,6 +674,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        _playerBarAccentCts?.Cancel();
+        _playerBarAccentCts?.Dispose();
+        _playerBarAccentCts = null;
+
         _currentQueueItems.CollectionChanged -= OnCurrentQueueItemsCollectionChanged;
 
         _musicAssistant.LoginRequired -= OnLoginRequired;
@@ -663,6 +691,68 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _navigationService.PropertyChanged -= OnNavigationServicePropertyChanged;
 
         await Task.CompletedTask;
+    }
+
+    #endregion
+
+    #region Artwork
+
+    private async Task UpdatePlayerBarAccentColorAsync(Track? track)
+    {
+        _playerBarAccentCts?.Cancel();
+        _playerBarAccentCts?.Dispose();
+
+        if (track == null || string.IsNullOrWhiteSpace(track.ImageUrl))
+        {
+            PlayerBarAccentColor = Color.FromArgb("#141414");
+            PlayerBarForegroundColor = _artworkService.GetForegroundColor(PlayerBarAccentColor);
+            _playerBarAccentCts = null;
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _playerBarAccentCts = cts;
+
+        try
+        {
+            var accentColor = await _artworkService.GetAccentColorAsync(track.ImageUrl, cts.Token);
+            if (cts.IsCancellationRequested || !ReferenceEquals(_playerBarAccentCts, cts))
+            {
+                return;
+            }
+
+            var resolvedColor = accentColor ?? Color.FromArgb("#141414");
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                if (ReferenceEquals(_playerBarAccentCts, cts))
+                {
+                    PlayerBarAccentColor = resolvedColor;
+                    PlayerBarForegroundColor = _artworkService.GetForegroundColor(resolvedColor);
+                }
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when track changes quickly.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to resolve player bar accent color");
+            if (ReferenceEquals(_playerBarAccentCts, cts))
+            {
+                PlayerBarAccentColor = Color.FromArgb("#141414");
+                PlayerBarForegroundColor = _artworkService.GetForegroundColor(PlayerBarAccentColor);
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(_playerBarAccentCts, cts))
+            {
+                _playerBarAccentCts = null;
+            }
+
+            cts.Dispose();
+        }
     }
 
     #endregion

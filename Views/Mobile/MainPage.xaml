@@ -2,16 +2,127 @@
 <ContentPage x:Class="mashin.Views.Mobile.MainPage"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:converters="clr-namespace:mashin.Converters"
     xmlns:vm="clr-namespace:mashin.ViewModels"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
     x:DataType="vm:MainViewModel"
     BackgroundColor="{DynamicResource BackgroundPrimary}">
 
-    <Grid x:Name="RootGrid" RowDefinitions="*,Auto">
+    <ContentPage.Resources>
+        <converters:PlayStateToBoolConverter x:Key="PlayStateToBoolConverter" />
+    </ContentPage.Resources>
+
+    <Grid x:Name="RootGrid" RowDefinitions="*,Auto,Auto">
 
         <ContentView x:Name="ContentContainer" Grid.Row="0" />
 
-        <Border Grid.Row="1"
+        <!--  Bottom Player Bar  -->
+        <Border x:Name="PlayerBarBorder"
+            Grid.Row="1"
+            Margin="10,6,10,4"
+            Padding="0"
+            BackgroundColor="{Binding PlayerBarAccentColor}"
+            StrokeThickness="0">
+            <Border.StrokeShape>
+                <RoundRectangle CornerRadius="12" />
+            </Border.StrokeShape>
+            <Border.Triggers>
+                <DataTrigger TargetType="Border"
+                    Binding="{Binding CurrentTrack}"
+                    Value="{x:Null}">
+                    <Setter Property="IsVisible" Value="False" />
+                </DataTrigger>
+            </Border.Triggers>
+            <Grid ColumnDefinitions="Auto,*"
+                ColumnSpacing="0">
+                <Border Grid.Column="0"
+                    HeightRequest="{Binding Source={x:Reference PlayerBarBorder}, Path=Height}"
+                    StrokeThickness="0"
+                    VerticalOptions="Fill"
+                    WidthRequest="{Binding Source={x:Reference PlayerBarBorder}, Path=Height}">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="12,0,0,12" />
+                    </Border.StrokeShape>
+                    <Image Aspect="AspectFill"
+                        Source="{Binding CurrentTrack.ImageUrl}" />
+                </Border>
+
+                <Grid x:Name="PlayerBarProgressHost"
+                    Grid.Column="1"
+                    ColumnDefinitions="*,Auto"
+                    ColumnSpacing="10"
+                    IsClippedToBounds="True">
+                    <Border Grid.ColumnSpan="2"
+                        BackgroundColor="{Binding PlayerBarForegroundColor}"
+                        HeightRequest="{Binding Source={x:Reference PlayerBarProgressHost}, Path=Height}"
+                        HorizontalOptions="Fill"
+                        InputTransparent="True"
+                        ScaleX="{Binding PlayerBarProgress}"
+                        StrokeThickness="0"
+                        VerticalOptions="Fill"
+                        AnchorX="0"
+                        WidthRequest="{Binding Source={x:Reference PlayerBarProgressHost}, Path=Width}">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="0,100,0,100" />
+                        </Border.StrokeShape>
+                    </Border>
+
+                    <Grid Grid.Column="0"
+                        Margin="8,8,0,8"
+                        RowDefinitions="Auto,Auto"
+                        RowSpacing="1"
+                        VerticalOptions="Center">
+                        <Label Grid.Row="0"
+                            FontAttributes="Bold"
+                            FontFamily="PoppinsSemibold"
+                            FontSize="13"
+                            LineBreakMode="TailTruncation"
+                            MaxLines="1"
+                            Text="{Binding CurrentTrack.DisplayName}"
+                            TextColor="{DynamicResource TextPrimary}" />
+                        <Label Grid.Row="1"
+                            FontFamily="PoppinsRegular"
+                            FontSize="11"
+                            LineBreakMode="TailTruncation"
+                            MaxLines="1"
+                            Text="{Binding CurrentTrack.ArtistName}"
+                            TextColor="{DynamicResource TextSecondary}" />
+                    </Grid>
+
+                    <Border Grid.Column="1"
+                        Margin="0,8,12,8"
+                        BackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
+                        HeightRequest="38"
+                        StrokeThickness="0"
+                        VerticalOptions="Center"
+                        WidthRequest="38">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding TogglePlayPauseCommand}" />
+                        </Border.GestureRecognizers>
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="19" />
+                        </Border.StrokeShape>
+                        <Grid>
+                            <Label FontSize="20"
+                                HorizontalOptions="Center"
+                                IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=show-play-icon}"
+                                Text="{mi:FluentFilled Icon=Play48Filled, FontOverride=True}"
+                                TextColor="{DynamicResource OverlayPlayIconColor}"
+                                VerticalOptions="Center" />
+                            <Label FontSize="20"
+                                HorizontalOptions="Center"
+                                IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=show-pause-icon}"
+                                Text="{mi:FluentFilled Icon=Pause48Filled, FontOverride=True}"
+                                TextColor="{DynamicResource OverlayPlayIconColor}"
+                                VerticalOptions="Center" />
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!--  Bottom Navigation Bar  -->
+        <Border Grid.Row="2"
             Padding="12,10,12,14"
             BackgroundColor="{DynamicResource BackgroundSecondary}"
             StrokeThickness="0">
@@ -110,7 +221,7 @@
         <!--! Overlay Host -->
         <Grid x:Name="OverlayHost"
             Grid.Row="0"
-            Grid.RowSpan="2"
+            Grid.RowSpan="3"
             BackgroundColor="Transparent"
             InputTransparent="False"
             IsVisible="False">

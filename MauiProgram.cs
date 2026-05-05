@@ -53,6 +53,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<IOverlayService, OverlayService>();
         builder.Services.AddSingleton<IPlaylistStoreService, PlaylistStoreService>();
         builder.Services.AddSingleton<IQueueSyncService, QueueSyncService>();
+        builder.Services.AddSingleton<IArtworkService, ArtworkService>();
 
 #if WINDOWS
         builder.Services.AddSingleton<IContextMenuService, WindowsContextMenuService>();
