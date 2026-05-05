@@ -1,8 +1,10 @@
 using ImageSharpImage = SixLabors.ImageSharp.Image;
+using Microsoft.Extensions.Logging;
 using Microsoft.Maui.Graphics;
 using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using SixLabors.ImageSharp.Processing.Processors.Transforms;
 using System.Collections.Concurrent;
 
 namespace mashin.Services;
@@ -40,10 +42,20 @@ public sealed class ArtworkService : IArtworkService
     #region Fields
 
     private static readonly HttpClient ArtworkHttpClient = new() { Timeout = TimeSpan.FromSeconds(8) };
+    private readonly ILogger<ArtworkService> _logger;
 
     private readonly ConcurrentDictionary<string, byte[]> _downloadCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte[]> _blurredCoverCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, Color> _accentColorCache = new(StringComparer.OrdinalIgnoreCase);
+
+    #endregion
+
+    #region Construction
+
+    public ArtworkService(ILogger<ArtworkService> logger)
+    {
+        _logger = logger;
+    }
 
     #endregion
 
@@ -69,35 +81,48 @@ public sealed class ArtworkService : IArtworkService
                 return null;
             }
 
-            await using var sourceStream = new MemoryStream(bytes);
-            using var image = await ImageSharpImage.LoadAsync<Rgba32>(sourceStream, cancellationToken);
-
-            // Keep color extraction fast by reducing image resolution before analysis.
-            image.Mutate(ctx =>
+            var color = await Task.Run(() =>
             {
-                ctx.Resize(new ResizeOptions
-                {
-                    Mode = SixLabors.ImageSharp.Processing.ResizeMode.Max,
-                    Size = new SixLabors.ImageSharp.Size(48, 48),
-                    Sampler = KnownResamplers.Triangle,
-                });
-            });
+                using var sourceStream = new MemoryStream(bytes);
+                using var image = ImageSharpImage.Load<Rgba32>(sourceStream);
 
-            var color = CalculateAccentColor(image);
+                image.Mutate(ctx =>
+                {
+                    ctx.Resize(new ResizeOptions
+                    {
+                        Mode = SixLabors.ImageSharp.Processing.ResizeMode.Max,
+                        Size = new SixLabors.ImageSharp.Size(48, 48),
+                        Sampler = KnownResamplers.Triangle,
+                    });
+                });
+
+                return CalculateAccentColor(image);
+            }, cancellationToken);
+
             _accentColorCache[imageUrl] = color;
 
             return color;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "ArtworkService: accent extraction failed for URL {ImageUrl}", imageUrl);
             return null;
         }
     }
 
     public async Task<ImageSource?> GetBlurredCoverSourceAsync(string? imageUrl, float blurRadius = 24f, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(imageUrl) || !Uri.TryCreate(imageUrl, UriKind.Absolute, out _))
+        _logger.LogInformation("ArtworkService: blurred cover requested for URL {ImageUrl}", imageUrl);
+
+        if (string.IsNullOrWhiteSpace(imageUrl))
         {
+            _logger.LogInformation("ArtworkService: blurred cover skipped because image URL is empty.");
+            return null;
+        }
+
+        if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out _))
+        {
+            _logger.LogInformation("ArtworkService: blurred cover skipped because image URL is not absolute: {ImageUrl}", imageUrl);
             return null;
         }
 
@@ -114,28 +139,48 @@ public sealed class ArtworkService : IArtworkService
             var bytes = await GetImageBytesAsync(imageUrl, cancellationToken);
             if (bytes.Length == 0)
             {
+                _logger.LogInformation("ArtworkService: blurred cover skipped because download returned 0 bytes for URL {ImageUrl}", imageUrl);
                 return null;
             }
 
-            await using var sourceStream = new MemoryStream(bytes);
-            using var image = await ImageSharpImage.LoadAsync<Rgba32>(sourceStream, cancellationToken);
-
-            // Gaussian blur is used so UI layers can reuse this as a soft backdrop.
-            image.Mutate(ctx =>
+            // Blur simulation via extreme downscale + upscale: resize to a tiny thumbnail,
+            // then scale back up. The bilinear sampler smears all detail into a smooth
+            // color wash — no GaussianBlur kernel needed, so this is very fast on Android.
+            var blurredBytes = await Task.Run(() =>
             {
-                ctx.GaussianBlur(normalizedBlur);
-            });
+                using var sourceStream = new MemoryStream(bytes);
+                using var image = ImageSharpImage.Load<Rgba32>(sourceStream);
 
-            await using var outputStream = new MemoryStream();
-            await image.SaveAsync(outputStream, new PngEncoder(), cancellationToken);
+                image.Mutate(ctx =>
+                {
+                    ctx.Resize(new ResizeOptions
+                    {
+                        Mode = SixLabors.ImageSharp.Processing.ResizeMode.Stretch,
+                        Size = new SixLabors.ImageSharp.Size(16, 16),
+                        Sampler = KnownResamplers.Bicubic,
+                    });
+                    ctx.Resize(new ResizeOptions
+                    {
+                        Mode = SixLabors.ImageSharp.Processing.ResizeMode.Stretch,
+                        Size = new SixLabors.ImageSharp.Size(200, 200),
+                        Sampler = KnownResamplers.Bicubic,
+                    });
+                });
 
-            var blurredBytes = outputStream.ToArray();
+                using var outputStream = new MemoryStream();
+                image.Save(outputStream, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = 70 });
+
+                return outputStream.ToArray();
+            }, cancellationToken);
+
             _blurredCoverCache[cacheKey] = blurredBytes;
+            _logger.LogInformation("ArtworkService: blurred cover generated for URL {ImageUrl} with blur {BlurRadius}", imageUrl, normalizedBlur);
 
             return ImageSource.FromStream(() => new MemoryStream(blurredBytes));
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "ArtworkService: blurred cover generation failed for URL {ImageUrl}", imageUrl);
             return null;
         }
     }
@@ -171,13 +216,19 @@ public sealed class ArtworkService : IArtworkService
     {
         if (_downloadCache.TryGetValue(imageUrl, out var cachedBytes))
         {
+            _logger.LogInformation("ArtworkService: image bytes served from cache for URL {ImageUrl}", imageUrl);
             return cachedBytes;
         }
 
-        using var response = await ArtworkHttpClient.GetAsync(imageUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        _logger.LogInformation("ArtworkService: downloading image bytes for URL {ImageUrl}", imageUrl);
 
-        var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+        var bytes = await ArtworkHttpClient.GetByteArrayAsync(imageUrl, cts.Token);
+
+        _logger.LogInformation("ArtworkService: downloaded {Bytes} bytes for URL {ImageUrl}", bytes.Length, imageUrl);
+
         _downloadCache[imageUrl] = bytes;
 
         return bytes;

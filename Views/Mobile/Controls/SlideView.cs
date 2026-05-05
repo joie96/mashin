@@ -1,10 +1,6 @@
 using mashin.Models;
 using mashin.Services;
-using ImageSharpImage = SixLabors.ImageSharp.Image;
-using SixLabors.ImageSharp.Formats.Png;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
-using System.Collections.Concurrent;
+using Microsoft.Extensions.DependencyInjection;
 using System.Windows.Input;
 
 namespace mashin.Views.Mobile.Controls;
@@ -44,12 +40,16 @@ public partial class SlideView : ContentView
 
     #region Fields
 
-    private static readonly HttpClient PaletteHttpClient = new() { Timeout = TimeSpan.FromSeconds(8) };
-    private readonly ConcurrentDictionary<string, byte[]> _blurredCoverCache = new(StringComparer.OrdinalIgnoreCase);
+    private IArtworkService? _artworkService;
 
     #endregion
 
     #region Properties
+
+    private IArtworkService? ArtworkService =>
+        _artworkService ??=
+            IPlatformApplication.Current?.Services.GetService<IArtworkService>() ??
+            Handler?.MauiContext?.Services.GetService<IArtworkService>();
 
     public IEnumerable<object>? ItemsSource
     {
@@ -131,6 +131,16 @@ public partial class SlideView : ContentView
             return;
         }
 
+        await ApplyTrackBackgroundAsync(backgroundImage, mediaItem);
+    }
+
+    private async Task ApplyTrackBackgroundAsync(Image backgroundImage, MediaItem mediaItem, int attempt = 0)
+    {
+        if (!ReferenceEquals(backgroundImage.BindingContext, mediaItem))
+        {
+            return;
+        }
+
         var imageUrl = mediaItem.ImageUrl;
         if (string.IsNullOrWhiteSpace(imageUrl))
         {
@@ -138,7 +148,22 @@ public partial class SlideView : ContentView
             return;
         }
 
-        var blurredSource = await GetBlurredCoverSourceAsync(imageUrl);
+        // Keep card readable while blurred image is generated.
+        backgroundImage.Source = imageUrl;
+
+        var artworkService = ArtworkService;
+        if (artworkService == null)
+        {
+            if (attempt < 3)
+            {
+                await Task.Delay(120);
+                await ApplyTrackBackgroundAsync(backgroundImage, mediaItem, attempt + 1);
+            }
+
+            return;
+        }
+
+        var blurredSource = await artworkService.GetBlurredCoverSourceAsync(imageUrl);
 
         await MainThread.InvokeOnMainThreadAsync(() =>
         {
@@ -147,7 +172,10 @@ public partial class SlideView : ContentView
                 return;
             }
 
-            backgroundImage.Source = blurredSource;
+            if (blurredSource != null)
+            {
+                backgroundImage.Source = blurredSource;
+            }
         });
     }
 
@@ -159,53 +187,6 @@ public partial class SlideView : ContentView
         }
 
         await MediaActions.PlayMediaAsync(item);
-    }
-
-    private async Task<ImageSource?> GetBlurredCoverSourceAsync(string? imageUrl)
-    {
-        if (string.IsNullOrWhiteSpace(imageUrl))
-        {
-            return null;
-        }
-
-        if (_blurredCoverCache.TryGetValue(imageUrl, out var cachedBytes))
-        {
-            return ImageSource.FromStream(() => new MemoryStream(cachedBytes));
-        }
-
-        try
-        {
-            if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out _))
-            {
-                return null;
-            }
-
-            var bytes = await PaletteHttpClient.GetByteArrayAsync(imageUrl);
-            if (bytes.Length == 0)
-            {
-                return null;
-            }
-
-            await using var sourceStream = new MemoryStream(bytes);
-            using var image = await ImageSharpImage.LoadAsync<Rgba32>(sourceStream);
-
-            image.Mutate(ctx =>
-            {
-                ctx.GaussianBlur(24f);
-            });
-
-            await using var outputStream = new MemoryStream();
-            await image.SaveAsync(outputStream, new PngEncoder());
-
-            var blurredBytes = outputStream.ToArray();
-            _blurredCoverCache[imageUrl] = blurredBytes;
-
-            return ImageSource.FromStream(() => new MemoryStream(blurredBytes));
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     #endregion

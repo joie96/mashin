@@ -126,10 +126,7 @@
             Padding="12,10,12,14"
             BackgroundColor="{DynamicResource BackgroundSecondary}"
             StrokeThickness="0">
-            <Border.StrokeShape>
-                <RoundRectangle CornerRadius="24,24,0,0" />
-            </Border.StrokeShape>
-
+            
             <Grid ColumnDefinitions="*,*,*,*,*,*"
                 ColumnSpacing="4">
 
@@ -141,10 +138,6 @@
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=Home24, FontOverride=True}"
                         TextColor="{DynamicResource AccentColor}" />
-                    <Label FontSize="11"
-                        HorizontalTextAlignment="Center"
-                        Text="Home"
-                        TextColor="{DynamicResource AccentColor}" />
                 </VerticalStackLayout>
 
                 <VerticalStackLayout Grid.Column="1"
@@ -155,10 +148,6 @@
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=CompassNorthwest24, FontOverride=True}"
                         TextColor="{DynamicResource IconSecondary}" />
-                    <Label FontSize="11"
-                        HorizontalTextAlignment="Center"
-                        Text="Entdecken"
-                        TextColor="{DynamicResource TextSecondary}" />
                 </VerticalStackLayout>
 
                 <VerticalStackLayout Grid.Column="2"
@@ -169,10 +158,6 @@
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=Heart24, FontOverride=True}"
                         TextColor="{DynamicResource IconSecondary}" />
-                    <Label FontSize="11"
-                        HorizontalTextAlignment="Center"
-                        Text="Favoriten"
-                        TextColor="{DynamicResource TextSecondary}" />
                 </VerticalStackLayout>
 
                 <VerticalStackLayout Grid.Column="3"
@@ -183,10 +168,6 @@
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=TextBulletListLtr24, FontOverride=True}"
                         TextColor="{DynamicResource IconSecondary}" />
-                    <Label FontSize="11"
-                        HorizontalTextAlignment="Center"
-                        Text="Playlists"
-                        TextColor="{DynamicResource TextSecondary}" />
                 </VerticalStackLayout>
 
                 <VerticalStackLayout Grid.Column="4"
@@ -197,10 +178,6 @@
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=Search24, FontOverride=True}"
                         TextColor="{DynamicResource IconSecondary}" />
-                    <Label FontSize="11"
-                        HorizontalTextAlignment="Center"
-                        Text="Suche"
-                        TextColor="{DynamicResource TextSecondary}" />
                 </VerticalStackLayout>
 
                 <VerticalStackLayout Grid.Column="5"
@@ -211,10 +188,6 @@
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=Settings24, FontOverride=True}"
                         TextColor="{DynamicResource IconSecondary}" />
-                    <Label FontSize="11"
-                        HorizontalTextAlignment="Center"
-                        Text="Einstellungen"
-                        TextColor="{DynamicResource TextSecondary}" />
                 </VerticalStackLayout>
             </Grid>
         </Border>
