@@ -44,7 +44,7 @@
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="6" />
                         </Border.StrokeShape>
-                        <Image Aspect="AspectFill" Source="{Binding CurrentTrack.ImageUrl}" />
+                        <Image Aspect="AspectFill" Source="{Binding CurrentTrack.DisplayImageSource}" />
                     </Border>
 
                     <!--  Track Actions  -->

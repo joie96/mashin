@@ -977,7 +977,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
             track.DisplayName = snapshot.DisplayName;
         }
 
-        track.Metadata = BuildMetadata(snapshot.ImageUrl);
+        track.Metadata = BuildMetadata(snapshot.ImagePath);
 
         if (snapshot.Album != null)
         {
@@ -992,7 +992,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
             };
 
             album.DisplayName = snapshot.Album.Name;
-            album.Metadata = BuildMetadata(snapshot.Album.ImageUrl);
+            album.Metadata = BuildMetadata(snapshot.Album.ImagePath);
             track.Album = album;
         }
 
@@ -1024,7 +1024,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
             album.DisplayName = snapshot.DisplayName;
         }
 
-        album.Metadata = BuildMetadata(snapshot.ImageUrl);
+        album.Metadata = BuildMetadata(snapshot.ImagePath);
 
         if (snapshot.Artists.Count > 0)
         {
@@ -1053,7 +1053,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
             playlist.DisplayName = snapshot.DisplayName;
         }
 
-        playlist.Metadata = BuildMetadata(snapshot.ImageUrl);
+        playlist.Metadata = BuildMetadata(snapshot.ImagePath);
         return playlist;
     }
 
@@ -1074,7 +1074,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
             artist.DisplayName = snapshot.DisplayName;
         }
 
-        artist.Metadata = BuildMetadata(snapshot.ImageUrl);
+        artist.Metadata = BuildMetadata(snapshot.ImagePath);
         return artist;
     }
 
@@ -1092,9 +1092,9 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
         return artist;
     }
 
-    private static MediaItemMetadata? BuildMetadata(string? imageUrl)
+    private static MediaItemMetadata? BuildMetadata(string? imagePath)
     {
-        if (string.IsNullOrWhiteSpace(imageUrl))
+        if (string.IsNullOrWhiteSpace(imagePath))
         {
             return null;
         }
@@ -1105,7 +1105,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
             {
                 new()
                 {
-                    Path = imageUrl,
+                    Path = imagePath,
                     Provider = string.Empty,
                     RemotelyAccessible = true
                 }

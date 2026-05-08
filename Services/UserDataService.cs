@@ -447,7 +447,7 @@ public sealed class UserDataService : IUserDataService
             Name = track.Name,
             DisplayName = track.DisplayName,
             Duration = track.Duration,
-            ImageUrl = track.ImageUrl,
+            ImagePath = track.PrimaryImage?.Path,
             ProviderMappings = track.ProviderMappings
                 .Select(CloneProviderMapping)
                 .ToList()
@@ -461,7 +461,7 @@ public sealed class UserDataService : IUserDataService
                 Provider = track.Album.Provider,
                 Name = track.Album.Name,
                 Year = track.Album.Year,
-                ImageUrl = track.Album.ImageUrl,
+                ImagePath = track.Album.PrimaryImage?.Path,
                 ProviderMappings = track.Album.ProviderMappings
                     .Select(CloneProviderMapping)
                     .ToList()
@@ -497,7 +497,7 @@ public sealed class UserDataService : IUserDataService
             Name = album.Name,
             DisplayName = album.DisplayName,
             Year = album.Year,
-            ImageUrl = album.ImageUrl,
+            ImagePath = album.PrimaryImage?.Path,
             ProviderMappings = album.ProviderMappings
                 .Select(CloneProviderMapping)
                 .ToList()
@@ -531,7 +531,7 @@ public sealed class UserDataService : IUserDataService
             Provider = artist.Provider,
             Name = artist.Name,
             DisplayName = artist.DisplayName,
-            ImageUrl = artist.ImageUrl,
+            ImagePath = artist.PrimaryImage?.Path,
             ProviderMappings = artist.ProviderMappings
                 .Select(CloneProviderMapping)
                 .ToList()
@@ -547,7 +547,7 @@ public sealed class UserDataService : IUserDataService
             Provider = playlist.Provider,
             Name = playlist.Name,
             DisplayName = playlist.DisplayName,
-            ImageUrl = playlist.ImageUrl,
+            ImagePath = playlist.PrimaryImage?.Path,
             ProviderMappings = playlist.ProviderMappings
                 .Select(CloneProviderMapping)
                 .ToList()

@@ -5,6 +5,7 @@ using mashin.Views.Desktop;
 using MauiIcons.Fluent;
 using MauiIcons.Fluent.Filled;
 using Microsoft.Extensions.Logging;
+using Microsoft.Maui.Controls;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
@@ -52,7 +53,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             if (SetProperty(ref _playlist, value))
             {
                 OnPropertyChanged(nameof(PlaylistName));
-                OnPropertyChanged(nameof(ImageUrl));
+                OnPropertyChanged(nameof(DisplayImageSource));
                 OnPropertyChanged(nameof(IsPlaylistFavorite));
             }
         }
@@ -60,7 +61,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
     public string PlaylistName => Playlist?.DisplayName ?? "Unbekannte Playlist";
 
-    public string? ImageUrl => Playlist?.ImageUrl;
+    public ImageSource? DisplayImageSource => Playlist?.DisplayImageSource;
 
     public ObservableRangeCollection<Track> Tracks
     {

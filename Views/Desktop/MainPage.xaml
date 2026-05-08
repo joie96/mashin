@@ -191,7 +191,7 @@
                                             <Border.StrokeShape>
                                                 <RoundRectangle CornerRadius="2" />
                                             </Border.StrokeShape>
-                                            <Image Aspect="AspectFill" Source="{Binding ImageUrl}" />
+                                            <Image Aspect="AspectFill" Source="{Binding DisplayImageSource}" />
                                         </Border>
 
                                         <VerticalStackLayout Grid.Column="1"
@@ -396,7 +396,7 @@
                         StrokeThickness="0"
                         VerticalOptions="Center"
                         WidthRequest="60">
-                        <Image Aspect="AspectFill" Source="{Binding CurrentTrack.ImageUrl}" />
+                        <Image Aspect="AspectFill" Source="{Binding CurrentTrack.DisplayImageSource}" />
                     </Border>
 
                     <Grid Grid.Column="1"

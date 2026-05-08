@@ -141,15 +141,15 @@ public partial class SlideView : ContentView
             return;
         }
 
-        var imageUrl = mediaItem.ImageUrl;
-        if (string.IsNullOrWhiteSpace(imageUrl))
+        var imageBytes = mediaItem.PrimaryImage?.Bytes;
+        if (imageBytes == null || imageBytes.Length == 0)
         {
             backgroundImage.Source = null;
             return;
         }
 
         // Keep card readable while blurred image is generated.
-        backgroundImage.Source = imageUrl;
+        backgroundImage.Source = mediaItem.DisplayImageSource;
 
         var artworkService = ArtworkService;
         if (artworkService == null)
@@ -163,7 +163,7 @@ public partial class SlideView : ContentView
             return;
         }
 
-        var blurredSource = await artworkService.GetBlurredCoverSourceAsync(imageUrl);
+        var blurredSource = await artworkService.GetBlurredCoverSourceAsync(imageBytes);
 
         await MainThread.InvokeOnMainThreadAsync(() =>
         {

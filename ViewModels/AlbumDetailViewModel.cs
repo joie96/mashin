@@ -4,6 +4,7 @@ using mashin.Views.Desktop;
 using MauiIcons.Fluent;
 using MauiIcons.Fluent.Filled;
 using Microsoft.Extensions.Logging;
+using Microsoft.Maui.Controls;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
@@ -65,7 +66,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
             {
                 OnPropertyChanged(nameof(AlbumName));
                 OnPropertyChanged(nameof(ArtistName));
-                OnPropertyChanged(nameof(ImageUrl));
+                OnPropertyChanged(nameof(DisplayImageSource));
                 OnPropertyChanged(nameof(AlbumYearText));
                 OnPropertyChanged(nameof(AlbumDescription));
                 OnPropertyChanged(nameof(HasDescription));
@@ -92,7 +93,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
         }
     }
 
-    public string? ImageUrl => Album?.ImageUrl;
+    public ImageSource? DisplayImageSource => Album?.DisplayImageSource;
 
     public string AlbumYearText => Album?.Year?.ToString() ?? string.Empty;
 

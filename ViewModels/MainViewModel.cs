@@ -53,7 +53,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private bool _isDontStopTheMusicEnabled;
     private bool _isDarkTheme;
     private Color _playerBarAccentColor = Color.FromArgb("#141414");
-    private Color _playerBarForegroundColor = Color.FromArgb("#5C4436");
     private CancellationTokenSource? _playerBarAccentCts;
 
     // Search
@@ -435,12 +434,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         private set => SetProperty(ref _playerBarAccentColor, value);
     }
 
-    public Color PlayerBarForegroundColor
-    {
-        get => _playerBarForegroundColor;
-        private set => SetProperty(ref _playerBarForegroundColor, value);
-    }
-
     public double PlayerBarProgress => Duration <= 0 ? 0 : Math.Clamp(Position / Duration, 0, 1);
 
     public Artist? CurrentTrackPrimaryArtist => CurrentTrack?.Artists?.FirstOrDefault();
@@ -702,10 +695,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _playerBarAccentCts?.Cancel();
         _playerBarAccentCts?.Dispose();
 
-        if (track == null || string.IsNullOrWhiteSpace(track.ImageUrl))
+        var imageBytes = track?.PrimaryImage?.Bytes;
+        if (track == null || imageBytes == null || imageBytes.Length == 0)
         {
             PlayerBarAccentColor = Color.FromArgb("#141414");
-            PlayerBarForegroundColor = _artworkService.GetForegroundColor(PlayerBarAccentColor);
             _playerBarAccentCts = null;
             return;
         }
@@ -715,7 +708,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         try
         {
-            var accentColor = await _artworkService.GetAccentColorAsync(track.ImageUrl, cts.Token);
+            var accentColor = await _artworkService.GetAccentColorAsync(imageBytes, cts.Token);
             if (cts.IsCancellationRequested || !ReferenceEquals(_playerBarAccentCts, cts))
             {
                 return;
@@ -727,7 +720,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 if (ReferenceEquals(_playerBarAccentCts, cts))
                 {
                     PlayerBarAccentColor = resolvedColor;
-                    PlayerBarForegroundColor = _artworkService.GetForegroundColor(resolvedColor);
                 }
             });
         }
@@ -741,7 +733,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             if (ReferenceEquals(_playerBarAccentCts, cts))
             {
                 PlayerBarAccentColor = Color.FromArgb("#141414");
-                PlayerBarForegroundColor = _artworkService.GetForegroundColor(PlayerBarAccentColor);
             }
         }
         finally

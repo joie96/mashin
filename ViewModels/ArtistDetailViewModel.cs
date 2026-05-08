@@ -5,6 +5,7 @@ using mashin.Views.Desktop;
 using MauiIcons.Fluent;
 using MauiIcons.Fluent.Filled;
 using Microsoft.Extensions.Logging;
+using Microsoft.Maui.Controls;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
@@ -75,7 +76,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             if (SetProperty(ref _artist, value))
             {
                 OnPropertyChanged(nameof(ArtistName));
-                OnPropertyChanged(nameof(ImageUrl));
+                OnPropertyChanged(nameof(DisplayImageSource));
                 OnPropertyChanged(nameof(HasDescription));
                 OnPropertyChanged(nameof(IsArtistFavorite));
                 IsDescriptionExpanded = false;
@@ -85,7 +86,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
     public string ArtistName => Artist?.Name ?? "Unbekannter Interpret";
 
-    public string? ImageUrl => Artist?.ImageUrl;
+    public ImageSource? DisplayImageSource => Artist?.DisplayImageSource;
 
     public bool HasDescription => !string.IsNullOrWhiteSpace(Artist?.Metadata?.Description);
 

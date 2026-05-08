@@ -60,7 +60,7 @@
                                 <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
                             </Border.StrokeShape>
                             <Image Aspect="AspectFill"
-                                Source="{Binding ImageUrl}" />
+                                Source="{Binding DisplayImageSource}" />
                         </Border>
 
                         <!--  Provider Icon (Top-Left)  -->
@@ -348,7 +348,7 @@
                                 <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
                             </Border.StrokeShape>
                             <Image Aspect="AspectFill"
-                                Source="{Binding ImageUrl}" />
+                                Source="{Binding DisplayImageSource}" />
                         </Border>
 
                         <!--  Provider Icon (Top-Left)  -->
@@ -625,7 +625,7 @@
                                 <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
                             </Border.StrokeShape>
                             <Image Aspect="AspectFill"
-                                Source="{Binding ImageUrl}" />
+                                Source="{Binding DisplayImageSource}" />
                         </Border>
 
                         <!--  Provider Icon (Top-Left)  -->
@@ -860,7 +860,7 @@
                                 <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
                             </Border.StrokeShape>
                             <Image Aspect="AspectFill"
-                                Source="{Binding ImageUrl}" />
+                                Source="{Binding DisplayImageSource}" />
                         </Border>
 
                         <!--  Provider Icon (Top-Left)  -->

@@ -1,7 +1,9 @@
 ﻿using mashin.Converters;
+using Microsoft.Maui.Controls;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -139,7 +141,22 @@ namespace mashin.Models
         public List<List<string>>? ExternalIds { get; set; }
 
         [JsonIgnore]
-        public virtual string? ImageUrl => Metadata?.Images?.FirstOrDefault()?.Path;
+        public virtual MediaItemImage? PrimaryImage => Metadata?.Images?.FirstOrDefault();
+
+        [JsonIgnore]
+        public virtual ImageSource? DisplayImageSource
+        {
+            get
+            {
+                var image = PrimaryImage;
+                if (image?.Bytes is not { Length: > 0 } bytes)
+                {
+                    return null;
+                }
+
+                return ImageSource.FromStream(() => new MemoryStream(bytes, writable: false));
+            }
+        }
 
         [JsonIgnore]
         public bool IsSelected
@@ -202,7 +219,7 @@ namespace mashin.Models
         }
 
         [JsonIgnore]
-        public override string? ImageUrl => Album?.ImageUrl ?? Metadata?.Images?.FirstOrDefault()?.Path;
+        public override MediaItemImage? PrimaryImage => Album?.PrimaryImage ?? Metadata?.Images?.FirstOrDefault();
 
         [JsonIgnore]
         public string ArtistName => Artists?.FirstOrDefault()?.Name ?? "Unknown Artist";
@@ -470,6 +487,9 @@ namespace mashin.Models
 
         [JsonPropertyName("remotely_accessible")]
         public bool RemotelyAccessible { get; set; }
+
+        [JsonIgnore]
+        public byte[]? Bytes { get; set; }
     }
 
     /// <summary>

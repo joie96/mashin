@@ -54,7 +54,7 @@
                             <Image Aspect="AspectFill"
                                 HeightRequest="200"
                                 HorizontalOptions="Center"
-                                Source="{Binding ImageUrl}"
+                                Source="{Binding DisplayImageSource}"
                                 VerticalOptions="Center"
                                 WidthRequest="200" />
                         </Grid>
@@ -253,7 +253,7 @@
                         <Image Aspect="AspectFill"
                             HeightRequest="48"
                             HorizontalOptions="Center"
-                            Source="{Binding ImageUrl}"
+                            Source="{Binding DisplayImageSource}"
                             VerticalOptions="Center"
                             WidthRequest="48" />
                     </Border>

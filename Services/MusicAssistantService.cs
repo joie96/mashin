@@ -1,5 +1,7 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
+using System.Collections;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -95,7 +97,9 @@ public class MusicAssistantService
             var responseJson = await response.Content.ReadAsStringAsync();
             _logger.LogTrace("Response: {Response}", responseJson);
 
-            return JsonSerializer.Deserialize<T>(responseJson, JsonOptions);
+            var deserialized = JsonSerializer.Deserialize<T>(responseJson, JsonOptions);
+            await EnrichImagesAsync(deserialized);
+            return deserialized;
         }
         catch (HttpRequestException ex)
         {
@@ -107,23 +111,6 @@ public class MusicAssistantService
             _logger.LogError(ex, "Failed to send command: {Command}", command);
             throw;
         }
-    }
-
-    private static string NormalizeImagePath(string? path, string? provider, string baseUrl)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return string.Empty;
-        }
-
-        if (Uri.TryCreate(path, UriKind.Absolute, out _))
-        {
-            return path;
-        }
-
-        var encodedPath = Uri.EscapeDataString(path);
-        var encodedProvider = Uri.EscapeDataString(string.IsNullOrWhiteSpace(provider) ? "builtin" : provider);
-        return $"{baseUrl.TrimEnd('/')}/imageproxy?path={encodedPath}&provider={encodedProvider}&checksum=&size=256";
     }
 
     private static string RestoreImagePath(string? path, string baseUrl)
@@ -157,6 +144,17 @@ public class MusicAssistantService
         return path;
     }
 
+    private async Task<T?> DeserializeMediaItemAsync<T>(JsonElement element) where T : MediaItem
+    {
+        var item = JsonSerializer.Deserialize<T>(element.GetRawText(), JsonOptions);
+        if (item != null)
+        {
+            await EnrichImagesAsync(item);
+            await EnrichWithProviderInfoAsync(new List<T> { item });
+        }
+
+        return item;
+    }
 
     #region Authentication
 
@@ -863,17 +861,7 @@ public class MusicAssistantService
         if (!string.IsNullOrEmpty(orderBy)) args["order_by"] = orderBy;
 
         var result = await SendCommandAsync<List<Playlist>>("music/playlists/library_items", args);
-        var playlists = result ?? new List<Playlist>();
-        foreach (var playlist in playlists)
-        {
-            var image = playlist.Metadata?.Images?.FirstOrDefault();
-            if (image != null)
-            {
-                image.Path = NormalizeImagePath(image.Path, image.Provider, _settings.MusicAssistantUrl);
-            }
-        }
-
-        return playlists;
+        return result ?? new List<Playlist>();
     }
 
     /// <summary>
@@ -887,13 +875,7 @@ public class MusicAssistantService
             provider_instance_id_or_domain = providerInstanceIdOrDomain
         };
 
-        var playlist = await SendCommandAsync<Playlist>("music/playlists/get", args);
-        var image = playlist?.Metadata?.Images?.FirstOrDefault();
-        if (image != null)
-        {
-            image.Path = NormalizeImagePath(image.Path, image.Provider, _settings.MusicAssistantUrl);
-        }
-        return playlist;
+        return await SendCommandAsync<Playlist>("music/playlists/get", args);
     }
 
     /// <summary>
@@ -931,13 +913,7 @@ public class MusicAssistantService
             args["provider_instance_or_domain"] = providerInstanceOrDomain;
         }
 
-        var playlist = await SendCommandAsync<Playlist>("music/playlists/create_playlist", args);
-        var image = playlist?.Metadata?.Images?.FirstOrDefault();
-        if (image != null)
-        {
-            image.Path = NormalizeImagePath(image.Path, image.Provider, _settings.MusicAssistantUrl);
-        }
-        return playlist;
+        return await SendCommandAsync<Playlist>("music/playlists/create_playlist", args);
     }
 
     /// <summary>
@@ -1016,13 +992,7 @@ public class MusicAssistantService
             ["overwrite"] = overwrite
         };
 
-        var playlist = await SendCommandAsync<Playlist>("music/playlists/update", args);
-        var playlistImage = playlist?.Metadata?.Images?.FirstOrDefault();
-        if (playlistImage != null)
-        {
-            playlistImage.Path = NormalizeImagePath(playlistImage.Path, playlistImage.Provider, _settings.MusicAssistantUrl);
-        }
-        return playlist;
+        return await SendCommandAsync<Playlist>("music/playlists/update", args);
     }
 
     /// <summary>
@@ -1215,43 +1185,7 @@ public class MusicAssistantService
     public async Task<List<RecommendationFolder>> GetRecommendationsAsync()
     {
         var result = await SendCommandAsync<List<RecommendationFolder>>("music/recommendations");
-        if (result != null)
-        {
-            NormalizeRecommendationFolderImages(result);
-        }
         return result ?? new List<RecommendationFolder>();
-    }
-
-    /// <summary>
-    /// Normalize image paths in recommendation folders (convert relative paths to imageproxy URLs).
-    /// </summary>
-    private void NormalizeRecommendationFolderImages(List<RecommendationFolder> folders)
-    {
-        foreach (var folder in folders)
-        {
-            // Normalize folder's own image if present
-            if (folder.Image != null)
-            {
-                folder.Image.Path = NormalizeImagePath(folder.Image.Path, folder.Image.Provider, _settings.MusicAssistantUrl);
-            }
-
-            // Normalize images in already typed folder items.
-            if (folder.Items != null)
-            {
-                foreach (var mediaItem in folder.Items)
-                {
-                    if (mediaItem?.Metadata?.Images == null)
-                    {
-                        continue;
-                    }
-
-                    foreach (var image in mediaItem.Metadata.Images)
-                    {
-                        image.Path = NormalizeImagePath(image.Path, image.Provider, _settings.MusicAssistantUrl);
-                    }
-                }
-            }
-        }
     }
 
     /// <summary>
@@ -1854,7 +1788,7 @@ public class MusicAssistantService
 
     #endregion
 
-    #region Provider Manifest Caching
+    #region Provider Enrichment
 
     /// <summary>
     /// Get provider manifest with caching
@@ -1950,21 +1884,6 @@ public class MusicAssistantService
         }
     }
 
-    private async Task<T?> DeserializeMediaItemAsync<T>(JsonElement element) where T : MediaItem
-    {
-        var item = JsonSerializer.Deserialize<T>(element.GetRawText(), JsonOptions);
-        if (item != null)
-        {
-            await EnrichWithProviderInfoAsync(new List<T> { item });
-        }
-
-        return item;
-    }
-
-    #endregion
-
-    #region Providers
-
     /// <summary>
     /// Return all Provider manifests.
     /// </summary>
@@ -1988,8 +1907,130 @@ public class MusicAssistantService
         return await SendCommandAsync<ProviderManifest>("providers/manifests/get", args);
     }
 
-    
+    #endregion
+
+    #region Image Enrichment
+
+    private async Task EnrichImagesAsync(object? payload)
+    {
+        if (payload == null)
+        {
+            return;
+        }
+
+        var targets = new List<MediaItemImage>();
+        var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
+
+        CollectImageTargets(payload, targets, visited);
+
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        var hydrateTasks = targets.Select(async image =>
+        {
+            if (image.Bytes is { Length: > 0 })
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(image.Path))
+            {
+                return;
+            }
+
+            var bytes = await DownLoadImageBytes(image.Path);
+            if (bytes == null || bytes.Length == 0)
+            {
+                return;
+            }
+
+            image.Bytes = bytes;
+        });
+
+        await Task.WhenAll(hydrateTasks);
+    }
+
+    private void CollectImageTargets(
+        object node,
+        List<MediaItemImage> targets,
+        HashSet<object> visited)
+    {
+        if (node is string || node is JsonElement || node.GetType().IsValueType)
+        {
+            return;
+        }
+
+        if (!visited.Add(node))
+        {
+            return;
+        }
+
+        if (node is MediaItemImage image)
+        {
+            targets.Add(image);
+            return;
+        }
+
+        if (node is IEnumerable enumerable)
+        {
+            foreach (var child in enumerable)
+            {
+                if (child != null)
+                {
+                    CollectImageTargets(child, targets, visited);
+                }
+            }
+
+            return;
+        }
+
+        var properties = node.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public);
+        foreach (var property in properties)
+        {
+            if (!property.CanRead || property.GetIndexParameters().Length > 0)
+            {
+                continue;
+            }
+
+            object? value;
+            try
+            {
+                value = property.GetValue(node);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (value != null)
+            {
+                CollectImageTargets(value, targets, visited);
+            }
+        }
+    }
+
+    private async Task<byte[]?> DownLoadImageBytes(string imagePath)
+    {
+        try
+        {
+            var bytes = await _httpClient.GetByteArrayAsync(imagePath);
+            if (bytes.Length == 0)
+            {
+                return null;
+            }
+
+            return bytes;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to download image bytes for path: {ImagePath}", imagePath);
+            return null;
+        }
+    }
 
     #endregion
+
 
 }

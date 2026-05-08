@@ -463,7 +463,7 @@
                             </Border.StrokeShape>
                             <Image Aspect="AspectFill"
                                    HeightRequest="48"
-                                   Source="{Binding ImageUrl}"
+                                   Source="{Binding DisplayImageSource}"
                                    VerticalOptions="Center"
                                    WidthRequest="48"/>
                         </Border>
@@ -844,7 +844,7 @@
                             </Border.StrokeShape>
                             <Image Aspect="AspectFill"
                                    HeightRequest="48"
-                                   Source="{Binding MediaItem.ImageUrl}"
+                                   Source="{Binding MediaItem.DisplayImageSource}"
                                    VerticalOptions="Center"
                                    WidthRequest="48"/>
                         </Border>

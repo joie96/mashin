@@ -47,7 +47,7 @@
 
                         <!--  Track Cover  -->
                         <Image Aspect="AspectFill"
-                            Source="{Binding ImageUrl}" />
+                            Source="{Binding DisplayImageSource}" />
 
                         <!--  Hover Overlay  -->
                         <Border x:Name="CoverHoverOverlay"

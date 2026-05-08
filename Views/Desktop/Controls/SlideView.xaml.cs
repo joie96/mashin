@@ -694,7 +694,7 @@ public partial class SlideView : ContentView
             return;
         }
 
-        var blurredCoverSource = await GetBlurredCoverSourceAsync(mediaItem.ImageUrl);
+        var blurredCoverSource = await GetBlurredCoverSourceAsync(mediaItem.PrimaryImage?.Path);
 
         await MainThread.InvokeOnMainThreadAsync(() =>
         {
@@ -702,26 +702,26 @@ public partial class SlideView : ContentView
         });
     }
 
-    private async Task<ImageSource?> GetBlurredCoverSourceAsync(string? imageUrl)
+    private async Task<ImageSource?> GetBlurredCoverSourceAsync(string? imagePath)
     {
-        if (string.IsNullOrWhiteSpace(imageUrl))
+        if (string.IsNullOrWhiteSpace(imagePath))
         {
             return null;
         }
 
-        if (_blurredCoverCache.TryGetValue(imageUrl, out var cachedBytes))
+        if (_blurredCoverCache.TryGetValue(imagePath, out var cachedBytes))
         {
             return ImageSource.FromStream(() => new MemoryStream(cachedBytes));
         }
 
         try
         {
-            if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out _))
+            if (!Uri.TryCreate(imagePath, UriKind.Absolute, out _))
             {
                 return null;
             }
 
-            var bytes = await PaletteHttpClient.GetByteArrayAsync(imageUrl);
+            var bytes = await PaletteHttpClient.GetByteArrayAsync(imagePath);
             if (bytes.Length == 0)
             {
                 return null;
@@ -739,7 +739,7 @@ public partial class SlideView : ContentView
             await image.SaveAsync(outputStream, new PngEncoder());
 
             var blurredBytes = outputStream.ToArray();
-            _blurredCoverCache[imageUrl] = blurredBytes;
+            _blurredCoverCache[imagePath] = blurredBytes;
 
             return ImageSource.FromStream(() => new MemoryStream(blurredBytes));
         }

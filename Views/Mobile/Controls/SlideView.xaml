@@ -56,7 +56,7 @@
                         <Grid>
                             <!--  Cover Image  -->
                             <Image Aspect="AspectFill"
-                                Source="{Binding ImageUrl}" />
+                                Source="{Binding DisplayImageSource}" />
 
                             <!--  Cover Shade  -->
                             <Border BackgroundColor="#26000000"
