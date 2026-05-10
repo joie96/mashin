@@ -12,12 +12,12 @@
 
         <!--  DataTemplate for Tracks  -->
         <DataTemplate x:Key="TrackTemplate" x:DataType="models:Track">
-            <Border Padding="6"
+            <Border Padding="0"
                 BackgroundColor="{DynamicResource BackgroundSecondary}"
                 StrokeThickness="0"
                 WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
                 <Border.StrokeShape>
-                    <RoundRectangle CornerRadius="12" />
+                    <RoundRectangle CornerRadius="14" />
                 </Border.StrokeShape>
 
                 <Grid x:Name="TrackContentHost"
@@ -26,21 +26,32 @@
                     IsClippedToBounds="True">
 
                     <!--  Blurred Card Background  -->
-                    <Image Grid.ColumnSpan="2"
-                        Aspect="AspectFill"
-                        BindingContextChanged="OnTrackBackgroundBindingContextChanged"
-                        HeightRequest="{Binding Source={x:Reference TrackContentHost}, Path=Height}"
+                    <Border Grid.ColumnSpan="2"
                         InputTransparent="True"
-                        Opacity="0.85"
-                        Scale="1.18"
-                        VerticalOptions="Center"
-                        WidthRequest="{Binding Source={x:Reference TrackContentHost}, Path=Width}" />
+                        Padding="0"
+                        StrokeThickness="0">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="14" />
+                        </Border.StrokeShape>
+                        <Grid>
+                            <Image Aspect="AspectFill"
+                                BindingContextChanged="OnTrackBackgroundBindingContextChanged"
+                                HeightRequest="{Binding Source={x:Reference TrackContentHost}, Path=Height}"
+                                Opacity="0.85"
+                                Scale="1.18"
+                                VerticalOptions="Center"
+                                WidthRequest="{Binding Source={x:Reference TrackContentHost}, Path=Width}" />
 
-                    <!--  Dark Tint for Readability  -->
-                    <Border BackgroundColor="#7F141414"
-                        Grid.ColumnSpan="2"
-                        InputTransparent="True"
-                        StrokeThickness="0" />
+                            <!--  Dark Tint for Readability  -->
+                            <Border BackgroundColor="#7F141414"
+                                InputTransparent="True"
+                                StrokeThickness="0">
+                                <Border.StrokeShape>
+                                    <RoundRectangle CornerRadius="14" />
+                                </Border.StrokeShape>
+                            </Border>
+                        </Grid>
+                    </Border>
 
                     <!--  Cover + Play Overlay  -->
                     <Border Grid.Column="0"
