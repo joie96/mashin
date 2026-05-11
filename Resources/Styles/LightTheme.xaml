@@ -36,6 +36,7 @@
     <Color x:Key="OverlayOppositeIconColor">#dddddd</Color>
     <Color x:Key="OverlayOppositeIconHoverColor">#ffffff</Color>
     <Color x:Key="OverlayOppositePlayIconColor">#FFFFFF</Color>
+    <Color x:Key="PlayerBarAccentFallbackColor">#141414</Color>
 
     <Color x:Key="AccentColor">#ff4757</Color>
     <Color x:Key="AccentHover">#ee5a6f</Color>

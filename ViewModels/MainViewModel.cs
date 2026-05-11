@@ -23,6 +23,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 {
     #region Fields
 
+    private const string PlayerBarAccentFallbackColorKey = "PlayerBarAccentFallbackColor";
+
     // Services
     private readonly SettingsService _settings;
     private readonly MusicAssistantService _musicAssistant;
@@ -52,7 +54,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private bool _isDontStopTheMusicEnabled;
     private bool _isDarkTheme;
-    private Color _playerBarAccentColor = Color.FromArgb("#141414");
+    private Color _playerBarAccentColor = null!;
+    private Color _playerBarBackgroundColor = null!;
     private CancellationTokenSource? _playerBarAccentCts;
 
     // Search
@@ -123,6 +126,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _volume = _settings.GetInitialVolume();
         _isMuted = _settings.GetInitialMuted();
         _currentQueueItems.CollectionChanged += OnCurrentQueueItemsCollectionChanged;
+
+        var fallbackAccentColor = GetRequiredColorResource(PlayerBarAccentFallbackColorKey);
+        _playerBarAccentColor = fallbackAccentColor;
+        _playerBarBackgroundColor = fallbackAccentColor.WithAlpha(0.5f);
 
         // Navigation Commands
         NavigateToHomeCommand = new Command(async () => await navigationService.NavigateToAsync<HomePage>());
@@ -434,6 +441,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         private set => SetProperty(ref _playerBarAccentColor, value);
     }
 
+    public Color PlayerBarBackgroundColor
+    {
+        get => _playerBarBackgroundColor;
+        private set => SetProperty(ref _playerBarBackgroundColor, value);
+    }
+
     public double PlayerBarProgress => Duration <= 0 ? 0 : Math.Clamp(Position / Duration, 0, 1);
 
     public Artist? CurrentTrackPrimaryArtist => CurrentTrack?.Artists?.FirstOrDefault();
@@ -688,7 +701,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     #endregion
 
-    #region Artwork
+    #region Artwork & Colors
 
     private async Task UpdatePlayerBarAccentColorAsync(Track? track)
     {
@@ -698,7 +711,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         var imageBytes = track?.PrimaryImage?.Bytes;
         if (track == null || imageBytes == null || imageBytes.Length == 0)
         {
-            PlayerBarAccentColor = Color.FromArgb("#141414");
+            var fallbackColor = GetRequiredColorResource(PlayerBarAccentFallbackColorKey);
+            PlayerBarAccentColor = fallbackColor;
+            PlayerBarBackgroundColor = fallbackColor.WithAlpha(0.5f);
             _playerBarAccentCts = null;
             return;
         }
@@ -714,12 +729,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 return;
             }
 
-            var resolvedColor = accentColor ?? Color.FromArgb("#141414");
+            var resolvedColor = accentColor ?? GetRequiredColorResource(PlayerBarAccentFallbackColorKey);
             await MainThread.InvokeOnMainThreadAsync(() =>
             {
                 if (ReferenceEquals(_playerBarAccentCts, cts))
                 {
                     PlayerBarAccentColor = resolvedColor;
+                    PlayerBarBackgroundColor = resolvedColor.WithAlpha(0.5f);
                 }
             });
         }
@@ -732,7 +748,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             _logger.LogDebug(ex, "Failed to resolve player bar accent color");
             if (ReferenceEquals(_playerBarAccentCts, cts))
             {
-                PlayerBarAccentColor = Color.FromArgb("#141414");
+                var fallbackColor = GetRequiredColorResource(PlayerBarAccentFallbackColorKey);
+                PlayerBarAccentColor = fallbackColor;
+                PlayerBarBackgroundColor = fallbackColor.WithAlpha(0.5f);
             }
         }
         finally
@@ -744,6 +762,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
             cts.Dispose();
         }
+    }
+
+    private static Color GetRequiredColorResource(string key)
+    {
+        var resources = Application.Current?.Resources;
+        if (resources != null && resources.TryGetValue(key, out var value) && value is Color color)
+        {
+            return color;
+        }
+
+        throw new InvalidOperationException($"Required color resource '{key}' is not defined.");
     }
 
     #endregion
