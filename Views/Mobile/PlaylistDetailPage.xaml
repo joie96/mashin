@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage x:Class="mashin.Views.Mobile.PlaylistDetailPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:converters="clr-namespace:mashin.Converters"
+    xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
+    xmlns:vm="clr-namespace:mashin.ViewModels"
+    x:DataType="vm:PlaylistDetailViewModel"
+    BackgroundColor="{DynamicResource BackgroundPrimary}">
+
+    <ContentPage.Resources>
+        <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
+    </ContentPage.Resources>
+
+    <Grid Padding="16,16,16,8"
+        RowDefinitions="Auto,*"
+        RowSpacing="14">
+
+        <Grid Grid.Row="0"
+            ColumnDefinitions="96,*"
+            ColumnSpacing="12"
+            MinimumHeightRequest="96">
+
+            <Border Grid.Column="0"
+                BackgroundColor="{DynamicResource BackgroundTertiary}"
+                HeightRequest="96"
+                StrokeThickness="0"
+                WidthRequest="96">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="8" />
+                </Border.StrokeShape>
+                <Image Aspect="AspectFill"
+                    Source="{Binding DisplayImageSource}" />
+            </Border>
+
+            <Grid Grid.Column="1"
+                RowDefinitions="Auto,Auto,Auto"
+                RowSpacing="6"
+                VerticalOptions="Center">
+                <Label Grid.Row="0"
+                    FontFamily="PoppinsSemibold"
+                    FontSize="10"
+                    Text="PLAYLIST"
+                    TextColor="{DynamicResource TextSecondary}" />
+
+                <Label Grid.Row="1"
+                    FontFamily="PoppinsSemibold"
+                    FontSize="22"
+                    LineBreakMode="WordWrap"
+                    MaxLines="2"
+                    Text="{Binding PlaylistName}"
+                    TextColor="{DynamicResource TextPrimary}" />
+
+                <HorizontalStackLayout Grid.Row="2" Spacing="8">
+                    <Label FontFamily="PoppinsRegular"
+                        FontSize="12"
+                        Text="{Binding Tracks.Count, StringFormat='{0} Titel'}"
+                        TextColor="{DynamicResource TextSecondary}" />
+                    <Label FontSize="12"
+                        Text="•"
+                        TextColor="{DynamicResource TextSecondary}" />
+                    <Label FontFamily="PoppinsRegular"
+                        FontSize="12"
+                        Text="{Binding PlaylistTotalDurationText}"
+                        TextColor="{DynamicResource TextSecondary}" />
+                </HorizontalStackLayout>
+            </Grid>
+        </Grid>
+
+        <Grid Grid.Row="1" RowDefinitions="Auto,Auto" RowSpacing="10">
+            <HorizontalStackLayout Grid.Row="0" Spacing="10">
+                <Border BackgroundColor="{DynamicResource ActionButtonsBackground}"
+                    Padding="12,8"
+                    StrokeThickness="0">
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding PlayPlaylistCommand}" />
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="10" />
+                    </Border.StrokeShape>
+                    <HorizontalStackLayout Spacing="6">
+                        <Label FontSize="14"
+                            Text="{mi:FluentFilled Icon=Play16Filled, FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}" />
+                        <Label FontFamily="PoppinsSemibold"
+                            FontSize="12"
+                            Text="Abspielen"
+                            TextColor="{DynamicResource TextPrimary}" />
+                    </HorizontalStackLayout>
+                </Border>
+
+                <Border BackgroundColor="{DynamicResource ActionButtonsBackground}"
+                    Padding="12,8"
+                    StrokeThickness="0">
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding ShufflePlaylistCommand}" />
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="10" />
+                    </Border.StrokeShape>
+                    <HorizontalStackLayout Spacing="6">
+                        <Label FontSize="14"
+                            Text="{mi:FluentFilled Icon=ArrowShuffle16Filled, FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}" />
+                        <Label FontFamily="PoppinsSemibold"
+                            FontSize="12"
+                            Text="Shuffle"
+                            TextColor="{DynamicResource TextPrimary}" />
+                    </HorizontalStackLayout>
+                </Border>
+            </HorizontalStackLayout>
+
+            <Label Grid.Row="1"
+                FontFamily="PoppinsRegular"
+                FontSize="13"
+                Text="Track-Details folgen hier spaeter."
+                TextColor="{DynamicResource TextSecondary}" />
+        </Grid>
+    </Grid>
+</ContentPage>

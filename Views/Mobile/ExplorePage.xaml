@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage x:Class="mashin.Views.Mobile.ExplorePage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    BackgroundColor="{DynamicResource BackgroundPrimary}">
+
+    <Grid Padding="16">
+        <Label FontFamily="PoppinsSemibold"
+            FontSize="22"
+            HorizontalOptions="Center"
+            Text="Explore (Mobile)"
+            TextColor="{DynamicResource TextPrimary}"
+            VerticalOptions="Center" />
+    </Grid>
+</ContentPage>

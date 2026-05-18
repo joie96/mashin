@@ -1,9 +1,26 @@
 ﻿using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Maui.Devices;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using FFImageLoading;
 using mashin.Models;
+using DesktopAlbumDetailPage = mashin.Views.Desktop.AlbumDetailPage;
+using DesktopArtistDetailPage = mashin.Views.Desktop.ArtistDetailPage;
+using DesktopExplorePage = mashin.Views.Desktop.ExplorePage;
+using DesktopFavoritesPage = mashin.Views.Desktop.FavoritesPage;
+using DesktopHomePage = mashin.Views.Desktop.HomePage;
+using DesktopPlaylistsPage = mashin.Views.Desktop.PlaylistsPage;
+using DesktopPlaylistDetailPage = mashin.Views.Desktop.PlaylistDetailPage;
+using DesktopSearchPage = mashin.Views.Desktop.SearchPage;
+using MobileAlbumDetailPage = mashin.Views.Mobile.AlbumDetailPage;
+using MobileArtistDetailPage = mashin.Views.Mobile.ArtistDetailPage;
+using MobileExplorePage = mashin.Views.Mobile.ExplorePage;
+using MobileFavoritesPage = mashin.Views.Mobile.FavoritesPage;
+using MobileHomePage = mashin.Views.Mobile.HomePage;
+using MobilePlaylistsPage = mashin.Views.Mobile.PlaylistsPage;
+using MobilePlaylistDetailPage = mashin.Views.Mobile.PlaylistDetailPage;
+using MobileSearchPage = mashin.Views.Mobile.SearchPage;
 
 namespace mashin.Services;
 
@@ -34,6 +51,18 @@ public interface INavigationAware
 /// </summary>
 public class NavigationService : INavigationService
 {
+    private static readonly IReadOnlyDictionary<Type, Type> MobilePageTypeMap = new Dictionary<Type, Type>
+    {
+        [typeof(DesktopHomePage)] = typeof(MobileHomePage),
+        [typeof(DesktopExplorePage)] = typeof(MobileExplorePage),
+        [typeof(DesktopFavoritesPage)] = typeof(MobileFavoritesPage),
+        [typeof(DesktopPlaylistsPage)] = typeof(MobilePlaylistsPage),
+        [typeof(DesktopSearchPage)] = typeof(MobileSearchPage),
+        [typeof(DesktopPlaylistDetailPage)] = typeof(MobilePlaylistDetailPage),
+        [typeof(DesktopArtistDetailPage)] = typeof(MobileArtistDetailPage),
+        [typeof(DesktopAlbumDetailPage)] = typeof(MobileAlbumDetailPage)
+    };
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<NavigationService> _logger;
     private bool _isNavigating;
@@ -155,18 +184,19 @@ public class NavigationService : INavigationService
 
     private async Task ShowPageAsync(NavigationEntry entry)
     {
+        var targetPageType = ResolveTargetPageType(entry.PageType);
         var scope = _scopeFactory.CreateScope();
         ContentPage newPage;
         try
         {
-            newPage = (ContentPage)scope.ServiceProvider.GetRequiredService(entry.PageType);
+            newPage = (ContentPage)scope.ServiceProvider.GetRequiredService(targetPageType);
         }
         catch
         {
             scope.Dispose();
             throw;
         }
-        _logger.LogDebug("Navigating to {PageName}", entry.PageType.Name);
+        _logger.LogDebug("Navigating to {PageName} (requested: {RequestedPageName})", targetPageType.Name, entry.PageType.Name);
 
         _currentPage = newPage;
         _currentScope = scope;
@@ -185,6 +215,25 @@ public class NavigationService : INavigationService
         {
             await navigationAware.OnNavigatedToAsync(entry.Parameter);
         }
+    }
+
+    private static Type ResolveTargetPageType(Type requestedPageType)
+    {
+        var isMobile = DeviceInfo.Idiom == DeviceIdiom.Phone || DeviceInfo.Idiom == DeviceIdiom.Tablet;
+        
+        isMobile = true; // force mobile page types for testing on desktop
+
+        if (!isMobile)
+        {
+            return requestedPageType;
+        }
+
+        if (MobilePageTypeMap.TryGetValue(requestedPageType, out var mappedPageType))
+        {
+            return mappedPageType;
+        }
+
+        return requestedPageType;
     }
 
     private async Task CleanupPageAsync(ContentPage page, IServiceScope? scope)

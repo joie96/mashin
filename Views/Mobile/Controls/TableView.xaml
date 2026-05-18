@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView x:Class="mashin.Views.Mobile.Controls.TableView"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:controls="clr-namespace:mashin.Views.Mobile.Controls"
+    xmlns:desktopControls="clr-namespace:mashin.Views.Desktop.Controls"
+    xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
+    xmlns:models="clr-namespace:mashin.Models"
+    x:Name="self">
+
+    <ContentView.Resources>
+        <DataTemplate x:Key="PlaylistTemplate" x:DataType="models:Playlist">
+            <Border Padding="8,6"
+                BackgroundColor="Transparent"
+                HeightRequest="86"
+                StrokeThickness="0">
+                <Border.GestureRecognizers>
+                    <TapGestureRecognizer Command="{Binding Source={x:Reference self}, Path=PrimaryInfoTappedCommand}"
+                        CommandParameter="{Binding .}" />
+                </Border.GestureRecognizers>
+
+                <Grid ColumnDefinitions="52,*,32,32"
+                    ColumnSpacing="10">
+                    <Border Grid.Column="0"
+                        BackgroundColor="{DynamicResource BackgroundTertiary}"
+                        HeightRequest="52"
+                        StrokeThickness="0"
+                        VerticalOptions="Center"
+                        WidthRequest="52">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="8" />
+                        </Border.StrokeShape>
+                        <Image Aspect="AspectFill"
+                            Source="{Binding DisplayImageSource}" />
+                    </Border>
+
+                    <VerticalStackLayout Grid.Column="1"
+                        Spacing="2"
+                        VerticalOptions="Center">
+                        <Label FontFamily="PoppinsSemibold"
+                            FontSize="18"
+                            LineBreakMode="TailTruncation"
+                            MaxLines="1"
+                            Text="{Binding DisplayName}"
+                            TextColor="{DynamicResource TextPrimary}" />
+                    </VerticalStackLayout>
+
+                    <CheckBox Grid.Column="2"
+                        HorizontalOptions="Center"
+                        IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                        VerticalOptions="Center" />
+
+                    <Label x:Name="MoreIconLabel"
+                        Grid.Column="3"
+                        FontSize="18"
+                        HorizontalOptions="Center"
+                        Text="{mi:Fluent Icon=MoreHorizontal48, FontOverride=True}"
+                        TextColor="{DynamicResource IconSecondary}"
+                        VerticalOptions="Center">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Source={x:Reference self}, Path=ShowContextMenuAtAnchorCommand}"
+                                CommandParameter="{x:Reference MoreIconLabel}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate x:Key="SkeletonTemplate" x:DataType="models:TableViewSkeleton">
+            <Grid ColumnDefinitions="52,*,32,32"
+                ColumnSpacing="10"
+                HeightRequest="86"
+                Padding="8,6">
+                <desktopControls:SkeletonLoader Grid.Column="0"
+                    CornerRadius="8"
+                    HeightRequest="52"
+                    WidthRequest="52" />
+                <VerticalStackLayout Grid.Column="1"
+                    Spacing="6"
+                    VerticalOptions="Center">
+                    <desktopControls:SkeletonLoader CornerRadius="6"
+                        HeightRequest="16"
+                        WidthRequest="190" />
+                    <desktopControls:SkeletonLoader CornerRadius="6"
+                        HeightRequest="13"
+                        WidthRequest="140" />
+                </VerticalStackLayout>
+                <desktopControls:SkeletonLoader Grid.Column="2"
+                    CornerRadius="4"
+                    HeightRequest="20"
+                    HorizontalOptions="Center"
+                    VerticalOptions="Center"
+                    WidthRequest="20" />
+                <desktopControls:SkeletonLoader Grid.Column="3"
+                    CornerRadius="4"
+                    HeightRequest="18"
+                    HorizontalOptions="Center"
+                    VerticalOptions="Center"
+                    WidthRequest="18" />
+            </Grid>
+        </DataTemplate>
+
+        <controls:MobileTableViewTemplateSelector x:Key="MobileTableViewTemplateSelector"
+            PlaylistTemplate="{StaticResource PlaylistTemplate}"
+            SkeletonTemplate="{StaticResource SkeletonTemplate}" />
+    </ContentView.Resources>
+
+    <CollectionView ItemSizingStrategy="MeasureFirstItem"
+        ItemsSource="{Binding Source={x:Reference self}, Path=ItemsSource}"
+        SelectionMode="None"
+        VerticalScrollBarVisibility="Never">
+        <CollectionView.ItemsLayout>
+            <LinearItemsLayout Orientation="Vertical" ItemSpacing="2" />
+        </CollectionView.ItemsLayout>
+        <CollectionView.ItemTemplate>
+            <StaticResource Key="MobileTableViewTemplateSelector" />
+        </CollectionView.ItemTemplate>
+    </CollectionView>
+</ContentView>

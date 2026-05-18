@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage x:Class="mashin.Views.Mobile.AlbumDetailPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:vm="clr-namespace:mashin.ViewModels"
+    x:DataType="vm:AlbumDetailViewModel"
+    BackgroundColor="{DynamicResource BackgroundPrimary}">
+
+    <Grid Padding="16">
+        <Label FontFamily="PoppinsSemibold"
+            FontSize="22"
+            HorizontalOptions="Center"
+            Text="Album Detail (Mobile)"
+            TextColor="{DynamicResource TextPrimary}"
+            VerticalOptions="Center" />
+    </Grid>
+</ContentPage>

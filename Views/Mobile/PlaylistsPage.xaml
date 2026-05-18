@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage x:Class="mashin.Views.Mobile.PlaylistsPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:controls="clr-namespace:mashin.Views.Mobile.Controls"
+    xmlns:vm="clr-namespace:mashin.ViewModels"
+    x:DataType="vm:PlaylistsViewModel"
+    BackgroundColor="{DynamicResource BackgroundPrimary}">
+
+    <Grid Padding="16,16,16,8"
+        RowDefinitions="Auto,Auto,*"
+        RowSpacing="0">
+        <Label Grid.Row="0"
+            FontFamily="PoppinsSemibold"
+            FontSize="24"
+            Text="Playlists"
+            TextColor="{DynamicResource TextPrimary}" />
+
+        <Label Grid.Row="1"
+            Margin="0,16,0,0"
+            IsVisible="{Binding ShowNoPlaylistsMessage}"
+            Text="Keine Playlists verfuegbar."
+            TextColor="{DynamicResource TextSecondary}" />
+
+        <controls:TableView Grid.Row="2"
+            Margin="0,16,0,0"
+            IsVisible="{Binding ShowPlaylistListView}"
+            ItemsSource="{Binding PlaylistItems}"
+            PrimaryInfoTappedCommand="{Binding PlaylistTappedCommand}"
+            ShowContextMenuAtAnchorCommand="{Binding ShowPlaylistContextMenuAtAnchorCommand}" />
+    </Grid>
+</ContentPage>

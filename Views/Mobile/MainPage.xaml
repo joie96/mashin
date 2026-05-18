@@ -134,56 +134,114 @@
                     Spacing="4"
                     HorizontalOptions="Center"
                     VerticalOptions="Center">
+                    <VerticalStackLayout.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding NavigateToHomeCommand}" />
+                    </VerticalStackLayout.GestureRecognizers>
                     <Label FontSize="22"
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=Home24, FontOverride=True}"
-                        TextColor="{DynamicResource AccentColor}" />
+                        TextColor="{DynamicResource IconSecondary}">
+                        <Label.Triggers>
+                            <DataTrigger TargetType="Label"
+                                Binding="{Binding CurrentSection}"
+                                Value="{x:Static vm:MainViewModel+NavigationSection.Home}">
+                                <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
+                            </DataTrigger>
+                        </Label.Triggers>
+                    </Label>
                 </VerticalStackLayout>
 
                 <VerticalStackLayout Grid.Column="1"
                     Spacing="4"
                     HorizontalOptions="Center"
                     VerticalOptions="Center">
+                    <VerticalStackLayout.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding NavigateToExploreCommand}" />
+                    </VerticalStackLayout.GestureRecognizers>
                     <Label FontSize="22"
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=CompassNorthwest24, FontOverride=True}"
-                        TextColor="{DynamicResource IconSecondary}" />
+                        TextColor="{DynamicResource IconSecondary}">
+                        <Label.Triggers>
+                            <DataTrigger TargetType="Label"
+                                Binding="{Binding CurrentSection}"
+                                Value="{x:Static vm:MainViewModel+NavigationSection.Explore}">
+                                <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
+                            </DataTrigger>
+                        </Label.Triggers>
+                    </Label>
                 </VerticalStackLayout>
 
                 <VerticalStackLayout Grid.Column="2"
                     Spacing="4"
                     HorizontalOptions="Center"
                     VerticalOptions="Center">
+                    <VerticalStackLayout.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding NavigateToFavoritesCommand}" />
+                    </VerticalStackLayout.GestureRecognizers>
                     <Label FontSize="22"
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=Heart24, FontOverride=True}"
-                        TextColor="{DynamicResource IconSecondary}" />
+                        TextColor="{DynamicResource IconSecondary}">
+                        <Label.Triggers>
+                            <DataTrigger TargetType="Label"
+                                Binding="{Binding CurrentSection}"
+                                Value="{x:Static vm:MainViewModel+NavigationSection.Favorites}">
+                                <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
+                            </DataTrigger>
+                        </Label.Triggers>
+                    </Label>
                 </VerticalStackLayout>
 
                 <VerticalStackLayout Grid.Column="3"
                     Spacing="4"
                     HorizontalOptions="Center"
                     VerticalOptions="Center">
+                    <VerticalStackLayout.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding NavigateToPlaylistsCommand}" />
+                    </VerticalStackLayout.GestureRecognizers>
                     <Label FontSize="22"
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=TextBulletListLtr24, FontOverride=True}"
-                        TextColor="{DynamicResource IconSecondary}" />
+                        TextColor="{DynamicResource IconSecondary}">
+                        <Label.Triggers>
+                            <DataTrigger TargetType="Label"
+                                Binding="{Binding CurrentSection}"
+                                Value="{x:Static vm:MainViewModel+NavigationSection.Playlists}">
+                                <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
+                            </DataTrigger>
+                        </Label.Triggers>
+                    </Label>
                 </VerticalStackLayout>
 
                 <VerticalStackLayout Grid.Column="4"
                     Spacing="4"
                     HorizontalOptions="Center"
                     VerticalOptions="Center">
+                    <VerticalStackLayout.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding NavigateToSearchCommand}" />
+                    </VerticalStackLayout.GestureRecognizers>
                     <Label FontSize="22"
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=Search24, FontOverride=True}"
-                        TextColor="{DynamicResource IconSecondary}" />
+                        TextColor="{DynamicResource IconSecondary}">
+                        <Label.Triggers>
+                            <DataTrigger TargetType="Label"
+                                Binding="{Binding CurrentSection}"
+                                Value="{x:Static vm:MainViewModel+NavigationSection.Search}">
+                                <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
+                            </DataTrigger>
+                        </Label.Triggers>
+                    </Label>
                 </VerticalStackLayout>
 
                 <VerticalStackLayout Grid.Column="5"
                     Spacing="4"
                     HorizontalOptions="Center"
                     VerticalOptions="Center">
+                    <VerticalStackLayout.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding ToggleThemeCommand}" />
+                    </VerticalStackLayout.GestureRecognizers>
                     <Label FontSize="22"
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=Settings24, FontOverride=True}"

@@ -89,7 +89,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         None,
         Home,
         Explore,
-        Favorites
+        Favorites,
+        Playlists,
+        Search
     }
 
     #endregion
@@ -132,10 +134,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _playerBarBackgroundColor = fallbackAccentColor.WithAlpha(0.5f);
 
         // Navigation Commands
-        NavigateToHomeCommand = new Command(async () => await navigationService.NavigateToAsync<HomePage>());
-        NavigateToExploreCommand = new Command(async () => await navigationService.NavigateToAsync<ExplorePage>());
-        NavigateToFavoritesCommand = new Command(async () => await navigationService.NavigateToAsync<FavoritesPage>());
-        NavigateToPlaylistCommand = new Command<Playlist>(async (playlist) => await navigationService.NavigateToAsync<PlaylistDetailPage>(playlist));
+        NavigateToHomeCommand = new Command(async () => await NavigateToSectionAsync<HomePage>(NavigationSection.Home));
+        NavigateToExploreCommand = new Command(async () => await NavigateToSectionAsync<ExplorePage>(NavigationSection.Explore));
+        NavigateToFavoritesCommand = new Command(async () => await NavigateToSectionAsync<FavoritesPage>(NavigationSection.Favorites));
+        NavigateToPlaylistsCommand = new Command(async () => await NavigateToSectionAsync<PlaylistsPage>(NavigationSection.Playlists));
+        NavigateToSearchCommand = new Command(async () => await NavigateToSectionAsync<SearchPage>(NavigationSection.Search));
+        NavigateToPlaylistCommand = new Command<Playlist>(async playlist =>
+            await NavigateToSectionAsync<PlaylistDetailPage>(NavigationSection.Playlists, playlist));
 
         SearchCommand = new Command(async () => await ExecuteSearchAsync());
         
@@ -565,6 +570,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     public ICommand NavigateToHomeCommand { get; }
     public ICommand NavigateToExploreCommand { get; }
     public ICommand NavigateToFavoritesCommand { get; }
+    public ICommand NavigateToPlaylistsCommand { get; }
+    public ICommand NavigateToSearchCommand { get; }
     public ICommand NavigateToPlaylistCommand { get; }
 
     // Playback Commands
@@ -614,6 +621,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         try
         {
             _isSearching = true;
+            CurrentSection = NavigationSection.Search;
             var request = new SearchRequest(
                 query,
                 new[] { MediaType.Track, MediaType.Album, MediaType.Playlist, MediaType.Artist });
@@ -631,6 +639,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     }
 
     #endregion
+
+    private async Task NavigateToSectionAsync<TPage>(NavigationSection section) where TPage : ContentPage
+    {
+        CurrentSection = section;
+        await _navigationService.NavigateToAsync<TPage>();
+    }
+
+    private async Task NavigateToSectionAsync<TPage>(NavigationSection section, object? parameter) where TPage : ContentPage
+    {
+        CurrentSection = section;
+        await _navigationService.NavigateToAsync<TPage>(parameter);
+    }
 
     #region Lifecycle
 
@@ -1718,4 +1738,5 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     }
 
     #endregion
+
 }
