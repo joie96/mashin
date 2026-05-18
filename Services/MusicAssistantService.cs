@@ -501,7 +501,14 @@ public class MusicAssistantService
         if (!string.IsNullOrEmpty(orderBy)) args["order_by"] = orderBy;
 
         var result = await SendCommandAsync<List<Artist>>("music/artists/library_items", args);
-        return result ?? new List<Artist>();
+        var artists = result ?? new List<Artist>();
+
+        await Task.WhenAll(
+            EnrichWithProviderInfoAsync(artists),
+            EnrichImagesAsync(artists)
+        );
+
+        return artists;
     }
 
     /// <summary>
@@ -621,7 +628,14 @@ public class MusicAssistantService
         }
 
         var result = await SendCommandAsync<List<Album>>("music/albums/library_items", args);
-        return result ?? new List<Album>();
+        var albums = result ?? new List<Album>();
+
+        await Task.WhenAll(
+            EnrichWithProviderInfoAsync(albums),
+            EnrichImagesAsync(albums)
+        );
+
+        return albums;
     }
 
     /// <summary>
@@ -758,7 +772,16 @@ public class MusicAssistantService
             provider_instance_id_or_domain = providerInstanceIdOrDomain
         };
 
-        return await SendCommandAsync<Track>("music/tracks/get", args);
+        var track = await SendCommandAsync<Track>("music/tracks/get", args);
+        if (track != null)
+        {
+            await Task.WhenAll(
+                EnrichWithProviderInfoAsync(new List<Track> { track }),
+                EnrichImagesAsync(track)
+            );
+        }
+
+        return track;
     }
 
     /// <summary>
@@ -773,7 +796,14 @@ public class MusicAssistantService
         };
 
         var result = await SendCommandAsync<List<Track>>("music/tracks/track_versions", args);
-        return result ?? new List<Track>();
+        var tracks = result ?? new List<Track>();
+
+        await Task.WhenAll(
+            EnrichWithProviderInfoAsync(tracks),
+            EnrichImagesAsync(tracks)
+        );
+
+        return tracks;
     }
 
     /// <summary>
@@ -789,7 +819,14 @@ public class MusicAssistantService
         };
 
         var result = await SendCommandAsync<List<Album>>("music/tracks/track_albums", args);
-        return result ?? new List<Album>();
+        var albums = result ?? new List<Album>();
+
+        await Task.WhenAll(
+            EnrichWithProviderInfoAsync(albums),
+            EnrichImagesAsync(albums)
+        );
+
+        return albums;
     }
 
     /// <summary>
@@ -880,7 +917,14 @@ public class MusicAssistantService
         if (!string.IsNullOrEmpty(orderBy)) args["order_by"] = orderBy;
 
         var result = await SendCommandAsync<List<Playlist>>("music/playlists/library_items", args);
-        return result ?? new List<Playlist>();
+        var playlists = result ?? new List<Playlist>();
+
+        await Task.WhenAll(
+            EnrichWithProviderInfoAsync(playlists),
+            EnrichImagesAsync(playlists)
+        );
+
+        return playlists;
     }
 
     /// <summary>
@@ -894,7 +938,16 @@ public class MusicAssistantService
             provider_instance_id_or_domain = providerInstanceIdOrDomain
         };
 
-        return await SendCommandAsync<Playlist>("music/playlists/get", args);
+        var playlist = await SendCommandAsync<Playlist>("music/playlists/get", args);
+        if (playlist != null)
+        {
+            await Task.WhenAll(
+                EnrichWithProviderInfoAsync(new List<Playlist> { playlist }),
+                EnrichImagesAsync(playlist)
+            );
+        }
+
+        return playlist;
     }
 
     /// <summary>
@@ -1210,7 +1263,28 @@ public class MusicAssistantService
     public async Task<List<RecommendationFolder>> GetRecommendationsAsync()
     {
         var result = await SendCommandAsync<List<RecommendationFolder>>("music/recommendations");
-        return result ?? new List<RecommendationFolder>();
+        var folders = result ?? new List<RecommendationFolder>();
+
+        var items = folders
+            .SelectMany(folder => folder.Items ?? Enumerable.Empty<MediaItem>())
+            .Where(item => item != null)
+            .ToList();
+
+        if (items.Count > 0)
+        {
+            try
+            {
+                await Task.WhenAll(
+                    EnrichWithProviderInfoAsync(items),
+                    EnrichImagesAsync(items));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to enrich recommendation folder items");
+            }
+        }
+
+        return folders;
     }
 
     /// <summary>
@@ -1331,7 +1405,25 @@ public class MusicAssistantService
         }
 
         var result = await SendCommandAsync<List<MediaItem>>("music/recently_played_items", args);
-        return result ?? new List<MediaItem>();
+        var items = result ?? new List<MediaItem>();
+
+        var tracks = items.OfType<Track>().ToList();
+        var albums = items.OfType<Album>().ToList();
+        var artists = items.OfType<Artist>().ToList();
+        var playlists = items.OfType<Playlist>().ToList();
+
+        await Task.WhenAll(
+            EnrichWithProviderInfoAsync(tracks),
+            EnrichWithProviderInfoAsync(albums),
+            EnrichWithProviderInfoAsync(artists),
+            EnrichWithProviderInfoAsync(playlists),
+            EnrichImagesAsync(tracks),
+            EnrichImagesAsync(albums),
+            EnrichImagesAsync(artists),
+            EnrichImagesAsync(playlists)
+        );
+
+        return items;
     }
 
     #endregion
@@ -1458,7 +1550,18 @@ public class MusicAssistantService
         _logger.LogInformation("Fetching active queue for player: {PlayerId}", playerId);
 
         var args = new { player_id = playerId };
-        return await SendCommandAsync<PlayerQueue>("player_queues/get_active_queue", args);
+        var queue = await SendCommandAsync<PlayerQueue>("player_queues/get_active_queue", args);
+
+        var currentTrack = queue?.CurrentItem?.MediaItem;
+        if (currentTrack != null)
+        {
+            await Task.WhenAll(
+                EnrichWithProviderInfoAsync(new List<Track> { currentTrack }),
+                EnrichImagesAsync(currentTrack)
+            );
+        }
+
+        return queue;
     }
 
     /// <summary>
@@ -1477,7 +1580,22 @@ public class MusicAssistantService
         if (offset.HasValue) args["offset"] = offset.Value;
 
         var result = await SendCommandAsync<List<QueueItem>>("player_queues/items", args);
-        return result ?? new List<QueueItem>();
+        var queueItems = result ?? new List<QueueItem>();
+
+        var queueTracks = queueItems
+            .Select(queueItem => queueItem.MediaItem)
+            .OfType<Track>()
+            .ToList();
+
+        if (queueTracks.Count > 0)
+        {
+            await Task.WhenAll(
+                EnrichWithProviderInfoAsync(queueTracks),
+                EnrichImagesAsync(queueTracks)
+            );
+        }
+
+        return queueItems;
     }
 
     /// <summary>
@@ -1865,7 +1983,7 @@ public class MusicAssistantService
     /// <summary>
     /// Enrich media items with provider manifest for their primary provider
     /// </summary>
-    public async Task EnrichWithProviderInfoAsync<T>(IEnumerable<T> items) where T : MediaItem
+    private async Task EnrichWithProviderInfoAsync<T>(IEnumerable<T> items) where T : MediaItem
     {
         if (items == null)
             return;

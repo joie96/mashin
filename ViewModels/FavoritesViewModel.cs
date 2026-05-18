@@ -565,8 +565,6 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                 .Select(BuildTrackFromSnapshot)
                 .ToList();
 
-            await _musicAssistant.EnrichWithProviderInfoAsync(tracks);
-
             for (var i = 0; i < tracks.Count; i++)
             {
                 tracks[i].Index = i + 1;
@@ -597,7 +595,6 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                 .Select(BuildAlbumFromSnapshot)
                 .ToList();
 
-            await _musicAssistant.EnrichWithProviderInfoAsync(favoriteAlbums);
             Albums = new ObservableRangeCollection<Album>(favoriteAlbums);
             IsLoadingAlbums = false;
 
@@ -621,7 +618,6 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                 .Select(BuildPlaylistFromSnapshot)
                 .ToList();
 
-            await _musicAssistant.EnrichWithProviderInfoAsync(favoritePlaylists);
             Playlists = new ObservableRangeCollection<Playlist>(favoritePlaylists);
             IsLoadingPlaylists = false;
 
@@ -645,7 +641,6 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                 .Select(BuildArtistFromSnapshot)
                 .ToList();
 
-            await _musicAssistant.EnrichWithProviderInfoAsync(favoriteArtists);
             Artists = new ObservableRangeCollection<Artist>(favoriteArtists);
             IsLoadingArtists = false;
 

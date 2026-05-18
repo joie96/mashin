@@ -266,7 +266,6 @@ public sealed class QueueSyncService : IQueueSyncService
             Track? currentTrack = activeQueue.CurrentItem?.MediaItem;
             if (currentTrack != null)
             {
-                await _musicAssistant.EnrichWithProviderInfoAsync(new List<Track> { currentTrack });
                 currentTrack.Favorite = await _userDataService.IsFavoriteAsync(currentTrack, cancellationToken);
             }
 
@@ -275,15 +274,6 @@ public sealed class QueueSyncService : IQueueSyncService
             if (!string.IsNullOrWhiteSpace(activeQueue.QueueId))
             {
                 queueItems = await _musicAssistant.GetQueueItemsAsync(activeQueue.QueueId);
-                var queueTracks = queueItems
-                    .Select(queueItem => queueItem.MediaItem)
-                    .OfType<Track>()
-                    .ToList();
-
-                if (queueTracks.Count > 0)
-                {
-                    await _musicAssistant.EnrichWithProviderInfoAsync(queueTracks);
-                }
 
                 for (var index = 0; index < queueItems.Count; index++)
                 {

@@ -685,7 +685,6 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 .ToList()
                 ?? new List<Track>();
 
-            await _musicAssistant.EnrichWithProviderInfoAsync(recommendationTracks);
             await ApplyFavoriteStateAsync(recommendationTracks);
 
             // Shuffle recommendations on each load so the slide order varies.
@@ -729,7 +728,6 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 .ToList()
                 ?? new List<Track>();
 
-            await _musicAssistant.EnrichWithProviderInfoAsync(topTracks);
             await ApplyFavoriteStateAsync(topTracks);
 
             TopTracks = new ObservableRangeCollection<Track>(topTracks);
@@ -789,7 +787,6 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 })
                 .ToList();
 
-            await _musicAssistant.EnrichWithProviderInfoAsync(recentTracks);
             await ApplyFavoriteStateAsync(recentTracks);
 
             RecentListens = new ObservableRangeCollection<Track>(recentTracks);
@@ -827,7 +824,6 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 .ToList()
                 ?? new List<Artist>();
 
-            await _musicAssistant.EnrichWithProviderInfoAsync(topArtists);
             await ApplyFavoriteStateAsync(topArtists);
 
             TopArtists = new ObservableRangeCollection<Artist>(topArtists);
@@ -874,7 +870,6 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                     .ToList()
                     ?? new List<Artist>();
 
-                await _musicAssistant.EnrichWithProviderInfoAsync(artists);
                 await ApplyFavoriteStateAsync(artists);
 
                 var sectionName = string.IsNullOrWhiteSpace(folder.Name) ? folder.ItemId : folder.Name;
@@ -930,7 +925,6 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 .ToList()
                 ?? new List<Playlist>();
 
-            await _musicAssistant.EnrichWithProviderInfoAsync(genrePlaylists);
             await ApplyFavoriteStateAsync(genrePlaylists);
 
             GenrePlaylists = new ObservableRangeCollection<Playlist>(genrePlaylists);
@@ -967,7 +961,6 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 .ToList()
                 ?? new List<Playlist>();
 
-            await _musicAssistant.EnrichWithProviderInfoAsync(artistPlaylists);
             await ApplyFavoriteStateAsync(artistPlaylists);
 
             ArtistPlaylists = new ObservableRangeCollection<Playlist>(artistPlaylists);
