@@ -27,7 +27,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly IUserDataService _userDataService;
-    private readonly IPlaylistStoreService _playlistStore;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
     private readonly ILogger<ArtistDetailViewModel> _logger;
@@ -223,7 +222,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         MusicAssistantService musicAssistant,
         IPlayerService playerService,
         IUserDataService userDataService,
-        IPlaylistStoreService playlistStore,
         IMediaItemActions mediaActions,
         IContextMenuService contextMenuService,
         INavigationService navigationService,
@@ -231,7 +229,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     {
         _musicAssistant = musicAssistant;
         _userDataService = userDataService;
-        _playlistStore = playlistStore;
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
         _logger = logger;
@@ -826,8 +823,11 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         return Task.CompletedTask;
     }
 
-    private Task BuildTrackContextMenuAsync()
+    private async Task BuildTrackContextMenuAsync()
     {
+        var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(orderBy: "sort_name");
+        ApplyPlaylistDisplayNames(playlists);
+
         var menu = new ObservableRangeCollection<ContextMenuItem>
         {
             new()
@@ -857,7 +857,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                 Text = "Zu Wiedergabeliste hinzufügen",
                 Icon = FluentIcons.Add12,
                 SubItems = new ObservableCollection<ContextMenuItem>(
-                    _playlistStore.Playlists
+                    playlists
                         .Where(playlist => !playlist.Name.StartsWith("~"))
                         .Select(playlist => new ContextMenuItem
                         {
@@ -888,7 +888,34 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         };
 
         _trackContextMenuItems = menu;
-        return Task.CompletedTask;
+    }
+
+    private void ApplyPlaylistDisplayNames(IEnumerable<Playlist> playlists)
+    {
+        var prefix = GetUserPlaylistPrefix();
+
+        foreach (var playlist in playlists)
+        {
+            playlist.DisplayName = playlist.Name;
+
+            if (!string.IsNullOrWhiteSpace(prefix)
+                && !string.IsNullOrWhiteSpace(playlist.Name)
+                && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                playlist.DisplayName = playlist.Name[prefix.Length..];
+            }
+        }
+    }
+
+    private string? GetUserPlaylistPrefix()
+    {
+        var username = _userDataService.CurrentUser?.Username;
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            return null;
+        }
+
+        return string.Concat(username, "--");
     }
 
     private async Task PlaySelectedTracksWithModesAsync(IEnumerable<Track> tracks)

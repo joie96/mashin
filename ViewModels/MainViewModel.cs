@@ -32,11 +32,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private readonly IPlayerService _playerService;
     private readonly INavigationService _navigationService;
     private readonly IOverlayService _overlayService;
-    private readonly IPlaylistStoreService _playlistStore;
     private readonly IContextMenuService _contextMenuService;
     private readonly IQueueSyncService _queueSyncService;
     private readonly IArtworkService _artworkService;
     private readonly ILogger<MainViewModel> _logger;
+    private readonly ObservableRangeCollection<Playlist> _playlists = new();
 
 
     // Player
@@ -54,6 +54,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private bool _isDontStopTheMusicEnabled;
     private bool _isDarkTheme;
+    private bool _isLoadingPlaylists;
     private Color _playerBarAccentColor = null!;
     private Color _playerBarBackgroundColor = null!;
     private CancellationTokenSource? _playerBarAccentCts;
@@ -105,7 +106,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         IPlayerService playerService,
         INavigationService navigationService,
         IOverlayService overlayService,
-        IPlaylistStoreService playlistStore,
         IMediaItemActions mediaActions,
         IContextMenuService contextMenuService,
         IQueueSyncService queueSyncService,
@@ -118,7 +118,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _playerService = playerService;
         _navigationService = navigationService;
         _overlayService = overlayService;
-        _playlistStore = playlistStore;
         _contextMenuService = contextMenuService;
         _queueSyncService = queueSyncService;
         _artworkService = artworkService;
@@ -261,7 +260,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         IsNavigating = _navigationService.IsNavigating;
 
         _musicAssistant.LoginRequired += OnLoginRequired;
-        _playlistStore.PropertyChanged += OnPlaylistStorePropertyChanged;
 
         // Subscribe to player state events
         _playerService.PropertyChanged += OnPlayerServicePropertyChanged;
@@ -299,12 +297,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public ObservableRangeCollection<Playlist> Playlists
     {
-        get => _playlistStore.Playlists;
+        get => _playlists;
     }
 
     public bool IsLoadingPlaylists
     {
-        get => _playlistStore.IsLoading;
+        get => _isLoadingPlaylists;
+        private set => SetProperty(ref _isLoadingPlaylists, value);
     }
 
     #endregion
@@ -671,8 +670,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             await _playerService.ConnectAsync(uri);
         }
 
-        // Load playlists and store locally
-        await _playlistStore.RefreshAsync();
+        // Load playlists once and keep local list refreshed as needed.
+        await RefreshPlaylistsAsync();
 
         // Build Context Menus
         BuildUserMenuItems();
@@ -712,7 +711,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _queueSyncService.CurrentPlayerQueueUpdated -= OnCurrentPlayerQueueUpdated;
         _queueSyncService.CurrentTrackUpdated -= OnCurrentTrackUpdated;
         _queueSyncService.CurrentQueueItemsUpdated -= OnCurrentQueueItemsUpdated;
-        _playlistStore.PropertyChanged -= OnPlaylistStorePropertyChanged;
 
         _navigationService.PropertyChanged -= OnNavigationServicePropertyChanged;
 
@@ -831,7 +829,23 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             return;
         }
 
-        await _playlistStore.CreateAsync(name);
+        await _userDataService.GetPreferencesAsync();
+        var prefix = GetUserPlaylistPrefix();
+        if (!string.IsNullOrWhiteSpace(prefix)
+            && !name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            name = string.Concat(prefix, name);
+        }
+
+        try
+        {
+            await _musicAssistant.CreatePlaylistAsync(name);
+            await RefreshPlaylistsAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create playlist: {PlaylistName}", name);
+        }
     }
 
     #endregion
@@ -1125,19 +1139,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
     }
 
-    private void OnPlaylistStorePropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName == nameof(IPlaylistStoreService.IsLoading))
-        {
-            OnPropertyChanged(nameof(IsLoadingPlaylists));
-
-            if (!_playlistStore.IsLoading)
-            {
-                BuildCurrentTrackContextMenuItems();
-            }
-        }
-    }
-
     private void OnCurrentQueueItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         OnPropertyChanged(nameof(QueueTrackCountText));
@@ -1319,7 +1320,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 Text = "Zu Wiedergabeliste hinzufügen",
                 Icon = FluentIcons.Add12,
                 SubItems = new ObservableCollection<ContextMenuItem>(
-                    _playlistStore.Playlists
+                    _playlists
                         .Where(playlist => !playlist.Name.StartsWith("~", StringComparison.Ordinal))
                         .Select(playlist => new ContextMenuItem
                         {
@@ -1368,7 +1369,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private void BuildCurrentTrackContextMenuItems()
     {
         _currentTrackContextMenuItems = new ObservableRangeCollection<ContextMenuItem>(
-            _playlistStore.Playlists
+            _playlists
                 .Where(playlist => !playlist.Name.StartsWith("~", StringComparison.Ordinal))
                 .Select(playlist => new ContextMenuItem
                 {
@@ -1384,6 +1385,61 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                         await MediaActions.AddToPlaylistAsync(CurrentTrack, playlist);
                     })
                 }));
+    }
+
+    private async Task RefreshPlaylistsAsync()
+    {
+        IsLoadingPlaylists = true;
+
+        try
+        {
+            await _userDataService.GetPreferencesAsync();
+            var prefix = GetUserPlaylistPrefix();
+            var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(
+                search: string.IsNullOrWhiteSpace(prefix) ? null : prefix,
+                orderBy: "sort_name");
+
+            ApplyPlaylistDisplayNames(playlists, prefix);
+            _playlists.ReplaceRange(playlists);
+
+            BuildQueueContextMenuItems();
+            BuildCurrentTrackContextMenuItems();
+            OnPropertyChanged(nameof(Playlists));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to refresh playlists");
+        }
+        finally
+        {
+            IsLoadingPlaylists = false;
+        }
+    }
+
+    private string? GetUserPlaylistPrefix()
+    {
+        var username = _userDataService.CurrentUser?.Username;
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            return null;
+        }
+
+        return string.Concat(username, "--");
+    }
+
+    private static void ApplyPlaylistDisplayNames(IEnumerable<Playlist> playlists, string? prefix)
+    {
+        foreach (var playlist in playlists)
+        {
+            playlist.DisplayName = playlist.Name;
+
+            if (!string.IsNullOrWhiteSpace(prefix)
+                && !string.IsNullOrWhiteSpace(playlist.Name)
+                && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                playlist.DisplayName = playlist.Name[prefix.Length..];
+            }
+        }
     }
 
     #endregion

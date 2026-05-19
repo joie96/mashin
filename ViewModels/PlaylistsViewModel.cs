@@ -5,7 +5,6 @@ using MauiIcons.Fluent;
 using MauiIcons.Fluent.Filled;
 using Microsoft.Extensions.Logging;
 using System.Collections.ObjectModel;
-using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
@@ -16,12 +15,14 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 {
     #region Fields
 
-    private readonly IPlaylistStoreService _playlistStore;
+    private readonly MusicAssistantService _musicAssistantService;
+    private readonly IUserDataService _userDataService;
     private readonly INavigationService _navigationService;
     private readonly IMediaItemActions _mediaActions;
     private readonly IContextMenuService _contextMenuService;
     private readonly ILogger<PlaylistsViewModel> _logger;
     private readonly ObservableCollection<ContextMenuItem> _playlistContextMenuItems = new();
+    private readonly ObservableCollection<Playlist> _playlists = new();
     private readonly IReadOnlyList<TableViewSkeleton> _playlistSkeletons = Enumerable.Range(0, 12)
         .Select(_ => new TableViewSkeleton())
         .ToList();
@@ -35,20 +36,19 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
     #region Construction
 
     public PlaylistsViewModel(
-        IPlaylistStoreService playlistStore,
+        MusicAssistantService musicAssistantService,
+        IUserDataService userDataService,
         INavigationService navigationService,
         IMediaItemActions mediaActions,
         IContextMenuService contextMenuService,
         ILogger<PlaylistsViewModel> logger)
     {
-        _playlistStore = playlistStore;
+        _musicAssistantService = musicAssistantService;
+        _userDataService = userDataService;
         _navigationService = navigationService;
         _mediaActions = mediaActions;
         _contextMenuService = contextMenuService;
         _logger = logger;
-
-        _playlistStore.PropertyChanged += OnPlaylistStorePropertyChanged;
-        _playlistStore.Playlists.CollectionChanged += OnPlaylistsCollectionChanged;
 
         // Navigation command
         PlaylistTappedCommand = new Command<Playlist>(async playlist =>
@@ -95,13 +95,15 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         }
     }
 
-    public bool HasPlaylists => _playlistStore.Playlists.Count > 0;
+    public bool HasPlaylists => _playlists.Count > 0;
 
     public bool ShowPlaylistListView => IsLoading || HasPlaylists;
 
     public bool ShowNoPlaylistsMessage => !IsLoading && !HasPlaylists;
 
-    public IEnumerable<object> PlaylistItems => IsLoading ? _playlistSkeletons : _playlistStore.Playlists;
+    public IEnumerable<object> PlaylistItems => IsLoading
+        ? _playlistSkeletons
+        : _playlists;
 
     #endregion
 
@@ -133,8 +135,6 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         }
 
         _disposed = true;
-        _playlistStore.PropertyChanged -= OnPlaylistStorePropertyChanged;
-        _playlistStore.Playlists.CollectionChanged -= OnPlaylistsCollectionChanged;
     }
 
     #endregion
@@ -147,7 +147,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
         try
         {
-            await _playlistStore.RefreshAsync();
+            await LoadPlaylistsDirectAsync();
         }
         catch (Exception ex)
         {
@@ -159,24 +159,37 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         }
     }
 
-    #endregion
-
-    #region Event Handlers
-
-    private void OnPlaylistStorePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    private async Task LoadPlaylistsDirectAsync()
     {
-        if (e.PropertyName != nameof(IPlaylistStoreService.IsLoading))
+        await _userDataService.GetPreferencesAsync();
+
+        var username = _userDataService.CurrentUser?.Username;
+        var prefix = string.IsNullOrWhiteSpace(username)
+            ? null
+            : string.Concat(username, "--");
+
+        var playlists = await _musicAssistantService.GetLibraryPlaylistsAsync(
+            search: string.IsNullOrWhiteSpace(prefix) ? null : prefix,
+            orderBy: "sort_name");
+
+        _playlists.Clear();
+
+        foreach (var playlist in playlists)
         {
-            return;
+            if (!string.IsNullOrWhiteSpace(prefix)
+                && !string.IsNullOrWhiteSpace(playlist.Name)
+                && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                playlist.DisplayName = playlist.Name[prefix.Length..];
+            }
+            else
+            {
+                playlist.DisplayName = playlist.Name;
+            }
+
+            _playlists.Add(playlist);
         }
 
-        OnPropertyChanged(nameof(ShowPlaylistListView));
-        OnPropertyChanged(nameof(ShowNoPlaylistsMessage));
-        OnPropertyChanged(nameof(PlaylistItems));
-    }
-
-    private void OnPlaylistsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
-    {
         OnPropertyChanged(nameof(HasPlaylists));
         OnPropertyChanged(nameof(ShowPlaylistListView));
         OnPropertyChanged(nameof(ShowNoPlaylistsMessage));
@@ -246,7 +259,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
     private IReadOnlyList<Playlist> GetPlaylistsForAction()
     {
-        var selected = _playlistStore.Playlists.Where(playlist => playlist.IsSelected).ToList();
+        var selected = _playlists.Where(playlist => playlist.IsSelected).ToList();
         if (selected.Count > 0)
         {
             return selected;

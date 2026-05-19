@@ -64,7 +64,6 @@ public static class MauiProgram
         builder.Services.AddSingleton<IMediaItemActions, MediaItemActions>();
         builder.Services.AddSingleton<INavigationService, NavigationService>();
         builder.Services.AddSingleton<IOverlayService, OverlayService>();
-        builder.Services.AddSingleton<IPlaylistStoreService, PlaylistStoreService>();
         builder.Services.AddSingleton<IQueueSyncService, QueueSyncService>();
         builder.Services.AddSingleton<IArtworkService, ArtworkService>();
 

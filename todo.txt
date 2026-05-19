@@ -1,0 +1,1 @@
+- playlistshandling (umbenennen, anlegen etc.) überarbeiten bei desktop

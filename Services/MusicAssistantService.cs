@@ -2180,7 +2180,13 @@ public class MusicAssistantService
     {
         try
         {
-            var bytes = await _httpClient.GetByteArrayAsync(imagePath);
+            var resolvedImageUrl = ResolveImageDownloadUrl(imagePath);
+            if (string.IsNullOrWhiteSpace(resolvedImageUrl))
+            {
+                return null;
+            }
+
+            var bytes = await _httpClient.GetByteArrayAsync(resolvedImageUrl);
             if (bytes.Length == 0)
             {
                 return null;
@@ -2193,6 +2199,34 @@ public class MusicAssistantService
             _logger.LogDebug(ex, "Failed to download image bytes for path: {ImagePath}", imagePath);
             return null;
         }
+    }
+
+    private string ResolveImageDownloadUrl(string? imagePath)
+    {
+        if (string.IsNullOrWhiteSpace(imagePath))
+        {
+            return string.Empty;
+        }
+
+        if (Uri.TryCreate(imagePath, UriKind.Absolute, out _))
+        {
+            return imagePath;
+        }
+
+        var baseUrl = _settings.MusicAssistantUrl.TrimEnd('/');
+        if (imagePath.StartsWith("/imageproxy", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Concat(baseUrl, imagePath);
+        }
+
+        // Playlists can return relative paths like /collage/... that need imageproxy wrapping.
+        if (imagePath.StartsWith("/", StringComparison.Ordinal))
+        {
+            var encodedPath = Uri.EscapeDataString(Uri.EscapeDataString(imagePath));
+            return $"{baseUrl}/imageproxy?path={encodedPath}&provider=builtin&checksum=&size=256";
+        }
+
+        return string.Concat(baseUrl, "/", imagePath);
     }
 
     #endregion

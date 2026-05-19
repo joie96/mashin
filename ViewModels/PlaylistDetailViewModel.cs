@@ -23,7 +23,6 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     private readonly MusicAssistantService _musicAssistant;
     private readonly IUserDataService _userDataService;
     private readonly IOverlayService _overlayService;
-    private readonly IPlaylistStoreService _playlistStore;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
     private readonly ILogger<PlaylistDetailViewModel> _logger;
@@ -152,16 +151,6 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         OnPropertyChanged(nameof(TrackItems));
     }
 
-    private void OnStorePlaylistsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _ = BuildContentContextMenuAsync();
-    }
-
     #endregion
 
     #region Construction
@@ -171,7 +160,6 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         IPlayerService playerService,
         IUserDataService userDataService,
         IOverlayService overlayService,
-        IPlaylistStoreService playlistStore,
         IMediaItemActions mediaActions,
         IContextMenuService contextMenuService,
         INavigationService navigationService,
@@ -180,12 +168,9 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         _musicAssistant = musicAssistant;
         _userDataService = userDataService;
         _overlayService = overlayService;
-        _playlistStore = playlistStore;
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
         _logger = logger;
-
-        _playlistStore.Playlists.CollectionChanged += OnStorePlaylistsCollectionChanged;
 
         MediaActions = mediaActions;
 
@@ -420,10 +405,40 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             return;
         }
 
-        var renamed = await _playlistStore.RenameAsync(playlist, updatedName);
+        await _userDataService.GetPreferencesAsync();
+        var prefix = GetUserPlaylistPrefix();
+        if (!string.IsNullOrWhiteSpace(prefix)
+            && !updatedName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            updatedName = string.Concat(prefix, updatedName);
+        }
+
+        var originalName = playlist.Name;
+        var originalDisplayName = playlist.DisplayName;
+
+        var renamed = false;
+        try
+        {
+            playlist.Name = updatedName;
+            playlist.DisplayName = !string.IsNullOrWhiteSpace(prefix)
+                && updatedName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                ? updatedName[prefix.Length..]
+                : updatedName;
+
+            await MediaActions.UpdatePlaylistAsync(playlist);
+            renamed = true;
+        }
+        catch (Exception ex)
+        {
+            playlist.Name = originalName;
+            playlist.DisplayName = originalDisplayName;
+            _logger.LogError(ex, "Failed to rename playlist: {PlaylistName}", originalName);
+        }
+
         if (renamed)
         {
             OnPropertyChanged(nameof(PlaylistName));
+            _ = BuildContentContextMenuAsync();
         }
     }
 
@@ -437,7 +452,17 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             return;
         }
 
-        var removed = await _playlistStore.RemoveAsync(playlist);
+        var removed = false;
+        try
+        {
+            await MediaActions.RemovePlaylistAsync(playlist);
+            removed = true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete playlist: {PlaylistName}", playlist.Name);
+        }
+
         if (removed)
         {
             await _navigationService.GoBackAsync();
@@ -523,9 +548,10 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         return Task.CompletedTask;
     }
 
-    private Task BuildContentContextMenuAsync()
+    private async Task BuildContentContextMenuAsync()
     {
-        var playlists = _playlistStore.Playlists;
+        var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(orderBy: "sort_name");
+        ApplyPlaylistDisplayNames(playlists);
 
         var menu = new ObservableRangeCollection<ContextMenuItem>
         {
@@ -619,7 +645,6 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         };
 
         _contentContextMenuItems = menu;
-        return Task.CompletedTask;
     }
 
     #endregion
@@ -634,6 +659,23 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         }
 
         return string.Concat(username, "--");
+    }
+
+    private void ApplyPlaylistDisplayNames(IEnumerable<Playlist> playlists)
+    {
+        var prefix = GetUserPlaylistPrefix();
+
+        foreach (var playlist in playlists)
+        {
+            playlist.DisplayName = playlist.Name;
+
+            if (!string.IsNullOrWhiteSpace(prefix)
+                && !string.IsNullOrWhiteSpace(playlist.Name)
+                && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                playlist.DisplayName = playlist.Name[prefix.Length..];
+            }
+        }
     }
 
     private static string FormatTotalDuration(int totalSeconds)
@@ -700,8 +742,6 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             _tracks.CollectionChanged -= OnTracksCollectionChanged;
             _tracks.Clear();
         }
-
-        _playlistStore.Playlists.CollectionChanged -= OnStorePlaylistsCollectionChanged;
 
         _headerContextMenuItems.Clear();
         _contentContextMenuItems.Clear();

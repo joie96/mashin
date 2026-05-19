@@ -23,7 +23,6 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly IUserDataService _userDataService;
-    private readonly IPlaylistStoreService _playlistStore;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
     private readonly ILogger<FavoritesViewModel> _logger;
@@ -314,7 +313,6 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
     public FavoritesViewModel(
         MusicAssistantService musicAssistant,
         IUserDataService userDataService,
-        IPlaylistStoreService playlistStore,
         IMediaItemActions mediaActions,
         IContextMenuService contextMenuService,
         INavigationService navigationService,
@@ -322,7 +320,6 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
     {
         _musicAssistant = musicAssistant;
         _userDataService = userDataService;
-        _playlistStore = playlistStore;
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
         _logger = logger;
@@ -909,7 +906,10 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
 
         try
         {
-            foreach (var playlist in _playlistStore.Playlists)
+            var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(orderBy: "sort_name");
+            ApplyPlaylistDisplayNames(playlists);
+
+            foreach (var playlist in playlists)
             {
                 if (playlist.Name.StartsWith("~", StringComparison.Ordinal))
                 {

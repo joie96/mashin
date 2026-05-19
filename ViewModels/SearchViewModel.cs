@@ -22,7 +22,6 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
     #region Fields
 
     private readonly MusicAssistantService _musicAssistant;
-    private readonly IPlaylistStoreService _playlistStore;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
     private readonly ILogger<SearchViewModel> _logger;
@@ -304,14 +303,12 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
     public SearchViewModel(
         MusicAssistantService musicAssistant,
         IPlayerService playerService,
-        IPlaylistStoreService playlistStore,
         IMediaItemActions mediaActions,
         IContextMenuService contextMenuService,
         INavigationService navigationService,
         ILogger<SearchViewModel> logger)
     {
         _musicAssistant = musicAssistant;
-        _playlistStore = playlistStore;
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
         _logger = logger;
@@ -899,7 +896,9 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
 
         try
         {
-            foreach (var playlist in _playlistStore.Playlists)
+            var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(orderBy: "sort_name");
+
+            foreach (var playlist in playlists)
             {
                 if (playlist.Name.StartsWith("~", StringComparison.Ordinal))
                 {
