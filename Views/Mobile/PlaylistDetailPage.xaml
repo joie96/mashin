@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8" ?>
+﻿<?xml version="1.0" encoding="utf-8" ?>
 <ContentPage x:Class="mashin.Views.Mobile.PlaylistDetailPage"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
@@ -38,13 +38,13 @@
                 RowSpacing="6"
                 VerticalOptions="Center">
                 <Label Grid.Row="0"
-                    FontFamily="PoppinsSemibold"
+                    FontFamily="PoppinsRegular"
                     FontSize="10"
                     Text="PLAYLIST"
                     TextColor="{DynamicResource TextSecondary}" />
 
                 <Label Grid.Row="1"
-                    FontFamily="PoppinsSemibold"
+                    FontFamily="PoppinsRegular"
                     FontSize="22"
                     LineBreakMode="WordWrap"
                     MaxLines="2"
@@ -57,7 +57,7 @@
                         Text="{Binding Tracks.Count, StringFormat='{0} Titel'}"
                         TextColor="{DynamicResource TextSecondary}" />
                     <Label FontSize="12"
-                        Text="•"
+                        Text="â€¢"
                         TextColor="{DynamicResource TextSecondary}" />
                     <Label FontFamily="PoppinsRegular"
                         FontSize="12"
@@ -82,7 +82,7 @@
                         <Label FontSize="14"
                             Text="{mi:FluentFilled Icon=Play16Filled, FontOverride=True}"
                             TextColor="{DynamicResource IconPrimary}" />
-                        <Label FontFamily="PoppinsSemibold"
+                        <Label FontFamily="PoppinsRegular"
                             FontSize="12"
                             Text="Abspielen"
                             TextColor="{DynamicResource TextPrimary}" />
@@ -102,7 +102,7 @@
                         <Label FontSize="14"
                             Text="{mi:FluentFilled Icon=ArrowShuffle16Filled, FontOverride=True}"
                             TextColor="{DynamicResource IconPrimary}" />
-                        <Label FontFamily="PoppinsSemibold"
+                        <Label FontFamily="PoppinsRegular"
                             FontSize="12"
                             Text="Shuffle"
                             TextColor="{DynamicResource TextPrimary}" />
@@ -118,3 +118,4 @@
         </Grid>
     </Grid>
 </ContentPage>
+

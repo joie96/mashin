@@ -54,6 +54,17 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         PlaylistTappedCommand = new Command<Playlist>(async playlist =>
             await _navigationService.NavigateToAsync<PlaylistDetailPage>(playlist));
 
+        // Long-press selection command
+        PlaylistLongPressedCommand = new Command<Playlist>(playlist =>
+        {
+            if (playlist == null)
+            {
+                return;
+            }
+
+            playlist.IsSelected = !playlist.IsSelected;
+        });
+
         // Context menu command
         ShowPlaylistContextMenuAtAnchorCommand = new Command<View>(async anchor =>
         {
@@ -110,6 +121,8 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
     #region Commands
 
     public ICommand PlaylistTappedCommand { get; }
+
+    public ICommand PlaylistLongPressedCommand { get; }
 
     public ICommand ShowPlaylistContextMenuAtAnchorCommand { get; }
 

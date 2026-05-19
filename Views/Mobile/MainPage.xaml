@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8" ?>
+﻿<?xml version="1.0" encoding="utf-8" ?>
 <ContentPage x:Class="mashin.Views.Mobile.MainPage"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
@@ -73,8 +73,8 @@
                         RowSpacing="1"
                         VerticalOptions="Center">
                         <Label Grid.Row="0"
-                            FontAttributes="Bold"
-                            FontFamily="PoppinsSemibold"
+                            FontAttributes="None"
+                            FontFamily="PoppinsRegular"
                             FontSize="13"
                             LineBreakMode="TailTruncation"
                             MaxLines="1"

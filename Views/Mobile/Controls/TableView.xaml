@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8" ?>
+﻿<?xml version="1.0" encoding="utf-8" ?>
 <ContentView x:Class="mashin.Views.Mobile.Controls.TableView"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
@@ -10,13 +10,23 @@
 
     <ContentView.Resources>
         <DataTemplate x:Key="PlaylistTemplate" x:DataType="models:Playlist">
-            <Border Padding="8,6"
+            <Border Padding="8,4"
                 BackgroundColor="Transparent"
-                HeightRequest="86"
+                HeightRequest="80"
                 StrokeThickness="0">
+                <Border.Triggers>
+                    <DataTrigger Binding="{Binding IsSelected}"
+                        TargetType="Border"
+                        Value="True">
+                        <Setter Property="BackgroundColor"
+                            Value="{DynamicResource SelectionBackground}" />
+                    </DataTrigger>
+                </Border.Triggers>
                 <Border.GestureRecognizers>
-                    <TapGestureRecognizer Command="{Binding Source={x:Reference self}, Path=PrimaryInfoTappedCommand}"
-                        CommandParameter="{Binding .}" />
+                    <PointerGestureRecognizer PointerExited="OnRowPointerExited"
+                        PointerPressed="OnRowPointerPressed"
+                        PointerReleased="OnRowPointerReleased" />
+                    <TapGestureRecognizer Tapped="OnRowTapped" />
                 </Border.GestureRecognizers>
 
                 <Grid ColumnDefinitions="52,*,32,32"
@@ -37,7 +47,7 @@
                     <VerticalStackLayout Grid.Column="1"
                         Spacing="2"
                         VerticalOptions="Center">
-                        <Label FontFamily="PoppinsSemibold"
+                        <Label FontFamily="PoppinsRegular"
                             FontSize="18"
                             LineBreakMode="TailTruncation"
                             MaxLines="1"
@@ -46,15 +56,25 @@
                     </VerticalStackLayout>
 
                     <CheckBox Grid.Column="2"
-                        HorizontalOptions="Center"
+                        HorizontalOptions="End"
                         IsChecked="{Binding IsSelected, Mode=TwoWay}"
-                        VerticalOptions="Center" />
+                        IsVisible="False"
+                        VerticalOptions="Center">
+                        <CheckBox.Triggers>
+                            <DataTrigger Binding="{Binding IsSelected}"
+                                TargetType="CheckBox"
+                                Value="True">
+                                <Setter Property="IsVisible"
+                                    Value="True" />
+                            </DataTrigger>
+                        </CheckBox.Triggers>
+                    </CheckBox>
 
                     <Label x:Name="MoreIconLabel"
                         Grid.Column="3"
                         FontSize="18"
                         HorizontalOptions="Center"
-                        Text="{mi:Fluent Icon=MoreHorizontal48, FontOverride=True}"
+                        Text="{mi:Fluent Icon=MoreVertical48, FontOverride=True}"
                         TextColor="{DynamicResource IconSecondary}"
                         VerticalOptions="Center">
                         <Label.GestureRecognizers>
@@ -69,8 +89,8 @@
         <DataTemplate x:Key="SkeletonTemplate" x:DataType="models:TableViewSkeleton">
             <Grid ColumnDefinitions="52,*,32,32"
                 ColumnSpacing="10"
-                HeightRequest="86"
-                Padding="8,6">
+                HeightRequest="80"
+                Padding="8,4">
                 <desktopControls:SkeletonLoader Grid.Column="0"
                     CornerRadius="8"
                     HeightRequest="52"
@@ -88,7 +108,7 @@
                 <desktopControls:SkeletonLoader Grid.Column="2"
                     CornerRadius="4"
                     HeightRequest="20"
-                    HorizontalOptions="Center"
+                    HorizontalOptions="End"
                     VerticalOptions="Center"
                     WidthRequest="20" />
                 <desktopControls:SkeletonLoader Grid.Column="3"
@@ -110,10 +130,11 @@
         SelectionMode="None"
         VerticalScrollBarVisibility="Never">
         <CollectionView.ItemsLayout>
-            <LinearItemsLayout Orientation="Vertical" ItemSpacing="2" />
+            <LinearItemsLayout Orientation="Vertical" ItemSpacing="0" />
         </CollectionView.ItemsLayout>
         <CollectionView.ItemTemplate>
             <StaticResource Key="MobileTableViewTemplateSelector" />
         </CollectionView.ItemTemplate>
     </CollectionView>
 </ContentView>
+
