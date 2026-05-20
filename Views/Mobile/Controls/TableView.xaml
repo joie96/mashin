@@ -26,34 +26,41 @@
                     <PointerGestureRecognizer PointerExited="OnRowPointerExited"
                         PointerPressed="OnRowPointerPressed"
                         PointerReleased="OnRowPointerReleased" />
-                    <TapGestureRecognizer Tapped="OnRowTapped" />
                 </Border.GestureRecognizers>
 
                 <Grid ColumnDefinitions="52,*,32,32"
                     ColumnSpacing="10">
-                    <Border Grid.Column="0"
-                        BackgroundColor="{DynamicResource BackgroundTertiary}"
-                        HeightRequest="52"
-                        StrokeThickness="0"
-                        VerticalOptions="Center"
-                        WidthRequest="52">
-                        <Border.StrokeShape>
-                            <RoundRectangle CornerRadius="8" />
-                        </Border.StrokeShape>
-                        <Image Aspect="AspectFill"
-                            Source="{Binding DisplayImageSource}" />
-                    </Border>
+                    <Grid Grid.ColumnSpan="2"
+                        ColumnDefinitions="52,*"
+                        ColumnSpacing="10">
+                        <Grid.GestureRecognizers>
+                            <TapGestureRecognizer Tapped="OnRowTapped" />
+                        </Grid.GestureRecognizers>
 
-                    <VerticalStackLayout Grid.Column="1"
-                        Spacing="2"
-                        VerticalOptions="Center">
-                        <Label FontFamily="PoppinsRegular"
-                            FontSize="18"
-                            LineBreakMode="TailTruncation"
-                            MaxLines="1"
-                            Text="{Binding DisplayName}"
-                            TextColor="{DynamicResource TextPrimary}" />
-                    </VerticalStackLayout>
+                        <Border Grid.Column="0"
+                            BackgroundColor="{DynamicResource BackgroundTertiary}"
+                            HeightRequest="52"
+                            StrokeThickness="0"
+                            VerticalOptions="Center"
+                            WidthRequest="52">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="8" />
+                            </Border.StrokeShape>
+                            <Image Aspect="AspectFill"
+                                Source="{Binding DisplayImageSource}" />
+                        </Border>
+
+                        <VerticalStackLayout Grid.Column="1"
+                            Spacing="2"
+                            VerticalOptions="Center">
+                            <Label FontFamily="PoppinsRegular"
+                                FontSize="18"
+                                LineBreakMode="TailTruncation"
+                                MaxLines="1"
+                                Text="{Binding DisplayName}"
+                                TextColor="{DynamicResource TextPrimary}" />
+                        </VerticalStackLayout>
+                    </Grid>
 
                     <CheckBox Grid.Column="2"
                         HorizontalOptions="End"
