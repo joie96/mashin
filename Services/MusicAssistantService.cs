@@ -2178,55 +2178,82 @@ public class MusicAssistantService
 
     private async Task<byte[]?> DownLoadImageBytes(string imagePath)
     {
-        try
+        var downloadUrls = ResolveImageDownloadUrls(imagePath);
+        if (downloadUrls.Count == 0)
         {
-            var resolvedImageUrl = ResolveImageDownloadUrl(imagePath);
-            if (string.IsNullOrWhiteSpace(resolvedImageUrl))
-            {
-                return null;
-            }
-
-            var bytes = await _httpClient.GetByteArrayAsync(resolvedImageUrl);
-            if (bytes.Length == 0)
-            {
-                return null;
-            }
-
-            return bytes;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to download image bytes for path: {ImagePath}", imagePath);
             return null;
         }
+
+        Exception? lastException = null;
+        foreach (var downloadUrl in downloadUrls)
+        {
+            try
+            {
+                var bytes = await _httpClient.GetByteArrayAsync(downloadUrl);
+                if (bytes.Length == 0)
+                {
+                    continue;
+                }
+
+                return bytes;
+            }
+            catch (Exception ex)
+            {
+                lastException = ex;
+                _logger.LogDebug(ex, "Image download attempt failed for URL: {ImageUrl}", downloadUrl);
+            }
+        }
+
+        _logger.LogWarning(
+            lastException,
+            "Failed to download image bytes for path: {ImagePath}. Tried URLs: {TriedUrls}",
+            imagePath,
+            string.Join(" | ", downloadUrls));
+        return null;
     }
 
-    private string ResolveImageDownloadUrl(string? imagePath)
+    private List<string> ResolveImageDownloadUrls(string? imagePath)
     {
+        var result = new List<string>();
         if (string.IsNullOrWhiteSpace(imagePath))
         {
-            return string.Empty;
+            return result;
         }
 
-        if (Uri.TryCreate(imagePath, UriKind.Absolute, out _))
+        if (Uri.TryCreate(imagePath, UriKind.Absolute, out var absoluteUri)
+            && (absoluteUri.Scheme == Uri.UriSchemeHttp || absoluteUri.Scheme == Uri.UriSchemeHttps))
         {
-            return imagePath;
+            result.Add(imagePath);
+            return result;
         }
 
-        var baseUrl = _settings.MusicAssistantUrl.TrimEnd('/');
+        var configuredBaseUrl = _settings.MusicAssistantUrl?.Trim();
+        if (string.IsNullOrWhiteSpace(configuredBaseUrl))
+        {
+            configuredBaseUrl = _httpClient.BaseAddress?.ToString();
+        }
+
+        var baseUrl = configuredBaseUrl?.TrimEnd('/') ?? string.Empty;
         if (imagePath.StartsWith("/imageproxy", StringComparison.OrdinalIgnoreCase))
         {
-            return string.Concat(baseUrl, imagePath);
+            result.Add(string.Concat(baseUrl, imagePath));
+            return result;
         }
 
         // Playlists can return relative paths like /collage/... that need imageproxy wrapping.
         if (imagePath.StartsWith("/", StringComparison.Ordinal))
         {
-            var encodedPath = Uri.EscapeDataString(Uri.EscapeDataString(imagePath));
-            return $"{baseUrl}/imageproxy?path={encodedPath}&provider=builtin&checksum=&size=256";
+            var singleEncodedPath = Uri.EscapeDataString(imagePath);
+            var doubleEncodedPath = Uri.EscapeDataString(singleEncodedPath);
+
+            // Music Assistant imageproxy commonly expects a double-encoded path value.
+            result.Add($"{baseUrl}/imageproxy?path={doubleEncodedPath}&size=256");
+
+            return result;
         }
 
-        return string.Concat(baseUrl, "/", imagePath);
+        result.Add(string.Concat(baseUrl, "/", imagePath));
+        return result;
     }
 
     #endregion
