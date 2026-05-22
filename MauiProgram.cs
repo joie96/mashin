@@ -141,6 +141,16 @@ public static class MauiProgram
         builder.Services.AddTransient<DesktopSearchPage>();
         builder.Services.AddTransient<MobileSearchPage>();
 
-        return builder.Build();
+        var app = builder.Build();
+
+        var startupLogger = app.Services
+            .GetRequiredService<ILoggerFactory>()
+            .CreateLogger("mashin.Startup");
+        var resolvedPlayer = app.Services.GetRequiredService<IAudioPlayer>();
+        startupLogger.LogInformation(
+            "Resolved IAudioPlayer implementation: {AudioPlayerType}",
+            resolvedPlayer.GetType().FullName);
+
+        return app;
     }
 }

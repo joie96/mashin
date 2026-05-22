@@ -254,6 +254,13 @@ public sealed class QueueSyncService : IQueueSyncService
 
         try
         {
+            var favoritesSnapshot = await _userDataService.GetFavoritesSnapshotAsync(cancellationToken);
+            var favoriteTrackUris = favoritesSnapshot?.Tracks
+                .Select(track => track.Uri)
+                .Where(uri => !string.IsNullOrWhiteSpace(uri))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase)
+                ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             // Get active queue for player
             var activeQueue = await _musicAssistant.GetActiveQueueForPlayerAsync(_playerService.PlayerId);
             if (activeQueue == null)
@@ -266,7 +273,8 @@ public sealed class QueueSyncService : IQueueSyncService
             Track? currentTrack = activeQueue.CurrentItem?.MediaItem;
             if (currentTrack != null)
             {
-                currentTrack.Favorite = await _userDataService.IsFavoriteAsync(currentTrack, cancellationToken);
+                currentTrack.Favorite = !string.IsNullOrWhiteSpace(currentTrack.Uri)
+                    && favoriteTrackUris.Contains(currentTrack.Uri);
             }
 
             // Get queue tracks
@@ -284,7 +292,8 @@ public sealed class QueueSyncService : IQueueSyncService
                     }
 
                     track.Index = index + 1;
-                    track.Favorite = await _userDataService.IsFavoriteAsync(track, cancellationToken);
+                    track.Favorite = !string.IsNullOrWhiteSpace(track.Uri)
+                        && favoriteTrackUris.Contains(track.Uri);
                 }
             }
 

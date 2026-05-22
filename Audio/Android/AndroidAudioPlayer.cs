@@ -1,10 +1,14 @@
 ﻿#if ANDROID
+#pragma warning disable CA1416
+#pragma warning disable CA1422
+#pragma warning disable CS0618
 using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Android.Media;
 using Microsoft.Extensions.Logging;
 using Sendspin.SDK.Audio;
+using Sendspin.SDK.Models;
 
 namespace mashin.Audio.Android
 {
@@ -15,8 +19,9 @@ namespace mashin.Audio.Android
         private IAudioSampleSource? _source;
         private AudioTrack? _audioTrack;
         private Thread? _playbackThread;
-        private bool _isPlaying;
-        private bool _disposed;
+        private readonly object _playbackLock = new();
+        private volatile bool _isPlaying;
+        private volatile bool _disposed;
 
         private float _volume = 1.0f;
         private bool _isMuted;
@@ -25,6 +30,7 @@ namespace mashin.Audio.Android
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             State = AudioPlayerState.Uninitialized;
+            _logger.LogInformation("AndroidAudioPlayer instantiated");
         }
 
         public AudioPlayerState State { get; private set; }
@@ -35,7 +41,6 @@ namespace mashin.Audio.Android
             set
             {
                 _volume = Math.Clamp(value, 0f, 1f);
-                _audioTrack?.SetVolume(_volume);
             }
         }
 
@@ -45,7 +50,6 @@ namespace mashin.Audio.Android
             set
             {
                 _isMuted = value;
-                _audioTrack?.SetVolume(_isMuted ? 0f : _volume);
             }
         }
 
@@ -61,6 +65,21 @@ namespace mashin.Audio.Android
                 try
                 {
                     ArgumentNullException.ThrowIfNull(format);
+
+                    if (_disposed)
+                    {
+                        _logger.LogInformation("Re-initializing AndroidAudioPlayer after previous dispose");
+                        _disposed = false;
+                    }
+
+                    _isPlaying = false;
+                    _playbackThread?.Join(300);
+                    _playbackThread = null;
+
+                    _audioTrack?.Release();
+                    _audioTrack?.Dispose();
+                    _audioTrack = null;
+
                     _format = format;
 
                     var channelConfig = format.Channels == 1
@@ -70,27 +89,23 @@ namespace mashin.Audio.Android
                     var bufferSize = AudioTrack.GetMinBufferSize(
                         format.SampleRate,
                         channelConfig,
-                        Encoding.PcmFloat);
+                        Encoding.Pcm16bit);
 
                     if (bufferSize <= 0)
                     {
                         throw new InvalidOperationException($"Invalid buffer size: {bufferSize}");
                     }
 
-                    _audioTrack = new AudioTrack.Builder()!
-                        .SetAudioAttributes(new AudioAttributes.Builder()!
-                            .SetUsage(AudioUsageKind.Media)!
-                            .SetContentType(AudioContentType.Music)!
-                            .Build()!)!
-                        .SetAudioFormat(new AudioFormat.Builder()!
-                            .SetEncoding(Encoding.PcmFloat)!
-                            .SetSampleRate(format.SampleRate)!
-                            .SetChannelMask(channelConfig)!
-                            .Build()!)!
-                        .SetBufferSizeInBytes(bufferSize * 4)!
-                        .Build();
+                    _audioTrack = new AudioTrack(
+                        global::Android.Media.Stream.Music,
+                        format.SampleRate,
+                        channelConfig,
+                        Encoding.Pcm16bit,
+                        bufferSize * 2,
+                        AudioTrackMode.Stream);
 
-                    OutputLatencyMs = (bufferSize * 1000) / format.SampleRate;
+                    var bytesPerSample = 2;
+                    OutputLatencyMs = (bufferSize * 1000) / (format.SampleRate * format.Channels * bytesPerSample);
                     SetState(AudioPlayerState.Stopped);
 
                     _logger.LogInformation(
@@ -111,7 +126,7 @@ namespace mashin.Audio.Android
         {
             ArgumentNullException.ThrowIfNull(source);
             _source = source;
-            _logger.LogDebug("Sample source configured");
+            _logger.LogInformation("Sample source configured: {SourceType}", source.GetType().FullName);
         }
 
         public void Play()
@@ -119,14 +134,25 @@ namespace mashin.Audio.Android
             if (_audioTrack == null || _format == null)
                 throw new InvalidOperationException("Not initialized");
 
-            if (_isPlaying) return;
+            lock (_playbackLock)
+            {
+                if (_isPlaying)
+                {
+                    return;
+                }
 
-            _isPlaying = true;
-            _audioTrack.Play();
-            SetState(AudioPlayerState.Playing);
+                _isPlaying = true;
+                _audioTrack.SetVolume(1.0f);
+                _audioTrack.Play();
+                SetState(AudioPlayerState.Playing);
 
-            _playbackThread = new Thread(PlaybackLoop) { IsBackground = true };
-            _playbackThread.Start();
+                _playbackThread = new Thread(PlaybackLoop)
+                {
+                    IsBackground = true,
+                    Name = "AndroidAudioPlayback"
+                };
+                _playbackThread.Start();
+            }
 
             _logger.LogInformation("Playback started");
         }
@@ -137,6 +163,8 @@ namespace mashin.Audio.Android
 
             _isPlaying = false;
             _audioTrack?.Pause();
+            _audioTrack?.Flush();
+            JoinPlaybackThreadIfNeeded();
             SetState(AudioPlayerState.Paused);
             _logger.LogInformation("Playback paused");
         }
@@ -146,14 +174,24 @@ namespace mashin.Audio.Android
             if (!_isPlaying) return;
 
             _isPlaying = false;
+            _audioTrack?.Pause();
+            _audioTrack?.Flush();
             _audioTrack?.Stop();
+            JoinPlaybackThreadIfNeeded();
             SetState(AudioPlayerState.Stopped);
             _logger.LogInformation("Playback stopped");
         }
 
         private void PlaybackLoop()
         {
-            var buffer = new float[4096];
+            var floatBuffer = new float[4096];
+            var pcm16Buffer = new short[floatBuffer.Length];
+            var diagnosticsLeft = 12;
+            var sourceMissingLogged = false;
+            var consecutiveZeroReads = 0;
+            const int maxConsecutiveZeroReadsBeforeStop = 40;
+
+            _logger.LogInformation("Playback loop entered (isPlaying={IsPlaying}, disposed={Disposed})", _isPlaying, _disposed);
 
             while (_isPlaying && !_disposed)
             {
@@ -161,29 +199,132 @@ namespace mashin.Audio.Android
                 {
                     if (_source == null || _isMuted)
                     {
-                        Array.Clear(buffer, 0, buffer.Length);
+                        if (_source == null && !sourceMissingLogged)
+                        {
+                            _logger.LogWarning("Playback loop running without sample source");
+                            sourceMissingLogged = true;
+                        }
+                        Array.Clear(floatBuffer, 0, floatBuffer.Length);
                     }
                     else
                     {
-                        var read = _source.Read(buffer, 0, buffer.Length);
+                        sourceMissingLogged = false;
+                        var read = _source.Read(floatBuffer, 0, floatBuffer.Length);
+
                         if (read == 0)
                         {
-                            Stop();
-                            break;
+                            consecutiveZeroReads++;
+
+                            if (consecutiveZeroReads == 1 || consecutiveZeroReads % 10 == 0)
+                            {
+                                _logger.LogInformation(
+                                    "Audio source returned 0 samples (consecutive={Count})",
+                                    consecutiveZeroReads);
+                            }
+
+                            if (consecutiveZeroReads >= maxConsecutiveZeroReadsBeforeStop)
+                            {
+                                _logger.LogWarning(
+                                    "Stopping playback after {Count} consecutive zero-sample reads",
+                                    consecutiveZeroReads);
+                                Stop();
+                                break;
+                            }
+
+                            Thread.Yield();
+                            continue;
                         }
 
-                        if (read < buffer.Length)
-                            Array.Clear(buffer, read, buffer.Length - read);
+                        consecutiveZeroReads = 0;
 
-                        // Apply volume
-                        if (_volume < 0.999f)
+                        if (read < floatBuffer.Length)
+                            Array.Clear(floatBuffer, read, floatBuffer.Length - read);
+                    }
+
+                    var gain = _isMuted ? 0f : _volume;
+                    if (gain <= 0f)
+                    {
+                        Array.Clear(pcm16Buffer, 0, pcm16Buffer.Length);
+                    }
+                    else
+                    {
+                        for (int i = 0; i < floatBuffer.Length; i++)
                         {
-                            for (int i = 0; i < read; i++)
-                                buffer[i] *= _volume;
+                            var sample = gain < 0.999f ? floatBuffer[i] * gain : floatBuffer[i];
+                            sample = Math.Clamp(sample, -1f, 1f);
+                            pcm16Buffer[i] = (short)(sample * short.MaxValue);
                         }
                     }
 
-                    _audioTrack?.Write(buffer, 0, buffer.Length, WriteMode.Blocking);
+                    var track = _audioTrack;
+                    if (track == null)
+                    {
+                        throw new InvalidOperationException("AudioTrack not available");
+                    }
+
+                    var totalWritten = 0;
+                    var offset = 0;
+                    var remaining = pcm16Buffer.Length;
+                    var zeroWriteSpins = 0;
+                    const int maxZeroWriteSpins = 120;
+
+                    while (remaining > 0 && _isPlaying && !_disposed)
+                    {
+                        var written = OperatingSystem.IsAndroidVersionAtLeast(23)
+                            ? track.Write(pcm16Buffer, offset, remaining, WriteMode.NonBlocking)
+                            : track.Write(pcm16Buffer, offset, remaining);
+
+                        if (written < 0)
+                        {
+                            throw new InvalidOperationException($"AudioTrack write failed: {written}");
+                        }
+
+                        if (written == 0)
+                        {
+                            zeroWriteSpins++;
+                            if (zeroWriteSpins >= maxZeroWriteSpins)
+                            {
+                                _logger.LogWarning(
+                                    "AudioTrack write returned 0 repeatedly (remaining={Remaining}, playState={PlayState}); dropping current buffer chunk",
+                                    remaining,
+                                    track.PlayState);
+                                break;
+                            }
+
+                            Thread.Yield();
+                            continue;
+                        }
+
+                        zeroWriteSpins = 0;
+
+                        offset += written;
+                        remaining -= written;
+                        totalWritten += written;
+                    }
+
+                    if (diagnosticsLeft > 0)
+                    {
+                        var firstSample = pcm16Buffer.Length > 0 ? pcm16Buffer[0] : (short)0;
+                        var peak = 0;
+                        for (int i = 0; i < pcm16Buffer.Length; i++)
+                        {
+                            var abs = Math.Abs((int)pcm16Buffer[i]);
+                            if (abs > peak)
+                            {
+                                peak = abs;
+                            }
+                        }
+                        _logger.LogInformation(
+                            "Android audio write: samples={Samples}, written={Written}, gain={Gain:F2}, muted={Muted}, first={FirstSample}, peak={Peak}, playState={PlayState}",
+                            pcm16Buffer.Length,
+                            totalWritten,
+                            gain,
+                            _isMuted,
+                            firstSample,
+                            peak,
+                            track.PlayState);
+                        diagnosticsLeft--;
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -193,6 +334,8 @@ namespace mashin.Audio.Android
                     break;
                 }
             }
+
+            _logger.LogInformation("Playback loop exited (isPlaying={IsPlaying}, disposed={Disposed})", _isPlaying, _disposed);
         }
 
         public ValueTask DisposeAsync()
@@ -213,6 +356,26 @@ namespace mashin.Audio.Android
             return ValueTask.CompletedTask;
         }
 
+        private void JoinPlaybackThreadIfNeeded()
+        {
+            Thread? threadToJoin;
+            lock (_playbackLock)
+            {
+                threadToJoin = _playbackThread;
+                _playbackThread = null;
+            }
+
+            if (threadToJoin == null || threadToJoin == Thread.CurrentThread)
+            {
+                return;
+            }
+
+            if (!threadToJoin.Join(300))
+            {
+                _logger.LogWarning("Playback thread did not stop within timeout");
+            }
+        }
+
         private void SetState(AudioPlayerState newState)
         {
             if (State != newState)
@@ -228,4 +391,7 @@ namespace mashin.Audio.Android
         }
     }
 }
+#pragma warning restore CA1416
+#pragma warning restore CA1422
+#pragma warning restore CS0618
 #endif
