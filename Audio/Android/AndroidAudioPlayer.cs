@@ -89,7 +89,7 @@ namespace mashin.Audio.Android
                     var bufferSize = AudioTrack.GetMinBufferSize(
                         format.SampleRate,
                         channelConfig,
-                        Encoding.Pcm16bit);
+                        Encoding.PcmFloat);
 
                     if (bufferSize <= 0)
                     {
@@ -100,11 +100,11 @@ namespace mashin.Audio.Android
                         global::Android.Media.Stream.Music,
                         format.SampleRate,
                         channelConfig,
-                        Encoding.Pcm16bit,
-                        bufferSize * 2,
+                        Encoding.PcmFloat,
+                        bufferSize * 4,
                         AudioTrackMode.Stream);
 
-                    var bytesPerSample = 2;
+                    var bytesPerSample = 4;
                     OutputLatencyMs = (bufferSize * 1000) / (format.SampleRate * format.Channels * bytesPerSample);
                     SetState(AudioPlayerState.Stopped);
 
@@ -185,7 +185,7 @@ namespace mashin.Audio.Android
         private void PlaybackLoop()
         {
             var floatBuffer = new float[4096];
-            var pcm16Buffer = new short[floatBuffer.Length];
+            var writeBuffer = new float[floatBuffer.Length];
             var diagnosticsLeft = 12;
             var sourceMissingLogged = false;
             var consecutiveZeroReads = 0;
@@ -244,15 +244,14 @@ namespace mashin.Audio.Android
                     var gain = _isMuted ? 0f : _volume;
                     if (gain <= 0f)
                     {
-                        Array.Clear(pcm16Buffer, 0, pcm16Buffer.Length);
+                        Array.Clear(writeBuffer, 0, writeBuffer.Length);
                     }
                     else
                     {
                         for (int i = 0; i < floatBuffer.Length; i++)
                         {
                             var sample = gain < 0.999f ? floatBuffer[i] * gain : floatBuffer[i];
-                            sample = Math.Clamp(sample, -1f, 1f);
-                            pcm16Buffer[i] = (short)(sample * short.MaxValue);
+                            writeBuffer[i] = Math.Clamp(sample, -1f, 1f);
                         }
                     }
 
@@ -264,15 +263,13 @@ namespace mashin.Audio.Android
 
                     var totalWritten = 0;
                     var offset = 0;
-                    var remaining = pcm16Buffer.Length;
-                    var zeroWriteSpins = 0;
-                    const int maxZeroWriteSpins = 120;
+                    var remaining = writeBuffer.Length;
 
                     while (remaining > 0 && _isPlaying && !_disposed)
                     {
                         var written = OperatingSystem.IsAndroidVersionAtLeast(23)
-                            ? track.Write(pcm16Buffer, offset, remaining, WriteMode.NonBlocking)
-                            : track.Write(pcm16Buffer, offset, remaining);
+                            ? track.Write(writeBuffer, offset, remaining, WriteMode.Blocking)
+                            : track.Write(writeBuffer, offset, remaining, WriteMode.Blocking);
 
                         if (written < 0)
                         {
@@ -281,21 +278,9 @@ namespace mashin.Audio.Android
 
                         if (written == 0)
                         {
-                            zeroWriteSpins++;
-                            if (zeroWriteSpins >= maxZeroWriteSpins)
-                            {
-                                _logger.LogWarning(
-                                    "AudioTrack write returned 0 repeatedly (remaining={Remaining}, playState={PlayState}); dropping current buffer chunk",
-                                    remaining,
-                                    track.PlayState);
-                                break;
-                            }
-
-                            Thread.Yield();
+                            Thread.Sleep(1);
                             continue;
                         }
-
-                        zeroWriteSpins = 0;
 
                         offset += written;
                         remaining -= written;
@@ -304,11 +289,11 @@ namespace mashin.Audio.Android
 
                     if (diagnosticsLeft > 0)
                     {
-                        var firstSample = pcm16Buffer.Length > 0 ? pcm16Buffer[0] : (short)0;
-                        var peak = 0;
-                        for (int i = 0; i < pcm16Buffer.Length; i++)
+                        var firstSample = writeBuffer.Length > 0 ? writeBuffer[0] : 0f;
+                        var peak = 0f;
+                        for (int i = 0; i < writeBuffer.Length; i++)
                         {
-                            var abs = Math.Abs((int)pcm16Buffer[i]);
+                            var abs = Math.Abs(writeBuffer[i]);
                             if (abs > peak)
                             {
                                 peak = abs;
@@ -316,7 +301,7 @@ namespace mashin.Audio.Android
                         }
                         _logger.LogInformation(
                             "Android audio write: samples={Samples}, written={Written}, gain={Gain:F2}, muted={Muted}, first={FirstSample}, peak={Peak}, playState={PlayState}",
-                            pcm16Buffer.Length,
+                            writeBuffer.Length,
                             totalWritten,
                             gain,
                             _isMuted,
