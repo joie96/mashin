@@ -140,6 +140,65 @@ public class MusicAssistantService
         return path;
     }
 
+    private string ResolveImagePath(string? path, string? provider)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        if (Uri.TryCreate(path, UriKind.Absolute, out _))
+        {
+            return path;
+        }
+
+        if (!path.StartsWith("/collage", StringComparison.OrdinalIgnoreCase))
+        {
+            return path;
+        }
+
+        // The imageproxy endpoint expects the collage path to be URL-encoded twice.
+        var encodedPath = WebUtility.UrlEncode(WebUtility.UrlEncode(path));
+        var resolvedProvider = string.IsNullOrWhiteSpace(provider) ? "builtin" : provider;
+        var encodedProvider = WebUtility.UrlEncode(resolvedProvider);
+
+        return string.Concat(
+            _settings.MusicAssistantUrl.TrimEnd('/'),
+            "/imageproxy?path=",
+            encodedPath);
+    }
+
+    private void ResolveMediaItemImages(MediaItem item)
+    {
+        ResolveMetadataImages(item.Metadata);
+
+        if (item is Track track)
+        {
+            if (track.Album != null)
+            {
+                ResolveMediaItemImages(track.Album);
+            }
+        }
+    }
+
+    private void ResolveMetadataImages(MediaItemMetadata? metadata)
+    {
+        if (metadata?.Images == null || metadata.Images.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var image in metadata.Images)
+        {
+            if (image == null)
+            {
+                continue;
+            }
+
+            image.Path = ResolveImagePath(image.Path, image.Provider);
+        }
+    }
+
     private async Task<T?> DeserializeMediaItemAsync<T>(JsonElement element) where T : MediaItem
     {
         var item = JsonSerializer.Deserialize<T>(element.GetRawText(), JsonOptions);
@@ -1211,6 +1270,14 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<RecommendationFolder>>("music/recommendations");
         var folders = result ?? new List<RecommendationFolder>();
 
+        foreach (var folder in folders)
+        {
+            if (folder.Image != null)
+            {
+                folder.Image.Path = ResolveImagePath(folder.Image.Path, folder.Image.Provider);
+            }
+        }
+
         var items = folders
             .SelectMany(folder => folder.Items ?? Enumerable.Empty<MediaItem>())
             .Where(item => item != null)
@@ -1952,6 +2019,8 @@ public class MusicAssistantService
         // Setze das Manifest für jedes Item
         foreach (var item in materialized)
         {
+            ResolveMediaItemImages(item);
+
             var providerDomain = item.ProviderMappings.FirstOrDefault()?.ProviderDomain;
             if (!string.IsNullOrEmpty(providerDomain) &&
                 manifestByDomain.TryGetValue(providerDomain, out var manifest))
