@@ -5,6 +5,7 @@
     xmlns:controls="clr-namespace:mashin.Views.Mobile.Controls"
     xmlns:desktopControls="clr-namespace:mashin.Views.Desktop.Controls"
     xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
+    xmlns:fftransformations="clr-namespace:FFImageLoading.Transformations;assembly=FFImageLoading.Maui"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
     xmlns:models="clr-namespace:mashin.Models"
     x:Name="self">
@@ -39,12 +40,20 @@
                                 Source="{Binding ImageUri}"
                                 HeightRequest="{Binding Source={x:Reference TrackContentHost}, Path=Height}"
                                 Opacity="0.85"
-                                Scale="1.18"
                                 VerticalOptions="Center"
-                                WidthRequest="{Binding Source={x:Reference TrackContentHost}, Path=Width}" />
+                                WidthRequest="{Binding Source={x:Reference TrackContentHost}, Path=Width}">
+                                <ffimageloading:CachedImage.Transformations>
+                                    <fftransformations:CropTransformation ZoomFactor="1"
+                                        XOffset="0"
+                                        YOffset="0"
+                                        CropWidthRatio="3"
+                                        CropHeightRatio="1" />
+                                    <fftransformations:BlurredTransformation Radius="50" />
+                                </ffimageloading:CachedImage.Transformations>
+                            </ffimageloading:CachedImage>
 
                             <!--  Dark Tint for Readability  -->
-                            <Border BackgroundColor="#7F141414"
+                            <Border BackgroundColor="#7FA9A9A9"
                                 InputTransparent="True"
                                 StrokeThickness="0">
                                 <Border.StrokeShape>
