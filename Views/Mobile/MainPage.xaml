@@ -3,6 +3,7 @@
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
     xmlns:converters="clr-namespace:mashin.Converters"
+    xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
     xmlns:vm="clr-namespace:mashin.ViewModels"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
     x:DataType="vm:MainViewModel"
@@ -43,8 +44,8 @@
                     <Border.StrokeShape>
                         <RoundRectangle CornerRadius="12,0,0,12" />
                     </Border.StrokeShape>
-                    <Image Aspect="AspectFill"
-                        Source="{Binding CurrentTrack.DisplayImageSource}" />
+                    <ffimageloading:CachedImage Aspect="AspectFill"
+                        Source="{Binding CurrentTrack.ImageUri}" />
                 </Border>
 
                 <Grid x:Name="PlayerBarProgressHost"

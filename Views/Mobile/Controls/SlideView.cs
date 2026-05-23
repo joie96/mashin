@@ -1,6 +1,5 @@
 using mashin.Models;
 using mashin.Services;
-using Microsoft.Extensions.DependencyInjection;
 using System.Windows.Input;
 
 namespace mashin.Views.Mobile.Controls;
@@ -38,18 +37,7 @@ public partial class SlideView : ContentView
 
     #endregion
 
-    #region Fields
-
-    private IArtworkService? _artworkService;
-
-    #endregion
-
     #region Properties
-
-    private IArtworkService? ArtworkService =>
-        _artworkService ??=
-            IPlatformApplication.Current?.Services.GetService<IArtworkService>() ??
-            Handler?.MauiContext?.Services.GetService<IArtworkService>();
 
     public IEnumerable<object>? ItemsSource
     {
@@ -117,67 +105,6 @@ public partial class SlideView : ContentView
     #endregion
 
     #region UI Events
-
-    private async void OnTrackBackgroundBindingContextChanged(object? sender, EventArgs e)
-    {
-        if (sender is not Image backgroundImage)
-        {
-            return;
-        }
-
-        if (backgroundImage.BindingContext is not MediaItem mediaItem)
-        {
-            backgroundImage.Source = null;
-            return;
-        }
-
-        await ApplyTrackBackgroundAsync(backgroundImage, mediaItem);
-    }
-
-    private async Task ApplyTrackBackgroundAsync(Image backgroundImage, MediaItem mediaItem, int attempt = 0)
-    {
-        if (!ReferenceEquals(backgroundImage.BindingContext, mediaItem))
-        {
-            return;
-        }
-
-        var imageBytes = mediaItem.PrimaryImage?.Bytes;
-        if (imageBytes == null || imageBytes.Length == 0)
-        {
-            backgroundImage.Source = null;
-            return;
-        }
-
-        // Keep card readable while blurred image is generated.
-        backgroundImage.Source = mediaItem.DisplayImageSource;
-
-        var artworkService = ArtworkService;
-        if (artworkService == null)
-        {
-            if (attempt < 3)
-            {
-                await Task.Delay(120);
-                await ApplyTrackBackgroundAsync(backgroundImage, mediaItem, attempt + 1);
-            }
-
-            return;
-        }
-
-        var blurredSource = await artworkService.GetBlurredCoverSourceAsync(imageBytes);
-
-        await MainThread.InvokeOnMainThreadAsync(() =>
-        {
-            if (!ReferenceEquals(backgroundImage.BindingContext, mediaItem))
-            {
-                return;
-            }
-
-            if (blurredSource != null)
-            {
-                backgroundImage.Source = blurredSource;
-            }
-        });
-    }
 
     private async void OnPlayOverlayClicked(object? sender, TappedEventArgs e)
     {

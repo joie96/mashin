@@ -52,7 +52,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             if (SetProperty(ref _playlist, value))
             {
                 OnPropertyChanged(nameof(PlaylistName));
-                OnPropertyChanged(nameof(DisplayImageSource));
+                OnPropertyChanged(nameof(ImageUri));
                 OnPropertyChanged(nameof(IsPlaylistFavorite));
             }
         }
@@ -60,7 +60,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
     public string PlaylistName => Playlist?.DisplayName ?? "Unbekannte Playlist";
 
-    public ImageSource? DisplayImageSource => Playlist?.DisplayImageSource;
+    public string? ImageUri => Playlist?.ImageUri;
 
     public ObservableRangeCollection<Track> Tracks
     {

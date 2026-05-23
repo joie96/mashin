@@ -6,6 +6,7 @@
     xmlns:controls="clr-namespace:mashin.Views.Desktop.Controls"
     xmlns:desktopControls="clr-namespace:mashin.Views.Desktop.Controls;assembly=mashin"
     xmlns:converters="clr-namespace:mashin.Converters"
+    xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
     xmlns:models="clr-namespace:mashin.Models"
     xmlns:vm="clr-namespace:mashin.ViewModels"
@@ -191,7 +192,7 @@
                                             <Border.StrokeShape>
                                                 <RoundRectangle CornerRadius="2" />
                                             </Border.StrokeShape>
-                                            <Image Aspect="AspectFill" Source="{Binding DisplayImageSource}" />
+                                            <ffimageloading:CachedImage Aspect="AspectFill" Source="{Binding ImageUri}" />
                                         </Border>
 
                                         <VerticalStackLayout Grid.Column="1"
@@ -396,7 +397,7 @@
                         StrokeThickness="0"
                         VerticalOptions="Center"
                         WidthRequest="60">
-                        <Image Aspect="AspectFill" Source="{Binding CurrentTrack.DisplayImageSource}" />
+                        <ffimageloading:CachedImage Aspect="AspectFill" Source="{Binding CurrentTrack.ImageUri}" />
                     </Border>
 
                     <Grid Grid.Column="1"

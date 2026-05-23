@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
     xmlns:controls="clr-namespace:mashin.Views.Mobile.Controls"
     xmlns:desktopControls="clr-namespace:mashin.Views.Desktop.Controls"
+    xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
     xmlns:models="clr-namespace:mashin.Models"
     x:Name="self">
@@ -34,8 +35,8 @@
                             <RoundRectangle CornerRadius="14" />
                         </Border.StrokeShape>
                         <Grid>
-                            <Image Aspect="AspectFill"
-                                BindingContextChanged="OnTrackBackgroundBindingContextChanged"
+                            <ffimageloading:CachedImage Aspect="AspectFill"
+                                Source="{Binding ImageUri}"
                                 HeightRequest="{Binding Source={x:Reference TrackContentHost}, Path=Height}"
                                 Opacity="0.85"
                                 Scale="1.18"
@@ -66,8 +67,8 @@
 
                         <Grid>
                             <!--  Cover Image  -->
-                            <Image Aspect="AspectFill"
-                                Source="{Binding DisplayImageSource}" />
+                            <ffimageloading:CachedImage Aspect="AspectFill"
+                                Source="{Binding ImageUri}" />
 
                             <!--  Cover Shade  -->
                             <Border BackgroundColor="#26000000"

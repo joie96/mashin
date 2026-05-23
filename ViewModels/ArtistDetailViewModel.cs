@@ -75,7 +75,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             if (SetProperty(ref _artist, value))
             {
                 OnPropertyChanged(nameof(ArtistName));
-                OnPropertyChanged(nameof(DisplayImageSource));
+                OnPropertyChanged(nameof(ImageUri));
                 OnPropertyChanged(nameof(HasDescription));
                 OnPropertyChanged(nameof(IsArtistFavorite));
                 IsDescriptionExpanded = false;
@@ -85,7 +85,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
     public string ArtistName => Artist?.Name ?? "Unbekannter Interpret";
 
-    public ImageSource? DisplayImageSource => Artist?.DisplayImageSource;
+    public string? ImageUri => Artist?.ImageUri;
 
     public bool HasDescription => !string.IsNullOrWhiteSpace(Artist?.Metadata?.Description);
 

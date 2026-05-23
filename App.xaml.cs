@@ -80,7 +80,7 @@ public partial class App : Application
         // {
         //     mainPage = services.GetRequiredService<DesktopMainPage>();
         // }
-        var mainPage = services.GetRequiredService<MobileMainPage>();
+        var mainPage = services.GetRequiredService<DesktopMainPage>();
         
         var window = new Window(mainPage);
 

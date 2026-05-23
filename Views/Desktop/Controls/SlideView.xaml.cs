@@ -1,11 +1,6 @@
 using mashin.Models;
 using mashin.Services;
 using mashin.Collections;
-using ImageSharpImage = SixLabors.ImageSharp.Image;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Formats.Png;
-using SixLabors.ImageSharp.Processing;
-using System.Collections.Concurrent;
 using System.Collections.Specialized;
 using System.Windows.Input;
 
@@ -61,9 +56,6 @@ public partial class SlideView : ContentView
 
     #region Fields
 
-    private static readonly HttpClient PaletteHttpClient = new() { Timeout = TimeSpan.FromSeconds(8) };
-    private readonly ConcurrentDictionary<string, byte[]> _blurredCoverCache = new(StringComparer.OrdinalIgnoreCase);
-
     private readonly List<object> _allItems = new();
     private readonly ObservableRangeCollection<object> _visibleItemsPrimary = new();
     private readonly ObservableRangeCollection<object> _visibleItemsSecondary = new();
@@ -78,8 +70,8 @@ public partial class SlideView : ContentView
 
     private Border? SlideCardBorderPrimaryElement => this.FindByName<Border>("SlideCardBorderPrimary");
     private Border? SlideCardBorderSecondaryElement => this.FindByName<Border>("SlideCardBorderSecondary");
-    private Image? SlideCardBackgroundImagePrimaryElement => this.FindByName<Image>("SlideCardBackgroundImagePrimary");
-    private Image? SlideCardBackgroundImageSecondaryElement => this.FindByName<Image>("SlideCardBackgroundImageSecondary");
+    private FFImageLoading.Maui.CachedImage? SlideCardBackgroundImagePrimaryElement => this.FindByName<FFImageLoading.Maui.CachedImage>("SlideCardBackgroundImagePrimary");
+    private FFImageLoading.Maui.CachedImage? SlideCardBackgroundImageSecondaryElement => this.FindByName<FFImageLoading.Maui.CachedImage>("SlideCardBackgroundImageSecondary");
     private Grid? SlideItemHostPrimaryElement => this.FindByName<Grid>("SlideItemHostPrimary");
     private Grid? SlideItemHostSecondaryElement => this.FindByName<Grid>("SlideItemHostSecondary");
 
@@ -182,8 +174,8 @@ public partial class SlideView : ContentView
     private ObservableRangeCollection<object> InactiveVisibleItems => _isPrimaryHostActive ? _visibleItemsSecondary : _visibleItemsPrimary;
     private Border? ActiveCardBorder => _isPrimaryHostActive ? SlideCardBorderPrimaryElement : SlideCardBorderSecondaryElement;
     private Border? InactiveCardBorder => _isPrimaryHostActive ? SlideCardBorderSecondaryElement : SlideCardBorderPrimaryElement;
-    private Image? ActiveBackgroundImage => _isPrimaryHostActive ? SlideCardBackgroundImagePrimaryElement : SlideCardBackgroundImageSecondaryElement;
-    private Image? InactiveBackgroundImage => _isPrimaryHostActive ? SlideCardBackgroundImageSecondaryElement : SlideCardBackgroundImagePrimaryElement;
+    private FFImageLoading.Maui.CachedImage? ActiveBackgroundImage => _isPrimaryHostActive ? SlideCardBackgroundImagePrimaryElement : SlideCardBackgroundImageSecondaryElement;
+    private FFImageLoading.Maui.CachedImage? InactiveBackgroundImage => _isPrimaryHostActive ? SlideCardBackgroundImageSecondaryElement : SlideCardBackgroundImagePrimaryElement;
 
     public SlideView()
     {
@@ -681,7 +673,7 @@ public partial class SlideView : ContentView
 
     #region Card palette
 
-    private async Task ApplySlideCardBackgroundToCardAsync(Image? backgroundImage, MediaItem? mediaItem)
+    private async Task ApplySlideCardBackgroundToCardAsync(FFImageLoading.Maui.CachedImage? backgroundImage, MediaItem? mediaItem)
     {
         if (backgroundImage == null)
         {
@@ -694,59 +686,10 @@ public partial class SlideView : ContentView
             return;
         }
 
-        var blurredCoverSource = await GetBlurredCoverSourceAsync(mediaItem.PrimaryImage?.Path);
-
         await MainThread.InvokeOnMainThreadAsync(() =>
         {
-            backgroundImage.Source = blurredCoverSource;
+            backgroundImage.Source = mediaItem.ImageUri;
         });
-    }
-
-    private async Task<ImageSource?> GetBlurredCoverSourceAsync(string? imagePath)
-    {
-        if (string.IsNullOrWhiteSpace(imagePath))
-        {
-            return null;
-        }
-
-        if (_blurredCoverCache.TryGetValue(imagePath, out var cachedBytes))
-        {
-            return ImageSource.FromStream(() => new MemoryStream(cachedBytes));
-        }
-
-        try
-        {
-            if (!Uri.TryCreate(imagePath, UriKind.Absolute, out _))
-            {
-                return null;
-            }
-
-            var bytes = await PaletteHttpClient.GetByteArrayAsync(imagePath);
-            if (bytes.Length == 0)
-            {
-                return null;
-            }
-
-            await using var sourceStream = new MemoryStream(bytes);
-            using var image = await ImageSharpImage.LoadAsync<Rgba32>(sourceStream);
-
-            image.Mutate(ctx =>
-            {
-                ctx.GaussianBlur(24f);
-            });
-
-            await using var outputStream = new MemoryStream();
-            await image.SaveAsync(outputStream, new PngEncoder());
-
-            var blurredBytes = outputStream.ToArray();
-            _blurredCoverCache[imagePath] = blurredBytes;
-
-            return ImageSource.FromStream(() => new MemoryStream(blurredBytes));
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     #endregion

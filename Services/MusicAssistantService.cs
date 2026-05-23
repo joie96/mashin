@@ -1,7 +1,5 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
-using System.Collections;
-using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -147,10 +145,7 @@ public class MusicAssistantService
         var item = JsonSerializer.Deserialize<T>(element.GetRawText(), JsonOptions);
         if (item != null)
         {
-            await Task.WhenAll(
-                EnrichImagesAsync(item),
-                EnrichWithProviderInfoAsync(new List<T> { item })
-            );
+            await EnrichWithProviderInfoAsync(new List<T> { item });
         }
 
         return item;
@@ -503,10 +498,7 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Artist>>("music/artists/library_items", args);
         var artists = result ?? new List<Artist>();
 
-        await Task.WhenAll(
-            EnrichWithProviderInfoAsync(artists),
-            EnrichImagesAsync(artists)
-        );
+        await EnrichWithProviderInfoAsync(artists);
 
         return artists;
     }
@@ -527,10 +519,7 @@ public class MusicAssistantService
         var artist = await SendCommandAsync<Artist>("music/artists/get", args);
         if (artist != null)
         {
-            await Task.WhenAll(
-                EnrichWithProviderInfoAsync(new List<Artist> { artist }),
-                EnrichImagesAsync(artist)
-            );
+            await EnrichWithProviderInfoAsync(new List<Artist> { artist });
         }
 
         return artist;
@@ -553,10 +542,7 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Album>>("music/artists/artist_albums", args);
         var albums = result ?? new List<Album>();
 
-        await Task.WhenAll(
-            EnrichWithProviderInfoAsync(albums),
-            EnrichImagesAsync(albums)
-        );
+        await EnrichWithProviderInfoAsync(albums);
         return albums;
     }
 
@@ -578,10 +564,7 @@ public class MusicAssistantService
         var tracks = result ?? new List<Track>();
 
         // Enrich with provider information
-        await Task.WhenAll(
-            EnrichWithProviderInfoAsync(tracks),
-            EnrichImagesAsync(tracks)
-        );
+        await EnrichWithProviderInfoAsync(tracks);
         return result ?? new List<Track>();
     }
 
@@ -630,10 +613,7 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Album>>("music/albums/library_items", args);
         var albums = result ?? new List<Album>();
 
-        await Task.WhenAll(
-            EnrichWithProviderInfoAsync(albums),
-            EnrichImagesAsync(albums)
-        );
+        await EnrichWithProviderInfoAsync(albums);
 
         return albums;
     }
@@ -654,10 +634,7 @@ public class MusicAssistantService
         var album = await SendCommandAsync<Album>("music/albums/get", args);
         if (album != null)
         {
-            await Task.WhenAll(
-                EnrichWithProviderInfoAsync(new List<Album> { album }),
-                EnrichImagesAsync(album)
-            );
+            await EnrichWithProviderInfoAsync(new List<Album> { album });
         }
 
         return album;
@@ -680,10 +657,7 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Track>>("music/albums/album_tracks", args);
         var tracks = result ?? new List<Track>();
 
-        await Task.WhenAll(
-            EnrichWithProviderInfoAsync(tracks),
-            EnrichImagesAsync(tracks)
-        );
+        await EnrichWithProviderInfoAsync(tracks);
         return tracks;
     }
 
@@ -751,10 +725,7 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Track>>("music/tracks/library_items", args);
         var tracks = result ?? new List<Track>();
 
-        await Task.WhenAll(
-            EnrichWithProviderInfoAsync(tracks),
-            EnrichImagesAsync(tracks)
-        );
+        await EnrichWithProviderInfoAsync(tracks);
 
         return tracks;
     }
@@ -775,10 +746,7 @@ public class MusicAssistantService
         var track = await SendCommandAsync<Track>("music/tracks/get", args);
         if (track != null)
         {
-            await Task.WhenAll(
-                EnrichWithProviderInfoAsync(new List<Track> { track }),
-                EnrichImagesAsync(track)
-            );
+            await EnrichWithProviderInfoAsync(new List<Track> { track });
         }
 
         return track;
@@ -798,10 +766,7 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Track>>("music/tracks/track_versions", args);
         var tracks = result ?? new List<Track>();
 
-        await Task.WhenAll(
-            EnrichWithProviderInfoAsync(tracks),
-            EnrichImagesAsync(tracks)
-        );
+        await EnrichWithProviderInfoAsync(tracks);
 
         return tracks;
     }
@@ -821,10 +786,7 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Album>>("music/tracks/track_albums", args);
         var albums = result ?? new List<Album>();
 
-        await Task.WhenAll(
-            EnrichWithProviderInfoAsync(albums),
-            EnrichImagesAsync(albums)
-        );
+        await EnrichWithProviderInfoAsync(albums);
 
         return albums;
     }
@@ -880,10 +842,7 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Track>>("music/tracks/similar_tracks", args);
         var tracks = result ?? new List<Track>();
 
-        await Task.WhenAll(
-            EnrichWithProviderInfoAsync(tracks),
-            EnrichImagesAsync(tracks)
-        );
+        await EnrichWithProviderInfoAsync(tracks);
 
         return tracks;
     }
@@ -919,10 +878,7 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Playlist>>("music/playlists/library_items", args);
         var playlists = result ?? new List<Playlist>();
 
-        await Task.WhenAll(
-            EnrichWithProviderInfoAsync(playlists),
-            EnrichImagesAsync(playlists)
-        );
+        await EnrichWithProviderInfoAsync(playlists);
 
         return playlists;
     }
@@ -941,10 +897,7 @@ public class MusicAssistantService
         var playlist = await SendCommandAsync<Playlist>("music/playlists/get", args);
         if (playlist != null)
         {
-            await Task.WhenAll(
-                EnrichWithProviderInfoAsync(new List<Playlist> { playlist }),
-                EnrichImagesAsync(playlist)
-            );
+            await EnrichWithProviderInfoAsync(new List<Playlist> { playlist });
         }
 
         return playlist;
@@ -965,10 +918,7 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Track>>("music/playlists/playlist_tracks", args);
         var tracks = result ?? new List<Track>();
 
-        await Task.WhenAll(
-            EnrichWithProviderInfoAsync(tracks),
-            EnrichImagesAsync(tracks)
-        );
+        await EnrichWithProviderInfoAsync(tracks);
         return result ?? new List<Track>();
     }
 
@@ -1235,11 +1185,7 @@ public class MusicAssistantService
                 EnrichWithProviderInfoAsync(results.Tracks ?? new List<Track>()),
                 EnrichWithProviderInfoAsync(results.Albums ?? new List<Album>()),
                 EnrichWithProviderInfoAsync(results.Artists ?? new List<Artist>()),
-                EnrichWithProviderInfoAsync(results.Playlists ?? new List<Playlist>()),
-                EnrichImagesAsync(results.Tracks ?? new List<Track>()),
-                EnrichImagesAsync(results.Albums ?? new List<Album>()),
-                EnrichImagesAsync(results.Artists ?? new List<Artist>()),
-                EnrichImagesAsync(results.Playlists ?? new List<Playlist>())
+                EnrichWithProviderInfoAsync(results.Playlists ?? new List<Playlist>())
             };
 
             await Task.WhenAll(enrichTasks);
@@ -1274,9 +1220,7 @@ public class MusicAssistantService
         {
             try
             {
-                await Task.WhenAll(
-                    EnrichWithProviderInfoAsync(items),
-                    EnrichImagesAsync(items));
+                await EnrichWithProviderInfoAsync(items);
             }
             catch (Exception ex)
             {
@@ -1416,11 +1360,7 @@ public class MusicAssistantService
             EnrichWithProviderInfoAsync(tracks),
             EnrichWithProviderInfoAsync(albums),
             EnrichWithProviderInfoAsync(artists),
-            EnrichWithProviderInfoAsync(playlists),
-            EnrichImagesAsync(tracks),
-            EnrichImagesAsync(albums),
-            EnrichImagesAsync(artists),
-            EnrichImagesAsync(playlists)
+            EnrichWithProviderInfoAsync(playlists)
         );
 
         return items;
@@ -1555,10 +1495,7 @@ public class MusicAssistantService
         var currentTrack = queue?.CurrentItem?.MediaItem;
         if (currentTrack != null)
         {
-            await Task.WhenAll(
-                EnrichWithProviderInfoAsync(new List<Track> { currentTrack }),
-                EnrichImagesAsync(currentTrack)
-            );
+            await EnrichWithProviderInfoAsync(new List<Track> { currentTrack });
         }
 
         return queue;
@@ -1589,10 +1526,7 @@ public class MusicAssistantService
 
         if (queueTracks.Count > 0)
         {
-            await Task.WhenAll(
-                EnrichWithProviderInfoAsync(queueTracks),
-                EnrichImagesAsync(queueTracks)
-            );
+            await EnrichWithProviderInfoAsync(queueTracks);
         }
 
         return queueItems;
@@ -2051,212 +1985,5 @@ public class MusicAssistantService
     }
 
     #endregion
-
-    #region Image Enrichment
-
-    private async Task EnrichImagesAsync<T>(T? item) where T : MediaItem
-    {
-        if (item == null)
-            return;
-
-        var targets = new List<MediaItemImage>();
-        var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
-        CollectImageTargets(item, targets, visited);
-
-        if (targets.Count == 0)
-            return;
-
-        await Task.WhenAll(targets.Select(async image =>
-        {
-            if (image.Bytes is { Length: > 0 })
-                return;
-
-            if (string.IsNullOrWhiteSpace(image.Path))
-                return;
-
-            var bytes = await DownLoadImageBytes(image.Path);
-            if (bytes == null || bytes.Length == 0)
-                return;
-
-            image.Bytes = bytes;
-        }));
-
-        item.NotifyImagesChanged();
-    }
-
-    private async Task EnrichImagesAsync<T>(IList<T> items) where T : MediaItem
-    {
-        if (items == null || items.Count == 0)
-            return;
-
-        await Task.WhenAll(items.Select(async item =>
-        {
-            var targets = new List<MediaItemImage>();
-            var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
-            CollectImageTargets(item, targets, visited);
-
-            if (targets.Count == 0)
-                return;
-
-            await Task.WhenAll(targets.Select(async image =>
-            {
-                if (image.Bytes is { Length: > 0 })
-                    return;
-
-                if (string.IsNullOrWhiteSpace(image.Path))
-                    return;
-
-                var bytes = await DownLoadImageBytes(image.Path);
-                if (bytes == null || bytes.Length == 0)
-                    return;
-
-                image.Bytes = bytes;
-            }));
-
-            item.NotifyImagesChanged();
-        }));
-    }
-
-    private void CollectImageTargets(
-        object node,
-        List<MediaItemImage> targets,
-        HashSet<object> visited)
-    {
-        if (node is string || node is JsonElement || node.GetType().IsValueType)
-        {
-            return;
-        }
-
-        if (!visited.Add(node))
-        {
-            return;
-        }
-
-        if (node is MediaItemImage image)
-        {
-            targets.Add(image);
-            return;
-        }
-
-        if (node is IEnumerable enumerable)
-        {
-            foreach (var child in enumerable)
-            {
-                if (child != null)
-                {
-                    CollectImageTargets(child, targets, visited);
-                }
-            }
-
-            return;
-        }
-
-        var properties = node.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public);
-        foreach (var property in properties)
-        {
-            if (!property.CanRead || property.GetIndexParameters().Length > 0)
-            {
-                continue;
-            }
-
-            object? value;
-            try
-            {
-                value = property.GetValue(node);
-            }
-            catch
-            {
-                continue;
-            }
-
-            if (value != null)
-            {
-                CollectImageTargets(value, targets, visited);
-            }
-        }
-    }
-
-    private async Task<byte[]?> DownLoadImageBytes(string imagePath)
-    {
-        var downloadUrls = ResolveImageDownloadUrls(imagePath);
-        if (downloadUrls.Count == 0)
-        {
-            return null;
-        }
-
-        Exception? lastException = null;
-        foreach (var downloadUrl in downloadUrls)
-        {
-            try
-            {
-                var bytes = await _httpClient.GetByteArrayAsync(downloadUrl);
-                if (bytes.Length == 0)
-                {
-                    continue;
-                }
-
-                return bytes;
-            }
-            catch (Exception ex)
-            {
-                lastException = ex;
-                _logger.LogDebug(ex, "Image download attempt failed for URL: {ImageUrl}", downloadUrl);
-            }
-        }
-
-        _logger.LogWarning(
-            lastException,
-            "Failed to download image bytes for path: {ImagePath}. Tried URLs: {TriedUrls}",
-            imagePath,
-            string.Join(" | ", downloadUrls));
-        return null;
-    }
-
-    private List<string> ResolveImageDownloadUrls(string? imagePath)
-    {
-        var result = new List<string>();
-        if (string.IsNullOrWhiteSpace(imagePath))
-        {
-            return result;
-        }
-
-        if (Uri.TryCreate(imagePath, UriKind.Absolute, out var absoluteUri)
-            && (absoluteUri.Scheme == Uri.UriSchemeHttp || absoluteUri.Scheme == Uri.UriSchemeHttps))
-        {
-            result.Add(imagePath);
-            return result;
-        }
-
-        var configuredBaseUrl = _settings.MusicAssistantUrl?.Trim();
-        if (string.IsNullOrWhiteSpace(configuredBaseUrl))
-        {
-            configuredBaseUrl = _httpClient.BaseAddress?.ToString();
-        }
-
-        var baseUrl = configuredBaseUrl?.TrimEnd('/') ?? string.Empty;
-        if (imagePath.StartsWith("/imageproxy", StringComparison.OrdinalIgnoreCase))
-        {
-            result.Add(string.Concat(baseUrl, imagePath));
-            return result;
-        }
-
-        // Playlists can return relative paths like /collage/... that need imageproxy wrapping.
-        if (imagePath.StartsWith("/", StringComparison.Ordinal))
-        {
-            var singleEncodedPath = Uri.EscapeDataString(imagePath);
-            var doubleEncodedPath = Uri.EscapeDataString(singleEncodedPath);
-
-            // Music Assistant imageproxy commonly expects a double-encoded path value.
-            result.Add($"{baseUrl}/imageproxy?path={doubleEncodedPath}&size=256");
-
-            return result;
-        }
-
-        result.Add(string.Concat(baseUrl, "/", imagePath));
-        return result;
-    }
-
-    #endregion
-
 
 }

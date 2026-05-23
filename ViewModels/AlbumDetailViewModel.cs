@@ -65,7 +65,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
             {
                 OnPropertyChanged(nameof(AlbumName));
                 OnPropertyChanged(nameof(ArtistName));
-                OnPropertyChanged(nameof(DisplayImageSource));
+                OnPropertyChanged(nameof(ImageUri));
                 OnPropertyChanged(nameof(AlbumYearText));
                 OnPropertyChanged(nameof(AlbumDescription));
                 OnPropertyChanged(nameof(HasDescription));
@@ -92,7 +92,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
         }
     }
 
-    public ImageSource? DisplayImageSource => Album?.DisplayImageSource;
+    public string? ImageUri => Album?.ImageUri;
 
     public string AlbumYearText => Album?.Year?.ToString() ?? string.Empty;
 

@@ -5,6 +5,7 @@
     xmlns:behaviors="clr-namespace:mashin.Views.Desktop.Behaviors"
     xmlns:controls="clr-namespace:mashin.Views.Desktop.Controls"
     xmlns:converters="clr-namespace:mashin.Converters"
+    xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
     xmlns:vm="clr-namespace:mashin.ViewModels"
     x:DataType="vm:MainViewModel"
@@ -44,7 +45,7 @@
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="6" />
                         </Border.StrokeShape>
-                        <Image Aspect="AspectFill" Source="{Binding CurrentTrack.DisplayImageSource}" />
+                        <ffimageloading:CachedImage Aspect="AspectFill" Source="{Binding CurrentTrack.ImageUri}" />
                     </Border>
 
                     <!--  Track Actions  -->

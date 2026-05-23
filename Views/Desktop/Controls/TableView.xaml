@@ -461,9 +461,9 @@
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="4"/>
                             </Border.StrokeShape>
-                            <Image Aspect="AspectFill"
+                            <ffimageloading:CachedImage Aspect="AspectFill"
                                    HeightRequest="48"
-                                   Source="{Binding DisplayImageSource}"
+                                   Source="{Binding ImageUri}"
                                    VerticalOptions="Center"
                                    WidthRequest="48"/>
                         </Border>
@@ -842,9 +842,9 @@
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="4"/>
                             </Border.StrokeShape>
-                            <Image Aspect="AspectFill"
+                            <ffimageloading:CachedImage Aspect="AspectFill"
                                    HeightRequest="48"
-                                   Source="{Binding MediaItem.DisplayImageSource}"
+                                   Source="{Binding MediaItem.ImageUri}"
                                    VerticalOptions="Center"
                                    WidthRequest="48"/>
                         </Border>

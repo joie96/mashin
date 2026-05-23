@@ -49,10 +49,10 @@
                         <RoundRectangle CornerRadius="8" />
                     </Border.StrokeShape>
                     <Grid>
-                        <Image Aspect="AspectFill"
+                        <ffimageloading:CachedImage Aspect="AspectFill"
                             HeightRequest="200"
                             HorizontalOptions="Center"
-                            Source="{Binding DisplayImageSource}"
+                            Source="{Binding ImageUri}"
                             VerticalOptions="Center"
                             WidthRequest="200" />
                     </Grid>

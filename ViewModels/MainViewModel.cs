@@ -34,7 +34,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private readonly IOverlayService _overlayService;
     private readonly IContextMenuService _contextMenuService;
     private readonly IQueueSyncService _queueSyncService;
-    private readonly IArtworkService _artworkService;
     private readonly ILogger<MainViewModel> _logger;
     private readonly ObservableRangeCollection<Playlist> _playlists = new();
 
@@ -57,7 +56,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private bool _isLoadingPlaylists;
     private Color _playerBarAccentColor = null!;
     private Color _playerBarBackgroundColor = null!;
-    private CancellationTokenSource? _playerBarAccentCts;
 
     // Search
     private string _searchQuery = string.Empty;
@@ -109,7 +107,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         IMediaItemActions mediaActions,
         IContextMenuService contextMenuService,
         IQueueSyncService queueSyncService,
-        IArtworkService artworkService,
         ILogger<MainViewModel> logger)
     {
         _settings = settings;
@@ -120,7 +117,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _overlayService = overlayService;
         _contextMenuService = contextMenuService;
         _queueSyncService = queueSyncService;
-        _artworkService = artworkService;
         _logger = logger;
         MediaActions = mediaActions;
         _selectedAudioQuality = _settings.GetPreferredAudioCodec();
@@ -699,10 +695,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        _playerBarAccentCts?.Cancel();
-        _playerBarAccentCts?.Dispose();
-        _playerBarAccentCts = null;
-
         _currentQueueItems.CollectionChanged -= OnCurrentQueueItemsCollectionChanged;
 
         _musicAssistant.LoginRequired -= OnLoginRequired;
@@ -723,63 +715,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private async Task UpdatePlayerBarAccentColorAsync(Track? track)
     {
-        _playerBarAccentCts?.Cancel();
-        _playerBarAccentCts?.Dispose();
-
-        var imageBytes = track?.PrimaryImage?.Bytes;
-        if (track == null || imageBytes == null || imageBytes.Length == 0)
-        {
-            var fallbackColor = GetRequiredColorResource(PlayerBarAccentFallbackColorKey);
-            PlayerBarAccentColor = fallbackColor;
-            PlayerBarBackgroundColor = fallbackColor.WithAlpha(0.5f);
-            _playerBarAccentCts = null;
-            return;
-        }
-
-        var cts = new CancellationTokenSource();
-        _playerBarAccentCts = cts;
-
-        try
-        {
-            var accentColor = await _artworkService.GetAccentColorAsync(imageBytes, cts.Token);
-            if (cts.IsCancellationRequested || !ReferenceEquals(_playerBarAccentCts, cts))
-            {
-                return;
-            }
-
-            var resolvedColor = accentColor ?? GetRequiredColorResource(PlayerBarAccentFallbackColorKey);
-            await MainThread.InvokeOnMainThreadAsync(() =>
-            {
-                if (ReferenceEquals(_playerBarAccentCts, cts))
-                {
-                    PlayerBarAccentColor = resolvedColor;
-                    PlayerBarBackgroundColor = resolvedColor.WithAlpha(0.5f);
-                }
-            });
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected when track changes quickly.
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to resolve player bar accent color");
-            if (ReferenceEquals(_playerBarAccentCts, cts))
-            {
-                var fallbackColor = GetRequiredColorResource(PlayerBarAccentFallbackColorKey);
-                PlayerBarAccentColor = fallbackColor;
-                PlayerBarBackgroundColor = fallbackColor.WithAlpha(0.5f);
-            }
-        }
-        finally
-        {
-            if (ReferenceEquals(_playerBarAccentCts, cts))
-            {
-                _playerBarAccentCts = null;
-            }
-
-            cts.Dispose();
-        }
+        var fallbackColor = GetRequiredColorResource(PlayerBarAccentFallbackColorKey);
+        PlayerBarAccentColor = fallbackColor;
+        PlayerBarBackgroundColor = fallbackColor.WithAlpha(0.5f);
+        await Task.CompletedTask;
     }
 
     private static Color GetRequiredColorResource(string key)

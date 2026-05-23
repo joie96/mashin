@@ -5,6 +5,8 @@
     xmlns:behaviors="clr-namespace:mashin.Views.Desktop.Behaviors"
     xmlns:converters="clr-namespace:mashin.Converters"
     xmlns:controls="clr-namespace:mashin.Views.Desktop.Controls"
+    xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
+    xmlns:fftransformations="clr-namespace:FFImageLoading.Transformations;assembly=FFImageLoading.Maui"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
     xmlns:models="clr-namespace:mashin.Models"
     x:Name="self">
@@ -46,8 +48,8 @@
                         </Grid.GestureRecognizers>
 
                         <!--  Track Cover  -->
-                        <Image Aspect="AspectFill"
-                            Source="{Binding DisplayImageSource}" />
+                        <ffimageloading:CachedImage Aspect="AspectFill"
+                            Source="{Binding ImageUri}" />
 
                         <!--  Hover Overlay  -->
                         <Border x:Name="CoverHoverOverlay"
@@ -227,13 +229,22 @@
                 <RoundRectangle CornerRadius="10" />
             </Border.StrokeShape>
             <Grid>
-                <Image x:Name="SlideCardBackgroundImagePrimary"
+                <ffimageloading:CachedImage x:Name="SlideCardBackgroundImagePrimary"
                     Aspect="AspectFill"
                     HeightRequest="{Binding Source={x:Reference SlideItemHostPrimary}, Path=Height}"
+                    HorizontalOptions="Center"
                     InputTransparent="True"
-                    Scale="1.18"
                     VerticalOptions="Center"
-                    WidthRequest="{Binding Source={x:Reference SlideItemHostPrimary}, Path=Width}" />
+                    WidthRequest="{Binding Source={x:Reference SlideItemHostPrimary}, Path=Width}">
+                    <ffimageloading:CachedImage.Transformations>
+                        <fftransformations:CropTransformation ZoomFactor="1"
+                            XOffset="0"
+                            YOffset="0"
+                            CropWidthRatio="3"
+                            CropHeightRatio="1" />
+                        <fftransformations:BlurredTransformation Radius="50" />
+                    </ffimageloading:CachedImage.Transformations>
+                </ffimageloading:CachedImage>
                 <Grid x:Name="SlideItemHostPrimary"
                     BindableLayout.ItemTemplateSelector="{StaticResource SlideViewTemplateSelector}" />
             </Grid>
@@ -250,13 +261,22 @@
                 <RoundRectangle CornerRadius="10" />
             </Border.StrokeShape>
             <Grid>
-                <Image x:Name="SlideCardBackgroundImageSecondary"
+                <ffimageloading:CachedImage x:Name="SlideCardBackgroundImageSecondary"
                     Aspect="AspectFill"
                     HeightRequest="{Binding Source={x:Reference SlideItemHostSecondary}, Path=Height}"
+                    HorizontalOptions="Center"
                     InputTransparent="True"
-                    Scale="1.18"
                     VerticalOptions="Center"
-                    WidthRequest="{Binding Source={x:Reference SlideItemHostSecondary}, Path=Width}" />
+                    WidthRequest="{Binding Source={x:Reference SlideItemHostSecondary}, Path=Width}">
+                    <ffimageloading:CachedImage.Transformations>
+                        <fftransformations:CropTransformation ZoomFactor="1"
+                            XOffset="0"
+                            YOffset="0"
+                            CropWidthRatio="3"
+                            CropHeightRatio="1" />
+                        <fftransformations:BlurredTransformation Radius="50" />
+                    </ffimageloading:CachedImage.Transformations>
+                </ffimageloading:CachedImage>
                 <Grid x:Name="SlideItemHostSecondary"
                     BindableLayout.ItemTemplateSelector="{StaticResource SlideViewTemplateSelector}" />
             </Grid>

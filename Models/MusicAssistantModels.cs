@@ -1,9 +1,7 @@
 ﻿using mashin.Converters;
-using Microsoft.Maui.Controls;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -144,17 +142,17 @@ namespace mashin.Models
         public virtual MediaItemImage? PrimaryImage => Metadata?.Images?.FirstOrDefault();
 
         [JsonIgnore]
-        public virtual ImageSource? DisplayImageSource
+        public virtual string? ImageUri
         {
             get
             {
                 var image = PrimaryImage;
-                if (image?.Bytes is not { Length: > 0 } bytes)
+                if (string.IsNullOrWhiteSpace(image?.Path))
                 {
                     return null;
                 }
 
-                return ImageSource.FromStream(() => new MemoryStream(bytes, writable: false));
+                return image.Path;
             }
         }
 
@@ -176,12 +174,6 @@ namespace mashin.Models
 
         protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
             => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-
-        public void NotifyImagesChanged()
-        {
-            OnPropertyChanged(nameof(PrimaryImage));
-            OnPropertyChanged(nameof(DisplayImageSource));
-        }
     }
 
     /// <summary>
@@ -494,8 +486,6 @@ namespace mashin.Models
         [JsonPropertyName("remotely_accessible")]
         public bool RemotelyAccessible { get; set; }
 
-        [JsonIgnore]
-        public byte[]? Bytes { get; set; }
     }
 
     /// <summary>

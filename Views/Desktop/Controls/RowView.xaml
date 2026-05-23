@@ -59,8 +59,8 @@
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
                             </Border.StrokeShape>
-                            <Image Aspect="AspectFill"
-                                Source="{Binding DisplayImageSource}" />
+                            <ffimageloading:CachedImage Aspect="AspectFill"
+                                Source="{Binding ImageUri}" />
                         </Border>
 
                         <!--  Provider Icon (Top-Left)  -->
@@ -347,8 +347,8 @@
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
                             </Border.StrokeShape>
-                            <Image Aspect="AspectFill"
-                                Source="{Binding DisplayImageSource}" />
+                            <ffimageloading:CachedImage Aspect="AspectFill"
+                                Source="{Binding ImageUri}" />
                         </Border>
 
                         <!--  Provider Icon (Top-Left)  -->
@@ -624,8 +624,8 @@
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
                             </Border.StrokeShape>
-                            <Image Aspect="AspectFill"
-                                Source="{Binding DisplayImageSource}" />
+                            <ffimageloading:CachedImage Aspect="AspectFill"
+                                Source="{Binding ImageUri}" />
                         </Border>
 
                         <!--  Provider Icon (Top-Left)  -->
@@ -859,8 +859,8 @@
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
                             </Border.StrokeShape>
-                            <Image Aspect="AspectFill"
-                                Source="{Binding DisplayImageSource}" />
+                            <ffimageloading:CachedImage Aspect="AspectFill"
+                                Source="{Binding ImageUri}" />
                         </Border>
 
                         <!--  Provider Icon (Top-Left)  -->
