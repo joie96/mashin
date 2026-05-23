@@ -48,8 +48,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private double _sliderPosition;
     private double _volume = 50;
     private bool _suppressVolumeCommand;
+    private bool _isApplyingQueueSettings;
     private bool _isAudioOptionsFlyoutOpen;
+    private bool _isDeviceSelectionFlyoutOpen;
+    private bool _isLoadingPlayers;
+    private string? _selectedPlayerId;
+    private bool _suppressSelectedPlayerChange;
     private string _selectedAudioQuality = "opus";
+    private readonly ObservableRangeCollection<Player> _availablePlayers = new();
 
     private bool _isDontStopTheMusicEnabled;
     private bool _isDarkTheme;
@@ -123,6 +129,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _volume = _settings.GetInitialVolume();
         _isMuted = _settings.GetInitialMuted();
         _currentQueueItems.CollectionChanged += OnCurrentQueueItemsCollectionChanged;
+        _availablePlayers.CollectionChanged += OnAvailablePlayersCollectionChanged;
 
         var fallbackAccentColor = GetRequiredColorResource(PlayerBarAccentFallbackColorKey);
         _playerBarAccentColor = fallbackAccentColor;
@@ -228,6 +235,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         ToggleDontStopTheMusicCommand = new Command(() => IsDontStopTheMusicEnabled = !IsDontStopTheMusicEnabled);
         ToggleAudioOptionsFlyoutCommand = new Command(() => IsAudioOptionsFlyoutOpen = !IsAudioOptionsFlyoutOpen);
         CloseAudioOptionsFlyoutCommand = new Command(() => IsAudioOptionsFlyoutOpen = false);
+        ToggleDeviceSelectionFlyoutCommand = new Command(async () => await ToggleDeviceSelectionFlyoutAsync());
+        CloseDeviceSelectionFlyoutCommand = new Command(() => IsDeviceSelectionFlyoutOpen = false);
         BeginSeekCommand = new Command<double>(_ => BeginSeek());
         SeekCommand = new Command<double>(async seconds => await SeekAsync(seconds));
         PlayPlaylistCommand = new Command<Playlist>(async playlist => await PlayPlaylistAsync(playlist));
@@ -483,6 +492,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 return;
             }
 
+            if (_isApplyingQueueSettings)
+            {
+                return;
+            }
+
             _ = SetDontStopTheMusicAsync(value);
         }
     }
@@ -491,6 +505,44 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         get => _isAudioOptionsFlyoutOpen;
         set => SetProperty(ref _isAudioOptionsFlyoutOpen, value);
+    }
+
+    public bool IsDeviceSelectionFlyoutOpen
+    {
+        get => _isDeviceSelectionFlyoutOpen;
+        set => SetProperty(ref _isDeviceSelectionFlyoutOpen, value);
+    }
+
+    public bool IsLoadingPlayers
+    {
+        get => _isLoadingPlayers;
+        private set => SetProperty(ref _isLoadingPlayers, value);
+    }
+
+    public ObservableRangeCollection<Player> AvailablePlayers => _availablePlayers;
+
+    public bool HasAvailablePlayers => _availablePlayers.Count > 0;
+
+    public bool HasNoAvailablePlayers => !HasAvailablePlayers;
+
+    public string? SelectedPlayerId
+    {
+        get => _selectedPlayerId;
+        set
+        {
+            var previousPlayerId = _selectedPlayerId;
+            if (!SetProperty(ref _selectedPlayerId, value))
+            {
+                return;
+            }
+
+            if (_suppressSelectedPlayerChange)
+            {
+                return;
+            }
+
+            _ = SelectActivePlayerAsync(value, previousPlayerId);
+        }
     }
 
     public string SelectedAudioQuality
@@ -580,6 +632,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     public ICommand ToggleDontStopTheMusicCommand { get; }
     public ICommand ToggleAudioOptionsFlyoutCommand { get; }
     public ICommand CloseAudioOptionsFlyoutCommand { get; }
+    public ICommand ToggleDeviceSelectionFlyoutCommand { get; }
+    public ICommand CloseDeviceSelectionFlyoutCommand { get; }
     public ICommand ToggleCurrentTrackFavoriteCommand { get; }
     public ICommand ShowCurrentTrackContextMenuCommand { get; }
     public ICommand BeginSeekCommand { get; }
@@ -666,6 +720,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             await _playerService.ConnectAsync(uri);
         }
 
+        await RefreshAvailablePlayersAsync();
+        ApplyInitialSelectedPlayer();
+
         // Load playlists once and keep local list refreshed as needed.
         await RefreshPlaylistsAsync();
 
@@ -676,6 +733,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         // Set initial queue state
         await _queueSyncService.RefreshNowAsync();
+        CurrentPlayerQueue = _queueSyncService.CurrentPlayerQueue;
+        ApplyQueueSettingsFromCurrentQueue(_queueSyncService.CurrentPlayerQueue);
 
         // Set position slider
         if (_queueSyncService.CurrentPlayerQueue?.ElapsedTime is double elapsedTime
@@ -696,6 +755,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _currentQueueItems.CollectionChanged -= OnCurrentQueueItemsCollectionChanged;
+        _availablePlayers.CollectionChanged -= OnAvailablePlayersCollectionChanged;
 
         _musicAssistant.LoginRequired -= OnLoginRequired;
 
@@ -798,10 +858,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             return;
         }
 
-        // Without a player id, we cannot send playback commands.
-        if (string.IsNullOrEmpty(_playerService.PlayerId))
+        var activePlayerId = _queueSyncService.TargetPlayerId;
+        if (string.IsNullOrWhiteSpace(activePlayerId))
         {
-            _logger.LogWarning("PlayerId is not available. Player connection is missing.");
+            _logger.LogWarning("No active player available for playlist playback.");
             return;
         }
 
@@ -810,7 +870,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             _logger.LogInformation("Play playlist: {Name}", playlist.Name);
 
             await _musicAssistant.PlayMediaAsync(
-                _playerService.PlayerId,
+                activePlayerId,
                 new List<MediaItem> { playlist },
                 QueueOption.Play);
 
@@ -830,10 +890,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         try
         {
-            var isPlaying = PlayState.State == PlayerPlaybackState.Playing || PlayState.State == PlayerPlaybackState.Seeking;
-            var command = isPlaying ? "pause" : "play";
-            await _playerService.SendCommandAsync(command);
-            _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+            var queueId = CurrentPlayerQueue?.QueueId;
+            if (!string.IsNullOrWhiteSpace(queueId))
+            {
+                await _musicAssistant.PlayPauseAsync(queueId);
+                PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+                return;
+            }
+
+            _logger.LogWarning("No active queue available for play/pause");
         }
         catch (Exception ex)
         {
@@ -845,9 +910,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         try
         {
-            await _playerService.SendCommandAsync("next");
-            _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
-            _playerService.PositionSeconds = 0;
+            var queueId = CurrentPlayerQueue?.QueueId;
+            if (!string.IsNullOrWhiteSpace(queueId))
+            {
+                await _musicAssistant.NextAsync(queueId);
+                PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+                return;
+            }
+
+            _logger.LogWarning("No active queue available for next track");
         }
         catch (Exception ex)
         {
@@ -859,9 +930,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         try
         {
-            await _playerService.SendCommandAsync("previous");
-            _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
-            _playerService.PositionSeconds = 0;
+            var queueId = CurrentPlayerQueue?.QueueId;
+            if (!string.IsNullOrWhiteSpace(queueId))
+            {
+                await _musicAssistant.PreviousAsync(queueId);
+                PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+                return;
+            }
+
+            _logger.LogWarning("No active queue available for previous track");
         }
         catch (Exception ex)
         {
@@ -875,12 +952,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         try
         {
-            await _playerService.SendCommandAsync(
-                "mute",
-                new Dictionary<string, object>
-                {
-                    ["muted"] = nextMuted,
-                });
+            var activePlayerId = _queueSyncService.TargetPlayerId;
+            if (string.IsNullOrWhiteSpace(activePlayerId))
+            {
+                _logger.LogWarning("No active player available for mute toggle");
+                return;
+            }
+
+            await _musicAssistant.SetPlayerMuteAsync(activePlayerId, nextMuted);
+            IsMuted = nextMuted;
 
             _settings.SetInitialMuted(nextMuted);
         }
@@ -977,13 +1057,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         try
         {
             var clamped = Math.Max(0, Math.Min(100, volume));
+            var activePlayerId = _queueSyncService.TargetPlayerId;
+            if (string.IsNullOrWhiteSpace(activePlayerId))
+            {
+                _logger.LogWarning("No active player available for volume update");
+                return;
+            }
 
-            await _playerService.SendCommandAsync(
-                "volume",
-                new Dictionary<string, object>
-                {
-                    ["volume"] = clamped,
-                });
+            await _musicAssistant.SetPlayerVolumeAsync(activePlayerId, clamped);
 
             _settings.SetInitialVolume(clamped);
         }
@@ -1087,10 +1168,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private void OnCurrentPlayerQueueUpdated(object? sender, EventArgs e)
     {
         CurrentPlayerQueue = _queueSyncService.CurrentPlayerQueue;
-        ShuffleEnabled = _queueSyncService.CurrentPlayerQueue?.ShuffleEnabled;
-        RepeatMode = _queueSyncService.CurrentPlayerQueue?.RepeatMode?.ToString();
-        IsDontStopTheMusicEnabled = _queueSyncService.CurrentPlayerQueue?.DontStopTheMusicEnabled == true;
+        ApplyQueueSettingsFromCurrentQueue(_queueSyncService.CurrentPlayerQueue);
 
+    }
+
+    private void OnAvailablePlayersCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasAvailablePlayers));
+        OnPropertyChanged(nameof(HasNoAvailablePlayers));
     }
 
     private void OnCurrentTrackUpdated(object? sender, EventArgs e)
@@ -1581,6 +1666,189 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         {
             _logger.LogWarning(ex, "Failed to set dont-stop-the-music state to {Enabled}", dontStopTheMusicEnabled);
         }
+    }
+
+    #endregion
+
+    #region Player Selection
+
+    private void ApplyInitialSelectedPlayer()
+    {
+        var preferredPlayerId = _availablePlayers
+            .FirstOrDefault(player => string.Equals(player.PlayerId, _playerService.PlayerId, StringComparison.Ordinal))?.PlayerId
+            ?? _availablePlayers.FirstOrDefault(player => player.Available)?.PlayerId
+            ?? _availablePlayers.FirstOrDefault()?.PlayerId;
+
+        if (string.IsNullOrWhiteSpace(preferredPlayerId))
+        {
+            return;
+        }
+
+        SetSelectedPlayerSilently(preferredPlayerId);
+        _queueSyncService.SetTargetPlayerId(preferredPlayerId);
+    }
+
+    private async Task ToggleDeviceSelectionFlyoutAsync()
+    {
+        IsDeviceSelectionFlyoutOpen = !IsDeviceSelectionFlyoutOpen;
+        if (!IsDeviceSelectionFlyoutOpen)
+        {
+            return;
+        }
+
+        await RefreshAvailablePlayersAsync();
+    }
+
+    private async Task RefreshAvailablePlayersAsync()
+    {
+        if (IsLoadingPlayers)
+        {
+            return;
+        }
+
+        IsLoadingPlayers = true;
+
+        try
+        {
+            var players = await _musicAssistant.GetPlayersAsync(returnUnavailable: true);
+            var orderedPlayers = players
+                .Where(player => !string.IsNullOrWhiteSpace(player.PlayerId))
+                .OrderByDescending(player => string.Equals(player.PlayerId, _playerService.PlayerId, StringComparison.Ordinal))
+                .ThenBy(player => player.Name, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+
+            _availablePlayers.ReplaceRange(orderedPlayers);
+
+            if (string.IsNullOrWhiteSpace(SelectedPlayerId)
+                || orderedPlayers.All(player => !string.Equals(player.PlayerId, SelectedPlayerId, StringComparison.Ordinal)))
+            {
+                ApplyInitialSelectedPlayer();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load available players for device selection");
+        }
+        finally
+        {
+            IsLoadingPlayers = false;
+        }
+    }
+
+    private async Task SelectActivePlayerAsync(string? playerId, string? previousPlayerId)
+    {
+        if (string.IsNullOrWhiteSpace(playerId))
+        {
+            return;
+        }
+
+        var selectedPlayer = _availablePlayers.FirstOrDefault(player => string.Equals(player.PlayerId, playerId, StringComparison.Ordinal));
+        if (selectedPlayer != null && !selectedPlayer.Available)
+        {
+            _logger.LogInformation("Ignoring player switch to unavailable player: {PlayerId}", playerId);
+            if (!string.IsNullOrWhiteSpace(previousPlayerId))
+            {
+                SetSelectedPlayerSilently(previousPlayerId);
+            }
+
+            return;
+        }
+
+        try
+        {
+            _queueSyncService.SetTargetPlayerId(playerId);
+            await _queueSyncService.RefreshNowAsync();
+            CurrentPlayerQueue = _queueSyncService.CurrentPlayerQueue;
+            ApplyQueueSettingsFromCurrentQueue(_queueSyncService.CurrentPlayerQueue);
+
+            var refreshedPlayer = selectedPlayer ?? await _musicAssistant.GetPlayerAsync(playerId, raiseUnavailable: true);
+            if (refreshedPlayer != null)
+            {
+                if (refreshedPlayer.VolumeLevel.HasValue)
+                {
+                    _suppressVolumeCommand = true;
+                    try
+                    {
+                        Volume = refreshedPlayer.VolumeLevel.Value;
+                    }
+                    finally
+                    {
+                        _suppressVolumeCommand = false;
+                    }
+                }
+
+                if (refreshedPlayer.VolumeMuted.HasValue)
+                {
+                    IsMuted = refreshedPlayer.VolumeMuted.Value;
+                }
+            }
+
+            IsDeviceSelectionFlyoutOpen = false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to switch active player to {PlayerId}", playerId);
+
+            if (!string.IsNullOrWhiteSpace(previousPlayerId))
+            {
+                SetSelectedPlayerSilently(previousPlayerId);
+                _queueSyncService.SetTargetPlayerId(previousPlayerId);
+            }
+        }
+    }
+
+    private void ApplyQueueSettingsFromCurrentQueue(PlayerQueue? queue)
+    {
+        _isApplyingQueueSettings = true;
+        try
+        {
+            ShuffleEnabled = queue?.ShuffleEnabled;
+            RepeatMode = queue?.RepeatMode?.ToString();
+            IsDontStopTheMusicEnabled = queue?.DontStopTheMusicEnabled == true;
+            SyncPlayStateFromQueue(queue);
+        }
+        finally
+        {
+            _isApplyingQueueSettings = false;
+        }
+    }
+
+    private void SetSelectedPlayerSilently(string playerId)
+    {
+        if (string.Equals(_selectedPlayerId, playerId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _suppressSelectedPlayerChange = true;
+        try
+        {
+            _selectedPlayerId = playerId;
+            OnPropertyChanged(nameof(SelectedPlayerId));
+        }
+        finally
+        {
+            _suppressSelectedPlayerChange = false;
+        }
+    }
+
+    private void SyncPlayStateFromQueue(PlayerQueue? queue)
+    {
+        if (queue?.State == null)
+        {
+            return;
+        }
+
+        var mappedState = queue.State.Value switch
+        {
+            mashin.Models.PlaybackState.Playing => PlayerPlaybackState.Playing,
+            mashin.Models.PlaybackState.Paused => PlayerPlaybackState.Paused,
+            mashin.Models.PlaybackState.Buffering => PlayerPlaybackState.Buffering,
+            mashin.Models.PlaybackState.Idle => PlayerPlaybackState.Stopped,
+            _ => PlayerPlaybackState.Unknown
+        };
+
+        PlayState = new PlayerPlayState(mappedState, DateTimeOffset.UtcNow);
     }
     #endregion
 

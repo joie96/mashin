@@ -81,9 +81,10 @@ public class MediaItemActions : IMediaItemActions
             return;
         }
 
-        if (string.IsNullOrEmpty(_playerService.PlayerId))
+        var activePlayerId = _queueSyncService.TargetPlayerId;
+        if (string.IsNullOrWhiteSpace(activePlayerId))
         {
-            _logger.LogWarning("PlayerId is not available. Player connection is missing.");
+            _logger.LogWarning("No active player available. Player connection is missing.");
             return;
         }
 
@@ -93,7 +94,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.PlayMediaAsync(
-                _playerService.PlayerId,
+                activePlayerId,
                 mediaItems,
                 QueueOption.Replace,
                 startItem: startItem);
@@ -117,9 +118,10 @@ public class MediaItemActions : IMediaItemActions
             return;
         }
 
-        if (string.IsNullOrEmpty(_playerService.PlayerId))
+        var activePlayerId = _queueSyncService.TargetPlayerId;
+        if (string.IsNullOrWhiteSpace(activePlayerId))
         {
-            _logger.LogWarning("PlayerId is not available. Player connection is missing.");
+            _logger.LogWarning("No active player available. Player connection is missing.");
             return;
         }
 
@@ -128,7 +130,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.PlayMediaAsync(
-                _playerService.PlayerId,
+                activePlayerId,
                 mediaItems,
                 QueueOption.Next,
                 startItem: startItem);
@@ -152,9 +154,10 @@ public class MediaItemActions : IMediaItemActions
             return;
         }
 
-        if (string.IsNullOrEmpty(_playerService.PlayerId))
+        var activePlayerId = _queueSyncService.TargetPlayerId;
+        if (string.IsNullOrWhiteSpace(activePlayerId))
         {
-            _logger.LogWarning("PlayerId is not available. Player connection is missing.");
+            _logger.LogWarning("No active player available. Player connection is missing.");
             return;
         }
 
@@ -163,7 +166,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.PlayMediaAsync(
-                _playerService.PlayerId,
+                activePlayerId,
                 mediaItems,
                 QueueOption.Add,
                 startItem: startItem);

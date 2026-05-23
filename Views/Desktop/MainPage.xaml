@@ -744,6 +744,9 @@
                         ToolTipProperties.Text="Gerätewahl"
                         VerticalOptions="Center"
                         WidthRequest="32">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding ToggleDeviceSelectionFlyoutCommand}" />
+                        </Border.GestureRecognizers>
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="16" />
                         </Border.StrokeShape>
@@ -752,7 +755,15 @@
                             Text="{mi:Fluent Icon=PhoneDesktop24,
                                              FontOverride=True}"
                             TextColor="{DynamicResource IconSecondary}"
-                            VerticalOptions="Center" />
+                            VerticalOptions="Center">
+                            <Label.Triggers>
+                                <DataTrigger Binding="{Binding IsDeviceSelectionFlyoutOpen}"
+                                    TargetType="Label"
+                                    Value="True">
+                                    <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
+                                </DataTrigger>
+                            </Label.Triggers>
+                        </Label>
                     </Border>
 
                     <!--  Volume  -->
@@ -829,6 +840,87 @@
                     </Border>
                 </Grid>
             </Grid>
+        </Grid>
+
+        <!--  Device Selection Flyout  -->
+        <Grid Grid.Row="0"
+            Grid.RowSpan="3"
+            Grid.Column="0"
+            Grid.ColumnSpan="2"
+            IsVisible="{Binding IsDeviceSelectionFlyoutOpen}">
+            <BoxView BackgroundColor="Transparent">
+                <BoxView.GestureRecognizers>
+                    <TapGestureRecognizer Command="{Binding CloseDeviceSelectionFlyoutCommand}" />
+                </BoxView.GestureRecognizers>
+            </BoxView>
+
+            <Border Margin="0,0,220,70"
+                Padding="12"
+                BackgroundColor="{DynamicResource BackgroundSecondary}"
+                HorizontalOptions="End"
+                VerticalOptions="End"
+                WidthRequest="260"
+                Stroke="{DynamicResource SeparatorColor}"
+                StrokeThickness="1">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="8" />
+                </Border.StrokeShape>
+                <Border.Shadow>
+                    <Shadow Brush="{DynamicResource ShadowColorStrong}"
+                        Opacity="{DynamicResource ShadowOpacityStrong}"
+                        Radius="20"
+                        Offset="0,8" />
+                </Border.Shadow>
+
+                <VerticalStackLayout Spacing="10">
+                    <Label
+                        FontSize="14"
+                        Text="Wiedergabegerät"
+                        Margin="0,0,0,8"
+                        TextColor="{DynamicResource TextPrimary}" />
+
+                    <ActivityIndicator IsRunning="{Binding IsLoadingPlayers}"
+                        IsVisible="{Binding IsLoadingPlayers}"
+                        Color="{DynamicResource AccentColor}" />
+
+                    <Label FontSize="12"
+                        IsVisible="{Binding HasNoAvailablePlayers}"
+                        Text="Keine Music-Assistant-Geräte gefunden."
+                        TextColor="{DynamicResource TextSecondary}" />
+
+                    <ScrollView MaximumHeightRequest="260">
+                        <VerticalStackLayout
+                            BindableLayout.ItemsSource="{Binding AvailablePlayers}"
+                            RadioButtonGroup.GroupName="DesktopDeviceSelection"
+                            RadioButtonGroup.SelectedValue="{Binding SelectedPlayerId, Mode=TwoWay}"
+                            Spacing="8">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate x:DataType="models:Player">
+                                    <Grid ColumnDefinitions="*,Auto"
+                                        ColumnSpacing="10"
+                                        Padding="0,2">
+                                        <VerticalStackLayout Grid.Column="0"
+                                            Spacing="0">
+                                            <Label FontSize="14"
+                                                Text="{Binding Name}"
+                                                TextColor="{DynamicResource TextPrimary}" />
+                                            <Label FontSize="11"
+                                                Text="{Binding PlayerId}"
+                                                TextColor="{DynamicResource TextSecondary}" />
+                                        </VerticalStackLayout>
+
+                                        <RadioButton Grid.Column="1"
+                                            IsEnabled="{Binding Available}"
+                                            Value="{Binding PlayerId}"
+                                            VerticalOptions="Center"
+                                            MinimumWidthRequest="0" />
+                                    </Grid>
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                        </VerticalStackLayout>
+                    </ScrollView>
+                </VerticalStackLayout>
+            </Border>
         </Grid>
 
         <!--  Audio Options Flyout  -->

@@ -21,10 +21,12 @@ public interface IQueueSyncService : IAsyncDisposable
     PlayerQueue? CurrentPlayerQueue { get; }
     Track? CurrentTrack { get; }
     IReadOnlyList<QueueItem> CurrentQueueItems { get; }
+    string? TargetPlayerId { get; }
 
     Task StartAsync(CancellationToken cancellationToken = default);
     Task StopAsync();
     Task RefreshNowAsync(CancellationToken cancellationToken = default);
+    void SetTargetPlayerId(string? playerId);
 }
 
 public enum QueueItemChangeType
@@ -97,6 +99,7 @@ public sealed class QueueSyncService : IQueueSyncService
     private CancellationTokenSource? _loopCts;
     private Task? _loopTask;
     private readonly List<QueueItem> _currentQueueItems = new();
+    private string? _targetPlayerId;
 
     #endregion
 
@@ -113,6 +116,7 @@ public sealed class QueueSyncService : IQueueSyncService
     public PlayerQueue? CurrentPlayerQueue { get; private set; }
     public Track? CurrentTrack { get; private set; }
     public IReadOnlyList<QueueItem> CurrentQueueItems => new ReadOnlyCollection<QueueItem>(_currentQueueItems);
+    public string? TargetPlayerId => _targetPlayerId;
 
     #endregion
 
@@ -219,6 +223,11 @@ public sealed class QueueSyncService : IQueueSyncService
         _refreshLock.Dispose();
     }
 
+    public void SetTargetPlayerId(string? playerId)
+    {
+        _targetPlayerId = string.IsNullOrWhiteSpace(playerId) ? null : playerId.Trim();
+    }
+
     #endregion
 
     #region Refresh
@@ -246,7 +255,11 @@ public sealed class QueueSyncService : IQueueSyncService
 
     private async Task RefreshStateCoreAsync(CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(_playerService.PlayerId))
+        var activePlayerId = !string.IsNullOrWhiteSpace(_targetPlayerId)
+            ? _targetPlayerId
+            : _playerService.PlayerId;
+
+        if (string.IsNullOrWhiteSpace(activePlayerId))
         {
             UpdateState(null, null, Array.Empty<QueueItem>());
             return;
@@ -262,7 +275,7 @@ public sealed class QueueSyncService : IQueueSyncService
                 ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             // Get active queue for player
-            var activeQueue = await _musicAssistant.GetActiveQueueForPlayerAsync(_playerService.PlayerId);
+            var activeQueue = await _musicAssistant.GetActiveQueueForPlayerAsync(activePlayerId);
             if (activeQueue == null)
             {
                 UpdateState(null, null, Array.Empty<QueueItem>());
@@ -456,7 +469,12 @@ public sealed class QueueSyncService : IQueueSyncService
         }
 
         return string.Equals(left.QueueId, right.QueueId, StringComparison.Ordinal)
-            && left.CurrentIndex == right.CurrentIndex;
+            && left.CurrentIndex == right.CurrentIndex
+            && left.ShuffleEnabled == right.ShuffleEnabled
+            && left.RepeatMode == right.RepeatMode
+            && left.DontStopTheMusicEnabled == right.DontStopTheMusicEnabled
+            && left.FlowMode == right.FlowMode
+            && left.State == right.State;
     }
 
     private static bool AreTracksEqual(Track? left, Track? right)
