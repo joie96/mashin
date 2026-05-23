@@ -1712,6 +1712,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         {
             var players = await _musicAssistant.GetPlayersAsync(returnUnavailable: true);
             var orderedPlayers = players
+                .Where(player => player.Available)
                 .Where(player => !string.IsNullOrWhiteSpace(player.PlayerId))
                 .OrderByDescending(player => string.Equals(player.PlayerId, _playerService.PlayerId, StringComparison.Ordinal))
                 .ThenBy(player => player.Name, StringComparer.CurrentCultureIgnoreCase)

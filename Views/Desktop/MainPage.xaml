@@ -904,9 +904,6 @@
                                             <Label FontSize="14"
                                                 Text="{Binding Name}"
                                                 TextColor="{DynamicResource TextPrimary}" />
-                                            <Label FontSize="11"
-                                                Text="{Binding PlayerId}"
-                                                TextColor="{DynamicResource TextSecondary}" />
                                         </VerticalStackLayout>
 
                                         <RadioButton Grid.Column="1"
