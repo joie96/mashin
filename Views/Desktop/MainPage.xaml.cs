@@ -1,6 +1,5 @@
 using mashin.Services;
 using mashin.ViewModels;
-using mashin.Views.Desktop.Controls;
 using Microsoft.Extensions.Logging;
 
 namespace mashin.Views.Desktop;
@@ -71,35 +70,35 @@ public partial class MainPage : ContentPage
 
     private async Task OnCloseQueueViewRequestedAsync()
     {
-        if (QueueOverlay.IsAnimating)
+        if (_overlayService.IsQueueOverlayAnimating)
         {
             return;
         }
 
-        if (QueueOverlay.IsOpen)
+        if (_overlayService.IsQueueOverlayOpen)
         {
-            await QueueOverlay.HideAsync();
+            await _overlayService.HideQueueOverlayAsync();
             UpdateQueueIconColor();
         }
     }
 
     private async void OnQueueTapped(object? sender, TappedEventArgs e)
     {
-        if (QueueOverlay.IsAnimating)
+        if (_overlayService.IsQueueOverlayAnimating)
         {
             return;
         }
 
-        if (QueueOverlay.IsOpen)
+        if (_overlayService.IsQueueOverlayOpen)
         {
-            await QueueOverlay.HideAsync();
+            await _overlayService.HideQueueOverlayAsync();
             UpdateQueueIconColor();
             return;
         }
 
         var queueIconLabel = this.FindByName<Label>("QueueIconLabel");
         queueIconLabel?.SetDynamicResource(Label.TextColorProperty, "AccentColor");
-        await QueueOverlay.ShowAsync();
+        await _overlayService.ShowQueueOverlayAsync(_viewModel);
         UpdateQueueIconColor();
     }
 
@@ -108,7 +107,7 @@ public partial class MainPage : ContentPage
         var queueIconLabel = this.FindByName<Label>("QueueIconLabel");
         queueIconLabel?.SetDynamicResource(
             Label.TextColorProperty,
-            QueueOverlay.IsOpen ? "AccentColor" : "IconSecondary");
+            _overlayService.IsQueueOverlayOpen ? "AccentColor" : "IconSecondary");
     }
 
     #endregion

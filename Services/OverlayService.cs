@@ -19,10 +19,15 @@ public interface IOverlayService
     void OnBackdropTapped();
     void OnFlyoutBackdropTapped();
 
-    Task ShowCenteredOverlayAsync(View overlay, Action? onClose);
-    Task HideCenteredOverlayAsync();
-    Task ShowFlyoutAsync(View flyout, Action? onClose);
-    Task HideFlyoutAsync();
+    Task ShowContextMenuMainAsync(View menuView, Action? onClose);
+    Task HideContextMenuMainAsync();
+    Task ShowContextMenuSubMenuAsync(View subMenuView, Action? onClose);
+    Task HideContextMenuSubMenuAsync();
+
+    bool IsQueueOverlayOpen { get; }
+    bool IsQueueOverlayAnimating { get; }
+    Task ShowQueueOverlayAsync(object bindingContext);
+    Task HideQueueOverlayAsync();
 
     Task<string?> ShowCreatePlaylistAsync();
     Task<string?> ShowUpdatePlaylistAsync(Playlist playlist);
@@ -49,6 +54,7 @@ public sealed class OverlayService : IOverlayService
     private readonly UpdatePlaylistOverlay _updatePlaylistOverlay;
     private readonly DeletePlaylistOverlay _deletePlaylistOverlay;
     private readonly LoginOverlay _loginOverlay;
+    private readonly QueueOverlay _queueOverlay;
 
     private Grid? _overlayHost;
     private ContentPresenter? _overlayContent;
@@ -89,11 +95,13 @@ public sealed class OverlayService : IOverlayService
         _loginOverlay.UsernameCompleted += OnLoginUsernameCompleted;
         _loginOverlay.PasswordCompleted += OnLoginPasswordCompleted;
         _loginOverlay.LoginClicked += OnLoginClicked;
+
+        _queueOverlay = new QueueOverlay();
     }
 
     #endregion
 
-    #region Public API
+    #region Host API
 
     public void Initialize(
         Grid overlayHost,
@@ -117,16 +125,30 @@ public sealed class OverlayService : IOverlayService
         _flyoutCloseAction?.Invoke();
     }
 
-    public Task ShowCenteredOverlayAsync(View overlay, Action? onClose)
+    #endregion
+
+    #region Context Menu API
+
+    public Task ShowContextMenuMainAsync(View menuView, Action? onClose)
+    {
+        return ShowFlyoutLayerAsync(menuView, onClose);
+    }
+
+    public Task HideContextMenuMainAsync()
+    {
+        return HideFlyoutLayerAsync();
+    }
+
+    public Task ShowContextMenuSubMenuAsync(View subMenuView, Action? onClose)
     {
         return MainThread.InvokeOnMainThreadAsync(() =>
         {
             EnsureInitialized();
-            ShowCenteredOverlayInternal(overlay, onClose);
+            ShowCenteredOverlayInternal(subMenuView, onClose);
         });
     }
 
-    public Task HideCenteredOverlayAsync()
+    public Task HideContextMenuSubMenuAsync()
     {
         return MainThread.InvokeOnMainThreadAsync(() =>
         {
@@ -141,29 +163,55 @@ public sealed class OverlayService : IOverlayService
         });
     }
 
-    public Task ShowFlyoutAsync(View flyout, Action? onClose)
+    #endregion
+
+    #region Queue API
+
+    public bool IsQueueOverlayOpen => _queueOverlay.IsOpen;
+
+    public bool IsQueueOverlayAnimating => _queueOverlay.IsAnimating;
+
+    public async Task ShowQueueOverlayAsync(object bindingContext)
     {
-        return MainThread.InvokeOnMainThreadAsync(() =>
+        if (bindingContext == null)
         {
-            EnsureInitialized();
-            ShowFlyoutInternal(flyout, onClose);
+            return;
+        }
+
+        EnsureInitialized();
+
+        await MainThread.InvokeOnMainThreadAsync(async () =>
+        {
+            // Force a clean rebind cycle in case the same view model instance is reused.
+            _queueOverlay.BindingContext = null;
+            _queueOverlay.BindingContext = bindingContext;
+
+            await ShowFlyoutLayerAsync(_queueOverlay, () => _ = HideQueueOverlayAsync());
+            await _queueOverlay.ShowAsync();
         });
     }
 
-    public Task HideFlyoutAsync()
+    public async Task HideQueueOverlayAsync()
     {
-        return MainThread.InvokeOnMainThreadAsync(() =>
+        EnsureInitialized();
+
+        await MainThread.InvokeOnMainThreadAsync(async () =>
         {
-            if (_flyoutHost == null || _flyoutContent == null)
+            await _queueOverlay.HideAsync();
+
+            if (_flyoutHost != null)
             {
-                return;
+                _flyoutHost.IsVisible = false;
             }
 
-            _flyoutHost.IsVisible = false;
-            _flyoutContent.Content = null;
+            // Keep queue content mounted so TableView does not run full unload cleanup.
             _flyoutCloseAction = null;
         });
     }
+
+    #endregion
+
+    #region Playlist Overlay API
 
     public async Task<string?> ShowCreatePlaylistAsync()
     {
@@ -186,7 +234,7 @@ public sealed class OverlayService : IOverlayService
         finally
         {
             _createPlaylistTcs = null;
-            await HideCenteredOverlayAsync();
+            await HideCenteredOverlayInternalAsync();
             _overlayLock.Release();
         }
     }
@@ -217,7 +265,7 @@ public sealed class OverlayService : IOverlayService
         finally
         {
             _updatePlaylistTcs = null;
-            await HideCenteredOverlayAsync();
+            await HideCenteredOverlayInternalAsync();
             _overlayLock.Release();
         }
     }
@@ -249,10 +297,14 @@ public sealed class OverlayService : IOverlayService
         finally
         {
             _deletePlaylistTcs = null;
-            await HideCenteredOverlayAsync();
+            await HideCenteredOverlayInternalAsync();
             _overlayLock.Release();
         }
     }
+
+    #endregion
+
+    #region Login Overlay API
 
     public async Task<bool> ShowLoginAsync(
         string? initialUsername,
@@ -363,7 +415,7 @@ public sealed class OverlayService : IOverlayService
                 _loginOverlay.ClearPassword();
                 _loginOverlay.SetStatusMessage(string.Empty);
             });
-            await HideCenteredOverlayAsync();
+            await HideCenteredOverlayInternalAsync();
             _overlayLock.Release();
         }
     }
@@ -490,7 +542,46 @@ public sealed class OverlayService : IOverlayService
 
     #endregion
 
-    #region Overlay Host Helpers
+    #region Host Helpers
+
+    private Task HideCenteredOverlayInternalAsync()
+    {
+        return MainThread.InvokeOnMainThreadAsync(() =>
+        {
+            if (_overlayHost == null || _overlayContent == null)
+            {
+                return;
+            }
+
+            _overlayHost.IsVisible = false;
+            _overlayContent.Content = null;
+            _overlayCloseAction = null;
+        });
+    }
+
+    private Task ShowFlyoutLayerAsync(View flyout, Action? onClose)
+    {
+        return MainThread.InvokeOnMainThreadAsync(() =>
+        {
+            EnsureInitialized();
+            ShowFlyoutInternal(flyout, onClose);
+        });
+    }
+
+    private Task HideFlyoutLayerAsync()
+    {
+        return MainThread.InvokeOnMainThreadAsync(() =>
+        {
+            if (_flyoutHost == null || _flyoutContent == null)
+            {
+                return;
+            }
+
+            _flyoutHost.IsVisible = false;
+            _flyoutContent.Content = null;
+            _flyoutCloseAction = null;
+        });
+    }
 
     private void ShowCenteredOverlayInternal(View overlay, Action? onClose)
     {

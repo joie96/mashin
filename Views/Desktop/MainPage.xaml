@@ -1029,17 +1029,10 @@
             </Border>
         </Grid>
 
-        <!--  Queue Overlay Host  -->
-        <controls:QueueOverlay x:Name="QueueOverlay"
-            Grid.Row="0"
-            Grid.RowSpan="2"
-            Grid.Column="0"
-            Grid.ColumnSpan="2" />
-
         <!-- Flyout Host -->
         <Grid x:Name="FlyoutHost"
             Grid.Row="0"
-            Grid.RowSpan="3"
+            Grid.RowSpan="2"
             Grid.Column="0"
             Grid.ColumnSpan="2"
             BackgroundColor="Transparent"

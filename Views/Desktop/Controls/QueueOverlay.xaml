@@ -8,6 +8,7 @@
     xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
     xmlns:vm="clr-namespace:mashin.ViewModels"
+    x:Name="Root"
     x:DataType="vm:MainViewModel"
     BackgroundColor="Transparent"
     InputTransparent="False"
@@ -27,7 +28,9 @@
         <!--  Queue Overlay Panel  -->
         <Border x:Name="OverlayPanel"
             BackgroundColor="{DynamicResource BackgroundSecondary}"
+            HeightRequest="{Binding Source={x:Reference Root}, Path=Height}"
             StrokeThickness="0"
+            VerticalOptions="Fill"
             TranslationY="2000">
             <Grid Padding="48,52,48,10"
                 ColumnDefinitions="300,*"
