@@ -7,6 +7,9 @@
     <Color x:Key="BackgroundPrimary">#0a0a0a</Color>
     <Color x:Key="BackgroundSecondary">#141414</Color>
     <Color x:Key="BackgroundTertiary">#1f1f1f</Color>
+    
+    <Color x:Key="PlayerBarBackground">#FF282828</Color>
+    <Color x:Key="PlayerBarForeground">#FF5F5F5F</Color>
 
     <Color x:Key="TextPrimary">#ffffff</Color>
     <Color x:Key="TextSecondary">#dddddd</Color>
@@ -36,7 +39,6 @@
     <Color x:Key="OverlayOppositeIconColor">#595D66</Color>
     <Color x:Key="OverlayOppositeIconHoverColor">#17181B</Color>
     <Color x:Key="OverlayOppositePlayIconColor">#111111</Color>
-    <Color x:Key="PlayerBarAccentFallbackColor">#141414</Color>
 
     <Color x:Key="AccentColor">#ff4757</Color>
     <Color x:Key="AccentHover">#ee5a6f</Color>

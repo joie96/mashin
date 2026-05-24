@@ -23,8 +23,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 {
     #region Fields
 
-    private const string PlayerBarAccentFallbackColorKey = "PlayerBarAccentFallbackColor";
-
     // Services
     private readonly SettingsService _settings;
     private readonly MusicAssistantService _musicAssistant;
@@ -60,8 +58,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private bool _isDontStopTheMusicEnabled;
     private bool _isDarkTheme;
     private bool _isLoadingPlaylists;
-    private Color _playerBarAccentColor = null!;
-    private Color _playerBarBackgroundColor = null!;
 
     // Search
     private string _searchQuery = string.Empty;
@@ -130,10 +126,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _isMuted = _settings.GetInitialMuted();
         _currentQueueItems.CollectionChanged += OnCurrentQueueItemsCollectionChanged;
         _availablePlayers.CollectionChanged += OnAvailablePlayersCollectionChanged;
-
-        var fallbackAccentColor = GetRequiredColorResource(PlayerBarAccentFallbackColorKey);
-        _playerBarAccentColor = fallbackAccentColor;
-        _playerBarBackgroundColor = fallbackAccentColor.WithAlpha(0.5f);
 
         // Navigation Commands
         NavigateToHomeCommand = new Command(async () => await NavigateToSectionAsync<HomePage>(NavigationSection.Home));
@@ -434,7 +426,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             if (SetProperty(ref _currentTrack, value))
             {
                 OnPropertyChanged(nameof(CurrentTrackPrimaryArtist));
-                _ = UpdatePlayerBarAccentColorAsync(value);
 
                 if (oldTrack?.Uri != value?.Uri)
                 {
@@ -442,18 +433,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 }
             }
         }
-    }
-
-    public Color PlayerBarAccentColor
-    {
-        get => _playerBarAccentColor;
-        private set => SetProperty(ref _playerBarAccentColor, value);
-    }
-
-    public Color PlayerBarBackgroundColor
-    {
-        get => _playerBarBackgroundColor;
-        private set => SetProperty(ref _playerBarBackgroundColor, value);
     }
 
     public double PlayerBarProgress => Duration <= 0 ? 0 : Math.Clamp(Position / Duration, 0, 1);
@@ -767,29 +746,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _navigationService.PropertyChanged -= OnNavigationServicePropertyChanged;
 
         await Task.CompletedTask;
-    }
-
-    #endregion
-
-    #region Artwork & Colors
-
-    private async Task UpdatePlayerBarAccentColorAsync(Track? track)
-    {
-        var fallbackColor = GetRequiredColorResource(PlayerBarAccentFallbackColorKey);
-        PlayerBarAccentColor = fallbackColor;
-        PlayerBarBackgroundColor = fallbackColor.WithAlpha(0.5f);
-        await Task.CompletedTask;
-    }
-
-    private static Color GetRequiredColorResource(string key)
-    {
-        var resources = Application.Current?.Resources;
-        if (resources != null && resources.TryGetValue(key, out var value) && value is Color color)
-        {
-            return color;
-        }
-
-        throw new InvalidOperationException($"Required color resource '{key}' is not defined.");
     }
 
     #endregion

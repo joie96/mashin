@@ -22,7 +22,7 @@
             Grid.Row="1"
             Margin="10,6,10,4"
             Padding="0"
-            BackgroundColor="{Binding PlayerBarBackgroundColor}"
+            BackgroundColor="{DynamicResource PlayerBarBackground}"
             StrokeThickness="0">
             <Border.StrokeShape>
                 <RoundRectangle CornerRadius="12" />
@@ -54,7 +54,7 @@
                     ColumnSpacing="10"
                     IsClippedToBounds="True">
                     <Border Grid.ColumnSpan="2"
-                        BackgroundColor="{Binding PlayerBarAccentColor}"
+                        BackgroundColor="{DynamicResource PlayerBarForeground}"
                         HeightRequest="{Binding Source={x:Reference PlayerBarProgressHost}, Path=Height}"
                         HorizontalOptions="Fill"
                         InputTransparent="True"
