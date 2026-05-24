@@ -23,7 +23,7 @@ public partial class MainPage : ContentPage
         _overlayService = overlayService;
         BindingContext = _viewModel;
 
-        _overlayService.Initialize(OverlayHost, OverlayContent);
+        _overlayService.Initialize(OverlayHost, OverlayContent, FlyoutHost, FlyoutContent);
 
         if (_navigationService is NavigationService navService)
         {
@@ -38,5 +38,10 @@ public partial class MainPage : ContentPage
     private void OnOverlayBackdropTapped(object? sender, TappedEventArgs e)
     {
         _overlayService.OnBackdropTapped();
+    }
+
+    private void OnFlyoutBackdropTapped(object? sender, TappedEventArgs e)
+    {
+        _overlayService.OnFlyoutBackdropTapped();
     }
 }

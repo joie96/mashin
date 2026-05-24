@@ -11,8 +11,18 @@ namespace mashin.Services;
 /// </summary>
 public interface IOverlayService
 {
-    void Initialize(Grid overlayHost, ContentPresenter overlayContent);
+    void Initialize(
+        Grid overlayHost,
+        ContentPresenter overlayContent,
+        Grid flyoutHost,
+        ContentPresenter flyoutContent);
     void OnBackdropTapped();
+    void OnFlyoutBackdropTapped();
+
+    Task ShowCenteredOverlayAsync(View overlay, Action? onClose);
+    Task HideCenteredOverlayAsync();
+    Task ShowFlyoutAsync(View flyout, Action? onClose);
+    Task HideFlyoutAsync();
 
     Task<string?> ShowCreatePlaylistAsync();
     Task<string?> ShowUpdatePlaylistAsync(Playlist playlist);
@@ -42,7 +52,11 @@ public sealed class OverlayService : IOverlayService
 
     private Grid? _overlayHost;
     private ContentPresenter? _overlayContent;
+    private Grid? _flyoutHost;
+    private ContentPresenter? _flyoutContent;
+
     private Action? _overlayCloseAction;
+    private Action? _flyoutCloseAction;
 
     private TaskCompletionSource<string?>? _createPlaylistTcs;
     private TaskCompletionSource<string?>? _updatePlaylistTcs;
@@ -81,15 +95,74 @@ public sealed class OverlayService : IOverlayService
 
     #region Public API
 
-    public void Initialize(Grid overlayHost, ContentPresenter overlayContent)
+    public void Initialize(
+        Grid overlayHost,
+        ContentPresenter overlayContent,
+        Grid flyoutHost,
+        ContentPresenter flyoutContent)
     {
         _overlayHost = overlayHost;
         _overlayContent = overlayContent;
+        _flyoutHost = flyoutHost;
+        _flyoutContent = flyoutContent;
     }
 
     public void OnBackdropTapped()
     {
         _overlayCloseAction?.Invoke();
+    }
+
+    public void OnFlyoutBackdropTapped()
+    {
+        _flyoutCloseAction?.Invoke();
+    }
+
+    public Task ShowCenteredOverlayAsync(View overlay, Action? onClose)
+    {
+        return MainThread.InvokeOnMainThreadAsync(() =>
+        {
+            EnsureInitialized();
+            ShowCenteredOverlayInternal(overlay, onClose);
+        });
+    }
+
+    public Task HideCenteredOverlayAsync()
+    {
+        return MainThread.InvokeOnMainThreadAsync(() =>
+        {
+            if (_overlayHost == null || _overlayContent == null)
+            {
+                return;
+            }
+
+            _overlayHost.IsVisible = false;
+            _overlayContent.Content = null;
+            _overlayCloseAction = null;
+        });
+    }
+
+    public Task ShowFlyoutAsync(View flyout, Action? onClose)
+    {
+        return MainThread.InvokeOnMainThreadAsync(() =>
+        {
+            EnsureInitialized();
+            ShowFlyoutInternal(flyout, onClose);
+        });
+    }
+
+    public Task HideFlyoutAsync()
+    {
+        return MainThread.InvokeOnMainThreadAsync(() =>
+        {
+            if (_flyoutHost == null || _flyoutContent == null)
+            {
+                return;
+            }
+
+            _flyoutHost.IsVisible = false;
+            _flyoutContent.Content = null;
+            _flyoutCloseAction = null;
+        });
     }
 
     public async Task<string?> ShowCreatePlaylistAsync()
@@ -105,7 +178,7 @@ public sealed class OverlayService : IOverlayService
             await MainThread.InvokeOnMainThreadAsync(() =>
             {
                 _createPlaylistOverlay.PlaylistName = string.Empty;
-                ShowOverlay(_createPlaylistOverlay, () => _createPlaylistTcs.TrySetResult(null));
+                ShowCenteredOverlayInternal(_createPlaylistOverlay, () => _createPlaylistTcs.TrySetResult(null));
             });
 
             return await _createPlaylistTcs.Task;
@@ -113,7 +186,7 @@ public sealed class OverlayService : IOverlayService
         finally
         {
             _createPlaylistTcs = null;
-            await HideOverlayAsync();
+            await HideCenteredOverlayAsync();
             _overlayLock.Release();
         }
     }
@@ -136,7 +209,7 @@ public sealed class OverlayService : IOverlayService
             await MainThread.InvokeOnMainThreadAsync(() =>
             {
                 _updatePlaylistOverlay.PlaylistName = playlist.DisplayName ?? playlist.Name ?? string.Empty;
-                ShowOverlay(_updatePlaylistOverlay, () => _updatePlaylistTcs.TrySetResult(null));
+                ShowCenteredOverlayInternal(_updatePlaylistOverlay, () => _updatePlaylistTcs.TrySetResult(null));
             });
 
             return await _updatePlaylistTcs.Task;
@@ -144,7 +217,7 @@ public sealed class OverlayService : IOverlayService
         finally
         {
             _updatePlaylistTcs = null;
-            await HideOverlayAsync();
+            await HideCenteredOverlayAsync();
             _overlayLock.Release();
         }
     }
@@ -168,7 +241,7 @@ public sealed class OverlayService : IOverlayService
             {
                 _deletePlaylistOverlay.PlaylistName = playlist.DisplayName ?? playlist.Name ?? string.Empty;
                 _deletePlaylistOverlay.IsDeleteEnabled = true;
-                ShowOverlay(_deletePlaylistOverlay, () => _deletePlaylistTcs.TrySetResult(false));
+                ShowCenteredOverlayInternal(_deletePlaylistOverlay, () => _deletePlaylistTcs.TrySetResult(false));
             });
 
             return await _deletePlaylistTcs.Task;
@@ -176,7 +249,7 @@ public sealed class OverlayService : IOverlayService
         finally
         {
             _deletePlaylistTcs = null;
-            await HideOverlayAsync();
+            await HideCenteredOverlayAsync();
             _overlayLock.Release();
         }
     }
@@ -208,7 +281,7 @@ public sealed class OverlayService : IOverlayService
                 _loginOverlay.HideError();
                 _loginOverlay.SetStatusMessage(string.Empty);
                 _loginOverlay.SetLoadingState(false);
-                ShowOverlay(_loginOverlay, null);
+                ShowCenteredOverlayInternal(_loginOverlay, null);
 
                 if (string.IsNullOrWhiteSpace(_loginOverlay.Username))
                 {
@@ -290,7 +363,7 @@ public sealed class OverlayService : IOverlayService
                 _loginOverlay.ClearPassword();
                 _loginOverlay.SetStatusMessage(string.Empty);
             });
-            await HideOverlayAsync();
+            await HideCenteredOverlayAsync();
             _overlayLock.Release();
         }
     }
@@ -419,7 +492,7 @@ public sealed class OverlayService : IOverlayService
 
     #region Overlay Host Helpers
 
-    private void ShowOverlay(View overlay, Action? onClose)
+    private void ShowCenteredOverlayInternal(View overlay, Action? onClose)
     {
         if (_overlayHost == null || _overlayContent == null)
         {
@@ -431,24 +504,21 @@ public sealed class OverlayService : IOverlayService
         _overlayHost.IsVisible = true;
     }
 
-    private async Task HideOverlayAsync()
+    private void ShowFlyoutInternal(View flyout, Action? onClose)
     {
-        await MainThread.InvokeOnMainThreadAsync(() =>
+        if (_flyoutHost == null || _flyoutContent == null)
         {
-            if (_overlayHost == null || _overlayContent == null)
-            {
-                return;
-            }
+            return;
+        }
 
-            _overlayHost.IsVisible = false;
-            _overlayContent.Content = null;
-            _overlayCloseAction = null;
-        });
+        _flyoutContent.Content = flyout;
+        _flyoutCloseAction = onClose;
+        _flyoutHost.IsVisible = true;
     }
 
     private void EnsureInitialized()
     {
-        if (_overlayHost != null && _overlayContent != null)
+        if (_overlayHost != null && _overlayContent != null && _flyoutHost != null && _flyoutContent != null)
         {
             return;
         }

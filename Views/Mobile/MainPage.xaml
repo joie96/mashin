@@ -250,6 +250,26 @@
                 </VerticalStackLayout>
             </Grid>
         </Border>
+
+        <!-- Flyout Host -->
+        <Grid x:Name="FlyoutHost"
+            Grid.Row="0"
+            Grid.RowSpan="3"
+            BackgroundColor="Transparent"
+            InputTransparent="False"
+            IsVisible="False">
+            <Grid>
+                <BoxView BackgroundColor="#80000000">
+                    <BoxView.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnFlyoutBackdropTapped" />
+                    </BoxView.GestureRecognizers>
+                </BoxView>
+                <ContentPresenter x:Name="FlyoutContent"
+                    HorizontalOptions="Fill"
+                    VerticalOptions="End" />
+            </Grid>
+        </Grid>
+
         <!--! Overlay Host -->
         <Grid x:Name="OverlayHost"
             Grid.Row="0"
