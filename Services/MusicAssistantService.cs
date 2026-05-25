@@ -199,15 +199,15 @@ public class MusicAssistantService
         }
     }
 
-    private async Task<T?> DeserializeMediaItemAsync<T>(JsonElement element) where T : MediaItem
+    private Task<T?> DeserializeMediaItemAsync<T>(JsonElement element) where T : MediaItem
     {
         var item = JsonSerializer.Deserialize<T>(element.GetRawText(), JsonOptions);
         if (item != null)
         {
-            await EnrichWithProviderInfoAsync(new List<T> { item });
+            _ = EnrichWithProviderInfoAsync(new List<T> { item });
         }
 
-        return item;
+        return Task.FromResult(item);
     }
 
     #region Authentication
@@ -557,7 +557,7 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Artist>>("music/artists/library_items", args);
         var artists = result ?? new List<Artist>();
 
-        await EnrichWithProviderInfoAsync(artists);
+        _ = EnrichWithProviderInfoAsync(artists);
 
         return artists;
     }
@@ -578,7 +578,7 @@ public class MusicAssistantService
         var artist = await SendCommandAsync<Artist>("music/artists/get", args);
         if (artist != null)
         {
-            await EnrichWithProviderInfoAsync(new List<Artist> { artist });
+            _ = EnrichWithProviderInfoAsync(new List<Artist> { artist });
         }
 
         return artist;
@@ -601,7 +601,7 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Album>>("music/artists/artist_albums", args);
         var albums = result ?? new List<Album>();
 
-        await EnrichWithProviderInfoAsync(albums);
+        _ = EnrichWithProviderInfoAsync(albums);
         return albums;
     }
 
@@ -623,7 +623,7 @@ public class MusicAssistantService
         var tracks = result ?? new List<Track>();
 
         // Enrich with provider information
-        await EnrichWithProviderInfoAsync(tracks);
+        _ = EnrichWithProviderInfoAsync(tracks);
         return result ?? new List<Track>();
     }
 
@@ -672,7 +672,7 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Album>>("music/albums/library_items", args);
         var albums = result ?? new List<Album>();
 
-        await EnrichWithProviderInfoAsync(albums);
+        _ = EnrichWithProviderInfoAsync(albums);
 
         return albums;
     }
@@ -693,7 +693,7 @@ public class MusicAssistantService
         var album = await SendCommandAsync<Album>("music/albums/get", args);
         if (album != null)
         {
-            await EnrichWithProviderInfoAsync(new List<Album> { album });
+            _ = EnrichWithProviderInfoAsync(new List<Album> { album });
         }
 
         return album;
@@ -716,7 +716,7 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Track>>("music/albums/album_tracks", args);
         var tracks = result ?? new List<Track>();
 
-        await EnrichWithProviderInfoAsync(tracks);
+        _ = EnrichWithProviderInfoAsync(tracks);
         return tracks;
     }
 
@@ -784,7 +784,7 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Track>>("music/tracks/library_items", args);
         var tracks = result ?? new List<Track>();
 
-        await EnrichWithProviderInfoAsync(tracks);
+        _ = EnrichWithProviderInfoAsync(tracks);
 
         return tracks;
     }
@@ -805,7 +805,7 @@ public class MusicAssistantService
         var track = await SendCommandAsync<Track>("music/tracks/get", args);
         if (track != null)
         {
-            await EnrichWithProviderInfoAsync(new List<Track> { track });
+            _ = EnrichWithProviderInfoAsync(new List<Track> { track });
         }
 
         return track;
@@ -825,7 +825,7 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Track>>("music/tracks/track_versions", args);
         var tracks = result ?? new List<Track>();
 
-        await EnrichWithProviderInfoAsync(tracks);
+        _ = EnrichWithProviderInfoAsync(tracks);
 
         return tracks;
     }
@@ -845,7 +845,7 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Album>>("music/tracks/track_albums", args);
         var albums = result ?? new List<Album>();
 
-        await EnrichWithProviderInfoAsync(albums);
+        _ = EnrichWithProviderInfoAsync(albums);
 
         return albums;
     }
@@ -901,7 +901,7 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Track>>("music/tracks/similar_tracks", args);
         var tracks = result ?? new List<Track>();
 
-        await EnrichWithProviderInfoAsync(tracks);
+        _ = EnrichWithProviderInfoAsync(tracks);
 
         return tracks;
     }
@@ -937,7 +937,7 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Playlist>>("music/playlists/library_items", args);
         var playlists = result ?? new List<Playlist>();
 
-        await EnrichWithProviderInfoAsync(playlists);
+        _ = EnrichWithProviderInfoAsync(playlists);
 
         return playlists;
     }
@@ -956,7 +956,7 @@ public class MusicAssistantService
         var playlist = await SendCommandAsync<Playlist>("music/playlists/get", args);
         if (playlist != null)
         {
-            await EnrichWithProviderInfoAsync(new List<Playlist> { playlist });
+            _ = EnrichWithProviderInfoAsync(new List<Playlist> { playlist });
         }
 
         return playlist;
@@ -977,7 +977,7 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Track>>("music/playlists/playlist_tracks", args);
         var tracks = result ?? new List<Track>();
 
-        await EnrichWithProviderInfoAsync(tracks);
+        _ = EnrichWithProviderInfoAsync(tracks);
         return result ?? new List<Track>();
     }
 
@@ -1239,15 +1239,10 @@ public class MusicAssistantService
 
         if (results != null)
         {
-            var enrichTasks = new List<Task>
-            {
-                EnrichWithProviderInfoAsync(results.Tracks ?? new List<Track>()),
-                EnrichWithProviderInfoAsync(results.Albums ?? new List<Album>()),
-                EnrichWithProviderInfoAsync(results.Artists ?? new List<Artist>()),
-                EnrichWithProviderInfoAsync(results.Playlists ?? new List<Playlist>())
-            };
-
-            await Task.WhenAll(enrichTasks);
+            _ = EnrichWithProviderInfoAsync(results.Tracks ?? new List<Track>());
+            _ = EnrichWithProviderInfoAsync(results.Albums ?? new List<Album>());
+            _ = EnrichWithProviderInfoAsync(results.Artists ?? new List<Artist>());
+            _ = EnrichWithProviderInfoAsync(results.Playlists ?? new List<Playlist>());
         }
 
         return results;
@@ -1285,14 +1280,7 @@ public class MusicAssistantService
 
         if (items.Count > 0)
         {
-            try
-            {
-                await EnrichWithProviderInfoAsync(items);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to enrich recommendation folder items");
-            }
+            _ = EnrichWithProviderInfoAsync(items);
         }
 
         return folders;
@@ -1423,12 +1411,10 @@ public class MusicAssistantService
         var artists = items.OfType<Artist>().ToList();
         var playlists = items.OfType<Playlist>().ToList();
 
-        await Task.WhenAll(
-            EnrichWithProviderInfoAsync(tracks),
-            EnrichWithProviderInfoAsync(albums),
-            EnrichWithProviderInfoAsync(artists),
-            EnrichWithProviderInfoAsync(playlists)
-        );
+        _ = EnrichWithProviderInfoAsync(tracks);
+        _ = EnrichWithProviderInfoAsync(albums);
+        _ = EnrichWithProviderInfoAsync(artists);
+        _ = EnrichWithProviderInfoAsync(playlists);
 
         return items;
     }
@@ -1562,7 +1548,7 @@ public class MusicAssistantService
         var currentTrack = queue?.CurrentItem?.MediaItem;
         if (currentTrack != null)
         {
-            await EnrichWithProviderInfoAsync(new List<Track> { currentTrack });
+            _ = EnrichWithProviderInfoAsync(new List<Track> { currentTrack });
         }
 
         return queue;
@@ -1593,7 +1579,7 @@ public class MusicAssistantService
 
         if (queueTracks.Count > 0)
         {
-            await EnrichWithProviderInfoAsync(queueTracks);
+            _ = EnrichWithProviderInfoAsync(queueTracks);
         }
 
         return queueItems;
