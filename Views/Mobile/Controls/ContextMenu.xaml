@@ -4,6 +4,7 @@
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
     xmlns:converters="clr-namespace:mashin.Converters"
+    xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
     xmlns:models="clr-namespace:mashin.Models"
     x:Name="self">
 
@@ -44,7 +45,7 @@
 
                                 <Grid
                                     Padding="18,14"
-                                    ColumnDefinitions="*,Auto"
+                                    ColumnDefinitions="24,*,Auto"
                                     ColumnSpacing="12"
                                     IsVisible="{Binding IsSeparator, Converter={StaticResource InvertedBoolConverter}}"
                                     Opacity="{Binding IsEnabled, Converter={StaticResource BoolToOpacityConverter}}">
@@ -53,6 +54,49 @@
                                     </Grid.GestureRecognizers>
 
                                     <Label
+                                        Grid.Column="0"
+                                        FontSize="18"
+                                        IsVisible="{Binding HasIcon}"
+                                        Text="{mi:Fluent Icon={Binding Icon},
+                                                         FontOverride=True,
+                                                         IconSize=18,
+                                                         IconColor={DynamicResource IconSecondary}}"
+                                        TextColor="{DynamicResource IconSecondary}"
+                                        VerticalOptions="Center">
+                                        <Label.Triggers>
+                                            <DataTrigger Binding="{Binding IconIsFilled}"
+                                                TargetType="Label"
+                                                Value="True">
+                                                <Setter Property="IsVisible" Value="False" />
+                                            </DataTrigger>
+                                        </Label.Triggers>
+                                    </Label>
+                                    <Label
+                                        Grid.Column="0"
+                                        FontSize="18"
+                                        IsVisible="False"
+                                        Text="{mi:FluentFilled Icon={Binding Icon},
+                                                               FontOverride=True,
+                                                               IconSize=18,
+                                                               IconColor={DynamicResource IconSecondary}}"
+                                        TextColor="{DynamicResource IconSecondary}"
+                                        VerticalOptions="Center">
+                                        <Label.Triggers>
+                                            <DataTrigger Binding="{Binding IconIsFilled}"
+                                                TargetType="Label"
+                                                Value="True">
+                                                <Setter Property="IsVisible" Value="True" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding HasIcon}"
+                                                TargetType="Label"
+                                                Value="False">
+                                                <Setter Property="IsVisible" Value="False" />
+                                            </DataTrigger>
+                                        </Label.Triggers>
+                                    </Label>
+
+                                    <Label
+                                        Grid.Column="1"
                                         FontFamily="PoppinsRegular"
                                         FontSize="15"
                                         LineBreakMode="TailTruncation"
@@ -62,7 +106,7 @@
                                         VerticalOptions="Center" />
 
                                     <Label
-                                        Grid.Column="1"
+                                        Grid.Column="2"
                                         FontFamily="PoppinsRegular"
                                         FontSize="15"
                                         HorizontalTextAlignment="End"

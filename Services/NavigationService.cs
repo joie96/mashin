@@ -221,8 +221,6 @@ public class NavigationService : INavigationService
     {
         var isMobile = DeviceInfo.Idiom == DeviceIdiom.Phone || DeviceInfo.Idiom == DeviceIdiom.Tablet;
         
-        isMobile = false; // force mobile page types for testing on desktop
-
         if (!isMobile)
         {
             return requestedPageType;

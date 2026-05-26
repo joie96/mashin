@@ -219,7 +219,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
         _playlistContextMenuItems.Add(new ContextMenuItem
         {
-            Text = "Oeffnen",
+            Text = "Öffnen",
             Icon = FluentIcons.TextBulletListLtr16,
             Command = new Command(async () =>
             {
@@ -240,7 +240,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
         _playlistContextMenuItems.Add(new ContextMenuItem
         {
-            Text = "Als Naechstes spielen",
+            Text = "Als Nächstes spielen",
             Icon = FluentIcons.ArrowForward16,
             Command = new Command(async () => await _mediaActions.PlayMediaNextAsync(GetPlaylistsForAction()))
         });
@@ -256,7 +256,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
         _playlistContextMenuItems.Add(new ContextMenuItem
         {
-            Text = "Zu Favoriten hinzufuegen",
+            Text = "Zu Favoriten hinzufügen",
             Icon = FluentIcons.Heart12,
             Command = new Command(async () => await _mediaActions.AddToFavoritesAsync(GetPlaylistsForAction()))
         });
