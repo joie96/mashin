@@ -78,18 +78,29 @@
                         </CheckBox.Triggers>
                     </CheckBox>
 
-                    <Label x:Name="MoreIconLabel"
+                    <Border x:Name="MoreButton"
                         Grid.Column="3"
-                        FontSize="18"
+                        WidthRequest="40"
+                        HeightRequest="40"
+                        Padding="0"
                         HorizontalOptions="Center"
-                        Text="{mi:Fluent Icon=MoreVertical48, FontOverride=True}"
-                        TextColor="{DynamicResource IconSecondary}"
-                        VerticalOptions="Center">
-                        <Label.GestureRecognizers>
+                        VerticalOptions="Center"
+                        BackgroundColor="Transparent"
+                        StrokeThickness="0">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="20" />
+                        </Border.StrokeShape>
+                        <Border.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding Source={x:Reference self}, Path=ShowContextMenuAtAnchorCommand}"
-                                CommandParameter="{x:Reference MoreIconLabel}" />
-                        </Label.GestureRecognizers>
-                    </Label>
+                                CommandParameter="{x:Reference MoreButton}" />
+                        </Border.GestureRecognizers>
+                        <Label
+                            FontSize="18"
+                            HorizontalOptions="Center"
+                            Text="{mi:Fluent Icon=MoreVertical48, FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center" />
+                    </Border>
                 </Grid>
             </Border>
         </DataTemplate>

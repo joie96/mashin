@@ -131,17 +131,32 @@
             <Grid ColumnDefinitions="*,*,*,*,*,*"
                 ColumnSpacing="4">
 
-                <VerticalStackLayout Grid.Column="0"
-                    Spacing="4"
+                <Border Grid.Column="0"
+                    WidthRequest="48"
+                    HeightRequest="48"
+                    Padding="0"
                     HorizontalOptions="Center"
-                    VerticalOptions="Center">
-                    <VerticalStackLayout.GestureRecognizers>
+                    VerticalOptions="Center"
+                    BackgroundColor="Transparent"
+                    StrokeThickness="0">
+                    <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding NavigateToHomeCommand}" />
-                    </VerticalStackLayout.GestureRecognizers>
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="24" />
+                    </Border.StrokeShape>
+                    <Border.Triggers>
+                        <DataTrigger TargetType="Border"
+                            Binding="{Binding CurrentSection}"
+                            Value="{x:Static vm:MainViewModel+NavigationSection.Home}">
+                            <Setter Property="BackgroundColor" Value="{DynamicResource HoverBackground}" />
+                        </DataTrigger>
+                    </Border.Triggers>
                     <Label FontSize="22"
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=Home24, FontOverride=True}"
-                        TextColor="{DynamicResource IconSecondary}">
+                        TextColor="{DynamicResource IconSecondary}"
+                        VerticalTextAlignment="Center">
                         <Label.Triggers>
                             <DataTrigger TargetType="Label"
                                 Binding="{Binding CurrentSection}"
@@ -150,19 +165,34 @@
                             </DataTrigger>
                         </Label.Triggers>
                     </Label>
-                </VerticalStackLayout>
+                </Border>
 
-                <VerticalStackLayout Grid.Column="1"
-                    Spacing="4"
+                <Border Grid.Column="1"
+                    WidthRequest="48"
+                    HeightRequest="48"
+                    Padding="0"
                     HorizontalOptions="Center"
-                    VerticalOptions="Center">
-                    <VerticalStackLayout.GestureRecognizers>
+                    VerticalOptions="Center"
+                    BackgroundColor="Transparent"
+                    StrokeThickness="0">
+                    <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding NavigateToExploreCommand}" />
-                    </VerticalStackLayout.GestureRecognizers>
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="24" />
+                    </Border.StrokeShape>
+                    <Border.Triggers>
+                        <DataTrigger TargetType="Border"
+                            Binding="{Binding CurrentSection}"
+                            Value="{x:Static vm:MainViewModel+NavigationSection.Explore}">
+                            <Setter Property="BackgroundColor" Value="{DynamicResource HoverBackground}" />
+                        </DataTrigger>
+                    </Border.Triggers>
                     <Label FontSize="22"
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=CompassNorthwest24, FontOverride=True}"
-                        TextColor="{DynamicResource IconSecondary}">
+                        TextColor="{DynamicResource IconSecondary}"
+                        VerticalTextAlignment="Center">
                         <Label.Triggers>
                             <DataTrigger TargetType="Label"
                                 Binding="{Binding CurrentSection}"
@@ -171,19 +201,34 @@
                             </DataTrigger>
                         </Label.Triggers>
                     </Label>
-                </VerticalStackLayout>
+                </Border>
 
-                <VerticalStackLayout Grid.Column="2"
-                    Spacing="4"
+                <Border Grid.Column="2"
+                    WidthRequest="48"
+                    HeightRequest="48"
+                    Padding="0"
                     HorizontalOptions="Center"
-                    VerticalOptions="Center">
-                    <VerticalStackLayout.GestureRecognizers>
+                    VerticalOptions="Center"
+                    BackgroundColor="Transparent"
+                    StrokeThickness="0">
+                    <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding NavigateToFavoritesCommand}" />
-                    </VerticalStackLayout.GestureRecognizers>
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="24" />
+                    </Border.StrokeShape>
+                    <Border.Triggers>
+                        <DataTrigger TargetType="Border"
+                            Binding="{Binding CurrentSection}"
+                            Value="{x:Static vm:MainViewModel+NavigationSection.Favorites}">
+                            <Setter Property="BackgroundColor" Value="{DynamicResource HoverBackground}" />
+                        </DataTrigger>
+                    </Border.Triggers>
                     <Label FontSize="22"
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=Heart24, FontOverride=True}"
-                        TextColor="{DynamicResource IconSecondary}">
+                        TextColor="{DynamicResource IconSecondary}"
+                        VerticalTextAlignment="Center">
                         <Label.Triggers>
                             <DataTrigger TargetType="Label"
                                 Binding="{Binding CurrentSection}"
@@ -192,19 +237,34 @@
                             </DataTrigger>
                         </Label.Triggers>
                     </Label>
-                </VerticalStackLayout>
+                </Border>
 
-                <VerticalStackLayout Grid.Column="3"
-                    Spacing="4"
+                <Border Grid.Column="3"
+                    WidthRequest="48"
+                    HeightRequest="48"
+                    Padding="0"
                     HorizontalOptions="Center"
-                    VerticalOptions="Center">
-                    <VerticalStackLayout.GestureRecognizers>
+                    VerticalOptions="Center"
+                    BackgroundColor="Transparent"
+                    StrokeThickness="0">
+                    <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding NavigateToPlaylistsCommand}" />
-                    </VerticalStackLayout.GestureRecognizers>
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="24" />
+                    </Border.StrokeShape>
+                    <Border.Triggers>
+                        <DataTrigger TargetType="Border"
+                            Binding="{Binding CurrentSection}"
+                            Value="{x:Static vm:MainViewModel+NavigationSection.Playlists}">
+                            <Setter Property="BackgroundColor" Value="{DynamicResource HoverBackground}" />
+                        </DataTrigger>
+                    </Border.Triggers>
                     <Label FontSize="22"
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=TextBulletListLtr24, FontOverride=True}"
-                        TextColor="{DynamicResource IconSecondary}">
+                        TextColor="{DynamicResource IconSecondary}"
+                        VerticalTextAlignment="Center">
                         <Label.Triggers>
                             <DataTrigger TargetType="Label"
                                 Binding="{Binding CurrentSection}"
@@ -213,19 +273,34 @@
                             </DataTrigger>
                         </Label.Triggers>
                     </Label>
-                </VerticalStackLayout>
+                </Border>
 
-                <VerticalStackLayout Grid.Column="4"
-                    Spacing="4"
+                <Border Grid.Column="4"
+                    WidthRequest="48"
+                    HeightRequest="48"
+                    Padding="0"
                     HorizontalOptions="Center"
-                    VerticalOptions="Center">
-                    <VerticalStackLayout.GestureRecognizers>
+                    VerticalOptions="Center"
+                    BackgroundColor="Transparent"
+                    StrokeThickness="0">
+                    <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding NavigateToSearchCommand}" />
-                    </VerticalStackLayout.GestureRecognizers>
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="24" />
+                    </Border.StrokeShape>
+                    <Border.Triggers>
+                        <DataTrigger TargetType="Border"
+                            Binding="{Binding CurrentSection}"
+                            Value="{x:Static vm:MainViewModel+NavigationSection.Search}">
+                            <Setter Property="BackgroundColor" Value="{DynamicResource HoverBackground}" />
+                        </DataTrigger>
+                    </Border.Triggers>
                     <Label FontSize="22"
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=Search24, FontOverride=True}"
-                        TextColor="{DynamicResource IconSecondary}">
+                        TextColor="{DynamicResource IconSecondary}"
+                        VerticalTextAlignment="Center">
                         <Label.Triggers>
                             <DataTrigger TargetType="Label"
                                 Binding="{Binding CurrentSection}"
@@ -234,20 +309,28 @@
                             </DataTrigger>
                         </Label.Triggers>
                     </Label>
-                </VerticalStackLayout>
+                </Border>
 
-                <VerticalStackLayout Grid.Column="5"
-                    Spacing="4"
+                <Border Grid.Column="5"
+                    WidthRequest="48"
+                    HeightRequest="48"
+                    Padding="0"
                     HorizontalOptions="Center"
-                    VerticalOptions="Center">
-                    <VerticalStackLayout.GestureRecognizers>
+                    VerticalOptions="Center"
+                    BackgroundColor="Transparent"
+                    StrokeThickness="0">
+                    <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding ToggleThemeCommand}" />
-                    </VerticalStackLayout.GestureRecognizers>
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="24" />
+                    </Border.StrokeShape>
                     <Label FontSize="22"
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=Settings24, FontOverride=True}"
-                        TextColor="{DynamicResource IconSecondary}" />
-                </VerticalStackLayout>
+                        TextColor="{DynamicResource IconSecondary}"
+                        VerticalTextAlignment="Center" />
+                </Border>
             </Grid>
         </Border>
 
