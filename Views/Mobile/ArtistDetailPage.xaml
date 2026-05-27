@@ -21,7 +21,7 @@
 
             <!--  Header: Image, Name, Meta  -->
             <Grid RowDefinitions="Auto,Auto,Auto"
-                RowSpacing="10">
+                RowSpacing="4">
 
                 <!--  Artist Image  -->
                 <Border Grid.Row="0"
@@ -32,13 +32,29 @@
                     <Border.StrokeShape>
                         <RoundRectangle CornerRadius="0,0,16,16" />
                     </Border.StrokeShape>
-                    <ffimageloading:CachedImage Aspect="AspectFill"
-                        Source="{Binding ImageUri}" />
+                    <Grid>
+                        <ffimageloading:CachedImage Aspect="AspectFill"
+                            Source="{Binding ImageUri}" />
+
+                        <!--  Fade image into page background at the bottom  -->
+                        <BoxView InputTransparent="True">
+                            <BoxView.Background>
+                                <LinearGradientBrush EndPoint="0,1"
+                                    StartPoint="0,0">
+                                    <GradientStop Color="#00FFFFFF"
+                                        Offset="0.44" />
+                                    <GradientStop Color="{DynamicResource BackgroundPrimary}"
+                                        Offset="1.0" />
+                                </LinearGradientBrush>
+                            </BoxView.Background>
+                        </BoxView>
+
+                    </Grid>
                 </Border>
 
                 <!--  Artist Name  -->
                 <Label Grid.Row="1"
-                    Margin="16,0"
+                    Margin="16,2,16,0"
                     FontFamily="PoppinsRegular"
                     FontSize="24"
                     HorizontalTextAlignment="Center"
