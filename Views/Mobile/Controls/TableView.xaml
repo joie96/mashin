@@ -10,6 +10,7 @@
     x:Name="self">
 
     <ContentView.Resources>
+        <!--  Playlist Row Template  -->
         <DataTemplate x:Key="PlaylistTemplate" x:DataType="models:Playlist">
             <Border Padding="8,4"
                 BackgroundColor="Transparent"
@@ -29,8 +30,9 @@
                         PointerReleased="OnRowPointerReleased" />
                 </Border.GestureRecognizers>
 
-                <Grid ColumnDefinitions="52,*,32,32"
+                <Grid ColumnDefinitions="52,*,40"
                     ColumnSpacing="10">
+                    <!--  Row Main Tap Area  -->
                     <Grid Grid.ColumnSpan="2"
                         ColumnDefinitions="52,*"
                         ColumnSpacing="10">
@@ -38,6 +40,7 @@
                             <TapGestureRecognizer Tapped="OnRowTapped" />
                         </Grid.GestureRecognizers>
 
+                        <!--  Cover  -->
                         <Border Grid.Column="0"
                             BackgroundColor="{DynamicResource BackgroundTertiary}"
                             HeightRequest="52"
@@ -51,6 +54,7 @@
                                 Source="{Binding ImageUri}" />
                         </Border>
 
+                        <!--  Primary Text  -->
                         <VerticalStackLayout Grid.Column="1"
                             Spacing="2"
                             VerticalOptions="Center">
@@ -63,23 +67,46 @@
                         </VerticalStackLayout>
                     </Grid>
 
-                    <CheckBox Grid.Column="2"
-                        HorizontalOptions="End"
-                        IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                    <!--  Selection checkbox   -->
+                    <Border Grid.Column="2"
+                        BackgroundColor="Transparent"
+                        HeightRequest="20"
+                        HorizontalOptions="Center"
                         IsVisible="False"
-                        VerticalOptions="Center">
-                        <CheckBox.Triggers>
+                        Margin="0,0,2,0"
+                        Stroke="{DynamicResource IconSecondary}"
+                        StrokeThickness="0.75"
+                        VerticalOptions="Center"
+                        WidthRequest="20">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="4" />
+                        </Border.StrokeShape>
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Tapped="OnRowTapped" />
+                        </Border.GestureRecognizers>
+                        <Border.Triggers>
                             <DataTrigger Binding="{Binding IsSelected}"
-                                TargetType="CheckBox"
+                                TargetType="Border"
                                 Value="True">
                                 <Setter Property="IsVisible"
                                     Value="True" />
+                                <Setter Property="BackgroundColor"
+                                    Value="{DynamicResource AccentColor}" />
+                                <Setter Property="Stroke"
+                                    Value="{DynamicResource AccentColor}" />
                             </DataTrigger>
-                        </CheckBox.Triggers>
-                    </CheckBox>
+                        </Border.Triggers>
+                        <Label FontSize="14"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsSelected}"
+                            Text="{mi:Fluent Icon=Checkmark16, FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
 
+                    <!--  Context Menu Button  -->
                     <Border x:Name="MoreButton"
-                        Grid.Column="3"
+                        Grid.Column="2"
                         WidthRequest="40"
                         HeightRequest="40"
                         Padding="0"
@@ -87,12 +114,19 @@
                         VerticalOptions="Center"
                         BackgroundColor="Transparent"
                         StrokeThickness="0">
+                        <Border.Triggers>
+                            <DataTrigger Binding="{Binding IsSelected}"
+                                TargetType="Border"
+                                Value="True">
+                                <Setter Property="IsVisible"
+                                    Value="False" />
+                            </DataTrigger>
+                        </Border.Triggers>
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="20" />
                         </Border.StrokeShape>
                         <Border.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding Source={x:Reference self}, Path=ShowContextMenuAtAnchorCommand}"
-                                CommandParameter="{x:Reference MoreButton}" />
+                            <TapGestureRecognizer Tapped="OnMoreButtonTapped" />
                         </Border.GestureRecognizers>
                         <Label
                             FontSize="18"
@@ -105,6 +139,7 @@
             </Border>
         </DataTemplate>
 
+        <!--  Track Row Template  -->
         <DataTemplate x:Key="TrackTemplate" x:DataType="models:Track">
             <Border Padding="8,6"
                 BackgroundColor="Transparent"
@@ -123,8 +158,9 @@
                         PointerReleased="OnRowPointerReleased" />
                 </Border.GestureRecognizers>
 
-                <Grid ColumnDefinitions="52,*,56,32"
+                <Grid ColumnDefinitions="52,*,56,40"
                     ColumnSpacing="10">
+                    <!--  Row Main Tap Area  -->
                     <Grid Grid.ColumnSpan="2"
                         ColumnDefinitions="52,*"
                         ColumnSpacing="10">
@@ -132,6 +168,7 @@
                             <TapGestureRecognizer Tapped="OnRowTapped" />
                         </Grid.GestureRecognizers>
 
+                        <!--  Cover  -->
                         <Border Grid.Column="0"
                             BackgroundColor="{DynamicResource BackgroundTertiary}"
                             HeightRequest="52"
@@ -145,6 +182,7 @@
                                 Source="{Binding ImageUri}" />
                         </Border>
 
+                        <!--  Title + Artist  -->
                         <VerticalStackLayout Grid.Column="1"
                             Spacing="1"
                             VerticalOptions="Center">
@@ -163,6 +201,7 @@
                         </VerticalStackLayout>
                     </Grid>
 
+                    <!--  Duration  -->
                     <Label Grid.Column="2"
                         FontFamily="PoppinsRegular"
                         FontSize="12"
@@ -171,6 +210,44 @@
                         TextColor="{DynamicResource TextSecondary}"
                         VerticalOptions="Center" />
 
+                    <!--  Selection checkbox  -->
+                    <Border Grid.Column="3"
+                        BackgroundColor="Transparent"
+                        HeightRequest="20"
+                        HorizontalOptions="Center"
+                        IsVisible="False"
+                        Margin="0,0,2,0"
+                        Stroke="{DynamicResource IconSecondary}"
+                        StrokeThickness="0.75"
+                        VerticalOptions="Center"
+                        WidthRequest="20">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="4" />
+                        </Border.StrokeShape>
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Tapped="OnRowTapped" />
+                        </Border.GestureRecognizers>
+                        <Border.Triggers>
+                            <DataTrigger Binding="{Binding IsSelected}"
+                                TargetType="Border"
+                                Value="True">
+                                <Setter Property="IsVisible"
+                                    Value="True" />
+                                <Setter Property="BackgroundColor"
+                                    Value="{DynamicResource AccentColor}" />
+                                <Setter Property="Stroke"
+                                    Value="{DynamicResource AccentColor}" />
+                            </DataTrigger>
+                        </Border.Triggers>
+                        <Label FontSize="14"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsSelected}"
+                            Text="{mi:Fluent Icon=Checkmark16, FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+
+                    <!--  Context Menu Button  -->
                     <Border x:Name="TrackMoreButton"
                         Grid.Column="3"
                         WidthRequest="40"
@@ -180,12 +257,19 @@
                         VerticalOptions="Center"
                         BackgroundColor="Transparent"
                         StrokeThickness="0">
+                        <Border.Triggers>
+                            <DataTrigger Binding="{Binding IsSelected}"
+                                TargetType="Border"
+                                Value="True">
+                                <Setter Property="IsVisible"
+                                    Value="False" />
+                            </DataTrigger>
+                        </Border.Triggers>
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="20" />
                         </Border.StrokeShape>
                         <Border.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding Source={x:Reference self}, Path=ShowContextMenuAtAnchorCommand}"
-                                CommandParameter="{x:Reference TrackMoreButton}" />
+                            <TapGestureRecognizer Tapped="OnMoreButtonTapped" />
                         </Border.GestureRecognizers>
                         <Label
                             FontSize="18"
@@ -198,6 +282,7 @@
             </Border>
         </DataTemplate>
 
+        <!--  Skeleton Row Template  -->
         <DataTemplate x:Key="SkeletonTemplate" x:DataType="models:TableViewSkeleton">
             <Grid ColumnDefinitions="52,*,32,32"
                 ColumnSpacing="10"
@@ -232,12 +317,14 @@
             </Grid>
         </DataTemplate>
 
+        <!--  Template Selector  -->
         <controls:MobileTableViewTemplateSelector x:Key="MobileTableViewTemplateSelector"
             PlaylistTemplate="{StaticResource PlaylistTemplate}"
             TrackTemplate="{StaticResource TrackTemplate}"
             SkeletonTemplate="{StaticResource SkeletonTemplate}" />
     </ContentView.Resources>
 
+    <!--  Items List  -->
     <CollectionView x:Name="ItemsCollectionView"
         ItemSizingStrategy="MeasureFirstItem"
         ItemsSource="{Binding Source={x:Reference self}, Path=ItemsSource}"

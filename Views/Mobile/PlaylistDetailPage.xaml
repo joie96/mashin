@@ -85,7 +85,7 @@
                 </Border.StrokeShape>
                 <Label FontSize="18"
                     HorizontalOptions="Center"
-                    Text="{mi:FluentFilled Icon=Play16Filled, FontOverride=True}"
+                    Text="{mi:FluentFilled Icon=Play48Filled, FontOverride=True}"
                     TextColor="{DynamicResource IconPrimary}"
                     VerticalOptions="Center" />
             </Border>
@@ -104,7 +104,7 @@
                 </Border.StrokeShape>
                 <Label FontSize="18"
                     HorizontalOptions="Center"
-                    Text="{mi:FluentFilled Icon=ArrowShuffle16Filled, FontOverride=True}"
+                    Text="{mi:FluentFilled Icon=ArrowShuffle48Filled, FontOverride=True}"
                     TextColor="{DynamicResource IconPrimary}"
                     VerticalOptions="Center" />
             </Border>

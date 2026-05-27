@@ -590,6 +590,24 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 Command = new Command(async () => 
                     await MediaActions.PlayMediaLastAsync(Tracks.Where(t => t.IsSelected)))
             },
+            new()
+            {
+                Text = "Artist öffnen",
+                Command = new Command(async () =>
+                {
+                    var selectedArtist = Tracks
+                        .Where(track => track.IsSelected)
+                        .SelectMany(track => track.Artists ?? Enumerable.Empty<Artist>())
+                        .FirstOrDefault();
+
+                    if (selectedArtist == null)
+                    {
+                        return;
+                    }
+
+                    await _navigationService.NavigateToAsync<ArtistDetailPage>(selectedArtist);
+                })
+            },
             new() { IsSeparator = true },
             new()
             {

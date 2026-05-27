@@ -1,0 +1,374 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView x:Class="mashin.Views.Mobile.Controls.RowView"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:controls="clr-namespace:mashin.Views.Mobile.Controls"
+    xmlns:desktopControls="clr-namespace:mashin.Views.Desktop.Controls"
+    xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
+    xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
+    xmlns:models="clr-namespace:mashin.Models"
+    x:Name="self">
+
+    <ContentView.Resources>
+        <!--  DataTemplate for Albums  -->
+        <DataTemplate x:Key="AlbumTemplate" x:DataType="models:Album">
+            <Grid RowDefinitions="Auto,Auto,Auto"
+                RowSpacing="6"
+                WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
+                <!--  Cover + Play Overlay  -->
+                <Border Grid.Row="0"
+                    HeightRequest="{Binding Source={x:Reference self}, Path=CoverSize}"
+                    HorizontalOptions="Center"
+                    StrokeThickness="0"
+                    WidthRequest="{Binding Source={x:Reference self}, Path=CoverSize}">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
+                    </Border.StrokeShape>
+                    <Grid>
+                        <ffimageloading:CachedImage Aspect="AspectFill"
+                            Source="{Binding ImageUri}" />
+
+                        <Border BackgroundColor="#26000000"
+                            StrokeThickness="0">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
+                            </Border.StrokeShape>
+                        </Border>
+
+                        <Grid Padding="4,0,0,4"
+                            HorizontalOptions="Fill"
+                            VerticalOptions="Fill">
+                            <Border BackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
+                                HeightRequest="28"
+                                HorizontalOptions="Start"
+                                StrokeThickness="0"
+                                VerticalOptions="End"
+                                WidthRequest="28">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Tapped="OnPlayOverlayClicked" />
+                                </Border.GestureRecognizers>
+                                <Border.StrokeShape>
+                                    <RoundRectangle CornerRadius="15" />
+                                </Border.StrokeShape>
+                                <Label FontSize="16"
+                                    HorizontalOptions="Center"
+                                    Text="{mi:FluentFilled Icon=Play48Filled, FontOverride=True}"
+                                    TextColor="{DynamicResource OverlayPlayIconColor}"
+                                    VerticalOptions="Center" />
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <!--  Primary Info  -->
+                <Label Grid.Row="1"
+                    FontAttributes="None"
+                    FontFamily="PoppinsRegular"
+                    FontSize="15"
+                    LineBreakMode="TailTruncation"
+                    MaxLines="1"
+                    Text="{Binding DisplayName}"
+                    TextColor="{DynamicResource TextPrimary}">
+                    <Label.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding Source={x:Reference self}, Path=PrimaryInfoTappedCommand}"
+                            CommandParameter="{Binding .}" />
+                    </Label.GestureRecognizers>
+                </Label>
+
+                <!--  Secondary Info  -->
+                <Label Grid.Row="2"
+                    FontFamily="PoppinsRegular"
+                    FontSize="12"
+                    LineBreakMode="TailTruncation"
+                    MaxLines="1"
+                    Text="{Binding ArtistName}"
+                    TextColor="{DynamicResource TextSecondary}">
+                    <Label.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding Source={x:Reference self}, Path=SecondaryInfoTappedCommand}"
+                            CommandParameter="{Binding Artists[0]}" />
+                    </Label.GestureRecognizers>
+                </Label>
+            </Grid>
+        </DataTemplate>
+
+        <!--  DataTemplate for Tracks  -->
+        <DataTemplate x:Key="TrackTemplate" x:DataType="models:Track">
+            <Grid RowDefinitions="Auto,Auto,Auto"
+                RowSpacing="6"
+                WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
+                <!--  Cover + Play Overlay  -->
+                <Border Grid.Row="0"
+                    HeightRequest="{Binding Source={x:Reference self}, Path=CoverSize}"
+                    HorizontalOptions="Center"
+                    StrokeThickness="0"
+                    WidthRequest="{Binding Source={x:Reference self}, Path=CoverSize}">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
+                    </Border.StrokeShape>
+                    <Grid>
+                        <ffimageloading:CachedImage Aspect="AspectFill"
+                            Source="{Binding ImageUri}" />
+
+                        <Border BackgroundColor="#26000000"
+                            StrokeThickness="0">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
+                            </Border.StrokeShape>
+                        </Border>
+
+                        <Grid Padding="4,0,0,4"
+                            HorizontalOptions="Fill"
+                            VerticalOptions="Fill">
+                            <Border BackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
+                                HeightRequest="28"
+                                HorizontalOptions="Start"
+                                StrokeThickness="0"
+                                VerticalOptions="End"
+                                WidthRequest="28">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Tapped="OnPlayOverlayClicked" />
+                                </Border.GestureRecognizers>
+                                <Border.StrokeShape>
+                                    <RoundRectangle CornerRadius="15" />
+                                </Border.StrokeShape>
+                                <Label FontSize="16"
+                                    HorizontalOptions="Center"
+                                    Text="{mi:FluentFilled Icon=Play48Filled, FontOverride=True}"
+                                    TextColor="{DynamicResource OverlayPlayIconColor}"
+                                    VerticalOptions="Center" />
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <!--  Primary Info  -->
+                <Label Grid.Row="1"
+                    FontAttributes="None"
+                    FontFamily="PoppinsRegular"
+                    FontSize="15"
+                    LineBreakMode="TailTruncation"
+                    MaxLines="1"
+                    Text="{Binding DisplayName}"
+                    TextColor="{DynamicResource TextPrimary}">
+                    <Label.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding Source={x:Reference self}, Path=PrimaryInfoTappedCommand}"
+                            CommandParameter="{Binding Album}" />
+                    </Label.GestureRecognizers>
+                </Label>
+
+                <!--  Secondary Info  -->
+                <Label Grid.Row="2"
+                    FontFamily="PoppinsRegular"
+                    FontSize="12"
+                    LineBreakMode="TailTruncation"
+                    MaxLines="1"
+                    Text="{Binding ArtistName}"
+                    TextColor="{DynamicResource TextSecondary}">
+                    <Label.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding Source={x:Reference self}, Path=SecondaryInfoTappedCommand}"
+                            CommandParameter="{Binding Artists[0]}" />
+                    </Label.GestureRecognizers>
+                </Label>
+            </Grid>
+        </DataTemplate>
+
+        <!--  DataTemplate for Artists  -->
+        <DataTemplate x:Key="ArtistTemplate" x:DataType="models:Artist">
+            <Grid RowDefinitions="Auto,Auto,Auto"
+                RowSpacing="6"
+                WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
+                <!--  Cover + Play Overlay  -->
+                <Border Grid.Row="0"
+                    HeightRequest="{Binding Source={x:Reference self}, Path=CoverSize}"
+                    HorizontalOptions="Center"
+                    StrokeThickness="0"
+                    WidthRequest="{Binding Source={x:Reference self}, Path=CoverSize}">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
+                    </Border.StrokeShape>
+                    <Grid>
+                        <ffimageloading:CachedImage Aspect="AspectFill"
+                            Source="{Binding ImageUri}" />
+
+                        <Border BackgroundColor="#26000000"
+                            StrokeThickness="0">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
+                            </Border.StrokeShape>
+                        </Border>
+
+                        <Grid Padding="4,0,0,4"
+                            HorizontalOptions="Fill"
+                            VerticalOptions="Fill">
+                            <Border BackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
+                                HeightRequest="28"
+                                HorizontalOptions="Start"
+                                StrokeThickness="0"
+                                VerticalOptions="End"
+                                WidthRequest="28">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Tapped="OnPlayOverlayClicked" />
+                                </Border.GestureRecognizers>
+                                <Border.StrokeShape>
+                                    <RoundRectangle CornerRadius="15" />
+                                </Border.StrokeShape>
+                                <Label FontSize="16"
+                                    HorizontalOptions="Center"
+                                    Text="{mi:FluentFilled Icon=Play48Filled, FontOverride=True}"
+                                    TextColor="{DynamicResource OverlayPlayIconColor}"
+                                    VerticalOptions="Center" />
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <!--  Primary Info  -->
+                <Label Grid.Row="1"
+                    FontAttributes="None"
+                    FontFamily="PoppinsRegular"
+                    FontSize="15"
+                    LineBreakMode="TailTruncation"
+                    MaxLines="1"
+                    Text="{Binding DisplayName}"
+                    TextColor="{DynamicResource TextPrimary}">
+                    <Label.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding Source={x:Reference self}, Path=PrimaryInfoTappedCommand}"
+                            CommandParameter="{Binding .}" />
+                    </Label.GestureRecognizers>
+                </Label>
+
+                <!--  Secondary Info  -->
+                <Label Grid.Row="2"
+                    FontFamily="PoppinsRegular"
+                    FontSize="12"
+                    LineBreakMode="TailTruncation"
+                    MaxLines="1"
+                    Text="{Binding ProviderName}"
+                    TextColor="{DynamicResource TextSecondary}" />
+            </Grid>
+        </DataTemplate>
+
+        <!--  DataTemplate for Playlists  -->
+        <DataTemplate x:Key="PlaylistTemplate" x:DataType="models:Playlist">
+            <Grid RowDefinitions="Auto,Auto,Auto"
+                RowSpacing="6"
+                WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
+                <!--  Cover + Play Overlay  -->
+                <Border Grid.Row="0"
+                    HeightRequest="{Binding Source={x:Reference self}, Path=CoverSize}"
+                    HorizontalOptions="Center"
+                    StrokeThickness="0"
+                    WidthRequest="{Binding Source={x:Reference self}, Path=CoverSize}">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
+                    </Border.StrokeShape>
+                    <Grid>
+                        <ffimageloading:CachedImage Aspect="AspectFill"
+                            Source="{Binding ImageUri}" />
+
+                        <Border BackgroundColor="#26000000"
+                            StrokeThickness="0">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
+                            </Border.StrokeShape>
+                        </Border>
+
+                        <Grid Padding="4,0,0,4"
+                            HorizontalOptions="Fill"
+                            VerticalOptions="Fill">
+                            <Border BackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
+                                HeightRequest="28"
+                                HorizontalOptions="Start"
+                                StrokeThickness="0"
+                                VerticalOptions="End"
+                                WidthRequest="28">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Tapped="OnPlayOverlayClicked" />
+                                </Border.GestureRecognizers>
+                                <Border.StrokeShape>
+                                    <RoundRectangle CornerRadius="15" />
+                                </Border.StrokeShape>
+                                <Label FontSize="16"
+                                    HorizontalOptions="Center"
+                                    Text="{mi:FluentFilled Icon=Play48Filled, FontOverride=True}"
+                                    TextColor="{DynamicResource OverlayPlayIconColor}"
+                                    VerticalOptions="Center" />
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <!--  Primary Info  -->
+                <Label Grid.Row="1"
+                    FontAttributes="None"
+                    FontFamily="PoppinsRegular"
+                    FontSize="15"
+                    LineBreakMode="TailTruncation"
+                    MaxLines="1"
+                    Text="{Binding DisplayName}"
+                    TextColor="{DynamicResource TextPrimary}">
+                    <Label.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding Source={x:Reference self}, Path=PrimaryInfoTappedCommand}"
+                            CommandParameter="{Binding .}" />
+                    </Label.GestureRecognizers>
+                </Label>
+
+                <!--  Secondary Info  -->
+                <Label Grid.Row="2"
+                    FontFamily="PoppinsRegular"
+                    FontSize="12"
+                    LineBreakMode="TailTruncation"
+                    MaxLines="1"
+                    Text="{Binding Owner}"
+                    TextColor="{DynamicResource TextSecondary}" />
+            </Grid>
+        </DataTemplate>
+
+        <!--  DataTemplate for Skeletons  -->
+        <DataTemplate x:Key="SkeletonTemplate" x:DataType="models:RowViewSkeleton">
+            <Grid RowDefinitions="Auto,Auto,Auto"
+                RowSpacing="6"
+                WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
+                <desktopControls:SkeletonLoader Grid.Row="0"
+                    CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}"
+                    HeightRequest="{Binding Source={x:Reference self}, Path=CoverSize}"
+                    HorizontalOptions="Center"
+                    WidthRequest="{Binding Source={x:Reference self}, Path=CoverSize}" />
+                <desktopControls:SkeletonLoader Grid.Row="1"
+                    CornerRadius="8"
+                    HeightRequest="14"
+                    HorizontalOptions="Start"
+                    WidthRequest="110" />
+                <desktopControls:SkeletonLoader Grid.Row="2"
+                    CornerRadius="8"
+                    HeightRequest="12"
+                    HorizontalOptions="Start"
+                    WidthRequest="90" />
+            </Grid>
+        </DataTemplate>
+
+        <!--  TemplateSelector to choose between DataTemplates  -->
+        <controls:MobileRowViewTemplateSelector x:Key="MobileRowViewTemplateSelector"
+            AlbumTemplate="{StaticResource AlbumTemplate}"
+            ArtistTemplate="{StaticResource ArtistTemplate}"
+            PlaylistTemplate="{StaticResource PlaylistTemplate}"
+            SkeletonTemplate="{StaticResource SkeletonTemplate}"
+            TrackTemplate="{StaticResource TrackTemplate}" />
+    </ContentView.Resources>
+
+    <!--  Horizontal Items  -->
+    <CollectionView x:Name="ItemsCollectionView"
+        HorizontalScrollBarVisibility="Never"
+        ItemSizingStrategy="MeasureAllItems"
+        ItemsSource="{Binding Source={x:Reference self}, Path=ItemsSource}"
+        SelectionMode="None"
+        VerticalScrollBarVisibility="Never">
+        <CollectionView.ItemsLayout>
+            <LinearItemsLayout Orientation="Horizontal"
+                ItemSpacing="12" />
+        </CollectionView.ItemsLayout>
+        <CollectionView.ItemTemplate>
+            <StaticResource Key="MobileRowViewTemplateSelector" />
+        </CollectionView.ItemTemplate>
+    </CollectionView>
+</ContentView>

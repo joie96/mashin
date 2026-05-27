@@ -1,4 +1,5 @@
 using mashin.Models;
+using System.Linq;
 using System.Windows.Input;
 
 namespace mashin.Views.Mobile.Controls;
@@ -75,12 +76,14 @@ public partial class TableView : ContentView
             return;
         }
 
+        var anchorView = sender as View;
+
         CancelPendingLongPress(mediaItem);
 
         var cts = new CancellationTokenSource();
         _pendingLongPresses[mediaItem] = cts;
 
-        _ = DetectLongPressAsync(mediaItem, cts.Token);
+        _ = DetectLongPressAsync(mediaItem, anchorView, cts.Token);
     }
 
     private void OnRowPointerReleased(object? sender, PointerEventArgs e)
@@ -103,7 +106,7 @@ public partial class TableView : ContentView
         CancelPendingLongPress(mediaItem);
     }
 
-    private async Task DetectLongPressAsync(MediaItem mediaItem, CancellationToken token)
+    private async Task DetectLongPressAsync(MediaItem mediaItem, View? anchorView, CancellationToken token)
     {
         try
         {
@@ -111,6 +114,18 @@ public partial class TableView : ContentView
 
             Dispatcher.Dispatch(() =>
             {
+                // Long-press opens the context menu only when this specific row is selected.
+                if (mediaItem.IsSelected)
+                {
+                    var contextMenuCommand = ShowContextMenuAtAnchorCommand;
+                    if (anchorView != null && contextMenuCommand?.CanExecute(anchorView) == true)
+                    {
+                        contextMenuCommand.Execute(anchorView);
+                        _suppressNextTap.Add(mediaItem);
+                        return;
+                    }
+                }
+
                 var longPressCommand = LongPressCommand;
                 if (longPressCommand?.CanExecute(mediaItem) == true)
                 {
@@ -142,10 +157,37 @@ public partial class TableView : ContentView
             return;
         }
 
+        // If at least one row is selected, keep taps in selection mode until all are deselected.
+        if (HasAnySelectedItems())
+        {
+            mediaItem.IsSelected = !mediaItem.IsSelected;
+            return;
+        }
+
         var command = ShortPressCommand;
         if (command?.CanExecute(mediaItem) == true)
         {
             command.Execute(mediaItem);
+        }
+    }
+
+    private void OnMoreButtonTapped(object? sender, TappedEventArgs e)
+    {
+        if (sender is not View anchorView || sender is not BindableObject { BindingContext: MediaItem mediaItem })
+        {
+            return;
+        }
+
+        // If nothing is selected yet, scope the context menu actions to the tapped row.
+        if (!HasAnySelectedItems())
+        {
+            mediaItem.IsSelected = true;
+        }
+
+        var contextMenuCommand = ShowContextMenuAtAnchorCommand;
+        if (contextMenuCommand?.CanExecute(anchorView) == true)
+        {
+            contextMenuCommand.Execute(anchorView);
         }
     }
 
@@ -163,6 +205,16 @@ public partial class TableView : ContentView
         _pendingLongPresses.Remove(mediaItem);
         cts.Cancel();
         cts.Dispose();
+    }
+
+    private bool HasAnySelectedItems()
+    {
+        if (ItemsSource == null)
+        {
+            return false;
+        }
+
+        return ItemsSource.OfType<MediaItem>().Any(item => item.IsSelected);
     }
 
     #endregion

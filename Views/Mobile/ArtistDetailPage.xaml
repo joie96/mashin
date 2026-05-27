@@ -2,17 +2,230 @@
 <ContentPage x:Class="mashin.Views.Mobile.ArtistDetailPage"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:controls="clr-namespace:mashin.Views.Mobile.Controls"
+    xmlns:converters="clr-namespace:mashin.Converters"
+    xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
+    xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
     xmlns:vm="clr-namespace:mashin.ViewModels"
     x:DataType="vm:ArtistDetailViewModel"
     BackgroundColor="{DynamicResource BackgroundPrimary}">
 
-    <Grid Padding="16">
-        <Label FontFamily="PoppinsRegular"
-            FontSize="22"
-            HorizontalOptions="Center"
-            Text="Artist Detail (Mobile)"
-            TextColor="{DynamicResource TextPrimary}"
-            VerticalOptions="Center" />
-    </Grid>
+    <ContentPage.Resources>
+        <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
+    </ContentPage.Resources>
+
+    <!--  Page Scroll  -->
+    <ScrollView>
+        <VerticalStackLayout Padding="0,0,0,12"
+            Spacing="16">
+
+            <!--  Header: Image, Name, Meta  -->
+            <Grid RowDefinitions="Auto,Auto,Auto"
+                RowSpacing="10">
+
+                <!--  Artist Image  -->
+                <Border Grid.Row="0"
+                    BackgroundColor="{DynamicResource BackgroundTertiary}"
+                    HeightRequest="220"
+                    HorizontalOptions="Fill"
+                    StrokeThickness="0">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="0,0,16,16" />
+                    </Border.StrokeShape>
+                    <ffimageloading:CachedImage Aspect="AspectFill"
+                        Source="{Binding ImageUri}" />
+                </Border>
+
+                <!--  Artist Name  -->
+                <Label Grid.Row="1"
+                    Margin="16,0"
+                    FontFamily="PoppinsRegular"
+                    FontSize="24"
+                    HorizontalTextAlignment="Center"
+                    LineBreakMode="WordWrap"
+                    MaxLines="2"
+                    Text="{Binding ArtistName}"
+                    TextColor="{DynamicResource TextPrimary}" />
+
+                <!--  Artist Meta  -->
+                <HorizontalStackLayout Grid.Row="2"
+                    HorizontalOptions="Center"
+                    Spacing="8">
+                    <Label FontFamily="PoppinsRegular"
+                        FontSize="12"
+                        Text="{Binding Albums.Count, StringFormat='{0} Alben'}"
+                        TextColor="{DynamicResource TextSecondary}" />
+                    <Label FontFamily="PoppinsRegular"
+                        FontSize="12"
+                        Text="•"
+                        TextColor="{DynamicResource TextSecondary}" />
+                    <Label FontFamily="PoppinsRegular"
+                        FontSize="12"
+                        Text="{Binding Artist.ProviderName}"
+                        TextColor="{DynamicResource TextSecondary}" />
+                </HorizontalStackLayout>
+            </Grid>
+
+            <!--  Header Actions  -->
+            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto"
+                ColumnSpacing="14"
+                HorizontalOptions="Center">
+
+                <!--  Play  -->
+                <Border Grid.Column="0"
+                    BackgroundColor="{DynamicResource ActionButtonsBackground}"
+                    HeightRequest="44"
+                    StrokeThickness="0"
+                    WidthRequest="44">
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding PlayArtistCommand}" />
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="22" />
+                    </Border.StrokeShape>
+                    <Label FontSize="18"
+                        HorizontalOptions="Center"
+                        Text="{mi:FluentFilled Icon=Play48Filled, FontOverride=True}"
+                        TextColor="{DynamicResource IconPrimary}"
+                        VerticalOptions="Center" />
+                </Border>
+
+                <!--  Shuffle  -->
+                <Border Grid.Column="1"
+                    BackgroundColor="{DynamicResource ActionButtonsBackground}"
+                    HeightRequest="44"
+                    StrokeThickness="0"
+                    WidthRequest="44">
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding ShuffleArtistCommand}" />
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="22" />
+                    </Border.StrokeShape>
+                    <Label FontSize="18"
+                        HorizontalOptions="Center"
+                        Text="{mi:FluentFilled Icon=ArrowShuffle48Filled, FontOverride=True}"
+                        TextColor="{DynamicResource IconPrimary}"
+                        VerticalOptions="Center" />
+                </Border>
+
+                <!--  Favorite Toggle  -->
+                <Grid Grid.Column="2"
+                    HeightRequest="44"
+                    WidthRequest="44">
+                    <Border BackgroundColor="{DynamicResource ActionButtonsBackground}"
+                        HeightRequest="44"
+                        StrokeThickness="0"
+                        WidthRequest="44">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="22" />
+                        </Border.StrokeShape>
+                    </Border>
+
+                    <Label FontSize="18"
+                        HorizontalOptions="Center"
+                        IsVisible="{Binding IsArtistFavorite, Converter={StaticResource InvertedBoolConverter}}"
+                        Text="{mi:Fluent Icon=Heart48, FontOverride=True}"
+                        TextColor="{DynamicResource IconPrimary}"
+                        VerticalOptions="Center">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding ToggleArtistFavoriteCommand}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+
+                    <Label FontSize="18"
+                        HorizontalOptions="Center"
+                        IsVisible="{Binding IsArtistFavorite}"
+                        Text="{mi:FluentFilled Icon=Heart48Filled, FontOverride=True}"
+                        TextColor="{DynamicResource IconPrimary}"
+                        VerticalOptions="Center">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding ToggleArtistFavoriteCommand}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </Grid>
+
+                <!--  Header Context Menu  -->
+                <Border x:Name="HeaderContextMenuButton"
+                    Grid.Column="3"
+                    BackgroundColor="{DynamicResource ActionButtonsBackground}"
+                    HeightRequest="44"
+                    StrokeThickness="0"
+                    WidthRequest="44">
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding ShowHeaderContextMenuAtAnchorCommand}"
+                            CommandParameter="{x:Reference HeaderContextMenuButton}" />
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="22" />
+                    </Border.StrokeShape>
+                    <Label FontSize="18"
+                        HorizontalOptions="Center"
+                        Text="{mi:Fluent Icon=MoreHorizontal48, FontOverride=True}"
+                        TextColor="{DynamicResource IconPrimary}"
+                        VerticalOptions="Center" />
+                </Border>
+            </Grid>
+
+            <!--  Veröffentlichungen Section  -->
+            <VerticalStackLayout Padding="16,0,16,0"
+                Spacing="10">
+                <Label FontFamily="PoppinsRegular"
+                    FontSize="22"
+                    Text="Veröffentlichungen"
+                    TextColor="{DynamicResource TextPrimary}" />
+
+                <controls:RowView CoverSize="145"
+                    ItemCornerRadius="8"
+                    ItemWidth="145"
+                    ItemsSource="{Binding AlbumItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowAlbumContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowAlbumContextMenuAtPositionCommand}" />
+            </VerticalStackLayout>
+
+            <!--  Ähnliche Interpreten Section  -->
+            <VerticalStackLayout Padding="16,0,16,0"
+                Spacing="10">
+                <Label FontFamily="PoppinsRegular"
+                    FontSize="22"
+                    Text="Ähnliche Interpreten"
+                    TextColor="{DynamicResource TextPrimary}" />
+
+                <controls:RowView CoverSize="145"
+                    ItemCornerRadius="8"
+                    ItemWidth="145"
+                    ItemsSource="{Binding SimilarArtistItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
+            </VerticalStackLayout>
+
+            <!--  Top Tracks Section  -->
+            <VerticalStackLayout Padding="16,0,16,0"
+                Spacing="10">
+                <Label FontFamily="PoppinsRegular"
+                    FontSize="22"
+                    Text="Top Tracks"
+                    TextColor="{DynamicResource TextPrimary}" />
+
+                <Border BackgroundColor="{DynamicResource BackgroundSecondary}"
+                    Padding="0"
+                    Stroke="{DynamicResource BorderColor}"
+                    StrokeThickness="1">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="12" />
+                    </Border.StrokeShape>
+
+                    <controls:TableView ItemsSource="{Binding TopTrackItems}"
+                        ShowContextMenuAtAnchorCommand="{Binding ShowTrackContextMenuAtAnchorCommand}" />
+                </Border>
+            </VerticalStackLayout>
+        </VerticalStackLayout>
+    </ScrollView>
 </ContentPage>
 
