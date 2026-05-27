@@ -7,28 +7,30 @@
     x:DataType="vm:PlaylistsViewModel"
     BackgroundColor="{DynamicResource BackgroundPrimary}">
 
-    <Grid Padding="16,16,16,8"
-        RowDefinitions="Auto,Auto,*"
-        RowSpacing="0">
-        <Label Grid.Row="0"
-            FontFamily="PoppinsRegular"
-            FontSize="24"
-            Text="Wiedergabelisten"
-            TextColor="{DynamicResource TextPrimary}" />
+    <ScrollView>
+        <Grid Padding="16,16,16,8"
+            RowDefinitions="Auto,Auto,*"
+            RowSpacing="0">
+            <Label Grid.Row="0"
+                FontFamily="PoppinsRegular"
+                FontSize="24"
+                Text="Wiedergabelisten"
+                TextColor="{DynamicResource TextPrimary}" />
 
-        <Label Grid.Row="1"
-            Margin="0,16,0,0"
-            IsVisible="{Binding ShowNoPlaylistsMessage}"
-            Text="Keine Playlists verfuegbar."
-            TextColor="{DynamicResource TextSecondary}" />
+            <Label Grid.Row="1"
+                Margin="0,16,0,0"
+                IsVisible="{Binding ShowNoPlaylistsMessage}"
+                Text="Keine Playlists verfuegbar."
+                TextColor="{DynamicResource TextSecondary}" />
 
-        <controls:TableView Grid.Row="2"
-            Margin="0,16,0,0"
-            IsVisible="{Binding ShowPlaylistListView}"
-            ItemsSource="{Binding PlaylistItems}"
-            LongPressCommand="{Binding PlaylistLongPressedCommand}"
-            ShortPressCommand="{Binding PlaylistTappedCommand}"
-            ShowContextMenuAtAnchorCommand="{Binding ShowPlaylistContextMenuAtAnchorCommand}" />
-    </Grid>
+            <controls:TableView Grid.Row="2"
+                Margin="0,16,0,0"
+                IsVisible="{Binding ShowPlaylistListView}"
+                ItemsSource="{Binding PlaylistItems}"
+                LongPressCommand="{Binding PlaylistLongPressedCommand}"
+                ShortPressCommand="{Binding PlaylistTappedCommand}"
+                ShowContextMenuAtAnchorCommand="{Binding ShowPlaylistContextMenuAtAnchorCommand}" />
+        </Grid>
+    </ScrollView>
 </ContentPage>
 

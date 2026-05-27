@@ -8,8 +8,8 @@ public partial class TableView : ContentView
     #region Fields
 
     private const int LongPressDurationMilliseconds = 420;
-    private readonly Dictionary<Playlist, CancellationTokenSource> _pendingLongPresses = new();
-    private readonly HashSet<Playlist> _suppressNextTap = new();
+    private readonly Dictionary<MediaItem, CancellationTokenSource> _pendingLongPresses = new();
+    private readonly HashSet<MediaItem> _suppressNextTap = new();
 
     #endregion
 
@@ -70,40 +70,40 @@ public partial class TableView : ContentView
 
     private void OnRowPointerPressed(object? sender, PointerEventArgs e)
     {
-        if (sender is not BindableObject { BindingContext: Playlist playlist })
+        if (sender is not BindableObject { BindingContext: MediaItem mediaItem })
         {
             return;
         }
 
-        CancelPendingLongPress(playlist);
+        CancelPendingLongPress(mediaItem);
 
         var cts = new CancellationTokenSource();
-        _pendingLongPresses[playlist] = cts;
+        _pendingLongPresses[mediaItem] = cts;
 
-        _ = DetectLongPressAsync(playlist, cts.Token);
+        _ = DetectLongPressAsync(mediaItem, cts.Token);
     }
 
     private void OnRowPointerReleased(object? sender, PointerEventArgs e)
     {
-        if (sender is not BindableObject { BindingContext: Playlist playlist })
+        if (sender is not BindableObject { BindingContext: MediaItem mediaItem })
         {
             return;
         }
 
-        CancelPendingLongPress(playlist);
+        CancelPendingLongPress(mediaItem);
     }
 
     private void OnRowPointerExited(object? sender, PointerEventArgs e)
     {
-        if (sender is not BindableObject { BindingContext: Playlist playlist })
+        if (sender is not BindableObject { BindingContext: MediaItem mediaItem })
         {
             return;
         }
 
-        CancelPendingLongPress(playlist);
+        CancelPendingLongPress(mediaItem);
     }
 
-    private async Task DetectLongPressAsync(Playlist playlist, CancellationToken token)
+    private async Task DetectLongPressAsync(MediaItem mediaItem, CancellationToken token)
     {
         try
         {
@@ -112,16 +112,16 @@ public partial class TableView : ContentView
             Dispatcher.Dispatch(() =>
             {
                 var longPressCommand = LongPressCommand;
-                if (longPressCommand?.CanExecute(playlist) == true)
+                if (longPressCommand?.CanExecute(mediaItem) == true)
                 {
-                    longPressCommand.Execute(playlist);
+                    longPressCommand.Execute(mediaItem);
                 }
                 else
                 {
-                    playlist.IsSelected = !playlist.IsSelected;
+                    mediaItem.IsSelected = !mediaItem.IsSelected;
                 }
 
-                _suppressNextTap.Add(playlist);
+                _suppressNextTap.Add(mediaItem);
             });
         }
         catch (TaskCanceledException)
@@ -132,20 +132,20 @@ public partial class TableView : ContentView
 
     private void OnRowTapped(object? sender, TappedEventArgs e)
     {
-        if (sender is not BindableObject { BindingContext: Playlist playlist })
+        if (sender is not BindableObject { BindingContext: MediaItem mediaItem })
         {
             return;
         }
 
-        if (_suppressNextTap.Remove(playlist))
+        if (_suppressNextTap.Remove(mediaItem))
         {
             return;
         }
 
         var command = ShortPressCommand;
-        if (command?.CanExecute(playlist) == true)
+        if (command?.CanExecute(mediaItem) == true)
         {
-            command.Execute(playlist);
+            command.Execute(mediaItem);
         }
     }
 
@@ -153,14 +153,14 @@ public partial class TableView : ContentView
 
     #region Helpers
 
-    private void CancelPendingLongPress(Playlist playlist)
+    private void CancelPendingLongPress(MediaItem mediaItem)
     {
-        if (!_pendingLongPresses.TryGetValue(playlist, out var cts))
+        if (!_pendingLongPresses.TryGetValue(mediaItem, out var cts))
         {
             return;
         }
 
-        _pendingLongPresses.Remove(playlist);
+        _pendingLongPresses.Remove(mediaItem);
         cts.Cancel();
         cts.Dispose();
     }
@@ -171,6 +171,7 @@ public partial class TableView : ContentView
 public sealed class MobileTableViewTemplateSelector : DataTemplateSelector
 {
     public DataTemplate? PlaylistTemplate { get; set; }
+    public DataTemplate? TrackTemplate { get; set; }
     public DataTemplate? SkeletonTemplate { get; set; }
 
     protected override DataTemplate OnSelectTemplate(object item, BindableObject container)
@@ -185,9 +186,19 @@ public sealed class MobileTableViewTemplateSelector : DataTemplateSelector
             return PlaylistTemplate;
         }
 
+        if (item is Track && TrackTemplate != null)
+        {
+            return TrackTemplate;
+        }
+
         if (PlaylistTemplate != null)
         {
             return PlaylistTemplate;
+        }
+
+        if (TrackTemplate != null)
+        {
+            return TrackTemplate;
         }
 
         if (SkeletonTemplate != null)
@@ -195,6 +206,6 @@ public sealed class MobileTableViewTemplateSelector : DataTemplateSelector
             return SkeletonTemplate;
         }
 
-        throw new InvalidOperationException("MobileTableViewTemplateSelector requires PlaylistTemplate or SkeletonTemplate.");
+        throw new InvalidOperationException("MobileTableViewTemplateSelector requires PlaylistTemplate, TrackTemplate, or SkeletonTemplate.");
     }
 }

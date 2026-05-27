@@ -1,7 +1,8 @@
-﻿<?xml version="1.0" encoding="utf-8" ?>
+<?xml version="1.0" encoding="utf-8" ?>
 <ContentPage x:Class="mashin.Views.Mobile.PlaylistDetailPage"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:controls="clr-namespace:mashin.Views.Mobile.Controls"
     xmlns:converters="clr-namespace:mashin.Converters"
     xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
@@ -13,52 +14,50 @@
         <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
     </ContentPage.Resources>
 
-    <Grid Padding="16,16,16,8"
-        RowDefinitions="Auto,*"
-        RowSpacing="14">
+    <!--  Page Scroll  -->
+    <ScrollView>
+        <VerticalStackLayout Padding="0,0,0,12"
+            Spacing="16">
 
-        <Grid Grid.Row="0"
-            ColumnDefinitions="96,*"
-            ColumnSpacing="12"
-            MinimumHeightRequest="96">
+            <!--  Header: Cover, Name, Meta  -->
+            <Grid RowDefinitions="Auto,Auto,Auto"
+                RowSpacing="10">
 
-            <Border Grid.Column="0"
-                BackgroundColor="{DynamicResource BackgroundTertiary}"
-                HeightRequest="96"
-                StrokeThickness="0"
-                WidthRequest="96">
-                <Border.StrokeShape>
-                    <RoundRectangle CornerRadius="8" />
-                </Border.StrokeShape>
-                <ffimageloading:CachedImage Aspect="AspectFill"
-                    Source="{Binding ImageUri}" />
-            </Border>
+                <!--  Playlist Cover  -->
+                <Border Grid.Row="0"
+                    BackgroundColor="{DynamicResource BackgroundTertiary}"
+                    HeightRequest="220"
+                    HorizontalOptions="Fill"
+                    StrokeThickness="0">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="0,0,16,16" />
+                    </Border.StrokeShape>
+                    <ffimageloading:CachedImage Aspect="AspectFill"
+                        Source="{Binding ImageUri}" />
+                </Border>
 
-            <Grid Grid.Column="1"
-                RowDefinitions="Auto,Auto,Auto"
-                RowSpacing="6"
-                VerticalOptions="Center">
-                <Label Grid.Row="0"
-                    FontFamily="PoppinsRegular"
-                    FontSize="10"
-                    Text="PLAYLIST"
-                    TextColor="{DynamicResource TextSecondary}" />
-
+                <!--  Playlist Name  -->
                 <Label Grid.Row="1"
+                    Margin="16,0"
                     FontFamily="PoppinsRegular"
-                    FontSize="22"
+                    FontSize="24"
+                    HorizontalTextAlignment="Center"
                     LineBreakMode="WordWrap"
                     MaxLines="2"
                     Text="{Binding PlaylistName}"
                     TextColor="{DynamicResource TextPrimary}" />
 
-                <HorizontalStackLayout Grid.Row="2" Spacing="8">
+                <!--  Playlist Meta  -->
+                <HorizontalStackLayout Grid.Row="2"
+                    HorizontalOptions="Center"
+                    Spacing="8">
                     <Label FontFamily="PoppinsRegular"
                         FontSize="12"
                         Text="{Binding Tracks.Count, StringFormat='{0} Titel'}"
                         TextColor="{DynamicResource TextSecondary}" />
-                    <Label FontSize="12"
-                        Text="â€¢"
+                    <Label FontFamily="PoppinsRegular"
+                        FontSize="12"
+                        Text="•"
                         TextColor="{DynamicResource TextSecondary}" />
                     <Label FontFamily="PoppinsRegular"
                         FontSize="12"
@@ -66,57 +65,124 @@
                         TextColor="{DynamicResource TextSecondary}" />
                 </HorizontalStackLayout>
             </Grid>
-        </Grid>
 
-        <Grid Grid.Row="1" RowDefinitions="Auto,Auto" RowSpacing="10">
-            <HorizontalStackLayout Grid.Row="0" Spacing="10">
+            <!--  Header Actions  -->
+            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto"
+                ColumnSpacing="14"
+                HorizontalOptions="Center">
+
+            <!--  Play  -->
+            <Border Grid.Column="0"
+                BackgroundColor="{DynamicResource ActionButtonsBackground}"
+                HeightRequest="44"
+                StrokeThickness="0"
+                WidthRequest="44">
+                <Border.GestureRecognizers>
+                    <TapGestureRecognizer Command="{Binding PlayPlaylistCommand}" />
+                </Border.GestureRecognizers>
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="22" />
+                </Border.StrokeShape>
+                <Label FontSize="18"
+                    HorizontalOptions="Center"
+                    Text="{mi:FluentFilled Icon=Play16Filled, FontOverride=True}"
+                    TextColor="{DynamicResource IconPrimary}"
+                    VerticalOptions="Center" />
+            </Border>
+
+            <!--  Shuffle  -->
+            <Border Grid.Column="1"
+                BackgroundColor="{DynamicResource ActionButtonsBackground}"
+                HeightRequest="44"
+                StrokeThickness="0"
+                WidthRequest="44">
+                <Border.GestureRecognizers>
+                    <TapGestureRecognizer Command="{Binding ShufflePlaylistCommand}" />
+                </Border.GestureRecognizers>
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="22" />
+                </Border.StrokeShape>
+                <Label FontSize="18"
+                    HorizontalOptions="Center"
+                    Text="{mi:FluentFilled Icon=ArrowShuffle16Filled, FontOverride=True}"
+                    TextColor="{DynamicResource IconPrimary}"
+                    VerticalOptions="Center" />
+            </Border>
+
+            <!--  Favorite Toggle  -->
+            <Grid Grid.Column="2"
+                HeightRequest="44"
+                WidthRequest="44">
                 <Border BackgroundColor="{DynamicResource ActionButtonsBackground}"
-                    Padding="12,8"
-                    StrokeThickness="0">
-                    <Border.GestureRecognizers>
-                        <TapGestureRecognizer Command="{Binding PlayPlaylistCommand}" />
-                    </Border.GestureRecognizers>
+                    HeightRequest="44"
+                    StrokeThickness="0"
+                    WidthRequest="44">
                     <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="10" />
+                        <RoundRectangle CornerRadius="22" />
                     </Border.StrokeShape>
-                    <HorizontalStackLayout Spacing="6">
-                        <Label FontSize="14"
-                            Text="{mi:FluentFilled Icon=Play16Filled, FontOverride=True}"
-                            TextColor="{DynamicResource IconPrimary}" />
-                        <Label FontFamily="PoppinsRegular"
-                            FontSize="12"
-                            Text="Abspielen"
-                            TextColor="{DynamicResource TextPrimary}" />
-                    </HorizontalStackLayout>
                 </Border>
 
-                <Border BackgroundColor="{DynamicResource ActionButtonsBackground}"
-                    Padding="12,8"
-                    StrokeThickness="0">
-                    <Border.GestureRecognizers>
-                        <TapGestureRecognizer Command="{Binding ShufflePlaylistCommand}" />
-                    </Border.GestureRecognizers>
-                    <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="10" />
-                    </Border.StrokeShape>
-                    <HorizontalStackLayout Spacing="6">
-                        <Label FontSize="14"
-                            Text="{mi:FluentFilled Icon=ArrowShuffle16Filled, FontOverride=True}"
-                            TextColor="{DynamicResource IconPrimary}" />
-                        <Label FontFamily="PoppinsRegular"
-                            FontSize="12"
-                            Text="Shuffle"
-                            TextColor="{DynamicResource TextPrimary}" />
-                    </HorizontalStackLayout>
-                </Border>
-            </HorizontalStackLayout>
+                <Label FontSize="18"
+                    HorizontalOptions="Center"
+                    IsVisible="{Binding IsPlaylistFavorite, Converter={StaticResource InvertedBoolConverter}}"
+                    Text="{mi:Fluent Icon=Heart48, FontOverride=True}"
+                    TextColor="{DynamicResource IconPrimary}"
+                    VerticalOptions="Center">
+                    <Label.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding TogglePlaylistFavoriteCommand}" />
+                    </Label.GestureRecognizers>
+                </Label>
 
-            <Label Grid.Row="1"
-                FontFamily="PoppinsRegular"
-                FontSize="13"
-                Text="Track-Details folgen hier spaeter."
-                TextColor="{DynamicResource TextSecondary}" />
-        </Grid>
-    </Grid>
+                <Label FontSize="18"
+                    HorizontalOptions="Center"
+                    IsVisible="{Binding IsPlaylistFavorite}"
+                    Text="{mi:FluentFilled Icon=Heart48Filled, FontOverride=True}"
+                    TextColor="{DynamicResource IconPrimary}"
+                    VerticalOptions="Center">
+                    <Label.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding TogglePlaylistFavoriteCommand}" />
+                    </Label.GestureRecognizers>
+                </Label>
+            </Grid>
+
+            <!--  Header Context Menu  -->
+            <Border x:Name="HeaderContextMenuButton"
+                Grid.Column="3"
+                BackgroundColor="{DynamicResource ActionButtonsBackground}"
+                HeightRequest="44"
+                StrokeThickness="0"
+                WidthRequest="44">
+                <Border.GestureRecognizers>
+                    <TapGestureRecognizer Command="{Binding ShowHeaderContextMenuAtAnchorCommand}"
+                        CommandParameter="{x:Reference HeaderContextMenuButton}" />
+                </Border.GestureRecognizers>
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="22" />
+                </Border.StrokeShape>
+                <Label FontSize="18"
+                    HorizontalOptions="Center"
+                    Text="{mi:Fluent Icon=MoreHorizontal48, FontOverride=True}"
+                    TextColor="{DynamicResource IconPrimary}"
+                    VerticalOptions="Center" />
+            </Border>
+            </Grid>
+
+            <!--  Track List  -->
+            <VerticalStackLayout Padding="16,0,16,0"
+                Spacing="8">
+                <Border BackgroundColor="{DynamicResource BackgroundSecondary}"
+                    Padding="0"
+                    Stroke="{DynamicResource BorderColor}"
+                    StrokeThickness="1">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="12" />
+                    </Border.StrokeShape>
+
+                    <!--  Tracks TableView  -->
+                    <controls:TableView ItemsSource="{Binding TrackItems}"
+                        ShowContextMenuAtAnchorCommand="{Binding ShowContentContextMenuAtAnchorCommand}" />
+                </Border>
+            </VerticalStackLayout>
+        </VerticalStackLayout>
+    </ScrollView>
 </ContentPage>
-

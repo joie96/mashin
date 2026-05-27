@@ -105,6 +105,99 @@
             </Border>
         </DataTemplate>
 
+        <DataTemplate x:Key="TrackTemplate" x:DataType="models:Track">
+            <Border Padding="8,6"
+                BackgroundColor="Transparent"
+                StrokeThickness="0">
+                <Border.Triggers>
+                    <DataTrigger Binding="{Binding IsSelected}"
+                        TargetType="Border"
+                        Value="True">
+                        <Setter Property="BackgroundColor"
+                            Value="{DynamicResource SelectionBackground}" />
+                    </DataTrigger>
+                </Border.Triggers>
+                <Border.GestureRecognizers>
+                    <PointerGestureRecognizer PointerExited="OnRowPointerExited"
+                        PointerPressed="OnRowPointerPressed"
+                        PointerReleased="OnRowPointerReleased" />
+                </Border.GestureRecognizers>
+
+                <Grid ColumnDefinitions="52,*,56,32"
+                    ColumnSpacing="10">
+                    <Grid Grid.ColumnSpan="2"
+                        ColumnDefinitions="52,*"
+                        ColumnSpacing="10">
+                        <Grid.GestureRecognizers>
+                            <TapGestureRecognizer Tapped="OnRowTapped" />
+                        </Grid.GestureRecognizers>
+
+                        <Border Grid.Column="0"
+                            BackgroundColor="{DynamicResource BackgroundTertiary}"
+                            HeightRequest="52"
+                            StrokeThickness="0"
+                            VerticalOptions="Center"
+                            WidthRequest="52">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="8" />
+                            </Border.StrokeShape>
+                            <ffimageloading:CachedImage Aspect="AspectFill"
+                                Source="{Binding ImageUri}" />
+                        </Border>
+
+                        <VerticalStackLayout Grid.Column="1"
+                            Spacing="1"
+                            VerticalOptions="Center">
+                            <Label FontFamily="PoppinsRegular"
+                                FontSize="14"
+                                LineBreakMode="TailTruncation"
+                                MaxLines="1"
+                                Text="{Binding DisplayName}"
+                                TextColor="{DynamicResource TextPrimary}" />
+                            <Label FontFamily="PoppinsRegular"
+                                FontSize="12"
+                                LineBreakMode="TailTruncation"
+                                MaxLines="1"
+                                Text="{Binding ArtistName}"
+                                TextColor="{DynamicResource TextSecondary}" />
+                        </VerticalStackLayout>
+                    </Grid>
+
+                    <Label Grid.Column="2"
+                        FontFamily="PoppinsRegular"
+                        FontSize="12"
+                        HorizontalOptions="End"
+                        Text="{Binding DurationTimeSpan, StringFormat='{0:mm\\:ss}'}"
+                        TextColor="{DynamicResource TextSecondary}"
+                        VerticalOptions="Center" />
+
+                    <Border x:Name="TrackMoreButton"
+                        Grid.Column="3"
+                        WidthRequest="40"
+                        HeightRequest="40"
+                        Padding="0"
+                        HorizontalOptions="Center"
+                        VerticalOptions="Center"
+                        BackgroundColor="Transparent"
+                        StrokeThickness="0">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="20" />
+                        </Border.StrokeShape>
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Source={x:Reference self}, Path=ShowContextMenuAtAnchorCommand}"
+                                CommandParameter="{x:Reference TrackMoreButton}" />
+                        </Border.GestureRecognizers>
+                        <Label
+                            FontSize="18"
+                            HorizontalOptions="Center"
+                            Text="{mi:Fluent Icon=MoreVertical48, FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
         <DataTemplate x:Key="SkeletonTemplate" x:DataType="models:TableViewSkeleton">
             <Grid ColumnDefinitions="52,*,32,32"
                 ColumnSpacing="10"
@@ -141,13 +234,14 @@
 
         <controls:MobileTableViewTemplateSelector x:Key="MobileTableViewTemplateSelector"
             PlaylistTemplate="{StaticResource PlaylistTemplate}"
+            TrackTemplate="{StaticResource TrackTemplate}"
             SkeletonTemplate="{StaticResource SkeletonTemplate}" />
     </ContentView.Resources>
 
-    <CollectionView ItemSizingStrategy="MeasureFirstItem"
+    <CollectionView x:Name="ItemsCollectionView"
+        ItemSizingStrategy="MeasureFirstItem"
         ItemsSource="{Binding Source={x:Reference self}, Path=ItemsSource}"
-        SelectionMode="None"
-        VerticalScrollBarVisibility="Never">
+        SelectionMode="None">
         <CollectionView.ItemsLayout>
             <LinearItemsLayout Orientation="Vertical" ItemSpacing="0" />
         </CollectionView.ItemsLayout>
