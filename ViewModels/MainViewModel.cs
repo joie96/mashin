@@ -718,7 +718,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         ApplyQueueSettingsFromCurrentQueue(_playbackService.CurrentPlayerQueue);
 
         // Set position slider
-        if (_playbackService.CurrentPlayerQueue?.ElapsedTime is double elapsedTime
+        if (IsLocalPlaybackTarget()
+            && _playbackService.CurrentPlayerQueue?.ElapsedTime is double elapsedTime
             && _playbackService.CurrentPlayerQueue?.CurrentItem?.MediaItem?.Duration is int duration)
         {
             Duration = duration;
@@ -827,11 +828,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         try
         {
             _logger.LogInformation("Play playlist: {Name}", playlist.Name);
-
-            await _musicAssistant.PlayMediaAsync(
-                activePlayerId,
-                new List<MediaItem> { playlist },
-                QueueOption.Play);
+            await MediaActions.PlayMediaAsync(playlist);
         }
         catch (Exception ex)
         {
@@ -934,7 +931,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private void BeginSeek()
     {
-        _playbackService.BeginSeek();
+        _playbackService.PlaybackState = new PlayerPlayState(PlayerPlaybackState.Seeking, DateTimeOffset.UtcNow);
     }
 
     private async Task SetVolumeAsync(int volume)
@@ -994,6 +991,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 break;
 
             case nameof(ISendspinPlayerService.DurationSeconds):
+                if (!IsLocalPlaybackTarget())
+                {
+                    break;
+                }
+
                 Duration = _sendspinPlayerService.DurationSeconds;
                 if (SliderPosition > Duration)
                 {
@@ -1002,6 +1004,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 break;
 
             case nameof(ISendspinPlayerService.PositionSeconds):
+                if (!IsLocalPlaybackTarget())
+                {
+                    break;
+                }
+
                 if (PlayState.State != PlayerPlaybackState.Seeking)
                 {
                     var position = _sendspinPlayerService.PositionSeconds;
@@ -1719,6 +1726,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         _logger.LogInformation("Einstellungen ist noch nicht implementiert.");
         return Task.CompletedTask;
+    }
+
+    private bool IsLocalPlaybackTarget()
+    {
+        return !string.IsNullOrWhiteSpace(_playbackService.ActivePlayerId)
+            && !string.IsNullOrWhiteSpace(_sendspinPlayerService.PlayerId)
+            && string.Equals(_playbackService.ActivePlayerId, _sendspinPlayerService.PlayerId, StringComparison.Ordinal);
     }
 
     private void ToggleTheme()

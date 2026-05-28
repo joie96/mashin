@@ -88,7 +88,6 @@ public interface IPlaybackService : IAsyncDisposable, INotifyPropertyChanged
     Task NextTrackAsync(CancellationToken cancellationToken = default);
     Task PreviousTrackAsync(CancellationToken cancellationToken = default);
     Task SeekAsync(double seconds, double durationSeconds, CancellationToken cancellationToken = default);
-    void BeginSeek();
     Task SetVolumeAsync(int volume, CancellationToken cancellationToken = default);
     Task ToggleMuteAsync(bool currentMuted, CancellationToken cancellationToken = default);
     Task ToggleShuffleAsync(bool? currentShuffleEnabled, CancellationToken cancellationToken = default);
@@ -326,8 +325,8 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        await _musicAssistant.PlayPauseAsync(ActiveQueueId);
         PlaybackState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+        await _musicAssistant.PlayPauseAsync(ActiveQueueId);
     }
 
     public async Task NextTrackAsync(CancellationToken cancellationToken = default)
@@ -338,8 +337,8 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        await _musicAssistant.NextAsync(ActiveQueueId);
         PlaybackState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+        await _musicAssistant.NextAsync(ActiveQueueId);
     }
 
     public async Task PreviousTrackAsync(CancellationToken cancellationToken = default)
@@ -350,8 +349,8 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        await _musicAssistant.PreviousAsync(ActiveQueueId);
         PlaybackState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+        await _musicAssistant.PreviousAsync(ActiveQueueId);
     }
 
     public async Task SeekAsync(double seconds, double durationSeconds, CancellationToken cancellationToken = default)
@@ -362,27 +361,16 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        BeginSeek();
+        PlaybackState = new PlayerPlayState(PlayerPlaybackState.Seeking, DateTimeOffset.UtcNow);
+        PlaybackState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
 
-        try
+        var clamped = Math.Max(0, Math.Min(durationSeconds, seconds));
+        if (IsLocalTarget())
         {
-            var clamped = Math.Max(0, Math.Min(durationSeconds, seconds));
-            if (IsLocalTarget())
-            {
-                _sendspinPlayerService.PositionSeconds = clamped;
-            }
-
-            await _musicAssistant.SeekAsync(ActiveQueueId, (int)Math.Round(clamped));
+            _sendspinPlayerService.PositionSeconds = clamped;
         }
-        finally
-        {
-            PlaybackState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
-        }
-    }
 
-    public void BeginSeek()
-    {
-        SetState(PlayerPlaybackState.Seeking);
+        await _musicAssistant.SeekAsync(ActiveQueueId, (int)Math.Round(clamped));
     }
 
     public async Task SetVolumeAsync(int volume, CancellationToken cancellationToken = default)
@@ -543,7 +531,7 @@ public sealed class PlaybackService : IPlaybackService
                     var localState = _sendspinPlayerService.PlayState.State;
                     if (localState != PlayerPlaybackState.Buffering && localState != PlayerPlaybackState.Unknown)
                     {
-                        SetState(localState);
+                        PlaybackState = new PlayerPlayState(localState, DateTimeOffset.UtcNow);
                         return;
                     }
 
@@ -732,7 +720,8 @@ public sealed class PlaybackService : IPlaybackService
         if (e.PropertyName == nameof(ISendspinPlayerService.PlayState))
         {
             var localState = _sendspinPlayerService.PlayState.State;
-            SetState(localState);
+
+            PlaybackState = new PlayerPlayState(localState, DateTimeOffset.UtcNow);
 
             if (localState != PlayerPlaybackState.Buffering)
             {
@@ -854,17 +843,12 @@ public sealed class PlaybackService : IPlaybackService
             _ => PlayerPlaybackState.Unknown
         };
 
-        SetState(mappedState);
+        PlaybackState = new PlayerPlayState(mappedState, DateTimeOffset.UtcNow);
 
         if (mappedState != PlayerPlaybackState.Buffering)
         {
             _ = StopBufferingResolutionLoopAsync();
         }
-    }
-
-    private void SetState(PlayerPlaybackState state)
-    {
-        PlaybackState = new PlayerPlayState(state, DateTimeOffset.UtcNow);
     }
 
     private bool IsLocalTarget()

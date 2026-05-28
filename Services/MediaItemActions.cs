@@ -123,6 +123,7 @@ public class MediaItemActions : IMediaItemActions
         }
 
         _logger.LogInformation("Playing {Count} item(s) next", mediaItems.Count);
+        _playbackService.PlaybackState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
 
         try
         {
@@ -159,6 +160,7 @@ public class MediaItemActions : IMediaItemActions
         }
 
         _logger.LogInformation("Playing {Count} item(s) last", mediaItems.Count);
+        _playbackService.PlaybackState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
 
         try
         {
