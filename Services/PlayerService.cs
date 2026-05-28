@@ -24,7 +24,7 @@ public enum PlayerPlaybackState
 
 public sealed record PlayerPlayState(PlayerPlaybackState State, DateTimeOffset TimestampUtc);
 
-public interface IPlayerService : IAsyncDisposable, INotifyPropertyChanged
+public interface ISendspinPlayerService : IAsyncDisposable, INotifyPropertyChanged
 {
     #region Properties
     bool IsConnected { get; }
@@ -53,10 +53,10 @@ public interface IPlayerService : IAsyncDisposable, INotifyPropertyChanged
     Task UpdatePreferredAudioCodecAsync(string codec, CancellationToken cancellationToken = default);
     #endregion
 }
-public sealed class PlayerService : IPlayerService
+public sealed class SendspinPlayerService : ISendspinPlayerService
 {
     #region Fields
-    private readonly ILogger<PlayerService> _logger;
+    private readonly ILogger<SendspinPlayerService> _logger;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IAudioPlayer _audioPlayer;
     private readonly IAudioPipeline _audioPipeline;
@@ -160,8 +160,8 @@ public sealed class PlayerService : IPlayerService
     #region Constructor
 
 
-    public PlayerService(
-        ILogger<PlayerService> logger,
+    public SendspinPlayerService(
+        ILogger<SendspinPlayerService> logger,
         ILoggerFactory loggerFactory,
         IAudioPlayer audioPlayer,
         IAudioPipeline audioPipeline,

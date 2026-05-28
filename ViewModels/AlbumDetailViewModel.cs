@@ -227,7 +227,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     public AlbumDetailViewModel(
         MusicAssistantService musicAssistant,
-        IPlayerService playerService,
+        ISendspinPlayerService playerService,
         IUserDataService userDataService,
         IMediaItemActions mediaActions,
         IContextMenuService contextMenuService,

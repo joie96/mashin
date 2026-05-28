@@ -64,7 +64,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<IMediaItemActions, MediaItemActions>();
         builder.Services.AddSingleton<INavigationService, NavigationService>();
         builder.Services.AddSingleton<IOverlayService, OverlayService>();
-        builder.Services.AddSingleton<IQueueSyncService, QueueSyncService>();
+        builder.Services.AddSingleton<IPlaybackService, PlaybackService>();
 
 #if WINDOWS
         builder.Services.AddSingleton<IContextMenuService, WindowsContextMenuService>();
@@ -107,7 +107,7 @@ public static class MauiProgram
                     return new UntimedAudioSampleSource((UntimedAudioBuffer)buffer);
                 });
         });
-        builder.Services.AddSingleton<IPlayerService, PlayerService>();
+        builder.Services.AddSingleton<ISendspinPlayerService, SendspinPlayerService>();
 
 
         // ViewModels registrieren

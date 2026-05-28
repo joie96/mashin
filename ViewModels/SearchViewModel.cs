@@ -302,7 +302,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
 
     public SearchViewModel(
         MusicAssistantService musicAssistant,
-        IPlayerService playerService,
+        ISendspinPlayerService playerService,
         IMediaItemActions mediaActions,
         IContextMenuService contextMenuService,
         INavigationService navigationService,

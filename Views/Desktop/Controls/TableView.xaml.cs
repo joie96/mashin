@@ -82,8 +82,8 @@ public partial class TableView : ContentView
     private INotifyCollectionChanged? _itemsSourceCollection;
     private List<object> _allItems = new();
     private IKeyboardService? _keyboardService;
-    private IQueueSyncService? _queueSyncService;
-    private IPlayerService? _playerService;
+    private IPlaybackService? _playbackService;
+    private ISendspinPlayerService? _sendspinPlayerService;
     private Track? _currentTrack;
     private int? _anchorIndex;
     private int _pageIndex;
@@ -1141,9 +1141,12 @@ public partial class TableView : ContentView
 
     private void AttachPlaybackStateSource()
     {
-        if (_queueSyncService != null && _playerService != null)
+        if (_playbackService != null)
         {
-            return;
+            if (_sendspinPlayerService != null)
+            {
+                return;
+            }
         }
 
         var mauiContext = Handler?.MauiContext
@@ -1153,14 +1156,14 @@ public partial class TableView : ContentView
             return;
         }
 
-        if (_queueSyncService == null)
+        if (_playbackService == null)
         {
-            _queueSyncService = mauiContext.Services.GetService<IQueueSyncService>();
-            if (_queueSyncService != null)
+            _playbackService = mauiContext.Services.GetService<IPlaybackService>();
+            if (_playbackService != null)
             {
-                _currentTrack = _queueSyncService.CurrentTrack;
+                _currentTrack = _playbackService.CurrentTrack;
                 SetCurrentTrackUri(_currentTrack?.Uri);
-                _queueSyncService.CurrentTrackUpdated += OnCurrentTrackUpdated;
+                _playbackService.CurrentTrackUpdated += OnCurrentTrackUpdated;
 
                 if (_currentTrack != null)
                 {
@@ -1169,22 +1172,22 @@ public partial class TableView : ContentView
             }
         }
 
-        if (_playerService == null)
+        if (_sendspinPlayerService == null)
         {
-            _playerService = mauiContext.Services.GetService<IPlayerService>();
-            if (_playerService != null)
+            _sendspinPlayerService = mauiContext.Services.GetService<ISendspinPlayerService>();
+            if (_sendspinPlayerService != null)
             {
-                SetCurrentPlayState(_playerService.PlayState);
-                _playerService.PropertyChanged += OnPlayerServicePropertyChanged;
+                SetCurrentPlayState(_sendspinPlayerService.PlayState);
+                _sendspinPlayerService.PropertyChanged += OnPlayerServicePropertyChanged;
             }
         }
     }
 
     private void DetachPlaybackStateSource()
     {
-        if (_queueSyncService != null)
+        if (_playbackService != null)
         {
-            _queueSyncService.CurrentTrackUpdated -= OnCurrentTrackUpdated;
+            _playbackService.CurrentTrackUpdated -= OnCurrentTrackUpdated;
 
             if (_currentTrack != null)
             {
@@ -1192,13 +1195,13 @@ public partial class TableView : ContentView
             }
         }
 
-        if (_playerService != null)
+        if (_sendspinPlayerService != null)
         {
-            _playerService.PropertyChanged -= OnPlayerServicePropertyChanged;
+            _sendspinPlayerService.PropertyChanged -= OnPlayerServicePropertyChanged;
         }
 
-        _queueSyncService = null;
-        _playerService = null;
+        _playbackService = null;
+        _sendspinPlayerService = null;
         _currentTrack = null;
         SetCurrentTrackUri(null);
         SetCurrentPlayState(new PlayerPlayState(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow));
@@ -1211,7 +1214,7 @@ public partial class TableView : ContentView
             _currentTrack.PropertyChanged -= OnCurrentTrackPropertyChanged;
         }
 
-        _currentTrack = _queueSyncService?.CurrentTrack;
+        _currentTrack = _playbackService?.CurrentTrack;
         var currentTrackUri = _currentTrack?.Uri;
 
         if (_currentTrack != null)
@@ -1309,12 +1312,12 @@ public partial class TableView : ContentView
 
     private void OnPlayerServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(IPlayerService.PlayState))
+        if (e.PropertyName != nameof(ISendspinPlayerService.PlayState))
         {
             return;
         }
 
-        var currentPlayState = _playerService?.PlayState
+        var currentPlayState = _sendspinPlayerService?.PlayState
             ?? new PlayerPlayState(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow);
 
         if (MainThread.IsMainThread)

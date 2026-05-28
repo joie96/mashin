@@ -27,11 +27,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private readonly SettingsService _settings;
     private readonly MusicAssistantService _musicAssistant;
     private readonly IUserDataService _userDataService;
-    private readonly IPlayerService _playerService;
+    private readonly ISendspinPlayerService _sendspinPlayerService;
     private readonly INavigationService _navigationService;
     private readonly IOverlayService _overlayService;
     private readonly IContextMenuService _contextMenuService;
-    private readonly IQueueSyncService _queueSyncService;
+    private readonly IPlaybackService _playbackService;
     private readonly ILogger<MainViewModel> _logger;
     private readonly ObservableRangeCollection<Playlist> _playlists = new();
 
@@ -103,22 +103,22 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         SettingsService settings,
         MusicAssistantService musicAssistant,
         IUserDataService userDataService,
-        IPlayerService playerService,
+        ISendspinPlayerService playerService,
         INavigationService navigationService,
         IOverlayService overlayService,
         IMediaItemActions mediaActions,
         IContextMenuService contextMenuService,
-        IQueueSyncService queueSyncService,
+        IPlaybackService playbackService,
         ILogger<MainViewModel> logger)
     {
         _settings = settings;
         _musicAssistant = musicAssistant;
         _userDataService = userDataService;
-        _playerService = playerService;
+        _sendspinPlayerService = playerService;
         _navigationService = navigationService;
         _overlayService = overlayService;
         _contextMenuService = contextMenuService;
-        _queueSyncService = queueSyncService;
+        _playbackService = playbackService;
         _logger = logger;
         MediaActions = mediaActions;
         _selectedAudioQuality = _settings.GetPreferredAudioCodec();
@@ -259,13 +259,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _musicAssistant.LoginRequired += OnLoginRequired;
 
         // Subscribe to player state events
-        _playerService.PropertyChanged += OnPlayerServicePropertyChanged;
-        PlayState = _playerService.PlayState;
+        _sendspinPlayerService.PropertyChanged += OnPlayerServicePropertyChanged;
+        _playbackService.PropertyChanged += OnPlaybackServicePropertyChanged;
+        PlayState = _playbackService.PlaybackState;
 
-        // Subscribe to queue sync updates
-        _queueSyncService.CurrentPlayerQueueUpdated += OnCurrentPlayerQueueUpdated;
-        _queueSyncService.CurrentTrackUpdated += OnCurrentTrackUpdated;
-        _queueSyncService.CurrentQueueItemsUpdated += OnCurrentQueueItemsUpdated;
+        // Subscribe to playback/queue updates
+        _playbackService.CurrentPlayerQueueUpdated += OnCurrentPlayerQueueUpdated;
+        _playbackService.CurrentTrackUpdated += OnCurrentTrackUpdated;
+        _playbackService.CurrentQueueItemsUpdated += OnCurrentQueueItemsUpdated;
 
         // Keep the UI toggle in sync with persisted theme preference.
         IsDarkTheme = _settings.ThemeMode != AppTheme.Light;
@@ -696,11 +697,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (!string.IsNullOrWhiteSpace(_settings.SendspinUrl))
         {
             var uri = new Uri(_settings.SendspinUrl);
-            await _playerService.ConnectAsync(uri);
+            await _sendspinPlayerService.ConnectAsync(uri);
         }
 
         await RefreshAvailablePlayersAsync();
         ApplyInitialSelectedPlayer();
+        await _playbackService.InitializeAsync();
 
         // Load playlists once and keep local list refreshed as needed.
         await RefreshPlaylistsAsync();
@@ -711,22 +713,22 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         BuildCurrentTrackContextMenuItems();  
 
         // Set initial queue state
-        await _queueSyncService.RefreshNowAsync();
-        CurrentPlayerQueue = _queueSyncService.CurrentPlayerQueue;
-        ApplyQueueSettingsFromCurrentQueue(_queueSyncService.CurrentPlayerQueue);
+        await _playbackService.RefreshNowAsync();
+        CurrentPlayerQueue = _playbackService.CurrentPlayerQueue;
+        ApplyQueueSettingsFromCurrentQueue(_playbackService.CurrentPlayerQueue);
 
         // Set position slider
-        if (_queueSyncService.CurrentPlayerQueue?.ElapsedTime is double elapsedTime
-            && _queueSyncService.CurrentPlayerQueue?.CurrentItem?.MediaItem?.Duration is int duration)
+        if (_playbackService.CurrentPlayerQueue?.ElapsedTime is double elapsedTime
+            && _playbackService.CurrentPlayerQueue?.CurrentItem?.MediaItem?.Duration is int duration)
         {
             Duration = duration;
-            _playerService.PositionSeconds = elapsedTime;
+            _sendspinPlayerService.PositionSeconds = elapsedTime;
             Position = elapsedTime;
             SliderPosition = elapsedTime;
         }
 
         // Start queue sync loop
-        await _queueSyncService.StartAsync();
+        await _playbackService.StartAsync();
 
         
     }
@@ -738,10 +740,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         _musicAssistant.LoginRequired -= OnLoginRequired;
 
-        _playerService.PropertyChanged -= OnPlayerServicePropertyChanged;
-        _queueSyncService.CurrentPlayerQueueUpdated -= OnCurrentPlayerQueueUpdated;
-        _queueSyncService.CurrentTrackUpdated -= OnCurrentTrackUpdated;
-        _queueSyncService.CurrentQueueItemsUpdated -= OnCurrentQueueItemsUpdated;
+        _playbackService.PropertyChanged -= OnPlaybackServicePropertyChanged;
+        _sendspinPlayerService.PropertyChanged -= OnPlayerServicePropertyChanged;
+        _playbackService.CurrentPlayerQueueUpdated -= OnCurrentPlayerQueueUpdated;
+        _playbackService.CurrentTrackUpdated -= OnCurrentTrackUpdated;
+        _playbackService.CurrentQueueItemsUpdated -= OnCurrentQueueItemsUpdated;
 
         _navigationService.PropertyChanged -= OnNavigationServicePropertyChanged;
 
@@ -814,7 +817,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             return;
         }
 
-        var activePlayerId = _queueSyncService.TargetPlayerId;
+        var activePlayerId = _playbackService.ActivePlayerId;
         if (string.IsNullOrWhiteSpace(activePlayerId))
         {
             _logger.LogWarning("No active player available for playlist playback.");
@@ -830,7 +833,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 new List<MediaItem> { playlist },
                 QueueOption.Play);
 
-            _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+            _sendspinPlayerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
         }
         catch (Exception ex)
         {
@@ -846,15 +849,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         try
         {
-            var queueId = CurrentPlayerQueue?.QueueId;
-            if (!string.IsNullOrWhiteSpace(queueId))
-            {
-                await _musicAssistant.PlayPauseAsync(queueId);
-                PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
-                return;
-            }
-
-            _logger.LogWarning("No active queue available for play/pause");
+            await _playbackService.TogglePlayPauseAsync();
         }
         catch (Exception ex)
         {
@@ -866,15 +861,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         try
         {
-            var queueId = CurrentPlayerQueue?.QueueId;
-            if (!string.IsNullOrWhiteSpace(queueId))
-            {
-                await _musicAssistant.NextAsync(queueId);
-                PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
-                return;
-            }
-
-            _logger.LogWarning("No active queue available for next track");
+            await _playbackService.NextTrackAsync();
         }
         catch (Exception ex)
         {
@@ -886,15 +873,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         try
         {
-            var queueId = CurrentPlayerQueue?.QueueId;
-            if (!string.IsNullOrWhiteSpace(queueId))
-            {
-                await _musicAssistant.PreviousAsync(queueId);
-                PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
-                return;
-            }
-
-            _logger.LogWarning("No active queue available for previous track");
+            await _playbackService.PreviousTrackAsync();
         }
         catch (Exception ex)
         {
@@ -904,21 +883,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private async Task ToggleMuteAsync()
     {
-        var nextMuted = !IsMuted;
-
         try
         {
-            var activePlayerId = _queueSyncService.TargetPlayerId;
-            if (string.IsNullOrWhiteSpace(activePlayerId))
-            {
-                _logger.LogWarning("No active player available for mute toggle");
-                return;
-            }
-
-            await _musicAssistant.SetPlayerMuteAsync(activePlayerId, nextMuted);
-            IsMuted = nextMuted;
-
-            _settings.SetInitialMuted(nextMuted);
+            await _playbackService.ToggleMuteAsync(IsMuted);
+            IsMuted = !IsMuted;
+            _settings.SetInitialMuted(IsMuted);
         }
         catch (Exception ex)
         {
@@ -930,19 +899,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         try
         {
-            var queueId = CurrentPlayerQueue?.QueueId;
-            if (string.IsNullOrWhiteSpace(queueId))
-            {
-                _logger.LogDebug("No active queue available for shuffle toggle");
-                return;
-            }
-
-            var nextShuffleEnabled = !(ShuffleEnabled ?? false);
-            await _musicAssistant.SetShuffleAsync(queueId, nextShuffleEnabled);
-            ShuffleEnabled = nextShuffleEnabled;
-
-            // Shuffle can reorder items server-side, so force an immediate queue resync.
-            await _queueSyncService.RefreshNowAsync();
+            await _playbackService.ToggleShuffleAsync(ShuffleEnabled);
         }
         catch (Exception ex)
         {
@@ -954,16 +911,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         try
         {
-            var queueId = CurrentPlayerQueue?.QueueId;
-            if (string.IsNullOrWhiteSpace(queueId))
-            {
-                _logger.LogDebug("No active queue available for repeat toggle");
-                return;
-            }
-
-            var nextRepeatMode = GetNextRepeatMode(RepeatMode);
-            await _musicAssistant.SetRepeatAsync(queueId, nextRepeatMode);
-            RepeatMode = nextRepeatMode.ToString();
+            await _playbackService.ToggleRepeatModeAsync(RepeatMode);
         }
         catch (Exception ex)
         {
@@ -973,39 +921,22 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private async Task SeekAsync(double seconds)
     {
-        if (PlayState.State != PlayerPlaybackState.Seeking)
-        {
-            _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Seeking, DateTimeOffset.UtcNow);
-        }
-        
         try
         {
             var clamped = Math.Max(0, Math.Min(Duration, seconds));
             Position = clamped;
             SliderPosition = clamped;
-            _playerService.PositionSeconds = clamped;
-            var queueId = CurrentPlayerQueue?.QueueId;
-            if (string.IsNullOrWhiteSpace(queueId))
-            {
-                _logger.LogWarning("No active queue available for seek");
-                return;
-            }
-
-            await _musicAssistant.SeekAsync(queueId, (int)Math.Round(clamped));
+            await _playbackService.SeekAsync(clamped, Duration);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to seek");
         }
-        finally
-        {
-            _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Playing, DateTimeOffset.UtcNow);
-        }
     }
 
     private void BeginSeek()
     {
-        _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Seeking, DateTimeOffset.UtcNow);
+        _playbackService.BeginSeek();
     }
 
     private async Task SetVolumeAsync(int volume)
@@ -1013,15 +944,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         try
         {
             var clamped = Math.Max(0, Math.Min(100, volume));
-            var activePlayerId = _queueSyncService.TargetPlayerId;
-            if (string.IsNullOrWhiteSpace(activePlayerId))
-            {
-                _logger.LogWarning("No active player available for volume update");
-                return;
-            }
-
-            await _musicAssistant.SetPlayerVolumeAsync(activePlayerId, clamped);
-
+            await _playbackService.SetVolumeAsync(clamped);
             _settings.SetInitialVolume(clamped);
         }
         catch (Exception ex)
@@ -1034,7 +957,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         try
         {
-            await _playerService.UpdatePreferredAudioCodecAsync(codec);
+            await _sendspinPlayerService.UpdatePreferredAudioCodecAsync(codec);
         }
         catch (Exception ex)
         {
@@ -1050,16 +973,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         switch (e.PropertyName)
         {
-            case nameof(IPlayerService.PlayState):
-                PlayState = _playerService.PlayState;
-                break;
-
-            case nameof(IPlayerService.Volume):
+            case nameof(ISendspinPlayerService.Volume):
                 _suppressVolumeCommand = true;
                 try
                 {
-                    Volume = _playerService.Volume;
-                    _settings.SetInitialVolume(_playerService.Volume);
+                    Volume = _sendspinPlayerService.Volume;
+                    _settings.SetInitialVolume(_sendspinPlayerService.Volume);
                 }
                 finally
                 {
@@ -1067,43 +986,51 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 }
                 break;
 
-            case nameof(IPlayerService.IsMuted):
-                IsMuted = _playerService.IsMuted;
-                _settings.SetInitialMuted(_playerService.IsMuted);
+            case nameof(ISendspinPlayerService.IsMuted):
+                IsMuted = _sendspinPlayerService.IsMuted;
+                _settings.SetInitialMuted(_sendspinPlayerService.IsMuted);
                 break;
 
-            case nameof(IPlayerService.RepeatMode):
-                RepeatMode = _playerService.RepeatMode;
+            case nameof(ISendspinPlayerService.RepeatMode):
+                RepeatMode = _sendspinPlayerService.RepeatMode;
                 break;
 
-            case nameof(IPlayerService.DurationSeconds):
-                Duration = _playerService.DurationSeconds;
+            case nameof(ISendspinPlayerService.DurationSeconds):
+                Duration = _sendspinPlayerService.DurationSeconds;
                 if (SliderPosition > Duration)
                 {
                     SliderPosition = Duration;
                 }
                 break;
 
-            case nameof(IPlayerService.PositionSeconds):
+            case nameof(ISendspinPlayerService.PositionSeconds):
                 if (PlayState.State != PlayerPlaybackState.Seeking)
                 {
-                    var position = _playerService.PositionSeconds;
+                    var position = _sendspinPlayerService.PositionSeconds;
                     Position = position;
                     SliderPosition = position;
                 }
                 break;
 
-            case nameof(IPlayerService.TrackTitle):
-            case nameof(IPlayerService.TrackArtist):
-            case nameof(IPlayerService.TrackAlbum):
+            case nameof(ISendspinPlayerService.TrackTitle):
+            case nameof(ISendspinPlayerService.TrackArtist):
+            case nameof(ISendspinPlayerService.TrackAlbum):
                 if (CurrentTrack == null
-                    || !string.Equals(CurrentTrack.Name, _playerService.TrackTitle, StringComparison.Ordinal)
-                    || !string.Equals(CurrentTrack.ArtistName, _playerService.TrackArtist, StringComparison.Ordinal)
-                    || !string.Equals(CurrentTrack.AlbumName, _playerService.TrackAlbum, StringComparison.Ordinal))
+                    || !string.Equals(CurrentTrack.Name, _sendspinPlayerService.TrackTitle, StringComparison.Ordinal)
+                    || !string.Equals(CurrentTrack.ArtistName, _sendspinPlayerService.TrackArtist, StringComparison.Ordinal)
+                    || !string.Equals(CurrentTrack.AlbumName, _sendspinPlayerService.TrackAlbum, StringComparison.Ordinal))
                 {
-                    _ = _queueSyncService.RefreshNowAsync();
+                    _ = _playbackService.RefreshNowAsync();
                 }
                 break;
+        }
+    }
+
+    private void OnPlaybackServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(IPlaybackService.PlaybackState))
+        {
+            PlayState = _playbackService.PlaybackState;
         }
     }
 
@@ -1123,8 +1050,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private void OnCurrentPlayerQueueUpdated(object? sender, EventArgs e)
     {
-        CurrentPlayerQueue = _queueSyncService.CurrentPlayerQueue;
-        ApplyQueueSettingsFromCurrentQueue(_queueSyncService.CurrentPlayerQueue);
+        CurrentPlayerQueue = _playbackService.CurrentPlayerQueue;
+        ApplyQueueSettingsFromCurrentQueue(_playbackService.CurrentPlayerQueue);
 
     }
 
@@ -1136,7 +1063,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private void OnCurrentTrackUpdated(object? sender, EventArgs e)
     {
-        CurrentTrack = _queueSyncService.CurrentTrack;
+        CurrentTrack = _playbackService.CurrentTrack;
     }
 
     private void OnCurrentQueueItemsUpdated(object? sender, QueueItemsChangedEventArgs e)
@@ -1212,7 +1139,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
 
         // Check if now equal and if not do full refresh
-        var serviceQueue = _queueSyncService.CurrentQueueItems;
+        var serviceQueue = _playbackService.CurrentQueueItems;
         var isEqual = _currentQueueItems.Count == serviceQueue.Count;
 
         if (isEqual)
@@ -1631,7 +1558,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private void ApplyInitialSelectedPlayer()
     {
         var preferredPlayerId = _availablePlayers
-            .FirstOrDefault(player => string.Equals(player.PlayerId, _playerService.PlayerId, StringComparison.Ordinal))?.PlayerId
+            .FirstOrDefault(player => string.Equals(player.PlayerId, _sendspinPlayerService.PlayerId, StringComparison.Ordinal))?.PlayerId
             ?? _availablePlayers.FirstOrDefault(player => player.Available)?.PlayerId
             ?? _availablePlayers.FirstOrDefault()?.PlayerId;
 
@@ -1641,7 +1568,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
 
         SetSelectedPlayerSilently(preferredPlayerId);
-        _queueSyncService.SetTargetPlayerId(preferredPlayerId);
+        _ = _playbackService.SetActivePlayerAsync(preferredPlayerId);
     }
 
     private async Task ToggleDeviceSelectionFlyoutAsync()
@@ -1670,7 +1597,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             var orderedPlayers = players
                 .Where(player => player.Available)
                 .Where(player => !string.IsNullOrWhiteSpace(player.PlayerId))
-                .OrderByDescending(player => string.Equals(player.PlayerId, _playerService.PlayerId, StringComparison.Ordinal))
+                .OrderByDescending(player => string.Equals(player.PlayerId, _sendspinPlayerService.PlayerId, StringComparison.Ordinal))
                 .ThenBy(player => player.Name, StringComparer.CurrentCultureIgnoreCase)
                 .ToList();
 
@@ -1713,10 +1640,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         try
         {
-            _queueSyncService.SetTargetPlayerId(playerId);
-            await _queueSyncService.RefreshNowAsync();
-            CurrentPlayerQueue = _queueSyncService.CurrentPlayerQueue;
-            ApplyQueueSettingsFromCurrentQueue(_queueSyncService.CurrentPlayerQueue);
+            await _playbackService.SetActivePlayerAsync(playerId);
+            CurrentPlayerQueue = _playbackService.CurrentPlayerQueue;
+            ApplyQueueSettingsFromCurrentQueue(_playbackService.CurrentPlayerQueue);
 
             var refreshedPlayer = selectedPlayer ?? await _musicAssistant.GetPlayerAsync(playerId, raiseUnavailable: true);
             if (refreshedPlayer != null)
@@ -1749,7 +1675,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             if (!string.IsNullOrWhiteSpace(previousPlayerId))
             {
                 SetSelectedPlayerSilently(previousPlayerId);
-                _queueSyncService.SetTargetPlayerId(previousPlayerId);
+                await _playbackService.SetActivePlayerAsync(previousPlayerId);
             }
         }
     }
@@ -1762,7 +1688,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             ShuffleEnabled = queue?.ShuffleEnabled;
             RepeatMode = queue?.RepeatMode?.ToString();
             IsDontStopTheMusicEnabled = queue?.DontStopTheMusicEnabled == true;
-            SyncPlayStateFromQueue(queue);
         }
         finally
         {
@@ -1789,24 +1714,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
     }
 
-    private void SyncPlayStateFromQueue(PlayerQueue? queue)
-    {
-        if (queue?.State == null)
-        {
-            return;
-        }
-
-        var mappedState = queue.State.Value switch
-        {
-            mashin.Models.PlaybackState.Playing => PlayerPlaybackState.Playing,
-            mashin.Models.PlaybackState.Paused => PlayerPlaybackState.Paused,
-            mashin.Models.PlaybackState.Buffering => PlayerPlaybackState.Buffering,
-            mashin.Models.PlaybackState.Idle => PlayerPlaybackState.Stopped,
-            _ => PlayerPlaybackState.Unknown
-        };
-
-        PlayState = new PlayerPlayState(mappedState, DateTimeOffset.UtcNow);
-    }
     #endregion
 
     #region Helpers

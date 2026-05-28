@@ -1,33 +1,12 @@
 using mashin.Models;
 using Microsoft.Extensions.Logging;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
 
 namespace mashin.Services;
 
-/// <summary>
-/// Keeps the player queue state in sync for the active client by polling periodically and on-demand,
-/// stores the latest queue/track data as a single source of truth, and publishes targeted queue
-/// change events so view models can apply efficient in-place UI updates.
-/// </summary>
-
-#region Interface and ChangeSet Definitions
-
-public interface IQueueSyncService : IAsyncDisposable
-{
-    event EventHandler? CurrentPlayerQueueUpdated;
-    event EventHandler? CurrentTrackUpdated;
-    event EventHandler<QueueItemsChangedEventArgs>? CurrentQueueItemsUpdated;
-
-    PlayerQueue? CurrentPlayerQueue { get; }
-    Track? CurrentTrack { get; }
-    IReadOnlyList<QueueItem> CurrentQueueItems { get; }
-    string? TargetPlayerId { get; }
-
-    Task StartAsync(CancellationToken cancellationToken = default);
-    Task StopAsync();
-    Task RefreshNowAsync(CancellationToken cancellationToken = default);
-    void SetTargetPlayerId(string? playerId);
-}
+#region ChangeSet Types
 
 public enum QueueItemChangeType
 {
@@ -82,61 +61,145 @@ public sealed class QueueItemsChangedEventArgs : EventArgs
 
 #endregion
 
-public sealed class QueueSyncService : IQueueSyncService
+#region Interface
+
+public interface IPlaybackService : IAsyncDisposable, INotifyPropertyChanged
 {
-    #region Fields
+    event EventHandler? CurrentPlayerQueueUpdated;
+    event EventHandler? CurrentTrackUpdated;
+    event EventHandler<QueueItemsChangedEventArgs>? CurrentQueueItemsUpdated;
+
+    string? ActivePlayerId { get; }
+    string? ActiveQueueId { get; }
+    PlayerPlayState PlaybackState { get; }
+
+    PlayerQueue? CurrentPlayerQueue { get; }
+    Track? CurrentTrack { get; }
+    IReadOnlyList<QueueItem> CurrentQueueItems { get; }
+
+    Task InitializeAsync(CancellationToken cancellationToken = default);
+    Task SetActivePlayerAsync(string? playerId, CancellationToken cancellationToken = default);
+
+    Task StartAsync(CancellationToken cancellationToken = default);
+    Task StopAsync();
+    Task RefreshNowAsync(CancellationToken cancellationToken = default);
+
+    Task TogglePlayPauseAsync(CancellationToken cancellationToken = default);
+    Task NextTrackAsync(CancellationToken cancellationToken = default);
+    Task PreviousTrackAsync(CancellationToken cancellationToken = default);
+    Task SeekAsync(double seconds, double durationSeconds, CancellationToken cancellationToken = default);
+    void BeginSeek();
+    Task SetVolumeAsync(int volume, CancellationToken cancellationToken = default);
+    Task ToggleMuteAsync(bool currentMuted, CancellationToken cancellationToken = default);
+    Task ToggleShuffleAsync(bool? currentShuffleEnabled, CancellationToken cancellationToken = default);
+    Task ToggleRepeatModeAsync(string? currentRepeatMode, CancellationToken cancellationToken = default);
+}
+
+#endregion
+
+public sealed class PlaybackService : IPlaybackService
+{
+#region Fields
 
     private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(15);
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly IUserDataService _userDataService;
-    private readonly IPlayerService _playerService;
-    private readonly ILogger<QueueSyncService> _logger;
+    private readonly ISendspinPlayerService _sendspinPlayerService;
+    private readonly ILogger<PlaybackService> _logger;
 
     private readonly SemaphoreSlim _startStopLock = new(1, 1);
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
 
     private CancellationTokenSource? _loopCts;
     private Task? _loopTask;
+
+    private string? _activePlayerId;
+    private string? _activeQueueId;
+    private PlayerPlayState _playbackState = new(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow);
+    private PlayerQueue? _currentPlayerQueue;
+    private Track? _currentTrack;
     private readonly List<QueueItem> _currentQueueItems = new();
-    private string? _targetPlayerId;
 
-    #endregion
+#endregion
 
-    #region Events
+#region Events
 
+    public event PropertyChangedEventHandler? PropertyChanged;
     public event EventHandler? CurrentPlayerQueueUpdated;
     public event EventHandler? CurrentTrackUpdated;
     public event EventHandler<QueueItemsChangedEventArgs>? CurrentQueueItemsUpdated;
 
-    #endregion
+#endregion
 
-    #region Properties
+#region Properties
 
-    public PlayerQueue? CurrentPlayerQueue { get; private set; }
-    public Track? CurrentTrack { get; private set; }
+    public string? ActivePlayerId
+    {
+        get => _activePlayerId;
+        private set => SetProperty(ref _activePlayerId, NormalizeId(value));
+    }
+
+    public string? ActiveQueueId
+    {
+        get => _activeQueueId;
+        private set => SetProperty(ref _activeQueueId, NormalizeId(value));
+    }
+
+    public PlayerPlayState PlaybackState
+    {
+        get => _playbackState;
+        private set => SetProperty(ref _playbackState, value);
+    }
+
+    public PlayerQueue? CurrentPlayerQueue
+    {
+        get => _currentPlayerQueue;
+        private set => SetProperty(ref _currentPlayerQueue, value);
+    }
+
+    public Track? CurrentTrack
+    {
+        get => _currentTrack;
+        private set => SetProperty(ref _currentTrack, value);
+    }
+
     public IReadOnlyList<QueueItem> CurrentQueueItems => new ReadOnlyCollection<QueueItem>(_currentQueueItems);
-    public string? TargetPlayerId => _targetPlayerId;
 
-    #endregion
+#endregion
 
-    #region Construction
+#region Construction
 
-    public QueueSyncService(
+    public PlaybackService(
         MusicAssistantService musicAssistant,
         IUserDataService userDataService,
-        IPlayerService playerService,
-        ILogger<QueueSyncService> logger)
+        ISendspinPlayerService sendspinPlayerService,
+        ILogger<PlaybackService> logger)
     {
         _musicAssistant = musicAssistant;
         _userDataService = userDataService;
-        _playerService = playerService;
+        _sendspinPlayerService = sendspinPlayerService;
         _logger = logger;
+
+        _sendspinPlayerService.PropertyChanged += OnSendspinPlayerPropertyChanged;
+        PlaybackState = _sendspinPlayerService.PlayState;
     }
 
-    #endregion
+#endregion
 
-    #region Lifecycle
+#region Lifecycle
+
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        var initialPlayerId = ActivePlayerId ?? _sendspinPlayerService.PlayerId;
+        await SetActivePlayerAsync(initialPlayerId, cancellationToken);
+    }
+
+    public async Task SetActivePlayerAsync(string? playerId, CancellationToken cancellationToken = default)
+    {
+        ActivePlayerId = playerId;
+        await RefreshNowAsync(cancellationToken);
+    }
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
@@ -219,18 +282,138 @@ public sealed class QueueSyncService : IQueueSyncService
     public async ValueTask DisposeAsync()
     {
         await StopAsync();
+        _sendspinPlayerService.PropertyChanged -= OnSendspinPlayerPropertyChanged;
         _startStopLock.Dispose();
         _refreshLock.Dispose();
     }
 
-    public void SetTargetPlayerId(string? playerId)
+#endregion
+
+#region Playback Commands
+
+    public async Task TogglePlayPauseAsync(CancellationToken cancellationToken = default)
     {
-        _targetPlayerId = string.IsNullOrWhiteSpace(playerId) ? null : playerId.Trim();
+        if (string.IsNullOrWhiteSpace(ActiveQueueId))
+        {
+            _logger.LogWarning("No active queue available for play/pause");
+            return;
+        }
+
+        await _musicAssistant.PlayPauseAsync(ActiveQueueId);
+        SetState(PlayerPlaybackState.Buffering);
     }
 
-    #endregion
+    public async Task NextTrackAsync(CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(ActiveQueueId))
+        {
+            _logger.LogWarning("No active queue available for next track");
+            return;
+        }
 
-    #region Refresh
+        await _musicAssistant.NextAsync(ActiveQueueId);
+        SetState(PlayerPlaybackState.Buffering);
+    }
+
+    public async Task PreviousTrackAsync(CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(ActiveQueueId))
+        {
+            _logger.LogWarning("No active queue available for previous track");
+            return;
+        }
+
+        await _musicAssistant.PreviousAsync(ActiveQueueId);
+        SetState(PlayerPlaybackState.Buffering);
+    }
+
+    public async Task SeekAsync(double seconds, double durationSeconds, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(ActiveQueueId))
+        {
+            _logger.LogWarning("No active queue available for seek");
+            return;
+        }
+
+        BeginSeek();
+
+        try
+        {
+            var clamped = Math.Max(0, Math.Min(durationSeconds, seconds));
+            if (IsLocalTarget())
+            {
+                _sendspinPlayerService.PositionSeconds = clamped;
+            }
+
+            await _musicAssistant.SeekAsync(ActiveQueueId, (int)Math.Round(clamped));
+        }
+        finally
+        {
+            SetState(PlayerPlaybackState.Playing);
+        }
+    }
+
+    public void BeginSeek()
+    {
+        SetState(PlayerPlaybackState.Seeking);
+
+        if (IsLocalTarget())
+        {
+            _sendspinPlayerService.PlayState = PlaybackState;
+        }
+    }
+
+    public async Task SetVolumeAsync(int volume, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(ActivePlayerId))
+        {
+            _logger.LogWarning("No active player available for volume update");
+            return;
+        }
+
+        var clamped = Math.Clamp(volume, 0, 100);
+        await _musicAssistant.SetPlayerVolumeAsync(ActivePlayerId, clamped);
+    }
+
+    public async Task ToggleMuteAsync(bool currentMuted, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(ActivePlayerId))
+        {
+            _logger.LogWarning("No active player available for mute toggle");
+            return;
+        }
+
+        await _musicAssistant.SetPlayerMuteAsync(ActivePlayerId, !currentMuted);
+    }
+
+    public async Task ToggleShuffleAsync(bool? currentShuffleEnabled, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(ActiveQueueId))
+        {
+            _logger.LogWarning("No active queue available for shuffle toggle");
+            return;
+        }
+
+        var nextShuffleEnabled = !(currentShuffleEnabled ?? false);
+        await _musicAssistant.SetShuffleAsync(ActiveQueueId, nextShuffleEnabled);
+        await RefreshNowAsync(cancellationToken);
+    }
+
+    public async Task ToggleRepeatModeAsync(string? currentRepeatMode, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(ActiveQueueId))
+        {
+            _logger.LogWarning("No active queue available for repeat toggle");
+            return;
+        }
+
+        var nextRepeatMode = GetNextRepeatMode(currentRepeatMode);
+        await _musicAssistant.SetRepeatAsync(ActiveQueueId, nextRepeatMode);
+    }
+
+#endregion
+
+#region Refresh
 
     private async Task RunLoopAsync(CancellationToken cancellationToken)
     {
@@ -248,21 +431,26 @@ public sealed class QueueSyncService : IQueueSyncService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Queue sync refresh loop failed");
+                _logger.LogWarning(ex, "Playback refresh loop failed");
             }
         }
     }
 
     private async Task RefreshStateCoreAsync(CancellationToken cancellationToken)
     {
-        var activePlayerId = !string.IsNullOrWhiteSpace(_targetPlayerId)
-            ? _targetPlayerId
-            : _playerService.PlayerId;
+        var activePlayerId = !string.IsNullOrWhiteSpace(ActivePlayerId)
+            ? ActivePlayerId
+            : _sendspinPlayerService.PlayerId;
 
         if (string.IsNullOrWhiteSpace(activePlayerId))
         {
             UpdateState(null, null, Array.Empty<QueueItem>());
             return;
+        }
+
+        if (!string.Equals(activePlayerId, ActivePlayerId, StringComparison.Ordinal))
+        {
+            ActivePlayerId = activePlayerId;
         }
 
         try
@@ -274,7 +462,6 @@ public sealed class QueueSyncService : IQueueSyncService
                 .ToHashSet(StringComparer.OrdinalIgnoreCase)
                 ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            // Get active queue for player
             var activeQueue = await _musicAssistant.GetActiveQueueForPlayerAsync(activePlayerId);
             if (activeQueue == null)
             {
@@ -282,7 +469,6 @@ public sealed class QueueSyncService : IQueueSyncService
                 return;
             }
 
-            // Set current track 
             Track? currentTrack = activeQueue.CurrentItem?.MediaItem;
             if (currentTrack != null)
             {
@@ -290,7 +476,6 @@ public sealed class QueueSyncService : IQueueSyncService
                     && favoriteTrackUris.Contains(currentTrack.Uri);
             }
 
-            // Get queue tracks
             var queueItems = new List<QueueItem>();
             if (!string.IsNullOrWhiteSpace(activeQueue.QueueId))
             {
@@ -310,7 +495,6 @@ public sealed class QueueSyncService : IQueueSyncService
                 }
             }
 
-            // Set current track to first in queue if no active track
             var firstQueueTrack = queueItems.Select(item => item.MediaItem).OfType<Track>().FirstOrDefault();
             if (currentTrack == null && firstQueueTrack != null)
             {
@@ -318,19 +502,17 @@ public sealed class QueueSyncService : IQueueSyncService
             }
 
             UpdateState(activeQueue, currentTrack, queueItems);
-            return;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to refresh queue state");
+            _logger.LogWarning(ex, "Failed to refresh playback state");
             UpdateState(null, null, Array.Empty<QueueItem>());
-            return;
         }
     }
 
-    #endregion
+#endregion
 
-   #region State Update
+#region State Update
 
     private void UpdateState(PlayerQueue? nextQueue, Track? nextTrack, IReadOnlyList<QueueItem> nextQueueItems)
     {
@@ -341,6 +523,8 @@ public sealed class QueueSyncService : IQueueSyncService
         if (queueChanged)
         {
             CurrentPlayerQueue = nextQueue;
+            ActiveQueueId = nextQueue?.QueueId;
+            SyncPlaybackStateFromQueue(nextQueue);
             CurrentPlayerQueueUpdated?.Invoke(this, EventArgs.Empty);
         }
 
@@ -359,9 +543,26 @@ public sealed class QueueSyncService : IQueueSyncService
         }
     }
 
-    #endregion
+#endregion
 
-    #region ChangeSet Builder
+#region Event Handlers
+
+    private void OnSendspinPlayerPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (!IsLocalTarget())
+        {
+            return;
+        }
+
+        if (e.PropertyName == nameof(ISendspinPlayerService.PlayState))
+        {
+            SetState(_sendspinPlayerService.PlayState.State);
+        }
+    }
+
+#endregion
+
+#region ChangeSet Builder
 
     private static QueueItemsChangeSet BuildQueueItemsChangeSet(IReadOnlyList<QueueItem> previous, IReadOnlyList<QueueItem> next)
     {
@@ -452,9 +653,40 @@ public sealed class QueueSyncService : IQueueSyncService
         return entries;
     }
 
-    #endregion
+#endregion
 
-    #region State Comparison Helper
+#region Helpers
+
+    private void SyncPlaybackStateFromQueue(PlayerQueue? queue)
+    {
+        if (queue?.State == null)
+        {
+            return;
+        }
+
+        var mappedState = queue.State.Value switch
+        {
+            mashin.Models.PlaybackState.Playing => PlayerPlaybackState.Playing,
+            mashin.Models.PlaybackState.Paused => PlayerPlaybackState.Paused,
+            mashin.Models.PlaybackState.Buffering => PlayerPlaybackState.Buffering,
+            mashin.Models.PlaybackState.Idle => PlayerPlaybackState.Stopped,
+            _ => PlayerPlaybackState.Unknown
+        };
+
+        SetState(mappedState);
+    }
+
+    private void SetState(PlayerPlaybackState state)
+    {
+        PlaybackState = new PlayerPlayState(state, DateTimeOffset.UtcNow);
+    }
+
+    private bool IsLocalTarget()
+    {
+        return !string.IsNullOrWhiteSpace(ActivePlayerId)
+            && !string.IsNullOrWhiteSpace(_sendspinPlayerService.PlayerId)
+            && string.Equals(ActivePlayerId, _sendspinPlayerService.PlayerId, StringComparison.Ordinal);
+    }
 
     private static bool ArePlayerQueuesEqual(PlayerQueue? left, PlayerQueue? right)
     {
@@ -536,5 +768,40 @@ public sealed class QueueSyncService : IQueueSyncService
         return string.Empty;
     }
 
-    #endregion
+    private static string? NormalizeId(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static RepeatMode GetNextRepeatMode(string? repeatMode)
+    {
+        var currentMode = repeatMode?.Trim().ToLowerInvariant() switch
+        {
+            "all" => RepeatMode.All,
+            "one" => RepeatMode.One,
+            _ => RepeatMode.Off
+        };
+
+        return currentMode switch
+        {
+            RepeatMode.Off => RepeatMode.All,
+            RepeatMode.All => RepeatMode.One,
+            RepeatMode.One => RepeatMode.Off,
+            _ => RepeatMode.Off
+        };
+    }
+
+    private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string propertyName = "")
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value))
+        {
+            return false;
+        }
+
+        field = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        return true;
+    }
+
+#endregion
 }

@@ -42,9 +42,9 @@ public class MediaItemActions : IMediaItemActions
     #region Fields
 
     private readonly MusicAssistantService _musicAssistant;
-    private readonly IPlayerService _playerService;
+    private readonly ISendspinPlayerService _sendspinPlayerService;
     private readonly IUserDataService _userDataService;
-    private readonly IQueueSyncService _queueSyncService;
+    private readonly IPlaybackService _playbackService;
     private readonly ILogger<MediaItemActions> _logger;
 
     #endregion
@@ -53,15 +53,15 @@ public class MediaItemActions : IMediaItemActions
 
     public MediaItemActions(
         MusicAssistantService musicAssistant,
-        IPlayerService playerService,
+        ISendspinPlayerService playerService,
         IUserDataService userDataService,
-        IQueueSyncService queueSyncService,
+        IPlaybackService playbackService,
         ILogger<MediaItemActions> logger)
     {
         _musicAssistant = musicAssistant;
-        _playerService = playerService;
+        _sendspinPlayerService = playerService;
         _userDataService = userDataService;
-        _queueSyncService = queueSyncService;
+        _playbackService = playbackService;
         _logger = logger;
     }
 
@@ -81,7 +81,7 @@ public class MediaItemActions : IMediaItemActions
             return;
         }
 
-        var activePlayerId = _queueSyncService.TargetPlayerId;
+        var activePlayerId = _playbackService.ActivePlayerId;
         if (string.IsNullOrWhiteSpace(activePlayerId))
         {
             _logger.LogWarning("No active player available. Player connection is missing.");
@@ -89,7 +89,7 @@ public class MediaItemActions : IMediaItemActions
         }
 
         _logger.LogInformation("Playing {Count} item(s)", mediaItems.Count);
-        _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+        _sendspinPlayerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
 
         try
         {
@@ -98,7 +98,8 @@ public class MediaItemActions : IMediaItemActions
                 mediaItems,
                 QueueOption.Replace,
                 startItem: startItem);
-            await _queueSyncService.RefreshNowAsync();
+            await _playbackService.RefreshNowAsync();
+                    await _playbackService.RefreshNowAsync();
         }
         catch (Exception ex)
         {
@@ -118,7 +119,8 @@ public class MediaItemActions : IMediaItemActions
             return;
         }
 
-        var activePlayerId = _queueSyncService.TargetPlayerId;
+        var activePlayerId = _playbackService.ActivePlayerId;
+                    await _playbackService.RefreshNowAsync();
         if (string.IsNullOrWhiteSpace(activePlayerId))
         {
             _logger.LogWarning("No active player available. Player connection is missing.");
@@ -134,7 +136,7 @@ public class MediaItemActions : IMediaItemActions
                 mediaItems,
                 QueueOption.Next,
                 startItem: startItem);
-            await _queueSyncService.RefreshNowAsync();
+            await _playbackService.RefreshNowAsync();
         }
         catch (Exception ex)
         {
@@ -154,7 +156,8 @@ public class MediaItemActions : IMediaItemActions
             return;
         }
 
-        var activePlayerId = _queueSyncService.TargetPlayerId;
+        var activePlayerId = _playbackService.ActivePlayerId;
+                    await _playbackService.RefreshNowAsync();
         if (string.IsNullOrWhiteSpace(activePlayerId))
         {
             _logger.LogWarning("No active player available. Player connection is missing.");
@@ -170,7 +173,7 @@ public class MediaItemActions : IMediaItemActions
                 mediaItems,
                 QueueOption.Add,
                 startItem: startItem);
-            await _queueSyncService.RefreshNowAsync();
+            await _playbackService.RefreshNowAsync();
         }
         catch (Exception ex)
         {
@@ -392,7 +395,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.ClearQueueAsync(queueId, skipStop);
-            await _queueSyncService.RefreshNowAsync();
+            await _playbackService.RefreshNowAsync();
         }
         catch (Exception ex)
         {
@@ -413,9 +416,9 @@ public class MediaItemActions : IMediaItemActions
 
         try
         {
-            _playerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+            _sendspinPlayerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
             await _musicAssistant.PlayIndexAsync(queueId, index);
-            await _queueSyncService.RefreshNowAsync();
+            await _playbackService.RefreshNowAsync();
         }
         catch (Exception ex)
         {
@@ -443,7 +446,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.DeleteQueueItemAsync(queueId, itemIndex);
-            await _queueSyncService.RefreshNowAsync();
+            await _playbackService.RefreshNowAsync();
         }
         catch (Exception ex)
         {
@@ -471,7 +474,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.DeleteQueueItemAsync(queueId, itemId);
-            await _queueSyncService.RefreshNowAsync();
+            await _playbackService.RefreshNowAsync();
         }
         catch (Exception ex)
         {
@@ -499,7 +502,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.MoveQueueItemAsync(queueId, queueItemId, posShift);
-            await _queueSyncService.RefreshNowAsync();
+            await _playbackService.RefreshNowAsync();
         }
         catch (Exception ex)
         {
@@ -521,7 +524,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.SetDontStopTheMusicAsync(queueId, dontStopTheMusicEnabled);
-            await _queueSyncService.RefreshNowAsync();
+            await _playbackService.RefreshNowAsync();
         }
         catch (Exception ex)
         {

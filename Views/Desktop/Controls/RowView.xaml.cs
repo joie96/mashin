@@ -83,7 +83,7 @@ public partial class RowView : ContentView
     private List<object> _allItems = new();
     private INotifyCollectionChanged? _itemsSourceCollection;
     private IKeyboardService? _keyboardService;
-    private IQueueSyncService? _queueSyncService;
+    private IPlaybackService? _playbackService;
     private int? _anchorIndex;
     private bool _isCheckboxClick;
     private int _pageIndex;
@@ -334,7 +334,7 @@ public partial class RowView : ContentView
 
     private void AttachPlaybackStateSource()
     {
-        if (_queueSyncService != null)
+        if (_playbackService != null)
         {
             return;
         }
@@ -346,31 +346,31 @@ public partial class RowView : ContentView
             return;
         }
 
-        _queueSyncService = mauiContext.Services.GetService<IQueueSyncService>();
-        if (_queueSyncService == null)
+        _playbackService = mauiContext.Services.GetService<IPlaybackService>();
+        if (_playbackService == null)
         {
             return;
         }
 
-        _queueSyncService.CurrentTrackUpdated += OnCurrentTrackUpdated;
-        SetCurrentTrackUri(_queueSyncService.CurrentTrack?.Uri);
+        _playbackService.CurrentTrackUpdated += OnCurrentTrackUpdated;
+        SetCurrentTrackUri(_playbackService.CurrentTrack?.Uri);
     }
 
     private void DetachPlaybackStateSource()
     {
-        if (_queueSyncService == null)
+        if (_playbackService == null)
         {
             return;
         }
 
-        _queueSyncService.CurrentTrackUpdated -= OnCurrentTrackUpdated;
-        _queueSyncService = null;
+        _playbackService.CurrentTrackUpdated -= OnCurrentTrackUpdated;
+        _playbackService = null;
         SetCurrentTrackUri(null);
     }
 
     private void OnCurrentTrackUpdated(object? sender, EventArgs e)
     {
-        var currentTrackUri = _queueSyncService?.CurrentTrack?.Uri;
+        var currentTrackUri = _playbackService?.CurrentTrack?.Uri;
 
         if (MainThread.IsMainThread)
         {
