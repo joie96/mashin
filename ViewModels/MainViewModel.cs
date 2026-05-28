@@ -832,8 +832,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 activePlayerId,
                 new List<MediaItem> { playlist },
                 QueueOption.Play);
-
-            _sendspinPlayerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
         }
         catch (Exception ex)
         {

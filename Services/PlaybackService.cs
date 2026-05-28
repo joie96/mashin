@@ -71,7 +71,7 @@ public interface IPlaybackService : IAsyncDisposable, INotifyPropertyChanged
 
     string? ActivePlayerId { get; }
     string? ActiveQueueId { get; }
-    PlayerPlayState PlaybackState { get; }
+    PlayerPlayState PlaybackState { get; set; }
 
     PlayerQueue? CurrentPlayerQueue { get; }
     Track? CurrentTrack { get; }
@@ -101,7 +101,10 @@ public sealed class PlaybackService : IPlaybackService
 {
 #region Fields
 
-    private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan QueueRefreshInterval = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan BufferingResolveMaxDuration = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan BufferingResolveLocalInterval = TimeSpan.FromMilliseconds(140);
+    private static readonly TimeSpan BufferingResolveRemoteInterval = TimeSpan.FromMilliseconds(380);
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly IUserDataService _userDataService;
@@ -110,9 +113,12 @@ public sealed class PlaybackService : IPlaybackService
 
     private readonly SemaphoreSlim _startStopLock = new(1, 1);
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
+    private readonly SemaphoreSlim _bufferingResolveLock = new(1, 1);
 
     private CancellationTokenSource? _loopCts;
     private Task? _loopTask;
+    private CancellationTokenSource? _bufferingResolveCts;
+    private Task? _bufferingResolveTask;
 
     private string? _activePlayerId;
     private string? _activeQueueId;
@@ -149,7 +155,26 @@ public sealed class PlaybackService : IPlaybackService
     public PlayerPlayState PlaybackState
     {
         get => _playbackState;
-        private set => SetProperty(ref _playbackState, value);
+        set
+        {
+            var normalizedTimestamp = value.TimestampUtc == default
+                ? DateTimeOffset.UtcNow
+                : value.TimestampUtc;
+            var normalizedValue = value with { TimestampUtc = normalizedTimestamp };
+
+            if (!SetProperty(ref _playbackState, normalizedValue))
+            {
+                return;
+            }
+
+            if (normalizedValue.State == PlayerPlaybackState.Buffering)
+            {
+                TriggerBufferingResolution();
+                return;
+            }
+
+            _ = StopBufferingResolutionLoopAsync();
+        }
     }
 
     public PlayerQueue? CurrentPlayerQueue
@@ -224,6 +249,7 @@ public sealed class PlaybackService : IPlaybackService
 
     public async Task StopAsync()
     {
+        await StopBufferingResolutionLoopAsync();
         await _startStopLock.WaitAsync();
 
         CancellationTokenSource? ctsToCancel = null;
@@ -285,6 +311,7 @@ public sealed class PlaybackService : IPlaybackService
         _sendspinPlayerService.PropertyChanged -= OnSendspinPlayerPropertyChanged;
         _startStopLock.Dispose();
         _refreshLock.Dispose();
+        _bufferingResolveLock.Dispose();
     }
 
 #endregion
@@ -300,7 +327,7 @@ public sealed class PlaybackService : IPlaybackService
         }
 
         await _musicAssistant.PlayPauseAsync(ActiveQueueId);
-        SetState(PlayerPlaybackState.Buffering);
+        PlaybackState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
     }
 
     public async Task NextTrackAsync(CancellationToken cancellationToken = default)
@@ -312,7 +339,7 @@ public sealed class PlaybackService : IPlaybackService
         }
 
         await _musicAssistant.NextAsync(ActiveQueueId);
-        SetState(PlayerPlaybackState.Buffering);
+        PlaybackState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
     }
 
     public async Task PreviousTrackAsync(CancellationToken cancellationToken = default)
@@ -324,7 +351,7 @@ public sealed class PlaybackService : IPlaybackService
         }
 
         await _musicAssistant.PreviousAsync(ActiveQueueId);
-        SetState(PlayerPlaybackState.Buffering);
+        PlaybackState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
     }
 
     public async Task SeekAsync(double seconds, double durationSeconds, CancellationToken cancellationToken = default)
@@ -349,18 +376,13 @@ public sealed class PlaybackService : IPlaybackService
         }
         finally
         {
-            SetState(PlayerPlaybackState.Playing);
+            PlaybackState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
         }
     }
 
     public void BeginSeek()
     {
         SetState(PlayerPlaybackState.Seeking);
-
-        if (IsLocalTarget())
-        {
-            _sendspinPlayerService.PlayState = PlaybackState;
-        }
     }
 
     public async Task SetVolumeAsync(int volume, CancellationToken cancellationToken = default)
@@ -415,9 +437,158 @@ public sealed class PlaybackService : IPlaybackService
 
 #region Refresh
 
+#region Buffering Resolve
+
+    private void TriggerBufferingResolution()
+    {
+        _ = RestartBufferingResolutionLoopAsync();
+    }
+
+    private async Task RestartBufferingResolutionLoopAsync()
+    {
+        await _bufferingResolveLock.WaitAsync();
+        try
+        {
+            if (PlaybackState.State != PlayerPlaybackState.Buffering)
+            {
+                return;
+            }
+
+            var previousCts = _bufferingResolveCts;
+            var previousTask = _bufferingResolveTask;
+
+            _bufferingResolveCts = new CancellationTokenSource();
+            _bufferingResolveTask = RunBufferingResolutionLoopAsync(_bufferingResolveCts.Token);
+
+            if (previousCts != null)
+            {
+                try
+                {
+                    await previousCts.CancelAsync();
+                    if (previousTask != null)
+                    {
+                        await previousTask;
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    // Expected when switching buffering resolve loops.
+                }
+                finally
+                {
+                    previousCts.Dispose();
+                }
+            }
+        }
+        finally
+        {
+            _bufferingResolveLock.Release();
+        }
+    }
+
+    private async Task StopBufferingResolutionLoopAsync()
+    {
+        await _bufferingResolveLock.WaitAsync();
+        try
+        {
+            var cts = _bufferingResolveCts;
+            var task = _bufferingResolveTask;
+
+            _bufferingResolveCts = null;
+            _bufferingResolveTask = null;
+
+            if (cts == null)
+            {
+                return;
+            }
+
+            try
+            {
+                await cts.CancelAsync();
+                if (task != null)
+                {
+                    await task;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected while stopping.
+            }
+            finally
+            {
+                cts.Dispose();
+            }
+        }
+        finally
+        {
+            _bufferingResolveLock.Release();
+        }
+    }
+
+    private async Task RunBufferingResolutionLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var startUtc = DateTimeOffset.UtcNow;
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                if (PlaybackState.State != PlayerPlaybackState.Buffering)
+                {
+                    return;
+                }
+
+                if (IsLocalTarget())
+                {
+                    var localState = _sendspinPlayerService.PlayState.State;
+                    if (localState != PlayerPlaybackState.Buffering && localState != PlayerPlaybackState.Unknown)
+                    {
+                        SetState(localState);
+                        return;
+                    }
+
+                    await Task.Delay(BufferingResolveLocalInterval, cancellationToken);
+                }
+                else
+                {
+                    await RefreshNowSafeAsync(cancellationToken);
+                    await Task.Delay(BufferingResolveRemoteInterval, cancellationToken);
+                }
+
+                if (DateTimeOffset.UtcNow - startUtc >= BufferingResolveMaxDuration)
+                {
+                    await RefreshNowSafeAsync(cancellationToken);
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when a new buffering phase starts or service is stopped.
+        }
+    }
+
+    private async Task RefreshNowSafeAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await RefreshNowAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Fast buffering refresh failed");
+        }
+    }
+
+#endregion
+
     private async Task RunLoopAsync(CancellationToken cancellationToken)
     {
-        using var timer = new PeriodicTimer(RefreshInterval);
+        using var timer = new PeriodicTimer(QueueRefreshInterval);
 
         while (await timer.WaitForNextTickAsync(cancellationToken))
         {
@@ -435,6 +606,10 @@ public sealed class PlaybackService : IPlaybackService
             }
         }
     }
+
+    #endregion
+
+    #region Queue Refresh
 
     private async Task RefreshStateCoreAsync(CancellationToken cancellationToken)
     {
@@ -512,7 +687,7 @@ public sealed class PlaybackService : IPlaybackService
 
 #endregion
 
-#region State Update
+#region Queue State Update
 
     private void UpdateState(PlayerQueue? nextQueue, Track? nextTrack, IReadOnlyList<QueueItem> nextQueueItems)
     {
@@ -556,13 +731,19 @@ public sealed class PlaybackService : IPlaybackService
 
         if (e.PropertyName == nameof(ISendspinPlayerService.PlayState))
         {
-            SetState(_sendspinPlayerService.PlayState.State);
+            var localState = _sendspinPlayerService.PlayState.State;
+            SetState(localState);
+
+            if (localState != PlayerPlaybackState.Buffering)
+            {
+                _ = StopBufferingResolutionLoopAsync();
+            }
         }
     }
 
 #endregion
 
-#region ChangeSet Builder
+#region ChangeSet Builder for Queue Items
 
     private static QueueItemsChangeSet BuildQueueItemsChangeSet(IReadOnlyList<QueueItem> previous, IReadOnlyList<QueueItem> next)
     {
@@ -674,6 +855,11 @@ public sealed class PlaybackService : IPlaybackService
         };
 
         SetState(mappedState);
+
+        if (mappedState != PlayerPlaybackState.Buffering)
+        {
+            _ = StopBufferingResolutionLoopAsync();
+        }
     }
 
     private void SetState(PlayerPlaybackState state)

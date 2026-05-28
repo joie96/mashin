@@ -162,7 +162,7 @@ public sealed class PlaybackNotificationService : Service
                 _isForeground = false;
             }
 
-            StopSelf();
+            _notificationManager?.Cancel(NotificationId);
             return;
         }
 

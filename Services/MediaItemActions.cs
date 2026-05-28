@@ -42,7 +42,6 @@ public class MediaItemActions : IMediaItemActions
     #region Fields
 
     private readonly MusicAssistantService _musicAssistant;
-    private readonly ISendspinPlayerService _sendspinPlayerService;
     private readonly IUserDataService _userDataService;
     private readonly IPlaybackService _playbackService;
     private readonly ILogger<MediaItemActions> _logger;
@@ -53,13 +52,11 @@ public class MediaItemActions : IMediaItemActions
 
     public MediaItemActions(
         MusicAssistantService musicAssistant,
-        ISendspinPlayerService playerService,
         IUserDataService userDataService,
         IPlaybackService playbackService,
         ILogger<MediaItemActions> logger)
     {
         _musicAssistant = musicAssistant;
-        _sendspinPlayerService = playerService;
         _userDataService = userDataService;
         _playbackService = playbackService;
         _logger = logger;
@@ -89,7 +86,7 @@ public class MediaItemActions : IMediaItemActions
         }
 
         _logger.LogInformation("Playing {Count} item(s)", mediaItems.Count);
-        _sendspinPlayerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+        _playbackService.PlaybackState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
 
         try
         {
@@ -99,7 +96,6 @@ public class MediaItemActions : IMediaItemActions
                 QueueOption.Replace,
                 startItem: startItem);
             await _playbackService.RefreshNowAsync();
-                    await _playbackService.RefreshNowAsync();
         }
         catch (Exception ex)
         {
@@ -120,7 +116,6 @@ public class MediaItemActions : IMediaItemActions
         }
 
         var activePlayerId = _playbackService.ActivePlayerId;
-                    await _playbackService.RefreshNowAsync();
         if (string.IsNullOrWhiteSpace(activePlayerId))
         {
             _logger.LogWarning("No active player available. Player connection is missing.");
@@ -157,7 +152,6 @@ public class MediaItemActions : IMediaItemActions
         }
 
         var activePlayerId = _playbackService.ActivePlayerId;
-                    await _playbackService.RefreshNowAsync();
         if (string.IsNullOrWhiteSpace(activePlayerId))
         {
             _logger.LogWarning("No active player available. Player connection is missing.");
@@ -416,7 +410,7 @@ public class MediaItemActions : IMediaItemActions
 
         try
         {
-            _sendspinPlayerService.PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+            _playbackService.PlaybackState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
             await _musicAssistant.PlayIndexAsync(queueId, index);
             await _playbackService.RefreshNowAsync();
         }
