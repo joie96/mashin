@@ -1,6 +1,7 @@
 using Android;
 using Android.App;
 using Android.Content;
+using Android.Graphics;
 using Android.Media;
 using Android.Media.Session;
 using Android.OS;
@@ -9,17 +10,24 @@ using mashin.Services;
 using Microsoft.Maui;
 using Microsoft.Extensions.DependencyInjection;
 using System.ComponentModel;
+using System.Net.Http;
 using SessionPlaybackState = Android.Media.Session.PlaybackState;
 using SessionPlaybackStateCode = Android.Media.Session.PlaybackStateCode;
 
 namespace mashin;
 
-[Service(Enabled = true, Exported = false)]
+[Service(
+    Enabled = true,
+    Exported = false,
+    ForegroundServiceType = Android.Content.PM.ForegroundService.TypeMediaPlayback)]
 public sealed class PlaybackNotificationService : Service
 {
+#region Constants
+
     private const string ChannelId = "mashin.playback";
     private const int NotificationId = 4201;
     private const PendingIntentFlags ImmutableCompatFlag = (PendingIntentFlags)0x04000000;
+    private static readonly HttpClient ArtworkHttpClient = new();
 
     public const string ActionStartOrUpdate = "mashin.action.START_OR_UPDATE";
     public const string ActionPlayPause = "mashin.action.PLAY_PAUSE";
@@ -27,10 +35,20 @@ public sealed class PlaybackNotificationService : Service
     public const string ActionPrevious = "mashin.action.PREVIOUS";
     public const string ActionStop = "mashin.action.STOP";
 
+#endregion
+
+#region Fields
+
     private IPlaybackService? _playbackService;
     private MediaSession? _mediaSession;
     private NotificationManager? _notificationManager;
     private bool _isForeground;
+    private string? _lastArtworkUri;
+    private Bitmap? _lastArtworkBitmap;
+
+#endregion
+
+#region Lifecycle
 
     public override void OnCreate()
     {
@@ -71,8 +89,16 @@ public sealed class PlaybackNotificationService : Service
             _mediaSession = null;
         }
 
+        _lastArtworkBitmap?.Dispose();
+        _lastArtworkBitmap = null;
+        _lastArtworkUri = null;
+
         base.OnDestroy();
     }
+
+#endregion
+
+#region Intents And Events
 
     private async Task HandleIntentAsync(Intent? intent)
     {
@@ -113,12 +139,12 @@ public sealed class PlaybackNotificationService : Service
             // Keep service alive even if remote command fails.
         }
 
-        UpdateNotification();
+        await UpdateNotificationAsync();
     }
 
     private void OnPlaybackSourceChanged(object? sender, EventArgs e)
     {
-        UpdateNotification();
+        _ = UpdateNotificationAsync();
     }
 
     private void OnPlaybackPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -127,60 +153,81 @@ public sealed class PlaybackNotificationService : Service
             || e.PropertyName == nameof(IPlaybackService.CurrentTrack)
             || e.PropertyName == nameof(IPlaybackService.CurrentPlayerQueue))
         {
-            UpdateNotification();
+            _ = UpdateNotificationAsync();
         }
     }
 
-    private void UpdateNotification()
+#endregion
+
+#region Notification
+
+    private async Task UpdateNotificationAsync()
     {
-        TryAttachPlaybackService();
-        var playback = _playbackService;
-        if (playback == null)
+        try
         {
-            return;
-        }
-
-        var track = playback.CurrentTrack;
-        var state = playback.PlaybackState.State;
-        var hasTrack = track != null;
-
-        var shouldShow = hasTrack || state is PlayerPlaybackState.Playing or PlayerPlaybackState.Buffering or PlayerPlaybackState.Paused or PlayerPlaybackState.Seeking;
-
-        if (!shouldShow)
-        {
-            if (_isForeground)
+            TryAttachPlaybackService();
+            var playback = _playbackService;
+            if (playback == null)
             {
-                if (OperatingSystem.IsAndroidVersionAtLeast(24))
+                return;
+            }
+
+            var track = playback.CurrentTrack;
+            var state = playback.PlaybackState.State;
+            var hasTrack = track != null;
+
+            var shouldShow = hasTrack || state is PlayerPlaybackState.Playing or PlayerPlaybackState.Buffering or PlayerPlaybackState.Paused or PlayerPlaybackState.Seeking;
+
+            if (!shouldShow)
+            {
+                if (_isForeground)
                 {
-                    StopForeground(StopForegroundFlags.Remove);
+                    if (OperatingSystem.IsAndroidVersionAtLeast(24))
+                    {
+                        StopForeground(StopForegroundFlags.Remove);
+                    }
+                    else
+                    {
+                        StopForeground(true);
+                    }
+
+                    _isForeground = false;
+                }
+
+                _notificationManager?.Cancel(NotificationId);
+                return;
+            }
+
+            var artwork = await TryGetArtworkBitmapAsync(track?.ImageUri);
+            UpdateMediaSession(track, state, artwork);
+
+            var notification = BuildNotification(track, state, artwork);
+            if (!_isForeground)
+            {
+                if (OperatingSystem.IsAndroidVersionAtLeast(29))
+                {
+                    StartForeground(NotificationId, notification, Android.Content.PM.ForegroundService.TypeMediaPlayback);
                 }
                 else
                 {
-                    StopForeground(true);
+                    StartForeground(NotificationId, notification);
                 }
 
-                _isForeground = false;
+                _isForeground = true;
+                return;
             }
 
-            _notificationManager?.Cancel(NotificationId);
-            return;
+            _notificationManager?.Notify(NotificationId, notification);
         }
-
-        UpdateMediaSession(track, state);
-
-        var notification = BuildNotification(track, state);
-        if (!_isForeground)
+        catch
         {
-            StartForeground(NotificationId, notification);
-            _isForeground = true;
-            return;
+            // Avoid crashing notification service due to transient artwork/network/platform issues.
         }
-
-        _notificationManager?.Notify(NotificationId, notification);
     }
 
+    // Builds the visible media notification with title, artist, album and optional artwork.
     #pragma warning disable CA1422
-    private Notification BuildNotification(Track? track, PlayerPlaybackState state)
+    private Notification BuildNotification(Track? track, PlayerPlaybackState state, Bitmap? artwork)
     {
         var immutableFlag = Build.VERSION.SdkInt >= BuildVersionCodes.M
             ? ImmutableCompatFlag
@@ -221,6 +268,10 @@ public sealed class PlaybackNotificationService : Service
         builder.SetContentIntent(contentIntent);
         builder.SetDeleteIntent(stopIntent);
         builder.SetOngoing(isPlaying);
+        if (artwork != null)
+        {
+            builder.SetLargeIcon(artwork);
+        }
 
 #pragma warning disable CS0618
 #pragma warning disable CA1422
@@ -244,7 +295,12 @@ public sealed class PlaybackNotificationService : Service
     }
     #pragma warning restore CA1422
 
-    private void UpdateMediaSession(Track? track, PlayerPlaybackState state)
+#endregion
+
+#region Media Session
+
+    // Mirrors current playback metadata/state to the Android media session.
+    private void UpdateMediaSession(Track? track, PlayerPlaybackState state, Bitmap? artwork)
     {
         var mediaSession = _mediaSession;
         if (mediaSession == null)
@@ -267,6 +323,11 @@ public sealed class PlaybackNotificationService : Service
         metadataBuilder.PutString(MediaMetadata.MetadataKeyTitle, track?.Name ?? string.Empty);
         metadataBuilder.PutString(MediaMetadata.MetadataKeyArtist, track?.ArtistName ?? string.Empty);
         metadataBuilder.PutString(MediaMetadata.MetadataKeyAlbum, track?.AlbumName ?? string.Empty);
+        if (artwork != null)
+        {
+            metadataBuilder.PutBitmap(MediaMetadata.MetadataKeyAlbumArt, artwork);
+            metadataBuilder.PutBitmap(MediaMetadata.MetadataKeyDisplayIcon, artwork);
+        }
 
         mediaSession.SetPlaybackState(playbackState!);
         mediaSession.SetMetadata(metadataBuilder.Build()!);
@@ -284,6 +345,10 @@ public sealed class PlaybackNotificationService : Service
             _ => SessionPlaybackStateCode.None
         };
     }
+
+#endregion
+
+#region Helpers
 
     private PendingIntent CreateActionIntent(string action, int requestCode)
     {
@@ -349,6 +414,43 @@ public sealed class PlaybackNotificationService : Service
         _playbackService.PropertyChanged += OnPlaybackPropertyChanged;
     }
 
+    // Caches the last artwork bitmap to avoid repeated downloads for the same track image.
+    private async Task<Bitmap?> TryGetArtworkBitmapAsync(string? imageUri)
+    {
+        if (string.IsNullOrWhiteSpace(imageUri) || !Uri.TryCreate(imageUri, UriKind.Absolute, out var uri))
+        {
+            return null;
+        }
+
+        if (string.Equals(_lastArtworkUri, imageUri, StringComparison.Ordinal) && _lastArtworkBitmap != null)
+        {
+            return _lastArtworkBitmap;
+        }
+
+        try
+        {
+            var bytes = await ArtworkHttpClient.GetByteArrayAsync(uri);
+            var bitmap = BitmapFactory.DecodeByteArray(bytes, 0, bytes.Length);
+            if (bitmap == null)
+            {
+                return null;
+            }
+
+            _lastArtworkBitmap?.Dispose();
+            _lastArtworkBitmap = bitmap;
+            _lastArtworkUri = imageUri;
+            return bitmap;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+#endregion
+
+#region Nested Types
+
     private sealed class MediaSessionCallback : MediaSession.Callback
     {
         private readonly PlaybackNotificationService _service;
@@ -383,4 +485,6 @@ public sealed class PlaybackNotificationService : Service
             _ = _service.HandleIntentAsync(new Intent().SetAction(ActionStop));
         }
     }
+
+#endregion
 }
