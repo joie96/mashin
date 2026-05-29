@@ -652,6 +652,11 @@ public sealed class PlaybackService : IPlaybackService
 
     private void SyncPlaybackStateFromQueue(PlayerQueue? queue)
     {
+        if (IsLocalTarget())
+        {
+            return;
+        }
+
         if (queue?.State == null)
         {
             return;
