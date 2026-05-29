@@ -76,20 +76,26 @@ public class PlayStateToBoolConverter : IValueConverter
 {
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
-        if (value is not PlayerPlayState playState)
+        if (value is not PlaybackStateModel playStateModel)
         {
             return false;
         }
 
-        var mode = (parameter as string)?.Trim().ToLowerInvariant();
-        return mode switch
+        if (parameter is not string stateParameter || string.IsNullOrWhiteSpace(stateParameter))
         {
-            "playing" => playState.State is PlayerPlaybackState.Playing or PlayerPlaybackState.Seeking,
-            "not-playing" => playState.State is not (PlayerPlaybackState.Playing or PlayerPlaybackState.Seeking),
-            "buffering" => playState.State == PlayerPlaybackState.Buffering,
-            "seeking" => playState.State == PlayerPlaybackState.Seeking,
-            "show-play-icon" => playState.State is not (PlayerPlaybackState.Playing or PlayerPlaybackState.Seeking or PlayerPlaybackState.Buffering),
-            "show-pause-icon" => playState.State is PlayerPlaybackState.Playing or PlayerPlaybackState.Seeking,
+            return false;
+        }
+
+        var token = stateParameter.Trim().ToLowerInvariant();
+
+        return token switch
+        {
+            "unknown" => playStateModel.State == PlayerPlaybackState.Unknown,
+            "stopped" => playStateModel.State == PlayerPlaybackState.Stopped,
+            "paused" => playStateModel.State is PlayerPlaybackState.Paused or PlayerPlaybackState.Stopped or PlayerPlaybackState.Unknown,
+            "buffering" => playStateModel.State is PlayerPlaybackState.Buffering or PlayerPlaybackState.Seeking,
+            "playing" => playStateModel.State == PlayerPlaybackState.Playing,
+            "seeking" => playStateModel.State is PlayerPlaybackState.Seeking or PlayerPlaybackState.Buffering,
             _ => false,
         };
     }

@@ -40,7 +40,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private bool _isMuted;
     private bool? _shuffleEnabled;
     private string? _repeatMode;
-    private PlayerPlayState _playState = new(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow);
+    private PlaybackStateModel _playState = new(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow);
     private double _duration;
     private double _position;
     private double _sliderPosition;
@@ -308,13 +308,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     #region Bindable Properties (Playback)
 
-    public PlayerPlayState PlayState
+    public PlaybackStateModel PlayState
     {
         get => _playState;
-        private set
-        {
-            SetProperty(ref _playState, value);
-        }
+        private set => SetProperty(ref _playState, value);
     }
 
     public bool IsMuted
@@ -931,7 +928,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private void BeginSeek()
     {
-        _playbackService.PlaybackState = new PlayerPlayState(PlayerPlaybackState.Seeking, DateTimeOffset.UtcNow);
+        _playbackService.PlaybackState = new PlaybackStateModel(PlayerPlaybackState.Seeking, DateTimeOffset.UtcNow);
     }
 
     private async Task SetVolumeAsync(int volume)

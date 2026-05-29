@@ -49,7 +49,7 @@ public partial class TableView : ContentView
         BindableProperty.Create(nameof(CurrentTrackUri), typeof(string), typeof(TableView));
 
     public static readonly BindableProperty CurrentPlayStateProperty =
-        BindableProperty.Create(nameof(CurrentPlayState), typeof(PlayerPlayState), typeof(TableView), defaultValue: new PlayerPlayState(PlayerPlaybackState.Stopped, DateTimeOffset.MinValue));
+        BindableProperty.Create(nameof(CurrentPlayState), typeof(PlaybackStateModel), typeof(TableView), defaultValue: new PlaybackStateModel(PlayerPlaybackState.Stopped, DateTimeOffset.MinValue));
 
     public static readonly BindableProperty PageSizeProperty =
         BindableProperty.Create(nameof(PageSize), typeof(int), typeof(TableView), defaultValue: 10, propertyChanged: OnPageSizeChanged);
@@ -155,9 +155,9 @@ public partial class TableView : ContentView
         private set => SetValue(CurrentTrackUriProperty, value);
     }
 
-    public PlayerPlayState CurrentPlayState
+    public PlaybackStateModel CurrentPlayState
     {
-        get => (PlayerPlayState)GetValue(CurrentPlayStateProperty);
+        get => (PlaybackStateModel)GetValue(CurrentPlayStateProperty);
         private set => SetValue(CurrentPlayStateProperty, value);
     }
 
@@ -1177,7 +1177,7 @@ public partial class TableView : ContentView
             _sendspinPlayerService = mauiContext.Services.GetService<ISendspinPlayerService>();
             if (_sendspinPlayerService != null)
             {
-                SetCurrentPlayState(_sendspinPlayerService.PlayState);
+                SetCurrentPlayState(_sendspinPlayerService.PlayerState);
                 _sendspinPlayerService.PropertyChanged += OnPlayerServicePropertyChanged;
             }
         }
@@ -1204,7 +1204,7 @@ public partial class TableView : ContentView
         _sendspinPlayerService = null;
         _currentTrack = null;
         SetCurrentTrackUri(null);
-        SetCurrentPlayState(new PlayerPlayState(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow));
+        SetCurrentPlayState(new PlaybackStateModel(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow));
     }
 
     private void OnCurrentTrackUpdated(object? sender, EventArgs e)
@@ -1300,33 +1300,33 @@ public partial class TableView : ContentView
         CurrentTrackUri = uri;
     }
 
-    private void SetCurrentPlayState(PlayerPlayState playState)
+    private void SetCurrentPlayState(PlaybackStateModel playerState)
     {
-        if (CurrentPlayState == playState)
+        if (CurrentPlayState == playerState)
         {
             return;
         }
 
-        CurrentPlayState = playState;
+        CurrentPlayState = playerState;
     }
 
     private void OnPlayerServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(ISendspinPlayerService.PlayState))
+        if (e.PropertyName != nameof(ISendspinPlayerService.PlayerState))
         {
             return;
         }
 
-        var currentPlayState = _sendspinPlayerService?.PlayState
-            ?? new PlayerPlayState(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow);
+        var currentPlayerState = _sendspinPlayerService?.PlayerState
+            ?? new PlaybackStateModel(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow);
 
         if (MainThread.IsMainThread)
         {
-            SetCurrentPlayState(currentPlayState);
+            SetCurrentPlayState(currentPlayerState);
             return;
         }
 
-        MainThread.BeginInvokeOnMainThread(() => SetCurrentPlayState(currentPlayState));
+        MainThread.BeginInvokeOnMainThread(() => SetCurrentPlayState(currentPlayerState));
     }
 
     #endregion

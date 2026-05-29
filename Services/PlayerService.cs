@@ -12,18 +12,6 @@ using System.Threading;
 
 namespace mashin.Services;
 
-public enum PlayerPlaybackState
-{
-    Unknown,
-    Stopped,
-    Paused,
-    Buffering,
-    Playing,
-    Seeking,
-}
-
-public sealed record PlayerPlayState(PlayerPlaybackState State, DateTimeOffset TimestampUtc);
-
 public interface ISendspinPlayerService : IAsyncDisposable, INotifyPropertyChanged
 {
     #region Properties
@@ -31,7 +19,7 @@ public interface ISendspinPlayerService : IAsyncDisposable, INotifyPropertyChang
     string? ConnectedServerName { get; }
     string? PlayerId { get; }
 
-    PlayerPlayState PlayState { get; set; }
+    PlaybackStateModel PlayerState { get; set; }
     int Volume { get; }
     double DurationSeconds { get; }
     double PositionSeconds { get; set; }
@@ -70,7 +58,7 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
     private readonly Timer _positionTimer;
     private readonly object _stateLock = new();
 
-    private PlayerPlayState _playState = new(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow);
+    private PlaybackStateModel _playerState = new(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow);
     private int _volume;
     private double _durationSeconds;
     private double _positionSeconds;
@@ -96,10 +84,10 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
     public string? ConnectedServerName => _client?.ServerName;
     public string? PlayerId { get; private set; }
 
-    public PlayerPlayState PlayState
+    public PlaybackStateModel PlayerState
     {
-        get => _playState;
-        set => SetPlayState(value);
+        get => _playerState;
+        set => SetPlayerState(value);
     }
 
     public int Volume
@@ -293,10 +281,10 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
             "Preferred audio codec updated to {Codec}. Reconnecting to apply updated client capabilities.",
             normalizedCodec);
 
-        var wasPlayingBeforeReconnect = PlayState.State == PlayerPlaybackState.Playing;
+        var wasPlayingBeforeReconnect = PlayerState.State == PlayerPlaybackState.Playing;
 
         // Reflect codec switch in the UI immediately while reconnect is in progress.
-        PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+        PlayerState = new PlaybackStateModel(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
 
         await DisconnectAsync();
         await ConnectAsync(serverUri, cancellationToken);
@@ -307,7 +295,7 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
             _logger.LogInformation("Resuming playback after codec reconnect.");
 
             const int maxResumeAttempts = 5;
-            var playbackResumed = PlayState.State == PlayerPlaybackState.Playing;
+            var playbackResumed = PlayerState.State == PlayerPlaybackState.Playing;
 
             for (var attempt = 1; attempt <= maxResumeAttempts; attempt++)
             {
@@ -323,7 +311,7 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
                     try
                     {
                         await _client.SendCommandAsync("play");
-                        PlayState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+                        PlayerState = new PlaybackStateModel(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
                         _logger.LogDebug(
                             "Playback resume command issued after reconnect (attempt {Attempt}/{MaxAttempts}).",
                             attempt,
@@ -341,7 +329,7 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
 
                 await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken);
 
-                playbackResumed = PlayState.State == PlayerPlaybackState.Playing;
+                playbackResumed = PlayerState.State == PlayerPlaybackState.Playing;
 
                 if (playbackResumed)
                 {
@@ -367,7 +355,7 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
     {
         if (e.NewState != ConnectionState.Connected)
         {
-            SetPlayState(new PlayerPlayState(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow));
+            SetPlayerState(new PlaybackStateModel(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow));
         }
 
         OnPropertyChanged(nameof(IsConnected));
@@ -378,7 +366,7 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
         // Playing state -> use AudioPlayer state for more immediate feedback (instead of waiting for metadata update with progress info)
         //var stateName = group.PlaybackState.ToString();
         //var mappedPlayState = MapServerPlaybackState(stateName);
-        //SetPlayState(new PlayerPlayState(mappedPlayState, DateTimeOffset.UtcNow));
+        //SetPlayerState(new PlaybackStateModel(mappedPlayState, DateTimeOffset.UtcNow));
 
         // Volume and mute state
         var clampedVolume = Math.Max(0, Math.Min(100, group.Volume));
@@ -444,7 +432,7 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
             _ => PlayerPlaybackState.Unknown,
         };
 
-        SetPlayState(new PlayerPlayState(mappedState, DateTimeOffset.UtcNow));
+        SetPlayerState(new PlaybackStateModel(mappedState, DateTimeOffset.UtcNow));
     }
 
     #endregion
@@ -458,7 +446,7 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
     {
         var nowUtc = DateTimeOffset.UtcNow;
 
-        PlayerPlayState playState;
+        PlaybackStateModel playerState;
         long metadataTimestampUs;
         double trackProgressMs;
         double trackDurationMs;
@@ -466,14 +454,14 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
 
         lock (_stateLock)
         {
-            playState = _playState;
+            playerState = _playerState;
             metadataTimestampUs = _metadataTimestampUs;
             trackProgressMs = _metadataTrackProgressMs;
             trackDurationMs = _metadataTrackDurationMs;
             playbackSpeed = _metadataPlaybackSpeed;
         }
 
-        if (playState.State != PlayerPlaybackState.Playing && playState.State != PlayerPlaybackState.Seeking)
+        if (playerState.State != PlayerPlaybackState.Playing && playerState.State != PlayerPlaybackState.Seeking)
         {
             return;
         }
@@ -484,7 +472,7 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
             DurationSeconds = durationSeconds;
         }
 
-        var stateAge = nowUtc - playState.TimestampUtc;
+        var stateAge = nowUtc - playerState.TimestampUtc;
         if (stateAge < TimeSpan.FromSeconds(5))
         {
             var localPosition = _positionSeconds + 0.5d;
@@ -564,14 +552,14 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
         };
     }
 
-    private void SetPlayState(PlayerPlayState playState)
+    private void SetPlayerState(PlaybackStateModel playerState)
     {
-        var normalizedTimestamp = playState.TimestampUtc == default
+        var normalizedTimestamp = playerState.TimestampUtc == default
             ? DateTimeOffset.UtcNow
-            : playState.TimestampUtc;
-        var normalizedPlayState = playState with { TimestampUtc = normalizedTimestamp };
+            : playerState.TimestampUtc;
+        var normalizedPlayerState = playerState with { TimestampUtc = normalizedTimestamp };
 
-        var stateChanged = SetProperty(ref _playState, normalizedPlayState, nameof(PlayState));
+        var stateChanged = SetProperty(ref _playerState, normalizedPlayerState, nameof(PlayerState));
 
         if (!stateChanged)
         {

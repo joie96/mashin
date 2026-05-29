@@ -561,14 +561,14 @@
                             <Grid>
                                 <Label FontSize="18"
                                     HorizontalOptions="Center"
-                                    IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=show-play-icon}"
+                                    IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=paused}"
                                     Text="{mi:FluentFilled Icon=Play48Filled,
                                                      FontOverride=True}"
                                     TextColor="{DynamicResource BackgroundPrimary}"
                                     VerticalOptions="Center" />
                                 <Label FontSize="18"
                                     HorizontalOptions="Center"
-                                    IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=show-pause-icon}"
+                                    IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=playing}"
                                     Text="{mi:FluentFilled Icon=Pause48Filled,
                                                      FontOverride=True}"
                                     TextColor="{DynamicResource BackgroundPrimary}"

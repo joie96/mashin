@@ -86,7 +86,7 @@ public class MediaItemActions : IMediaItemActions
         }
 
         _logger.LogInformation("Playing {Count} item(s)", mediaItems.Count);
-        _playbackService.PlaybackState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+        _playbackService.PlaybackState = new PlaybackStateModel(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
 
         try
         {
@@ -123,7 +123,6 @@ public class MediaItemActions : IMediaItemActions
         }
 
         _logger.LogInformation("Playing {Count} item(s) next", mediaItems.Count);
-        _playbackService.PlaybackState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
 
         try
         {
@@ -160,7 +159,6 @@ public class MediaItemActions : IMediaItemActions
         }
 
         _logger.LogInformation("Playing {Count} item(s) last", mediaItems.Count);
-        _playbackService.PlaybackState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
 
         try
         {
@@ -412,7 +410,7 @@ public class MediaItemActions : IMediaItemActions
 
         try
         {
-            _playbackService.PlaybackState = new PlayerPlayState(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+            _playbackService.PlaybackState = new PlaybackStateModel(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
             await _musicAssistant.PlayIndexAsync(queueId, index);
             await _playbackService.RefreshNowAsync();
         }
