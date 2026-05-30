@@ -15,7 +15,20 @@
 
     <Grid x:Name="RootGrid" RowDefinitions="*,Auto,Auto">
 
-        <ContentView x:Name="ContentContainer" Grid.Row="0" />
+        <Grid Grid.Row="0">
+            <ContentView x:Name="ContentContainer" />
+
+            <Grid BackgroundColor="Transparent"
+                IsVisible="{Binding IsNavigating}">
+                <BoxView BackgroundColor="#80000000" />
+                <ActivityIndicator HeightRequest="48"
+                    HorizontalOptions="Center"
+                    IsRunning="{Binding IsNavigating}"
+                    VerticalOptions="Center"
+                    WidthRequest="48"
+                    Color="{DynamicResource AccentColor}" />
+            </Grid>
+        </Grid>
 
         <!--  Bottom Player Bar  -->
         <Border x:Name="PlayerBarBorder"

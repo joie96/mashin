@@ -170,7 +170,7 @@
             <!--  Track List  -->
             <VerticalStackLayout Padding="16,0,16,0"
                 Spacing="8">
-                <Border BackgroundColor="{DynamicResource BackgroundSecondary}"
+                <Border
                     Padding="0"
                     Stroke="{DynamicResource BorderColor}"
                     StrokeThickness="1">

@@ -330,7 +330,14 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
     public event PropertyChangedEventHandler? PropertyChanged;
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
-        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+        if (propertyName == nameof(IsLoading) && !IsLoading)
+        {
+            _navigationService.IsNavigating = false;
+        }
+    }
 
     private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
