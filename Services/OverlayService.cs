@@ -26,8 +26,12 @@ public interface IOverlayService
 
     bool IsQueueOverlayOpen { get; }
     bool IsQueueOverlayAnimating { get; }
+    bool IsOverlayOpen { get; }
+    bool IsFlyoutOpen { get; }
     Task ShowQueueOverlayAsync(object bindingContext);
     Task HideQueueOverlayAsync();
+    Task CloseOverlayAsync();
+    Task CloseFlyoutAsync();
 
     Task<string?> ShowCreatePlaylistAsync();
     Task<string?> ShowUpdatePlaylistAsync(Playlist playlist);
@@ -171,6 +175,10 @@ public sealed class OverlayService : IOverlayService
 
     public bool IsQueueOverlayAnimating => _queueOverlay.IsAnimating;
 
+    public bool IsOverlayOpen => _overlayHost?.IsVisible == true;
+
+    public bool IsFlyoutOpen => _flyoutHost?.IsVisible == true;
+
     public async Task ShowQueueOverlayAsync(object bindingContext)
     {
         if (bindingContext == null)
@@ -206,6 +214,50 @@ public sealed class OverlayService : IOverlayService
 
             // Keep queue content mounted so TableView does not run full unload cleanup.
             _flyoutCloseAction = null;
+        });
+    }
+
+    public Task CloseOverlayAsync()
+    {
+        return MainThread.InvokeOnMainThreadAsync(async () =>
+        {
+            if (!IsOverlayOpen)
+            {
+                return;
+            }
+
+            if (_overlayCloseAction != null)
+            {
+                _overlayCloseAction.Invoke();
+                return;
+            }
+
+            await HideCenteredOverlayInternalAsync();
+        });
+    }
+
+    public Task CloseFlyoutAsync()
+    {
+        return MainThread.InvokeOnMainThreadAsync(async () =>
+        {
+            if (!IsFlyoutOpen)
+            {
+                return;
+            }
+
+            if (IsQueueOverlayOpen)
+            {
+                await HideQueueOverlayAsync();
+                return;
+            }
+
+            if (_flyoutCloseAction != null)
+            {
+                _flyoutCloseAction.Invoke();
+                return;
+            }
+
+            await HideFlyoutLayerAsync();
         });
     }
 

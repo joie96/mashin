@@ -32,6 +32,7 @@ namespace mashin.Services;
 public interface INavigationService : INotifyPropertyChanged
 {
     bool IsNavigating { get; set; }
+    bool CanGoBack { get; }
     Task NavigateToAsync<TPage>() where TPage : ContentPage;
     Task NavigateToAsync<TPage>(object? parameter) where TPage : ContentPage;
     Task GoBackAsync();
@@ -86,6 +87,8 @@ public class NavigationService : INavigationService
         }
     }
 
+    public bool CanGoBack => _navigationStack.Count > 1;
+
     public NavigationService(
         IServiceScopeFactory scopeFactory,
         ILogger<NavigationService> logger)
@@ -123,6 +126,7 @@ public class NavigationService : INavigationService
             // Save new page type and parameter on stack
             var entry = new NavigationEntry(typeof(TPage), parameter);
             _navigationStack.Push(entry);
+            OnPropertyChanged(nameof(CanGoBack));
             
             // Show new page
             await ShowPageAsync(entry);
@@ -158,6 +162,7 @@ public class NavigationService : INavigationService
 
             // Remove current entry
             _navigationStack.Pop();
+            OnPropertyChanged(nameof(CanGoBack));
             var previousPage = _currentPage;
             var previousScope = _currentScope;
 
