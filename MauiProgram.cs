@@ -1,4 +1,5 @@
 ﻿using FFImageLoading.Maui;
+using CommunityToolkit.Maui;
 using mashin.Audio;
 using mashin.Services;
 using mashin.ViewModels;
@@ -36,6 +37,7 @@ public static class MauiProgram
         var builder = MauiApp.CreateBuilder();
         builder
             .UseMauiApp<App>()
+            .UseMauiCommunityToolkit()
             .UseFFImageLoading()
             .UseFluentMauiIcons()
             .UseFluentFilledMauiIcons()

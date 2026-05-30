@@ -2,6 +2,7 @@
 <ContentView x:Class="mashin.Views.Mobile.Controls.TableView"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:converters="clr-namespace:mashin.Converters"
+    xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
     xmlns:controls="clr-namespace:mashin.Views.Mobile.Controls"
     xmlns:desktopControls="clr-namespace:mashin.Views.Desktop.Controls"
@@ -26,11 +27,6 @@
                             Value="{DynamicResource SelectionBackground}" />
                     </DataTrigger>
                 </Border.Triggers>
-                <Border.GestureRecognizers>
-                    <PointerGestureRecognizer PointerExited="OnRowPointerExited"
-                        PointerPressed="OnRowPointerPressed"
-                        PointerReleased="OnRowPointerReleased" />
-                </Border.GestureRecognizers>
 
                 <Grid ColumnDefinitions="52,*,56,40"
                     ColumnSpacing="10">
@@ -38,9 +34,12 @@
                     <Grid Grid.ColumnSpan="2"
                         ColumnDefinitions="52,*"
                         ColumnSpacing="10">
-                        <Grid.GestureRecognizers>
-                            <TapGestureRecognizer Tapped="OnRowTapped" />
-                        </Grid.GestureRecognizers>
+                        <Grid.Behaviors>
+                            <toolkit:TouchBehavior
+                                LongPressCompleted="OnRowLongPressCompleted"
+                                LongPressDuration="420"
+                                TouchGestureCompleted="OnRowTouchCompleted" />
+                        </Grid.Behaviors>
 
                         <!--  Cover  -->
                         <Border Grid.Column="0"
@@ -169,11 +168,6 @@
                             Value="{DynamicResource SelectionBackground}" />
                     </DataTrigger>
                 </Border.Triggers>
-                <Border.GestureRecognizers>
-                    <PointerGestureRecognizer PointerExited="OnRowPointerExited"
-                        PointerPressed="OnRowPointerPressed"
-                        PointerReleased="OnRowPointerReleased" />
-                </Border.GestureRecognizers>
 
                 <Grid ColumnDefinitions="52,*,56,40"
                     ColumnSpacing="10">
@@ -181,9 +175,12 @@
                     <Grid Grid.ColumnSpan="2"
                         ColumnDefinitions="52,*"
                         ColumnSpacing="10">
-                        <Grid.GestureRecognizers>
-                            <TapGestureRecognizer Tapped="OnRowTapped" />
-                        </Grid.GestureRecognizers>
+                        <Grid.Behaviors>
+                            <toolkit:TouchBehavior
+                                LongPressCompleted="OnRowLongPressCompleted"
+                                LongPressDuration="420"
+                                TouchGestureCompleted="OnRowTouchCompleted" />
+                        </Grid.Behaviors>
 
                         <!--  Cover  -->
                         <Border Grid.Column="0"

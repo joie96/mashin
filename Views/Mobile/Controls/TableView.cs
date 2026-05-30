@@ -8,8 +8,6 @@ public partial class TableView : ContentView
 {
     #region Fields
 
-    private const int LongPressDurationMilliseconds = 420;
-    private readonly Dictionary<MediaItem, CancellationTokenSource> _pendingLongPresses = new();
     private readonly HashSet<MediaItem> _suppressNextTap = new();
 
     #endregion
@@ -69,80 +67,34 @@ public partial class TableView : ContentView
 
     #region Input handling
 
-    private void OnRowPointerPressed(object? sender, PointerEventArgs e)
+    private void OnRowTouchCompleted(object? sender, EventArgs e)
     {
         if (sender is not BindableObject { BindingContext: MediaItem mediaItem })
         {
             return;
         }
 
-        var anchorView = sender as View;
-
-        CancelPendingLongPress(mediaItem);
-
-        var cts = new CancellationTokenSource();
-        _pendingLongPresses[mediaItem] = cts;
-
-        _ = DetectLongPressAsync(mediaItem, anchorView, cts.Token);
+        ExecuteShortPress(mediaItem);
     }
 
-    private void OnRowPointerReleased(object? sender, PointerEventArgs e)
+    private void OnRowLongPressCompleted(object? sender, EventArgs e)
     {
         if (sender is not BindableObject { BindingContext: MediaItem mediaItem })
         {
             return;
         }
 
-        CancelPendingLongPress(mediaItem);
-    }
-
-    private void OnRowPointerExited(object? sender, PointerEventArgs e)
-    {
-        if (sender is not BindableObject { BindingContext: MediaItem mediaItem })
+        var longPressCommand = LongPressCommand;
+        if (longPressCommand?.CanExecute(mediaItem) == true)
         {
-            return;
+            longPressCommand.Execute(mediaItem);
+        }
+        else
+        {
+            mediaItem.IsSelected = !mediaItem.IsSelected;
         }
 
-        CancelPendingLongPress(mediaItem);
-    }
-
-    private async Task DetectLongPressAsync(MediaItem mediaItem, View? anchorView, CancellationToken token)
-    {
-        try
-        {
-            await Task.Delay(LongPressDurationMilliseconds, token);
-
-            Dispatcher.Dispatch(() =>
-            {
-                // Long-press opens the context menu only when this specific row is selected.
-                if (mediaItem.IsSelected)
-                {
-                    var contextMenuCommand = ShowContextMenuAtAnchorCommand;
-                    if (anchorView != null && contextMenuCommand?.CanExecute(anchorView) == true)
-                    {
-                        contextMenuCommand.Execute(anchorView);
-                        _suppressNextTap.Add(mediaItem);
-                        return;
-                    }
-                }
-
-                var longPressCommand = LongPressCommand;
-                if (longPressCommand?.CanExecute(mediaItem) == true)
-                {
-                    longPressCommand.Execute(mediaItem);
-                }
-                else
-                {
-                    mediaItem.IsSelected = !mediaItem.IsSelected;
-                }
-
-                _suppressNextTap.Add(mediaItem);
-            });
-        }
-        catch (TaskCanceledException)
-        {
-            // Ignored: row was released/exited before long-press threshold.
-        }
+        _suppressNextTap.Add(mediaItem);
     }
 
     private void OnRowTapped(object? sender, TappedEventArgs e)
@@ -152,6 +104,11 @@ public partial class TableView : ContentView
             return;
         }
 
+        ExecuteShortPress(mediaItem);
+    }
+
+    private void ExecuteShortPress(MediaItem mediaItem)
+    {
         if (_suppressNextTap.Remove(mediaItem))
         {
             return;
@@ -194,18 +151,6 @@ public partial class TableView : ContentView
     #endregion
 
     #region Helpers
-
-    private void CancelPendingLongPress(MediaItem mediaItem)
-    {
-        if (!_pendingLongPresses.TryGetValue(mediaItem, out var cts))
-        {
-            return;
-        }
-
-        _pendingLongPresses.Remove(mediaItem);
-        cts.Cancel();
-        cts.Dispose();
-    }
 
     private bool HasAnySelectedItems()
     {
