@@ -299,6 +299,13 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
+        var canSendPlayAction = await _sendspinPlayerService.EnsureConnectedAsync(ActivePlayerId, cancellationToken);
+        if (!canSendPlayAction)
+        {
+            _logger.LogWarning("Play action aborted: local Sendspin connection is not available");
+            return;
+        }
+
         PlaybackState = new PlaybackStateModel(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
 
         await _musicAssistant.PlayPauseAsync(ActiveQueueId);

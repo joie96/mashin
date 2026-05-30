@@ -44,6 +44,7 @@ public class MediaItemActions : IMediaItemActions
     private readonly MusicAssistantService _musicAssistant;
     private readonly IUserDataService _userDataService;
     private readonly IPlaybackService _playbackService;
+    private readonly ISendspinPlayerService _sendspinPlayerService;
     private readonly ILogger<MediaItemActions> _logger;
 
     #endregion
@@ -54,11 +55,13 @@ public class MediaItemActions : IMediaItemActions
         MusicAssistantService musicAssistant,
         IUserDataService userDataService,
         IPlaybackService playbackService,
+        ISendspinPlayerService sendspinPlayerService,
         ILogger<MediaItemActions> logger)
     {
         _musicAssistant = musicAssistant;
         _userDataService = userDataService;
         _playbackService = playbackService;
+        _sendspinPlayerService = sendspinPlayerService;
         _logger = logger;
     }
 
@@ -82,6 +85,12 @@ public class MediaItemActions : IMediaItemActions
         if (string.IsNullOrWhiteSpace(activePlayerId))
         {
             _logger.LogWarning("No active player available. Player connection is missing.");
+            return;
+        }
+
+        if (!await _sendspinPlayerService.EnsureConnectedAsync(activePlayerId))
+        {
+            _logger.LogWarning("Play aborted: local Sendspin connection is not available");
             return;
         }
 
@@ -122,6 +131,12 @@ public class MediaItemActions : IMediaItemActions
             return;
         }
 
+        if (!await _sendspinPlayerService.EnsureConnectedAsync(activePlayerId))
+        {
+            _logger.LogWarning("Play next aborted: local Sendspin connection is not available");
+            return;
+        }
+
         _logger.LogInformation("Playing {Count} item(s) next", mediaItems.Count);
 
         try
@@ -155,6 +170,12 @@ public class MediaItemActions : IMediaItemActions
         if (string.IsNullOrWhiteSpace(activePlayerId))
         {
             _logger.LogWarning("No active player available. Player connection is missing.");
+            return;
+        }
+
+        if (!await _sendspinPlayerService.EnsureConnectedAsync(activePlayerId))
+        {
+            _logger.LogWarning("Play last aborted: local Sendspin connection is not available");
             return;
         }
 
@@ -410,6 +431,13 @@ public class MediaItemActions : IMediaItemActions
 
         try
         {
+            var activePlayerId = _playbackService.ActivePlayerId;
+            if (!await _sendspinPlayerService.EnsureConnectedAsync(activePlayerId))
+            {
+                _logger.LogWarning("Play index aborted: local Sendspin connection is not available");
+                return;
+            }
+
             _playbackService.PlaybackState = new PlaybackStateModel(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
             await _musicAssistant.PlayIndexAsync(queueId, index);
             await _playbackService.RefreshNowAsync();

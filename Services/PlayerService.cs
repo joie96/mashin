@@ -37,6 +37,7 @@ public interface ISendspinPlayerService : IAsyncDisposable, INotifyPropertyChang
     #endregion
 
     #region Commands
+    Task<bool> EnsureConnectedAsync(string? playerId, CancellationToken cancellationToken = default);
     Task SendCommandAsync(string command, Dictionary<string, object>? parameters = null);
     Task UpdatePreferredAudioCodecAsync(string codec, CancellationToken cancellationToken = default);
     #endregion
@@ -143,6 +144,7 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
         get => _repeatMode;
         private set => SetProperty(ref _repeatMode, value);
     }
+    
     #endregion
 
     #region Constructor
@@ -191,9 +193,7 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
                 _loggerFactory.CreateLogger<SendspinConnection>());
 
             var clientCapabilities = _settingsService.GetClientCapabilities();
-            PlayerId = string.IsNullOrWhiteSpace(clientCapabilities.ClientId)
-                ? null
-                : $"up{clientCapabilities.ClientId.Replace("-", string.Empty, StringComparison.Ordinal)}";
+            PlayerId = BuildLocalPlayerId(clientCapabilities);
 
             _client = new SendspinClientService(
                 _loggerFactory.CreateLogger<SendspinClientService>(),
@@ -229,6 +229,54 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
             _cleanupLock.Release();
         }
     }
+
+    public async Task<bool> EnsureConnectedAsync(string? playerId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(playerId))
+        {
+            return false;
+        }
+
+        if (IsConnected)
+        {
+            return true;
+        }
+
+        var localPlayerId = BuildLocalPlayerId();
+        if (string.IsNullOrWhiteSpace(localPlayerId)
+            || !string.Equals(playerId, localPlayerId, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (!Uri.TryCreate(_settingsService.SendspinUrl, UriKind.Absolute, out var serverUri))
+        {
+            _logger.LogWarning(
+                "Cannot reconnect Sendspin for local player {PlayerId}: invalid URL {SendspinUrl}",
+                playerId,
+                _settingsService.SendspinUrl);
+            return false;
+        }
+
+        try
+        {
+            await ConnectAsync(serverUri, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Reconnect for local player {PlayerId} failed", playerId);
+            return false;
+        }
+
+        if (!IsConnected)
+        {
+            _logger.LogWarning("Reconnect for local player {PlayerId} did not establish a connection", playerId);
+            return false;
+        }
+
+        return true;
+    }
+
     #endregion
 
     #region Commands
@@ -347,6 +395,21 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
             }
         }
     }
+    #endregion
+
+    #region ID Helpers
+
+    private string? BuildLocalPlayerId(ClientCapabilities? capabilities = null)
+    {
+        var clientCapabilities = capabilities ?? _settingsService.GetClientCapabilities();
+        if (string.IsNullOrWhiteSpace(clientCapabilities.ClientId))
+        {
+            return null;
+        }
+
+        return $"up{clientCapabilities.ClientId.Replace("-", string.Empty, StringComparison.Ordinal)}";
+    }
+
     #endregion
 
     #region Event Handlers
