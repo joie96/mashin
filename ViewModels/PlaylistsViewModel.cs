@@ -160,7 +160,41 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
         try
         {
-            await LoadPlaylistsDirectAsync();
+            await _userDataService.GetPreferencesAsync();
+
+            var username = _userDataService.CurrentUser?.Username;
+            var prefix = string.IsNullOrWhiteSpace(username)
+                ? null
+                : string.Concat(username, "--");
+
+            var playlists = await _musicAssistantService.GetLibraryPlaylistsAsync(
+                search: string.IsNullOrWhiteSpace(prefix) ? null : prefix,
+                orderBy: "sort_name");
+
+            await LoadPlaylistsMetadataAsync(playlists);
+
+            _playlists.Clear();
+
+            foreach (var playlist in playlists)
+            {
+                if (!string.IsNullOrWhiteSpace(prefix)
+                    && !string.IsNullOrWhiteSpace(playlist.Name)
+                    && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    playlist.DisplayName = playlist.Name[prefix.Length..];
+                }
+                else
+                {
+                    playlist.DisplayName = playlist.Name;
+                }
+
+                _playlists.Add(playlist);
+            }
+
+            OnPropertyChanged(nameof(HasPlaylists));
+            OnPropertyChanged(nameof(ShowPlaylistListView));
+            OnPropertyChanged(nameof(ShowNoPlaylistsMessage));
+            OnPropertyChanged(nameof(PlaylistItems));
         }
         catch (Exception ex)
         {
@@ -172,41 +206,49 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         }
     }
 
-    private async Task LoadPlaylistsDirectAsync()
+    private async Task LoadPlaylistsMetadataAsync(IReadOnlyCollection<Playlist> playlists)
     {
-        await _userDataService.GetPreferencesAsync();
-
-        var username = _userDataService.CurrentUser?.Username;
-        var prefix = string.IsNullOrWhiteSpace(username)
-            ? null
-            : string.Concat(username, "--");
-
-        var playlists = await _musicAssistantService.GetLibraryPlaylistsAsync(
-            search: string.IsNullOrWhiteSpace(prefix) ? null : prefix,
-            orderBy: "sort_name");
-
-        _playlists.Clear();
-
-        foreach (var playlist in playlists)
+        if (playlists.Count == 0)
         {
-            if (!string.IsNullOrWhiteSpace(prefix)
-                && !string.IsNullOrWhiteSpace(playlist.Name)
-                && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                playlist.DisplayName = playlist.Name[prefix.Length..];
-            }
-            else
-            {
-                playlist.DisplayName = playlist.Name;
-            }
-
-            _playlists.Add(playlist);
+            return;
         }
 
-        OnPropertyChanged(nameof(HasPlaylists));
-        OnPropertyChanged(nameof(ShowPlaylistListView));
-        OnPropertyChanged(nameof(ShowNoPlaylistsMessage));
-        OnPropertyChanged(nameof(PlaylistItems));
+        const int maxConcurrentRequests = 8;
+        using var throttler = new SemaphoreSlim(maxConcurrentRequests);
+
+        var metadataTasks = playlists.Select(async playlist =>
+        {
+            if (string.IsNullOrWhiteSpace(playlist.ItemId)
+                || string.IsNullOrWhiteSpace(playlist.Provider))
+            {
+                playlist.TracksCount = 0;
+                playlist.TotalDurationSeconds = 0;
+                return;
+            }
+
+            await throttler.WaitAsync();
+            try
+            {
+                var tracks = await _musicAssistantService.GetPlaylistTracksAsync(playlist.ItemId, playlist.Provider);
+                var tracksCount = tracks.Count;
+                var totalDurationSeconds = tracks.Sum(track => Math.Max(0, track.Duration));
+
+                playlist.TracksCount = tracksCount;
+                playlist.TotalDurationSeconds = totalDurationSeconds;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load metadata for playlist {PlaylistId}.", playlist.ItemId);
+                playlist.TracksCount = 0;
+                playlist.TotalDurationSeconds = 0;
+            }
+            finally
+            {
+                throttler.Release();
+            }
+        });
+
+        await Task.WhenAll(metadataTasks);
     }
 
     #endregion

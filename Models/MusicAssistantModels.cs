@@ -274,6 +274,12 @@ namespace mashin.Models
 
         [JsonPropertyName("is_editable")]
         public bool IsEditable { get; set; }
+
+        [JsonIgnore]
+        public int TracksCount { get; set; }
+
+        [JsonIgnore]
+        public int TotalDurationSeconds { get; set; }
     }
 
     /// <summary>

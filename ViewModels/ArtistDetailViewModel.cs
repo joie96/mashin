@@ -735,22 +735,44 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                 .ToList();
 
             SimilarArtists = new ObservableRangeCollection<Artist>();
-            foreach (var artistRef in uniqueArtists)
+
+            const int maxConcurrentRequests = 6;
+            using var throttler = new SemaphoreSlim(maxConcurrentRequests);
+            var resolvedArtists = new Artist?[uniqueArtists.Count];
+
+            var fetchTasks = uniqueArtists.Select(async (artistRef, index) =>
             {
+                if (string.IsNullOrWhiteSpace(artistRef.ItemId)
+                    || string.IsNullOrWhiteSpace(artistRef.Provider))
+                {
+                    return;
+                }
+
+                await throttler.WaitAsync();
                 try
                 {
-                    var fullArtist = await _musicAssistant.GetArtistAsync(artistRef.ItemId, artistRef.Provider);
-                    if (fullArtist != null)
-                    {
-                        if (IsLoadingSimilarArtists == true) {IsLoadingSimilarArtists = false;}
-                        SimilarArtists.Add(fullArtist);
-                    }
+                    resolvedArtists[index] = await _musicAssistant.GetArtistAsync(artistRef.ItemId, artistRef.Provider);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Failed to load details for artist: {ArtistId}", artistRef.ItemId);
                 }
+                finally
+                {
+                    throttler.Release();
+                }
+            });
+
+            await Task.WhenAll(fetchTasks);
+
+            foreach (var fullArtist in resolvedArtists)
+            {
+                if (fullArtist != null)
+                {
+                    SimilarArtists.Add(fullArtist);
+                }
             }
+
             _ = BuildArtistContextMenuAsync();
         }
         finally
