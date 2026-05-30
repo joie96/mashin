@@ -24,7 +24,16 @@ public partial class MainPage : ContentPage
         _overlayService = overlayService;
         BindingContext = _viewModel;
 
-        _overlayService.Initialize(OverlayHost, OverlayContent, FlyoutHost, FlyoutContent);
+        var selectionIndicatorHost = this.FindByName<Grid>("SelectionIndicatorHost");
+        var selectionIndicatorContent = this.FindByName<ContentPresenter>("SelectionIndicatorContent");
+
+        _overlayService.Initialize(
+            OverlayHost,
+            OverlayContent,
+            FlyoutHost,
+            FlyoutContent,
+            selectionIndicatorHost,
+            selectionIndicatorContent);
 
         if (_navigationService is NavigationService navService)
         {

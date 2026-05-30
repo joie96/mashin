@@ -74,7 +74,8 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
             }
 
             _contextPlaylist = anchor.BindingContext as Playlist;
-            if (_contextPlaylist == null)
+            var hasSelection = _playlists.Any(playlist => playlist.IsSelected);
+            if (_contextPlaylist == null && !hasSelection)
             {
                 return;
             }

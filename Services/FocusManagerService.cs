@@ -5,7 +5,6 @@
 /// </summary>
 public static class FocusManager
 {
-#if WINDOWS
     private static WeakReference<object>? _currentFocusedControl;
 
     public static void SetFocus(object control)
@@ -17,13 +16,22 @@ public static class FocusManager
     {
         if (_currentFocusedControl?.TryGetTarget(out var focused) == true)
         {
-            var hasFocus = ReferenceEquals(focused, control);
-            return hasFocus;
+            return ReferenceEquals(focused, control);
         }
+
         return false;
     }
-#else
-    public static void SetFocus(object control) { }
-    public static bool HasFocus(object control) => true;
-#endif
+
+    public static bool GetFocusedControl<TControl>(out TControl? control) where TControl : class
+    {
+        control = null;
+
+        if (_currentFocusedControl?.TryGetTarget(out var focused) != true)
+        {
+            return false;
+        }
+
+        control = focused as TControl;
+        return control != null;
+    }
 }

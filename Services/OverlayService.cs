@@ -1,5 +1,6 @@
 using mashin.Models;
 using mashin.Views.Desktop.Controls;
+using mashin.Views.Mobile.Controls;
 using Microsoft.Extensions.Logging;
 using System.Threading;
 
@@ -15,7 +16,9 @@ public interface IOverlayService
         Grid overlayHost,
         ContentPresenter overlayContent,
         Grid flyoutHost,
-        ContentPresenter flyoutContent);
+        ContentPresenter flyoutContent,
+        Grid? selectionIndicatorHost = null,
+        ContentPresenter? selectionIndicatorContent = null);
     void OnBackdropTapped();
     void OnFlyoutBackdropTapped();
 
@@ -32,6 +35,8 @@ public interface IOverlayService
     Task HideQueueOverlayAsync();
     Task CloseOverlayAsync();
     Task CloseFlyoutAsync();
+    Task ShowSelectionIndicatorAsync(mashin.Views.Mobile.Controls.TableView tableView);
+    Task HideSelectionIndicatorAsync(mashin.Views.Mobile.Controls.TableView? tableView = null);
 
     Task<string?> ShowCreatePlaylistAsync();
     Task<string?> ShowUpdatePlaylistAsync(Playlist playlist);
@@ -59,11 +64,15 @@ public sealed class OverlayService : IOverlayService
     private readonly DeletePlaylistOverlay _deletePlaylistOverlay;
     private readonly LoginOverlay _loginOverlay;
     private readonly QueueOverlay _queueOverlay;
+    private readonly SelectionIndicatorOverlay _selectionIndicatorOverlay;
 
     private Grid? _overlayHost;
     private ContentPresenter? _overlayContent;
     private Grid? _flyoutHost;
     private ContentPresenter? _flyoutContent;
+    private Grid? _selectionIndicatorHost;
+    private ContentPresenter? _selectionIndicatorContent;
+    private mashin.Views.Mobile.Controls.TableView? _selectionIndicatorTable;
 
     private Action? _overlayCloseAction;
     private Action? _flyoutCloseAction;
@@ -101,6 +110,11 @@ public sealed class OverlayService : IOverlayService
         _loginOverlay.LoginClicked += OnLoginClicked;
 
         _queueOverlay = new QueueOverlay();
+
+        _selectionIndicatorOverlay = new SelectionIndicatorOverlay();
+        _selectionIndicatorOverlay.SelectAllTapped += OnSelectionIndicatorSelectAllTapped;
+        _selectionIndicatorOverlay.MenuTapped += OnSelectionIndicatorMenuTapped;
+        _selectionIndicatorOverlay.CloseTapped += OnSelectionIndicatorCloseTapped;
     }
 
     #endregion
@@ -111,12 +125,16 @@ public sealed class OverlayService : IOverlayService
         Grid overlayHost,
         ContentPresenter overlayContent,
         Grid flyoutHost,
-        ContentPresenter flyoutContent)
+        ContentPresenter flyoutContent,
+        Grid? selectionIndicatorHost = null,
+        ContentPresenter? selectionIndicatorContent = null)
     {
         _overlayHost = overlayHost;
         _overlayContent = overlayContent;
         _flyoutHost = flyoutHost;
         _flyoutContent = flyoutContent;
+        _selectionIndicatorHost = selectionIndicatorHost;
+        _selectionIndicatorContent = selectionIndicatorContent;
     }
 
     public void OnBackdropTapped()
@@ -258,6 +276,46 @@ public sealed class OverlayService : IOverlayService
             }
 
             await HideFlyoutLayerAsync();
+        });
+    }
+
+    public Task ShowSelectionIndicatorAsync(mashin.Views.Mobile.Controls.TableView tableView)
+    {
+        if (tableView == null)
+        {
+            return Task.CompletedTask;
+        }
+
+        return MainThread.InvokeOnMainThreadAsync(() =>
+        {
+            if (_selectionIndicatorHost == null || _selectionIndicatorContent == null)
+            {
+                return;
+            }
+
+            _selectionIndicatorTable = tableView;
+            _selectionIndicatorContent.Content = _selectionIndicatorOverlay;
+            _selectionIndicatorHost.IsVisible = true;
+        });
+    }
+
+    public Task HideSelectionIndicatorAsync(mashin.Views.Mobile.Controls.TableView? tableView = null)
+    {
+        return MainThread.InvokeOnMainThreadAsync(() =>
+        {
+            if (_selectionIndicatorHost == null || _selectionIndicatorContent == null)
+            {
+                return;
+            }
+
+            if (tableView != null && !ReferenceEquals(tableView, _selectionIndicatorTable))
+            {
+                return;
+            }
+
+            _selectionIndicatorHost.IsVisible = false;
+            _selectionIndicatorContent.Content = null;
+            _selectionIndicatorTable = null;
         });
     }
 
@@ -532,6 +590,27 @@ public sealed class OverlayService : IOverlayService
     private async void OnLoginClicked(object? sender, EventArgs e)
     {
         await TryAuthenticateLoginAsync();
+    }
+
+    private void OnSelectionIndicatorSelectAllTapped(object? sender, EventArgs e)
+    {
+        _selectionIndicatorTable?.SelectAllItems();
+    }
+
+    private void OnSelectionIndicatorMenuTapped(object? sender, EventArgs e)
+    {
+        var tableView = _selectionIndicatorTable;
+        if (tableView == null)
+        {
+            return;
+        }
+
+        tableView.OpenContextMenuForSelection(_selectionIndicatorOverlay.MenuAnchor);
+    }
+
+    private void OnSelectionIndicatorCloseTapped(object? sender, EventArgs e)
+    {
+        _selectionIndicatorTable?.ClearSelection();
     }
 
     #endregion

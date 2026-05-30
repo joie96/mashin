@@ -1,4 +1,7 @@
 using mashin.Models;
+using mashin.Services;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Linq;
 using System.Windows.Input;
 
@@ -9,13 +12,19 @@ public partial class TableView : ContentView
     #region Fields
 
     private readonly HashSet<MediaItem> _suppressNextTap = new();
+    private readonly HashSet<INotifyPropertyChanged> _observedItems = new();
+    private INotifyCollectionChanged? _observedCollection;
 
     #endregion
 
     #region Bindable properties
 
     public static readonly BindableProperty ItemsSourceProperty =
-        BindableProperty.Create(nameof(ItemsSource), typeof(IEnumerable<object>), typeof(TableView));
+        BindableProperty.Create(
+            nameof(ItemsSource),
+            typeof(IEnumerable<object>),
+            typeof(TableView),
+            propertyChanged: OnItemsSourceChanged);
 
     public static readonly BindableProperty ShortPressCommandProperty =
         BindableProperty.Create(nameof(ShortPressCommand), typeof(ICommand), typeof(TableView));
@@ -63,6 +72,99 @@ public partial class TableView : ContentView
         set => SetValue(LongPressCommandProperty, value);
     }
 
+    public bool HasSelection => HasAnySelectedItems();
+
+    #endregion
+
+    #region Selection state synchronization
+
+    private static void OnItemsSourceChanged(BindableObject bindable, object? oldValue, object? newValue)
+    {
+        if (bindable is not TableView tableView)
+        {
+            return;
+        }
+
+        tableView.DetachSelectionObservers();
+        tableView.AttachSelectionObservers(newValue as IEnumerable<object>);
+        tableView.UpdateSelectionIndicator();
+    }
+
+    private void AttachSelectionObservers(IEnumerable<object>? items)
+    {
+        if (items is INotifyCollectionChanged collectionChanged)
+        {
+            _observedCollection = collectionChanged;
+            _observedCollection.CollectionChanged += OnItemsCollectionChanged;
+        }
+
+        if (items == null)
+        {
+            return;
+        }
+
+        foreach (var item in items.OfType<INotifyPropertyChanged>())
+        {
+            if (_observedItems.Add(item))
+            {
+                item.PropertyChanged += OnObservedItemPropertyChanged;
+            }
+        }
+    }
+
+    private void DetachSelectionObservers()
+    {
+        if (_observedCollection != null)
+        {
+            _observedCollection.CollectionChanged -= OnItemsCollectionChanged;
+            _observedCollection = null;
+        }
+
+        foreach (var item in _observedItems)
+        {
+            item.PropertyChanged -= OnObservedItemPropertyChanged;
+        }
+
+        _observedItems.Clear();
+    }
+
+    private void OnItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems != null)
+        {
+            foreach (var oldItem in e.OldItems.OfType<INotifyPropertyChanged>())
+            {
+                if (_observedItems.Remove(oldItem))
+                {
+                    oldItem.PropertyChanged -= OnObservedItemPropertyChanged;
+                }
+            }
+        }
+
+        if (e.NewItems != null)
+        {
+            foreach (var newItem in e.NewItems.OfType<INotifyPropertyChanged>())
+            {
+                if (_observedItems.Add(newItem))
+                {
+                    newItem.PropertyChanged += OnObservedItemPropertyChanged;
+                }
+            }
+        }
+
+        UpdateSelectionIndicator();
+    }
+
+    private void OnObservedItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (!string.Equals(e.PropertyName, nameof(MediaItem.IsSelected), StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        UpdateSelectionIndicator();
+    }
+
     #endregion
 
     #region Input handling
@@ -84,14 +186,16 @@ public partial class TableView : ContentView
             return;
         }
 
-        var longPressCommand = LongPressCommand;
-        if (longPressCommand?.CanExecute(mediaItem) == true)
+        mediaItem.IsSelected = true;
+        UpdateSelectionIndicator();
+
+        if (sender is View anchorView)
         {
-            longPressCommand.Execute(mediaItem);
-        }
-        else
-        {
-            mediaItem.IsSelected = !mediaItem.IsSelected;
+            var contextMenuCommand = ShowContextMenuAtAnchorCommand;
+            if (contextMenuCommand?.CanExecute(anchorView) == true)
+            {
+                contextMenuCommand.Execute(anchorView);
+            }
         }
 
         _suppressNextTap.Add(mediaItem);
@@ -118,6 +222,7 @@ public partial class TableView : ContentView
         if (HasAnySelectedItems())
         {
             mediaItem.IsSelected = !mediaItem.IsSelected;
+            UpdateSelectionIndicator();
             return;
         }
 
@@ -139,6 +244,7 @@ public partial class TableView : ContentView
         if (!HasAnySelectedItems())
         {
             mediaItem.IsSelected = true;
+            UpdateSelectionIndicator();
         }
 
         var contextMenuCommand = ShowContextMenuAtAnchorCommand;
@@ -152,6 +258,78 @@ public partial class TableView : ContentView
 
     #region Helpers
 
+    public void SelectAllItems()
+    {
+        if (ItemsSource == null)
+        {
+            return;
+        }
+
+        foreach (var item in ItemsSource.OfType<MediaItem>())
+        {
+            item.IsSelected = true;
+        }
+
+        UpdateSelectionIndicator();
+    }
+
+    public void ClearSelection()
+    {
+        if (ItemsSource == null)
+        {
+            return;
+        }
+
+        foreach (var item in ItemsSource.OfType<MediaItem>())
+        {
+            item.IsSelected = false;
+        }
+
+        UpdateSelectionIndicator();
+    }
+
+    public void OpenContextMenuForSelection(View anchor)
+    {
+        if (anchor == null || !HasAnySelectedItems())
+        {
+            return;
+        }
+
+        var contextMenuCommand = ShowContextMenuAtAnchorCommand;
+        if (contextMenuCommand?.CanExecute(anchor) == true)
+        {
+            contextMenuCommand.Execute(anchor);
+        }
+    }
+
+    private void UpdateSelectionIndicator()
+    {
+        var overlayService = ResolveOverlayService();
+        if (overlayService == null)
+        {
+            return;
+        }
+
+        if (HasAnySelectedItems())
+        {
+            _ = overlayService.ShowSelectionIndicatorAsync(this);
+            return;
+        }
+
+        _ = overlayService.HideSelectionIndicatorAsync(this);
+    }
+
+    private static IOverlayService? ResolveOverlayService()
+    {
+        var services = Application.Current?.Handler?.MauiContext?.Services;
+        if (services == null)
+        {
+            return null;
+        }
+
+        return services.GetService(typeof(IOverlayService)) as IOverlayService;
+    }
+
     private bool HasAnySelectedItems()
     {
         if (ItemsSource == null)
@@ -160,6 +338,23 @@ public partial class TableView : ContentView
         }
 
         return ItemsSource.OfType<MediaItem>().Any(item => item.IsSelected);
+    }
+
+    protected override void OnBindingContextChanged()
+    {
+        base.OnBindingContextChanged();
+        UpdateSelectionIndicator();
+    }
+
+    protected override void OnHandlerChanging(HandlerChangingEventArgs args)
+    {
+        if (args.NewHandler == null)
+        {
+            DetachSelectionObservers();
+            UpdateSelectionIndicator();
+        }
+
+        base.OnHandlerChanging(args);
     }
 
     #endregion
