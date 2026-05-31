@@ -14,6 +14,7 @@ public partial class TableView : ContentView
     private readonly HashSet<MediaItem> _suppressNextTap = new();
     private readonly HashSet<INotifyPropertyChanged> _observedItems = new();
     private INotifyCollectionChanged? _observedCollection;
+    private bool _hasSelection;
 
     #endregion
 
@@ -72,7 +73,7 @@ public partial class TableView : ContentView
         set => SetValue(LongPressCommandProperty, value);
     }
 
-    public bool HasSelection => HasAnySelectedItems();
+    public bool HasSelection => _hasSelection;
 
     #endregion
 
@@ -186,17 +187,8 @@ public partial class TableView : ContentView
             return;
         }
 
-        mediaItem.IsSelected = true;
+        mediaItem.IsSelected = !mediaItem.IsSelected;
         UpdateSelectionIndicator();
-
-        if (sender is View anchorView)
-        {
-            var contextMenuCommand = ShowContextMenuAtAnchorCommand;
-            if (contextMenuCommand?.CanExecute(anchorView) == true)
-            {
-                contextMenuCommand.Execute(anchorView);
-            }
-        }
 
         _suppressNextTap.Add(mediaItem);
     }
@@ -304,13 +296,20 @@ public partial class TableView : ContentView
 
     private void UpdateSelectionIndicator()
     {
+        var hasSelection = HasAnySelectedItems();
+        if (_hasSelection != hasSelection)
+        {
+            _hasSelection = hasSelection;
+            OnPropertyChanged(nameof(HasSelection));
+        }
+
         var overlayService = ResolveOverlayService();
         if (overlayService == null)
         {
             return;
         }
 
-        if (HasAnySelectedItems())
+        if (hasSelection)
         {
             _ = overlayService.ShowSelectionIndicatorAsync(this);
             return;

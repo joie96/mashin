@@ -13,6 +13,7 @@
 
     <ContentView.Resources>
         <converters:PlaylistMetadataTextConverter x:Key="PlaylistMetadataTextConverter" />
+        <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
 
         <!--  Playlist Row Template  -->
         <DataTemplate x:Key="PlaylistTemplate" x:DataType="models:Playlist">
@@ -88,14 +89,14 @@
                         BackgroundColor="Transparent"
                         HeightRequest="20"
                         HorizontalOptions="Center"
-                        IsVisible="False"
+                        IsVisible="{Binding Source={x:Reference self}, Path=HasSelection}"
                         Margin="0,0,2,0"
                         Stroke="{DynamicResource IconSecondary}"
                         StrokeThickness="0.75"
                         VerticalOptions="Center"
                         WidthRequest="20">
                         <Border.StrokeShape>
-                            <RoundRectangle CornerRadius="4" />
+                            <Ellipse />
                         </Border.StrokeShape>
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Tapped="OnRowTapped" />
@@ -104,8 +105,6 @@
                             <DataTrigger Binding="{Binding IsSelected}"
                                 TargetType="Border"
                                 Value="True">
-                                <Setter Property="IsVisible"
-                                    Value="True" />
                                 <Setter Property="BackgroundColor"
                                     Value="{DynamicResource AccentColor}" />
                                 <Setter Property="Stroke"
@@ -128,16 +127,9 @@
                         Padding="0"
                         HorizontalOptions="Center"
                         VerticalOptions="Center"
+                        IsVisible="{Binding Source={x:Reference self}, Path=HasSelection, Converter={StaticResource InvertedBoolConverter}}"
                         BackgroundColor="Transparent"
                         StrokeThickness="0">
-                        <Border.Triggers>
-                            <DataTrigger Binding="{Binding IsSelected}"
-                                TargetType="Border"
-                                Value="True">
-                                <Setter Property="IsVisible"
-                                    Value="False" />
-                            </DataTrigger>
-                        </Border.Triggers>
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="20" />
                         </Border.StrokeShape>
@@ -229,14 +221,14 @@
                         BackgroundColor="Transparent"
                         HeightRequest="20"
                         HorizontalOptions="Center"
-                        IsVisible="False"
+                        IsVisible="{Binding Source={x:Reference self}, Path=HasSelection}"
                         Margin="0,0,2,0"
                         Stroke="{DynamicResource IconSecondary}"
                         StrokeThickness="0.75"
                         VerticalOptions="Center"
                         WidthRequest="20">
                         <Border.StrokeShape>
-                            <RoundRectangle CornerRadius="4" />
+                            <Ellipse />
                         </Border.StrokeShape>
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Tapped="OnRowTapped" />
@@ -245,8 +237,6 @@
                             <DataTrigger Binding="{Binding IsSelected}"
                                 TargetType="Border"
                                 Value="True">
-                                <Setter Property="IsVisible"
-                                    Value="True" />
                                 <Setter Property="BackgroundColor"
                                     Value="{DynamicResource AccentColor}" />
                                 <Setter Property="Stroke"
@@ -269,16 +259,9 @@
                         Padding="0"
                         HorizontalOptions="Center"
                         VerticalOptions="Center"
+                        IsVisible="{Binding Source={x:Reference self}, Path=HasSelection, Converter={StaticResource InvertedBoolConverter}}"
                         BackgroundColor="Transparent"
                         StrokeThickness="0">
-                        <Border.Triggers>
-                            <DataTrigger Binding="{Binding IsSelected}"
-                                TargetType="Border"
-                                Value="True">
-                                <Setter Property="IsVisible"
-                                    Value="False" />
-                            </DataTrigger>
-                        </Border.Triggers>
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="20" />
                         </Border.StrokeShape>
