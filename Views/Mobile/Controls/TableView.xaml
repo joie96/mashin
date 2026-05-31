@@ -29,7 +29,7 @@
                     </DataTrigger>
                 </Border.Triggers>
 
-                <Grid ColumnDefinitions="52,*,Auto,40"
+                <Grid ColumnDefinitions="52,*,Auto,20,20"
                     ColumnSpacing="10">
                     <!--  Row Main Tap Area  -->
                     <Grid Grid.ColumnSpan="2"
@@ -84,18 +84,35 @@
                         TextColor="{DynamicResource TextSecondary}"
                         VerticalOptions="Center" />
 
+                    <!--  Provider (Icon)  -->
+                    <ffimageloading:SvgCachedImage Grid.Column="3"
+                        HeightRequest="16"
+                        HorizontalOptions="Center"
+                        Source="{Binding ProviderManifest.IconSvg}"
+                        VerticalOptions="Center"
+                        WidthRequest="16">
+                        <ffimageloading:SvgCachedImage.Triggers>
+                            <DataTrigger Binding="{Binding ProviderManifest.IconSvg}"
+                                TargetType="ffimageloading:SvgCachedImage"
+                                Value="{x:Null}">
+                                <Setter Property="IsVisible"
+                                    Value="False" />
+                            </DataTrigger>
+                        </ffimageloading:SvgCachedImage.Triggers>
+                    </ffimageloading:SvgCachedImage>
+
                     <!--  Selection checkbox   -->
-                    <Border Grid.Column="3"
+                    <Border Grid.Column="4"
                         BackgroundColor="Transparent"
-                        HeightRequest="40"
+                        HeightRequest="20"
                         HorizontalOptions="Center"
                         IsVisible="{Binding Source={x:Reference self}, Path=HasSelection}"
-                        Margin="0,0,2,0"
+                        Margin="0"
                         StrokeThickness="0"
                         VerticalOptions="Center"
-                        WidthRequest="40">
+                        WidthRequest="20">
                         <Border.StrokeShape>
-                            <RoundRectangle CornerRadius="20" />
+                            <RoundRectangle CornerRadius="10" />
                         </Border.StrokeShape>
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Tapped="OnRowTapped" />
@@ -131,9 +148,9 @@
 
                     <!--  Context Menu Button  -->
                     <Border x:Name="MoreButton"
-                        Grid.Column="3"
-                        WidthRequest="40"
-                        HeightRequest="40"
+                        Grid.Column="4"
+                        WidthRequest="20"
+                        HeightRequest="20"
                         Padding="0"
                         HorizontalOptions="Center"
                         VerticalOptions="Center"
@@ -174,7 +191,7 @@
                     </DataTrigger>
                 </Border.Triggers>
 
-                <Grid ColumnDefinitions="52,*,Auto,40"
+                <Grid ColumnDefinitions="52,*,Auto,20,20"
                     ColumnSpacing="10">
                     <!--  Row Main Tap Area  -->
                     <Grid Grid.ColumnSpan="2"
@@ -229,18 +246,35 @@
                         TextColor="{DynamicResource TextSecondary}"
                         VerticalOptions="Center" />
 
+                    <!--  Provider (Icon)  -->
+                    <ffimageloading:SvgCachedImage Grid.Column="3"
+                        HeightRequest="16"
+                        HorizontalOptions="Center"
+                        Source="{Binding ProviderManifest.IconSvg}"
+                        VerticalOptions="Center"
+                        WidthRequest="16">
+                        <ffimageloading:SvgCachedImage.Triggers>
+                            <DataTrigger Binding="{Binding ProviderManifest.IconSvg}"
+                                TargetType="ffimageloading:SvgCachedImage"
+                                Value="{x:Null}">
+                                <Setter Property="IsVisible"
+                                    Value="False" />
+                            </DataTrigger>
+                        </ffimageloading:SvgCachedImage.Triggers>
+                    </ffimageloading:SvgCachedImage>
+
                     <!--  Selection checkbox  -->
-                    <Border Grid.Column="3"
+                    <Border Grid.Column="4"
                         BackgroundColor="Transparent"
-                        HeightRequest="40"
+                        HeightRequest="20"
                         HorizontalOptions="Center"
                         IsVisible="{Binding Source={x:Reference self}, Path=HasSelection}"
-                        Margin="0,0,2,0"
+                        Margin="0"
                         StrokeThickness="0"
                         VerticalOptions="Center"
-                        WidthRequest="40">
+                        WidthRequest="20">
                         <Border.StrokeShape>
-                            <RoundRectangle CornerRadius="20" />
+                            <RoundRectangle CornerRadius="10" />
                         </Border.StrokeShape>
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Tapped="OnRowTapped" />
@@ -276,9 +310,9 @@
 
                     <!--  Context Menu Button  -->
                     <Border x:Name="TrackMoreButton"
-                        Grid.Column="3"
-                        WidthRequest="40"
-                        HeightRequest="40"
+                        Grid.Column="4"
+                        WidthRequest="20"
+                        HeightRequest="20"
                         Padding="0"
                         HorizontalOptions="Center"
                         VerticalOptions="Center"

@@ -193,6 +193,7 @@
 
             <!--  Veröffentlichungen Section  -->
             <VerticalStackLayout Padding="16,0,16,0"
+                Margin="0,8,0,0"
                 Spacing="10">
                 <Label FontFamily="PoppinsRegular"
                     FontSize="22"
@@ -212,6 +213,7 @@
 
             <!--  Ähnliche Interpreten Section  -->
             <VerticalStackLayout Padding="16,0,16,0"
+                Margin="0,8,0,0"
                 Spacing="10">
                 <Label FontFamily="PoppinsRegular"
                     FontSize="22"
@@ -219,7 +221,7 @@
                     TextColor="{DynamicResource TextPrimary}" />
 
                 <controls:RowView CoverSize="145"
-                    ItemCornerRadius="8"
+                    ItemCornerRadius="72.5"
                     ItemWidth="145"
                     ItemsSource="{Binding SimilarArtistItems}"
                     MediaActions="{Binding MediaActions}"
@@ -231,6 +233,7 @@
 
             <!--  Top Tracks Section  -->
             <VerticalStackLayout Padding="16,0,16,0"
+                Margin="0,8,0,0"
                 Spacing="10">
                 <Label FontFamily="PoppinsRegular"
                     FontSize="22"
