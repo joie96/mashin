@@ -10,13 +10,19 @@
         BackgroundColor="{DynamicResource BackgroundSecondary}"
         Stroke="{DynamicResource BorderColor}"
         StrokeThickness="1">
+        <Border.Shadow>
+            <Shadow
+                Brush="{DynamicResource ShadowColorSoft}"
+                Opacity="{DynamicResource ShadowOpacitySoft}"
+                Radius="12"
+                Offset="0,4" />
+        </Border.Shadow>
         <Border.StrokeShape>
             <RoundRectangle CornerRadius="16" />
         </Border.StrokeShape>
         <Grid ColumnDefinitions="Auto,Auto,Auto"
             ColumnSpacing="6">
             <Border Grid.Column="0"
-                BackgroundColor="{DynamicResource BackgroundTertiary}"
                 HeightRequest="40"
                 Stroke="{DynamicResource BorderColor}"
                 StrokeThickness="1"
@@ -29,14 +35,13 @@
                 </Border.GestureRecognizers>
                 <Label FontSize="16"
                     HorizontalTextAlignment="Center"
-                    Text="{mi:Fluent Icon=SelectAllOff24, FontOverride=True}"
-                    TextColor="{DynamicResource IconSecondary}"
+                    Text="{mi:Fluent Icon=ShapeSubtract16, FontOverride=True}"
+                    TextColor="{DynamicResource IconPrimary}"
                     VerticalTextAlignment="Center" />
             </Border>
 
             <Border x:Name="MenuAnchorBorder"
                 Grid.Column="1"
-                BackgroundColor="{DynamicResource BackgroundTertiary}"
                 HeightRequest="40"
                 Stroke="{DynamicResource BorderColor}"
                 StrokeThickness="1"
@@ -49,13 +54,12 @@
                 </Border.GestureRecognizers>
                 <Label FontSize="18"
                     HorizontalTextAlignment="Center"
-                    Text="{mi:Fluent Icon=MoreVertical48, FontOverride=True}"
-                    TextColor="{DynamicResource IconSecondary}"
+                    Text="{mi:Fluent Icon=MoreVertical16, FontOverride=True}"
+                    TextColor="{DynamicResource IconPrimary}"
                     VerticalTextAlignment="Center" />
             </Border>
 
             <Border Grid.Column="2"
-                BackgroundColor="{DynamicResource BackgroundTertiary}"
                 HeightRequest="40"
                 Stroke="{DynamicResource BorderColor}"
                 StrokeThickness="1"
@@ -68,8 +72,8 @@
                 </Border.GestureRecognizers>
                 <Label FontSize="18"
                     HorizontalTextAlignment="Center"
-                    Text="{mi:Fluent Icon=Dismiss24, FontOverride=True}"
-                    TextColor="{DynamicResource IconSecondary}"
+                    Text="{mi:Fluent Icon=Dismiss16, FontOverride=True}"
+                    TextColor="{DynamicResource IconPrimary}"
                     VerticalTextAlignment="Center" />
             </Border>
         </Grid>

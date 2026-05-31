@@ -227,16 +227,9 @@ public partial class TableView : ContentView
 
     private void OnMoreButtonTapped(object? sender, TappedEventArgs e)
     {
-        if (sender is not View anchorView || sender is not BindableObject { BindingContext: MediaItem mediaItem })
+        if (sender is not View anchorView || sender is not BindableObject { BindingContext: MediaItem })
         {
             return;
-        }
-
-        // If nothing is selected yet, scope the context menu actions to the tapped row.
-        if (!HasAnySelectedItems())
-        {
-            mediaItem.IsSelected = true;
-            UpdateSelectionIndicator();
         }
 
         var contextMenuCommand = ShowContextMenuAtAnchorCommand;

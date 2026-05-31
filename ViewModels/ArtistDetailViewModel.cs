@@ -63,6 +63,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     private bool _isLoadingSimilarArtists;
     private bool _isDescriptionExpanded;
     private bool _disposed;
+    private Track? _contextMenuTargetTrack;
     #endregion
 
     #region Properties
@@ -369,7 +370,13 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
         ShowTrackContextMenuAtAnchorCommand = new Command<View>(async (anchor) =>
         {
-            if (_trackContextMenuItems.Count > 0 && anchor != null)
+            if (anchor == null)
+            {
+                return;
+            }
+
+            _contextMenuTargetTrack = anchor.BindingContext as Track;
+            if (_trackContextMenuItems.Count > 0)
             {
                 await _contextMenuService.ShowContextMenuAsync(_trackContextMenuItems, anchor);
             }
@@ -857,21 +864,21 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                 Text = "Abspielen",
                 Icon = FluentIcons.Play12,
                 Command = new Command(async () =>
-                    await PlaySelectedTracksWithModesAsync(TopTracks))
+                    await PlayTracksWithModesAsync(GetContextMenuTargetTracks()))
             },
             new()
             {
                 Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaNextAsync(TopTracks.Where(t => t.IsSelected)))
+                    await MediaActions.PlayMediaNextAsync(GetContextMenuTargetTracks()))
             },
             new()
             {
                 Text = "Als Letztes spielen",
                 Icon = FluentIcons.ArrowNext12,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaLastAsync(TopTracks.Where(t => t.IsSelected)))
+                    await MediaActions.PlayMediaLastAsync(GetContextMenuTargetTracks()))
             },
             new() { IsSeparator = true },
             new()
@@ -887,7 +894,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                             Icon = FluentIcons.TextBulletListLtr16,
                             Command = new Command(async () =>
                                 await MediaActions.AddToPlaylistAsync(
-                                    TopTracks.Where(t => t.IsSelected),
+                                    GetContextMenuTargetTracks(),
                                     playlist))
                         }))
             },
@@ -897,7 +904,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                 Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
-                    await MediaActions.AddToFavoritesAsync(TopTracks.Where(t => t.IsSelected)))
+                    await MediaActions.AddToFavoritesAsync(GetContextMenuTargetTracks()))
             },
             new()
             {
@@ -905,7 +912,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                 Icon = FluentFilledIcons.Heart12Filled,
                 IconIsFilled = true,
                 Command = new Command(async () =>
-                    await MediaActions.RemoveFromFavoritesAsync(TopTracks.Where(t => t.IsSelected)))
+                    await MediaActions.RemoveFromFavoritesAsync(GetContextMenuTargetTracks()))
             }
         };
 
@@ -940,21 +947,20 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         return string.Concat(username, "--");
     }
 
-    private async Task PlaySelectedTracksWithModesAsync(IEnumerable<Track> tracks)
+    private async Task PlayTracksWithModesAsync(IEnumerable<Track> tracks)
     {
         var trackList = tracks.ToList();
-        var selectedTracks = trackList.Where(t => t.IsSelected).ToList();
-        if (selectedTracks.Count == 0)
+        if (trackList.Count == 0)
         {
             return;
         }
 
-        // multiple tracks selected:  play the first one and queue the rest selected tracks
-        if (selectedTracks.Count > 1)
+        // Multiple tracks: play first and queue remaining.
+        if (trackList.Count > 1)
         {
-            await MediaActions.PlayMediaAsync(selectedTracks.First());
+            await MediaActions.PlayMediaAsync(trackList.First());
 
-            var remainingTracks = selectedTracks.Skip(1).ToList();
+            var remainingTracks = trackList.Skip(1).ToList();
             if (remainingTracks.Count > 0)
             {
                 await MediaActions.PlayMediaNextAsync(remainingTracks);
@@ -963,33 +969,18 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             return;
         }
 
-        // single track selected: play track and queue remaining tracks in cyclic order
-        var selectedTrack = selectedTracks.First();
-        await MediaActions.PlayMediaAsync(selectedTrack);
+        await MediaActions.PlayMediaAsync(trackList[0]);
+    }
 
-        var selectedIndex = trackList.IndexOf(selectedTrack);
-        if (selectedIndex < 0 || trackList.Count <= 1)
+    private IReadOnlyList<Track> GetContextMenuTargetTracks()
+    {
+        var selectedTracks = TopTracks.Where(track => track.IsSelected).ToList();
+        if (selectedTracks.Count > 0)
         {
-            return;
+            return selectedTracks;
         }
 
-        var itemsToQueue = new List<Track>(trackList.Count - 1);
-        var trailingCount = trackList.Count - selectedIndex - 1;
-
-        if (trailingCount > 0)
-        {
-            itemsToQueue.AddRange(trackList.GetRange(selectedIndex + 1, trailingCount));
-        }
-
-        if (selectedIndex > 0)
-        {
-            itemsToQueue.AddRange(trackList.GetRange(0, selectedIndex));
-        }
-
-        if (itemsToQueue.Count > 0)
-        {
-            await MediaActions.PlayMediaNextAsync(itemsToQueue);
-        }
+        return _contextMenuTargetTrack == null ? Array.Empty<Track>() : new[] { _contextMenuTargetTrack };
     }
 
     private Task BuildAlbumContextMenuAsync()

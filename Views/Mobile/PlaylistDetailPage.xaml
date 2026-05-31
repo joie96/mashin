@@ -6,6 +6,7 @@
     xmlns:converters="clr-namespace:mashin.Converters"
     xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
+    xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
     xmlns:vm="clr-namespace:mashin.ViewModels"
     x:DataType="vm:PlaylistDetailViewModel"
     BackgroundColor="{DynamicResource BackgroundPrimary}">
@@ -77,6 +78,9 @@
                 HeightRequest="44"
                 StrokeThickness="0"
                 WidthRequest="44">
+                <Border.Behaviors>
+                    <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource SelectionBackground}" />
+                </Border.Behaviors>
                 <Border.GestureRecognizers>
                     <TapGestureRecognizer Command="{Binding PlayPlaylistCommand}" />
                 </Border.GestureRecognizers>
@@ -96,6 +100,9 @@
                 HeightRequest="44"
                 StrokeThickness="0"
                 WidthRequest="44">
+                <Border.Behaviors>
+                    <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource SelectionBackground}" />
+                </Border.Behaviors>
                 <Border.GestureRecognizers>
                     <TapGestureRecognizer Command="{Binding ShufflePlaylistCommand}" />
                 </Border.GestureRecognizers>
@@ -113,6 +120,12 @@
             <Grid Grid.Column="2"
                 HeightRequest="44"
                 WidthRequest="44">
+                <Grid.Behaviors>
+                    <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource SelectionBackground}" />
+                </Grid.Behaviors>
+                <Grid.GestureRecognizers>
+                    <TapGestureRecognizer Command="{Binding TogglePlaylistFavoriteCommand}" />
+                </Grid.GestureRecognizers>
                 <Border BackgroundColor="{DynamicResource ActionButtonsBackground}"
                     HeightRequest="44"
                     StrokeThickness="0"
@@ -127,22 +140,14 @@
                     IsVisible="{Binding IsPlaylistFavorite, Converter={StaticResource InvertedBoolConverter}}"
                     Text="{mi:Fluent Icon=Heart48, FontOverride=True}"
                     TextColor="{DynamicResource IconPrimary}"
-                    VerticalOptions="Center">
-                    <Label.GestureRecognizers>
-                        <TapGestureRecognizer Command="{Binding TogglePlaylistFavoriteCommand}" />
-                    </Label.GestureRecognizers>
-                </Label>
+                    VerticalOptions="Center" />
 
                 <Label FontSize="18"
                     HorizontalOptions="Center"
                     IsVisible="{Binding IsPlaylistFavorite}"
                     Text="{mi:FluentFilled Icon=Heart48Filled, FontOverride=True}"
                     TextColor="{DynamicResource IconPrimary}"
-                    VerticalOptions="Center">
-                    <Label.GestureRecognizers>
-                        <TapGestureRecognizer Command="{Binding TogglePlaylistFavoriteCommand}" />
-                    </Label.GestureRecognizers>
-                </Label>
+                    VerticalOptions="Center" />
             </Grid>
 
             <!--  Header Context Menu  -->
@@ -152,6 +157,9 @@
                 HeightRequest="44"
                 StrokeThickness="0"
                 WidthRequest="44">
+                <Border.Behaviors>
+                    <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource SelectionBackground}" />
+                </Border.Behaviors>
                 <Border.GestureRecognizers>
                     <TapGestureRecognizer Command="{Binding ShowHeaderContextMenuAtAnchorCommand}"
                         CommandParameter="{x:Reference HeaderContextMenuButton}" />
@@ -161,7 +169,7 @@
                 </Border.StrokeShape>
                 <Label FontSize="18"
                     HorizontalOptions="Center"
-                    Text="{mi:Fluent Icon=MoreHorizontal48, FontOverride=True}"
+                    Text="{mi:Fluent Icon=MoreVertical48, FontOverride=True}"
                     TextColor="{DynamicResource IconPrimary}"
                     VerticalOptions="Center" />
             </Border>

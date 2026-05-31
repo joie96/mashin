@@ -17,6 +17,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
     private readonly MusicAssistantService _musicAssistantService;
     private readonly IUserDataService _userDataService;
+    private readonly IOverlayService _overlayService;
     private readonly INavigationService _navigationService;
     private readonly IMediaItemActions _mediaActions;
     private readonly IContextMenuService _contextMenuService;
@@ -38,6 +39,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
     public PlaylistsViewModel(
         MusicAssistantService musicAssistantService,
         IUserDataService userDataService,
+        IOverlayService overlayService,
         INavigationService navigationService,
         IMediaItemActions mediaActions,
         IContextMenuService contextMenuService,
@@ -45,6 +47,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
     {
         _musicAssistantService = musicAssistantService;
         _userDataService = userDataService;
+        _overlayService = overlayService;
         _navigationService = navigationService;
         _mediaActions = mediaActions;
         _contextMenuService = contextMenuService;
@@ -53,6 +56,8 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         // Navigation command
         PlaylistTappedCommand = new Command<Playlist>(async playlist =>
             await _navigationService.NavigateToAsync<PlaylistDetailPage>(playlist));
+
+        CreatePlaylistCommand = new Command(async () => await CreatePlaylistAsync());
 
         // Long-press selection command
         PlaylistLongPressedCommand = new Command<Playlist>(playlist =>
@@ -79,6 +84,8 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
             {
                 return;
             }
+
+            BuildPlaylistContextMenuItems();
 
             if (_playlistContextMenuItems.Count > 0)
             {
@@ -122,6 +129,8 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
     #region Commands
 
     public ICommand PlaylistTappedCommand { get; }
+
+    public ICommand CreatePlaylistCommand { get; }
 
     public ICommand PlaylistLongPressedCommand { get; }
 
@@ -254,25 +263,47 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
     #endregion
 
+    #region Playlist Creation
+
+    private async Task CreatePlaylistAsync()
+    {
+        var name = await _overlayService.ShowCreatePlaylistAsync();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return;
+        }
+
+        await _userDataService.GetPreferencesAsync();
+
+        var username = _userDataService.CurrentUser?.Username;
+        var prefix = string.IsNullOrWhiteSpace(username)
+            ? null
+            : string.Concat(username, "--");
+
+        if (!string.IsNullOrWhiteSpace(prefix)
+            && !name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            name = string.Concat(prefix, name);
+        }
+
+        try
+        {
+            await _musicAssistantService.CreatePlaylistAsync(name);
+            await LoadPlaylistsAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create playlist: {PlaylistName}", name);
+        }
+    }
+
+    #endregion
+
     #region Context Menu
 
     private void BuildPlaylistContextMenuItems()
     {
         _playlistContextMenuItems.Clear();
-
-        _playlistContextMenuItems.Add(new ContextMenuItem
-        {
-            Text = "Öffnen",
-            Icon = FluentIcons.TextBulletListLtr16,
-            Command = new Command(async () =>
-            {
-                var target = GetPlaylistsForAction().FirstOrDefault();
-                if (target != null)
-                {
-                    await _navigationService.NavigateToAsync<PlaylistDetailPage>(target);
-                }
-            })
-        });
 
         _playlistContextMenuItems.Add(new ContextMenuItem
         {
@@ -297,19 +328,26 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
         _playlistContextMenuItems.Add(new ContextMenuItem { IsSeparator = true });
 
+        var targets = GetPlaylistsForAction();
+        var shouldShowRemoveFromFavorites = targets.Count > 0 && targets.All(playlist => playlist.Favorite);
+
+        if (shouldShowRemoveFromFavorites)
+        {
+            _playlistContextMenuItems.Add(new ContextMenuItem
+            {
+                Text = "Aus Favoriten entfernen",
+                Icon = FluentFilledIcons.Heart12Filled,
+                IconIsFilled = true,
+                Command = new Command(async () => await _mediaActions.RemoveFromFavoritesAsync(GetPlaylistsForAction()))
+            });
+            return;
+        }
+
         _playlistContextMenuItems.Add(new ContextMenuItem
         {
             Text = "Zu Favoriten hinzufügen",
             Icon = FluentIcons.Heart12,
             Command = new Command(async () => await _mediaActions.AddToFavoritesAsync(GetPlaylistsForAction()))
-        });
-
-        _playlistContextMenuItems.Add(new ContextMenuItem
-        {
-            Text = "Aus Favoriten entfernen",
-            Icon = FluentFilledIcons.Heart12Filled,
-            IconIsFilled = true,
-            Command = new Command(async () => await _mediaActions.RemoveFromFavoritesAsync(GetPlaylistsForAction()))
         });
     }
 

@@ -39,6 +39,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     private bool _isLoadingTracks;
     private bool _isHeaderCollapsed;
     private bool _disposed;
+    private Track? _contextMenuTargetTrack;
 
     #endregion
 
@@ -200,7 +201,15 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
         ShowContentContextMenuAtAnchorCommand = new Command<View>(async (anchor) =>
         {
-            if (_contentContextMenuItems.Count > 0 && anchor != null)
+            if (anchor == null)
+            {
+                return;
+            }
+
+            _contextMenuTargetTrack = anchor.BindingContext as Track;
+            await BuildContentContextMenuAsync();
+
+            if (_contentContextMenuItems.Count > 0)
             {
                 await _contextMenuService.ShowContextMenuAsync(_contentContextMenuItems, anchor);
             }
@@ -208,6 +217,8 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
         ShowContentContextMenuAtPositionCommand = new Command<Point>(async (position) =>
         {
+            await BuildContentContextMenuAsync();
+
             if (_contentContextMenuItems.Count > 0)
             {
                 await _contextMenuService.ShowContextMenuAsync(_contentContextMenuItems, position);
@@ -553,6 +564,10 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(orderBy: "sort_name");
         ApplyPlaylistDisplayNames(playlists);
 
+        var targets = GetContextMenuTargetTracks().ToList();
+        var isSingleTarget = targets.Count == 1;
+        var singleTarget = isSingleTarget ? targets[0] : null;
+
         var menu = new ObservableRangeCollection<ContextMenuItem>
         {
             new()
@@ -561,15 +576,15 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 Icon = FluentIcons.Play12,
                 Command = new Command(async () =>
                 {
-                    var selectedTracks = Tracks.Where(t => t.IsSelected).ToList();
-                    if (selectedTracks.Count == 0)
+                    var tracksForAction = GetContextMenuTargetTracks().ToList();
+                    if (tracksForAction.Count == 0)
                     {
                         return;
                     }
 
-                    await MediaActions.PlayMediaAsync(selectedTracks[0]);
+                    await MediaActions.PlayMediaAsync(tracksForAction[0]);
 
-                    var remainingTracks = selectedTracks.Skip(1).ToList();
+                    var remainingTracks = tracksForAction.Skip(1).ToList();
                     if (remainingTracks.Count > 0)
                     {
                         await MediaActions.PlayMediaNextAsync(remainingTracks);
@@ -581,22 +596,28 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () => 
-                    await MediaActions.PlayMediaNextAsync(Tracks.Where(t => t.IsSelected)))
+                    await MediaActions.PlayMediaNextAsync(GetContextMenuTargetTracks()))
             },
             new()
             {
                 Text = "Als Letztes spielen",
                 Icon = FluentIcons.ArrowNext12,
                 Command = new Command(async () => 
-                    await MediaActions.PlayMediaLastAsync(Tracks.Where(t => t.IsSelected)))
-            },
-            new()
+                    await MediaActions.PlayMediaLastAsync(GetContextMenuTargetTracks()))
+            }
+        };
+
+        if (isSingleTarget)
+        {
+            menu.Add(new ContextMenuItem { IsSeparator = true });
+
+            menu.Add(new ContextMenuItem
             {
-                Text = "Artist öffnen",
+                Text = "Künstler:inn öffnen",
+                Icon = FluentIcons.Person12,
                 Command = new Command(async () =>
                 {
-                    var selectedArtist = Tracks
-                        .Where(track => track.IsSelected)
+                    var selectedArtist = GetContextMenuTargetTracks()
                         .SelectMany(track => track.Artists ?? Enumerable.Empty<Artist>())
                         .FirstOrDefault();
 
@@ -607,60 +628,112 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
                     await _navigationService.NavigateToAsync<ArtistDetailPage>(selectedArtist);
                 })
-            },
-            new() { IsSeparator = true },
-            new()
+            });
+
+            menu.Add(new ContextMenuItem
             {
-                Text = "Zu Wiedergabeliste hinzufügen",
-                Icon = FluentIcons.Add12,
-                SubItems = new ObservableCollection<ContextMenuItem>(
-                    playlists
-                        .Where(playlist => !playlist.Name.StartsWith("~"))
-                        .Select(playlist => new ContextMenuItem
-                        {
-                            Text = playlist.DisplayName,
-                            Icon = FluentIcons.TextBulletListLtr16,
-                            Command = new Command(async () =>
-                                await MediaActions.AddToPlaylistAsync(
-                                    Tracks.Where(t => t.IsSelected),
-                                    playlist))
-                        }))
-            },
-            new()
-            {
-                Text = "Aus Wiedergabeliste entfernen",
-                Icon = FluentIcons.Subtract12,
+                Text = "Album öffnen",
+                Icon = FluentIcons.Open16,
                 Command = new Command(async () =>
                 {
-                    if (Playlist != null)
+                    var selectedAlbum = GetContextMenuTargetTracks()
+                        .Select(track => track.Album)
+                        .FirstOrDefault(album => album != null);
+
+                    if (selectedAlbum == null)
                     {
-                        await MediaActions.RemoveFromPlaylistAsync(
-                            Tracks.Where(t => t.IsSelected),
-                            Playlist);
-            
-                        // Playlist neu laden, um entfernte Tracks zu aktualisieren
-                        await LoadPlaylistAsync(Playlist.ItemId, Playlist.Provider);
+                        return;
                     }
-                }),
-                IsEnabled = true
-            },
-            new() { IsSeparator = true },
-            new()
+
+                    await _navigationService.NavigateToAsync<AlbumDetailPage>(selectedAlbum);
+                })
+            });
+        }
+
+        menu.Add(new ContextMenuItem { IsSeparator = true });
+
+        menu.Add(new ContextMenuItem
+        {
+            Text = "Zu Wiedergabeliste hinzufügen",
+            Icon = FluentIcons.Add12,
+            SubItems = new ObservableCollection<ContextMenuItem>(
+                playlists
+                    .Where(playlist => !playlist.Name.StartsWith("~"))
+                    .Select(playlist => new ContextMenuItem
+                    {
+                        Text = playlist.DisplayName,
+                        Icon = FluentIcons.TextBulletListLtr16,
+                        Command = new Command(async () =>
+                            await MediaActions.AddToPlaylistAsync(
+                                GetContextMenuTargetTracks(),
+                                playlist))
+                    }))
+        });
+
+        menu.Add(new ContextMenuItem
+        {
+            Text = "Aus Wiedergabeliste entfernen",
+            Icon = FluentIcons.Subtract12,
+            Command = new Command(async () =>
+            {
+                if (Playlist != null)
+                {
+                    await MediaActions.RemoveFromPlaylistAsync(
+                        GetContextMenuTargetTracks(),
+                        Playlist);
+
+                    // Playlist neu laden, um entfernte Tracks zu aktualisieren
+                    await LoadPlaylistAsync(Playlist.ItemId, Playlist.Provider);
+                }
+            }),
+            IsEnabled = true
+        });
+
+        menu.Add(new ContextMenuItem { IsSeparator = true });
+
+        if (isSingleTarget)
+        {
+            if (singleTarget?.Favorite == true)
+            {
+                menu.Add(new ContextMenuItem
+                {
+                    Text = "Aus Favoriten entfernen",
+                    Icon = FluentFilledIcons.Heart12Filled,
+                    IconIsFilled = true,
+                    Command = new Command(async () =>
+                        await MediaActions.RemoveFromFavoritesAsync(GetContextMenuTargetTracks()))
+                });
+            }
+            else
+            {
+                menu.Add(new ContextMenuItem
+                {
+                    Text = "Zu Favoriten hinzufügen",
+                    Icon = FluentIcons.Heart12,
+                    Command = new Command(async () =>
+                        await MediaActions.AddToFavoritesAsync(GetContextMenuTargetTracks()))
+                });
+            }
+        }
+        else
+        {
+            menu.Add(new ContextMenuItem
             {
                 Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
-                Command = new Command(async () => 
-                    await MediaActions.AddToFavoritesAsync(Tracks.Where(t => t.IsSelected)))
-            },
-            new()
+                Command = new Command(async () =>
+                    await MediaActions.AddToFavoritesAsync(GetContextMenuTargetTracks()))
+            });
+
+            menu.Add(new ContextMenuItem
             {
                 Text = "Aus Favoriten entfernen",
                 Icon = FluentFilledIcons.Heart12Filled,
                 IconIsFilled = true,
-                Command = new Command(async () => 
-                    await MediaActions.RemoveFromFavoritesAsync(Tracks.Where(t => t.IsSelected)))
-            }
-        };
+                Command = new Command(async () =>
+                    await MediaActions.RemoveFromFavoritesAsync(GetContextMenuTargetTracks()))
+            });
+        }
 
         _contentContextMenuItems = menu;
     }
@@ -694,6 +767,17 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 playlist.DisplayName = playlist.Name[prefix.Length..];
             }
         }
+    }
+
+    private IReadOnlyList<Track> GetContextMenuTargetTracks()
+    {
+        var selectedTracks = Tracks.Where(track => track.IsSelected).ToList();
+        if (selectedTracks.Count > 0)
+        {
+            return selectedTracks;
+        }
+
+        return _contextMenuTargetTrack == null ? Array.Empty<Track>() : new[] { _contextMenuTargetTrack };
     }
 
     private static string FormatTotalDuration(int totalSeconds)

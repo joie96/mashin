@@ -29,7 +29,7 @@
                     </DataTrigger>
                 </Border.Triggers>
 
-                <Grid ColumnDefinitions="52,*,56,40"
+                <Grid ColumnDefinitions="52,*,Auto,40"
                     ColumnSpacing="10">
                     <!--  Row Main Tap Area  -->
                     <Grid Grid.ColumnSpan="2"
@@ -87,36 +87,46 @@
                     <!--  Selection checkbox   -->
                     <Border Grid.Column="3"
                         BackgroundColor="Transparent"
-                        HeightRequest="20"
+                        HeightRequest="40"
                         HorizontalOptions="Center"
                         IsVisible="{Binding Source={x:Reference self}, Path=HasSelection}"
                         Margin="0,0,2,0"
-                        Stroke="{DynamicResource IconSecondary}"
-                        StrokeThickness="0.75"
+                        StrokeThickness="0"
                         VerticalOptions="Center"
-                        WidthRequest="20">
+                        WidthRequest="40">
                         <Border.StrokeShape>
-                            <Ellipse />
+                            <RoundRectangle CornerRadius="20" />
                         </Border.StrokeShape>
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Tapped="OnRowTapped" />
                         </Border.GestureRecognizers>
-                        <Border.Triggers>
-                            <DataTrigger Binding="{Binding IsSelected}"
-                                TargetType="Border"
-                                Value="True">
-                                <Setter Property="BackgroundColor"
-                                    Value="{DynamicResource AccentColor}" />
-                                <Setter Property="Stroke"
-                                    Value="{DynamicResource AccentColor}" />
-                            </DataTrigger>
-                        </Border.Triggers>
-                        <Label FontSize="14"
+                        <Border BackgroundColor="Transparent"
+                            HeightRequest="20"
                             HorizontalOptions="Center"
-                            IsVisible="{Binding IsSelected}"
-                            Text="{mi:Fluent Icon=Checkmark16, FontOverride=True}"
-                            TextColor="{DynamicResource IconPrimary}"
-                            VerticalOptions="Center" />
+                            Stroke="{DynamicResource IconSecondary}"
+                            StrokeThickness="0.75"
+                            VerticalOptions="Center"
+                            WidthRequest="20">
+                            <Border.StrokeShape>
+                                <Ellipse />
+                            </Border.StrokeShape>
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding IsSelected}"
+                                    TargetType="Border"
+                                    Value="True">
+                                    <Setter Property="BackgroundColor"
+                                        Value="{DynamicResource AccentColor}" />
+                                    <Setter Property="Stroke"
+                                        Value="{DynamicResource AccentColor}" />
+                                </DataTrigger>
+                            </Border.Triggers>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                IsVisible="{Binding IsSelected}"
+                                Text="{mi:Fluent Icon=Checkmark16, FontOverride=True}"
+                                TextColor="{DynamicResource IconPrimary}"
+                                VerticalOptions="Center" />
+                        </Border>
                     </Border>
 
                     <!--  Context Menu Button  -->
@@ -130,6 +140,9 @@
                         IsVisible="{Binding Source={x:Reference self}, Path=HasSelection, Converter={StaticResource InvertedBoolConverter}}"
                         BackgroundColor="Transparent"
                         StrokeThickness="0">
+                        <Border.Behaviors>
+                            <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource SelectionBackground}" />
+                        </Border.Behaviors>
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="20" />
                         </Border.StrokeShape>
@@ -161,7 +174,7 @@
                     </DataTrigger>
                 </Border.Triggers>
 
-                <Grid ColumnDefinitions="52,*,56,40"
+                <Grid ColumnDefinitions="52,*,Auto,40"
                     ColumnSpacing="10">
                     <!--  Row Main Tap Area  -->
                     <Grid Grid.ColumnSpan="2"
@@ -219,36 +232,46 @@
                     <!--  Selection checkbox  -->
                     <Border Grid.Column="3"
                         BackgroundColor="Transparent"
-                        HeightRequest="20"
+                        HeightRequest="40"
                         HorizontalOptions="Center"
                         IsVisible="{Binding Source={x:Reference self}, Path=HasSelection}"
                         Margin="0,0,2,0"
-                        Stroke="{DynamicResource IconSecondary}"
-                        StrokeThickness="0.75"
+                        StrokeThickness="0"
                         VerticalOptions="Center"
-                        WidthRequest="20">
+                        WidthRequest="40">
                         <Border.StrokeShape>
-                            <Ellipse />
+                            <RoundRectangle CornerRadius="20" />
                         </Border.StrokeShape>
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Tapped="OnRowTapped" />
                         </Border.GestureRecognizers>
-                        <Border.Triggers>
-                            <DataTrigger Binding="{Binding IsSelected}"
-                                TargetType="Border"
-                                Value="True">
-                                <Setter Property="BackgroundColor"
-                                    Value="{DynamicResource AccentColor}" />
-                                <Setter Property="Stroke"
-                                    Value="{DynamicResource AccentColor}" />
-                            </DataTrigger>
-                        </Border.Triggers>
-                        <Label FontSize="14"
+                        <Border BackgroundColor="Transparent"
+                            HeightRequest="20"
                             HorizontalOptions="Center"
-                            IsVisible="{Binding IsSelected}"
-                            Text="{mi:Fluent Icon=Checkmark16, FontOverride=True}"
-                            TextColor="{DynamicResource IconPrimary}"
-                            VerticalOptions="Center" />
+                            Stroke="{DynamicResource IconSecondary}"
+                            StrokeThickness="0.75"
+                            VerticalOptions="Center"
+                            WidthRequest="20">
+                            <Border.StrokeShape>
+                                <Ellipse />
+                            </Border.StrokeShape>
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding IsSelected}"
+                                    TargetType="Border"
+                                    Value="True">
+                                    <Setter Property="BackgroundColor"
+                                        Value="{DynamicResource AccentColor}" />
+                                    <Setter Property="Stroke"
+                                        Value="{DynamicResource AccentColor}" />
+                                </DataTrigger>
+                            </Border.Triggers>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                IsVisible="{Binding IsSelected}"
+                                Text="{mi:Fluent Icon=Checkmark16, FontOverride=True}"
+                                TextColor="{DynamicResource IconPrimary}"
+                                VerticalOptions="Center" />
+                        </Border>
                     </Border>
 
                     <!--  Context Menu Button  -->
@@ -262,6 +285,9 @@
                         IsVisible="{Binding Source={x:Reference self}, Path=HasSelection, Converter={StaticResource InvertedBoolConverter}}"
                         BackgroundColor="Transparent"
                         StrokeThickness="0">
+                        <Border.Behaviors>
+                            <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource SelectionBackground}" />
+                        </Border.Behaviors>
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="20" />
                         </Border.StrokeShape>
