@@ -772,13 +772,12 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
             await Task.WhenAll(fetchTasks);
 
-            foreach (var fullArtist in resolvedArtists)
-            {
-                if (fullArtist != null)
-                {
-                    SimilarArtists.Add(fullArtist);
-                }
-            }
+            var fullArtists = resolvedArtists
+                .Where(artist => artist != null)
+                .Select(artist => artist!)
+                .ToList();
+
+            SimilarArtists = new ObservableRangeCollection<Artist>(fullArtists);
 
             _ = BuildArtistContextMenuAsync();
         }

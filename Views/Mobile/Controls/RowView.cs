@@ -51,6 +51,9 @@ public partial class RowView : ContentView
     public static readonly BindableProperty ItemWidthProperty =
         BindableProperty.Create(nameof(ItemWidth), typeof(double), typeof(RowView), 145d);
 
+    public static readonly BindableProperty ItemHeightProperty =
+        BindableProperty.Create(nameof(ItemHeight), typeof(double), typeof(RowView), 206d);
+
     #endregion
 
     #region Properties
@@ -107,6 +110,12 @@ public partial class RowView : ContentView
     {
         get => (double)GetValue(ItemWidthProperty);
         set => SetValue(ItemWidthProperty, value);
+    }
+
+    public double ItemHeight
+    {
+        get => (double)GetValue(ItemHeightProperty);
+        set => SetValue(ItemHeightProperty, value);
     }
 
     public bool HasSelection => _hasSelection;

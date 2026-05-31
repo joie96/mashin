@@ -15,6 +15,7 @@
         <DataTemplate x:Key="AlbumTemplate" x:DataType="models:Album">
             <Grid RowDefinitions="Auto,Auto,Auto,6"
                 BackgroundColor="Transparent"
+                HeightRequest="{Binding Source={x:Reference self}, Path=ItemHeight}"
                 RowSpacing="6"
                 WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
                 <Grid.Behaviors>
@@ -54,6 +55,9 @@
                     </Border.StrokeShape>
                     <Grid>
                         <ffimageloading:CachedImage Aspect="AspectFill"
+                            DownsampleToViewSize="True"
+                            DownsampleUseDipUnits="True"
+                            FadeAnimationEnabled="False"
                             Source="{Binding ImageUri}" />
 
                         <Border BackgroundColor="#26000000"
@@ -185,6 +189,7 @@
         <DataTemplate x:Key="TrackTemplate" x:DataType="models:Track">
             <Grid RowDefinitions="Auto,Auto,Auto,6"
                 BackgroundColor="Transparent"
+                HeightRequest="{Binding Source={x:Reference self}, Path=ItemHeight}"
                 RowSpacing="6"
                 WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
                 <Grid.Behaviors>
@@ -224,6 +229,9 @@
                     </Border.StrokeShape>
                     <Grid>
                         <ffimageloading:CachedImage Aspect="AspectFill"
+                            DownsampleToViewSize="True"
+                            DownsampleUseDipUnits="True"
+                            FadeAnimationEnabled="False"
                             Source="{Binding ImageUri}" />
 
                         <Border BackgroundColor="#26000000"
@@ -355,6 +363,7 @@
         <DataTemplate x:Key="ArtistTemplate" x:DataType="models:Artist">
             <Grid RowDefinitions="Auto,Auto,6"
                 BackgroundColor="Transparent"
+                HeightRequest="{Binding Source={x:Reference self}, Path=ItemHeight}"
                 RowSpacing="6"
                 WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
                 <Grid.Behaviors>
@@ -394,6 +403,9 @@
                     </Border.StrokeShape>
                     <Grid>
                         <ffimageloading:CachedImage Aspect="AspectFill"
+                            DownsampleToViewSize="True"
+                            DownsampleUseDipUnits="True"
+                            FadeAnimationEnabled="False"
                             Source="{Binding ImageUri}" />
 
                         <Border BackgroundColor="#26000000"
@@ -514,6 +526,7 @@
         <DataTemplate x:Key="PlaylistTemplate" x:DataType="models:Playlist">
             <Grid RowDefinitions="Auto,Auto,Auto,6"
                 BackgroundColor="Transparent"
+                HeightRequest="{Binding Source={x:Reference self}, Path=ItemHeight}"
                 RowSpacing="6"
                 WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
                 <Grid.Behaviors>
@@ -553,6 +566,9 @@
                     </Border.StrokeShape>
                     <Grid>
                         <ffimageloading:CachedImage Aspect="AspectFill"
+                            DownsampleToViewSize="True"
+                            DownsampleUseDipUnits="True"
+                            FadeAnimationEnabled="False"
                             Source="{Binding ImageUri}" />
 
                         <Border BackgroundColor="#26000000"
@@ -683,6 +699,7 @@
         <!--  DataTemplate for Skeletons  -->
         <DataTemplate x:Key="SkeletonTemplate" x:DataType="models:RowViewSkeleton">
             <Grid RowDefinitions="Auto,Auto,Auto"
+                HeightRequest="{Binding Source={x:Reference self}, Path=ItemHeight}"
                 RowSpacing="6"
                 WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
                 <desktopControls:SkeletonLoader Grid.Row="0"
@@ -715,13 +732,14 @@
     <!--  Horizontal Items  -->
     <CollectionView x:Name="ItemsCollectionView"
         HorizontalScrollBarVisibility="Never"
-        ItemSizingStrategy="MeasureAllItems"
+        HeightRequest="{Binding Source={x:Reference self}, Path=ItemHeight}"
+        ItemSizingStrategy="MeasureFirstItem"
         ItemsSource="{Binding Source={x:Reference self}, Path=ItemsSource}"
         SelectionMode="None"
         VerticalScrollBarVisibility="Never">
         <CollectionView.ItemsLayout>
             <LinearItemsLayout Orientation="Horizontal"
-                ItemSpacing="4" />
+                ItemSpacing="8" />
         </CollectionView.ItemsLayout>
         <CollectionView.ItemTemplate>
             <StaticResource Key="MobileRowViewTemplateSelector" />
