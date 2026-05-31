@@ -30,7 +30,7 @@
     <Color x:Key="IconSecondary">#dddddd</Color>
     <Color x:Key="IconTertiary">#a0a0a0</Color>
 
-    <Color x:Key="OverlayPlayButtonBackground">#E6FFFFFF</Color>
+    <Color x:Key="OverlayPlayButtonBackground">#FFF8F8F8</Color>
     <Color x:Key="OverlayPlayButtonHoverBackground">#FFFFFFFF</Color>
     <Color x:Key="OverlayPlayIconColor">#111111</Color>
 

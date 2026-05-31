@@ -121,7 +121,7 @@
                             HeightRequest="20"
                             HorizontalOptions="Center"
                             Stroke="{DynamicResource IconSecondary}"
-                            StrokeThickness="0.75"
+                            StrokeThickness="1"
                             VerticalOptions="Center"
                             WidthRequest="20">
                             <Border.StrokeShape>
@@ -135,6 +135,8 @@
                                         Value="{DynamicResource AccentColor}" />
                                     <Setter Property="Stroke"
                                         Value="{DynamicResource AccentColor}" />
+                                    <Setter Property="StrokeThickness"
+                                        Value="1" />
                                 </DataTrigger>
                             </Border.Triggers>
                             <Label FontSize="14"
@@ -283,7 +285,7 @@
                             HeightRequest="20"
                             HorizontalOptions="Center"
                             Stroke="{DynamicResource IconSecondary}"
-                            StrokeThickness="0.75"
+                            StrokeThickness="1"
                             VerticalOptions="Center"
                             WidthRequest="20">
                             <Border.StrokeShape>
@@ -297,6 +299,8 @@
                                         Value="{DynamicResource AccentColor}" />
                                     <Setter Property="Stroke"
                                         Value="{DynamicResource AccentColor}" />
+                                    <Setter Property="StrokeThickness"
+                                        Value="1" />
                                 </DataTrigger>
                             </Border.Triggers>
                             <Label FontSize="14"

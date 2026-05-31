@@ -1,15 +1,31 @@
 using mashin.Models;
 using mashin.Services;
+using System.Collections.Specialized;
+using System.ComponentModel;
+using System.Linq;
 using System.Windows.Input;
 
 namespace mashin.Views.Mobile.Controls;
 
 public partial class RowView : ContentView
 {
+    #region Fields
+
+    private readonly HashSet<MediaItem> _suppressNextTap = new();
+    private readonly HashSet<INotifyPropertyChanged> _observedItems = new();
+    private INotifyCollectionChanged? _observedCollection;
+    private bool _hasSelection;
+
+    #endregion
+
     #region Bindable properties
 
     public static readonly BindableProperty ItemsSourceProperty =
-        BindableProperty.Create(nameof(ItemsSource), typeof(IEnumerable<object>), typeof(RowView));
+        BindableProperty.Create(
+            nameof(ItemsSource),
+            typeof(IEnumerable<object>),
+            typeof(RowView),
+            propertyChanged: OnItemsSourceChanged);
 
     public static readonly BindableProperty MediaActionsProperty =
         BindableProperty.Create(nameof(MediaActions), typeof(IMediaItemActions), typeof(RowView));
@@ -93,6 +109,8 @@ public partial class RowView : ContentView
         set => SetValue(ItemWidthProperty, value);
     }
 
+    public bool HasSelection => _hasSelection;
+
     #endregion
 
     #region Construction
@@ -104,7 +122,174 @@ public partial class RowView : ContentView
 
     #endregion
 
+    #region Selection state synchronization
+
+    private static void OnItemsSourceChanged(BindableObject bindable, object? oldValue, object? newValue)
+    {
+        if (bindable is not RowView rowView)
+        {
+            return;
+        }
+
+        rowView.DetachSelectionObservers();
+        rowView.AttachSelectionObservers(newValue as IEnumerable<object>);
+        rowView.UpdateSelectionIndicator();
+    }
+
+    private void AttachSelectionObservers(IEnumerable<object>? items)
+    {
+        if (items is INotifyCollectionChanged collectionChanged)
+        {
+            _observedCollection = collectionChanged;
+            _observedCollection.CollectionChanged += OnItemsCollectionChanged;
+        }
+
+        if (items == null)
+        {
+            return;
+        }
+
+        foreach (var item in items.OfType<INotifyPropertyChanged>())
+        {
+            if (_observedItems.Add(item))
+            {
+                item.PropertyChanged += OnObservedItemPropertyChanged;
+            }
+        }
+    }
+
+    private void DetachSelectionObservers()
+    {
+        if (_observedCollection != null)
+        {
+            _observedCollection.CollectionChanged -= OnItemsCollectionChanged;
+            _observedCollection = null;
+        }
+
+        foreach (var item in _observedItems)
+        {
+            item.PropertyChanged -= OnObservedItemPropertyChanged;
+        }
+
+        _observedItems.Clear();
+    }
+
+    private void OnItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems != null)
+        {
+            foreach (var oldItem in e.OldItems.OfType<INotifyPropertyChanged>())
+            {
+                if (_observedItems.Remove(oldItem))
+                {
+                    oldItem.PropertyChanged -= OnObservedItemPropertyChanged;
+                }
+            }
+        }
+
+        if (e.NewItems != null)
+        {
+            foreach (var newItem in e.NewItems.OfType<INotifyPropertyChanged>())
+            {
+                if (_observedItems.Add(newItem))
+                {
+                    newItem.PropertyChanged += OnObservedItemPropertyChanged;
+                }
+            }
+        }
+
+        UpdateSelectionIndicator();
+    }
+
+    private void OnObservedItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (!string.Equals(e.PropertyName, nameof(MediaItem.IsSelected), StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        UpdateSelectionIndicator();
+    }
+
+    #endregion
+
     #region UI Events
+
+    private void OnRowTouchCompleted(object? sender, EventArgs e)
+    {
+        if (sender is not BindableObject { BindingContext: MediaItem mediaItem })
+        {
+            return;
+        }
+
+        EnsureSelectionOwnership();
+
+        ExecuteShortPress(mediaItem);
+    }
+
+    private void OnRowLongPressCompleted(object? sender, EventArgs e)
+    {
+        if (sender is not BindableObject { BindingContext: MediaItem mediaItem })
+        {
+            return;
+        }
+
+        EnsureSelectionOwnership();
+
+        mediaItem.IsSelected = !mediaItem.IsSelected;
+        UpdateSelectionIndicator();
+
+        _suppressNextTap.Add(mediaItem);
+    }
+
+    private void OnRowTapped(object? sender, TappedEventArgs e)
+    {
+        if (sender is not BindableObject { BindingContext: MediaItem mediaItem })
+        {
+            return;
+        }
+
+        EnsureSelectionOwnership();
+
+        ExecuteShortPress(mediaItem);
+    }
+
+    private void ExecuteShortPress(MediaItem mediaItem)
+    {
+        if (_suppressNextTap.Remove(mediaItem))
+        {
+            return;
+        }
+
+        // If at least one item is selected, keep taps in selection mode until all are deselected.
+        if (HasAnySelectedItems())
+        {
+            mediaItem.IsSelected = !mediaItem.IsSelected;
+            UpdateSelectionIndicator();
+            return;
+        }
+
+        var command = PrimaryInfoTappedCommand;
+        var parameter = GetPrimaryNavigationParameter(mediaItem);
+        if (command?.CanExecute(parameter) == true)
+        {
+            command.Execute(parameter);
+        }
+    }
+
+    private void OnMoreButtonTapped(object? sender, TappedEventArgs e)
+    {
+        if (sender is not View anchorView || sender is not BindableObject { BindingContext: MediaItem })
+        {
+            return;
+        }
+
+        var contextMenuCommand = ShowContextMenuAtAnchorCommand;
+        if (contextMenuCommand?.CanExecute(anchorView) == true)
+        {
+            contextMenuCommand.Execute(anchorView);
+        }
+    }
 
     private async void OnPlayOverlayClicked(object? sender, TappedEventArgs e)
     {
@@ -114,6 +299,146 @@ public partial class RowView : ContentView
         }
 
         await MediaActions.PlayMediaAsync(item);
+    }
+
+    #endregion
+
+    #region Helpers
+
+    private static object GetPrimaryNavigationParameter(MediaItem mediaItem)
+    {
+        if (mediaItem is Track track)
+        {
+            return track.Album ?? mediaItem;
+        }
+
+        return mediaItem;
+    }
+
+    public void SelectAllItems()
+    {
+        if (ItemsSource == null)
+        {
+            return;
+        }
+
+        foreach (var item in ItemsSource.OfType<MediaItem>())
+        {
+            item.IsSelected = true;
+        }
+
+        UpdateSelectionIndicator();
+    }
+
+    public void ClearSelection()
+    {
+        if (ItemsSource == null)
+        {
+            return;
+        }
+
+        foreach (var item in ItemsSource.OfType<MediaItem>())
+        {
+            item.IsSelected = false;
+        }
+
+        UpdateSelectionIndicator();
+    }
+
+    public void OpenContextMenuForSelection(View anchor)
+    {
+        if (anchor == null || !HasAnySelectedItems())
+        {
+            return;
+        }
+
+        var contextMenuCommand = ShowContextMenuAtAnchorCommand;
+        if (contextMenuCommand?.CanExecute(anchor) == true)
+        {
+            contextMenuCommand.Execute(anchor);
+        }
+    }
+
+    private void EnsureSelectionOwnership()
+    {
+        if (mashin.Services.FocusManager.GetFocusedControl<RowView>(out var focusedRow)
+            && focusedRow != null
+            && !ReferenceEquals(focusedRow, this)
+            && focusedRow.HasSelection)
+        {
+            focusedRow.ClearSelection();
+        }
+
+        if (mashin.Services.FocusManager.GetFocusedControl<TableView>(out var focusedTable)
+            && focusedTable != null
+            && focusedTable.HasSelection)
+        {
+            focusedTable.ClearSelection();
+        }
+
+        mashin.Services.FocusManager.SetFocus(this);
+    }
+
+    private void UpdateSelectionIndicator()
+    {
+        var hasSelection = HasAnySelectedItems();
+        if (_hasSelection != hasSelection)
+        {
+            _hasSelection = hasSelection;
+            OnPropertyChanged(nameof(HasSelection));
+        }
+
+        var overlayService = ResolveOverlayService();
+        if (overlayService == null)
+        {
+            return;
+        }
+
+        if (hasSelection)
+        {
+            _ = overlayService.ShowSelectionIndicatorAsync(this);
+            return;
+        }
+
+        _ = overlayService.HideSelectionIndicatorAsync(this);
+    }
+
+    private static IOverlayService? ResolveOverlayService()
+    {
+        var services = Application.Current?.Handler?.MauiContext?.Services;
+        if (services == null)
+        {
+            return null;
+        }
+
+        return services.GetService(typeof(IOverlayService)) as IOverlayService;
+    }
+
+    private bool HasAnySelectedItems()
+    {
+        if (ItemsSource == null)
+        {
+            return false;
+        }
+
+        return ItemsSource.OfType<MediaItem>().Any(item => item.IsSelected);
+    }
+
+    protected override void OnBindingContextChanged()
+    {
+        base.OnBindingContextChanged();
+        UpdateSelectionIndicator();
+    }
+
+    protected override void OnHandlerChanging(HandlerChangingEventArgs args)
+    {
+        if (args.NewHandler == null)
+        {
+            DetachSelectionObservers();
+            UpdateSelectionIndicator();
+        }
+
+        base.OnHandlerChanging(args);
     }
 
     #endregion

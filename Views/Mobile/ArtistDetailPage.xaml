@@ -193,12 +193,23 @@
 
             <!--  Veröffentlichungen Section  -->
             <VerticalStackLayout Padding="16,0,16,0"
-                Margin="0,8,0,0"
+                Margin="0,12,0,0"
                 Spacing="10">
-                <Label FontFamily="PoppinsRegular"
-                    FontSize="22"
-                    Text="Veröffentlichungen"
-                    TextColor="{DynamicResource TextPrimary}" />
+                <Grid ColumnDefinitions="Auto,*"
+                    ColumnSpacing="10">
+                    <Label Grid.Column="0"
+                        FontFamily="PoppinsRegular"
+                        FontSize="22"
+                        Text="Veröffentlichungen"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <BoxView Grid.Column="1"
+                        BackgroundColor="{DynamicResource BorderColor}"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
 
                 <controls:RowView CoverSize="145"
                     ItemCornerRadius="8"
@@ -213,12 +224,23 @@
 
             <!--  Ähnliche Interpreten Section  -->
             <VerticalStackLayout Padding="16,0,16,0"
-                Margin="0,8,0,0"
+                Margin="0,12,0,0"
                 Spacing="10">
-                <Label FontFamily="PoppinsRegular"
-                    FontSize="22"
-                    Text="Ähnliche Interpreten"
-                    TextColor="{DynamicResource TextPrimary}" />
+                <Grid ColumnDefinitions="Auto,*"
+                    ColumnSpacing="10">
+                    <Label Grid.Column="0"
+                        FontFamily="PoppinsRegular"
+                        FontSize="22"
+                        Text="Ähnliche Interpreten"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <BoxView Grid.Column="1"
+                        BackgroundColor="{DynamicResource BorderColor}"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
 
                 <controls:RowView CoverSize="145"
                     ItemCornerRadius="72.5"
@@ -233,14 +255,25 @@
 
             <!--  Top Tracks Section  -->
             <VerticalStackLayout Padding="16,0,16,0"
-                Margin="0,8,0,0"
+                Margin="0,12,0,0"
                 Spacing="10">
-                <Label FontFamily="PoppinsRegular"
-                    FontSize="22"
-                    Text="Top Tracks"
-                    TextColor="{DynamicResource TextPrimary}" />
+                <Grid ColumnDefinitions="Auto,*"
+                    ColumnSpacing="10">
+                    <Label Grid.Column="0"
+                        FontFamily="PoppinsRegular"
+                        FontSize="22"
+                        Text="Top Tracks"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <BoxView Grid.Column="1"
+                        BackgroundColor="{DynamicResource BorderColor}"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
 
-                <Border BackgroundColor="{DynamicResource BackgroundSecondary}"
+                <Border 
                     Padding="0"
                     Stroke="{DynamicResource BorderColor}"
                     StrokeThickness="1">

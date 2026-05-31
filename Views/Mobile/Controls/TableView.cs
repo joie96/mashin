@@ -177,7 +177,9 @@ public partial class TableView : ContentView
             return;
         }
 
-        ExecuteShortPress(mediaItem);
+        EnsureSelectionOwnership();
+
+        _ = ExecuteShortPressAsync(mediaItem);
     }
 
     private void OnRowLongPressCompleted(object? sender, EventArgs e)
@@ -186,6 +188,8 @@ public partial class TableView : ContentView
         {
             return;
         }
+
+        EnsureSelectionOwnership();
 
         mediaItem.IsSelected = !mediaItem.IsSelected;
         UpdateSelectionIndicator();
@@ -200,10 +204,12 @@ public partial class TableView : ContentView
             return;
         }
 
-        ExecuteShortPress(mediaItem);
+        EnsureSelectionOwnership();
+
+        _ = ExecuteShortPressAsync(mediaItem);
     }
 
-    private void ExecuteShortPress(MediaItem mediaItem)
+    private async Task ExecuteShortPressAsync(MediaItem mediaItem)
     {
         if (_suppressNextTap.Remove(mediaItem))
         {
@@ -216,6 +222,24 @@ public partial class TableView : ContentView
             mediaItem.IsSelected = !mediaItem.IsSelected;
             UpdateSelectionIndicator();
             return;
+        }
+
+        // Default mobile behavior: tapping a track directly plays it.
+        if (mediaItem is Track track)
+        {
+            var mediaActions = ResolveMediaActions();
+            if (mediaActions != null)
+            {
+                await mediaActions.PlayMediaAsync(track);
+
+                var itemsToQueue = GetItemsAfterIndex(track, inCycle: false);
+                if (itemsToQueue.Count > 0)
+                {
+                    await mediaActions.PlayMediaNextAsync(itemsToQueue);
+                }
+
+                return;
+            }
         }
 
         var command = ShortPressCommand;
@@ -287,6 +311,26 @@ public partial class TableView : ContentView
         }
     }
 
+    private void EnsureSelectionOwnership()
+    {
+        if (mashin.Services.FocusManager.GetFocusedControl<TableView>(out var focusedTable)
+            && focusedTable != null
+            && !ReferenceEquals(focusedTable, this)
+            && focusedTable.HasSelection)
+        {
+            focusedTable.ClearSelection();
+        }
+
+        if (mashin.Services.FocusManager.GetFocusedControl<RowView>(out var focusedRow)
+            && focusedRow != null
+            && focusedRow.HasSelection)
+        {
+            focusedRow.ClearSelection();
+        }
+
+        mashin.Services.FocusManager.SetFocus(this);
+    }
+
     private void UpdateSelectionIndicator()
     {
         var hasSelection = HasAnySelectedItems();
@@ -320,6 +364,80 @@ public partial class TableView : ContentView
         }
 
         return services.GetService(typeof(IOverlayService)) as IOverlayService;
+    }
+
+    private static IMediaItemActions? ResolveMediaActions()
+    {
+        var services = Application.Current?.Handler?.MauiContext?.Services;
+        if (services == null)
+        {
+            return null;
+        }
+
+        return services.GetService(typeof(IMediaItemActions)) as IMediaItemActions;
+    }
+
+    private int? GetIndexOf(MediaItem target)
+    {
+        var i = 0;
+        foreach (var item in EnumerateSelectableItems())
+        {
+            if (ReferenceEquals(item, target))
+            {
+                return i;
+            }
+            i++;
+        }
+
+        return null;
+    }
+
+    private List<MediaItem> GetItemsAfterIndex(MediaItem startItem, bool inCycle = false)
+    {
+        var startIndex = GetIndexOf(startItem);
+        if (startIndex is null)
+        {
+            return new List<MediaItem>();
+        }
+
+        var items = EnumerateSelectableItems().ToList();
+        if (items.Count <= 1)
+        {
+            return new List<MediaItem>();
+        }
+
+        var index = startIndex.Value;
+        var result = new List<MediaItem>(items.Count - 1);
+
+        var trailingCount = items.Count - index - 1;
+        if (trailingCount > 0)
+        {
+            result.AddRange(items.GetRange(index + 1, trailingCount));
+        }
+
+        if (inCycle && index > 0)
+        {
+            result.AddRange(items.GetRange(0, index));
+        }
+
+        return result;
+    }
+
+    private IEnumerable<MediaItem> EnumerateSelectableItems()
+    {
+        var source = ItemsSource;
+        if (source == null)
+        {
+            yield break;
+        }
+
+        foreach (var item in source)
+        {
+            if (item is MediaItem selectable)
+            {
+                yield return selectable;
+            }
+        }
     }
 
     private bool HasAnySelectedItems()

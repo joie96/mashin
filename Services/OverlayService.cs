@@ -35,8 +35,8 @@ public interface IOverlayService
     Task HideQueueOverlayAsync();
     Task CloseOverlayAsync();
     Task CloseFlyoutAsync();
-    Task ShowSelectionIndicatorAsync(mashin.Views.Mobile.Controls.TableView tableView);
-    Task HideSelectionIndicatorAsync(mashin.Views.Mobile.Controls.TableView? tableView = null);
+    Task ShowSelectionIndicatorAsync(object selectionControl);
+    Task HideSelectionIndicatorAsync(object? selectionControl = null);
 
     Task<string?> ShowCreatePlaylistAsync();
     Task<string?> ShowUpdatePlaylistAsync(Playlist playlist);
@@ -72,7 +72,7 @@ public sealed class OverlayService : IOverlayService
     private ContentPresenter? _flyoutContent;
     private Grid? _selectionIndicatorHost;
     private ContentPresenter? _selectionIndicatorContent;
-    private mashin.Views.Mobile.Controls.TableView? _selectionIndicatorTable;
+    private object? _selectionIndicatorControl;
 
     private Action? _overlayCloseAction;
     private Action? _flyoutCloseAction;
@@ -279,9 +279,9 @@ public sealed class OverlayService : IOverlayService
         });
     }
 
-    public Task ShowSelectionIndicatorAsync(mashin.Views.Mobile.Controls.TableView tableView)
+    public Task ShowSelectionIndicatorAsync(object selectionControl)
     {
-        if (tableView == null)
+        if (!IsSupportedSelectionControl(selectionControl))
         {
             return Task.CompletedTask;
         }
@@ -293,14 +293,19 @@ public sealed class OverlayService : IOverlayService
                 return;
             }
 
-            _selectionIndicatorTable = tableView;
+            _selectionIndicatorControl = selectionControl;
             _selectionIndicatorContent.Content = _selectionIndicatorOverlay;
             _selectionIndicatorHost.IsVisible = true;
         });
     }
 
-    public Task HideSelectionIndicatorAsync(mashin.Views.Mobile.Controls.TableView? tableView = null)
+    public Task HideSelectionIndicatorAsync(object? selectionControl = null)
     {
+        if (selectionControl != null && !IsSupportedSelectionControl(selectionControl))
+        {
+            return Task.CompletedTask;
+        }
+
         return MainThread.InvokeOnMainThreadAsync(() =>
         {
             if (_selectionIndicatorHost == null || _selectionIndicatorContent == null)
@@ -308,14 +313,14 @@ public sealed class OverlayService : IOverlayService
                 return;
             }
 
-            if (tableView != null && !ReferenceEquals(tableView, _selectionIndicatorTable))
+            if (selectionControl != null && !ReferenceEquals(selectionControl, _selectionIndicatorControl))
             {
                 return;
             }
 
             _selectionIndicatorHost.IsVisible = false;
             _selectionIndicatorContent.Content = null;
-            _selectionIndicatorTable = null;
+            _selectionIndicatorControl = null;
         });
     }
 
@@ -594,23 +599,44 @@ public sealed class OverlayService : IOverlayService
 
     private void OnSelectionIndicatorSelectAllTapped(object? sender, EventArgs e)
     {
-        _selectionIndicatorTable?.SelectAllItems();
+        if (_selectionIndicatorControl is mashin.Views.Mobile.Controls.TableView tableView)
+        {
+            tableView.SelectAllItems();
+            return;
+        }
+
+        if (_selectionIndicatorControl is mashin.Views.Mobile.Controls.RowView rowView)
+        {
+            rowView.SelectAllItems();
+        }
     }
 
     private void OnSelectionIndicatorMenuTapped(object? sender, EventArgs e)
     {
-        var tableView = _selectionIndicatorTable;
-        if (tableView == null)
+        if (_selectionIndicatorControl is mashin.Views.Mobile.Controls.TableView tableView)
         {
+            tableView.OpenContextMenuForSelection(_selectionIndicatorOverlay.MenuAnchor);
             return;
         }
 
-        tableView.OpenContextMenuForSelection(_selectionIndicatorOverlay.MenuAnchor);
+        if (_selectionIndicatorControl is mashin.Views.Mobile.Controls.RowView rowView)
+        {
+            rowView.OpenContextMenuForSelection(_selectionIndicatorOverlay.MenuAnchor);
+        }
     }
 
     private void OnSelectionIndicatorCloseTapped(object? sender, EventArgs e)
     {
-        _selectionIndicatorTable?.ClearSelection();
+        if (_selectionIndicatorControl is mashin.Views.Mobile.Controls.TableView tableView)
+        {
+            tableView.ClearSelection();
+            return;
+        }
+
+        if (_selectionIndicatorControl is mashin.Views.Mobile.Controls.RowView rowView)
+        {
+            rowView.ClearSelection();
+        }
     }
 
     #endregion
@@ -746,6 +772,11 @@ public sealed class OverlayService : IOverlayService
         }
 
         throw new InvalidOperationException("OverlayService is not initialized. Call Initialize from MainPage first.");
+    }
+
+    private static bool IsSupportedSelectionControl(object selectionControl)
+    {
+        return selectionControl is mashin.Views.Mobile.Controls.TableView or mashin.Views.Mobile.Controls.RowView;
     }
 
     #endregion
