@@ -394,7 +394,8 @@
     <!--  Items List  -->
     <CollectionView x:Name="ItemsCollectionView"
         ItemSizingStrategy="MeasureFirstItem"
-        ItemsSource="{Binding Source={x:Reference self}, Path=ItemsSource}"
+        ItemsSource="{Binding Source={x:Reference self}, Path=VisibleItems}"
+        ItemsUpdatingScrollMode="KeepScrollOffset"
         SelectionMode="None">
         <CollectionView.ItemsLayout>
             <LinearItemsLayout Orientation="Vertical" ItemSpacing="0" />
@@ -402,6 +403,37 @@
         <CollectionView.ItemTemplate>
             <StaticResource Key="MobileTableViewTemplateSelector" />
         </CollectionView.ItemTemplate>
+        <!--  Footer for Load More  -->
+        <CollectionView.Footer>
+            <Grid HeightRequest="52"
+                IsVisible="{Binding Source={x:Reference self}, Path=HasMoreItems}"
+                Margin="0,8,0,0">
+                <Border BackgroundColor="{DynamicResource SelectionBackground}"
+                    HorizontalOptions="Center"
+                    Padding="16,10"
+                    StrokeThickness="0"
+                    VerticalOptions="Center">
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnLoadMoreTapped" />
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="10" />
+                    </Border.StrokeShape>
+                    <HorizontalStackLayout Spacing="8"
+                        VerticalOptions="Center">
+                        <Label FontSize="18"
+                            Text="{mi:Fluent Icon=ChevronDown16, FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                        <Label FontFamily="PoppinsRegular"
+                            FontSize="13"
+                            Text="Mehr"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </HorizontalStackLayout>
+                </Border>
+            </Grid>
+        </CollectionView.Footer>
     </CollectionView>
 </ContentView>
 

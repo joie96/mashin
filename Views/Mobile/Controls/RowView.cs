@@ -1,3 +1,4 @@
+using mashin.Collections;
 using mashin.Models;
 using mashin.Services;
 using System.Collections.Specialized;
@@ -11,9 +12,14 @@ public partial class RowView : ContentView
 {
     #region Fields
 
+    private const int PageSize = 10;
+
     private readonly HashSet<MediaItem> _suppressNextTap = new();
     private readonly HashSet<INotifyPropertyChanged> _observedItems = new();
+    private readonly ObservableRangeCollection<object> _visibleItems = new();
     private INotifyCollectionChanged? _observedCollection;
+    private int _loadedItemCount = PageSize;
+    private bool _hasMoreItems;
     private bool _hasSelection;
 
     #endregion
@@ -120,6 +126,10 @@ public partial class RowView : ContentView
 
     public bool HasSelection => _hasSelection;
 
+    public bool HasMoreItems => _hasMoreItems;
+
+    public IReadOnlyList<object> VisibleItems => _visibleItems;
+
     #endregion
 
     #region Construction
@@ -140,8 +150,14 @@ public partial class RowView : ContentView
             return;
         }
 
+        if (!ReferenceEquals(oldValue, newValue))
+        {
+            rowView._loadedItemCount = PageSize;
+        }
+
         rowView.DetachSelectionObservers();
         rowView.AttachSelectionObservers(newValue as IEnumerable<object>);
+        rowView.RefreshVisibleItems();
         rowView.UpdateSelectionIndicator();
     }
 
@@ -207,6 +223,7 @@ public partial class RowView : ContentView
             }
         }
 
+        RefreshVisibleItems();
         UpdateSelectionIndicator();
     }
 
@@ -298,6 +315,16 @@ public partial class RowView : ContentView
         {
             contextMenuCommand.Execute(anchorView);
         }
+    }
+
+    private void OnLoadMoreTapped(object? sender, TappedEventArgs e)
+    {
+        if (ItemsSource == null)
+        {
+            return;
+        }
+
+        AppendVisibleItemsPage();
     }
 
     private async void OnPlayOverlayClicked(object? sender, TappedEventArgs e)
@@ -423,6 +450,83 @@ public partial class RowView : ContentView
         return services.GetService(typeof(IOverlayService)) as IOverlayService;
     }
 
+    private void UpdateHasMoreItems(bool hasMoreItems)
+    {
+        if (_hasMoreItems == hasMoreItems)
+        {
+            return;
+        }
+
+        _hasMoreItems = hasMoreItems;
+        OnPropertyChanged(nameof(HasMoreItems));
+    }
+
+    #region Paging
+
+    private void RefreshVisibleItems()
+    {
+        if (ItemsSource == null)
+        {
+            _visibleItems.Clear();
+            _loadedItemCount = 0;
+            UpdateHasMoreItems(false);
+            return;
+        }
+
+        var sourceItems = ItemsSource.ToList();
+        var totalCount = sourceItems.Count;
+        if (totalCount == 0)
+        {
+            _visibleItems.Clear();
+            _loadedItemCount = 0;
+            UpdateHasMoreItems(false);
+            return;
+        }
+
+        var visibleCount = Math.Min(_loadedItemCount, totalCount);
+        var nextItems = sourceItems.Take(visibleCount).ToList();
+
+        _visibleItems.ReplaceRange(nextItems);
+        _loadedItemCount = visibleCount;
+        UpdateHasMoreItems(visibleCount < totalCount);
+    }
+
+    private void AppendVisibleItemsPage()
+    {
+        if (ItemsSource == null)
+        {
+            return;
+        }
+
+        var sourceItems = ItemsSource.ToList();
+        var totalCount = sourceItems.Count;
+        if (totalCount == 0)
+        {
+            _visibleItems.Clear();
+            _loadedItemCount = 0;
+            UpdateHasMoreItems(false);
+            return;
+        }
+
+        if (_visibleItems.Count > totalCount)
+        {
+            RefreshVisibleItems();
+            return;
+        }
+
+        var currentCount = _visibleItems.Count;
+        var nextCount = Math.Min(currentCount + PageSize, totalCount);
+        if (nextCount > currentCount)
+        {
+            _visibleItems.AddRange(sourceItems.Skip(currentCount).Take(nextCount - currentCount));
+        }
+
+        _loadedItemCount = nextCount;
+        UpdateHasMoreItems(nextCount < totalCount);
+    }
+
+    #endregion
+
     private bool HasAnySelectedItems()
     {
         if (ItemsSource == null)
@@ -436,6 +540,7 @@ public partial class RowView : ContentView
     protected override void OnBindingContextChanged()
     {
         base.OnBindingContextChanged();
+        RefreshVisibleItems();
         UpdateSelectionIndicator();
     }
 
@@ -455,11 +560,17 @@ public partial class RowView : ContentView
 
 public sealed class MobileRowViewTemplateSelector : DataTemplateSelector
 {
+    #region Templates
+
     public DataTemplate? AlbumTemplate { get; set; }
     public DataTemplate? TrackTemplate { get; set; }
     public DataTemplate? ArtistTemplate { get; set; }
     public DataTemplate? PlaylistTemplate { get; set; }
     public DataTemplate? SkeletonTemplate { get; set; }
+
+    #endregion
+
+    #region Template Selection
 
     protected override DataTemplate OnSelectTemplate(object item, BindableObject container)
     {
@@ -495,4 +606,6 @@ public sealed class MobileRowViewTemplateSelector : DataTemplateSelector
 
         throw new InvalidOperationException("MobileRowViewTemplateSelector requires AlbumTemplate, TrackTemplate, ArtistTemplate, PlaylistTemplate or SkeletonTemplate.");
     }
+
+    #endregion
 }

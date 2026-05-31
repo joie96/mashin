@@ -1,3 +1,4 @@
+using mashin.Collections;
 using mashin.Models;
 using mashin.Services;
 using System.Collections.Specialized;
@@ -11,9 +12,15 @@ public partial class TableView : ContentView
 {
     #region Fields
 
+    private const int InitialLoadCount = 15;
+    private const int LoadMoreCount = 10;
+
     private readonly HashSet<MediaItem> _suppressNextTap = new();
     private readonly HashSet<INotifyPropertyChanged> _observedItems = new();
+    private readonly ObservableRangeCollection<object> _visibleItems = new();
     private INotifyCollectionChanged? _observedCollection;
+    private int _loadedItemCount = InitialLoadCount;
+    private bool _hasMoreItems;
     private bool _hasSelection;
 
     #endregion
@@ -73,6 +80,10 @@ public partial class TableView : ContentView
         set => SetValue(LongPressCommandProperty, value);
     }
 
+    public bool HasMoreItems => _hasMoreItems;
+
+    public IReadOnlyList<object> VisibleItems => _visibleItems;
+
     public bool HasSelection => _hasSelection;
 
     #endregion
@@ -86,8 +97,14 @@ public partial class TableView : ContentView
             return;
         }
 
+        if (!ReferenceEquals(oldValue, newValue))
+        {
+            tableView._loadedItemCount = InitialLoadCount;
+        }
+
         tableView.DetachSelectionObservers();
         tableView.AttachSelectionObservers(newValue as IEnumerable<object>);
+        tableView.RefreshVisibleItems();
         tableView.UpdateSelectionIndicator();
     }
 
@@ -153,6 +170,7 @@ public partial class TableView : ContentView
             }
         }
 
+        RefreshVisibleItems();
         UpdateSelectionIndicator();
     }
 
@@ -263,6 +281,16 @@ public partial class TableView : ContentView
         }
     }
 
+    private void OnLoadMoreTapped(object? sender, TappedEventArgs e)
+    {
+        if (ItemsSource == null)
+        {
+            return;
+        }
+
+        AppendVisibleItemsPage();
+    }
+
     #endregion
 
     #region Helpers
@@ -366,6 +394,17 @@ public partial class TableView : ContentView
         return services.GetService(typeof(IOverlayService)) as IOverlayService;
     }
 
+    private void UpdateHasMoreItems(bool hasMoreItems)
+    {
+        if (_hasMoreItems == hasMoreItems)
+        {
+            return;
+        }
+
+        _hasMoreItems = hasMoreItems;
+        OnPropertyChanged(nameof(HasMoreItems));
+    }
+
     private static IMediaItemActions? ResolveMediaActions()
     {
         var services = Application.Current?.Handler?.MauiContext?.Services;
@@ -450,9 +489,74 @@ public partial class TableView : ContentView
         return ItemsSource.OfType<MediaItem>().Any(item => item.IsSelected);
     }
 
+    #region Paging
+
+    private void RefreshVisibleItems()
+    {
+        if (ItemsSource == null)
+        {
+            _visibleItems.Clear();
+            _loadedItemCount = 0;
+            UpdateHasMoreItems(false);
+            return;
+        }
+
+        var sourceItems = ItemsSource.ToList();
+        var totalCount = sourceItems.Count;
+        if (totalCount == 0)
+        {
+            _visibleItems.Clear();
+            _loadedItemCount = 0;
+            UpdateHasMoreItems(false);
+            return;
+        }
+
+        var visibleCount = Math.Min(_loadedItemCount, totalCount);
+        _visibleItems.ReplaceRange(sourceItems.Take(visibleCount));
+        _loadedItemCount = visibleCount;
+        UpdateHasMoreItems(visibleCount < totalCount);
+    }
+
+    private void AppendVisibleItemsPage()
+    {
+        if (ItemsSource == null)
+        {
+            return;
+        }
+
+        var sourceItems = ItemsSource.ToList();
+        var totalCount = sourceItems.Count;
+        if (totalCount == 0)
+        {
+            _visibleItems.Clear();
+            _loadedItemCount = 0;
+            UpdateHasMoreItems(false);
+            return;
+        }
+
+        if (_visibleItems.Count > totalCount)
+        {
+            RefreshVisibleItems();
+            return;
+        }
+
+        var currentCount = _visibleItems.Count;
+        var nextCount = Math.Min(currentCount + LoadMoreCount, totalCount);
+        if (nextCount > currentCount)
+        {
+            _visibleItems.AddRange(sourceItems.Skip(currentCount).Take(nextCount - currentCount));
+        }
+
+        _loadedItemCount = nextCount;
+        UpdateHasMoreItems(nextCount < totalCount);
+    }
+
+    #endregion
+
     protected override void OnBindingContextChanged()
     {
         base.OnBindingContextChanged();
+        RefreshVisibleItems();
         UpdateSelectionIndicator();
     }
 

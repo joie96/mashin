@@ -734,7 +734,8 @@
         HorizontalScrollBarVisibility="Never"
         HeightRequest="{Binding Source={x:Reference self}, Path=ItemHeight}"
         ItemSizingStrategy="MeasureFirstItem"
-        ItemsSource="{Binding Source={x:Reference self}, Path=ItemsSource}"
+        ItemsSource="{Binding Source={x:Reference self}, Path=VisibleItems}"
+        ItemsUpdatingScrollMode="KeepScrollOffset"
         SelectionMode="None"
         VerticalScrollBarVisibility="Never">
         <CollectionView.ItemsLayout>
@@ -744,5 +745,40 @@
         <CollectionView.ItemTemplate>
             <StaticResource Key="MobileRowViewTemplateSelector" />
         </CollectionView.ItemTemplate>
+        <!--  Footer for loading more items  -->
+        <CollectionView.Footer>
+            <Grid HeightRequest="{Binding Source={x:Reference self}, Path=CoverSize}"
+                IsVisible="{Binding Source={x:Reference self}, Path=HasMoreItems}"
+                Margin="8,0,0,0"
+                VerticalOptions="Start"
+                WidthRequest="{Binding Source={x:Reference self}, Path=CoverSize}">
+                <Border BackgroundColor="{DynamicResource SelectionBackground}"
+                    HorizontalOptions="Fill"
+                    Padding="0"
+                    StrokeThickness="0"
+                    VerticalOptions="Fill">
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnLoadMoreTapped" />
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
+                    </Border.StrokeShape>
+                    <VerticalStackLayout HorizontalOptions="Center"
+                        Spacing="8"
+                        VerticalOptions="Center">
+                        <Label FontFamily="PoppinsRegular"
+                            FontSize="30"
+                            HorizontalOptions="Center"
+                            Text="{mi:Fluent Icon=ChevronRight12, FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}" />
+                        <Label FontFamily="PoppinsRegular"
+                            FontSize="13"
+                            HorizontalOptions="Center"
+                            Text="Mehr"
+                            TextColor="{DynamicResource TextSecondary}" />
+                    </VerticalStackLayout>
+                </Border>
+            </Grid>
+        </CollectionView.Footer>
     </CollectionView>
 </ContentView>
