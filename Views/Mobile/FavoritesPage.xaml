@@ -2,17 +2,250 @@
 <ContentPage x:Class="mashin.Views.Mobile.FavoritesPage"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:controls="clr-namespace:mashin.Views.Mobile.Controls"
     xmlns:vm="clr-namespace:mashin.ViewModels"
     x:DataType="vm:FavoritesViewModel"
     BackgroundColor="{DynamicResource BackgroundPrimary}">
 
-    <Grid Padding="16">
-        <Label FontFamily="PoppinsRegular"
-            FontSize="22"
-            HorizontalOptions="Center"
-            Text="Favorites (Mobile)"
-            TextColor="{DynamicResource TextPrimary}"
-            VerticalOptions="Center" />
-    </Grid>
+    <!--  Page Scroll  -->
+    <ScrollView>
+        <VerticalStackLayout Padding="0,0,0,12"
+            Spacing="16">
+
+            <!--  Header  -->
+            <VerticalStackLayout Padding="16,0,16,0"
+                Spacing="6">
+                <Label FontFamily="PoppinsRegular"
+                    FontSize="24"
+                    Text="Favoriten"
+                    TextColor="{DynamicResource TextPrimary}" />
+            </VerticalStackLayout>
+
+            <!--  Tracks Section  -->
+            <VerticalStackLayout Padding="16,0,16,0"
+                Margin="0,12,0,0"
+                Spacing="10">
+                <Grid ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="10">
+                    <Label Grid.Column="0"
+                        FontFamily="PoppinsRegular"
+                        FontSize="22"
+                        Text="Titel"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontFamily="PoppinsRegular"
+                            FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding Tracks.Count}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        BackgroundColor="{DynamicResource BorderColor}"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <Label FontFamily="PoppinsRegular"
+                    FontSize="12"
+                    IsVisible="{Binding ShowNoTracksMessage}"
+                    Text="Keine favorisierten Titel."
+                    TextColor="{DynamicResource TextSecondary}" />
+
+                <Border Padding="0"
+                    IsVisible="{Binding ShowTrackTable}"
+                    Stroke="{DynamicResource BorderColor}"
+                    StrokeThickness="1">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="12" />
+                    </Border.StrokeShape>
+
+                    <controls:TableView ItemsSource="{Binding TrackItems}"
+                        ShowContextMenuAtAnchorCommand="{Binding ShowTrackContextMenuAtAnchorCommand}" />
+                </Border>
+            </VerticalStackLayout>
+
+            <!--  Albums Section  -->
+            <VerticalStackLayout Padding="16,0,16,0"
+                Margin="0,12,0,0"
+                Spacing="10">
+                <Grid ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="10">
+                    <Label Grid.Column="0"
+                        FontFamily="PoppinsRegular"
+                        FontSize="22"
+                        Text="Alben"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontFamily="PoppinsRegular"
+                            FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding Albums.Count}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        BackgroundColor="{DynamicResource BorderColor}"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <Label FontFamily="PoppinsRegular"
+                    FontSize="12"
+                    IsVisible="{Binding ShowNoAlbumsMessage}"
+                    Text="Keine favorisierten Alben."
+                    TextColor="{DynamicResource TextSecondary}" />
+
+                <controls:RowView CoverSize="145"
+                    IsVisible="{Binding ShowAlbumsRowView}"
+                    ItemCornerRadius="8"
+                    ItemWidth="145"
+                    ItemsSource="{Binding AlbumItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowAlbumContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowAlbumContextMenuAtPositionCommand}" />
+            </VerticalStackLayout>
+
+            <!--  Playlists Section  -->
+            <VerticalStackLayout Padding="16,0,16,0"
+                Margin="0,12,0,0"
+                Spacing="10">
+                <Grid ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="10">
+                    <Label Grid.Column="0"
+                        FontFamily="PoppinsRegular"
+                        FontSize="22"
+                        Text="Playlists"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontFamily="PoppinsRegular"
+                            FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding Playlists.Count}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        BackgroundColor="{DynamicResource BorderColor}"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <Label FontFamily="PoppinsRegular"
+                    FontSize="12"
+                    IsVisible="{Binding ShowNoPlaylistsMessage}"
+                    Text="Keine favorisierten Playlists."
+                    TextColor="{DynamicResource TextSecondary}" />
+
+                <controls:RowView CoverSize="145"
+                    IsVisible="{Binding ShowPlaylistsRowView}"
+                    ItemCornerRadius="8"
+                    ItemWidth="145"
+                    ItemsSource="{Binding PlaylistItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding PlaylistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowPlaylistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowPlaylistContextMenuAtPositionCommand}" />
+            </VerticalStackLayout>
+
+            <!--  Artists Section  -->
+            <VerticalStackLayout Padding="16,0,16,0"
+                Margin="0,12,0,0"
+                Spacing="10">
+                <Grid ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="10">
+                    <Label Grid.Column="0"
+                        FontFamily="PoppinsRegular"
+                        FontSize="22"
+                        Text="Artists"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontFamily="PoppinsRegular"
+                            FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding Artists.Count}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        BackgroundColor="{DynamicResource BorderColor}"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <Label FontFamily="PoppinsRegular"
+                    FontSize="12"
+                    IsVisible="{Binding ShowNoArtistsMessage}"
+                    Text="Keine favorisierten Artists."
+                    TextColor="{DynamicResource TextSecondary}" />
+
+                <controls:RowView CoverSize="145"
+                    IsVisible="{Binding ShowArtistsRowView}"
+                    ItemCornerRadius="72.5"
+                    ItemWidth="145"
+                    ItemsSource="{Binding ArtistItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
+            </VerticalStackLayout>
+
+        </VerticalStackLayout>
+    </ScrollView>
 </ContentPage>
 
