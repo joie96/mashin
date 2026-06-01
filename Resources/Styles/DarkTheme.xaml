@@ -48,7 +48,7 @@
     <Color x:Key="HoverBackground25">#402a2a2a</Color>
     <Color x:Key="HoverBackground50">#802a2a2a</Color>
     <Color x:Key="HoverBackground90">#E62a2a2a</Color>
-    <Color x:Key="TapFeedbackColor">#402a2a2a</Color>
+    <Color x:Key="TapFeedbackColor">#40CDCDCD</Color>
     <Color x:Key="SelectionBackground">#3a3a3a</Color>
 
     <Color x:Key="ShadowColorSoft">#000000</Color>

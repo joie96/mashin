@@ -22,10 +22,11 @@ namespace mashin;
     ForegroundServiceType = Android.Content.PM.ForegroundService.TypeMediaPlayback)]
 public sealed class PlaybackNotificationService : Service
 {
-#region Constants
+#region Constants And Actions
 
     private const string ChannelId = "mashin.playback";
     private const int NotificationId = 4201;
+    private static readonly TimeSpan BackgroundIdleShutdownDelay = TimeSpan.FromMinutes(5);
     private const PendingIntentFlags ImmutableCompatFlag = (PendingIntentFlags)0x04000000;
     private static readonly HttpClient ArtworkHttpClient = new();
 
@@ -34,10 +35,11 @@ public sealed class PlaybackNotificationService : Service
     public const string ActionNext = "mashin.action.NEXT";
     public const string ActionPrevious = "mashin.action.PREVIOUS";
     public const string ActionStop = "mashin.action.STOP";
+    public const string ActionTerminate = "mashin.action.TERMINATE";
 
 #endregion
 
-#region Fields
+#region Service State
 
     private IPlaybackService? _playbackService;
     private MediaSession? _mediaSession;
@@ -45,10 +47,11 @@ public sealed class PlaybackNotificationService : Service
     private bool _isForeground;
     private string? _lastArtworkUri;
     private Bitmap? _lastArtworkBitmap;
+    private CancellationTokenSource? _backgroundIdleStopCts;
 
 #endregion
 
-#region Lifecycle
+#region Android Service Lifecycle
 
     public override void OnCreate()
     {
@@ -67,13 +70,26 @@ public sealed class PlaybackNotificationService : Service
     public override StartCommandResult OnStartCommand(Intent? intent, StartCommandFlags flags, int startId)
     {
         _ = HandleIntentAsync(intent);
-        return StartCommandResult.Sticky;
+
+        // We do not want Android to recreate this service automatically
+        // after process death. It should only run when the app requests it.
+        return StartCommandResult.NotSticky;
+    }
+
+    public override void OnTaskRemoved(Intent? rootIntent)
+    {
+        // Triggered when the task is removed from Recents.
+        // Stop service and notification explicitly.
+        _ = StopServiceForAppTerminationAsync();
+        base.OnTaskRemoved(rootIntent);
     }
 
     public override IBinder? OnBind(Intent? intent) => null;
 
     public override void OnDestroy()
     {
+        CancelBackgroundIdleShutdown();
+
         if (_playbackService != null)
         {
             _playbackService.CurrentTrackUpdated -= OnPlaybackSourceChanged;
@@ -98,18 +114,24 @@ public sealed class PlaybackNotificationService : Service
 
 #endregion
 
-#region Intents And Events
+#region Command Handling And Event Wiring
 
     private async Task HandleIntentAsync(Intent? intent)
     {
         TryAttachPlaybackService();
         var playback = _playbackService;
+        var action = intent?.Action;
+
+        if (string.Equals(action, ActionTerminate, StringComparison.Ordinal))
+        {
+            await StopServiceForAppTerminationAsync();
+            return;
+        }
+
         if (playback == null)
         {
             return;
         }
-
-        var action = intent?.Action;
 
         try
         {
@@ -159,7 +181,7 @@ public sealed class PlaybackNotificationService : Service
 
 #endregion
 
-#region Notification
+#region Notification Sync
 
     private async Task UpdateNotificationAsync()
     {
@@ -180,6 +202,15 @@ public sealed class PlaybackNotificationService : Service
 
             if (!shouldShow)
             {
+                if (IsAppInBackground())
+                {
+                    ScheduleBackgroundIdleShutdown();
+                }
+                else
+                {
+                    CancelBackgroundIdleShutdown();
+                }
+
                 if (_isForeground)
                 {
                     if (OperatingSystem.IsAndroidVersionAtLeast(24))
@@ -197,6 +228,8 @@ public sealed class PlaybackNotificationService : Service
                 _notificationManager?.Cancel(NotificationId);
                 return;
             }
+
+            CancelBackgroundIdleShutdown();
 
             var artwork = await TryGetArtworkBitmapAsync(track?.ImageUri);
             UpdateMediaSession(track, state, artwork);
@@ -223,6 +256,122 @@ public sealed class PlaybackNotificationService : Service
         {
             // Avoid crashing notification service due to transient artwork/network/platform issues.
         }
+    }
+
+    private async Task StopServiceForAppTerminationAsync()
+    {
+        CancelBackgroundIdleShutdown();
+        TryAttachPlaybackService();
+
+        var playback = _playbackService;
+        if (playback != null)
+        {
+            try
+            {
+                await playback.StopAsync();
+            }
+            catch
+            {
+                // Force stop service/notification even if stopping playback fails.
+            }
+        }
+
+        if (_isForeground)
+        {
+            if (OperatingSystem.IsAndroidVersionAtLeast(24))
+            {
+                StopForeground(StopForegroundFlags.Remove);
+            }
+            else
+            {
+                StopForeground(true);
+            }
+
+            _isForeground = false;
+        }
+
+        _notificationManager?.Cancel(NotificationId);
+
+        // Final shutdown of this service instance.
+        StopSelf();
+    }
+
+    private void ScheduleBackgroundIdleShutdown()
+    {
+        if (_backgroundIdleStopCts != null)
+        {
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _backgroundIdleStopCts = cts;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(BackgroundIdleShutdownDelay, cts.Token);
+
+                if (cts.Token.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                TryAttachPlaybackService();
+                var playback = _playbackService;
+                if (playback == null)
+                {
+                    await StopServiceForAppTerminationAsync();
+                    return;
+                }
+
+                var state = playback.PlaybackState.State;
+                var hasTrack = playback.CurrentTrack != null;
+                var shouldShow = hasTrack || state is PlayerPlaybackState.Playing or PlayerPlaybackState.Buffering or PlayerPlaybackState.Paused or PlayerPlaybackState.Seeking;
+
+                if (shouldShow || !IsAppInBackground())
+                {
+                    return;
+                }
+
+                await StopServiceForAppTerminationAsync();
+            }
+            catch (System.OperationCanceledException)
+            {
+                // Expected when playback resumes or app comes to foreground.
+            }
+            finally
+            {
+                if (ReferenceEquals(_backgroundIdleStopCts, cts))
+                {
+                    _backgroundIdleStopCts = null;
+                }
+
+                cts.Dispose();
+            }
+        });
+    }
+
+    private void CancelBackgroundIdleShutdown()
+    {
+        var cts = _backgroundIdleStopCts;
+        if (cts == null)
+        {
+            return;
+        }
+
+        _backgroundIdleStopCts = null;
+        cts.Cancel();
+        cts.Dispose();
+    }
+
+    private static bool IsAppInBackground()
+    {
+        var processInfo = new ActivityManager.RunningAppProcessInfo();
+        ActivityManager.GetMyMemoryState(processInfo);
+
+        return processInfo.Importance != Importance.Foreground
+            && processInfo.Importance != Importance.Visible;
     }
 
     // Builds the visible media notification with title, artist, album and optional artwork.
@@ -297,7 +446,7 @@ public sealed class PlaybackNotificationService : Service
 
 #endregion
 
-#region Media Session
+    #region Media Session Sync
 
     // Mirrors current playback metadata/state to the Android media session.
     private void UpdateMediaSession(Track? track, PlayerPlaybackState state, Bitmap? artwork)
@@ -348,7 +497,7 @@ public sealed class PlaybackNotificationService : Service
 
 #endregion
 
-#region Helpers
+#region Internal Helpers
 
     private PendingIntent CreateActionIntent(string action, int requestCode)
     {
@@ -449,7 +598,7 @@ public sealed class PlaybackNotificationService : Service
 
 #endregion
 
-#region Nested Types
+#region Nested Callback Types
 
     private sealed class MediaSessionCallback : MediaSession.Callback
     {
