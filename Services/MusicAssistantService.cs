@@ -147,25 +147,36 @@ public class MusicAssistantService
             return string.Empty;
         }
 
-        if (Uri.TryCreate(path, UriKind.Absolute, out _))
+        if (path.StartsWith("/collage", StringComparison.OrdinalIgnoreCase))
         {
+            // The imageproxy endpoint expects the collage path to be URL-encoded twice.
+            var encodedPath = WebUtility.UrlEncode(WebUtility.UrlEncode(path));
+            var imageProxyUrl = string.Concat(
+                _settings.MusicAssistantUrl.TrimEnd('/'),
+                "/imageproxy?path=",
+                encodedPath);
+            return imageProxyUrl;
+        }
+
+        if (Uri.TryCreate(path, UriKind.Absolute, out var absoluteUri))
+        {
+            if (absoluteUri.AbsolutePath.StartsWith("/collage", StringComparison.OrdinalIgnoreCase))
+            {
+                // Absolute collage URLs should also go through imageproxy.
+                var relativeCollagePath = absoluteUri.PathAndQuery;
+                var encodedPath = WebUtility.UrlEncode(WebUtility.UrlEncode(relativeCollagePath));
+                var imageProxyUrl = string.Concat(
+                    _settings.MusicAssistantUrl.TrimEnd('/'),
+                    "/imageproxy?path=",
+                    encodedPath);
+
+                return imageProxyUrl;
+            }
+
             return path;
         }
 
-        if (!path.StartsWith("/collage", StringComparison.OrdinalIgnoreCase))
-        {
-            return path;
-        }
-
-        // The imageproxy endpoint expects the collage path to be URL-encoded twice.
-        var encodedPath = WebUtility.UrlEncode(WebUtility.UrlEncode(path));
-        var resolvedProvider = string.IsNullOrWhiteSpace(provider) ? "builtin" : provider;
-        var encodedProvider = WebUtility.UrlEncode(resolvedProvider);
-
-        return string.Concat(
-            _settings.MusicAssistantUrl.TrimEnd('/'),
-            "/imageproxy?path=",
-            encodedPath);
+        return path;
     }
 
     private void ResolveMediaItemImages(MediaItem item)
