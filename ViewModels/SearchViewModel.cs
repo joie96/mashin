@@ -51,6 +51,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
     private bool _isLoadingAlbums;
     private bool _isLoadingPlaylists;
     private bool _isLoadingArtists;
+    private bool _hasSearchRequest;
     private MediaType? _navigationAnchorType;
     private bool _disposed;
 
@@ -233,6 +234,12 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
     public bool ShowNoAlbumsMessage => !IsLoadingAlbums && !HasAlbums;
     public bool ShowNoPlaylistsMessage => !IsLoadingPlaylists && !HasPlaylists;
     public bool ShowNoArtistsMessage => !IsLoadingArtists && !HasArtists;
+
+    public bool HasSearchRequest
+    {
+        get => _hasSearchRequest;
+        private set => SetProperty(ref _hasSearchRequest, value);
+    }
 
     public IMediaItemActions MediaActions { get; }
 
@@ -502,12 +509,15 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
     {
         if (parameter is SearchRequest request)
         {
+            HasSearchRequest = true;
             _logger.LogInformation("Search started");
             _ = SearchAsync(request);
         }
         else
         {
+            HasSearchRequest = false;
             _logger.LogWarning("NavigatedTo called without SearchRequest");
+            _navigationService.IsNavigating = false;
         }
 
         return Task.CompletedTask;
