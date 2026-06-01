@@ -34,13 +34,11 @@
                 <Border Grid.RowSpan="4"
                     BackgroundColor="Transparent"
                     StrokeThickness="0"
-                    ZIndex="1">
+                    ZIndex="0">
                     <Border.Behaviors>
-                        <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                        <toolkit:TouchBehavior
                             LongPressCompleted="OnRowLongPressCompleted"
                             LongPressDuration="420"
-                            PressedAnimationDuration="250"
-                            PressedAnimationEasing="CubicOut"
                             TouchGestureCompleted="OnRowTouchCompleted" />
                     </Border.Behaviors>
                 </Border>
@@ -52,6 +50,14 @@
                     Scale="1"
                     StrokeThickness="0"
                     WidthRequest="{Binding Source={x:Reference self}, Path=CoverSize}">
+                    <Border.Behaviors>
+                        <toolkit:TouchBehavior LongPressCompleted="OnRowLongPressCompleted"
+                            LongPressDuration="420"
+                            PressedAnimationDuration="250"
+                            PressedAnimationEasing="CubicOut"
+                            PressedScale="0.78"
+                            TouchGestureCompleted="OnRowTouchCompleted" />
+                    </Border.Behaviors>
                     <Border.Triggers>
                         <DataTrigger Binding="{Binding IsSelected}"
                             TargetType="Border"
@@ -213,13 +219,11 @@
                 <Border Grid.RowSpan="4"
                     BackgroundColor="Transparent"
                     StrokeThickness="0"
-                    ZIndex="1">
+                    ZIndex="0">
                     <Border.Behaviors>
-                        <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                        <toolkit:TouchBehavior
                             LongPressCompleted="OnRowLongPressCompleted"
                             LongPressDuration="420"
-                            PressedAnimationDuration="250"
-                            PressedAnimationEasing="CubicOut"
                             TouchGestureCompleted="OnRowTouchCompleted" />
                     </Border.Behaviors>
                 </Border>
@@ -231,6 +235,14 @@
                     Scale="1"
                     StrokeThickness="0"
                     WidthRequest="{Binding Source={x:Reference self}, Path=CoverSize}">
+                    <Border.Behaviors>
+                        <toolkit:TouchBehavior LongPressCompleted="OnRowLongPressCompleted"
+                            LongPressDuration="420"
+                            PressedAnimationDuration="250"
+                            PressedAnimationEasing="CubicOut"
+                            PressedScale="0.78"
+                            TouchGestureCompleted="OnRowTouchCompleted" />
+                    </Border.Behaviors>
                     <Border.Triggers>
                         <DataTrigger Binding="{Binding IsSelected}"
                             TargetType="Border"
@@ -392,13 +404,11 @@
                 <Border Grid.RowSpan="3"
                     BackgroundColor="Transparent"
                     StrokeThickness="0"
-                    ZIndex="1">
+                    ZIndex="0">
                     <Border.Behaviors>
-                        <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                        <toolkit:TouchBehavior
                             LongPressCompleted="OnRowLongPressCompleted"
                             LongPressDuration="420"
-                            PressedAnimationDuration="250"
-                            PressedAnimationEasing="CubicOut"
                             TouchGestureCompleted="OnRowTouchCompleted" />
                     </Border.Behaviors>
                 </Border>
@@ -410,6 +420,14 @@
                     Scale="1"
                     StrokeThickness="0"
                     WidthRequest="{Binding Source={x:Reference self}, Path=CoverSize}">
+                    <Border.Behaviors>
+                        <toolkit:TouchBehavior LongPressCompleted="OnRowLongPressCompleted"
+                            LongPressDuration="420"
+                            PressedAnimationDuration="250"
+                            PressedAnimationEasing="CubicOut"
+                            PressedScale="0.78"
+                            TouchGestureCompleted="OnRowTouchCompleted" />
+                    </Border.Behaviors>
                     <Border.Triggers>
                         <DataTrigger Binding="{Binding IsSelected}"
                             TargetType="Border"
@@ -560,13 +578,11 @@
                 <Border Grid.RowSpan="4"
                     BackgroundColor="Transparent"
                     StrokeThickness="0"
-                    ZIndex="1">
+                    ZIndex="0">
                     <Border.Behaviors>
-                        <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                        <toolkit:TouchBehavior
                             LongPressCompleted="OnRowLongPressCompleted"
                             LongPressDuration="420"
-                            PressedAnimationDuration="250"
-                            PressedAnimationEasing="CubicOut"
                             TouchGestureCompleted="OnRowTouchCompleted" />
                     </Border.Behaviors>
                 </Border>
@@ -578,6 +594,14 @@
                     Scale="1"
                     StrokeThickness="0"
                     WidthRequest="{Binding Source={x:Reference self}, Path=CoverSize}">
+                    <Border.Behaviors>
+                        <toolkit:TouchBehavior LongPressCompleted="OnRowLongPressCompleted"
+                            LongPressDuration="420"
+                            PressedAnimationDuration="250"
+                            PressedAnimationEasing="CubicOut"
+                            PressedScale="0.78"
+                            TouchGestureCompleted="OnRowTouchCompleted" />
+                    </Border.Behaviors>
                     <Border.Triggers>
                         <DataTrigger Binding="{Binding IsSelected}"
                             TargetType="Border"
