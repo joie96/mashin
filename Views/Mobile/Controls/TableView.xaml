@@ -407,29 +407,29 @@
             <Grid HeightRequest="52"
                 IsVisible="{Binding Source={x:Reference self}, Path=HasMoreItems}"
                 Margin="0,8,0,0">
-                <Border BackgroundColor="{DynamicResource SelectionBackground}"
+                <Border BackgroundColor="{DynamicResource HoverBackground}"
+                    HeightRequest="40"
                     HorizontalOptions="Center"
-                    Padding="16,10"
+                    Padding="0"
                     StrokeThickness="0"
-                    VerticalOptions="Center">
+                    VerticalOptions="Center"
+                    WidthRequest="40">
+                    <Border.Behaviors>
+                        <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                            PressedAnimationDuration="100"
+                            PressedAnimationEasing="CubicOut" />
+                    </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Tapped="OnLoadMoreTapped" />
                     </Border.GestureRecognizers>
                     <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="10" />
+                        <Ellipse />
                     </Border.StrokeShape>
-                    <HorizontalStackLayout Spacing="8"
-                        VerticalOptions="Center">
-                        <Label FontSize="18"
-                            Text="{mi:Fluent Icon=ChevronDown16, FontOverride=True}"
-                            TextColor="{DynamicResource IconPrimary}"
-                            VerticalOptions="Center" />
-                        <Label FontFamily="PoppinsRegular"
-                            FontSize="13"
-                            Text="Mehr"
-                            TextColor="{DynamicResource TextPrimary}"
-                            VerticalOptions="Center" />
-                    </HorizontalStackLayout>
+                    <Label FontSize="18"
+                        HorizontalOptions="Center"
+                        Text="{mi:Fluent Icon=ChevronDown16, FontOverride=True}"
+                        TextColor="{DynamicResource IconPrimary}"
+                        VerticalOptions="Center" />
                 </Border>
             </Grid>
         </CollectionView.Footer>

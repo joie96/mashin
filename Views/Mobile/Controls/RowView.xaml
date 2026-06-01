@@ -799,11 +799,16 @@
                 Margin="8,0,0,0"
                 VerticalOptions="Start"
                 WidthRequest="{Binding Source={x:Reference self}, Path=CoverSize}">
-                <Border BackgroundColor="{DynamicResource SelectionBackground}"
+                <Border BackgroundColor="{DynamicResource HoverBackground}"
                     HorizontalOptions="Fill"
                     Padding="0"
                     StrokeThickness="0"
                     VerticalOptions="Fill">
+                    <Border.Behaviors>
+                        <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                            PressedAnimationDuration="100"
+                            PressedAnimationEasing="CubicOut" />
+                    </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Tapped="OnLoadMoreTapped" />
                     </Border.GestureRecognizers>
