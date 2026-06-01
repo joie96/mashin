@@ -34,9 +34,6 @@
                         <RoundRectangle CornerRadius="0,0,16,16" />
                     </Border.StrokeShape>
                     <ffimageloading:CachedImage Aspect="AspectFill"
-                        DownsampleToViewSize="True"
-                        DownsampleUseDipUnits="True"
-                        FadeAnimationEnabled="False"
                         Source="{Binding ImageUri}" />
                 </Border>
 

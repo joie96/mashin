@@ -1,12 +1,22 @@
 ﻿<?xml version="1.0" encoding="UTF-8" ?>
 <Application xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
              xmlns:local="clr-namespace:mashin"
              xmlns:styles="clr-namespace:mashin.Resources.Styles"
              x:Class="mashin.App"
              UserAppTheme="Dark">
     <Application.Resources>
         <ResourceDictionary>
+            <Style TargetType="ffimageloading:CachedImage"
+                   ApplyToDerivedTypes="True">
+                <Setter Property="DownsampleToViewSize" Value="True" />
+                <Setter Property="DownsampleUseDipUnits" Value="True" />
+                <Setter Property="BitmapOptimizations" Value="True" />
+                <Setter Property="FadeAnimationEnabled" Value="False" />
+                <Setter Property="LoadingDelay" Value="0" />
+            </Style>
+
             <ResourceDictionary.MergedDictionaries>
                 <styles:DarkTheme />
                 <ResourceDictionary Source="Resources/Styles/Styles.xaml" />

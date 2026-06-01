@@ -5,6 +5,7 @@ using mashin.Views.Desktop;
 using MauiIcons.Fluent;
 using MauiIcons.Fluent.Filled;
 using Microsoft.Extensions.Logging;
+using Microsoft.Maui.ApplicationModel;
 using Microsoft.Maui.Controls;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
@@ -46,13 +47,13 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     private ObservableRangeCollection<Album> _albums = new();
     private ObservableRangeCollection<Artist> _similarArtists = new();
 
-    private readonly IReadOnlyList<TableViewSkeleton> _trackSkeletons = Enumerable.Range(0, 10)
+    private readonly IReadOnlyList<TableViewSkeleton> _trackSkeletons = Enumerable.Range(0, 15)
         .Select(_ => new TableViewSkeleton())
         .ToList();
-    private readonly IReadOnlyList<RowViewSkeleton> _albumSkeletons = Enumerable.Range(0, 20)
+    private readonly IReadOnlyList<RowViewSkeleton> _albumSkeletons = Enumerable.Range(0, 15)
         .Select(_ => new RowViewSkeleton())
         .ToList();
-    private readonly IReadOnlyList<RowViewSkeleton> _artistSkeletons = Enumerable.Range(0, 20)
+    private readonly IReadOnlyList<RowViewSkeleton> _artistSkeletons = Enumerable.Range(0, 15)
         .Select(_ => new RowViewSkeleton())
         .ToList();
 
@@ -743,11 +744,10 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
             SimilarArtists = new ObservableRangeCollection<Artist>();
 
-            const int maxConcurrentRequests = 6;
+            const int maxConcurrentRequests = 3;
             using var throttler = new SemaphoreSlim(maxConcurrentRequests);
-            var resolvedArtists = new Artist?[uniqueArtists.Count];
 
-            var fetchTasks = uniqueArtists.Select(async (artistRef, index) =>
+            var fetchTasks = uniqueArtists.Select(async artistRef =>
             {
                 if (string.IsNullOrWhiteSpace(artistRef.ItemId)
                     || string.IsNullOrWhiteSpace(artistRef.Provider))
@@ -758,7 +758,11 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                 await throttler.WaitAsync();
                 try
                 {
-                    resolvedArtists[index] = await _musicAssistant.GetArtistAsync(artistRef.ItemId, artistRef.Provider);
+                    var resolvedArtist = await _musicAssistant.GetArtistAsync(artistRef.ItemId, artistRef.Provider);
+                    if (resolvedArtist != null)
+                    {
+                        await MainThread.InvokeOnMainThreadAsync(() => SimilarArtists.Add(resolvedArtist));
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -771,13 +775,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             });
 
             await Task.WhenAll(fetchTasks);
-
-            var fullArtists = resolvedArtists
-                .Where(artist => artist != null)
-                .Select(artist => artist!)
-                .ToList();
-
-            SimilarArtists = new ObservableRangeCollection<Artist>(fullArtists);
 
             _ = BuildArtistContextMenuAsync();
         }

@@ -53,9 +53,6 @@
                                 <RoundRectangle CornerRadius="8" />
                             </Border.StrokeShape>
                             <ffimageloading:CachedImage Aspect="AspectFill"
-                                DownsampleToViewSize="True"
-                                DownsampleUseDipUnits="True"
-                                FadeAnimationEnabled="False"
                                 Source="{Binding ImageUri}" />
                         </Border>
 
@@ -220,9 +217,6 @@
                                 <RoundRectangle CornerRadius="8" />
                             </Border.StrokeShape>
                             <ffimageloading:CachedImage Aspect="AspectFill"
-                                DownsampleToViewSize="True"
-                                DownsampleUseDipUnits="True"
-                                FadeAnimationEnabled="False"
                                 Source="{Binding ImageUri}" />
                         </Border>
 

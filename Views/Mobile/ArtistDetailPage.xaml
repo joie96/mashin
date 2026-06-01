@@ -35,10 +35,8 @@
                     </Border.StrokeShape>
                     <Grid>
                         <ffimageloading:CachedImage Aspect="AspectFill"
-                            DownsampleToViewSize="True"
-                            DownsampleUseDipUnits="True"
-                            FadeAnimationEnabled="False"
                             Source="{Binding ImageUri}" />
+
 
                         <!--  Fade image into page background at the bottom  -->
                         <BoxView InputTransparent="True">
@@ -56,16 +54,35 @@
                     </Grid>
                 </Border>
 
-                <!--  Artist Name  -->
-                <Label Grid.Row="1"
+                <!--  Artist Name + Provider Icon  -->
+                <HorizontalStackLayout Grid.Row="1"
                     Margin="16,2,16,0"
-                    FontFamily="PoppinsRegular"
-                    FontSize="24"
-                    HorizontalTextAlignment="Center"
-                    LineBreakMode="WordWrap"
-                    MaxLines="2"
-                    Text="{Binding ArtistName}"
-                    TextColor="{DynamicResource TextPrimary}" />
+                    HorizontalOptions="Center"
+                    Spacing="8"
+                    VerticalOptions="Center">
+                    <Label FontFamily="PoppinsRegular"
+                        FontSize="24"
+                        HorizontalTextAlignment="Center"
+                        LineBreakMode="WordWrap"
+                        MaxLines="2"
+                        Text="{Binding ArtistName}"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+
+                    <ffimageloading:SvgCachedImage HeightRequest="20"
+                        Source="{Binding Artist.ProviderManifest.IconSvg}"
+                        VerticalOptions="Center"
+                        WidthRequest="20">
+                        <ffimageloading:SvgCachedImage.Triggers>
+                            <DataTrigger Binding="{Binding Artist.ProviderManifest.IconSvg}"
+                                TargetType="ffimageloading:SvgCachedImage"
+                                Value="{x:Null}">
+                                <Setter Property="IsVisible"
+                                    Value="False" />
+                            </DataTrigger>
+                        </ffimageloading:SvgCachedImage.Triggers>
+                    </ffimageloading:SvgCachedImage>
+                </HorizontalStackLayout>
 
                 <!--  Artist Meta  -->
                 <HorizontalStackLayout Grid.Row="2"
@@ -74,14 +91,6 @@
                     <Label FontFamily="PoppinsRegular"
                         FontSize="12"
                         Text="{Binding Albums.Count, StringFormat='{0} Alben'}"
-                        TextColor="{DynamicResource TextSecondary}" />
-                    <Label FontFamily="PoppinsRegular"
-                        FontSize="12"
-                        Text="•"
-                        TextColor="{DynamicResource TextSecondary}" />
-                    <Label FontFamily="PoppinsRegular"
-                        FontSize="12"
-                        Text="{Binding Artist.ProviderName}"
                         TextColor="{DynamicResource TextSecondary}" />
                 </HorizontalStackLayout>
             </Grid>
