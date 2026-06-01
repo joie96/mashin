@@ -4,7 +4,6 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
     xmlns:converters="clr-namespace:mashin.Converters"
     xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
-    xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
     xmlns:vm="clr-namespace:mashin.ViewModels"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
     x:DataType="vm:MainViewModel"
@@ -111,9 +110,6 @@
                         StrokeThickness="0"
                         VerticalOptions="Center"
                         WidthRequest="38">
-                        <Border.Behaviors>
-                            <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
-                        </Border.Behaviors>
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding TogglePlayPauseCommand}" />
                         </Border.GestureRecognizers>
@@ -156,10 +152,6 @@
                     VerticalOptions="Center"
                     BackgroundColor="Transparent"
                     StrokeThickness="0">
-                    <Border.Behaviors>
-                        <toolkit:TouchBehavior
-                            PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
-                    </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding NavigateToHomeCommand}" />
                     </Border.GestureRecognizers>
@@ -196,10 +188,6 @@
                     VerticalOptions="Center"
                     BackgroundColor="Transparent"
                     StrokeThickness="0">
-                    <Border.Behaviors>
-                        <toolkit:TouchBehavior
-                            PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
-                    </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding NavigateToExploreCommand}" />
                     </Border.GestureRecognizers>
@@ -236,10 +224,6 @@
                     VerticalOptions="Center"
                     BackgroundColor="Transparent"
                     StrokeThickness="0">
-                    <Border.Behaviors>
-                        <toolkit:TouchBehavior
-                            PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
-                    </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding NavigateToFavoritesCommand}" />
                     </Border.GestureRecognizers>
@@ -276,10 +260,6 @@
                     VerticalOptions="Center"
                     BackgroundColor="Transparent"
                     StrokeThickness="0">
-                    <Border.Behaviors>
-                        <toolkit:TouchBehavior
-                            PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
-                    </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding NavigateToPlaylistsCommand}" />
                     </Border.GestureRecognizers>
@@ -316,10 +296,6 @@
                     VerticalOptions="Center"
                     BackgroundColor="Transparent"
                     StrokeThickness="0">
-                    <Border.Behaviors>
-                        <toolkit:TouchBehavior
-                            PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
-                    </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding NavigateToSearchCommand}" />
                     </Border.GestureRecognizers>
@@ -356,10 +332,6 @@
                     VerticalOptions="Center"
                     BackgroundColor="Transparent"
                     StrokeThickness="0">
-                    <Border.Behaviors>
-                        <toolkit:TouchBehavior
-                            PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
-                    </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding ToggleThemeCommand}" />
                     </Border.GestureRecognizers>

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8" ?>
+﻿<?xml version="1.0" encoding="utf-8" ?>
 <ContentView x:Class="mashin.Views.Mobile.Controls.TableView"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:converters="clr-namespace:mashin.Converters"
@@ -37,9 +37,12 @@
                         ColumnDefinitions="52,*"
                         ColumnSpacing="10">
                         <Grid.Behaviors>
-                            <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource TapFeedbackColor}"
+                            <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
                                 LongPressCompleted="OnRowLongPressCompleted"
                                 LongPressDuration="420"
+                                PressedAnimationDuration="250"
+                                PressedAnimationEasing="CubicOut"
+                                ShouldMakeChildrenInputTransparent="True"
                                 TouchGestureCompleted="OnRowTouchCompleted" />
                         </Grid.Behaviors>
 
@@ -113,10 +116,6 @@
                         StrokeThickness="0"
                         VerticalOptions="Center"
                         WidthRequest="20">
-                        <Border.Behaviors>
-                            <toolkit:TouchBehavior
-                                PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
-                        </Border.Behaviors>
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="10" />
                         </Border.StrokeShape>
@@ -165,10 +164,6 @@
                         IsVisible="{Binding Source={x:Reference self}, Path=HasSelection, Converter={StaticResource InvertedBoolConverter}}"
                         BackgroundColor="Transparent"
                         StrokeThickness="0">
-                        <Border.Behaviors>
-                            <toolkit:TouchBehavior
-                                PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
-                        </Border.Behaviors>
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="20" />
                         </Border.StrokeShape>
@@ -207,9 +202,12 @@
                         ColumnDefinitions="52,*"
                         ColumnSpacing="10">
                         <Grid.Behaviors>
-                            <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource TapFeedbackColor}"
+                            <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
                                 LongPressCompleted="OnRowLongPressCompleted"
                                 LongPressDuration="420"
+                                PressedAnimationDuration="250"
+                                PressedAnimationEasing="CubicOut"
+                                ShouldMakeChildrenInputTransparent="True"
                                 TouchGestureCompleted="OnRowTouchCompleted" />
                         </Grid.Behaviors>
 
@@ -283,10 +281,6 @@
                         StrokeThickness="0"
                         VerticalOptions="Center"
                         WidthRequest="20">
-                        <Border.Behaviors>
-                            <toolkit:TouchBehavior
-                                PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
-                        </Border.Behaviors>
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="10" />
                         </Border.StrokeShape>
@@ -337,7 +331,9 @@
                         StrokeThickness="0">
                         <Border.Behaviors>
                             <toolkit:TouchBehavior
-                                PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
+                                PressedBackgroundColor="{StaticResource SelectionBackground}"
+                                PressedAnimationDuration="250"
+                                PressedAnimationEasing="CubicOut" />
                         </Border.Behaviors>
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="20" />
@@ -420,9 +416,6 @@
                     Padding="16,10"
                     StrokeThickness="0"
                     VerticalOptions="Center">
-                    <Border.Behaviors>
-                        <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
-                    </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Tapped="OnLoadMoreTapped" />
                     </Border.GestureRecognizers>

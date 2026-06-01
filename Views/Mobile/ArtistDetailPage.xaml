@@ -6,7 +6,6 @@
     xmlns:converters="clr-namespace:mashin.Converters"
     xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
-    xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
     xmlns:vm="clr-namespace:mashin.ViewModels"
     x:DataType="vm:ArtistDetailViewModel"
     BackgroundColor="{DynamicResource BackgroundPrimary}">
@@ -106,9 +105,6 @@
                     HeightRequest="44"
                     StrokeThickness="0"
                     WidthRequest="44">
-                    <Border.Behaviors>
-                        <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
-                    </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding PlayArtistCommand}" />
                     </Border.GestureRecognizers>
@@ -128,9 +124,6 @@
                     HeightRequest="44"
                     StrokeThickness="0"
                     WidthRequest="44">
-                    <Border.Behaviors>
-                        <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
-                    </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding ShuffleArtistCommand}" />
                     </Border.GestureRecognizers>
@@ -148,9 +141,6 @@
                 <Grid Grid.Column="2"
                     HeightRequest="44"
                     WidthRequest="44">
-                    <Grid.Behaviors>
-                        <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
-                    </Grid.Behaviors>
                     <Grid.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding ToggleArtistFavoriteCommand}" />
                     </Grid.GestureRecognizers>
@@ -185,9 +175,6 @@
                     HeightRequest="44"
                     StrokeThickness="0"
                     WidthRequest="44">
-                    <Border.Behaviors>
-                        <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
-                    </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding ShowHeaderContextMenuAtAnchorCommand}"
                             CommandParameter="{x:Reference HeaderContextMenuButton}" />
@@ -203,7 +190,7 @@
                 </Border>
             </Grid>
 
-            <!--  Veröffentlichungen Section  -->
+            <!--  Verï¿½ffentlichungen Section  -->
             <VerticalStackLayout Padding="16,0,16,0"
                 Margin="0,12,0,0"
                 Spacing="10">
@@ -212,7 +199,7 @@
                     <Label Grid.Column="0"
                         FontFamily="PoppinsRegular"
                         FontSize="22"
-                        Text="Veröffentlichungen"
+                        Text="Verï¿½ffentlichungen"
                         TextColor="{DynamicResource TextPrimary}"
                         VerticalOptions="Center" />
                     <Border Grid.Column="1"
@@ -253,7 +240,7 @@
                     ShowContextMenuAtPositionCommand="{Binding ShowAlbumContextMenuAtPositionCommand}" />
             </VerticalStackLayout>
 
-            <!--  Ähnliche Interpreten Section  -->
+            <!--  ï¿½hnliche Interpreten Section  -->
             <VerticalStackLayout Padding="16,0,16,0"
                 Margin="0,12,0,0"
                 Spacing="10">
@@ -262,7 +249,7 @@
                     <Label Grid.Column="0"
                         FontFamily="PoppinsRegular"
                         FontSize="22"
-                        Text="Ähnliche Interpreten"
+                        Text="ï¿½hnliche Interpreten"
                         TextColor="{DynamicResource TextPrimary}"
                         VerticalOptions="Center" />
                     <Border Grid.Column="1"

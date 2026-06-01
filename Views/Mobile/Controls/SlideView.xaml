@@ -6,7 +6,6 @@
     xmlns:desktopControls="clr-namespace:mashin.Views.Desktop.Controls"
     xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
     xmlns:fftransformations="clr-namespace:FFImageLoading.Transformations;assembly=FFImageLoading.Maui"
-    xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
     xmlns:models="clr-namespace:mashin.Models"
     x:Name="self">
@@ -98,9 +97,6 @@
                                     StrokeThickness="0"
                                     VerticalOptions="End"
                                     WidthRequest="28">
-                                    <Border.Behaviors>
-                                        <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
-                                    </Border.Behaviors>
                                     <Border.GestureRecognizers>
                                         <TapGestureRecognizer Tapped="OnPlayOverlayClicked" />
                                     </Border.GestureRecognizers>
