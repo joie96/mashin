@@ -2,17 +2,431 @@
 <ContentPage x:Class="mashin.Views.Mobile.AlbumDetailPage"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:controls="clr-namespace:mashin.Views.Mobile.Controls"
+    xmlns:converters="clr-namespace:mashin.Converters"
+    xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
+    xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
+    xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
     xmlns:vm="clr-namespace:mashin.ViewModels"
     x:DataType="vm:AlbumDetailViewModel"
     BackgroundColor="{DynamicResource BackgroundPrimary}">
 
-    <Grid Padding="16">
-        <Label FontFamily="PoppinsRegular"
-            FontSize="22"
-            HorizontalOptions="Center"
-            Text="Album Detail (Mobile)"
-            TextColor="{DynamicResource TextPrimary}"
-            VerticalOptions="Center" />
-    </Grid>
+    <ContentPage.Resources>
+        <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
+        <converters:RemoveBlankLinesConverter x:Key="RemoveBlankLinesConverter" />
+    </ContentPage.Resources>
+
+    <ScrollView>
+        <VerticalStackLayout Padding="0,0,0,12"
+            Spacing="16">
+
+            <!--  Header: Cover, Name, Meta  -->
+            <Grid RowDefinitions="Auto,Auto,Auto"
+                RowSpacing="4">
+
+                <!--  Album Cover  -->
+                <Border Grid.Row="0"
+                    BackgroundColor="{DynamicResource BackgroundTertiary}"
+                    HeightRequest="220"
+                    HorizontalOptions="Fill"
+                    StrokeThickness="0">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="0,0,16,16" />
+                    </Border.StrokeShape>
+                    <Grid>
+                        <ffimageloading:CachedImage Aspect="AspectFill"
+                            Source="{Binding ImageUri}" />
+
+                        <BoxView InputTransparent="True">
+                            <BoxView.Background>
+                                <LinearGradientBrush EndPoint="0,1"
+                                    StartPoint="0,0">
+                                    <GradientStop Color="#00FFFFFF"
+                                        Offset="0.44" />
+                                    <GradientStop Color="{DynamicResource BackgroundPrimary}"
+                                        Offset="1.0" />
+                                </LinearGradientBrush>
+                            </BoxView.Background>
+                        </BoxView>
+                    </Grid>
+                </Border>
+
+                <!--  Album Name + Provider Icon  -->
+                <HorizontalStackLayout Grid.Row="1"
+                    Margin="16,2,16,0"
+                    HorizontalOptions="Center"
+                    Spacing="8"
+                    VerticalOptions="Center">
+                    <Label FontFamily="PoppinsRegular"
+                        FontSize="24"
+                        HorizontalTextAlignment="Center"
+                        LineBreakMode="WordWrap"
+                        MaxLines="2"
+                        Text="{Binding AlbumName}"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+
+                    <ffimageloading:SvgCachedImage HeightRequest="20"
+                        Source="{Binding Album.ProviderManifest.IconSvg}"
+                        VerticalOptions="Center"
+                        WidthRequest="20">
+                        <ffimageloading:SvgCachedImage.Triggers>
+                            <DataTrigger Binding="{Binding Album.ProviderManifest.IconSvg}"
+                                TargetType="ffimageloading:SvgCachedImage"
+                                Value="{x:Null}">
+                                <Setter Property="IsVisible"
+                                    Value="False" />
+                            </DataTrigger>
+                        </ffimageloading:SvgCachedImage.Triggers>
+                    </ffimageloading:SvgCachedImage>
+                </HorizontalStackLayout>
+
+                <!--  Album Meta  -->
+                <HorizontalStackLayout Grid.Row="2"
+                    HorizontalOptions="Center"
+                    Spacing="8">
+                    <Label FontFamily="PoppinsRegular"
+                        FontSize="12"
+                        Text="{Binding ArtistName}"
+                        TextColor="{DynamicResource TextSecondary}" />
+                    <Label FontFamily="PoppinsRegular"
+                        FontSize="12"
+                        Text="•"
+                        TextColor="{DynamicResource TextSecondary}" />
+                    <Label FontFamily="PoppinsRegular"
+                        FontSize="12"
+                        Text="{Binding AlbumYearText}"
+                        TextColor="{DynamicResource TextSecondary}" />
+                    <Label FontFamily="PoppinsRegular"
+                        FontSize="12"
+                        Text="•"
+                        TextColor="{DynamicResource TextSecondary}" />
+                    <Label FontFamily="PoppinsRegular"
+                        FontSize="12"
+                        Text="{Binding Tracks.Count, StringFormat='{0} Titel'}"
+                        TextColor="{DynamicResource TextSecondary}" />
+                </HorizontalStackLayout>
+            </Grid>
+
+            <!--  Header Actions  -->
+            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto"
+                ColumnSpacing="14"
+                HorizontalOptions="Center">
+
+                <Border Grid.Column="0"
+                    BackgroundColor="{DynamicResource ActionButtonsBackground}"
+                    HeightRequest="44"
+                    StrokeThickness="0"
+                    WidthRequest="44">
+                    <Border.Behaviors>
+                        <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                            PressedAnimationDuration="250"
+                            PressedAnimationEasing="CubicOut" />
+                    </Border.Behaviors>
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding PlayAlbumCommand}" />
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="22" />
+                    </Border.StrokeShape>
+                    <Label FontSize="18"
+                        HorizontalOptions="Center"
+                        Text="{mi:FluentFilled Icon=Play48Filled, FontOverride=True}"
+                        TextColor="{DynamicResource IconPrimary}"
+                        VerticalOptions="Center" />
+                </Border>
+
+                <Border Grid.Column="1"
+                    BackgroundColor="{DynamicResource ActionButtonsBackground}"
+                    HeightRequest="44"
+                    StrokeThickness="0"
+                    WidthRequest="44">
+                    <Border.Behaviors>
+                        <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                            PressedAnimationDuration="250"
+                            PressedAnimationEasing="CubicOut" />
+                    </Border.Behaviors>
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding ShuffleAlbumCommand}" />
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="22" />
+                    </Border.StrokeShape>
+                    <Label FontSize="18"
+                        HorizontalOptions="Center"
+                        Text="{mi:FluentFilled Icon=ArrowShuffle48Filled, FontOverride=True}"
+                        TextColor="{DynamicResource IconPrimary}"
+                        VerticalOptions="Center" />
+                </Border>
+
+                <Border Grid.Column="2"
+                    BackgroundColor="{DynamicResource ActionButtonsBackground}"
+                    HeightRequest="44"
+                    StrokeThickness="0"
+                    WidthRequest="44">
+                    <Border.Behaviors>
+                        <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                            PressedAnimationDuration="250"
+                            PressedAnimationEasing="CubicOut" />
+                    </Border.Behaviors>
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding ToggleAlbumFavoriteCommand}" />
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="22" />
+                    </Border.StrokeShape>
+                    <Grid>
+                        <Label FontSize="18"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsAlbumFavorite, Converter={StaticResource InvertedBoolConverter}}"
+                            Text="{mi:Fluent Icon=Heart48, FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+
+                        <Label FontSize="18"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsAlbumFavorite}"
+                            Text="{mi:FluentFilled Icon=Heart48Filled, FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                    </Grid>
+                </Border>
+
+                <Border x:Name="HeaderContextMenuButton"
+                    Grid.Column="3"
+                    BackgroundColor="{DynamicResource ActionButtonsBackground}"
+                    HeightRequest="44"
+                    StrokeThickness="0"
+                    WidthRequest="44">
+                    <Border.Behaviors>
+                        <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                            PressedAnimationDuration="250"
+                            PressedAnimationEasing="CubicOut" />
+                    </Border.Behaviors>
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding ShowHeaderContextMenuAtAnchorCommand}"
+                            CommandParameter="{x:Reference HeaderContextMenuButton}" />
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="22" />
+                    </Border.StrokeShape>
+                    <Label FontSize="18"
+                        HorizontalOptions="Center"
+                        Text="{mi:Fluent Icon=MoreVertical48, FontOverride=True}"
+                        TextColor="{DynamicResource IconPrimary}"
+                        VerticalOptions="Center" />
+                </Border>
+            </Grid>
+
+            <!--  Description Section  -->
+            <Grid Padding="16,0,16,0"
+                IsVisible="{Binding HasDescription}"
+                Margin="0,12,0,0"
+                RowDefinitions="Auto,Auto,Auto"
+                RowSpacing="0">
+                <Label Grid.Row="0"
+                    FontFamily="PoppinsRegular"
+                    FontSize="22"
+                    Text="{Binding AlbumName, StringFormat='Über {0}'}"
+                    TextColor="{DynamicResource TextPrimary}" />
+                <Label Grid.Row="1"
+                    Margin="0,16,0,0"
+                    FontFamily="PoppinsRegular"
+                    FontSize="12"
+                    LineBreakMode="WordWrap"
+                    MaxLines="{Binding DescriptionMaxLines}"
+                    Text="{Binding AlbumDescription, Converter={StaticResource RemoveBlankLinesConverter}}"
+                    TextColor="{DynamicResource TextSecondary}">
+                    <Label.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding ToggleDescriptionCommand}" />
+                    </Label.GestureRecognizers>
+                </Label>
+                <Border Grid.Row="2"
+                    Margin="0,8,0,0"
+                    BackgroundColor="Transparent"
+                    HeightRequest="24"
+                    HorizontalOptions="Center"
+                    StrokeThickness="0"
+                    WidthRequest="24">
+                    <Border.Behaviors>
+                        <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                            PressedAnimationDuration="250"
+                            PressedAnimationEasing="CubicOut" />
+                    </Border.Behaviors>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="12" />
+                    </Border.StrokeShape>
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding ToggleDescriptionCommand}" />
+                    </Border.GestureRecognizers>
+                    <Grid>
+                        <Label FontSize="12"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsDescriptionExpanded, Converter={StaticResource InvertedBoolConverter}}"
+                            Text="{mi:Fluent Icon=ChevronDown24, FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                        <Label FontSize="12"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsDescriptionExpanded}"
+                            Text="{mi:Fluent Icon=ChevronUp24, FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!--  Tracks Section  -->
+            <VerticalStackLayout Padding="16,0,16,0"
+                Margin="0,12,0,0"
+                Spacing="10">
+                <Grid ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="10">
+                    <Label Grid.Column="0"
+                        FontFamily="PoppinsRegular"
+                        FontSize="22"
+                        Text="Titel"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontFamily="PoppinsRegular"
+                            FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding TrackItems.Count}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        BackgroundColor="{DynamicResource BorderColor}"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <!--  Tracks TableView  -->
+                <Border Padding="0"
+                    Stroke="{DynamicResource BorderColor}"
+                    StrokeThickness="1">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="12" />
+                    </Border.StrokeShape>
+
+                    <controls:TableView ItemsSource="{Binding TrackItems}"
+                        ShowContextMenuAtAnchorCommand="{Binding ShowTrackContextMenuAtAnchorCommand}" />
+                </Border>
+            </VerticalStackLayout>
+
+            <!--  Other Albums Section  -->
+            <VerticalStackLayout Padding="16,0,16,0"
+                Margin="0,12,0,0"
+                Spacing="10">
+                <Grid ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="10">
+                    <Label Grid.Column="0"
+                        FontFamily="PoppinsRegular"
+                        FontSize="22"
+                        Text="Weitere Alben"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontFamily="PoppinsRegular"
+                            FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding OtherAlbumItems.Count}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        BackgroundColor="{DynamicResource BorderColor}"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <controls:RowView CoverSize="145"
+                    ItemCornerRadius="8"
+                    ItemWidth="145"
+                    ItemsSource="{Binding OtherAlbumItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowAlbumContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowAlbumContextMenuAtPositionCommand}" />
+
+            </VerticalStackLayout>
+
+            <!--  Similar Artists Section  -->
+            <VerticalStackLayout Padding="16,0,16,0"
+                Margin="0,12,0,0"
+                Spacing="10">
+                <Grid ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="10">
+                    <Label Grid.Column="0"
+                        FontFamily="PoppinsRegular"
+                        FontSize="22"
+                        Text="Ähnliche Interpreten"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontFamily="PoppinsRegular"
+                            FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding SimilarArtistItems.Count}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        BackgroundColor="{DynamicResource BorderColor}"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <controls:RowView CoverSize="145"
+                    ItemCornerRadius="72.5"
+                    ItemWidth="145"
+                    ItemsSource="{Binding SimilarArtistItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
+
+            </VerticalStackLayout>
+        </VerticalStackLayout>
+    </ScrollView>
 </ContentPage>
 
