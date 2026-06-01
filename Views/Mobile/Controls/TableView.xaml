@@ -21,6 +21,16 @@
             <Border Padding="8,6"
                 BackgroundColor="Transparent"
                 StrokeThickness="0">
+                <!--  Row Touch + Pressed Area (full row)  -->
+                <Border.Behaviors>
+                    <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                        LongPressCompleted="OnRowLongPressCompleted"
+                        LongPressDuration="420"
+                        PressedAnimationDuration="250"
+                        PressedAnimationEasing="CubicOut"
+                        ShouldMakeChildrenInputTransparent="False"
+                        TouchGestureCompleted="OnRowTouchCompleted" />
+                </Border.Behaviors>
                 <Border.Triggers>
                     <DataTrigger Binding="{Binding IsSelected}"
                         TargetType="Border"
@@ -30,22 +40,12 @@
                     </DataTrigger>
                 </Border.Triggers>
 
-                <Grid ColumnDefinitions="52,*,Auto,20,20"
+                <Grid ColumnDefinitions="52,*,Auto,20,40"
                     ColumnSpacing="10">
-                    <!--  Row Main Tap Area  -->
+                    <!--  Row Content Area  -->
                     <Grid Grid.ColumnSpan="2"
                         ColumnDefinitions="52,*"
                         ColumnSpacing="10">
-                        <Grid.Behaviors>
-                            <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
-                                LongPressCompleted="OnRowLongPressCompleted"
-                                LongPressDuration="420"
-                                PressedAnimationDuration="250"
-                                PressedAnimationEasing="CubicOut"
-                                ShouldMakeChildrenInputTransparent="True"
-                                TouchGestureCompleted="OnRowTouchCompleted" />
-                        </Grid.Behaviors>
-
                         <!--  Cover  -->
                         <Border Grid.Column="0"
                             BackgroundColor="{DynamicResource BackgroundTertiary}"
@@ -112,6 +112,7 @@
                         HeightRequest="20"
                         HorizontalOptions="Center"
                         IsVisible="{Binding Source={x:Reference self}, Path=HasSelection}"
+                        InputTransparent="True"
                         Margin="0"
                         StrokeThickness="0"
                         VerticalOptions="Center"
@@ -119,9 +120,6 @@
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="10" />
                         </Border.StrokeShape>
-                        <Border.GestureRecognizers>
-                            <TapGestureRecognizer Tapped="OnRowTapped" />
-                        </Border.GestureRecognizers>
                         <Border BackgroundColor="Transparent"
                             HeightRequest="20"
                             HorizontalOptions="Center"
@@ -156,8 +154,8 @@
                     <!--  Context Menu Button  -->
                     <Border x:Name="MoreButton"
                         Grid.Column="4"
-                        WidthRequest="20"
-                        HeightRequest="20"
+                        WidthRequest="40"
+                        HeightRequest="40"
                         Padding="0"
                         HorizontalOptions="Center"
                         VerticalOptions="Center"
@@ -186,6 +184,16 @@
             <Border Padding="8,6"
                 BackgroundColor="Transparent"
                 StrokeThickness="0">
+                <!--  Row Touch + Pressed Area (full row)  -->
+                <Border.Behaviors>
+                    <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                        LongPressCompleted="OnRowLongPressCompleted"
+                        LongPressDuration="420"
+                        PressedAnimationDuration="250"
+                        PressedAnimationEasing="CubicOut"
+                        ShouldMakeChildrenInputTransparent="False"
+                        TouchGestureCompleted="OnRowTouchCompleted" />
+                </Border.Behaviors>
                 <Border.Triggers>
                     <DataTrigger Binding="{Binding IsSelected}"
                         TargetType="Border"
@@ -195,22 +203,12 @@
                     </DataTrigger>
                 </Border.Triggers>
 
-                <Grid ColumnDefinitions="52,*,Auto,20,20"
+                <Grid ColumnDefinitions="52,*,Auto,20,40"
                     ColumnSpacing="10">
-                    <!--  Row Main Tap Area  -->
+                    <!--  Row Content Area  -->
                     <Grid Grid.ColumnSpan="2"
                         ColumnDefinitions="52,*"
                         ColumnSpacing="10">
-                        <Grid.Behaviors>
-                            <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
-                                LongPressCompleted="OnRowLongPressCompleted"
-                                LongPressDuration="420"
-                                PressedAnimationDuration="250"
-                                PressedAnimationEasing="CubicOut"
-                                ShouldMakeChildrenInputTransparent="True"
-                                TouchGestureCompleted="OnRowTouchCompleted" />
-                        </Grid.Behaviors>
-
                         <!--  Cover  -->
                         <Border Grid.Column="0"
                             BackgroundColor="{DynamicResource BackgroundTertiary}"
@@ -277,6 +275,7 @@
                         HeightRequest="20"
                         HorizontalOptions="Center"
                         IsVisible="{Binding Source={x:Reference self}, Path=HasSelection}"
+                        InputTransparent="True"
                         Margin="0"
                         StrokeThickness="0"
                         VerticalOptions="Center"
@@ -284,9 +283,6 @@
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="10" />
                         </Border.StrokeShape>
-                        <Border.GestureRecognizers>
-                            <TapGestureRecognizer Tapped="OnRowTapped" />
-                        </Border.GestureRecognizers>
                         <Border BackgroundColor="Transparent"
                             HeightRequest="20"
                             HorizontalOptions="Center"
@@ -321,8 +317,8 @@
                     <!--  Context Menu Button  -->
                     <Border x:Name="TrackMoreButton"
                         Grid.Column="4"
-                        WidthRequest="20"
-                        HeightRequest="20"
+                        WidthRequest="40"
+                        HeightRequest="40"
                         Padding="0"
                         HorizontalOptions="Center"
                         VerticalOptions="Center"

@@ -6,6 +6,7 @@
     xmlns:converters="clr-namespace:mashin.Converters"
     xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
+    xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
     xmlns:vm="clr-namespace:mashin.ViewModels"
     x:DataType="vm:ArtistDetailViewModel"
     BackgroundColor="{DynamicResource BackgroundPrimary}">
@@ -105,6 +106,11 @@
                     HeightRequest="44"
                     StrokeThickness="0"
                     WidthRequest="44">
+                    <Border.Behaviors>
+                        <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                            PressedAnimationDuration="250"
+                            PressedAnimationEasing="CubicOut" />
+                    </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding PlayArtistCommand}" />
                     </Border.GestureRecognizers>
@@ -124,6 +130,11 @@
                     HeightRequest="44"
                     StrokeThickness="0"
                     WidthRequest="44">
+                    <Border.Behaviors>
+                        <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                            PressedAnimationDuration="250"
+                            PressedAnimationEasing="CubicOut" />
+                    </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding ShuffleArtistCommand}" />
                     </Border.GestureRecognizers>
@@ -138,35 +149,38 @@
                 </Border>
 
                 <!--  Favorite Toggle  -->
-                <Grid Grid.Column="2"
+                <Border Grid.Column="2"
+                    BackgroundColor="{DynamicResource ActionButtonsBackground}"
                     HeightRequest="44"
+                    StrokeThickness="0"
                     WidthRequest="44">
-                    <Grid.GestureRecognizers>
+                    <Border.Behaviors>
+                        <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                            PressedAnimationDuration="250"
+                            PressedAnimationEasing="CubicOut" />
+                    </Border.Behaviors>
+                    <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding ToggleArtistFavoriteCommand}" />
-                    </Grid.GestureRecognizers>
-                    <Border BackgroundColor="{DynamicResource ActionButtonsBackground}"
-                        HeightRequest="44"
-                        StrokeThickness="0"
-                        WidthRequest="44">
-                        <Border.StrokeShape>
-                            <RoundRectangle CornerRadius="22" />
-                        </Border.StrokeShape>
-                    </Border>
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="22" />
+                    </Border.StrokeShape>
+                    <Grid>
+                        <Label FontSize="18"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsArtistFavorite, Converter={StaticResource InvertedBoolConverter}}"
+                            Text="{mi:Fluent Icon=Heart48, FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
 
-                    <Label FontSize="18"
-                        HorizontalOptions="Center"
-                        IsVisible="{Binding IsArtistFavorite, Converter={StaticResource InvertedBoolConverter}}"
-                        Text="{mi:Fluent Icon=Heart48, FontOverride=True}"
-                        TextColor="{DynamicResource IconPrimary}"
-                        VerticalOptions="Center" />
-
-                    <Label FontSize="18"
-                        HorizontalOptions="Center"
-                        IsVisible="{Binding IsArtistFavorite}"
-                        Text="{mi:FluentFilled Icon=Heart48Filled, FontOverride=True}"
-                        TextColor="{DynamicResource IconPrimary}"
-                        VerticalOptions="Center" />
-                </Grid>
+                        <Label FontSize="18"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsArtistFavorite}"
+                            Text="{mi:FluentFilled Icon=Heart48Filled, FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                    </Grid>
+                </Border>
 
                 <!--  Header Context Menu  -->
                 <Border x:Name="HeaderContextMenuButton"
@@ -175,6 +189,11 @@
                     HeightRequest="44"
                     StrokeThickness="0"
                     WidthRequest="44">
+                    <Border.Behaviors>
+                        <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                            PressedAnimationDuration="250"
+                            PressedAnimationEasing="CubicOut" />
+                    </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding ShowHeaderContextMenuAtAnchorCommand}"
                             CommandParameter="{x:Reference HeaderContextMenuButton}" />
@@ -190,7 +209,7 @@
                 </Border>
             </Grid>
 
-            <!--  Ver�ffentlichungen Section  -->
+            <!--  Veröffentlichungen Section  -->
             <VerticalStackLayout Padding="16,0,16,0"
                 Margin="0,12,0,0"
                 Spacing="10">
@@ -199,7 +218,7 @@
                     <Label Grid.Column="0"
                         FontFamily="PoppinsRegular"
                         FontSize="22"
-                        Text="Ver�ffentlichungen"
+                        Text="Veröffentlichungen"
                         TextColor="{DynamicResource TextPrimary}"
                         VerticalOptions="Center" />
                     <Border Grid.Column="1"
@@ -240,7 +259,7 @@
                     ShowContextMenuAtPositionCommand="{Binding ShowAlbumContextMenuAtPositionCommand}" />
             </VerticalStackLayout>
 
-            <!--  �hnliche Interpreten Section  -->
+            <!--  Ähnliche Interpreten Section  -->
             <VerticalStackLayout Padding="16,0,16,0"
                 Margin="0,12,0,0"
                 Spacing="10">
@@ -249,7 +268,7 @@
                     <Label Grid.Column="0"
                         FontFamily="PoppinsRegular"
                         FontSize="22"
-                        Text="�hnliche Interpreten"
+                        Text="Ähnliche Interpreten"
                         TextColor="{DynamicResource TextPrimary}"
                         VerticalOptions="Center" />
                     <Border Grid.Column="1"
