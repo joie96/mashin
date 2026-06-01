@@ -1,4 +1,4 @@
-ï»¿<?xml version="1.0" encoding="utf-8" ?>
+<?xml version="1.0" encoding="utf-8" ?>
 <ContentPage x:Class="mashin.Views.Mobile.ArtistDetailPage"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
@@ -107,7 +107,7 @@
                     StrokeThickness="0"
                     WidthRequest="44">
                     <Border.Behaviors>
-                        <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource SelectionBackground}" />
+                        <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
                     </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding PlayArtistCommand}" />
@@ -129,7 +129,7 @@
                     StrokeThickness="0"
                     WidthRequest="44">
                     <Border.Behaviors>
-                        <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource SelectionBackground}" />
+                        <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
                     </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding ShuffleArtistCommand}" />
@@ -149,7 +149,7 @@
                     HeightRequest="44"
                     WidthRequest="44">
                     <Grid.Behaviors>
-                        <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource SelectionBackground}" />
+                        <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
                     </Grid.Behaviors>
                     <Grid.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding ToggleArtistFavoriteCommand}" />
@@ -186,7 +186,7 @@
                     StrokeThickness="0"
                     WidthRequest="44">
                     <Border.Behaviors>
-                        <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource SelectionBackground}" />
+                        <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
                     </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Command="{Binding ShowHeaderContextMenuAtAnchorCommand}"
@@ -203,7 +203,7 @@
                 </Border>
             </Grid>
 
-            <!--  VerÃ¶ffentlichungen Section  -->
+            <!--  Veröffentlichungen Section  -->
             <VerticalStackLayout Padding="16,0,16,0"
                 Margin="0,12,0,0"
                 Spacing="10">
@@ -212,7 +212,7 @@
                     <Label Grid.Column="0"
                         FontFamily="PoppinsRegular"
                         FontSize="22"
-                        Text="VerÃ¶ffentlichungen"
+                        Text="Veröffentlichungen"
                         TextColor="{DynamicResource TextPrimary}"
                         VerticalOptions="Center" />
                     <Border Grid.Column="1"
@@ -253,7 +253,7 @@
                     ShowContextMenuAtPositionCommand="{Binding ShowAlbumContextMenuAtPositionCommand}" />
             </VerticalStackLayout>
 
-            <!--  Ã„hnliche Interpreten Section  -->
+            <!--  Ähnliche Interpreten Section  -->
             <VerticalStackLayout Padding="16,0,16,0"
                 Margin="0,12,0,0"
                 Spacing="10">
@@ -262,7 +262,7 @@
                     <Label Grid.Column="0"
                         FontFamily="PoppinsRegular"
                         FontSize="22"
-                        Text="Ã„hnliche Interpreten"
+                        Text="Ähnliche Interpreten"
                         TextColor="{DynamicResource TextPrimary}"
                         VerticalOptions="Center" />
                     <Border Grid.Column="1"
@@ -357,4 +357,5 @@
         </VerticalStackLayout>
     </ScrollView>
 </ContentPage>
+
 

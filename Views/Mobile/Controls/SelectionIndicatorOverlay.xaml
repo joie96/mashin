@@ -2,6 +2,7 @@
 <ContentView x:Class="mashin.Views.Mobile.Controls.SelectionIndicatorOverlay"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
     BackgroundColor="Transparent"
     InputTransparent="False">
@@ -27,6 +28,10 @@
                 Stroke="{DynamicResource BorderColor}"
                 StrokeThickness="1"
                 WidthRequest="40">
+                <Border.Behaviors>
+                    <toolkit:TouchBehavior
+                        PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
+                </Border.Behaviors>
                 <Border.StrokeShape>
                     <RoundRectangle CornerRadius="20" />
                 </Border.StrokeShape>
@@ -46,6 +51,10 @@
                 Stroke="{DynamicResource BorderColor}"
                 StrokeThickness="1"
                 WidthRequest="40">
+                <Border.Behaviors>
+                    <toolkit:TouchBehavior
+                        PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
+                </Border.Behaviors>
                 <Border.StrokeShape>
                     <RoundRectangle CornerRadius="20" />
                 </Border.StrokeShape>
@@ -64,6 +73,10 @@
                 Stroke="{DynamicResource BorderColor}"
                 StrokeThickness="1"
                 WidthRequest="40">
+                <Border.Behaviors>
+                    <toolkit:TouchBehavior
+                        PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
+                </Border.Behaviors>
                 <Border.StrokeShape>
                     <RoundRectangle CornerRadius="20" />
                 </Border.StrokeShape>
@@ -79,3 +92,5 @@
         </Grid>
     </Border>
 </ContentView>
+
+

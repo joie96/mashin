@@ -79,7 +79,7 @@
                 StrokeThickness="0"
                 WidthRequest="44">
                 <Border.Behaviors>
-                    <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource SelectionBackground}" />
+                    <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
                 </Border.Behaviors>
                 <Border.GestureRecognizers>
                     <TapGestureRecognizer Command="{Binding PlayPlaylistCommand}" />
@@ -101,7 +101,7 @@
                 StrokeThickness="0"
                 WidthRequest="44">
                 <Border.Behaviors>
-                    <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource SelectionBackground}" />
+                    <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
                 </Border.Behaviors>
                 <Border.GestureRecognizers>
                     <TapGestureRecognizer Command="{Binding ShufflePlaylistCommand}" />
@@ -121,7 +121,7 @@
                 HeightRequest="44"
                 WidthRequest="44">
                 <Grid.Behaviors>
-                    <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource SelectionBackground}" />
+                    <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
                 </Grid.Behaviors>
                 <Grid.GestureRecognizers>
                     <TapGestureRecognizer Command="{Binding TogglePlaylistFavoriteCommand}" />
@@ -158,7 +158,7 @@
                 StrokeThickness="0"
                 WidthRequest="44">
                 <Border.Behaviors>
-                    <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource SelectionBackground}" />
+                    <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
                 </Border.Behaviors>
                 <Border.GestureRecognizers>
                     <TapGestureRecognizer Command="{Binding ShowHeaderContextMenuAtAnchorCommand}"
@@ -194,3 +194,4 @@
         </VerticalStackLayout>
     </ScrollView>
 </ContentPage>
+

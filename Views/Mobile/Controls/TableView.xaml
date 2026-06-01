@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8" ?>
+<?xml version="1.0" encoding="utf-8" ?>
 <ContentView x:Class="mashin.Views.Mobile.Controls.TableView"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:converters="clr-namespace:mashin.Converters"
@@ -14,6 +14,7 @@
     <ContentView.Resources>
         <converters:PlaylistMetadataTextConverter x:Key="PlaylistMetadataTextConverter" />
         <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
+        <converters:MediaItemLoadingPriorityConverter x:Key="MediaItemLoadingPriorityConverter" />
 
         <!--  Playlist Row Template  -->
         <DataTemplate x:Key="PlaylistTemplate" x:DataType="models:Playlist">
@@ -36,7 +37,7 @@
                         ColumnDefinitions="52,*"
                         ColumnSpacing="10">
                         <Grid.Behaviors>
-                            <toolkit:TouchBehavior
+                            <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource TapFeedbackColor}"
                                 LongPressCompleted="OnRowLongPressCompleted"
                                 LongPressDuration="420"
                                 TouchGestureCompleted="OnRowTouchCompleted" />
@@ -53,6 +54,7 @@
                                 <RoundRectangle CornerRadius="8" />
                             </Border.StrokeShape>
                             <ffimageloading:CachedImage Aspect="AspectFill"
+                                LoadingPriority="{Binding ., Converter={StaticResource MediaItemLoadingPriorityConverter}}"
                                 Source="{Binding ImageUri}" />
                         </Border>
 
@@ -111,6 +113,10 @@
                         StrokeThickness="0"
                         VerticalOptions="Center"
                         WidthRequest="20">
+                        <Border.Behaviors>
+                            <toolkit:TouchBehavior
+                                PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
+                        </Border.Behaviors>
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="10" />
                         </Border.StrokeShape>
@@ -160,7 +166,8 @@
                         BackgroundColor="Transparent"
                         StrokeThickness="0">
                         <Border.Behaviors>
-                            <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource SelectionBackground}" />
+                            <toolkit:TouchBehavior
+                                PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
                         </Border.Behaviors>
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="20" />
@@ -200,7 +207,7 @@
                         ColumnDefinitions="52,*"
                         ColumnSpacing="10">
                         <Grid.Behaviors>
-                            <toolkit:TouchBehavior
+                            <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource TapFeedbackColor}"
                                 LongPressCompleted="OnRowLongPressCompleted"
                                 LongPressDuration="420"
                                 TouchGestureCompleted="OnRowTouchCompleted" />
@@ -217,6 +224,7 @@
                                 <RoundRectangle CornerRadius="8" />
                             </Border.StrokeShape>
                             <ffimageloading:CachedImage Aspect="AspectFill"
+                                LoadingPriority="{Binding ., Converter={StaticResource MediaItemLoadingPriorityConverter}}"
                                 Source="{Binding ImageUri}" />
                         </Border>
 
@@ -275,6 +283,10 @@
                         StrokeThickness="0"
                         VerticalOptions="Center"
                         WidthRequest="20">
+                        <Border.Behaviors>
+                            <toolkit:TouchBehavior
+                                PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
+                        </Border.Behaviors>
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="10" />
                         </Border.StrokeShape>
@@ -324,7 +336,8 @@
                         BackgroundColor="Transparent"
                         StrokeThickness="0">
                         <Border.Behaviors>
-                            <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource SelectionBackground}" />
+                            <toolkit:TouchBehavior
+                                PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
                         </Border.Behaviors>
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="20" />
@@ -407,6 +420,9 @@
                     Padding="16,10"
                     StrokeThickness="0"
                     VerticalOptions="Center">
+                    <Border.Behaviors>
+                        <toolkit:TouchBehavior PressedBackgroundColor="{DynamicResource TapFeedbackColor}" />
+                    </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Tapped="OnLoadMoreTapped" />
                     </Border.GestureRecognizers>
@@ -430,4 +446,6 @@
         </CollectionView.Footer>
     </CollectionView>
 </ContentView>
+
+
 
