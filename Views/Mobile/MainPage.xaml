@@ -30,7 +30,7 @@
 
             <!--  Search Bar (Search Section Only)  -->
             <Border BackgroundColor="{DynamicResource BackgroundPrimary}"
-                HeightRequest="56"
+                HeightRequest="64"
                 IsVisible="False"
                 StrokeThickness="0"
                 VerticalOptions="Start"
@@ -44,16 +44,16 @@
                     </DataTrigger>
                 </Border.Triggers>
 
-                <Border Margin="12,8,12,0"
+                <Border Margin="12,10,12,0"
                     Padding="12,0"
                     BackgroundColor="{DynamicResource BackgroundSecondary}"
-                    HeightRequest="40"
+                    HeightRequest="46"
                     HorizontalOptions="Fill"
                     Stroke="{DynamicResource BorderPrimary}"
                     StrokeThickness="1"
                     VerticalOptions="Start">
                     <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="20" />
+                        <RoundRectangle CornerRadius="23" />
                     </Border.StrokeShape>
                     <Grid ColumnDefinitions="Auto,*"
                         ColumnSpacing="8">
@@ -62,12 +62,12 @@
                             TextColor="{DynamicResource IconSecondary}"
                             VerticalOptions="Center" />
                         <Entry Grid.Column="1"
-                            Margin="0,-2,-10,1"
+                            Margin="0,0,0,0"
                             BackgroundColor="Transparent"
                             ClearButtonVisibility="WhileEditing"
                             FontFamily="PoppinsRegular"
-                            FontSize="13"
-                            HeightRequest="40"
+                            FontSize="14"
+                            HeightRequest="46"
                             Placeholder="Künstler:innen, Songs, Alben ..."
                             PlaceholderColor="{DynamicResource TextTertiary}"
                             ReturnCommand="{Binding SearchCommand}"
@@ -199,7 +199,7 @@
 
         <!--  Bottom Navigation Bar  -->
         <Border Grid.Row="2"
-            Padding="12,6,12,8"
+            Padding="12,10,12,14"
             BackgroundColor="{DynamicResource BackgroundSecondary}"
             StrokeThickness="0">
             
@@ -207,8 +207,8 @@
                 ColumnSpacing="4">
 
                 <Border Grid.Column="0"
-                    WidthRequest="42"
-                    HeightRequest="42"
+                    WidthRequest="48"
+                    HeightRequest="48"
                     Padding="0"
                     HorizontalOptions="Center"
                     VerticalOptions="Center"
@@ -218,7 +218,7 @@
                         <TapGestureRecognizer Command="{Binding NavigateToHomeCommand}" />
                     </Border.GestureRecognizers>
                     <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="21" />
+                        <RoundRectangle CornerRadius="24" />
                     </Border.StrokeShape>
                     <Border.Triggers>
                         <DataTrigger TargetType="Border"
@@ -227,7 +227,7 @@
                             <Setter Property="BackgroundColor" Value="{DynamicResource HoverBackground}" />
                         </DataTrigger>
                     </Border.Triggers>
-                    <Label FontSize="20"
+                    <Label FontSize="22"
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=Home24, FontOverride=True}"
                         TextColor="{DynamicResource IconSecondary}"
@@ -243,8 +243,8 @@
                 </Border>
 
                 <Border Grid.Column="1"
-                    WidthRequest="42"
-                    HeightRequest="42"
+                    WidthRequest="48"
+                    HeightRequest="48"
                     Padding="0"
                     HorizontalOptions="Center"
                     VerticalOptions="Center"
@@ -254,7 +254,7 @@
                         <TapGestureRecognizer Command="{Binding NavigateToExploreCommand}" />
                     </Border.GestureRecognizers>
                     <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="21" />
+                        <RoundRectangle CornerRadius="24" />
                     </Border.StrokeShape>
                     <Border.Triggers>
                         <DataTrigger TargetType="Border"
@@ -263,7 +263,7 @@
                             <Setter Property="BackgroundColor" Value="{DynamicResource HoverBackground}" />
                         </DataTrigger>
                     </Border.Triggers>
-                    <Label FontSize="20"
+                    <Label FontSize="22"
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=CompassNorthwest24, FontOverride=True}"
                         TextColor="{DynamicResource IconSecondary}"
@@ -279,8 +279,8 @@
                 </Border>
 
                 <Border Grid.Column="2"
-                    WidthRequest="42"
-                    HeightRequest="42"
+                    WidthRequest="48"
+                    HeightRequest="48"
                     Padding="0"
                     HorizontalOptions="Center"
                     VerticalOptions="Center"
@@ -290,7 +290,7 @@
                         <TapGestureRecognizer Command="{Binding NavigateToFavoritesCommand}" />
                     </Border.GestureRecognizers>
                     <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="21" />
+                        <RoundRectangle CornerRadius="24" />
                     </Border.StrokeShape>
                     <Border.Triggers>
                         <DataTrigger TargetType="Border"
@@ -299,7 +299,7 @@
                             <Setter Property="BackgroundColor" Value="{DynamicResource HoverBackground}" />
                         </DataTrigger>
                     </Border.Triggers>
-                    <Label FontSize="20"
+                    <Label FontSize="22"
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=Heart24, FontOverride=True}"
                         TextColor="{DynamicResource IconSecondary}"
@@ -315,8 +315,8 @@
                 </Border>
 
                 <Border Grid.Column="3"
-                    WidthRequest="42"
-                    HeightRequest="42"
+                    WidthRequest="48"
+                    HeightRequest="48"
                     Padding="0"
                     HorizontalOptions="Center"
                     VerticalOptions="Center"
@@ -326,7 +326,7 @@
                         <TapGestureRecognizer Command="{Binding NavigateToPlaylistsCommand}" />
                     </Border.GestureRecognizers>
                     <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="21" />
+                        <RoundRectangle CornerRadius="24" />
                     </Border.StrokeShape>
                     <Border.Triggers>
                         <DataTrigger TargetType="Border"
@@ -335,7 +335,7 @@
                             <Setter Property="BackgroundColor" Value="{DynamicResource HoverBackground}" />
                         </DataTrigger>
                     </Border.Triggers>
-                    <Label FontSize="20"
+                    <Label FontSize="22"
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=TextBulletListLtr24, FontOverride=True}"
                         TextColor="{DynamicResource IconSecondary}"
@@ -351,8 +351,8 @@
                 </Border>
 
                 <Border Grid.Column="4"
-                    WidthRequest="42"
-                    HeightRequest="42"
+                    WidthRequest="48"
+                    HeightRequest="48"
                     Padding="0"
                     HorizontalOptions="Center"
                     VerticalOptions="Center"
@@ -362,7 +362,7 @@
                         <TapGestureRecognizer Command="{Binding NavigateToSearchCommand}" />
                     </Border.GestureRecognizers>
                     <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="21" />
+                        <RoundRectangle CornerRadius="24" />
                     </Border.StrokeShape>
                     <Border.Triggers>
                         <DataTrigger TargetType="Border"
@@ -371,7 +371,7 @@
                             <Setter Property="BackgroundColor" Value="{DynamicResource HoverBackground}" />
                         </DataTrigger>
                     </Border.Triggers>
-                    <Label FontSize="20"
+                    <Label FontSize="22"
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=Search24, FontOverride=True}"
                         TextColor="{DynamicResource IconSecondary}"
@@ -387,8 +387,8 @@
                 </Border>
 
                 <Border Grid.Column="5"
-                    WidthRequest="42"
-                    HeightRequest="42"
+                    WidthRequest="48"
+                    HeightRequest="48"
                     Padding="0"
                     HorizontalOptions="Center"
                     VerticalOptions="Center"
@@ -398,9 +398,9 @@
                         <TapGestureRecognizer Command="{Binding ToggleThemeCommand}" />
                     </Border.GestureRecognizers>
                     <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="21" />
+                        <RoundRectangle CornerRadius="24" />
                     </Border.StrokeShape>
-                    <Label FontSize="20"
+                    <Label FontSize="22"
                         HorizontalTextAlignment="Center"
                         Text="{mi:Fluent Icon=Settings24, FontOverride=True}"
                         TextColor="{DynamicResource IconSecondary}"
