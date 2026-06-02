@@ -417,6 +417,7 @@
             InputTransparent="False"
             IsVisible="False"
             Margin="0,0,22,156"
+            ZIndex="100"
             VerticalOptions="End">
             <ContentPresenter x:Name="SelectionIndicatorContent"
                 HorizontalOptions="End"
@@ -429,7 +430,8 @@
             Grid.RowSpan="3"
             BackgroundColor="Transparent"
             InputTransparent="False"
-            IsVisible="False">
+            IsVisible="False"
+            ZIndex="120">
             <Grid>
                 <BoxView BackgroundColor="#80000000">
                     <BoxView.GestureRecognizers>
@@ -448,7 +450,8 @@
             Grid.RowSpan="3"
             BackgroundColor="Transparent"
             InputTransparent="False"
-            IsVisible="False">
+            IsVisible="False"
+            ZIndex="130">
             <Grid>
                 <BoxView BackgroundColor="#80000000">
                     <BoxView.GestureRecognizers>

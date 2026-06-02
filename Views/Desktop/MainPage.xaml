@@ -1032,12 +1032,13 @@
         <!-- Flyout Host -->
         <Grid x:Name="FlyoutHost"
             Grid.Row="0"
-            Grid.RowSpan="2"
+            Grid.RowSpan="3"
             Grid.Column="0"
             Grid.ColumnSpan="2"
             BackgroundColor="Transparent"
             InputTransparent="False"
-            IsVisible="False">
+            IsVisible="False"
+            ZIndex="120">
             <Grid>
                 <BoxView BackgroundColor="Transparent">
                     <BoxView.GestureRecognizers>
@@ -1058,7 +1059,8 @@
             Grid.ColumnSpan="2"
             BackgroundColor="Transparent"
             InputTransparent="False"
-            IsVisible="False">
+            IsVisible="False"
+            ZIndex="130">
             <Grid>
                 <BoxView BackgroundColor="#80000000">
                     <BoxView.GestureRecognizers>

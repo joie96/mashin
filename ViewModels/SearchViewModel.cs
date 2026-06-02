@@ -21,6 +21,19 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
 {
     #region Fields
 
+    #region Cache State
+
+    private sealed record CachedSearchState(
+        IReadOnlyList<Track> Tracks,
+        IReadOnlyList<Album> Albums,
+        IReadOnlyList<Playlist> Playlists,
+        IReadOnlyList<Artist> Artists,
+        bool HasSearchRequest);
+
+    private static CachedSearchState? s_cachedSearchState;
+
+    #endregion
+
     private readonly MusicAssistantService _musicAssistant;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
@@ -515,8 +528,16 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
         }
         else
         {
-            HasSearchRequest = false;
-            _logger.LogWarning("NavigatedTo called without SearchRequest");
+            if (TryRestoreFromCache())
+            {
+                _logger.LogInformation("Restored cached search results");
+            }
+            else
+            {
+                HasSearchRequest = false;
+                _logger.LogWarning("NavigatedTo called without SearchRequest");
+            }
+
             _navigationService.IsNavigating = false;
         }
 
@@ -564,6 +585,8 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
         try
         {
             await Task.WhenAll(tasks);
+
+            CacheCurrentState();
 
             _logger.LogInformation("Search completed");
         }
@@ -651,7 +674,51 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 _ = BuildArtistContextMenuAsync();
                 break;
         }
+
+        CacheCurrentState();
     }
+
+    #region Cache
+
+    private bool TryRestoreFromCache()
+    {
+        var cached = s_cachedSearchState;
+        if (cached is null || !cached.HasSearchRequest)
+        {
+            return false;
+        }
+
+        HasSearchRequest = true;
+
+        IsLoadingTracks = false;
+        IsLoadingAlbums = false;
+        IsLoadingPlaylists = false;
+        IsLoadingArtists = false;
+
+        Tracks = new ObservableRangeCollection<Track>(cached.Tracks);
+        Albums = new ObservableRangeCollection<Album>(cached.Albums);
+        Playlists = new ObservableRangeCollection<Playlist>(cached.Playlists);
+        Artists = new ObservableRangeCollection<Artist>(cached.Artists);
+
+        _ = BuildTrackContextMenuAsync();
+        _ = BuildAlbumContextMenuAsync();
+        _ = BuildPlaylistContextMenuAsync();
+        _ = BuildArtistContextMenuAsync();
+
+        return true;
+    }
+
+    private void CacheCurrentState()
+    {
+        s_cachedSearchState = new CachedSearchState(
+            Tracks.ToList(),
+            Albums.ToList(),
+            Playlists.ToList(),
+            Artists.ToList(),
+            HasSearchRequest);
+    }
+
+            #endregion
 
     #endregion
 
