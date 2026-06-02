@@ -57,16 +57,16 @@
                     </Border.StrokeShape>
                     <Grid ColumnDefinitions="Auto,*"
                         ColumnSpacing="8">
-                        <Label FontSize="16"
-                            Text="{mi:Fluent Icon=Search24, FontOverride=True}"
+                        <Label FontSize="18"
+                            Text="{mi:Fluent Icon=Search12, FontOverride=True}"
                             TextColor="{DynamicResource IconSecondary}"
                             VerticalOptions="Center" />
                         <Entry Grid.Column="1"
-                            Margin="0,0,0,0"
+                            Margin="0,8,0,0"
                             BackgroundColor="Transparent"
                             ClearButtonVisibility="WhileEditing"
                             FontFamily="PoppinsRegular"
-                            FontSize="14"
+                            FontSize="16"
                             HeightRequest="46"
                             Placeholder="Künstler:innen, Songs, Alben ..."
                             PlaceholderColor="{DynamicResource TextTertiary}"
