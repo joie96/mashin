@@ -1581,7 +1581,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task<PlayerQueue?> GetActiveQueueForPlayerAsync(string playerId)
     {
-        _logger.LogInformation("Fetching active queue for player: {PlayerId}", playerId);
+        _logger.LogDebug("Fetching active queue for player: {PlayerId}", playerId);
 
         var args = new { player_id = playerId };
         var queue = await SendCommandAsync<PlayerQueue>("player_queues/get_active_queue", args);

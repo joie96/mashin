@@ -421,6 +421,7 @@ public sealed class DefaultContextMenuService : IContextMenuService
                 MaxMenuHeight = maxSheetHeight
             };
             _mainMenu.ItemInvoked += async (_, item) => await OnMainMenuItemInvokedAsync(item);
+            _mainMenu.DismissRequested += async (_, _) => await CloseMenuCoreAsync();
 
             _currentMenuClosedTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 

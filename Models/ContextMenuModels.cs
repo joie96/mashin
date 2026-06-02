@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Text;
 using System.Windows.Input;
+using MauiIcons.Fluent;
+using MauiIcons.Fluent.Filled;
 
 namespace mashin.Models;
 
@@ -75,6 +77,26 @@ public class ContextMenuItem : BindableObject
     /// Indicates whether an icon is present.
     /// </summary>
     public bool HasIcon => Icon != null;
+
+    /// <summary>
+    /// Returns true when Icon is a regular Fluent icon enum value.
+    /// </summary>
+    public bool HasFluentIcon => Icon is FluentIcons;
+
+    /// <summary>
+    /// Returns true when Icon is a filled Fluent icon enum value.
+    /// </summary>
+    public bool HasFluentFilledIcon => Icon is FluentFilledIcons;
+
+    /// <summary>
+    /// Typed regular Fluent icon value for XAML bindings.
+    /// </summary>
+    public FluentIcons FluentIcon => Icon is FluentIcons icon ? icon : default;
+
+    /// <summary>
+    /// Typed filled Fluent icon value for XAML bindings.
+    /// </summary>
+    public FluentFilledIcons FluentFilledIcon => Icon is FluentFilledIcons icon ? icon : default;
 
     /// <summary>
     /// Indicates whether submenu items are present.

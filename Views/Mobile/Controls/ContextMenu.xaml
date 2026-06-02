@@ -16,6 +16,7 @@
     </ContentView.Resources>
 
     <Border
+        x:Name="MenuSheet"
         Padding="0,10,0,12"
         BackgroundColor="{DynamicResource BackgroundSecondary}"
         StrokeThickness="0">
@@ -25,101 +26,94 @@
 
         <VerticalStackLayout Spacing="0">
             <Border
+                x:Name="HandleBar"
                 WidthRequest="42"
                 HeightRequest="5"
                 Margin="0,0,0,8"
                 HorizontalOptions="Center"
                 StrokeThickness="0"
-                BackgroundColor="{DynamicResource SeparatorColor}" />
+                BackgroundColor="{DynamicResource SeparatorColor}">
+                <Border.GestureRecognizers>
+                    <PanGestureRecognizer PanUpdated="OnHandlePanUpdated" />
+                </Border.GestureRecognizers>
+            </Border>
 
-            <ScrollView MaximumHeightRequest="{Binding MaxMenuHeight, Source={x:Reference self}}">
-                <VerticalStackLayout BindableLayout.ItemsSource="{Binding MenuItems, Source={x:Reference self}}" Spacing="0">
-                    <BindableLayout.ItemTemplate>
-                        <DataTemplate x:DataType="models:ContextMenuItem">
-                            <Grid>
-                                <BoxView
-                                    Margin="14,4"
-                                    HeightRequest="1"
-                                    BackgroundColor="{DynamicResource SeparatorColor}"
-                                    IsVisible="{Binding IsSeparator}" />
+            <CollectionView
+                x:Name="MenuItemsList"
+                ItemsSource="{Binding MenuItems, Source={x:Reference self}}"
+                MaximumHeightRequest="{Binding MaxMenuHeight, Source={x:Reference self}}"
+                SelectionMode="None"
+                VerticalScrollBarVisibility="Never"
+                Scrolled="OnMenuItemsScrolled">
+                <CollectionView.GestureRecognizers>
+                    <PanGestureRecognizer PanUpdated="OnMenuPanUpdated" />
+                </CollectionView.GestureRecognizers>
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="models:ContextMenuItem">
+                        <Grid BackgroundColor="Transparent">
+                            <BoxView
+                                Margin="14,4"
+                                HeightRequest="1"
+                                BackgroundColor="{DynamicResource SeparatorColor}"
+                                IsVisible="{Binding IsSeparator}" />
 
-                                <Grid
-                                    Padding="18,14"
-                                    ColumnDefinitions="24,*,Auto"
-                                    ColumnSpacing="12"
-                                    IsVisible="{Binding IsSeparator, Converter={StaticResource InvertedBoolConverter}}"
-                                    Opacity="{Binding IsEnabled, Converter={StaticResource BoolToOpacityConverter}}">
-                                    <Grid.GestureRecognizers>
-                                        <TapGestureRecognizer Tapped="OnMenuItemTapped" />
-                                    </Grid.GestureRecognizers>
+                            <Grid
+                                Padding="18,14"
+                                ColumnDefinitions="24,*,Auto"
+                                ColumnSpacing="12"
+                                BackgroundColor="Transparent"
+                                IsVisible="{Binding IsSeparator, Converter={StaticResource InvertedBoolConverter}}"
+                                Opacity="{Binding IsEnabled, Converter={StaticResource BoolToOpacityConverter}}">
+                                <Grid.GestureRecognizers>
+                                    <PanGestureRecognizer PanUpdated="OnMenuPanUpdated" />
+                                    <TapGestureRecognizer Tapped="OnMenuItemTapped" />
+                                </Grid.GestureRecognizers>
 
-                                    <Label
-                                        Grid.Column="0"
-                                        FontSize="18"
-                                        IsVisible="{Binding HasIcon}"
-                                        Text="{mi:Fluent Icon={Binding Icon},
-                                                         FontOverride=True,
-                                                         IconSize=18,
-                                                         IconColor={DynamicResource IconSecondary}}"
-                                        TextColor="{DynamicResource IconSecondary}"
-                                        VerticalOptions="Center">
-                                        <Label.Triggers>
-                                            <DataTrigger Binding="{Binding IconIsFilled}"
-                                                TargetType="Label"
-                                                Value="True">
-                                                <Setter Property="IsVisible" Value="False" />
-                                            </DataTrigger>
-                                        </Label.Triggers>
-                                    </Label>
-                                    <Label
-                                        Grid.Column="0"
-                                        FontSize="18"
-                                        IsVisible="False"
-                                        Text="{mi:FluentFilled Icon={Binding Icon},
-                                                               FontOverride=True,
-                                                               IconSize=18,
-                                                               IconColor={DynamicResource IconSecondary}}"
-                                        TextColor="{DynamicResource IconSecondary}"
-                                        VerticalOptions="Center">
-                                        <Label.Triggers>
-                                            <DataTrigger Binding="{Binding IconIsFilled}"
-                                                TargetType="Label"
-                                                Value="True">
-                                                <Setter Property="IsVisible" Value="True" />
-                                            </DataTrigger>
-                                            <DataTrigger Binding="{Binding HasIcon}"
-                                                TargetType="Label"
-                                                Value="False">
-                                                <Setter Property="IsVisible" Value="False" />
-                                            </DataTrigger>
-                                        </Label.Triggers>
-                                    </Label>
+                                <Label
+                                    Grid.Column="0"
+                                    FontSize="18"
+                                    IsVisible="{Binding HasFluentIcon}"
+                                    Text="{mi:Fluent Icon={Binding FluentIcon},
+                                                     FontOverride=True,
+                                                     IconSize=18,
+                                                     IconColor={DynamicResource IconSecondary}}"
+                                    TextColor="{DynamicResource IconSecondary}"
+                                    VerticalOptions="Center" />
+                                <Label
+                                    Grid.Column="0"
+                                    FontSize="18"
+                                    IsVisible="{Binding HasFluentFilledIcon}"
+                                    Text="{mi:FluentFilled Icon={Binding FluentFilledIcon},
+                                                           FontOverride=True,
+                                                           IconSize=18,
+                                                           IconColor={DynamicResource IconSecondary}}"
+                                    TextColor="{DynamicResource IconSecondary}"
+                                    VerticalOptions="Center" />
 
-                                    <Label
-                                        Grid.Column="1"
-                                        FontFamily="PoppinsRegular"
-                                        FontSize="15"
-                                        LineBreakMode="TailTruncation"
-                                        MaxLines="1"
-                                        Text="{Binding Text}"
-                                        TextColor="{DynamicResource TextPrimary}"
-                                        VerticalOptions="Center" />
+                                <Label
+                                    Grid.Column="1"
+                                    FontFamily="PoppinsRegular"
+                                    FontSize="15"
+                                    LineBreakMode="TailTruncation"
+                                    MaxLines="1"
+                                    Text="{Binding Text}"
+                                    TextColor="{DynamicResource TextPrimary}"
+                                    VerticalOptions="Center" />
 
-                                    <Label
-                                        Grid.Column="2"
-                                        FontFamily="PoppinsRegular"
-                                        FontSize="15"
-                                        HorizontalTextAlignment="End"
-                                        Text=">"
-                                        TextColor="{DynamicResource TextSecondary}"
-                                        VerticalOptions="Center"
-                                        IsVisible="{Binding HasSubItems}" />
-                                </Grid>
+                                <Label
+                                    Grid.Column="2"
+                                    FontFamily="PoppinsRegular"
+                                    FontSize="15"
+                                    HorizontalTextAlignment="End"
+                                    Text=">"
+                                    TextColor="{DynamicResource TextSecondary}"
+                                    VerticalOptions="Center"
+                                    IsVisible="{Binding HasSubItems}" />
                             </Grid>
-                        </DataTemplate>
-                    </BindableLayout.ItemTemplate>
-                </VerticalStackLayout>
-            </ScrollView>
+                        </Grid>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
         </VerticalStackLayout>
     </Border>
 </ContentView>
