@@ -5,8 +5,11 @@ namespace mashin.Views.Mobile.Controls;
 
 public partial class ContextMenu : ContentView
 {
-    private const double DragDismissThreshold = 120d;
+    private const double DragDismissThreshold = 100d;
     private const double DragResistance = 0.92d;
+    private const uint InSlideDurationMs = 320;
+    private const uint OutSlideDurationMs = 300;
+    private const uint DragCancelSnapBackDurationMs = 180;
 
     private bool _isHandleDragging;
     private bool _canDismissForCurrentPan;
@@ -53,24 +56,18 @@ public partial class ContextMenu : ContentView
         _menuVerticalOffset = 0;
         ResetHandleBarVisual();
 
-        Opacity = 0;
-        TranslationY = 48;
+        TranslationY = GetSlideDistance();
 
-        await Task.WhenAll(
-            this.FadeToAsync(1, 180, Easing.CubicOut),
-            this.TranslateToAsync(0, 0, 220, Easing.CubicOut));
+        await this.TranslateToAsync(0, 0, InSlideDurationMs, Easing.SinOut);
     }
 
     public async Task AnimateOutAsync()
     {
         _dismissTriggered = true;
 
-        await Task.WhenAll(
-            this.FadeToAsync(0, 140, Easing.CubicIn),
-            this.TranslateToAsync(0, 40, 170, Easing.CubicIn));
+        await this.TranslateToAsync(0, GetSlideDistance(), OutSlideDurationMs, Easing.SinIn);
 
         TranslationY = 0;
-        Opacity = 1;
         ResetHandleBarVisual();
     }
 
@@ -150,7 +147,7 @@ public partial class ContextMenu : ContentView
             case GestureStatus.Canceled:
                 if (!_dismissTriggered)
                 {
-                    _ = this.TranslateToAsync(0, 0, 120, Easing.CubicOut);
+                    _ = this.TranslateToAsync(0, 0, DragCancelSnapBackDurationMs, Easing.SinOut);
                 }
 
                 _isHandleDragging = false;
@@ -174,6 +171,22 @@ public partial class ContextMenu : ContentView
     private double GetCurrentScrollY()
     {
         return _menuVerticalOffset;
+    }
+
+    private double GetSlideDistance()
+    {
+        var menuHeight = GetMenuSheet()?.Height ?? Height;
+        if (menuHeight <= 0)
+        {
+            menuHeight = MaxMenuHeight;
+        }
+
+        return Math.Max(120d, menuHeight + 24d);
+    }
+
+    private Border? GetMenuSheet()
+    {
+        return FindByName("MenuSheet") as Border;
     }
 
     private Border? GetHandleBar()

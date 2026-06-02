@@ -5,6 +5,11 @@ namespace mashin.Views.Mobile.Controls;
 
 public partial class ContextSubMenu : ContentView
 {
+    private const uint InFadeDurationMs = 200;
+    private const uint InScaleDurationMs = 230;
+    private const uint OutFadeDurationMs = 180;
+    private const uint OutScaleDurationMs = 210;
+
     public static readonly BindableProperty TitleProperty =
         BindableProperty.Create(
             nameof(Title),
@@ -54,18 +59,18 @@ public partial class ContextSubMenu : ContentView
     public async Task AnimateInAsync()
     {
         Opacity = 0;
-        Scale = 0.96;
+        Scale = 0.94;
 
         await Task.WhenAll(
-            this.FadeToAsync(1, 160, Easing.CubicOut),
-            this.ScaleToAsync(1, 180, Easing.CubicOut));
+            this.FadeToAsync(1, InFadeDurationMs, Easing.SinOut),
+            this.ScaleToAsync(1, InScaleDurationMs, Easing.SinOut));
     }
 
     public async Task AnimateOutAsync()
     {
         await Task.WhenAll(
-            this.FadeToAsync(0, 120, Easing.CubicIn),
-            this.ScaleToAsync(0.96, 140, Easing.CubicIn));
+            this.FadeToAsync(0, OutFadeDurationMs, Easing.SinIn),
+            this.ScaleToAsync(0.94, OutScaleDurationMs, Easing.SinIn));
 
         Scale = 1;
     }
