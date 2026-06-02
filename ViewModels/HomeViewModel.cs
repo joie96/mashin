@@ -644,18 +644,15 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             await LoadSimilarArtistsSectionsAsync(lbFolders);
             await LoadRecentListensAsync();
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogInformation(ex, "Home loading requires authentication. Triggering login flow.");
+            ResetHomeSectionsAfterFailure();
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to load home sections");
-            RecommendationTracks = new ObservableRangeCollection<Track>();
-            TopTracks = new ObservableRangeCollection<Track>();
-            RecentListens = new ObservableRangeCollection<Track>();
-            TopArtists = new ObservableRangeCollection<Artist>();
-            SimilarArtistSections = new ObservableRangeCollection<SimilarArtistSection>();
-            GenrePlaylists = new ObservableRangeCollection<Playlist>();
-            ArtistPlaylists = new ObservableRangeCollection<Playlist>();
-            SetSectionLoadingState(false);
-            IsLoadingHome = false;
+            ResetHomeSectionsAfterFailure();
         }
         finally
         {
@@ -665,6 +662,19 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 IsLoadingHome = false;
             }
         }
+    }
+
+    private void ResetHomeSectionsAfterFailure()
+    {
+        RecommendationTracks = new ObservableRangeCollection<Track>();
+        TopTracks = new ObservableRangeCollection<Track>();
+        RecentListens = new ObservableRangeCollection<Track>();
+        TopArtists = new ObservableRangeCollection<Artist>();
+        SimilarArtistSections = new ObservableRangeCollection<SimilarArtistSection>();
+        GenrePlaylists = new ObservableRangeCollection<Playlist>();
+        ArtistPlaylists = new ObservableRangeCollection<Playlist>();
+        SetSectionLoadingState(false);
+        IsLoadingHome = false;
     }
 
     private async Task LoadRecommendationTracksAsync(IEnumerable<RecommendationFolder> lbFolders)

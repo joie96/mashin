@@ -12,6 +12,7 @@ public partial class MainPage : ContentPage
     private readonly INavigationService _navigationService;
     private readonly IOverlayService _overlayService;
     private readonly ILogger<MainPage> _logger;
+    private Task? _initializeTask;
 
     #endregion
 
@@ -40,14 +41,28 @@ public partial class MainPage : ContentPage
             navService.Initialize(ContentContainer);
         }
 
-        // Navigate to home page
-        _ = _navigationService.NavigateToAsync<HomePage>();
-
-        _ = _viewModel.InitializeAsync();
+        Loaded += OnLoaded;
 
         _navigationService.IsNavigating = false;
 
         UpdateQueueIconColor();
+    }
+
+    private void OnLoaded(object? sender, EventArgs e)
+    {
+        _initializeTask ??= InitializeViewModelAsync();
+    }
+
+    private async Task InitializeViewModelAsync()
+    {
+        try
+        {
+            await _viewModel.InitializeAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to initialize main view model");
+        }
     }
 
     #endregion

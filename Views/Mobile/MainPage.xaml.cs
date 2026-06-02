@@ -9,7 +9,9 @@ public partial class MainPage : ContentPage
     private readonly MainViewModel _viewModel;
     private readonly INavigationService _navigationService;
     private readonly IOverlayService _overlayService;
+    private readonly ILogger<MainPage> _logger;
     private bool _isHandlingBackNavigation;
+    private Task? _initializeTask;
 
     public MainPage(
         MainViewModel viewModel,
@@ -22,6 +24,7 @@ public partial class MainPage : ContentPage
         _viewModel = viewModel;
         _navigationService = navigationService;
         _overlayService = overlayService;
+        _logger = logger;
         BindingContext = _viewModel;
 
         var selectionIndicatorHost = this.FindByName<Grid>("SelectionIndicatorHost");
@@ -40,9 +43,25 @@ public partial class MainPage : ContentPage
             navService.Initialize(ContentContainer);
         }
 
-        _ = _navigationService.NavigateToAsync<HomePage>();
-        _ = _viewModel.InitializeAsync();
+        Loaded += OnLoaded;
         _navigationService.IsNavigating = false;
+    }
+
+    private void OnLoaded(object? sender, EventArgs e)
+    {
+        _initializeTask ??= InitializeViewModelAsync();
+    }
+
+    private async Task InitializeViewModelAsync()
+    {
+        try
+        {
+            await _viewModel.InitializeAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to initialize main view model");
+        }
     }
 
     private void OnOverlayBackdropTapped(object? sender, TappedEventArgs e)

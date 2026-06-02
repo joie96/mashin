@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -18,6 +19,7 @@ public class MusicAssistantService
     private readonly SettingsService _settings;
     private readonly HttpClient _httpClient;
 
+    // Authentication state
     private string? _authToken;
     private bool _isAuthenticated;
 
@@ -25,6 +27,7 @@ public class MusicAssistantService
     private readonly Dictionary<string, ProviderManifest> _providerManifestCache = new();
     private readonly SemaphoreSlim _manifestCacheLock = new(1, 1);
 
+    // JSON Serializer options with custom converters
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -37,14 +40,6 @@ public class MusicAssistantService
         }
     };
 
-    public bool IsAuthenticated => _isAuthenticated;
-
-    /// <summary>
-    /// Event triggered when login is required (no valid token available).
-    /// Subscribe to this event to show a login UI.
-    /// </summary>
-    public event EventHandler? LoginRequired;
-
     public MusicAssistantService(
         ILogger<MusicAssistantService> logger,
         SettingsService settings)
@@ -56,18 +51,20 @@ public class MusicAssistantService
             Timeout = TimeSpan.FromSeconds(60),
             BaseAddress = new Uri(settings.MusicAssistantUrl)
         };
+
+        _authToken = _settings.AuthToken;
+        _isAuthenticated = !string.IsNullOrWhiteSpace(_authToken);
     }
+
+    public bool IsAuthenticated => _isAuthenticated;
+
+    public string? AuthToken => _authToken;
+
+    public event EventHandler? LoginRequired;
 
     private async Task<T?> SendCommandAsync<T>(string command, object? args = null)
     {
-        if (!_isAuthenticated && command != "auth/login")
-        {
-            var autoLoginSuccess = await TryAutoLoginAsync();
-            if (!autoLoginSuccess)
-            {
-                throw new UnauthorizedAccessException("Not authenticated. Please login first.");
-            }
-        }
+        SetAuthHeader();
 
         try
         {
@@ -87,6 +84,7 @@ public class MusicAssistantService
             {
                 _logger.LogWarning("Unauthorized - token may have expired");
                 Logout();
+                RequestLogin();
                 throw new UnauthorizedAccessException("Authentication token expired or invalid");
             }
 
@@ -226,6 +224,48 @@ public class MusicAssistantService
     /// <summary>
     /// Authenticate user with credentials via WebSocket. This command allows clients to authenticate over the WebSocket connection using username/password or other provider-specific credentials.
     /// </summary>
+    public async Task<bool> AutoLoginAsync(bool raiseLoginRequest = true)
+    {
+        if (!string.IsNullOrWhiteSpace(_settings.AuthToken))
+        {
+            _logger.LogInformation("Attempting auto-login with saved token...");
+            SetAuthSession(_settings.AuthToken!, _settings.Username);
+
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, "/api");
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _settings.AuthToken!);
+
+                var payload = JsonSerializer.Serialize(new
+                {
+                    command = "info",
+                    args = new { }
+                });
+
+                request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+
+                using var response = await _httpClient.SendAsync(request);
+                response.EnsureSuccessStatusCode();
+
+                _logger.LogInformation("Auto-login successful");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Saved token invalid, clearing...");
+                Logout();
+            }
+        }
+
+        _logger.LogInformation("No valid auth token available, login required");
+        if (raiseLoginRequest)
+        {
+            RequestLogin();
+        }
+
+        return false;
+    }
+
     public async Task<bool> LoginAsync(string username, string password, string? deviceName = null)
     {
         try
@@ -248,17 +288,9 @@ public class MusicAssistantService
 
             if (response?.Success == true && !string.IsNullOrEmpty(response.Token))
             {
-                _authToken = response.Token;
-                _isAuthenticated = true;
-
-                _httpClient.DefaultRequestHeaders.Authorization =
-                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _authToken);
+                SetAuthSession(response.Token, response.User?.Username ?? username);
 
                 _logger.LogInformation("Successfully authenticated as: {Username}", response.User?.Username ?? username);
-
-                _settings.AuthToken = _authToken;
-                _settings.Username = username;
-                _settings.Save();
 
                 return true;
             }
@@ -279,7 +311,7 @@ public class MusicAssistantService
     {
         try
         {
-            if (_isAuthenticated)
+            if (IsAuthenticated)
             {
                 await SendCommandAsync<object>("auth/logout");
             }
@@ -411,69 +443,67 @@ public class MusicAssistantService
     }
 
     /// <summary>
-    /// Set an existing Auth-Token from settings (internal use)
-    /// </summary>
-    public void SetAuthToken(string token)
-    {
-        _authToken = token;
-        _isAuthenticated = !string.IsNullOrEmpty(token);
-
-        if (_isAuthenticated)
-        {
-            _httpClient.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-
-            _logger.LogInformation("Auth token set from saved credentials");
-        }
-    }
-
-    /// <summary>
-    /// Try Auto-Login with saved Token in settings (internal use)
-    /// </summary>
-    public async Task<bool> TryAutoLoginAsync(bool raiseLoginRequiredEvent = true)
-    {
-        if (!string.IsNullOrEmpty(_settings.AuthToken))
-        {
-            _logger.LogInformation("Attempting auto-login with saved token...");
-            SetAuthToken(_settings.AuthToken);
-
-            try
-            {
-                await GetServerInfoAsync();
-                _logger.LogInformation("Auto-login successful");
-                return true;
-            }
-            catch
-            {
-                _logger.LogWarning("Saved token invalid, clearing...");
-                Logout();
-            }
-        }
-
-        // No valid token available - notify that login is required
-        _logger.LogInformation("No valid auth token available, login required");
-        if (raiseLoginRequiredEvent)
-        {
-            LoginRequired?.Invoke(this, EventArgs.Empty);
-        }
-
-        return false;
-    }
-
-    /// <summary>
     /// Logout (internal use)
     /// </summary>
-    public void Logout()
+    private void Logout()
+    {
+        ClearAuthSession();
+        _httpClient.DefaultRequestHeaders.Authorization = null;
+    }
+
+    private void SetAuthHeader()
+    {
+        if (!IsAuthenticated || string.IsNullOrWhiteSpace(AuthToken))
+        {
+            _httpClient.DefaultRequestHeaders.Authorization = null;
+            return;
+        }
+
+        var token = AuthToken;
+        var current = _httpClient.DefaultRequestHeaders.Authorization;
+
+        if (current?.Scheme == "Bearer" && current.Parameter == token)
+        {
+            return;
+        }
+
+        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+    }
+
+    public void SetAuthSession(string token, string? username = null)
+    {
+        if (!string.IsNullOrWhiteSpace(token))
+        {
+            _authToken = token;
+            _isAuthenticated = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(username))
+        {
+            _settings.Username = username;
+        }
+
+        _settings.AuthToken = token;
+        _settings.Save();
+
+        _logger.LogInformation("Authentication session updated");
+    }
+
+    public void ClearAuthSession()
     {
         _authToken = null;
         _isAuthenticated = false;
-        _httpClient.DefaultRequestHeaders.Authorization = null;
 
-        _settings.AuthToken = null;
         _settings.Username = null;
+        _settings.AuthToken = null;
         _settings.Save();
 
         _logger.LogInformation("Logged out");
+    }
+
+    public void RequestLogin()
+    {
+        LoginRequired?.Invoke(this, EventArgs.Empty);
     }
 
     #endregion

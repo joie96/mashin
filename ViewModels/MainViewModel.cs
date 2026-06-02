@@ -682,13 +682,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public async Task InitializeAsync()
     {
-        await EnsureAuthenticatedAtStartupAsync();
-
-        if (!_musicAssistant.IsAuthenticated)
+        var autoLoginSucceeded = await _musicAssistant.AutoLoginAsync(raiseLoginRequest: true);
+        if (!autoLoginSucceeded)
         {
             _logger.LogWarning("Startup initialization paused because user is not authenticated.");
             return;
         }
+
+        CurrentSection = NavigationSection.Home;
+        await _navigationService.NavigateToAsync<HomePage>();
 
         // Establish connection to Sendspin server (if configured).
         if (!string.IsNullOrWhiteSpace(_settings.SendspinUrl))
@@ -707,7 +709,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         // Build Context Menus
         BuildUserMenuItems();
         BuildQueueContextMenuItems();
-        BuildCurrentTrackContextMenuItems();  
+        BuildCurrentTrackContextMenuItems();
 
         // Set initial queue state
         await _playbackService.RefreshNowAsync();
@@ -727,8 +729,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         // Start queue sync loop
         await _playbackService.StartAsync();
-
-        
     }
 
     public async ValueTask DisposeAsync()
@@ -751,7 +751,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     #endregion
 
-    #region Login Overlay
+    #region Login Event Handler & Overlay
 
     private async void OnLoginRequired(object? sender, EventArgs e)
     {
@@ -761,15 +761,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
 
         _isLoginOverlayActive = true;
+        bool loginSucceeded;
         try
         {
-            await _overlayService.ShowLoginAsync(
+            loginSucceeded = await _overlayService.ShowLoginAsync(
                 _settings.Username,
-                AuthenticateWithCredentialsAsync);
+                ExecuteLogin);
         }
         finally
         {
             _isLoginOverlayActive = false;
+        }
+
+        if (loginSucceeded)
+        {
+            await InitializeAsync();
         }
     }
 
@@ -1718,12 +1724,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     #endregion
 
-    #region Helpers
+    #region Helper - Navigation
+
     private Task ExecuteOpenSettingsAsync()
     {
         _logger.LogInformation("Einstellungen ist noch nicht implementiert.");
         return Task.CompletedTask;
     }
+
+    #endregion
+
+    #region Helper - Playback Target
 
     private bool IsLocalPlaybackTarget()
     {
@@ -1731,6 +1742,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             && !string.IsNullOrWhiteSpace(_sendspinPlayerService.PlayerId)
             && string.Equals(_playbackService.ActivePlayerId, _sendspinPlayerService.PlayerId, StringComparison.Ordinal);
     }
+
+    #endregion
+
+    #region Helper - Theme
 
     private void ToggleTheme()
     {
@@ -1747,12 +1762,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         IsDarkTheme = nextTheme == AppTheme.Dark;
     }
 
+    #endregion
+
+    #region Helper - Authentication
+
     private async Task ExecuteLogoutAsync()
     {
         try
         {
             await _musicAssistant.LogoutAsync();
-            await _musicAssistant.TryAutoLoginAsync();
+            _musicAssistant.RequestLogin();
         }
         catch (Exception ex)
         {
@@ -1760,31 +1779,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
     }
 
-    private async Task EnsureAuthenticatedAtStartupAsync()
-    {
-        _isLoginOverlayActive = true;
-
-        try
-        {
-            await _overlayService.ShowLoginAsync(
-                _settings.Username,
-                AuthenticateWithCredentialsAsync,
-                async () =>
-                {
-                    var success = await _musicAssistant.TryAutoLoginAsync(raiseLoginRequiredEvent: false);
-                    return success
-                        ? (true, null)
-                        : (false, (string?)null);
-                },
-                "Sie werden angemeldet...");
-        }
-        finally
-        {
-            _isLoginOverlayActive = false;
-        }
-    }
-
-    private async Task<(bool Success, string? ErrorMessage)> AuthenticateWithCredentialsAsync(string username, string password)
+    private async Task<(bool Success, string? ErrorMessage)> ExecuteLogin(string username, string password)
     {
         try
         {
@@ -1807,6 +1802,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
     }
 
+    #endregion
+
+    #region Helper - Property Change
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
@@ -1823,6 +1822,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         OnPropertyChanged(propertyName);
         return true;
     }
+
+    #endregion
+
+    #region Helper - Formatting
 
     private static string FormatTime(double seconds)
     {
@@ -1852,6 +1855,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         return $"{ts.Minutes} Minuten";
     }
+
+    #endregion
+
+    #region Helper - Repeat Mode
 
     private static PlayerRepeatMode GetNextRepeatMode(string? repeatMode)
     {
