@@ -1032,7 +1032,7 @@
         <!-- Flyout Host -->
         <Grid x:Name="FlyoutHost"
             Grid.Row="0"
-            Grid.RowSpan="3"
+            Grid.RowSpan="2"
             Grid.Column="0"
             Grid.ColumnSpan="2"
             BackgroundColor="Transparent"
@@ -1054,7 +1054,7 @@
         <!--! Overlay Host  -->
         <Grid x:Name="OverlayHost"
             Grid.Row="0"
-            Grid.RowSpan="3"
+            Grid.RowSpan="2"
             Grid.Column="0"
             Grid.ColumnSpan="2"
             BackgroundColor="Transparent"

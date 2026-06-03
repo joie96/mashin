@@ -1,2 +1,0 @@
-- playlistshandling (umbenennen, anlegen etc.) überarbeiten bei desktop
-- enrichment für provider asynchron machen

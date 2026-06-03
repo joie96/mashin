@@ -27,6 +27,10 @@ public class MusicAssistantService
     private readonly Dictionary<string, ProviderManifest> _providerManifestCache = new();
     private readonly SemaphoreSlim _manifestCacheLock = new(1, 1);
 
+    // Library playlist cache
+    private readonly Dictionary<string, List<Playlist>> _libraryPlaylistsCache = new();
+    private readonly SemaphoreSlim _libraryPlaylistsCacheLock = new(1, 1);
+
     // JSON Serializer options with custom converters
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -105,118 +109,6 @@ public class MusicAssistantService
             _logger.LogError(ex, "Failed to send command: {Command}", command);
             throw;
         }
-    }
-
-    private static string RestoreImagePath(string? path, string baseUrl)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return string.Empty;
-        }
-
-        if (!Uri.TryCreate(path, UriKind.Absolute, out var uri))
-        {
-            return path;
-        }
-
-        var proxyPath = $"{baseUrl.TrimEnd('/')}/imageproxy";
-        if (!path.StartsWith(proxyPath, StringComparison.OrdinalIgnoreCase))
-        {
-            return path;
-        }
-
-        var query = uri.Query.TrimStart('?');
-        foreach (var part in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var kvp = part.Split('=', 2);
-            if (kvp.Length == 2 && kvp[0] == "path")
-            {
-                return WebUtility.UrlDecode(kvp[1]);
-            }
-        }
-
-        return path;
-    }
-
-    private string ResolveImagePath(string? path, string? provider)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return string.Empty;
-        }
-
-        if (path.StartsWith("/collage", StringComparison.OrdinalIgnoreCase))
-        {
-            // The imageproxy endpoint expects the collage path to be URL-encoded twice.
-            var encodedPath = WebUtility.UrlEncode(WebUtility.UrlEncode(path));
-            var imageProxyUrl = string.Concat(
-                _settings.MusicAssistantUrl.TrimEnd('/'),
-                "/imageproxy?path=",
-                encodedPath);
-            return imageProxyUrl;
-        }
-
-        if (Uri.TryCreate(path, UriKind.Absolute, out var absoluteUri))
-        {
-            if (absoluteUri.AbsolutePath.StartsWith("/collage", StringComparison.OrdinalIgnoreCase))
-            {
-                // Absolute collage URLs should also go through imageproxy.
-                var relativeCollagePath = absoluteUri.PathAndQuery;
-                var encodedPath = WebUtility.UrlEncode(WebUtility.UrlEncode(relativeCollagePath));
-                var imageProxyUrl = string.Concat(
-                    _settings.MusicAssistantUrl.TrimEnd('/'),
-                    "/imageproxy?path=",
-                    encodedPath);
-
-                return imageProxyUrl;
-            }
-
-            return path;
-        }
-
-        return path;
-    }
-
-    private void ResolveMediaItemImages(MediaItem item)
-    {
-        ResolveMetadataImages(item.Metadata);
-
-        if (item is Track track)
-        {
-            if (track.Album != null)
-            {
-                ResolveMediaItemImages(track.Album);
-            }
-        }
-    }
-
-    private void ResolveMetadataImages(MediaItemMetadata? metadata)
-    {
-        if (metadata?.Images == null || metadata.Images.Count == 0)
-        {
-            return;
-        }
-
-        foreach (var image in metadata.Images)
-        {
-            if (image == null)
-            {
-                continue;
-            }
-
-            image.Path = ResolveImagePath(image.Path, image.Provider);
-        }
-    }
-
-    private Task<T?> DeserializeMediaItemAsync<T>(JsonElement element) where T : MediaItem
-    {
-        var item = JsonSerializer.Deserialize<T>(element.GetRawText(), JsonOptions);
-        if (item != null)
-        {
-            _ = EnrichWithProviderInfoAsync(new List<T> { item });
-        }
-
-        return Task.FromResult(item);
     }
 
     #region Authentication
@@ -964,6 +856,22 @@ public class MusicAssistantService
     {
         _logger.LogInformation("Fetching library playlists...");
 
+        var cacheKey = BuildLibraryPlaylistsCacheKey(favorite, search, limit, offset, orderBy, libraryItemsOnly);
+
+        await _libraryPlaylistsCacheLock.WaitAsync();
+        try
+        {
+            if (_libraryPlaylistsCache.TryGetValue(cacheKey, out var cachedPlaylists))
+            {
+                _logger.LogDebug("Returning cached library playlists for key: {CacheKey}", cacheKey);
+                return new List<Playlist>(cachedPlaylists);
+            }
+        }
+        finally
+        {
+            _libraryPlaylistsCacheLock.Release();
+        }
+
         var args = new Dictionary<string, object>
         {
             ["library_items_only"] = libraryItemsOnly
@@ -979,6 +887,16 @@ public class MusicAssistantService
         var playlists = result ?? new List<Playlist>();
 
         _ = EnrichWithProviderInfoAsync(playlists);
+
+        await _libraryPlaylistsCacheLock.WaitAsync();
+        try
+        {
+            _libraryPlaylistsCache[cacheKey] = new List<Playlist>(playlists);
+        }
+        finally
+        {
+            _libraryPlaylistsCacheLock.Release();
+        }
 
         return playlists;
     }
@@ -1037,7 +955,11 @@ public class MusicAssistantService
             args["provider_instance_or_domain"] = providerInstanceOrDomain;
         }
 
-        return await SendCommandAsync<Playlist>("music/playlists/create_playlist", args);
+        var playlist = await SendCommandAsync<Playlist>("music/playlists/create_playlist", args);
+
+        // Creation impacts list membership/order/pagination, safest is a full invalidate.
+        await InvalidateLibraryPlaylistsCacheAsync();
+        return playlist;
     }
 
     /// <summary>
@@ -1052,6 +974,14 @@ public class MusicAssistantService
         };
 
         await SendCommandAsync<object>("music/playlists/add_playlist_tracks", args);
+
+        if (uris.Count > 0)
+        {
+            _ = await UpdateCachedPlaylistByItemIdAsync(playlistId, playlist =>
+            {
+                playlist.TracksCount = Math.Max(0, playlist.TracksCount + uris.Count);
+            });
+        }
     }
 
     /// <summary>
@@ -1066,6 +996,14 @@ public class MusicAssistantService
         };
 
         await SendCommandAsync<object>("music/playlists/remove_playlist_tracks", args);
+
+        if (positionsToRemove.Count > 0)
+        {
+            _ = await UpdateCachedPlaylistByItemIdAsync(playlistId, playlist =>
+            {
+                playlist.TracksCount = Math.Max(0, playlist.TracksCount - positionsToRemove.Count);
+            });
+        }
     }
 
     /// <summary>
@@ -1080,6 +1018,7 @@ public class MusicAssistantService
         };
 
         await SendCommandAsync<object>("music/playlists/remove", args);
+        _ = await RemoveCachedPlaylistByItemIdAsync(itemId);
     }
 
     /// <summary>
@@ -1116,7 +1055,17 @@ public class MusicAssistantService
             ["overwrite"] = overwrite
         };
 
-        return await SendCommandAsync<Playlist>("music/playlists/update", args);
+        var playlist = await SendCommandAsync<Playlist>("music/playlists/update", args);
+        if (playlist != null)
+        {
+            _ = await UpdateCachedPlaylistByItemIdAsync(itemId, cached => ApplyPlaylistSnapshot(cached, playlist));
+        }
+        else
+        {
+            _ = await UpdateCachedPlaylistByItemIdAsync(itemId, cached => ApplyPlaylistSnapshot(cached, update));
+        }
+
+        return playlist;
     }
 
     /// <summary>
@@ -1469,7 +1418,14 @@ public class MusicAssistantService
     /// </summary>
     public async Task<object?> AddLibraryItemAsync(string uri, bool overwriteExisting = false)
     {
-        return await AddLibraryItemAsync((object)uri, overwriteExisting);
+        var result = await AddLibraryItemAsync((object)uri, overwriteExisting);
+
+        if (TryExtractPlaylistIdFromUri(uri, out _))
+        {
+            await InvalidateLibraryPlaylistsCacheAsync();
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -1497,7 +1453,14 @@ public class MusicAssistantService
             }).ToList()
         };
 
-        return await AddLibraryItemAsync((object)itemPayload, overwriteExisting);
+        var result = await AddLibraryItemAsync((object)itemPayload, overwriteExisting);
+
+        if (mediaItem.MediaType == MediaType.Playlist)
+        {
+            await InvalidateLibraryPlaylistsCacheAsync();
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -1527,6 +1490,11 @@ public class MusicAssistantService
         };
 
         await SendCommandAsync<object>("music/library/remove_item", args);
+
+        if (mediaType == MediaType.Playlist)
+        {
+            _ = await RemoveCachedPlaylistByItemIdAsync(libraryItemId);
+        }
     }
 
     /// <summary>
@@ -1536,6 +1504,11 @@ public class MusicAssistantService
     {
         var args = new { item = itemUri };
         await SendCommandAsync<object>("music/favorites/add_item", args);
+
+        if (TryExtractPlaylistIdFromUri(itemUri, out var playlistId))
+        {
+            _ = await UpdateCachedPlaylistByItemIdAsync(playlistId, playlist => playlist.Favorite = true);
+        }
     }
 
     /// <summary>
@@ -1550,6 +1523,11 @@ public class MusicAssistantService
         };
 
         await SendCommandAsync<object>("music/favorites/remove_item", args);
+
+        if (mediaType == MediaType.Playlist)
+        {
+            _ = await UpdateCachedPlaylistByItemIdAsync(libraryItemId, playlist => playlist.Favorite = false);
+        }
     }
 
     #endregion
@@ -1959,7 +1937,7 @@ public class MusicAssistantService
 
     #endregion
 
-    #region Provider Enrichment
+    #region Provider Enrichment and Cache Helpers
 
     /// <summary>
     /// Get provider manifest with caching
@@ -2011,7 +1989,7 @@ public class MusicAssistantService
     /// <summary>
     /// Enrich media items with provider manifest for their primary provider
     /// </summary>
-    private async Task EnrichWithProviderInfoAsync<T>(IEnumerable<T> items) where T : MediaItem
+    public async Task EnrichWithProviderInfoAsync<T>(IEnumerable<T> items) where T : MediaItem
     {
         if (items == null)
             return;
@@ -2078,6 +2056,256 @@ public class MusicAssistantService
 
         var args = new { instance_id_or_domain = domain };
         return await SendCommandAsync<ProviderManifest>("providers/manifests/get", args);
+    }
+
+    #endregion
+
+    #region Image Helpers
+
+    private static string RestoreImagePath(string? path, string baseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        if (!Uri.TryCreate(path, UriKind.Absolute, out var uri))
+        {
+            return path;
+        }
+
+        var proxyPath = $"{baseUrl.TrimEnd('/')}/imageproxy";
+        if (!path.StartsWith(proxyPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return path;
+        }
+
+        var query = uri.Query.TrimStart('?');
+        foreach (var part in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var kvp = part.Split('=', 2);
+            if (kvp.Length == 2 && kvp[0] == "path")
+            {
+                return WebUtility.UrlDecode(kvp[1]);
+            }
+        }
+
+        return path;
+    }
+
+    private string ResolveImagePath(string? path, string? provider)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        if (path.StartsWith("/collage", StringComparison.OrdinalIgnoreCase))
+        {
+            // The imageproxy endpoint expects the collage path to be URL-encoded twice.
+            var encodedPath = WebUtility.UrlEncode(WebUtility.UrlEncode(path));
+            var imageProxyUrl = string.Concat(
+                _settings.MusicAssistantUrl.TrimEnd('/'),
+                "/imageproxy?path=",
+                encodedPath);
+            return imageProxyUrl;
+        }
+
+        if (Uri.TryCreate(path, UriKind.Absolute, out var absoluteUri))
+        {
+            if (absoluteUri.AbsolutePath.StartsWith("/collage", StringComparison.OrdinalIgnoreCase))
+            {
+                // Absolute collage URLs should also go through imageproxy.
+                var relativeCollagePath = absoluteUri.PathAndQuery;
+                var encodedPath = WebUtility.UrlEncode(WebUtility.UrlEncode(relativeCollagePath));
+                var imageProxyUrl = string.Concat(
+                    _settings.MusicAssistantUrl.TrimEnd('/'),
+                    "/imageproxy?path=",
+                    encodedPath);
+
+                return imageProxyUrl;
+            }
+
+            return path;
+        }
+
+        return path;
+    }
+
+    private void ResolveMediaItemImages(MediaItem item)
+    {
+        ResolveMetadataImages(item.Metadata);
+
+        if (item is Track track)
+        {
+            if (track.Album != null)
+            {
+                ResolveMediaItemImages(track.Album);
+            }
+        }
+    }
+
+    private void ResolveMetadataImages(MediaItemMetadata? metadata)
+    {
+        if (metadata?.Images == null || metadata.Images.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var image in metadata.Images)
+        {
+            if (image == null)
+            {
+                continue;
+            }
+
+            image.Path = ResolveImagePath(image.Path, image.Provider);
+        }
+    }
+
+    private Task<T?> DeserializeMediaItemAsync<T>(JsonElement element) where T : MediaItem
+    {
+        var item = JsonSerializer.Deserialize<T>(element.GetRawText(), JsonOptions);
+        if (item != null)
+        {
+            _ = EnrichWithProviderInfoAsync(new List<T> { item });
+        }
+
+        return Task.FromResult(item);
+    }
+
+    #endregion
+
+    #region Playlists Cache Helpers
+
+    private static string BuildLibraryPlaylistsCacheKey(
+        bool? favorite,
+        string? search,
+        int? limit,
+        int? offset,
+        string? orderBy,
+        bool libraryItemsOnly)
+    {
+        return string.Join("|", new[]
+        {
+            favorite?.ToString() ?? "null",
+            search ?? string.Empty,
+            limit?.ToString() ?? "null",
+            offset?.ToString() ?? "null",
+            orderBy ?? string.Empty,
+            libraryItemsOnly.ToString()
+        });
+    }
+
+    private async Task InvalidateLibraryPlaylistsCacheAsync()
+    {
+        await _libraryPlaylistsCacheLock.WaitAsync();
+        try
+        {
+            _libraryPlaylistsCache.Clear();
+        }
+        finally
+        {
+            _libraryPlaylistsCacheLock.Release();
+        }
+    }
+
+    private static void ApplyPlaylistSnapshot(Playlist target, Playlist source)
+    {
+        target.ItemId = source.ItemId;
+        target.Provider = source.Provider;
+        target.Name = source.Name;
+        target.SortName = source.SortName;
+        target.Uri = source.Uri;
+        target.ProviderMappings = source.ProviderMappings;
+        target.Metadata = source.Metadata;
+        target.Favorite = source.Favorite;
+        target.ExternalIds = source.ExternalIds;
+        target.Owner = source.Owner;
+        target.IsEditable = source.IsEditable;
+        target.TracksCount = source.TracksCount;
+        target.TotalDurationSeconds = source.TotalDurationSeconds;
+    }
+
+    private async Task<bool> UpdateCachedPlaylistByItemIdAsync(string playlistItemId, Action<Playlist> applyUpdate)
+    {
+        if (string.IsNullOrWhiteSpace(playlistItemId))
+        {
+            return false;
+        }
+
+        var updated = false;
+
+        await _libraryPlaylistsCacheLock.WaitAsync();
+        try
+        {
+            foreach (var playlists in _libraryPlaylistsCache.Values)
+            {
+                foreach (var playlist in playlists.Where(p => string.Equals(p.ItemId, playlistItemId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    applyUpdate(playlist);
+                    updated = true;
+                }
+            }
+        }
+        finally
+        {
+            _libraryPlaylistsCacheLock.Release();
+        }
+
+        return updated;
+    }
+
+    private async Task<int> RemoveCachedPlaylistByItemIdAsync(string playlistItemId)
+    {
+        if (string.IsNullOrWhiteSpace(playlistItemId))
+        {
+            return 0;
+        }
+
+        var removedCount = 0;
+
+        await _libraryPlaylistsCacheLock.WaitAsync();
+        try
+        {
+            foreach (var playlists in _libraryPlaylistsCache.Values)
+            {
+                removedCount += playlists.RemoveAll(p => string.Equals(p.ItemId, playlistItemId, StringComparison.OrdinalIgnoreCase));
+            }
+        }
+        finally
+        {
+            _libraryPlaylistsCacheLock.Release();
+        }
+
+        return removedCount;
+    }
+
+    private static bool TryExtractPlaylistIdFromUri(string itemUri, out string playlistId)
+    {
+        playlistId = string.Empty;
+        if (string.IsNullOrWhiteSpace(itemUri))
+        {
+            return false;
+        }
+
+        var markerIndex = itemUri.IndexOf("playlist", StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+        {
+            return false;
+        }
+
+        var remainder = itemUri[(markerIndex + "playlist".Length)..].TrimStart(':', '/');
+        if (string.IsNullOrWhiteSpace(remainder))
+        {
+            return false;
+        }
+
+        playlistId = remainder
+            .Split(new[] { '/', '?', '#', '&' }, StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault() ?? string.Empty;
+
+        return !string.IsNullOrWhiteSpace(playlistId);
     }
 
     #endregion
