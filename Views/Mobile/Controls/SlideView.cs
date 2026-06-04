@@ -287,7 +287,7 @@ public partial class SlideView : ContentView
 
     #region UI Events
 
-    private void OnRowTouchCompleted(object? sender, EventArgs e)
+    private async void OnRowTouchCompleted(object? sender, EventArgs e)
     {
         if (sender is not BindableObject { BindingContext: MediaItem mediaItem })
         {
@@ -296,7 +296,7 @@ public partial class SlideView : ContentView
 
         EnsureSelectionOwnership();
 
-        ExecuteShortPress(mediaItem);
+        await ExecuteShortPressAsync(mediaItem);
     }
 
     private void OnRowLongPressCompleted(object? sender, EventArgs e)
@@ -314,7 +314,7 @@ public partial class SlideView : ContentView
         _suppressNextTap.Add(mediaItem);
     }
 
-    private void OnRowTapped(object? sender, TappedEventArgs e)
+    private async void OnRowTapped(object? sender, TappedEventArgs e)
     {
         if (sender is not BindableObject { BindingContext: MediaItem mediaItem })
         {
@@ -323,7 +323,7 @@ public partial class SlideView : ContentView
 
         EnsureSelectionOwnership();
 
-        ExecuteShortPress(mediaItem);
+        await ExecuteShortPressAsync(mediaItem);
     }
 
     private async void OnPlayOverlayClicked(object? sender, TappedEventArgs e)
@@ -350,7 +350,7 @@ public partial class SlideView : ContentView
         return mediaItem;
     }
 
-    private void ExecuteShortPress(MediaItem mediaItem)
+    private async Task ExecuteShortPressAsync(MediaItem mediaItem)
     {
         if (_suppressNextTap.Remove(mediaItem))
         {
@@ -362,6 +362,12 @@ public partial class SlideView : ContentView
         {
             mediaItem.IsSelected = !mediaItem.IsSelected;
             UpdateSelectionIndicator();
+            return;
+        }
+
+        if (mediaItem is Track && MediaActions != null)
+        {
+            await MediaActions.PlayMediaAsync(mediaItem);
             return;
         }
 

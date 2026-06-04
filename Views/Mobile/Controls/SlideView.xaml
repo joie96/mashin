@@ -122,81 +122,7 @@
                                 <!--  Cover Image  -->
                                 <ffimageloading:CachedImage Aspect="AspectFill"
                                     Source="{Binding ImageUri}" />
-
-                                <!--  Bottom-Left Play Button  -->
-                                <Grid Padding="4,0,0,4"
-                                    HorizontalOptions="Fill"
-                                    VerticalOptions="Fill">
-                                    <Border BackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
-                                        HeightRequest="28"
-                                        HorizontalOptions="Start"
-                                        StrokeThickness="0"
-                                        VerticalOptions="End"
-                                        WidthRequest="28">
-                                        <Border.GestureRecognizers>
-                                            <TapGestureRecognizer Tapped="OnPlayOverlayClicked" />
-                                        </Border.GestureRecognizers>
-                                        <Border.StrokeShape>
-                                            <RoundRectangle CornerRadius="15" />
-                                        </Border.StrokeShape>
-                                        <Label FontSize="16"
-                                            HorizontalOptions="Center"
-                                            Text="{mi:FluentFilled Icon=Play48Filled, FontOverride=True}"
-                                            TextColor="{DynamicResource OverlayPlayIconColor}"
-                                            VerticalOptions="Center" />
-                                    </Border>
-                                </Grid>
                             </Grid>
-                        </Border>
-
-                        <Border Grid.Column="1"
-                            Margin="0,4,4,0"
-                            BackgroundColor="Transparent"
-                            HeightRequest="20"
-                            HorizontalOptions="End"
-                            IsVisible="{Binding Source={x:Reference self}, Path=HasSelection}"
-                            StrokeThickness="0"
-                            VerticalOptions="Start"
-                            WidthRequest="20"
-                            ZIndex="3">
-                            <Border.Shadow>
-                                <Shadow Brush="{DynamicResource ShadowColorSoft}"
-                                    Offset="0,1"
-                                    Radius="3"
-                                    Opacity="{DynamicResource ShadowOpacitySoft}" />
-                            </Border.Shadow>
-                            <Border.GestureRecognizers>
-                                <TapGestureRecognizer Tapped="OnRowTapped" />
-                            </Border.GestureRecognizers>
-                            <Border BackgroundColor="Transparent"
-                                HeightRequest="20"
-                                HorizontalOptions="Center"
-                                Stroke="{DynamicResource IconSecondary}"
-                                StrokeThickness="1"
-                                VerticalOptions="Center"
-                                WidthRequest="20">
-                                <Border.StrokeShape>
-                                    <Ellipse />
-                                </Border.StrokeShape>
-                                <Border.Triggers>
-                                    <DataTrigger Binding="{Binding IsSelected}"
-                                        TargetType="Border"
-                                        Value="True">
-                                        <Setter Property="BackgroundColor"
-                                            Value="{DynamicResource AccentColor}" />
-                                        <Setter Property="Stroke"
-                                            Value="{DynamicResource AccentColor}" />
-                                        <Setter Property="StrokeThickness"
-                                            Value="1" />
-                                    </DataTrigger>
-                                </Border.Triggers>
-                                <Label FontSize="14"
-                                    HorizontalOptions="Center"
-                                    IsVisible="{Binding IsSelected}"
-                                    Text="{mi:Fluent Icon=Checkmark16, FontOverride=True}"
-                                    TextColor="{DynamicResource IconPrimary}"
-                                    VerticalOptions="Center" />
-                            </Border>
                         </Border>
 
                         <!--  Primary Infos  -->
@@ -222,6 +148,78 @@
                                 TextColor="{DynamicResource TextSecondary}" />
                         </Grid>
                     </Grid>
+                </Border>
+
+                <Border
+                    Margin="6"
+                    BackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
+                    HeightRequest="28"
+                    HorizontalOptions="Start"
+                    StrokeThickness="0"
+                    VerticalOptions="End"
+                    WidthRequest="28"
+                    ZIndex="2">
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnPlayOverlayClicked" />
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="14" />
+                    </Border.StrokeShape>
+                    <Label FontSize="16"
+                        HorizontalOptions="Center"
+                        Text="{mi:FluentFilled Icon=Play48Filled, FontOverride=True}"
+                        TextColor="{DynamicResource OverlayPlayIconColor}"
+                        VerticalOptions="Center" />
+                </Border>
+
+                <Border
+                    Margin="0,4,4,0"
+                    BackgroundColor="Transparent"
+                    HeightRequest="20"
+                    HorizontalOptions="End"
+                    IsVisible="{Binding Source={x:Reference self}, Path=HasSelection}"
+                    StrokeThickness="0"
+                    VerticalOptions="Start"
+                    WidthRequest="20"
+                    ZIndex="3">
+                    <Border.Shadow>
+                        <Shadow Brush="{DynamicResource ShadowColorSoft}"
+                            Offset="0,1"
+                            Radius="3"
+                            Opacity="{DynamicResource ShadowOpacitySoft}" />
+                    </Border.Shadow>
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnRowTapped" />
+                    </Border.GestureRecognizers>
+                    <Border BackgroundColor="Transparent"
+                        HeightRequest="20"
+                        HorizontalOptions="Center"
+                        Stroke="{DynamicResource IconSecondary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center"
+                        WidthRequest="20">
+                        <Border.StrokeShape>
+                            <Ellipse />
+                        </Border.StrokeShape>
+                        <Border.Triggers>
+                            <DataTrigger Binding="{Binding IsSelected}"
+                                TargetType="Border"
+                                Value="True">
+                                <Setter Property="BackgroundColor"
+                                    Value="{DynamicResource AccentColor}" />
+                                <Setter Property="Stroke"
+                                    Value="{DynamicResource AccentColor}" />
+                                <Setter Property="StrokeThickness"
+                                    Value="1" />
+                            </DataTrigger>
+                        </Border.Triggers>
+                        <Label FontSize="14"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding IsSelected}"
+                            Text="{mi:Fluent Icon=Checkmark16, FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
                 </Border>
             </Grid>
         </DataTemplate>
