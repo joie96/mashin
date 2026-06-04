@@ -8,151 +8,229 @@
     xmlns:fftransformations="clr-namespace:FFImageLoading.Transformations;assembly=FFImageLoading.Maui"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
     xmlns:models="clr-namespace:mashin.Models"
+    xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
     x:Name="self">
 
     <ContentView.Resources>
 
         <!--  DataTemplate for Tracks  -->
         <DataTemplate x:Key="TrackTemplate" x:DataType="models:Track">
-            <Border Padding="0"
-                BackgroundColor="{DynamicResource BackgroundSecondary}"
-                StrokeThickness="0"
+            <Grid BackgroundColor="Transparent"
+                HeightRequest="{Binding Source={x:Reference self}, Path=ItemHeight}"
                 WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
-                <Border.StrokeShape>
-                    <RoundRectangle CornerRadius="14" />
-                </Border.StrokeShape>
+                <Border
+                    BackgroundColor="{DynamicResource SelectionBackground}"
+                    InputTransparent="True"
+                    IsVisible="{Binding IsSelected}"
+                    StrokeThickness="0">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="14" />
+                    </Border.StrokeShape>
+                </Border>
 
-                <Grid x:Name="TrackContentHost"
-                    ColumnDefinitions="Auto,*"
-                    ColumnSpacing="12"
-                    IsClippedToBounds="True">
+                <Border
+                    BackgroundColor="Transparent"
+                    StrokeThickness="0"
+                    ZIndex="0">
+                    <Border.Behaviors>
+                        <toolkit:TouchBehavior
+                            LongPressCompleted="OnRowLongPressCompleted"
+                            LongPressDuration="420"
+                            TouchGestureCompleted="OnRowTouchCompleted" />
+                    </Border.Behaviors>
+                </Border>
 
-                    <!--  Blurred Card Background  -->
-                    <Border Grid.ColumnSpan="2"
-                        InputTransparent="True"
-                        Padding="0"
-                        StrokeThickness="0">
-                        <Border.StrokeShape>
-                            <RoundRectangle CornerRadius="14" />
-                        </Border.StrokeShape>
-                        <Grid>
-                            <ffimageloading:CachedImage Aspect="AspectFill"
-                                Source="{Binding ImageUri}"
-                                HeightRequest="{Binding Source={x:Reference TrackContentHost}, Path=Height}"
-                                Opacity="0.85"
-                                VerticalOptions="Center"
-                                WidthRequest="{Binding Source={x:Reference TrackContentHost}, Path=Width}">
-                                <ffimageloading:CachedImage.Transformations>
-                                    <fftransformations:CropTransformation ZoomFactor="1"
-                                        XOffset="0"
-                                        YOffset="0"
-                                        CropWidthRatio="3"
-                                        CropHeightRatio="1" />
-                                    <fftransformations:BlurredTransformation Radius="50" />
-                                </ffimageloading:CachedImage.Transformations>
-                            </ffimageloading:CachedImage>
+                <Border Grid.Row="0"
+                    HeightRequest="{Binding Source={x:Reference self}, Path=ItemHeight}"
+                    HorizontalOptions="Fill"
+                    Scale="1"
+                    StrokeThickness="0"
+                    VerticalOptions="Center">
+                    <Border.Behaviors>
+                        <toolkit:TouchBehavior LongPressCompleted="OnRowLongPressCompleted"
+                            LongPressDuration="420"
+                            PressedAnimationDuration="250"
+                            PressedAnimationEasing="CubicOut"
+                            PressedScale="0.78"
+                            TouchGestureCompleted="OnRowTouchCompleted" />
+                    </Border.Behaviors>
+                    <Border.Triggers>
+                        <DataTrigger Binding="{Binding IsSelected}"
+                            TargetType="Border"
+                            Value="True">
+                            <Setter Property="Scale"
+                                Value="0.8" />
+                        </DataTrigger>
+                    </Border.Triggers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="14" />
+                    </Border.StrokeShape>
 
-                            <!--  Dark Tint for Readability  -->
-                            <Border BackgroundColor="#7FA9A9A9"
-                                InputTransparent="True"
-                                StrokeThickness="0">
-                                <Border.StrokeShape>
-                                    <RoundRectangle CornerRadius="14" />
-                                </Border.StrokeShape>
-                            </Border>
-                        </Grid>
-                    </Border>
+                    <Grid x:Name="TrackContentHost"
+                        ColumnDefinitions="Auto,*"
+                        ColumnSpacing="12"
+                        IsClippedToBounds="True">
 
-                    <!--  Cover + Play Overlay  -->
-                    <Border Grid.Column="0"
-                        HeightRequest="{Binding Source={x:Reference self}, Path=CoverSize}"
-                        HorizontalOptions="Start"
-                        StrokeThickness="0"
-                        VerticalOptions="Center"
-                        WidthRequest="{Binding Source={x:Reference self}, Path=CoverSize}">
-                        <Border.StrokeShape>
-                            <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
-                        </Border.StrokeShape>
+                        <!--  Blurred Card Background  -->
+                        <Border Grid.ColumnSpan="2"
+                            InputTransparent="True"
+                            Padding="0"
+                            StrokeThickness="0">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="14" />
+                            </Border.StrokeShape>
+                            <Grid>
+                                <ffimageloading:CachedImage Aspect="AspectFill"
+                                    Source="{Binding ImageUri}"
+                                    HeightRequest="{Binding Source={x:Reference TrackContentHost}, Path=Height}"
+                                    Opacity="0.85"
+                                    VerticalOptions="Center"
+                                    WidthRequest="{Binding Source={x:Reference TrackContentHost}, Path=Width}">
+                                    <ffimageloading:CachedImage.Transformations>
+                                        <fftransformations:CropTransformation ZoomFactor="1"
+                                            XOffset="0"
+                                            YOffset="0"
+                                            CropWidthRatio="3"
+                                            CropHeightRatio="1" />
+                                        <fftransformations:BlurredTransformation Radius="50" />
+                                    </ffimageloading:CachedImage.Transformations>
+                                </ffimageloading:CachedImage>
 
-                        <Grid>
-                            <!--  Cover Image  -->
-                            <ffimageloading:CachedImage Aspect="AspectFill"
-                                Source="{Binding ImageUri}" />
-
-                            <!--  Cover Shade  -->
-                            <Border BackgroundColor="#26000000"
-                                StrokeThickness="0">
-                                <Border.StrokeShape>
-                                    <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
-                                </Border.StrokeShape>
-                            </Border>
-
-                            <!--  Bottom-Left Play Button  -->
-                            <Grid Padding="4,0,0,4"
-                                HorizontalOptions="Fill"
-                                VerticalOptions="Fill">
-                                <Border BackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
-                                    HeightRequest="28"
-                                    HorizontalOptions="Start"
-                                    StrokeThickness="0"
-                                    VerticalOptions="End"
-                                    WidthRequest="28">
-                                    <Border.GestureRecognizers>
-                                        <TapGestureRecognizer Tapped="OnPlayOverlayClicked" />
-                                    </Border.GestureRecognizers>
+                                <!--  Dark Tint for Readability  -->
+                                <Border BackgroundColor="#7FA9A9A9"
+                                    InputTransparent="True"
+                                    StrokeThickness="0">
                                     <Border.StrokeShape>
-                                        <RoundRectangle CornerRadius="15" />
+                                        <RoundRectangle CornerRadius="14" />
                                     </Border.StrokeShape>
-                                    <Label FontSize="16"
-                                        HorizontalOptions="Center"
-                                        Text="{mi:FluentFilled Icon=Play48Filled, FontOverride=True}"
-                                        TextColor="{DynamicResource OverlayPlayIconColor}"
-                                        VerticalOptions="Center" />
                                 </Border>
                             </Grid>
+                        </Border>
+
+                        <!--  Cover + Play Overlay  -->
+                        <Border Grid.Column="0"
+                            HeightRequest="{Binding Source={x:Reference self}, Path=CoverSize}"
+                            HorizontalOptions="Start"
+                            StrokeThickness="0"
+                            VerticalOptions="Center"
+                            WidthRequest="{Binding Source={x:Reference self}, Path=CoverSize}">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
+                            </Border.StrokeShape>
+
+                            <Grid>
+                                <!--  Cover Image  -->
+                                <ffimageloading:CachedImage Aspect="AspectFill"
+                                    Source="{Binding ImageUri}" />
+
+                                <!--  Bottom-Left Play Button  -->
+                                <Grid Padding="4,0,0,4"
+                                    HorizontalOptions="Fill"
+                                    VerticalOptions="Fill">
+                                    <Border BackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
+                                        HeightRequest="28"
+                                        HorizontalOptions="Start"
+                                        StrokeThickness="0"
+                                        VerticalOptions="End"
+                                        WidthRequest="28">
+                                        <Border.GestureRecognizers>
+                                            <TapGestureRecognizer Tapped="OnPlayOverlayClicked" />
+                                        </Border.GestureRecognizers>
+                                        <Border.StrokeShape>
+                                            <RoundRectangle CornerRadius="15" />
+                                        </Border.StrokeShape>
+                                        <Label FontSize="16"
+                                            HorizontalOptions="Center"
+                                            Text="{mi:FluentFilled Icon=Play48Filled, FontOverride=True}"
+                                            TextColor="{DynamicResource OverlayPlayIconColor}"
+                                            VerticalOptions="Center" />
+                                    </Border>
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <Border Grid.Column="1"
+                            Margin="0,4,4,0"
+                            BackgroundColor="Transparent"
+                            HeightRequest="20"
+                            HorizontalOptions="End"
+                            IsVisible="{Binding Source={x:Reference self}, Path=HasSelection}"
+                            StrokeThickness="0"
+                            VerticalOptions="Start"
+                            WidthRequest="20"
+                            ZIndex="3">
+                            <Border.Shadow>
+                                <Shadow Brush="{DynamicResource ShadowColorSoft}"
+                                    Offset="0,1"
+                                    Radius="3"
+                                    Opacity="{DynamicResource ShadowOpacitySoft}" />
+                            </Border.Shadow>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Tapped="OnRowTapped" />
+                            </Border.GestureRecognizers>
+                            <Border BackgroundColor="Transparent"
+                                HeightRequest="20"
+                                HorizontalOptions="Center"
+                                Stroke="{DynamicResource IconSecondary}"
+                                StrokeThickness="1"
+                                VerticalOptions="Center"
+                                WidthRequest="20">
+                                <Border.StrokeShape>
+                                    <Ellipse />
+                                </Border.StrokeShape>
+                                <Border.Triggers>
+                                    <DataTrigger Binding="{Binding IsSelected}"
+                                        TargetType="Border"
+                                        Value="True">
+                                        <Setter Property="BackgroundColor"
+                                            Value="{DynamicResource AccentColor}" />
+                                        <Setter Property="Stroke"
+                                            Value="{DynamicResource AccentColor}" />
+                                        <Setter Property="StrokeThickness"
+                                            Value="1" />
+                                    </DataTrigger>
+                                </Border.Triggers>
+                                <Label FontSize="14"
+                                    HorizontalOptions="Center"
+                                    IsVisible="{Binding IsSelected}"
+                                    Text="{mi:Fluent Icon=Checkmark16, FontOverride=True}"
+                                    TextColor="{DynamicResource IconPrimary}"
+                                    VerticalOptions="Center" />
+                            </Border>
+                        </Border>
+
+                        <!--  Primary Infos  -->
+                        <Grid Grid.Column="1"
+                            RowDefinitions="Auto,Auto"
+                            RowSpacing="3"
+                            VerticalOptions="Center">
+                            <Label Grid.Row="0"
+                                FontAttributes="None"
+                                FontFamily="PoppinsRegular"
+                                FontSize="17"
+                                LineBreakMode="TailTruncation"
+                                MaxLines="1"
+                                Text="{Binding DisplayName}"
+                                TextColor="{DynamicResource TextPrimary}" />
+
+                            <Label Grid.Row="1"
+                                FontFamily="PoppinsRegular"
+                                FontSize="12"
+                                LineBreakMode="TailTruncation"
+                                MaxLines="1"
+                                Text="{Binding ArtistName}"
+                                TextColor="{DynamicResource TextSecondary}" />
                         </Grid>
-                    </Border>
-
-                    <!--  Primary Infos  -->
-                    <Grid Grid.Column="1"
-                        RowDefinitions="Auto,Auto"
-                        RowSpacing="3"
-                        VerticalOptions="Center">
-                        <Label Grid.Row="0"
-                            FontAttributes="None"
-                            FontFamily="PoppinsRegular"
-                            FontSize="17"
-                            LineBreakMode="TailTruncation"
-                            MaxLines="1"
-                            Text="{Binding DisplayName}"
-                            TextColor="{DynamicResource TextPrimary}">
-                            <Label.GestureRecognizers>
-                                <TapGestureRecognizer Command="{Binding Source={x:Reference self}, Path=PrimaryInfoTappedCommand}"
-                                    CommandParameter="{Binding Album}" />
-                            </Label.GestureRecognizers>
-                        </Label>
-
-                        <Label Grid.Row="1"
-                            FontFamily="PoppinsRegular"
-                            FontSize="12"
-                            LineBreakMode="TailTruncation"
-                            MaxLines="1"
-                            Text="{Binding ArtistName}"
-                            TextColor="{DynamicResource TextSecondary}">
-                            <Label.GestureRecognizers>
-                                <TapGestureRecognizer Command="{Binding Source={x:Reference self}, Path=SecondaryInfoTappedCommand}"
-                                    CommandParameter="{Binding Artists[0]}" />
-                            </Label.GestureRecognizers>
-                        </Label>
                     </Grid>
-                </Grid>
-            </Border>
+                </Border>
+            </Grid>
         </DataTemplate>
 
         <!--  DataTemplate for Skeletons  -->
         <DataTemplate x:Key="SkeletonTemplate" x:DataType="models:SkeletonItem">
             <Border Padding="12"
                 BackgroundColor="{DynamicResource BackgroundSecondary}"
+                HeightRequest="{Binding Source={x:Reference self}, Path=ItemHeight}"
                 StrokeThickness="0"
                 WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
                 <Border.StrokeShape>
@@ -194,14 +272,16 @@
 
     <!--  Horizontal Items   -->
     <CollectionView x:Name="ItemsCollectionView"
+        HeightRequest="{Binding Source={x:Reference self}, Path=ItemHeight}"
         HorizontalScrollBarVisibility="Never"
-        ItemSizingStrategy="MeasureAllItems"
+        ItemSizingStrategy="MeasureFirstItem"
         ItemsSource="{Binding Source={x:Reference self}, Path=ItemsSource}"
+        ItemsUpdatingScrollMode="KeepScrollOffset"
         SelectionMode="None"
         VerticalScrollBarVisibility="Never">
         <CollectionView.ItemsLayout>
             <LinearItemsLayout Orientation="Horizontal"
-                ItemSpacing="10" />
+                ItemSpacing="8" />
         </CollectionView.ItemsLayout>
         <CollectionView.ItemTemplate>
             <StaticResource Key="SlideViewTemplateSelector" />

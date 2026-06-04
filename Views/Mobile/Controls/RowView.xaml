@@ -74,13 +74,6 @@
                             LoadingPriority="{Binding ., Converter={StaticResource MediaItemLoadingPriorityConverter}}"
                             Source="{Binding ImageUri}" />
 
-                        <Border BackgroundColor="#26000000"
-                            StrokeThickness="0">
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
-                            </Border.StrokeShape>
-                        </Border>
-
                     </Grid>
                 </Border>
 
@@ -258,13 +251,6 @@
                         <ffimageloading:CachedImage Aspect="AspectFill"
                             LoadingPriority="{Binding ., Converter={StaticResource MediaItemLoadingPriorityConverter}}"
                             Source="{Binding ImageUri}" />
-
-                        <Border BackgroundColor="#26000000"
-                            StrokeThickness="0">
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
-                            </Border.StrokeShape>
-                        </Border>
 
                     </Grid>
                 </Border>
@@ -444,13 +430,6 @@
                             LoadingPriority="{Binding ., Converter={StaticResource MediaItemLoadingPriorityConverter}}"
                             Source="{Binding ImageUri}" />
 
-                        <Border BackgroundColor="#26000000"
-                            StrokeThickness="0">
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
-                            </Border.StrokeShape>
-                        </Border>
-
                     </Grid>
                 </Border>
 
@@ -617,13 +596,6 @@
                         <ffimageloading:CachedImage Aspect="AspectFill"
                             LoadingPriority="{Binding ., Converter={StaticResource MediaItemLoadingPriorityConverter}}"
                             Source="{Binding ImageUri}" />
-
-                        <Border BackgroundColor="#26000000"
-                            StrokeThickness="0">
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="{Binding Source={x:Reference self}, Path=ItemCornerRadius}" />
-                            </Border.StrokeShape>
-                        </Border>
 
                     </Grid>
                 </Border>

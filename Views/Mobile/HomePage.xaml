@@ -24,9 +24,10 @@
                 Text="Keine ListenBrainz-Empfehlungen verfügbar."
                 TextColor="{DynamicResource TextTertiary}" />
 
-            <controls:SlideView CoverSize="75"
+            <controls:SlideView CoverSize="145"
                 IsVisible="{Binding ShowRecommendationFolderSlideView}"
                 ItemCornerRadius="8"
+                ItemHeight="100"
                 ItemsSource="{Binding RecommendationTrackItems}"
                 MediaActions="{Binding MediaActions}"
                 PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"

@@ -1,15 +1,32 @@
 using mashin.Models;
 using mashin.Services;
+using System.Collections.Specialized;
+using System.ComponentModel;
+using System.Linq;
 using System.Windows.Input;
 
 namespace mashin.Views.Mobile.Controls;
 
 public partial class SlideView : ContentView
 {
+    #region Fields
+
+    private bool _isSynchronizingSize;
+    private readonly HashSet<MediaItem> _suppressNextTap = new();
+    private readonly HashSet<INotifyPropertyChanged> _observedItems = new();
+    private INotifyCollectionChanged? _observedCollection;
+    private bool _hasSelection;
+
+    #endregion
+
     #region Bindable properties
 
     public static readonly BindableProperty ItemsSourceProperty =
-        BindableProperty.Create(nameof(ItemsSource), typeof(IEnumerable<object>), typeof(SlideView));
+        BindableProperty.Create(
+            nameof(ItemsSource),
+            typeof(IEnumerable<object>),
+            typeof(SlideView),
+            propertyChanged: OnItemsSourceChanged);
 
     public static readonly BindableProperty MediaActionsProperty =
         BindableProperty.Create(nameof(MediaActions), typeof(IMediaItemActions), typeof(SlideView));
@@ -27,13 +44,26 @@ public partial class SlideView : ContentView
         BindableProperty.Create(nameof(ShowContextMenuAtPositionCommand), typeof(ICommand), typeof(SlideView));
 
     public static readonly BindableProperty CoverSizeProperty =
-        BindableProperty.Create(nameof(CoverSize), typeof(double), typeof(SlideView), 145d);
+        BindableProperty.Create(
+            nameof(CoverSize),
+            typeof(double),
+            typeof(SlideView),
+            145d,
+            propertyChanged: OnCoverSizeChanged);
 
     public static readonly BindableProperty ItemCornerRadiusProperty =
         BindableProperty.Create(nameof(ItemCornerRadius), typeof(float), typeof(SlideView), 8f);
 
     public static readonly BindableProperty ItemWidthProperty =
         BindableProperty.Create(nameof(ItemWidth), typeof(double), typeof(SlideView), 320d);
+
+    public static readonly BindableProperty ItemHeightProperty =
+        BindableProperty.Create(
+            nameof(ItemHeight),
+            typeof(double),
+            typeof(SlideView),
+            145d,
+            propertyChanged: OnItemHeightChanged);
 
     #endregion
 
@@ -93,6 +123,14 @@ public partial class SlideView : ContentView
         set => SetValue(ItemWidthProperty, value);
     }
 
+    public double ItemHeight
+    {
+        get => (double)GetValue(ItemHeightProperty);
+        set => SetValue(ItemHeightProperty, value);
+    }
+
+    public bool HasSelection => _hasSelection;
+
     #endregion
 
     #region Construction
@@ -104,7 +142,189 @@ public partial class SlideView : ContentView
 
     #endregion
 
+    #region Selection state synchronization
+
+    private static void OnItemsSourceChanged(BindableObject bindable, object? oldValue, object? newValue)
+    {
+        if (bindable is not SlideView slideView)
+        {
+            return;
+        }
+
+        slideView.DetachSelectionObservers();
+        slideView.AttachSelectionObservers(newValue as IEnumerable<object>);
+        slideView.UpdateSelectionIndicator();
+    }
+
+    private static void OnCoverSizeChanged(BindableObject bindable, object? oldValue, object? newValue)
+    {
+        if (bindable is not SlideView slideView || newValue is not double coverSize)
+        {
+            return;
+        }
+
+        slideView.SynchronizeSizes(sourceIsCoverSize: true, value: coverSize);
+    }
+
+    private static void OnItemHeightChanged(BindableObject bindable, object? oldValue, object? newValue)
+    {
+        if (bindable is not SlideView slideView || newValue is not double itemHeight)
+        {
+            return;
+        }
+
+        slideView.SynchronizeSizes(sourceIsCoverSize: false, value: itemHeight);
+    }
+
+    private void SynchronizeSizes(bool sourceIsCoverSize, double value)
+    {
+        if (_isSynchronizingSize)
+        {
+            return;
+        }
+
+        var normalizedValue = Math.Max(1d, value);
+        _isSynchronizingSize = true;
+        try
+        {
+            if (sourceIsCoverSize)
+            {
+                if (Math.Abs(ItemHeight - normalizedValue) > 0.001d)
+                {
+                    ItemHeight = normalizedValue;
+                }
+            }
+            else
+            {
+                if (Math.Abs(CoverSize - normalizedValue) > 0.001d)
+                {
+                    CoverSize = normalizedValue;
+                }
+            }
+        }
+        finally
+        {
+            _isSynchronizingSize = false;
+        }
+    }
+
+    private void AttachSelectionObservers(IEnumerable<object>? items)
+    {
+        if (items is INotifyCollectionChanged collectionChanged)
+        {
+            _observedCollection = collectionChanged;
+            _observedCollection.CollectionChanged += OnItemsCollectionChanged;
+        }
+
+        if (items == null)
+        {
+            return;
+        }
+
+        foreach (var item in items.OfType<INotifyPropertyChanged>())
+        {
+            if (_observedItems.Add(item))
+            {
+                item.PropertyChanged += OnObservedItemPropertyChanged;
+            }
+        }
+    }
+
+    private void DetachSelectionObservers()
+    {
+        if (_observedCollection != null)
+        {
+            _observedCollection.CollectionChanged -= OnItemsCollectionChanged;
+            _observedCollection = null;
+        }
+
+        foreach (var item in _observedItems)
+        {
+            item.PropertyChanged -= OnObservedItemPropertyChanged;
+        }
+
+        _observedItems.Clear();
+    }
+
+    private void OnItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems != null)
+        {
+            foreach (var oldItem in e.OldItems.OfType<INotifyPropertyChanged>())
+            {
+                if (_observedItems.Remove(oldItem))
+                {
+                    oldItem.PropertyChanged -= OnObservedItemPropertyChanged;
+                }
+            }
+        }
+
+        if (e.NewItems != null)
+        {
+            foreach (var newItem in e.NewItems.OfType<INotifyPropertyChanged>())
+            {
+                if (_observedItems.Add(newItem))
+                {
+                    newItem.PropertyChanged += OnObservedItemPropertyChanged;
+                }
+            }
+        }
+
+        UpdateSelectionIndicator();
+    }
+
+    private void OnObservedItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (!string.Equals(e.PropertyName, nameof(MediaItem.IsSelected), StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        UpdateSelectionIndicator();
+    }
+
+    #endregion
+
     #region UI Events
+
+    private void OnRowTouchCompleted(object? sender, EventArgs e)
+    {
+        if (sender is not BindableObject { BindingContext: MediaItem mediaItem })
+        {
+            return;
+        }
+
+        EnsureSelectionOwnership();
+
+        ExecuteShortPress(mediaItem);
+    }
+
+    private void OnRowLongPressCompleted(object? sender, EventArgs e)
+    {
+        if (sender is not BindableObject { BindingContext: MediaItem mediaItem })
+        {
+            return;
+        }
+
+        EnsureSelectionOwnership();
+
+        mediaItem.IsSelected = !mediaItem.IsSelected;
+        UpdateSelectionIndicator();
+
+        _suppressNextTap.Add(mediaItem);
+    }
+
+    private void OnRowTapped(object? sender, TappedEventArgs e)
+    {
+        if (sender is not BindableObject { BindingContext: MediaItem mediaItem })
+        {
+            return;
+        }
+
+        EnsureSelectionOwnership();
+
+        ExecuteShortPress(mediaItem);
+    }
 
     private async void OnPlayOverlayClicked(object? sender, TappedEventArgs e)
     {
@@ -114,6 +334,176 @@ public partial class SlideView : ContentView
         }
 
         await MediaActions.PlayMediaAsync(item);
+    }
+
+    #endregion
+
+    #region Helpers
+
+    private static object GetPrimaryNavigationParameter(MediaItem mediaItem)
+    {
+        if (mediaItem is Track track)
+        {
+            return track.Album ?? mediaItem;
+        }
+
+        return mediaItem;
+    }
+
+    private void ExecuteShortPress(MediaItem mediaItem)
+    {
+        if (_suppressNextTap.Remove(mediaItem))
+        {
+            return;
+        }
+
+        // If at least one item is selected, keep taps in selection mode until all are deselected.
+        if (HasAnySelectedItems())
+        {
+            mediaItem.IsSelected = !mediaItem.IsSelected;
+            UpdateSelectionIndicator();
+            return;
+        }
+
+        var command = PrimaryInfoTappedCommand;
+        var parameter = GetPrimaryNavigationParameter(mediaItem);
+        if (command?.CanExecute(parameter) == true)
+        {
+            command.Execute(parameter);
+        }
+    }
+
+    public void SelectAllItems()
+    {
+        if (ItemsSource == null)
+        {
+            return;
+        }
+
+        foreach (var item in ItemsSource.OfType<MediaItem>())
+        {
+            item.IsSelected = true;
+        }
+
+        UpdateSelectionIndicator();
+    }
+
+    public void ClearSelection()
+    {
+        if (ItemsSource == null)
+        {
+            return;
+        }
+
+        foreach (var item in ItemsSource.OfType<MediaItem>())
+        {
+            item.IsSelected = false;
+        }
+
+        UpdateSelectionIndicator();
+    }
+
+    public void OpenContextMenuForSelection(View anchor)
+    {
+        if (anchor == null || !HasAnySelectedItems())
+        {
+            return;
+        }
+
+        var contextMenuCommand = ShowContextMenuAtAnchorCommand;
+        if (contextMenuCommand?.CanExecute(anchor) == true)
+        {
+            contextMenuCommand.Execute(anchor);
+        }
+    }
+
+    private void EnsureSelectionOwnership()
+    {
+        if (mashin.Services.FocusManager.GetFocusedControl<SlideView>(out var focusedSlide)
+            && focusedSlide != null
+            && !ReferenceEquals(focusedSlide, this)
+            && focusedSlide.HasSelection)
+        {
+            focusedSlide.ClearSelection();
+        }
+
+        if (mashin.Services.FocusManager.GetFocusedControl<RowView>(out var focusedRow)
+            && focusedRow != null
+            && focusedRow.HasSelection)
+        {
+            focusedRow.ClearSelection();
+        }
+
+        if (mashin.Services.FocusManager.GetFocusedControl<TableView>(out var focusedTable)
+            && focusedTable != null
+            && focusedTable.HasSelection)
+        {
+            focusedTable.ClearSelection();
+        }
+
+        mashin.Services.FocusManager.SetFocus(this);
+    }
+
+    private void UpdateSelectionIndicator()
+    {
+        var hasSelection = HasAnySelectedItems();
+        if (_hasSelection != hasSelection)
+        {
+            _hasSelection = hasSelection;
+            OnPropertyChanged(nameof(HasSelection));
+        }
+
+        var overlayService = ResolveOverlayService();
+        if (overlayService == null)
+        {
+            return;
+        }
+
+        if (hasSelection)
+        {
+            _ = overlayService.ShowSelectionIndicatorAsync(this);
+            return;
+        }
+
+        _ = overlayService.HideSelectionIndicatorAsync(this);
+    }
+
+    private static IOverlayService? ResolveOverlayService()
+    {
+        var services = Application.Current?.Handler?.MauiContext?.Services;
+        if (services == null)
+        {
+            return null;
+        }
+
+        return services.GetService(typeof(IOverlayService)) as IOverlayService;
+    }
+
+    private bool HasAnySelectedItems()
+    {
+        if (ItemsSource == null)
+        {
+            return false;
+        }
+
+        return ItemsSource.OfType<MediaItem>().Any(item => item.IsSelected);
+    }
+
+    protected override void OnBindingContextChanged()
+    {
+        base.OnBindingContextChanged();
+        UpdateSelectionIndicator();
+    }
+
+    protected override void OnHandlerChanging(HandlerChangingEventArgs args)
+    {
+        if (args.NewHandler == null)
+        {
+            DetachSelectionObservers();
+            UpdateSelectionIndicator();
+        }
+
+        base.OnHandlerChanging(args);
     }
 
     #endregion
