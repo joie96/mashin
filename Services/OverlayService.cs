@@ -608,6 +608,12 @@ public sealed class OverlayService : IOverlayService
         if (_selectionIndicatorControl is mashin.Views.Mobile.Controls.RowView rowView)
         {
             rowView.SelectAllItems();
+            return;
+        }
+
+        if (_selectionIndicatorControl is mashin.Views.Mobile.Controls.SlideView slideView)
+        {
+            slideView.SelectAllItems();
         }
     }
 
@@ -622,6 +628,12 @@ public sealed class OverlayService : IOverlayService
         if (_selectionIndicatorControl is mashin.Views.Mobile.Controls.RowView rowView)
         {
             rowView.OpenContextMenuForSelection(_selectionIndicatorOverlay.MenuAnchor);
+            return;
+        }
+
+        if (_selectionIndicatorControl is mashin.Views.Mobile.Controls.SlideView slideView)
+        {
+            slideView.OpenContextMenuForSelection(_selectionIndicatorOverlay.MenuAnchor);
         }
     }
 
@@ -636,6 +648,12 @@ public sealed class OverlayService : IOverlayService
         if (_selectionIndicatorControl is mashin.Views.Mobile.Controls.RowView rowView)
         {
             rowView.ClearSelection();
+            return;
+        }
+
+        if (_selectionIndicatorControl is mashin.Views.Mobile.Controls.SlideView slideView)
+        {
+            slideView.ClearSelection();
         }
     }
 
@@ -776,7 +794,9 @@ public sealed class OverlayService : IOverlayService
 
     private static bool IsSupportedSelectionControl(object selectionControl)
     {
-        return selectionControl is mashin.Views.Mobile.Controls.TableView or mashin.Views.Mobile.Controls.RowView;
+        return selectionControl is mashin.Views.Mobile.Controls.TableView
+            or mashin.Views.Mobile.Controls.RowView
+            or mashin.Views.Mobile.Controls.SlideView;
     }
 
     #endregion

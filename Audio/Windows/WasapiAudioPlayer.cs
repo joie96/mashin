@@ -39,6 +39,8 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
     private float _volume = 1.0f;
     private bool _isMuted;
     private int _outputLatencyMs;
+    private bool _isOutputInitialized;
+    private string _currentDeviceDisplayName = "System Default";
 
     /// <summary>
     /// Gets the detected output latency in milliseconds.
@@ -111,40 +113,7 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
                 try
                 {
                     _format = format;
-
-                    // Get the audio device - either specific device by ID or system default
-                    MMDevice? device = null;
-                    if (!string.IsNullOrEmpty(_deviceId))
-                    {
-                        try
-                        {
-                            using var enumerator = new MMDeviceEnumerator();
-                            device = enumerator.GetDevice(_deviceId);
-                            _logger.LogInformation("Using audio device: {DeviceName}", device.FriendlyName);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Failed to get device {DeviceId}, falling back to default", _deviceId);
-                            device = null;
-                        }
-                    }
-
-                    // Create WASAPI output in shared mode with event-based synchronization
-                    if (device != null)
-                    {
-                        _wasapiOut = new WasapiOut(device, AudioClientShareMode.Shared, useEventSync: true, latency: RequestedLatencyMs);
-                    }
-                    else
-                    {
-                        _wasapiOut = new WasapiOut(AudioClientShareMode.Shared, useEventSync: true, latency: RequestedLatencyMs);
-                    }
-
-                    _wasapiOut.PlaybackStopped += OnPlaybackStopped;
-
-                    // Capture the output latency - this is the buffer latency we requested
-                    // from WASAPI. The actual end-to-end latency also includes DAC/driver
-                    // delays which vary by hardware and aren't directly queryable.
-                    _outputLatencyMs = RequestedLatencyMs; // Our requested latency in shared mode
+                    CreateOutputForCurrentDevice();
 
                     SetState(AudioPlayerState.Stopped);
                     _logger.LogInformation(
@@ -152,7 +121,7 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
                         format.SampleRate,
                         format.Channels,
                         _outputLatencyMs,
-                        device?.FriendlyName ?? "System Default");
+                        _currentDeviceDisplayName);
                 }
                 catch (Exception ex)
                 {
@@ -180,8 +149,17 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
         _sampleProvider.Volume = _volume;
         _sampleProvider.IsMuted = _isMuted;
 
+        // AudioClient can only be initialized once per WasapiOut instance.
+        // Recreate the output device if we need to attach a new sample source.
+        if (_isOutputInitialized)
+        {
+            _logger.LogDebug("WASAPI output already initialized. Recreating output before setting new source.");
+            CreateOutputForCurrentDevice();
+        }
+
         // Initialize WASAPI with our provider
         _wasapiOut.Init(_sampleProvider);
+        _isOutputInitialized = true;
 
         _logger.LogDebug("Sample source configured");
     }
@@ -232,52 +210,16 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
                         _deviceId ?? "System Default",
                         deviceId ?? "System Default");
 
-                    // Stop and dispose current output
-                    if (_wasapiOut != null)
-                    {
-                        _wasapiOut.PlaybackStopped -= OnPlaybackStopped;
-                        _wasapiOut.Stop();
-                        _wasapiOut.Dispose();
-                        _wasapiOut = null;
-                    }
-
                     // Update device ID
                     _deviceId = deviceId;
-
-                    // Get the new audio device
-                    MMDevice? device = null;
-                    if (!string.IsNullOrEmpty(_deviceId))
-                    {
-                        try
-                        {
-                            using var enumerator = new MMDeviceEnumerator();
-                            device = enumerator.GetDevice(_deviceId);
-                            _logger.LogInformation("Using audio device: {DeviceName}", device.FriendlyName);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Failed to get device {DeviceId}, falling back to default", _deviceId);
-                            device = null;
-                        }
-                    }
-
-                    // Create new WASAPI output
-                    if (device != null)
-                    {
-                        _wasapiOut = new WasapiOut(device, AudioClientShareMode.Shared, useEventSync: true, latency: RequestedLatencyMs);
-                    }
-                    else
-                    {
-                        _wasapiOut = new WasapiOut(AudioClientShareMode.Shared, useEventSync: true, latency: RequestedLatencyMs);
-                    }
-
-                    _wasapiOut.PlaybackStopped += OnPlaybackStopped;
-                    _outputLatencyMs = RequestedLatencyMs;
+                    CreateOutputForCurrentDevice();
 
                     // Re-attach sample provider if we had one
                     if (currentSampleProvider != null)
                     {
-                        _wasapiOut.Init(currentSampleProvider);
+                        var output = _wasapiOut ?? throw new InvalidOperationException("Audio output is not available after device switch.");
+                        output.Init(currentSampleProvider);
+                        _isOutputInitialized = true;
                         _logger.LogDebug("Sample source re-attached to new device");
                     }
 
@@ -286,14 +228,15 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
                     // Resume playback if we were playing
                     if (wasPlaying && currentSampleProvider != null)
                     {
-                        _wasapiOut.Play();
+                        var output = _wasapiOut ?? throw new InvalidOperationException("Audio output is not available for playback after device switch.");
+                        output.Play();
                         SetState(AudioPlayerState.Playing);
                         _logger.LogInformation("Playback resumed on new device");
                     }
 
                     _logger.LogInformation(
                         "Audio device switched successfully: {Device}, latency: {Latency}ms",
-                        device?.FriendlyName ?? "System Default",
+                        _currentDeviceDisplayName,
                         _outputLatencyMs);
                 }
                 catch (Exception ex)
@@ -318,6 +261,7 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
             _wasapiOut = null;
         }
 
+        _isOutputInitialized = false;
         _sampleProvider = null;
         SetState(AudioPlayerState.Uninitialized);
 
@@ -348,5 +292,54 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
             StateChanged?.Invoke(this, newState);
         }
     }
+
+    private void CreateOutputForCurrentDevice()
+    {
+        if (_wasapiOut != null)
+        {
+            _wasapiOut.PlaybackStopped -= OnPlaybackStopped;
+            _wasapiOut.Stop();
+            _wasapiOut.Dispose();
+            _wasapiOut = null;
+        }
+
+        var device = ResolveDevice();
+        if (device != null)
+        {
+            _wasapiOut = new WasapiOut(device, AudioClientShareMode.Shared, useEventSync: true, latency: RequestedLatencyMs);
+            _currentDeviceDisplayName = device.FriendlyName;
+        }
+        else
+        {
+            _wasapiOut = new WasapiOut(AudioClientShareMode.Shared, useEventSync: true, latency: RequestedLatencyMs);
+            _currentDeviceDisplayName = "System Default";
+        }
+
+        _wasapiOut.PlaybackStopped += OnPlaybackStopped;
+        _outputLatencyMs = RequestedLatencyMs;
+        _isOutputInitialized = false;
+    }
+
+    private MMDevice? ResolveDevice()
+    {
+        if (string.IsNullOrEmpty(_deviceId))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var enumerator = new MMDeviceEnumerator();
+            var device = enumerator.GetDevice(_deviceId);
+            _logger.LogInformation("Using audio device: {DeviceName}", device.FriendlyName);
+            return device;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get device {DeviceId}, falling back to default", _deviceId);
+            return null;
+        }
+    }
+
 }
 #endif

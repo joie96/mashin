@@ -1,5 +1,6 @@
 using mashin.Models;
 using mashin.Services;
+using mashin.Collections;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Linq;
@@ -11,10 +12,15 @@ public partial class SlideView : ContentView
 {
     #region Fields
 
+    private const int PageSize = 10;
+
     private bool _isSynchronizingSize;
     private readonly HashSet<MediaItem> _suppressNextTap = new();
     private readonly HashSet<INotifyPropertyChanged> _observedItems = new();
+    private readonly ObservableRangeCollection<object> _visibleItems = new();
     private INotifyCollectionChanged? _observedCollection;
+    private int _loadedItemCount = PageSize;
+    private bool _hasMoreItems;
     private bool _hasSelection;
 
     #endregion
@@ -131,6 +137,10 @@ public partial class SlideView : ContentView
 
     public bool HasSelection => _hasSelection;
 
+    public bool HasMoreItems => _hasMoreItems;
+
+    public IReadOnlyList<object> VisibleItems => _visibleItems;
+
     #endregion
 
     #region Construction
@@ -138,6 +148,8 @@ public partial class SlideView : ContentView
     public SlideView()
     {
         InitializeComponent();
+        ItemsCollectionView.ItemsSource = _visibleItems;
+        RefreshVisibleItems();
     }
 
     #endregion
@@ -151,8 +163,14 @@ public partial class SlideView : ContentView
             return;
         }
 
+        if (!ReferenceEquals(oldValue, newValue))
+        {
+            slideView._loadedItemCount = PageSize;
+        }
+
         slideView.DetachSelectionObservers();
         slideView.AttachSelectionObservers(newValue as IEnumerable<object>);
+        slideView.RefreshVisibleItems();
         slideView.UpdateSelectionIndicator();
     }
 
@@ -270,6 +288,7 @@ public partial class SlideView : ContentView
             }
         }
 
+        RefreshVisibleItems();
         UpdateSelectionIndicator();
     }
 
@@ -334,6 +353,16 @@ public partial class SlideView : ContentView
         }
 
         await MediaActions.PlayMediaAsync(item);
+    }
+
+    private void OnLoadMoreTapped(object? sender, TappedEventArgs e)
+    {
+        if (ItemsSource == null)
+        {
+            return;
+        }
+
+        AppendVisibleItemsPage();
     }
 
     #endregion
@@ -485,6 +514,83 @@ public partial class SlideView : ContentView
         return services.GetService(typeof(IOverlayService)) as IOverlayService;
     }
 
+    private void UpdateHasMoreItems(bool hasMoreItems)
+    {
+        if (_hasMoreItems == hasMoreItems)
+        {
+            return;
+        }
+
+        _hasMoreItems = hasMoreItems;
+        OnPropertyChanged(nameof(HasMoreItems));
+    }
+
+    #region Paging
+
+    private void RefreshVisibleItems()
+    {
+        if (ItemsSource == null)
+        {
+            _visibleItems.Clear();
+            _loadedItemCount = 0;
+            UpdateHasMoreItems(false);
+            return;
+        }
+
+        var sourceItems = ItemsSource.ToList();
+        var totalCount = sourceItems.Count;
+        if (totalCount == 0)
+        {
+            _visibleItems.Clear();
+            _loadedItemCount = 0;
+            UpdateHasMoreItems(false);
+            return;
+        }
+
+        var visibleCount = Math.Min(_loadedItemCount, totalCount);
+        var nextItems = sourceItems.Take(visibleCount).ToList();
+
+        _visibleItems.ReplaceRange(nextItems);
+        _loadedItemCount = visibleCount;
+        UpdateHasMoreItems(visibleCount < totalCount);
+    }
+
+    private void AppendVisibleItemsPage()
+    {
+        if (ItemsSource == null)
+        {
+            return;
+        }
+
+        var sourceItems = ItemsSource.ToList();
+        var totalCount = sourceItems.Count;
+        if (totalCount == 0)
+        {
+            _visibleItems.Clear();
+            _loadedItemCount = 0;
+            UpdateHasMoreItems(false);
+            return;
+        }
+
+        if (_visibleItems.Count > totalCount)
+        {
+            RefreshVisibleItems();
+            return;
+        }
+
+        var currentCount = _visibleItems.Count;
+        var nextCount = Math.Min(currentCount + PageSize, totalCount);
+        if (nextCount > currentCount)
+        {
+            _visibleItems.AddRange(sourceItems.Skip(currentCount).Take(nextCount - currentCount));
+        }
+
+        _loadedItemCount = nextCount;
+        UpdateHasMoreItems(nextCount < totalCount);
+    }
+
+    #endregion
+
     private bool HasAnySelectedItems()
     {
         if (ItemsSource == null)
@@ -498,6 +604,7 @@ public partial class SlideView : ContentView
     protected override void OnBindingContextChanged()
     {
         base.OnBindingContextChanged();
+        RefreshVisibleItems();
         UpdateSelectionIndicator();
     }
 
