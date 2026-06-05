@@ -17,6 +17,7 @@ public interface IMediaItemActions
     Task PlayMediaAsync(object item, object? startItem = null);
     Task PlayMediaNextAsync(object item, object? startItem = null);
     Task PlayMediaLastAsync(object item, object? startItem = null);
+    Task ShufflePlayMediaAsync(MediaItem parentItem, IEnumerable<MediaItem> associatedItems);
     Task AddToPlaylistAsync(object item, Playlist playlist);
     Task RemoveFromPlaylistAsync(object item, Playlist playlist);
     Task AddToFavoritesAsync(object item);
@@ -193,6 +194,153 @@ public class MediaItemActions : IMediaItemActions
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to add media to queue");
+        }
+    }
+
+    /// <summary>
+    /// Plays one random associated item immediately, queues the parent item next,
+    /// then shuffles queue entries from position 2.
+    /// </summary>
+    public async Task ShufflePlayMediaAsync(MediaItem parentItem, IEnumerable<MediaItem> associatedItems)
+    {
+        var associatedMediaItems = associatedItems?
+            .Where(mediaItem => mediaItem != null)
+            .ToList() ?? new List<MediaItem>();
+
+        if (associatedMediaItems.Count == 0)
+        {
+            _logger.LogWarning("No associated items available to shuffle play");
+            return;
+        }
+
+        var activePlayerId = _playbackService.ActivePlayerId;
+        if (string.IsNullOrWhiteSpace(activePlayerId))
+        {
+            _logger.LogWarning("No active player available. Player connection is missing.");
+            return;
+        }
+
+        if (!await _sendspinPlayerService.EnsureConnectedAsync(activePlayerId))
+        {
+            _logger.LogWarning("Shuffle play aborted: local Sendspin connection is not available");
+            return;
+        }
+
+        var queueId = activePlayerId;
+
+        try
+        {
+            if (parentItem == null)
+            {
+                _logger.LogWarning("No parent item provided for shuffle play");
+                return;
+            }
+
+            var randomTrackIndex = Random.Shared.Next(associatedMediaItems.Count);
+            var randomTrack = associatedMediaItems[randomTrackIndex];
+
+            // Start immediately with one random track.
+            await PlayMediaAsync(randomTrack);
+
+            // Queue the full parent item next (playlist/album/etc.).
+            await PlayMediaNextAsync(parentItem);
+
+            // Remove the duplicate track that was re-added by parentItem
+            var currentQueueItem = _playbackService.CurrentPlayerQueue?.CurrentItem;
+            var currentQueueItemId = currentQueueItem?.QueueItemId;
+            var currentTrackItemId = currentQueueItem?.MediaItem?.ItemId;
+            var currentTrackUri = currentQueueItem?.MediaItem?.Uri;
+
+            var queueItemsAfterAppend = _playbackService.CurrentQueueItems.ToList();
+
+            var duplicateQueueItemId = queueItemsAfterAppend
+                .Where(queueItem => !string.IsNullOrWhiteSpace(queueItem.QueueItemId))
+                .Where(queueItem => !string.Equals(queueItem.QueueItemId, currentQueueItemId, StringComparison.Ordinal))
+                .FirstOrDefault(queueItem =>
+                    (!string.IsNullOrWhiteSpace(currentTrackItemId)
+                        && string.Equals(queueItem.MediaItem?.ItemId, currentTrackItemId, StringComparison.Ordinal))
+                    || (!string.IsNullOrWhiteSpace(currentTrackUri)
+                        && string.Equals(queueItem.MediaItem?.Uri, currentTrackUri, StringComparison.Ordinal)))
+                ?.QueueItemId;
+
+            if (!string.IsNullOrWhiteSpace(duplicateQueueItemId))
+            {
+                await _musicAssistant.DeleteQueueItemAsync(queueId, duplicateQueueItemId);
+                await _playbackService.RefreshNowAsync();
+            }
+
+            var queueItems = _playbackService.CurrentQueueItems.ToList();
+            if (queueItems.Count == 0)
+            {
+                // Queue refresh succeeded but no items arrived; abort to avoid invalid move operations.
+                _logger.LogWarning("Queue is empty after shuffle preparation");
+                return;
+            }
+
+            var queueItemOrder = queueItems
+                .Select(queueItem => queueItem.QueueItemId)
+                .Where(queueItemId => !string.IsNullOrWhiteSpace(queueItemId))
+                .ToList();
+
+            // Shuffle from queue position 2 (index 1), keep first queued item stable.
+            const int firstShuffleIndex = 1;
+
+            if (queueItemOrder.Count > firstShuffleIndex + 1)
+            {
+                const int moveBatchSize = 10;
+                const int moveBatchPauseMs = 250;
+
+                var prefix = queueItemOrder.Take(firstShuffleIndex).ToList();
+                var shuffledIds = queueItemOrder.Skip(firstShuffleIndex).ToList();
+
+                for (var i = shuffledIds.Count - 1; i > 0; i--)
+                {
+                    var j = Random.Shared.Next(i + 1);
+                    (shuffledIds[i], shuffledIds[j]) = (shuffledIds[j], shuffledIds[i]);
+                }
+
+                shuffledIds = prefix.Concat(shuffledIds).ToList();
+
+                var movesSincePause = 0;
+
+                for (var targetPosition = firstShuffleIndex; targetPosition < shuffledIds.Count; targetPosition++)
+                {
+                    var queueItemId = shuffledIds[targetPosition];
+                    var currentPosition = queueItemOrder.IndexOf(queueItemId);
+                    if (currentPosition < 0)
+                    {
+                        continue;
+                    }
+
+                    var positionShift = targetPosition - currentPosition;
+                    if (positionShift == 0)
+                    {
+                        continue;
+                    }
+
+                    // Apply delta moves so we preserve order tracking without rebuilding the queue.
+                    await _musicAssistant.MoveQueueItemAsync(queueId, queueItemId, positionShift);
+                    movesSincePause++;
+
+                    if (movesSincePause >= moveBatchSize)
+                    {
+                        // Throttle bursts of queue mutations to reduce backend pressure on large lists.
+                        await Task.Delay(moveBatchPauseMs);
+                        movesSincePause = 0;
+                    }
+
+                    queueItemOrder.RemoveAt(currentPosition);
+                    queueItemOrder.Insert(targetPosition, queueItemId);
+                }
+
+                await _playbackService.RefreshNowAsync();
+            }
+
+            // No final play_index call: playback should continue on the already started random track.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to shuffle play media");
         }
     }
 

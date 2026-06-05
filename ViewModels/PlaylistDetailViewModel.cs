@@ -26,7 +26,6 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
     private readonly ILogger<PlaylistDetailViewModel> _logger;
-    private readonly Random _shuffleRandom = new();
 
     private Playlist? _playlist;
     private ObservableRangeCollection<Track> _tracks = new();
@@ -235,25 +234,18 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
         ShufflePlaylistCommand = new Command(async () =>
         {
-            var shuffledTracks = Tracks.ToList();
-            if (shuffledTracks.Count == 0)
+            var playlist = Playlist;
+            if (playlist == null)
             {
                 return;
             }
 
-            for (var i = shuffledTracks.Count - 1; i > 0; i--)
+            if (Tracks.Count == 0)
             {
-                var j = _shuffleRandom.Next(i + 1);
-                (shuffledTracks[i], shuffledTracks[j]) = (shuffledTracks[j], shuffledTracks[i]);
+                return;
             }
 
-            await MediaActions.PlayMediaAsync(shuffledTracks[0]);
-
-            var remainingTracks = shuffledTracks.Skip(1).ToList();
-            if (remainingTracks.Count > 0)
-            {
-                await MediaActions.PlayMediaNextAsync(remainingTracks);
-            }
+            await MediaActions.ShufflePlayMediaAsync(playlist, Tracks);
         });
 
         TogglePlaylistFavoriteCommand = new Command(async () =>
