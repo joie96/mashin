@@ -15,10 +15,42 @@
                     FontSize="24"
                     Text="Home"
                     TextColor="{DynamicResource TextPrimary}" />
-                <Label FontSize="13"
-                    Text="Unsere Empfehlungen für dich"
-                    TextColor="{DynamicResource TextSecondary}" />
             </VerticalStackLayout>
+
+            <Grid ColumnDefinitions="Auto,Auto,*"
+                ColumnSpacing="10"
+                Margin="0,10,0,0">
+                <Label Grid.Column="0"
+                    FontFamily="PoppinsRegular"
+                    FontSize="22"
+                    Text="Unsere Empfehlungen für dich"
+                    TextColor="{DynamicResource TextPrimary}"
+                    VerticalOptions="Center" />
+                <Border Grid.Column="1"
+                    BackgroundColor="Transparent"
+                    HeightRequest="22"
+                    Padding="6,0"
+                    Stroke="{DynamicResource BorderPrimary}"
+                    StrokeThickness="1"
+                    VerticalOptions="Center">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="3" />
+                    </Border.StrokeShape>
+                    <Label FontFamily="PoppinsRegular"
+                        FontAttributes="Bold"
+                        FontSize="10"
+                        HorizontalOptions="Center"
+                        Text="{Binding RecommendationTrackItems.Count}"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                </Border>
+                <BoxView Grid.Column="2"
+                    BackgroundColor="{DynamicResource BorderColor}"
+                    HeightRequest="1"
+                    HorizontalOptions="Fill"
+                    Opacity="0.75"
+                    VerticalOptions="Center" />
+            </Grid>
 
             <Label IsVisible="{Binding ShowNoRecommendationFolderMessage}"
                 Text="Keine ListenBrainz-Empfehlungen verfügbar."
@@ -37,14 +69,42 @@
 
             <VerticalStackLayout Spacing="4"
                 Margin="0,10,0,0">
-                <Label FontAttributes="None"
-                    FontFamily="PoppinsRegular"
-                    FontSize="18"
-                    Text="Genres, die du liebst"
-                    TextColor="{DynamicResource TextPrimary}" />
+                <Grid ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="10">
+                    <Label Grid.Column="0"
+                        FontFamily="PoppinsRegular"
+                        FontSize="22"
+                        Text="Genres, die du liebst"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontFamily="PoppinsRegular"
+                            FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding GenrePlaylistItems.Count}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        BackgroundColor="{DynamicResource BorderColor}"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
 
                 <Label IsVisible="{Binding ShowNoGenrePlaylistsMessage}"
-                    Text="Keine Genre-Playlists verfuegbar."
+                    Text="Keine Genre-Playlists verfügbar."
                     TextColor="{DynamicResource TextTertiary}" />
 
                 <controls:ListView IsVisible="{Binding ShowGenrePlaylistsListView}"
@@ -52,6 +112,461 @@
                     ItemsSource="{Binding GenrePlaylistItems}"
                     MediaActions="{Binding MediaActions}"
                     PrimaryInfoTappedCommand="{Binding PlaylistTappedCommand}" />
+            </VerticalStackLayout>
+
+            <VerticalStackLayout Spacing="4"
+                Margin="0,10,0,0">
+                <Grid ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="10">
+                    <Label Grid.Column="0"
+                        FontFamily="PoppinsRegular"
+                        FontSize="22"
+                        Text="Playlists, die du lieben wirst"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontFamily="PoppinsRegular"
+                            FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding ArtistPlaylistItems.Count}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        BackgroundColor="{DynamicResource BorderColor}"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <Label IsVisible="{Binding ShowNoArtistPlaylistsMessage}"
+                    Text="Keine Artist-Playlists verfügbar."
+                    TextColor="{DynamicResource TextTertiary}" />
+
+                <controls:RowView IsVisible="{Binding ShowArtistPlaylistsRowView}"
+                    ItemCornerRadius="8"
+                    ItemsSource="{Binding ArtistPlaylistItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding PlaylistTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowPlaylistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowPlaylistContextMenuAtPositionCommand}" />
+            </VerticalStackLayout>
+
+            <VerticalStackLayout Spacing="4"
+                Margin="0,10,0,0">
+                <Grid ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="10">
+                    <Label Grid.Column="0"
+                        FontFamily="PoppinsRegular"
+                        FontSize="22"
+                        Text="Deine Lieblingssongs"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontFamily="PoppinsRegular"
+                            FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding TopTrackItems.Count}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        BackgroundColor="{DynamicResource BorderColor}"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <Label IsVisible="{Binding ShowNoTopTracksMessage}"
+                    Text="Keine Top-Tracks verfügbar."
+                    TextColor="{DynamicResource TextTertiary}" />
+
+                <controls:RowView IsVisible="{Binding ShowTopTracksRowView}"
+                    ItemCornerRadius="8"
+                    ItemsSource="{Binding TopTrackItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding RecommendationTrackTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowTrackContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowTrackContextMenuAtPositionCommand}" />
+            </VerticalStackLayout>
+
+            <VerticalStackLayout Spacing="4"
+                Margin="0,10,0,0">
+                <Grid ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="10">
+                    <Label Grid.Column="0"
+                        FontFamily="PoppinsRegular"
+                        FontSize="22"
+                        Text="Deine Lieblingskünstler:innen"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontFamily="PoppinsRegular"
+                            FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding TopArtistItems.Count}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        BackgroundColor="{DynamicResource BorderColor}"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <Label IsVisible="{Binding ShowNoTopArtistsMessage}"
+                    Text="Keine Top-Artists verfügbar."
+                    TextColor="{DynamicResource TextTertiary}" />
+
+                <controls:RowView IsVisible="{Binding ShowTopArtistsRowView}"
+                    ItemCornerRadius="100"
+                    ItemsSource="{Binding TopArtistItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
+            </VerticalStackLayout>
+
+            <VerticalStackLayout Spacing="4"
+                Margin="0,10,0,0">
+                <Grid ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="10">
+                    <Label Grid.Column="0"
+                        FontFamily="PoppinsRegular"
+                        FontSize="22"
+                        Text="Kürzlich gespielt"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontFamily="PoppinsRegular"
+                            FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding RecentListenItems.Count}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        BackgroundColor="{DynamicResource BorderColor}"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <Label IsVisible="{Binding ShowNoRecentListensMessage}"
+                    Text="Keine kürzlich gehörten Tracks verfügbar."
+                    TextColor="{DynamicResource TextTertiary}" />
+
+                <controls:RowView IsVisible="{Binding ShowRecentListensRowView}"
+                    ItemCornerRadius="8"
+                    ItemsSource="{Binding RecentListenItems}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding RecommendationTrackTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowTrackContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowTrackContextMenuAtPositionCommand}" />
+            </VerticalStackLayout>
+
+            <VerticalStackLayout IsVisible="{Binding ShowSimilarArtistSectionContainer0}"
+                Spacing="4"
+                Margin="0,10,0,0">
+                <Grid ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="10">
+                    <Label Grid.Column="0"
+                        FontFamily="PoppinsRegular"
+                        FontSize="22"
+                        Text="{Binding SimilarArtistSectionTitle0}"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontFamily="PoppinsRegular"
+                            FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding SimilarArtistSectionCount0}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        BackgroundColor="{DynamicResource BorderColor}"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <Label IsVisible="{Binding ShowNoSimilarArtistSectionMessage0}"
+                    Text="Keine Artists verfügbar."
+                    TextColor="{DynamicResource TextTertiary}" />
+
+                <controls:RowView IsVisible="{Binding ShowSimilarArtistSectionRowView0}"
+                    ItemCornerRadius="100"
+                    ItemsSource="{Binding SimilarArtistSectionItems0}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
+            </VerticalStackLayout>
+
+            <VerticalStackLayout IsVisible="{Binding ShowSimilarArtistSectionContainer1}"
+                Spacing="4"
+                Margin="0,10,0,0">
+                <Grid ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="10">
+                    <Label Grid.Column="0"
+                        FontFamily="PoppinsRegular"
+                        FontSize="22"
+                        Text="{Binding SimilarArtistSectionTitle1}"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontFamily="PoppinsRegular"
+                            FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding SimilarArtistSectionCount1}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        BackgroundColor="{DynamicResource BorderColor}"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <Label IsVisible="{Binding ShowNoSimilarArtistSectionMessage1}"
+                    Text="Keine Artists verfügbar."
+                    TextColor="{DynamicResource TextTertiary}" />
+
+                <controls:RowView IsVisible="{Binding ShowSimilarArtistSectionRowView1}"
+                    ItemCornerRadius="100"
+                    ItemsSource="{Binding SimilarArtistSectionItems1}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
+            </VerticalStackLayout>
+
+            <VerticalStackLayout IsVisible="{Binding ShowSimilarArtistSectionContainer2}"
+                Spacing="4"
+                Margin="0,10,0,0">
+                <Grid ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="10">
+                    <Label Grid.Column="0"
+                        FontFamily="PoppinsRegular"
+                        FontSize="22"
+                        Text="{Binding SimilarArtistSectionTitle2}"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontFamily="PoppinsRegular"
+                            FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding SimilarArtistSectionCount2}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        BackgroundColor="{DynamicResource BorderColor}"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <Label IsVisible="{Binding ShowNoSimilarArtistSectionMessage2}"
+                    Text="Keine Artists verfügbar."
+                    TextColor="{DynamicResource TextTertiary}" />
+
+                <controls:RowView IsVisible="{Binding ShowSimilarArtistSectionRowView2}"
+                    ItemCornerRadius="100"
+                    ItemsSource="{Binding SimilarArtistSectionItems2}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
+            </VerticalStackLayout>
+
+            <VerticalStackLayout IsVisible="{Binding ShowSimilarArtistSectionContainer3}"
+                Spacing="4"
+                Margin="0,10,0,0">
+                <Grid ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="10">
+                    <Label Grid.Column="0"
+                        FontFamily="PoppinsRegular"
+                        FontSize="22"
+                        Text="{Binding SimilarArtistSectionTitle3}"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontFamily="PoppinsRegular"
+                            FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding SimilarArtistSectionCount3}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        BackgroundColor="{DynamicResource BorderColor}"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <Label IsVisible="{Binding ShowNoSimilarArtistSectionMessage3}"
+                    Text="Keine Artists verfügbar."
+                    TextColor="{DynamicResource TextTertiary}" />
+
+                <controls:RowView IsVisible="{Binding ShowSimilarArtistSectionRowView3}"
+                    ItemCornerRadius="100"
+                    ItemsSource="{Binding SimilarArtistSectionItems3}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
+            </VerticalStackLayout>
+
+            <VerticalStackLayout IsVisible="{Binding ShowSimilarArtistSectionContainer4}"
+                Spacing="4"
+                Margin="0,10,0,0">
+                <Grid ColumnDefinitions="Auto,Auto,*"
+                    ColumnSpacing="10">
+                    <Label Grid.Column="0"
+                        FontFamily="PoppinsRegular"
+                        FontSize="22"
+                        Text="{Binding SimilarArtistSectionTitle4}"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <Border Grid.Column="1"
+                        BackgroundColor="Transparent"
+                        HeightRequest="22"
+                        Padding="6,0"
+                        Stroke="{DynamicResource BorderPrimary}"
+                        StrokeThickness="1"
+                        VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="3" />
+                        </Border.StrokeShape>
+                        <Label FontFamily="PoppinsRegular"
+                            FontAttributes="Bold"
+                            FontSize="10"
+                            HorizontalOptions="Center"
+                            Text="{Binding SimilarArtistSectionCount4}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                    <BoxView Grid.Column="2"
+                        BackgroundColor="{DynamicResource BorderColor}"
+                        HeightRequest="1"
+                        HorizontalOptions="Fill"
+                        Opacity="0.75"
+                        VerticalOptions="Center" />
+                </Grid>
+
+                <Label IsVisible="{Binding ShowNoSimilarArtistSectionMessage4}"
+                    Text="Keine Artists verfügbar."
+                    TextColor="{DynamicResource TextTertiary}" />
+
+                <controls:RowView IsVisible="{Binding ShowSimilarArtistSectionRowView4}"
+                    ItemCornerRadius="100"
+                    ItemsSource="{Binding SimilarArtistSectionItems4}"
+                    MediaActions="{Binding MediaActions}"
+                    PrimaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
+                    ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
             </VerticalStackLayout>
         </VerticalStackLayout>
     </ScrollView>

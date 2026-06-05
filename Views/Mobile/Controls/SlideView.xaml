@@ -150,6 +150,24 @@
                     </Grid>
                 </Border>
 
+                <ffimageloading:SvgCachedImage
+                    Margin="6,6,0,0"
+                    HeightRequest="18"
+                    HorizontalOptions="Start"
+                    Source="{Binding ProviderManifest.IconSvg}"
+                    VerticalOptions="Start"
+                    WidthRequest="18"
+                    ZIndex="3">
+                    <ffimageloading:SvgCachedImage.Triggers>
+                        <DataTrigger Binding="{Binding ProviderManifest.IconSvg}"
+                            TargetType="ffimageloading:SvgCachedImage"
+                            Value="{x:Null}">
+                            <Setter Property="IsVisible"
+                                Value="False" />
+                        </DataTrigger>
+                    </ffimageloading:SvgCachedImage.Triggers>
+                </ffimageloading:SvgCachedImage>
+
                 <Border
                     Margin="6"
                     BackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
