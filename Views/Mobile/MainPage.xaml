@@ -117,7 +117,7 @@
                     VerticalOptions="Fill"
                     WidthRequest="{Binding Source={x:Reference PlayerBarBorder}, Path=Height}">
                     <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="12,0,0,12" />
+                        <RoundRectangle CornerRadius="12,0,12,0" />
                     </Border.StrokeShape>
                     <ffimageloading:CachedImage Aspect="AspectFill"
                         Source="{Binding CurrentTrack.ImageUri}" />
@@ -139,7 +139,7 @@
                         AnchorX="0"
                         WidthRequest="{Binding Source={x:Reference PlayerBarProgressHost}, Path=Width}">
                         <Border.StrokeShape>
-                            <RoundRectangle CornerRadius="0,100,0,100" />
+                            <RoundRectangle CornerRadius="0,12,0,12" />
                         </Border.StrokeShape>
                     </Border>
 
@@ -191,6 +191,12 @@
                                 Text="{mi:FluentFilled Icon=Pause48Filled, FontOverride=True}"
                                 TextColor="{DynamicResource OverlayPlayIconColor}"
                                 VerticalOptions="Center" />
+                            <ActivityIndicator HeightRequest="16"
+                                IsRunning="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
+                                IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
+                                Scale="1.5"
+                                WidthRequest="16"
+                                Color="{DynamicResource OverlayPlayIconColor}" />
                         </Grid>
                     </Border>
                 </Grid>
