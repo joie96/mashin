@@ -51,9 +51,15 @@
                 SelectionMode="None"
                 VerticalScrollBarVisibility="Never"
                 Scrolled="OnMenuItemsScrolled">
+                <CollectionView.GestureRecognizers>
+                    <PanGestureRecognizer PanUpdated="OnMenuPanUpdated" />
+                </CollectionView.GestureRecognizers>
                 <CollectionView.ItemTemplate>
                     <DataTemplate x:DataType="models:ContextMenuItem">
                         <Grid BackgroundColor="Transparent">
+                            <Grid.GestureRecognizers>
+                                <PanGestureRecognizer PanUpdated="OnMenuPanUpdated" />
+                            </Grid.GestureRecognizers>
                             <BoxView
                                 Margin="14,4"
                                 HeightRequest="1"
