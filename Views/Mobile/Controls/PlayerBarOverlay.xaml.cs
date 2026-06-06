@@ -24,7 +24,6 @@ public partial class PlayerBarOverlay : ContentView
     public PlayerBarOverlay()
     {
         InitializeComponent();
-        WireDismissPanAcrossOverlay();
         WireCoverHeightUpdates();
     }
 
@@ -143,11 +142,6 @@ public partial class PlayerBarOverlay : ContentView
         }
     }
 
-    private void WireDismissPanAcrossOverlay()
-    {
-        AttachDismissPanRecursive(OverlaySheet);
-    }
-
     private void WireCoverHeightUpdates()
     {
         SizeChanged += OnOverlaySizeChanged;
@@ -205,65 +199,6 @@ public partial class PlayerBarOverlay : ContentView
         }
 
         CoverArtBorder.HeightRequest = targetSide;
-    }
-
-    private void AttachDismissPanRecursive(Element parent)
-    {
-        foreach (var child in GetChildren(parent))
-        {
-            if (child is View view)
-            {
-                AttachDismissPanIfNeeded(view);
-            }
-
-            AttachDismissPanRecursive(child);
-        }
-    }
-
-    private void AttachDismissPanIfNeeded(View view)
-    {
-        if (ReferenceEquals(view, Backdrop))
-        {
-            return;
-        }
-
-        if (view.GestureRecognizers.OfType<PanGestureRecognizer>().Any())
-        {
-            return;
-        }
-
-        var pan = new PanGestureRecognizer();
-        pan.PanUpdated += OnSheetPanUpdated;
-        view.GestureRecognizers.Add(pan);
-    }
-
-    private static IEnumerable<Element> GetChildren(Element parent)
-    {
-        if (parent is Layout layout)
-        {
-            foreach (var child in layout.Children)
-            {
-                if (child is Element childElement)
-                {
-                    yield return childElement;
-                }
-            }
-        }
-
-        if (parent is ContentView contentView && contentView.Content is Element contentElement)
-        {
-            yield return contentElement;
-        }
-
-        if (parent is Border border && border.Content is Element borderContent)
-        {
-            yield return borderContent;
-        }
-
-        if (parent is ScrollView scrollView && scrollView.Content is Element scrollContent)
-        {
-            yield return scrollContent;
-        }
     }
 
     private double GetSlideDistance()

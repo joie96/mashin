@@ -1,7 +1,5 @@
 using mashin.Models;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Linq;
 
 namespace mashin.Views.Mobile.Controls;
 
@@ -50,7 +48,6 @@ public partial class ContextMenu : ContentView
     public ContextMenu()
     {
         InitializeComponent();
-        WireDismissPanAcrossMenu();
     }
 
     public async Task AnimateInAsync()
@@ -144,65 +141,6 @@ public partial class ContextMenu : ContentView
                 _isSheetDragging = false;
                 _canDismissForCurrentPan = false;
                 break;
-        }
-    }
-
-    private void WireDismissPanAcrossMenu()
-    {
-        AttachDismissPanRecursive(this);
-    }
-
-    private void AttachDismissPanRecursive(Element parent)
-    {
-        foreach (var child in GetChildren(parent))
-        {
-            if (child is View view)
-            {
-                AttachDismissPanIfNeeded(view);
-            }
-
-            AttachDismissPanRecursive(child);
-        }
-    }
-
-    private void AttachDismissPanIfNeeded(View view)
-    {
-        if (view.GestureRecognizers.OfType<PanGestureRecognizer>().Any())
-        {
-            return;
-        }
-
-        var pan = new PanGestureRecognizer();
-        pan.PanUpdated += OnMenuPanUpdated;
-        view.GestureRecognizers.Add(pan);
-    }
-
-    private static IEnumerable<Element> GetChildren(Element parent)
-    {
-        if (parent is Layout layout)
-        {
-            foreach (var child in layout.Children)
-            {
-                if (child is Element childElement)
-                {
-                    yield return childElement;
-                }
-            }
-        }
-
-        if (parent is ContentView contentView && contentView.Content is Element contentElement)
-        {
-            yield return contentElement;
-        }
-
-        if (parent is Border border && border.Content is Element borderContent)
-        {
-            yield return borderContent;
-        }
-
-        if (parent is ScrollView scrollView && scrollView.Content is Element scrollContent)
-        {
-            yield return scrollContent;
         }
     }
 

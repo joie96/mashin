@@ -50,6 +50,9 @@
                         BackgroundColor="{DynamicResource BackgroundTertiary}"
                         HorizontalOptions="Fill"
                         StrokeThickness="0">
+                        <Border.GestureRecognizers>
+                            <PanGestureRecognizer PanUpdated="OnSheetPanUpdated" />
+                        </Border.GestureRecognizers>
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="16" />
                         </Border.StrokeShape>
@@ -92,6 +95,9 @@
                         HorizontalOptions="Fill"
                         Spacing="3"
                         VerticalOptions="Start">
+                        <VerticalStackLayout.GestureRecognizers>
+                            <PanGestureRecognizer PanUpdated="OnSheetPanUpdated" />
+                        </VerticalStackLayout.GestureRecognizers>
                         <Label FontFamily="PoppinsRegular"
                             FontSize="24"
                             HorizontalTextAlignment="Center"

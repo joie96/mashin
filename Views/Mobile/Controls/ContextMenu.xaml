@@ -20,6 +20,9 @@
         Padding="0,10,0,12"
         BackgroundColor="{DynamicResource BackgroundSecondary}"
         StrokeThickness="0">
+        <Border.GestureRecognizers>
+            <PanGestureRecognizer PanUpdated="OnMenuPanUpdated" />
+        </Border.GestureRecognizers>
         <Border.StrokeShape>
             <RoundRectangle CornerRadius="18,18,0,0" />
         </Border.StrokeShape>
@@ -33,6 +36,9 @@
                 HeightRequest="4"
                 WidthRequest="38"
                 StrokeThickness="0">
+                <Border.GestureRecognizers>
+                    <PanGestureRecognizer PanUpdated="OnMenuPanUpdated" />
+                </Border.GestureRecognizers>
                 <Border.StrokeShape>
                     <RoundRectangle CornerRadius="2" />
                 </Border.StrokeShape>
