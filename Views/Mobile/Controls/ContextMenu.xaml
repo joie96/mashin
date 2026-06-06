@@ -25,19 +25,6 @@
         </Border.StrokeShape>
 
         <VerticalStackLayout Spacing="0">
-            <Border
-                x:Name="HandleBar"
-                WidthRequest="42"
-                HeightRequest="5"
-                Margin="0,0,0,8"
-                HorizontalOptions="Center"
-                StrokeThickness="0"
-                BackgroundColor="{DynamicResource SeparatorColor}">
-                <Border.GestureRecognizers>
-                    <PanGestureRecognizer PanUpdated="OnHandlePanUpdated" />
-                </Border.GestureRecognizers>
-            </Border>
-
             <CollectionView
                 x:Name="MenuItemsList"
                 ItemsSource="{Binding MenuItems, Source={x:Reference self}}"
@@ -45,9 +32,6 @@
                 SelectionMode="None"
                 VerticalScrollBarVisibility="Never"
                 Scrolled="OnMenuItemsScrolled">
-                <CollectionView.GestureRecognizers>
-                    <PanGestureRecognizer PanUpdated="OnMenuPanUpdated" />
-                </CollectionView.GestureRecognizers>
                 <CollectionView.ItemTemplate>
                     <DataTemplate x:DataType="models:ContextMenuItem">
                         <Grid BackgroundColor="Transparent">
@@ -65,7 +49,6 @@
                                 IsVisible="{Binding IsSeparator, Converter={StaticResource InvertedBoolConverter}}"
                                 Opacity="{Binding IsEnabled, Converter={StaticResource BoolToOpacityConverter}}">
                                 <Grid.GestureRecognizers>
-                                    <PanGestureRecognizer PanUpdated="OnMenuPanUpdated" />
                                     <TapGestureRecognizer Tapped="OnMenuItemTapped" />
                                 </Grid.GestureRecognizers>
 

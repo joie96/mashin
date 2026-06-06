@@ -1,5 +1,7 @@
 using mashin.Models;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 
 namespace mashin.Views.Mobile.Controls;
 
@@ -11,7 +13,7 @@ public partial class ContextMenu : ContentView
     private const uint OutSlideDurationMs = 300;
     private const uint DragCancelSnapBackDurationMs = 180;
 
-    private bool _isHandleDragging;
+    private bool _isSheetDragging;
     private bool _canDismissForCurrentPan;
     private bool _dismissTriggered;
     private double _menuVerticalOffset;
@@ -48,13 +50,13 @@ public partial class ContextMenu : ContentView
     public ContextMenu()
     {
         InitializeComponent();
+        WireDismissPanAcrossMenu();
     }
 
     public async Task AnimateInAsync()
     {
         _dismissTriggered = false;
         _menuVerticalOffset = 0;
-        ResetHandleBarVisual();
 
         TranslationY = GetSlideDistance();
 
@@ -68,7 +70,6 @@ public partial class ContextMenu : ContentView
         await this.TranslateToAsync(0, GetSlideDistance(), OutSlideDurationMs, Easing.SinIn);
 
         TranslationY = 0;
-        ResetHandleBarVisual();
     }
 
     private void OnMenuItemTapped(object? sender, TappedEventArgs e)
@@ -86,14 +87,9 @@ public partial class ContextMenu : ContentView
         ItemInvoked?.Invoke(this, item);
     }
 
-    private void OnHandlePanUpdated(object? sender, PanUpdatedEventArgs e)
-    {
-        HandlePanUpdated(e, startedFromHandle: true);
-    }
-
     private void OnMenuPanUpdated(object? sender, PanUpdatedEventArgs e)
     {
-        HandlePanUpdated(e, startedFromHandle: false);
+        HandlePanUpdated(e);
     }
 
     private void OnMenuItemsScrolled(object? sender, ItemsViewScrolledEventArgs e)
@@ -101,22 +97,17 @@ public partial class ContextMenu : ContentView
         _menuVerticalOffset = e.VerticalOffset;
     }
 
-    private void HandlePanUpdated(PanUpdatedEventArgs e, bool startedFromHandle)
+    private void HandlePanUpdated(PanUpdatedEventArgs e)
     {
         switch (e.StatusType)
         {
             case GestureStatus.Started:
-                _canDismissForCurrentPan = startedFromHandle || IsScrollAtTop();
-                _isHandleDragging = _canDismissForCurrentPan;
-
-                if (startedFromHandle)
-                {
-                    GetHandleBar()?.SetValue(Border.BackgroundColorProperty, Colors.White);
-                }
+                _canDismissForCurrentPan = IsScrollAtTop();
+                _isSheetDragging = _canDismissForCurrentPan;
 
                 break;
 
-            case GestureStatus.Running when _isHandleDragging:
+            case GestureStatus.Running when _isSheetDragging:
                 if (_dismissTriggered)
                 {
                     break;
@@ -150,16 +141,69 @@ public partial class ContextMenu : ContentView
                     _ = this.TranslateToAsync(0, 0, DragCancelSnapBackDurationMs, Easing.SinOut);
                 }
 
-                _isHandleDragging = false;
+                _isSheetDragging = false;
                 _canDismissForCurrentPan = false;
-                ResetHandleBarVisual();
                 break;
         }
     }
 
-    private void ResetHandleBarVisual()
+    private void WireDismissPanAcrossMenu()
     {
-        GetHandleBar()?.SetDynamicResource(Border.BackgroundColorProperty, "SeparatorColor");
+        AttachDismissPanRecursive(this);
+    }
+
+    private void AttachDismissPanRecursive(Element parent)
+    {
+        foreach (var child in GetChildren(parent))
+        {
+            if (child is View view)
+            {
+                AttachDismissPanIfNeeded(view);
+            }
+
+            AttachDismissPanRecursive(child);
+        }
+    }
+
+    private void AttachDismissPanIfNeeded(View view)
+    {
+        if (view.GestureRecognizers.OfType<PanGestureRecognizer>().Any())
+        {
+            return;
+        }
+
+        var pan = new PanGestureRecognizer();
+        pan.PanUpdated += OnMenuPanUpdated;
+        view.GestureRecognizers.Add(pan);
+    }
+
+    private static IEnumerable<Element> GetChildren(Element parent)
+    {
+        if (parent is Layout layout)
+        {
+            foreach (var child in layout.Children)
+            {
+                if (child is Element childElement)
+                {
+                    yield return childElement;
+                }
+            }
+        }
+
+        if (parent is ContentView contentView && contentView.Content is Element contentElement)
+        {
+            yield return contentElement;
+        }
+
+        if (parent is Border border && border.Content is Element borderContent)
+        {
+            yield return borderContent;
+        }
+
+        if (parent is ScrollView scrollView && scrollView.Content is Element scrollContent)
+        {
+            yield return scrollContent;
+        }
     }
 
     private bool IsScrollAtTop()
@@ -189,8 +233,4 @@ public partial class ContextMenu : ContentView
         return FindByName("MenuSheet") as Border;
     }
 
-    private Border? GetHandleBar()
-    {
-        return FindByName("HandleBar") as Border;
-    }
 }
