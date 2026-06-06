@@ -67,7 +67,7 @@
                             <Slider Maximum="{Binding Duration}"
                                 MaximumTrackColor="{DynamicResource BackgroundTertiary}"
                                 Minimum="0"
-                                MinimumTrackColor="{DynamicResource AccentColor}"
+                                MinimumTrackColor="{DynamicResource IconSecondary}"
                                 ThumbColor="{DynamicResource IconPrimary}"
                                 Value="{Binding SliderPosition, Mode=TwoWay}">
                                 <Slider.Behaviors>
@@ -169,6 +169,7 @@
 
                     <Border BackgroundColor="{DynamicResource IconPrimary}"
                         HeightRequest="60"
+                        Margin="4,0"
                         StrokeThickness="0"
                         WidthRequest="60">
                         <Border.GestureRecognizers>
