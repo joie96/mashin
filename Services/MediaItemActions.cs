@@ -17,6 +17,7 @@ public interface IMediaItemActions
     Task PlayMediaAsync(object item, object? startItem = null);
     Task PlayMediaNextAsync(object item, object? startItem = null);
     Task PlayMediaLastAsync(object item, object? startItem = null);
+    Task ShufflePlayMediaAsync(IEnumerable<MediaItem> items);
     Task ShufflePlayMediaAsync(MediaItem parentItem, IEnumerable<MediaItem> associatedItems);
     Task AddToPlaylistAsync(object item, Playlist playlist);
     Task RemoveFromPlaylistAsync(object item, Playlist playlist);
@@ -194,6 +195,37 @@ public class MediaItemActions : IMediaItemActions
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to add media to queue");
+        }
+    }
+
+    /// <summary>
+    /// Shuffles a standalone collection, starts with one random item,
+    /// then queues the remaining shuffled items next.
+    /// </summary>
+    public async Task ShufflePlayMediaAsync(IEnumerable<MediaItem> items)
+    {
+        var mediaItems = items?
+            .Where(mediaItem => mediaItem != null)
+            .ToList() ?? new List<MediaItem>();
+
+        if (mediaItems.Count == 0)
+        {
+            _logger.LogWarning("No items available to shuffle play");
+            return;
+        }
+
+        for (var i = mediaItems.Count - 1; i > 0; i--)
+        {
+            var j = Random.Shared.Next(i + 1);
+            (mediaItems[i], mediaItems[j]) = (mediaItems[j], mediaItems[i]);
+        }
+
+        await PlayMediaAsync(mediaItems[0]);
+
+        var remainingItems = mediaItems.Skip(1).ToList();
+        if (remainingItems.Count > 0)
+        {
+            await PlayMediaNextAsync(remainingItems);
         }
     }
 

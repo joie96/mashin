@@ -357,6 +357,7 @@
                     </Border.StrokeShape>
 
                     <controls:TableView ItemsSource="{Binding TopTrackItems}"
+                        PlaybackContextItem="{Binding Artist}"
                         ShowContextMenuAtAnchorCommand="{Binding ShowTrackContextMenuAtAnchorCommand}" />
                 </Border>
             </VerticalStackLayout>

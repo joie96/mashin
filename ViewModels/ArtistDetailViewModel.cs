@@ -308,25 +308,18 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
         ShuffleArtistCommand = new Command(async () =>
         {
-            var shuffledTracks = TopTracks.ToList();
-            if (shuffledTracks.Count == 0)
+            if (Artist == null)
             {
                 return;
             }
 
-            for (var i = shuffledTracks.Count - 1; i > 0; i--)
+            var tracks = TopTracks.ToList();
+            if (tracks.Count == 0)
             {
-                var j = _shuffleRandom.Next(i + 1);
-                (shuffledTracks[i], shuffledTracks[j]) = (shuffledTracks[j], shuffledTracks[i]);
+                return;
             }
 
-            await MediaActions.PlayMediaAsync(shuffledTracks[0]);
-
-            var remainingTracks = shuffledTracks.Skip(1).ToList();
-            if (remainingTracks.Count > 0)
-            {
-                await MediaActions.PlayMediaNextAsync(remainingTracks);
-            }
+            await MediaActions.ShufflePlayMediaAsync(Artist, tracks);
         });
 
         ToggleArtistFavoriteCommand = new Command(async () =>
