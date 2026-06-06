@@ -74,6 +74,16 @@ public partial class MainPage : ContentPage
         _overlayService.OnFlyoutBackdropTapped();
     }
 
+    private async void OnPlayerBarTapped(object? sender, TappedEventArgs e)
+    {
+        if (_viewModel.CurrentTrack is null)
+        {
+            return;
+        }
+
+        await _overlayService.ShowPlayerBarOverlayAsync(_viewModel);
+    }
+
     #region Android Back Button Handling
     protected override bool OnBackButtonPressed()
     {
@@ -87,28 +97,34 @@ public partial class MainPage : ContentPage
             return true;
         }
 
+        if (_overlayService.IsPlayerBarOverlayOpen)
+        {
+            _ = HandleAndroidBackAsync(closePlayerBarOverlay: true, closeOverlay: false, closeFlyout: false, navigateBack: false);
+            return true;
+        }
+
         if (_overlayService.IsOverlayOpen)
         {
-            _ = HandleAndroidBackAsync(closeOverlay: true, closeFlyout: false, navigateBack: false);
+            _ = HandleAndroidBackAsync(closePlayerBarOverlay: false, closeOverlay: true, closeFlyout: false, navigateBack: false);
             return true;
         }
 
         if (_overlayService.IsFlyoutOpen)
         {
-            _ = HandleAndroidBackAsync(closeOverlay: false, closeFlyout: true, navigateBack: false);
+            _ = HandleAndroidBackAsync(closePlayerBarOverlay: false, closeOverlay: false, closeFlyout: true, navigateBack: false);
             return true;
         }
 
         if (_navigationService.CanGoBack)
         {
-            _ = HandleAndroidBackAsync(closeOverlay: false, closeFlyout: false, navigateBack: true);
+            _ = HandleAndroidBackAsync(closePlayerBarOverlay: false, closeOverlay: false, closeFlyout: false, navigateBack: true);
             return true;
         }
 
         return base.OnBackButtonPressed();
     }
 
-    private async Task HandleAndroidBackAsync(bool closeOverlay, bool closeFlyout, bool navigateBack)
+    private async Task HandleAndroidBackAsync(bool closePlayerBarOverlay, bool closeOverlay, bool closeFlyout, bool navigateBack)
     {
         if (_isHandlingBackNavigation)
         {
@@ -118,6 +134,12 @@ public partial class MainPage : ContentPage
         _isHandlingBackNavigation = true;
         try
         {
+            if (closePlayerBarOverlay)
+            {
+                await _overlayService.HidePlayerBarOverlayAsync();
+                return;
+            }
+
             if (closeOverlay)
             {
                 await _overlayService.CloseOverlayAsync();

@@ -1,0 +1,416 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView
+    x:Class="mashin.Views.Mobile.Controls.PlayerBarOverlay"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:behaviors="clr-namespace:mashin.Views.Desktop.Behaviors"
+    xmlns:converters="clr-namespace:mashin.Converters"
+    xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
+    xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons">
+
+    <ContentView.Resources>
+        <!--  Playback State Converter  -->
+        <converters:PlayStateToBoolConverter x:Key="PlayStateToBoolConverter" />
+    </ContentView.Resources>
+
+    <Grid>
+        <!--  Backdrop for tap-to-dismiss  -->
+        <BoxView x:Name="Backdrop"
+            BackgroundColor="#80000000"
+            Opacity="0">
+            <BoxView.GestureRecognizers>
+                <TapGestureRecognizer Tapped="OnBackdropTapped" />
+            </BoxView.GestureRecognizers>
+        </BoxView>
+
+        <!--  Fullscreen overlay sheet with swipe-down dismiss  -->
+        <Border x:Name="OverlaySheet"
+            BackgroundColor="{DynamicResource BackgroundSecondary}"
+            Padding="0,20,0,20"
+            StrokeThickness="0"
+            TranslationY="1200"
+            VerticalOptions="Fill">
+            <Border.GestureRecognizers>
+                <PanGestureRecognizer PanUpdated="OnSheetPanUpdated" />
+            </Border.GestureRecognizers>
+            <Border.StrokeShape>
+                <RoundRectangle CornerRadius="0" />
+            </Border.StrokeShape>
+
+            <Grid RowDefinitions="Auto,*,Auto"
+                RowSpacing="0">
+
+                <ScrollView Grid.Row="0"
+                    VerticalScrollBarVisibility="Never">
+                    <VerticalStackLayout Spacing="14">
+
+                        <!--  Cover  -->
+                        <Border x:Name="CoverArtBorder"
+                            Margin="16,0,16,0"
+                            BackgroundColor="{DynamicResource BackgroundTertiary}"
+                            HorizontalOptions="Fill"
+                            MaximumWidthRequest="500"
+                            StrokeThickness="0">
+                            <Border.HeightRequest>
+                                <Binding Source="{x:Reference CoverArtBorder}" Path="Width" />
+                            </Border.HeightRequest>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="16" />
+                            </Border.StrokeShape>
+                            <ffimageloading:CachedImage Aspect="AspectFill"
+                                Source="{Binding CurrentTrack.ImageUri}" />
+                        </Border>
+
+                        <!--  Progress slider and time labels  -->
+                        <VerticalStackLayout Margin="16,8,16,0"
+                            Spacing="6">
+                            <Slider Maximum="{Binding Duration}"
+                                MaximumTrackColor="{DynamicResource BackgroundTertiary}"
+                                Minimum="0"
+                                MinimumTrackColor="{DynamicResource AccentColor}"
+                                ThumbColor="{DynamicResource IconPrimary}"
+                                Value="{Binding SliderPosition, Mode=TwoWay}">
+                                <Slider.Behaviors>
+                                    <behaviors:SliderDragCompletedBehavior StartedCommand="{Binding BeginSeekCommand}" Command="{Binding SeekCommand}" />
+                                </Slider.Behaviors>
+                            </Slider>
+
+                            <Grid ColumnDefinitions="Auto,*,Auto">
+                                <Label FontFamily="PoppinsRegular"
+                                    FontSize="12"
+                                    Text="{Binding PositionText}"
+                                    TextColor="{DynamicResource TextSecondary}" />
+                                <Label Grid.Column="2"
+                                    FontFamily="PoppinsRegular"
+                                    FontSize="12"
+                                    HorizontalTextAlignment="End"
+                                    Text="{Binding DurationText}"
+                                    TextColor="{DynamicResource TextSecondary}" />
+                            </Grid>
+                        </VerticalStackLayout>
+
+                        <!--  Track metadata  -->
+                        <VerticalStackLayout Margin="16,0,16,0"
+                            HorizontalOptions="Fill"
+                            Spacing="3"
+                            VerticalOptions="Start">
+                            <Label FontFamily="PoppinsRegular"
+                                FontSize="24"
+                                HorizontalTextAlignment="Center"
+                                LineBreakMode="TailTruncation"
+                                MaxLines="2"
+                                Text="{Binding CurrentTrack.DisplayName}"
+                                TextColor="{DynamicResource TextPrimary}" />
+                            <Label FontFamily="PoppinsRegular"
+                                FontSize="16"
+                                HorizontalTextAlignment="Center"
+                                LineBreakMode="TailTruncation"
+                                MaxLines="1"
+                                Text="{Binding CurrentTrack.AlbumName}"
+                                TextColor="{DynamicResource TextTertiary}" />
+                            <Label FontFamily="PoppinsRegular"
+                                FontSize="14"
+                                HorizontalTextAlignment="Center"
+                                LineBreakMode="TailTruncation"
+                                MaxLines="1"
+                                Text="{Binding CurrentTrack.ArtistName}"
+                                TextColor="{DynamicResource TextSecondary}" />
+                        </VerticalStackLayout>
+
+                    </VerticalStackLayout>
+                </ScrollView>
+
+                <!--  Playback controls  -->
+                <HorizontalStackLayout Grid.Row="1"
+                    HorizontalOptions="Center"
+                    Spacing="18"
+                    VerticalOptions="Center">
+                    <Border BackgroundColor="Transparent"
+                        HeightRequest="44"
+                        StrokeThickness="0"
+                        WidthRequest="44">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding ToggleShuffleCommand}" />
+                        </Border.GestureRecognizers>
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="22" />
+                        </Border.StrokeShape>
+                        <Label FontSize="20"
+                            HorizontalOptions="Center"
+                            Text="{mi:Fluent Icon=ArrowShuffle24, FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center">
+                            <Label.Triggers>
+                                <DataTrigger Binding="{Binding IsShuffleActive}"
+                                    TargetType="Label"
+                                    Value="True">
+                                    <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
+                                </DataTrigger>
+                            </Label.Triggers>
+                        </Label>
+                    </Border>
+
+                    <Border BackgroundColor="Transparent"
+                        HeightRequest="44"
+                        StrokeThickness="0"
+                        WidthRequest="44">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding PreviousTrackCommand}" />
+                        </Border.GestureRecognizers>
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="22" />
+                        </Border.StrokeShape>
+                        <Label FontSize="22"
+                            HorizontalOptions="Center"
+                            Text="{mi:FluentFilled Icon=Previous48Filled, FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+
+                    <Border BackgroundColor="{DynamicResource IconPrimary}"
+                        HeightRequest="60"
+                        StrokeThickness="0"
+                        WidthRequest="60">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding TogglePlayPauseCommand}" />
+                        </Border.GestureRecognizers>
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="30" />
+                        </Border.StrokeShape>
+                        <Grid>
+                            <Label FontSize="26"
+                                HorizontalOptions="Center"
+                                IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=paused}"
+                                Text="{mi:FluentFilled Icon=Play48Filled, FontOverride=True}"
+                                TextColor="{DynamicResource BackgroundPrimary}"
+                                VerticalOptions="Center" />
+                            <Label FontSize="26"
+                                HorizontalOptions="Center"
+                                IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=playing}"
+                                Text="{mi:FluentFilled Icon=Pause48Filled, FontOverride=True}"
+                                TextColor="{DynamicResource BackgroundPrimary}"
+                                VerticalOptions="Center" />
+                            <ActivityIndicator HeightRequest="20"
+                                IsRunning="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
+                                IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
+                                Scale="1.5"
+                                WidthRequest="20"
+                                Color="{DynamicResource BackgroundPrimary}" />
+                        </Grid>
+                    </Border>
+
+                    <Border BackgroundColor="Transparent"
+                        HeightRequest="44"
+                        StrokeThickness="0"
+                        WidthRequest="44">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding NextTrackCommand}" />
+                        </Border.GestureRecognizers>
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="22" />
+                        </Border.StrokeShape>
+                        <Label FontSize="22"
+                            HorizontalOptions="Center"
+                            Text="{mi:FluentFilled Icon=Next48Filled, FontOverride=True}"
+                            TextColor="{DynamicResource IconPrimary}"
+                            VerticalOptions="Center" />
+                    </Border>
+
+                    <Border BackgroundColor="Transparent"
+                        HeightRequest="44"
+                        StrokeThickness="0"
+                        WidthRequest="44">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding ToggleRepeatModeCommand}" />
+                        </Border.GestureRecognizers>
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="22" />
+                        </Border.StrokeShape>
+                        <Grid>
+                            <Label FontSize="20"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=ArrowRepeatAll24, FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center">
+                                <Label.Triggers>
+                                    <DataTrigger Binding="{Binding IsRepeatEnabled}"
+                                        TargetType="Label"
+                                        Value="True">
+                                        <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
+                                    </DataTrigger>
+                                </Label.Triggers>
+                            </Label>
+                            <Label FontAttributes="Bold"
+                                FontSize="9"
+                                HorizontalOptions="End"
+                                IsVisible="{Binding IsRepeatOne}"
+                                Margin="0,0,5,6"
+                                Text="1"
+                                TextColor="{DynamicResource AccentColor}"
+                                VerticalOptions="End" />
+                        </Grid>
+                    </Border>
+                </HorizontalStackLayout>
+
+                <!--  Secondary action controls  -->
+                <HorizontalStackLayout Grid.Row="2"
+                    HorizontalOptions="Center"
+                    Spacing="18">
+                    <Border x:Name="CurrentTrackAddToPlaylistButton"
+                        BackgroundColor="Transparent"
+                        HeightRequest="44"
+                        StrokeThickness="0"
+                        WidthRequest="44">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding ShowCurrentTrackContextMenuCommand}"
+                                CommandParameter="{x:Reference CurrentTrackAddToPlaylistButton}" />
+                        </Border.GestureRecognizers>
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="22" />
+                        </Border.StrokeShape>
+                        <Label FontSize="20"
+                            HorizontalOptions="Center"
+                            Text="{mi:Fluent Icon=Add24, FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center" />
+                    </Border>
+
+                    <Border BackgroundColor="Transparent"
+                        HeightRequest="44"
+                        StrokeThickness="0"
+                        WidthRequest="44">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding ToggleCurrentTrackFavoriteCommand}" />
+                        </Border.GestureRecognizers>
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="22" />
+                        </Border.StrokeShape>
+                        <Grid>
+                            <Label FontSize="20"
+                                HorizontalOptions="Center"
+                                Text="{mi:Fluent Icon=Heart24, FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center">
+                                <Label.Triggers>
+                                    <DataTrigger Binding="{Binding CurrentTrack.Favorite}"
+                                        TargetType="Label"
+                                        Value="True">
+                                        <Setter Property="IsVisible" Value="False" />
+                                    </DataTrigger>
+                                </Label.Triggers>
+                            </Label>
+                            <Label FontSize="20"
+                                HorizontalOptions="Center"
+                                IsVisible="False"
+                                Text="{mi:FluentFilled Icon=Heart48Filled, FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center">
+                                <Label.Triggers>
+                                    <DataTrigger Binding="{Binding CurrentTrack.Favorite}"
+                                        TargetType="Label"
+                                        Value="True">
+                                        <Setter Property="IsVisible" Value="True" />
+                                    </DataTrigger>
+                                </Label.Triggers>
+                            </Label>
+                        </Grid>
+                    </Border>
+
+                    <Border x:Name="QueueButtonAnchor"
+                        BackgroundColor="Transparent"
+                        HeightRequest="44"
+                        StrokeThickness="0"
+                        WidthRequest="44">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding ShowQueueContextMenuAtAnchorCommand}"
+                                CommandParameter="{x:Reference QueueButtonAnchor}" />
+                        </Border.GestureRecognizers>
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="22" />
+                        </Border.StrokeShape>
+                        <Label FontSize="20"
+                            HorizontalOptions="Center"
+                            Text="{mi:Fluent Icon=RowTriple24, FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center" />
+                    </Border>
+
+                    <Border BackgroundColor="Transparent"
+                        HeightRequest="44"
+                        StrokeThickness="0"
+                        WidthRequest="44">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding ToggleDontStopTheMusicCommand}" />
+                        </Border.GestureRecognizers>
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="22" />
+                        </Border.StrokeShape>
+                        <Label FontSize="20"
+                            HorizontalOptions="Center"
+                            Text="{mi:Fluent Icon=MusicNote216, FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center">
+                            <Label.Triggers>
+                                <DataTrigger Binding="{Binding IsDontStopTheMusicEnabled}"
+                                    TargetType="Label"
+                                    Value="True">
+                                    <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
+                                </DataTrigger>
+                            </Label.Triggers>
+                        </Label>
+                    </Border>
+
+                    <Border BackgroundColor="Transparent"
+                        HeightRequest="44"
+                        StrokeThickness="0"
+                        WidthRequest="44">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding ToggleDeviceSelectionFlyoutCommand}" />
+                        </Border.GestureRecognizers>
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="22" />
+                        </Border.StrokeShape>
+                        <Label FontSize="20"
+                            HorizontalOptions="Center"
+                            Text="{mi:Fluent Icon=PhoneDesktop24, FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center">
+                            <Label.Triggers>
+                                <DataTrigger Binding="{Binding IsDeviceSelectionFlyoutOpen}"
+                                    TargetType="Label"
+                                    Value="True">
+                                    <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
+                                </DataTrigger>
+                            </Label.Triggers>
+                        </Label>
+                    </Border>
+
+                    <Border BackgroundColor="Transparent"
+                        HeightRequest="44"
+                        StrokeThickness="0"
+                        WidthRequest="44">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding ToggleAudioOptionsFlyoutCommand}" />
+                        </Border.GestureRecognizers>
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="22" />
+                        </Border.StrokeShape>
+                        <Label FontSize="20"
+                            HorizontalOptions="Center"
+                            Text="{mi:Fluent Icon=Options24, FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center">
+                            <Label.Triggers>
+                                <DataTrigger Binding="{Binding IsAudioOptionsFlyoutOpen}"
+                                    TargetType="Label"
+                                    Value="True">
+                                    <Setter Property="TextColor" Value="{DynamicResource AccentColor}" />
+                                </DataTrigger>
+                            </Label.Triggers>
+                        </Label>
+                    </Border>
+                </HorizontalStackLayout>
+            </Grid>
+        </Border>
+    </Grid>
+</ContentView>

@@ -29,8 +29,11 @@ public interface IOverlayService
 
     bool IsQueueOverlayOpen { get; }
     bool IsQueueOverlayAnimating { get; }
+    bool IsPlayerBarOverlayOpen { get; }
     bool IsOverlayOpen { get; }
     bool IsFlyoutOpen { get; }
+    Task ShowPlayerBarOverlayAsync(object bindingContext);
+    Task HidePlayerBarOverlayAsync();
     Task ShowQueueOverlayAsync(object bindingContext);
     Task HideQueueOverlayAsync();
     Task CloseOverlayAsync();
@@ -56,6 +59,12 @@ public sealed class OverlayService : IOverlayService
 {
     #region Fields
 
+    private enum FlyoutLayoutMode
+    {
+        Bottom,
+        FullHeight
+    }
+
     private readonly ILogger<OverlayService> _logger;
     private readonly SemaphoreSlim _overlayLock = new(1, 1);
 
@@ -64,6 +73,7 @@ public sealed class OverlayService : IOverlayService
     private readonly DeletePlaylistOverlay _deletePlaylistOverlay;
     private readonly LoginOverlay _loginOverlay;
     private readonly QueueOverlay _queueOverlay;
+    private readonly PlayerBarOverlay _playerBarOverlay;
     private readonly SelectionIndicatorOverlay _selectionIndicatorOverlay;
 
     private Grid? _overlayHost;
@@ -111,6 +121,9 @@ public sealed class OverlayService : IOverlayService
 
         _queueOverlay = new QueueOverlay();
 
+        _playerBarOverlay = new PlayerBarOverlay();
+        _playerBarOverlay.DismissRequested += async (_, _) => await HidePlayerBarOverlayAsync();
+
         _selectionIndicatorOverlay = new SelectionIndicatorOverlay();
         _selectionIndicatorOverlay.SelectAllTapped += OnSelectionIndicatorSelectAllTapped;
         _selectionIndicatorOverlay.MenuTapped += OnSelectionIndicatorMenuTapped;
@@ -153,7 +166,7 @@ public sealed class OverlayService : IOverlayService
 
     public Task ShowContextMenuMainAsync(View menuView, Action? onClose)
     {
-        return ShowFlyoutLayerAsync(menuView, onClose);
+        return ShowFlyoutLayerAsync(menuView, onClose, FlyoutLayoutMode.Bottom);
     }
 
     public Task HideContextMenuMainAsync()
@@ -193,9 +206,48 @@ public sealed class OverlayService : IOverlayService
 
     public bool IsQueueOverlayAnimating => _queueOverlay.IsAnimating;
 
+    public bool IsPlayerBarOverlayOpen => _playerBarOverlay.IsOpen;
+
     public bool IsOverlayOpen => _overlayHost?.IsVisible == true;
 
     public bool IsFlyoutOpen => _flyoutHost?.IsVisible == true;
+
+    public async Task ShowPlayerBarOverlayAsync(object bindingContext)
+    {
+        if (bindingContext == null)
+        {
+            return;
+        }
+
+        EnsureInitialized();
+
+        await MainThread.InvokeOnMainThreadAsync(async () =>
+        {
+            // Force a clean rebind cycle in case the same view model instance is reused.
+            _playerBarOverlay.BindingContext = null;
+            _playerBarOverlay.BindingContext = bindingContext;
+
+            await ShowFlyoutLayerAsync(_playerBarOverlay, () => _ = HidePlayerBarOverlayAsync(), FlyoutLayoutMode.FullHeight);
+            await _playerBarOverlay.AnimateInAsync();
+        });
+    }
+
+    public async Task HidePlayerBarOverlayAsync()
+    {
+        EnsureInitialized();
+
+        await MainThread.InvokeOnMainThreadAsync(async () =>
+        {
+            await _playerBarOverlay.AnimateOutAsync();
+
+            if (_flyoutHost != null)
+            {
+                _flyoutHost.IsVisible = false;
+            }
+
+            _flyoutCloseAction = null;
+        });
+    }
 
     public async Task ShowQueueOverlayAsync(object bindingContext)
     {
@@ -212,7 +264,7 @@ public sealed class OverlayService : IOverlayService
             _queueOverlay.BindingContext = null;
             _queueOverlay.BindingContext = bindingContext;
 
-            await ShowFlyoutLayerAsync(_queueOverlay, () => _ = HideQueueOverlayAsync());
+            await ShowFlyoutLayerAsync(_queueOverlay, () => _ = HideQueueOverlayAsync(), FlyoutLayoutMode.Bottom);
             await _queueOverlay.ShowAsync();
         });
     }
@@ -260,6 +312,12 @@ public sealed class OverlayService : IOverlayService
         {
             if (!IsFlyoutOpen)
             {
+                return;
+            }
+
+            if (IsPlayerBarOverlayOpen)
+            {
+                await HidePlayerBarOverlayAsync();
                 return;
             }
 
@@ -734,12 +792,12 @@ public sealed class OverlayService : IOverlayService
         });
     }
 
-    private Task ShowFlyoutLayerAsync(View flyout, Action? onClose)
+    private Task ShowFlyoutLayerAsync(View flyout, Action? onClose, FlyoutLayoutMode layoutMode)
     {
         return MainThread.InvokeOnMainThreadAsync(() =>
         {
             EnsureInitialized();
-            ShowFlyoutInternal(flyout, onClose);
+            ShowFlyoutInternal(flyout, onClose, layoutMode);
         });
     }
 
@@ -754,6 +812,7 @@ public sealed class OverlayService : IOverlayService
 
             _flyoutHost.IsVisible = false;
             _flyoutContent.Content = null;
+            _flyoutContent.VerticalOptions = LayoutOptions.End;
             _flyoutCloseAction = null;
         });
     }
@@ -770,11 +829,20 @@ public sealed class OverlayService : IOverlayService
         _overlayHost.IsVisible = true;
     }
 
-    private void ShowFlyoutInternal(View flyout, Action? onClose)
+    private void ShowFlyoutInternal(View flyout, Action? onClose, FlyoutLayoutMode layoutMode)
     {
         if (_flyoutHost == null || _flyoutContent == null)
         {
             return;
+        }
+
+        var useFullHeight = layoutMode == FlyoutLayoutMode.FullHeight;
+        _flyoutContent.VerticalOptions = useFullHeight ? LayoutOptions.Fill : LayoutOptions.End;
+        flyout.VerticalOptions = useFullHeight ? LayoutOptions.Fill : LayoutOptions.End;
+
+        if (useFullHeight)
+        {
+            flyout.HeightRequest = -1;
         }
 
         _flyoutContent.Content = flyout;
