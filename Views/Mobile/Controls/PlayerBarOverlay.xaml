@@ -40,88 +40,86 @@
             <Grid RowDefinitions="Auto,*,Auto"
                 RowSpacing="0">
 
-                <ScrollView Grid.Row="0"
-                    VerticalScrollBarVisibility="Never">
-                    <VerticalStackLayout Spacing="14">
+                <VerticalStackLayout Grid.Row="0"
+                    x:Name="TopContentLayout"
+                    Spacing="14">
 
-                        <!--  Cover  -->
-                        <Border x:Name="CoverArtBorder"
-                            Margin="16,0,16,0"
-                            BackgroundColor="{DynamicResource BackgroundTertiary}"
-                            HorizontalOptions="Fill"
-                            MaximumWidthRequest="500"
-                            StrokeThickness="0">
-                            <Border.HeightRequest>
-                                <Binding Source="{x:Reference CoverArtBorder}" Path="Width" />
-                            </Border.HeightRequest>
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="16" />
-                            </Border.StrokeShape>
-                            <ffimageloading:CachedImage Aspect="AspectFill"
-                                Source="{Binding CurrentTrack.ImageUri}" />
-                        </Border>
+                    <!--  Cover  -->
+                    <Border x:Name="CoverArtBorder"
+                        Margin="16,0,16,0"
+                        BackgroundColor="{DynamicResource BackgroundTertiary}"
+                        HorizontalOptions="Fill"
+                        StrokeThickness="0">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="16" />
+                        </Border.StrokeShape>
+                        <ffimageloading:CachedImage Aspect="AspectFill"
+                            Source="{Binding CurrentTrack.ImageUri}" />
+                    </Border>
 
-                        <!--  Progress slider and time labels  -->
-                        <VerticalStackLayout Margin="16,8,16,0"
-                            Spacing="6">
-                            <Slider Maximum="{Binding Duration}"
-                                MaximumTrackColor="{DynamicResource BackgroundTertiary}"
-                                Minimum="0"
-                                MinimumTrackColor="{DynamicResource IconSecondary}"
-                                ThumbColor="{DynamicResource IconPrimary}"
-                                Value="{Binding SliderPosition, Mode=TwoWay}">
-                                <Slider.Behaviors>
-                                    <behaviors:SliderDragCompletedBehavior StartedCommand="{Binding BeginSeekCommand}" Command="{Binding SeekCommand}" />
-                                </Slider.Behaviors>
-                            </Slider>
+                    <!--  Progress slider and time labels  -->
+                    <VerticalStackLayout x:Name="ProgressSection"
+                        Margin="16,8,16,0"
+                        Spacing="6">
+                        <Slider Maximum="{Binding Duration}"
+                            MaximumTrackColor="{DynamicResource BackgroundTertiary}"
+                            Minimum="0"
+                            MinimumTrackColor="{DynamicResource IconSecondary}"
+                            ThumbColor="{DynamicResource IconPrimary}"
+                            Value="{Binding SliderPosition, Mode=TwoWay}">
+                            <Slider.Behaviors>
+                                <behaviors:SliderDragCompletedBehavior StartedCommand="{Binding BeginSeekCommand}" Command="{Binding SeekCommand}" />
+                            </Slider.Behaviors>
+                        </Slider>
 
-                            <Grid ColumnDefinitions="Auto,*,Auto">
-                                <Label FontFamily="PoppinsRegular"
-                                    FontSize="12"
-                                    Text="{Binding PositionText}"
-                                    TextColor="{DynamicResource TextSecondary}" />
-                                <Label Grid.Column="2"
-                                    FontFamily="PoppinsRegular"
-                                    FontSize="12"
-                                    HorizontalTextAlignment="End"
-                                    Text="{Binding DurationText}"
-                                    TextColor="{DynamicResource TextSecondary}" />
-                            </Grid>
-                        </VerticalStackLayout>
-
-                        <!--  Track metadata  -->
-                        <VerticalStackLayout Margin="16,0,16,0"
-                            HorizontalOptions="Fill"
-                            Spacing="3"
-                            VerticalOptions="Start">
+                        <Grid ColumnDefinitions="Auto,*,Auto">
                             <Label FontFamily="PoppinsRegular"
-                                FontSize="24"
-                                HorizontalTextAlignment="Center"
-                                LineBreakMode="TailTruncation"
-                                MaxLines="2"
-                                Text="{Binding CurrentTrack.DisplayName}"
-                                TextColor="{DynamicResource TextPrimary}" />
-                            <Label FontFamily="PoppinsRegular"
-                                FontSize="16"
-                                HorizontalTextAlignment="Center"
-                                LineBreakMode="TailTruncation"
-                                MaxLines="1"
-                                Text="{Binding CurrentTrack.AlbumName}"
-                                TextColor="{DynamicResource TextTertiary}" />
-                            <Label FontFamily="PoppinsRegular"
-                                FontSize="14"
-                                HorizontalTextAlignment="Center"
-                                LineBreakMode="TailTruncation"
-                                MaxLines="1"
-                                Text="{Binding CurrentTrack.ArtistName}"
+                                FontSize="12"
+                                Text="{Binding PositionText}"
                                 TextColor="{DynamicResource TextSecondary}" />
-                        </VerticalStackLayout>
-
+                            <Label Grid.Column="2"
+                                FontFamily="PoppinsRegular"
+                                FontSize="12"
+                                HorizontalTextAlignment="End"
+                                Text="{Binding DurationText}"
+                                TextColor="{DynamicResource TextSecondary}" />
+                        </Grid>
                     </VerticalStackLayout>
-                </ScrollView>
+
+                    <!--  Track metadata  -->
+                    <VerticalStackLayout x:Name="MetadataSection"
+                        Margin="16,0,16,0"
+                        HorizontalOptions="Fill"
+                        Spacing="3"
+                        VerticalOptions="Start">
+                        <Label FontFamily="PoppinsRegular"
+                            FontSize="24"
+                            HorizontalTextAlignment="Center"
+                            LineBreakMode="TailTruncation"
+                            MaxLines="2"
+                            Text="{Binding CurrentTrack.DisplayName}"
+                            TextColor="{DynamicResource TextPrimary}" />
+                        <Label FontFamily="PoppinsRegular"
+                            FontSize="16"
+                            HorizontalTextAlignment="Center"
+                            LineBreakMode="TailTruncation"
+                            MaxLines="1"
+                            Text="{Binding CurrentTrack.AlbumName}"
+                            TextColor="{DynamicResource TextTertiary}" />
+                        <Label FontFamily="PoppinsRegular"
+                            FontSize="14"
+                            HorizontalTextAlignment="Center"
+                            LineBreakMode="TailTruncation"
+                            MaxLines="1"
+                            Text="{Binding CurrentTrack.ArtistName}"
+                            TextColor="{DynamicResource TextSecondary}" />
+                    </VerticalStackLayout>
+
+                </VerticalStackLayout>
 
                 <!--  Playback controls  -->
-                <HorizontalStackLayout Grid.Row="1"
+                <HorizontalStackLayout x:Name="PlaybackControlsRow"
+                    Grid.Row="1"
                     HorizontalOptions="Center"
                     Spacing="18"
                     VerticalOptions="Center">
@@ -254,7 +252,8 @@
                 </HorizontalStackLayout>
 
                 <!--  Secondary action controls  -->
-                <HorizontalStackLayout Grid.Row="2"
+                <HorizontalStackLayout x:Name="SecondaryControlsRow"
+                    Grid.Row="2"
                     HorizontalOptions="Center"
                     Spacing="18">
                     <Border x:Name="CurrentTrackAddToPlaylistButton"

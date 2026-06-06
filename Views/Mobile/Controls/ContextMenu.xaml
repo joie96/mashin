@@ -25,6 +25,19 @@
         </Border.StrokeShape>
 
         <VerticalStackLayout Spacing="0">
+            <Border
+                Margin="0,0,0,8"
+                HorizontalOptions="Center"
+                BackgroundColor="{DynamicResource SeparatorColor}"
+                Opacity="0.8"
+                HeightRequest="4"
+                WidthRequest="38"
+                StrokeThickness="0">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="2" />
+                </Border.StrokeShape>
+            </Border>
+
             <CollectionView
                 x:Name="MenuItemsList"
                 ItemsSource="{Binding MenuItems, Source={x:Reference self}}"

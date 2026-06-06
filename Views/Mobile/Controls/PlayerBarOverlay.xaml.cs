@@ -4,6 +4,7 @@ public partial class PlayerBarOverlay : ContentView
 {
     private const double DragDismissThreshold = 100d;
     private const double DragResistance = 0.92d;
+    private const double CoverHeightFactor = 0.5d;
     private const uint BackdropInDurationMs = 220;
     private const uint BackdropOutDurationMs = 180;
     private const uint InSlideDurationMs = 320;
@@ -24,6 +25,7 @@ public partial class PlayerBarOverlay : ContentView
     {
         InitializeComponent();
         WireDismissPanAcrossOverlay();
+        WireCoverHeightUpdates();
     }
 
     public async Task AnimateInAsync()
@@ -144,6 +146,65 @@ public partial class PlayerBarOverlay : ContentView
     private void WireDismissPanAcrossOverlay()
     {
         AttachDismissPanRecursive(OverlaySheet);
+    }
+
+    private void WireCoverHeightUpdates()
+    {
+        SizeChanged += OnOverlaySizeChanged;
+        OverlaySheet.SizeChanged += OnOverlaySizeChanged;
+        CoverArtBorder.SizeChanged += OnOverlaySizeChanged;
+    }
+
+    private void OnOverlaySizeChanged(object? sender, EventArgs e)
+    {
+        UpdateCoverHeight();
+    }
+
+    private void UpdateCoverHeight()
+    {
+        if (OverlaySheet.Height <= 0 || OverlaySheet.Width <= 0)
+        {
+            return;
+        }
+
+        var maxByHeight = OverlaySheet.Height * CoverHeightFactor;
+        var fullWidthSide = Math.Max(0, OverlaySheet.Width - CoverArtBorder.Margin.Left - CoverArtBorder.Margin.Right);
+        var targetSide = Math.Min(fullWidthSide, maxByHeight);
+
+        if (targetSide <= 0)
+        {
+            return;
+        }
+
+        var canUseFullWidth = fullWidthSide <= maxByHeight + 0.5;
+
+        if (canUseFullWidth)
+        {
+            if (CoverArtBorder.WidthRequest >= 0)
+            {
+                CoverArtBorder.WidthRequest = -1;
+                CoverArtBorder.HorizontalOptions = LayoutOptions.Fill;
+            }
+        }
+        else
+        {
+            if (Math.Abs(CoverArtBorder.WidthRequest - targetSide) >= 0.5)
+            {
+                CoverArtBorder.WidthRequest = targetSide;
+            }
+
+            if (!CoverArtBorder.HorizontalOptions.Equals(LayoutOptions.Center))
+            {
+                CoverArtBorder.HorizontalOptions = LayoutOptions.Center;
+            }
+        }
+
+        if (Math.Abs(CoverArtBorder.HeightRequest - targetSide) < 0.5)
+        {
+            return;
+        }
+
+        CoverArtBorder.HeightRequest = targetSide;
     }
 
     private void AttachDismissPanRecursive(Element parent)
