@@ -194,6 +194,7 @@
 
                     <!--  Tracks TableView  -->
                     <controls:TableView ItemsSource="{Binding TrackItems}"
+                        PlaybackContextItem="{Binding Playlist}"
                         ShowContextMenuAtAnchorCommand="{Binding ShowContentContextMenuAtAnchorCommand}" />
                 </Border>
             </VerticalStackLayout>

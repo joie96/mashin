@@ -37,6 +37,9 @@ public partial class TableView : ContentView
     public static readonly BindableProperty ShortPressCommandProperty =
         BindableProperty.Create(nameof(ShortPressCommand), typeof(ICommand), typeof(TableView));
 
+    public static readonly BindableProperty PlaybackContextItemProperty =
+        BindableProperty.Create(nameof(PlaybackContextItem), typeof(object), typeof(TableView));
+
     public static readonly BindableProperty ShowContextMenuAtAnchorCommandProperty =
         BindableProperty.Create(nameof(ShowContextMenuAtAnchorCommand), typeof(ICommand), typeof(TableView));
 
@@ -66,6 +69,12 @@ public partial class TableView : ContentView
     {
         get => (ICommand?)GetValue(ShortPressCommandProperty);
         set => SetValue(ShortPressCommandProperty, value);
+    }
+
+    public object? PlaybackContextItem
+    {
+        get => GetValue(PlaybackContextItemProperty);
+        set => SetValue(PlaybackContextItemProperty, value);
     }
 
     public ICommand? ShowContextMenuAtAnchorCommand
@@ -248,14 +257,13 @@ public partial class TableView : ContentView
             var mediaActions = ResolveMediaActions();
             if (mediaActions != null)
             {
-                await mediaActions.PlayMediaAsync(track);
-
-                var itemsToQueue = GetItemsAfterIndex(track, inCycle: false);
-                if (itemsToQueue.Count > 0)
+                if (PlaybackContextItem is MediaItem parentItem)
                 {
-                    await mediaActions.PlayMediaNextAsync(itemsToQueue);
+                    await mediaActions.PlayMediaAsync(parentItem, track);
+                    return;
                 }
 
+                await mediaActions.PlayMediaAsync(track);
                 return;
             }
         }
@@ -414,69 +422,6 @@ public partial class TableView : ContentView
         }
 
         return services.GetService(typeof(IMediaItemActions)) as IMediaItemActions;
-    }
-
-    private int? GetIndexOf(MediaItem target)
-    {
-        var i = 0;
-        foreach (var item in EnumerateSelectableItems())
-        {
-            if (ReferenceEquals(item, target))
-            {
-                return i;
-            }
-            i++;
-        }
-
-        return null;
-    }
-
-    private List<MediaItem> GetItemsAfterIndex(MediaItem startItem, bool inCycle = false)
-    {
-        var startIndex = GetIndexOf(startItem);
-        if (startIndex is null)
-        {
-            return new List<MediaItem>();
-        }
-
-        var items = EnumerateSelectableItems().ToList();
-        if (items.Count <= 1)
-        {
-            return new List<MediaItem>();
-        }
-
-        var index = startIndex.Value;
-        var result = new List<MediaItem>(items.Count - 1);
-
-        var trailingCount = items.Count - index - 1;
-        if (trailingCount > 0)
-        {
-            result.AddRange(items.GetRange(index + 1, trailingCount));
-        }
-
-        if (inCycle && index > 0)
-        {
-            result.AddRange(items.GetRange(0, index));
-        }
-
-        return result;
-    }
-
-    private IEnumerable<MediaItem> EnumerateSelectableItems()
-    {
-        var source = ItemsSource;
-        if (source == null)
-        {
-            yield break;
-        }
-
-        foreach (var item in source)
-        {
-            if (item is MediaItem selectable)
-            {
-                yield return selectable;
-            }
-        }
     }
 
     private bool HasAnySelectedItems()

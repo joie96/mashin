@@ -65,44 +65,23 @@
                                     <Label
                                         Grid.Column="0"
                                         FontSize="16"
-                                        IsVisible="{Binding HasIcon}"
-                                        Text="{mi:Fluent Icon={Binding Icon},
+                                        IsVisible="{Binding HasFluentIcon}"
+                                        Text="{mi:Fluent Icon={Binding FluentIcon},
                                                          FontOverride=True,
                                                          IconSize=16,
                                                          IconColor={DynamicResource IconSecondary}}"
                                         TextColor="{DynamicResource IconSecondary}"
-                                        VerticalOptions="Center">
-                                        <Label.Triggers>
-                                            <DataTrigger Binding="{Binding IconIsFilled}"
-                                                TargetType="Label"
-                                                Value="True">
-                                                <Setter Property="IsVisible" Value="False" />
-                                            </DataTrigger>
-                                        </Label.Triggers>
-                                    </Label>
+                                        VerticalOptions="Center" />
                                     <Label
                                         Grid.Column="0"
                                         FontSize="16"
-                                        IsVisible="False"
-                                        Text="{mi:FluentFilled Icon={Binding Icon},
+                                        IsVisible="{Binding HasFluentFilledIcon}"
+                                        Text="{mi:FluentFilled Icon={Binding FluentFilledIcon},
                                                                FontOverride=True,
                                                                IconSize=16,
                                                                IconColor={DynamicResource IconSecondary}}"
                                         TextColor="{DynamicResource IconSecondary}"
-                                        VerticalOptions="Center">
-                                        <Label.Triggers>
-                                            <DataTrigger Binding="{Binding IconIsFilled}"
-                                                TargetType="Label"
-                                                Value="True">
-                                                <Setter Property="IsVisible" Value="True" />
-                                            </DataTrigger>
-                                            <DataTrigger Binding="{Binding HasIcon}"
-                                                TargetType="Label"
-                                                Value="False">
-                                                <Setter Property="IsVisible" Value="False" />
-                                            </DataTrigger>
-                                        </Label.Triggers>
-                                    </Label>
+                                        VerticalOptions="Center" />
 
                                     <Label
                                         Grid.Column="1"

@@ -359,25 +359,13 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
 
         ShuffleTracksCommand = new Command(async () =>
         {
-            var shuffledTracks = Tracks.ToList();
-            if (shuffledTracks.Count == 0)
+            var tracks = Tracks.ToList();
+            if (tracks.Count == 0)
             {
                 return;
             }
 
-            for (var i = shuffledTracks.Count - 1; i > 0; i--)
-            {
-                var j = _shuffleRandom.Next(i + 1);
-                (shuffledTracks[i], shuffledTracks[j]) = (shuffledTracks[j], shuffledTracks[i]);
-            }
-
-            await MediaActions.PlayMediaAsync(shuffledTracks[0]);
-
-            var remainingTracks = shuffledTracks.Skip(1).ToList();
-            if (remainingTracks.Count > 0)
-            {
-                await MediaActions.PlayMediaNextAsync(remainingTracks);
-            }
+            await MediaActions.ShufflePlayMediaAsync(tracks);
         });
 
         PlayAlbumsCommand = new Command(async () =>

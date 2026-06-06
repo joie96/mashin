@@ -922,13 +922,14 @@ public partial class TableView : ContentView
             return;
         }
 
-        // otherwise, play the media item directly and queue the rest of the items in the list
-        await MediaActions.PlayMediaAsync(item);
-        var itemsToQueue = GetItemsAfterIndex(item, inCycle: false);
-        if (itemsToQueue.Count > 0)
+        // otherwise, play the parent context and start at the clicked item
+        if (PlaybackContextItem is MediaItem parentItem)
         {
-            await MediaActions.PlayMediaNextAsync(itemsToQueue);
+            await MediaActions.PlayMediaAsync(parentItem, item);
+            return;
         }
+
+        await MediaActions.PlayMediaAsync(item);
     }
 
     private async void OnPlayOverlayClicked(object? sender, Microsoft.Maui.Controls.TappedEventArgs e)
@@ -957,14 +958,14 @@ public partial class TableView : ContentView
             return;
         }
 
-        // otherwise, play the media item directly and queue the rest of the items in the list
-        await MediaActions.PlayMediaAsync(item);
-
-        var itemsToQueue = GetItemsAfterIndex(item, inCycle: false);
-        if (itemsToQueue.Count > 0)
+        // otherwise, play the parent context and start at the clicked item
+        if (PlaybackContextItem is MediaItem parentItem)
         {
-            await MediaActions.PlayMediaNextAsync(itemsToQueue);
+            await MediaActions.PlayMediaAsync(parentItem, item);
+            return;
         }
+
+        await MediaActions.PlayMediaAsync(item);
     }
 
     private async void OnFavoriteIconTapped(object? sender, Microsoft.Maui.Controls.TappedEventArgs e)
@@ -1351,37 +1352,6 @@ public partial class TableView : ContentView
         }
 
         return null;
-    }
-
-    private List<MediaItem> GetItemsAfterIndex(MediaItem startItem, bool inCycle = false)
-    {
-        var startIndex = GetIndexOf(startItem);
-        if (startIndex is null)
-        {
-            return new List<MediaItem>();
-        }
-
-        var items = EnumerateSelectableItems().ToList();
-        if (items.Count <= 1)
-        {
-            return new List<MediaItem>();
-        }
-
-        var index = startIndex.Value;
-        var result = new List<MediaItem>(items.Count - 1);
-
-        var trailingCount = items.Count - index - 1;
-        if (trailingCount > 0)
-        {
-            result.AddRange(items.GetRange(index + 1, trailingCount));
-        }
-
-        if (inCycle && index > 0)
-        {
-            result.AddRange(items.GetRange(0, index));
-        }
-
-        return result;
     }
 
     private IEnumerable<MediaItem> EnumerateSelectableItems()
