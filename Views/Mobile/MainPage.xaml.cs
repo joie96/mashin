@@ -33,12 +33,17 @@ public partial class MainPage : ContentPage
         _overlayService.Initialize(
             OverlayHost,
             OverlayContent,
-            FlyoutHost,
-            FlyoutContent,
+            ContextMenuFlyoutHost,
+            ContextMenuFlyoutContent,
             selectionIndicatorHost,
             selectionIndicatorContent,
-            SecondaryFlyoutHost,
-            SecondaryFlyoutContent);
+            QueueFlyoutHost,
+            QueueFlyoutContent);
+
+        _overlayService.RegisterFlyoutHost(
+            FlyoutHostType.PlayerBar,
+            PlayerBarFlyoutHost,
+            PlayerBarFlyoutContent);
 
         if (_navigationService is NavigationService navService)
         {
@@ -71,14 +76,19 @@ public partial class MainPage : ContentPage
         _overlayService.OnBackdropTapped();
     }
 
-    private void OnFlyoutBackdropTapped(object? sender, TappedEventArgs e)
+    private void OnContextMenuFlyoutBackdropTapped(object? sender, TappedEventArgs e)
     {
-        _overlayService.OnFlyoutBackdropTapped();
+        _overlayService.OnContextMenuFlyoutBackdropTapped();
     }
 
-    private void OnSecondaryFlyoutBackdropTapped(object? sender, TappedEventArgs e)
+    private void OnPlayerBarFlyoutBackdropTapped(object? sender, TappedEventArgs e)
     {
-        _overlayService.OnSecondaryFlyoutBackdropTapped();
+        _overlayService.OnPlayerBarFlyoutBackdropTapped();
+    }
+
+    private void OnQueueFlyoutBackdropTapped(object? sender, TappedEventArgs e)
+    {
+        _overlayService.OnQueueFlyoutBackdropTapped();
     }
 
     private async void OnPlayerBarTapped(object? sender, TappedEventArgs e)

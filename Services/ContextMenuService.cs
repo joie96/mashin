@@ -425,7 +425,7 @@ public sealed class DefaultContextMenuService : IContextMenuService
 
             _currentMenuClosedTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-            await _overlayService.ShowContextMenuMainAsync(_mainMenu, CloseMenu);
+            await _overlayService.ShowContextMenuFlyoutAsync(_mainMenu, CloseMenu);
             await _mainMenu.AnimateInAsync();
 
             await _currentMenuClosedTcs.Task;
@@ -530,7 +530,7 @@ public sealed class DefaultContextMenuService : IContextMenuService
         await HideSubMenuCoreAsync();
 
         await _mainMenu.AnimateOutAsync();
-        await _overlayService.HideContextMenuMainAsync();
+        await _overlayService.HideContextMenuFlyoutAsync();
 
         _mainMenu = null;
 

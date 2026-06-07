@@ -33,7 +33,18 @@ public partial class MainPage : ContentPage
         BindingContext = _viewModel;
         _viewModel.CloseQueueViewRequested += OnCloseQueueViewRequestedAsync;
 
-        _overlayService.Initialize(OverlayHost, OverlayContent, FlyoutHost, FlyoutContent);
+        _overlayService.Initialize(
+            OverlayHost,
+            OverlayContent,
+            ContextMenuFlyoutHost,
+            ContextMenuFlyoutContent,
+            secondaryFlyoutHost: QueueFlyoutHost,
+            secondaryFlyoutContent: QueueFlyoutContent);
+
+        _overlayService.RegisterFlyoutHost(
+            FlyoutHostType.PlayerBar,
+            PlayerBarFlyoutHost,
+            PlayerBarFlyoutContent);
 
         // Initialize navigation service with content container
         if (_navigationService is NavigationService navService)
@@ -134,9 +145,19 @@ public partial class MainPage : ContentPage
         _overlayService.OnBackdropTapped();
     }
 
-    private void OnFlyoutBackdropTapped(object? sender, TappedEventArgs e)
+    private void OnContextMenuFlyoutBackdropTapped(object? sender, TappedEventArgs e)
     {
-        _overlayService.OnFlyoutBackdropTapped();
+        _overlayService.OnContextMenuFlyoutBackdropTapped();
+    }
+
+    private void OnPlayerBarFlyoutBackdropTapped(object? sender, TappedEventArgs e)
+    {
+        _overlayService.OnPlayerBarFlyoutBackdropTapped();
+    }
+
+    private void OnQueueFlyoutBackdropTapped(object? sender, TappedEventArgs e)
+    {
+        _overlayService.OnQueueFlyoutBackdropTapped();
     }
 
     #endregion

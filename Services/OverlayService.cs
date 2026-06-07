@@ -2,11 +2,21 @@ using mashin.Models;
 using mashin.Views.Desktop.Controls;
 using mashin.Views.Mobile.Controls;
 using Microsoft.Extensions.Logging;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using DesktopQueueOverlay = mashin.Views.Desktop.Controls.QueueOverlay;
 using MobileQueueOverlay = mashin.Views.Mobile.Controls.QueueOverlay;
 
 namespace mashin.Services;
+
+public enum FlyoutHostType
+{
+    Default,
+    ContextMenu,
+    PlayerBar,
+    Queue
+}
 
 /// <summary>
 /// Centralizes application overlays (create/update/delete playlist and login),
@@ -23,12 +33,15 @@ public interface IOverlayService
         ContentPresenter? selectionIndicatorContent = null,
         Grid? secondaryFlyoutHost = null,
         ContentPresenter? secondaryFlyoutContent = null);
+    void RegisterFlyoutHost(FlyoutHostType flyoutHostType, Grid flyoutHost, ContentPresenter flyoutContent);
     void OnBackdropTapped();
-    void OnFlyoutBackdropTapped();
-    void OnSecondaryFlyoutBackdropTapped();
+    void OnDefaultFlyoutBackdropTapped();
+    void OnContextMenuFlyoutBackdropTapped();
+    void OnPlayerBarFlyoutBackdropTapped();
+    void OnQueueFlyoutBackdropTapped();
 
-    Task ShowContextMenuMainAsync(View menuView, Action? onClose);
-    Task HideContextMenuMainAsync();
+    Task ShowContextMenuFlyoutAsync(View menuView, Action? onClose);
+    Task HideContextMenuFlyoutAsync();
     Task ShowContextMenuSubMenuAsync(View subMenuView, Action? onClose);
     Task HideContextMenuSubMenuAsync();
 
@@ -70,10 +83,11 @@ public sealed class OverlayService : IOverlayService
         FullHeight
     }
 
-    private enum FlyoutLayer
+    private sealed class FlyoutHostRegistration
     {
-        Primary,
-        Secondary
+        public required Grid Host { get; init; }
+        public required ContentPresenter Content { get; init; }
+        public Action? CloseAction { get; set; }
     }
 
     private readonly ILogger<OverlayService> _logger;
@@ -87,20 +101,15 @@ public sealed class OverlayService : IOverlayService
     private readonly MobileQueueOverlay _mobileQueueOverlay;
     private readonly PlayerBarOverlay _playerBarOverlay;
     private readonly SelectionIndicatorOverlay _selectionIndicatorOverlay;
+    private readonly Dictionary<FlyoutHostType, FlyoutHostRegistration> _flyoutHosts = new();
 
     private Grid? _overlayHost;
     private ContentPresenter? _overlayContent;
-    private Grid? _primaryFlyoutHost;
-    private ContentPresenter? _primaryFlyoutContent;
-    private Grid? _secondaryFlyoutHost;
-    private ContentPresenter? _secondaryFlyoutContent;
     private Grid? _selectionIndicatorHost;
     private ContentPresenter? _selectionIndicatorContent;
     private object? _selectionIndicatorControl;
 
     private Action? _overlayCloseAction;
-    private Action? _primaryFlyoutCloseAction;
-    private Action? _secondaryFlyoutCloseAction;
 
     private TaskCompletionSource<string?>? _createPlaylistTcs;
     private TaskCompletionSource<string?>? _updatePlaylistTcs;
@@ -164,12 +173,26 @@ public sealed class OverlayService : IOverlayService
     {
         _overlayHost = overlayHost;
         _overlayContent = overlayContent;
-        _primaryFlyoutHost = flyoutHost;
-        _primaryFlyoutContent = flyoutContent;
-        _secondaryFlyoutHost = secondaryFlyoutHost;
-        _secondaryFlyoutContent = secondaryFlyoutContent;
+        _flyoutHosts.Clear();
+        RegisterFlyoutHost(FlyoutHostType.Default, flyoutHost, flyoutContent);
+        RegisterFlyoutHost(FlyoutHostType.ContextMenu, flyoutHost, flyoutContent);
+
+        if (secondaryFlyoutHost != null && secondaryFlyoutContent != null)
+        {
+            RegisterFlyoutHost(FlyoutHostType.Queue, secondaryFlyoutHost, secondaryFlyoutContent);
+        }
+
         _selectionIndicatorHost = selectionIndicatorHost;
         _selectionIndicatorContent = selectionIndicatorContent;
+    }
+
+    public void RegisterFlyoutHost(FlyoutHostType flyoutHostType, Grid flyoutHost, ContentPresenter flyoutContent)
+    {
+        _flyoutHosts[flyoutHostType] = new FlyoutHostRegistration
+        {
+            Host = flyoutHost,
+            Content = flyoutContent
+        };
     }
 
     public void OnBackdropTapped()
@@ -177,28 +200,40 @@ public sealed class OverlayService : IOverlayService
         _overlayCloseAction?.Invoke();
     }
 
-    public void OnFlyoutBackdropTapped()
+    public void OnDefaultFlyoutBackdropTapped()
     {
-        _primaryFlyoutCloseAction?.Invoke();
+        InvokeFlyoutBackdrop(FlyoutHostType.Default);
     }
 
-    public void OnSecondaryFlyoutBackdropTapped()
+    public void OnContextMenuFlyoutBackdropTapped()
     {
-        _secondaryFlyoutCloseAction?.Invoke();
+        InvokeFlyoutBackdrop(FlyoutHostType.ContextMenu);
+    }
+
+    public void OnPlayerBarFlyoutBackdropTapped()
+    {
+        InvokeFlyoutBackdrop(FlyoutHostType.PlayerBar);
+    }
+
+    public void OnQueueFlyoutBackdropTapped()
+    {
+        InvokeFlyoutBackdrop(FlyoutHostType.Queue);
     }
 
     #endregion
 
     #region Context Menu API
 
-    public Task ShowContextMenuMainAsync(View menuView, Action? onClose)
+    public Task ShowContextMenuFlyoutAsync(View menuView, Action? onClose)
     {
-        return ShowFlyoutLayerAsync(menuView, onClose, FlyoutLayoutMode.Bottom, FlyoutLayer.Primary);
+        var hostType = IsMobileDevice() ? FlyoutHostType.ContextMenu : FlyoutHostType.Default;
+        return ShowFlyoutLayerAsync(menuView, onClose, FlyoutLayoutMode.Bottom, hostType);
     }
 
-    public Task HideContextMenuMainAsync()
+    public Task HideContextMenuFlyoutAsync()
     {
-        return HideFlyoutLayerAsync(FlyoutLayer.Primary);
+        var hostType = IsMobileDevice() ? FlyoutHostType.ContextMenu : FlyoutHostType.Default;
+        return HideFlyoutLayerAsync(hostType);
     }
 
     public Task ShowContextMenuSubMenuAsync(View subMenuView, Action? onClose)
@@ -237,7 +272,7 @@ public sealed class OverlayService : IOverlayService
 
     public bool IsOverlayOpen => _overlayHost?.IsVisible == true;
 
-    public bool IsFlyoutOpen => _primaryFlyoutHost?.IsVisible == true || _secondaryFlyoutHost?.IsVisible == true;
+    public bool IsFlyoutOpen => _flyoutHosts.Values.Any(registration => registration.Host.IsVisible);
 
     public async Task ShowPlayerBarOverlayAsync(object bindingContext)
     {
@@ -254,7 +289,8 @@ public sealed class OverlayService : IOverlayService
             _playerBarOverlay.BindingContext = null;
             _playerBarOverlay.BindingContext = bindingContext;
 
-            await ShowFlyoutLayerAsync(_playerBarOverlay, () => _ = HidePlayerBarOverlayAsync(), FlyoutLayoutMode.FullHeight, FlyoutLayer.Primary);
+            var hostType = IsMobileDevice() ? FlyoutHostType.PlayerBar : FlyoutHostType.Default;
+            await ShowFlyoutLayerAsync(_playerBarOverlay, () => _ = HidePlayerBarOverlayAsync(), FlyoutLayoutMode.FullHeight, hostType);
             await _playerBarOverlay.AnimateInAsync();
         });
     }
@@ -267,12 +303,13 @@ public sealed class OverlayService : IOverlayService
         {
             await _playerBarOverlay.AnimateOutAsync();
 
-            if (_primaryFlyoutHost != null)
+            var hostType = IsMobileDevice() ? FlyoutHostType.PlayerBar : FlyoutHostType.Default;
+            if (_flyoutHosts.TryGetValue(hostType, out var registration))
             {
-                _primaryFlyoutHost.IsVisible = false;
+                registration.Host.IsVisible = false;
             }
 
-            _primaryFlyoutCloseAction = null;
+            ClearFlyoutCloseAction(hostType);
         });
     }
 
@@ -295,8 +332,8 @@ public sealed class OverlayService : IOverlayService
             queueOverlayView.BindingContext = bindingContext;
 
             var layoutMode = useMobileQueueOverlay ? FlyoutLayoutMode.FullHeight : FlyoutLayoutMode.Bottom;
-            var layer = useMobileQueueOverlay ? FlyoutLayer.Secondary : FlyoutLayer.Primary;
-            await ShowFlyoutLayerAsync(queueOverlayView, () => _ = HideQueueOverlayAsync(), layoutMode, layer);
+            var hostType = useMobileQueueOverlay ? FlyoutHostType.Queue : FlyoutHostType.Default;
+            await ShowFlyoutLayerAsync(queueOverlayView, () => _ = HideQueueOverlayAsync(), layoutMode, hostType);
 
             if (useMobileQueueOverlay)
             {
@@ -328,22 +365,12 @@ public sealed class OverlayService : IOverlayService
 
             if (useMobileQueueOverlay)
             {
-                if (_secondaryFlyoutHost != null)
-                {
-                    _secondaryFlyoutHost.IsVisible = false;
-                }
-
-                _secondaryFlyoutCloseAction = null;
+                await HideFlyoutLayerAsync(FlyoutHostType.Queue);
                 return;
             }
 
-            if (_primaryFlyoutHost != null)
-            {
-                _primaryFlyoutHost.IsVisible = false;
-            }
-
             // Keep queue content mounted so TableView does not run full unload cleanup.
-            _primaryFlyoutCloseAction = null;
+            await HideFlyoutLayerAsync(FlyoutHostType.Default, clearContent: false);
         });
     }
 
@@ -375,21 +402,14 @@ public sealed class OverlayService : IOverlayService
                 return;
             }
 
-            if (_secondaryFlyoutHost?.IsVisible == true)
+            if (TryInvokeFlyoutCloseAction(FlyoutHostType.ContextMenu))
             {
-                if (IsQueueOverlayOpen)
-                {
-                    await HideQueueOverlayAsync();
-                    return;
-                }
+                return;
+            }
 
-                if (_secondaryFlyoutCloseAction != null)
-                {
-                    _secondaryFlyoutCloseAction.Invoke();
-                    return;
-                }
-
-                await HideFlyoutLayerAsync(FlyoutLayer.Secondary);
+            if (IsFlyoutVisible(FlyoutHostType.ContextMenu))
+            {
+                await HideFlyoutLayerAsync(FlyoutHostType.ContextMenu);
                 return;
             }
 
@@ -405,13 +425,37 @@ public sealed class OverlayService : IOverlayService
                 return;
             }
 
-            if (_primaryFlyoutCloseAction != null)
+            if (TryInvokeFlyoutCloseAction(FlyoutHostType.PlayerBar))
             {
-                _primaryFlyoutCloseAction.Invoke();
                 return;
             }
 
-            await HideFlyoutLayerAsync(FlyoutLayer.Primary);
+            if (TryInvokeFlyoutCloseAction(FlyoutHostType.Queue))
+            {
+                return;
+            }
+
+            if (TryInvokeFlyoutCloseAction(FlyoutHostType.Default))
+            {
+                return;
+            }
+
+            if (IsFlyoutVisible(FlyoutHostType.PlayerBar))
+            {
+                await HideFlyoutLayerAsync(FlyoutHostType.PlayerBar);
+                return;
+            }
+
+            if (IsFlyoutVisible(FlyoutHostType.Queue))
+            {
+                await HideFlyoutLayerAsync(FlyoutHostType.Queue);
+                return;
+            }
+
+            if (IsFlyoutVisible(FlyoutHostType.Default))
+            {
+                await HideFlyoutLayerAsync(FlyoutHostType.Default);
+            }
         });
     }
 
@@ -870,38 +914,34 @@ public sealed class OverlayService : IOverlayService
         });
     }
 
-    private Task ShowFlyoutLayerAsync(View flyout, Action? onClose, FlyoutLayoutMode layoutMode, FlyoutLayer layer)
+    private Task ShowFlyoutLayerAsync(View flyout, Action? onClose, FlyoutLayoutMode layoutMode, FlyoutHostType hostType)
     {
         return MainThread.InvokeOnMainThreadAsync(() =>
         {
             EnsureInitialized();
-            ShowFlyoutInternal(flyout, onClose, layoutMode, layer);
+            ShowFlyoutInternal(flyout, onClose, layoutMode, hostType);
         });
     }
 
-    private Task HideFlyoutLayerAsync(FlyoutLayer layer)
+    private Task HideFlyoutLayerAsync(FlyoutHostType hostType, bool clearContent = true)
     {
         return MainThread.InvokeOnMainThreadAsync(() =>
         {
-            var host = layer == FlyoutLayer.Primary ? _primaryFlyoutHost : _secondaryFlyoutHost;
-            var content = layer == FlyoutLayer.Primary ? _primaryFlyoutContent : _secondaryFlyoutContent;
-            if (host == null || content == null)
+            if (!_flyoutHosts.TryGetValue(hostType, out var registration))
             {
                 return;
             }
 
-            host.IsVisible = false;
-            content.Content = null;
-            content.VerticalOptions = LayoutOptions.End;
+            registration.Host.IsVisible = false;
 
-            if (layer == FlyoutLayer.Primary)
+            if (clearContent)
             {
-                _primaryFlyoutCloseAction = null;
+                registration.Content.Content = null;
             }
-            else
-            {
-                _secondaryFlyoutCloseAction = null;
-            }
+
+            registration.Content.VerticalOptions = LayoutOptions.End;
+
+            registration.CloseAction = null;
         });
     }
 
@@ -917,17 +957,15 @@ public sealed class OverlayService : IOverlayService
         _overlayHost.IsVisible = true;
     }
 
-    private void ShowFlyoutInternal(View flyout, Action? onClose, FlyoutLayoutMode layoutMode, FlyoutLayer layer)
+    private void ShowFlyoutInternal(View flyout, Action? onClose, FlyoutLayoutMode layoutMode, FlyoutHostType hostType)
     {
-        var host = layer == FlyoutLayer.Primary ? _primaryFlyoutHost : _secondaryFlyoutHost;
-        var content = layer == FlyoutLayer.Primary ? _primaryFlyoutContent : _secondaryFlyoutContent;
-        if (host == null || content == null)
+        if (!_flyoutHosts.TryGetValue(hostType, out var registration))
         {
             return;
         }
 
         var useFullHeight = layoutMode == FlyoutLayoutMode.FullHeight;
-        content.VerticalOptions = useFullHeight ? LayoutOptions.Fill : LayoutOptions.End;
+        registration.Content.VerticalOptions = useFullHeight ? LayoutOptions.Fill : LayoutOptions.End;
         flyout.VerticalOptions = useFullHeight ? LayoutOptions.Fill : LayoutOptions.End;
 
         if (useFullHeight)
@@ -935,22 +973,48 @@ public sealed class OverlayService : IOverlayService
             flyout.HeightRequest = -1;
         }
 
-        content.Content = flyout;
-        host.IsVisible = true;
+        registration.Content.Content = flyout;
+        registration.Host.IsVisible = true;
+        registration.CloseAction = onClose;
+    }
 
-        if (layer == FlyoutLayer.Primary)
+    private bool TryInvokeFlyoutCloseAction(FlyoutHostType hostType)
+    {
+        if (!_flyoutHosts.TryGetValue(hostType, out var registration) || registration.CloseAction == null)
         {
-            _primaryFlyoutCloseAction = onClose;
+            return false;
         }
-        else
+
+        registration.CloseAction.Invoke();
+        return true;
+    }
+
+    private void InvokeFlyoutBackdrop(FlyoutHostType hostType)
+    {
+        if (_flyoutHosts.TryGetValue(hostType, out var registration))
         {
-            _secondaryFlyoutCloseAction = onClose;
+            registration.CloseAction?.Invoke();
+        }
+    }
+
+    private bool IsFlyoutVisible(FlyoutHostType hostType)
+    {
+        return _flyoutHosts.TryGetValue(hostType, out var registration) && registration.Host.IsVisible;
+    }
+
+    private void ClearFlyoutCloseAction(FlyoutHostType hostType)
+    {
+        if (_flyoutHosts.TryGetValue(hostType, out var registration))
+        {
+            registration.CloseAction = null;
         }
     }
 
     private void EnsureInitialized()
     {
-        if (_overlayHost != null && _overlayContent != null && _primaryFlyoutHost != null && _primaryFlyoutContent != null)
+        if (_overlayHost != null
+            && _overlayContent != null
+            && _flyoutHosts.ContainsKey(FlyoutHostType.Default))
         {
             return;
         }

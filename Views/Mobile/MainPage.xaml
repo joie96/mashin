@@ -437,41 +437,61 @@
                 VerticalOptions="End" />
         </Grid>
 
-        <!-- Flyout Host -->
-        <Grid x:Name="FlyoutHost"
+        <!-- Context Menu Flyout Host -->
+        <Grid x:Name="ContextMenuFlyoutHost"
             Grid.Row="0"
             Grid.RowSpan="3"
             BackgroundColor="Transparent"
             InputTransparent="False"
             IsVisible="False"
-            ZIndex="120">
+            ZIndex="129">
             <Grid>
                 <BoxView BackgroundColor="#80000000">
                     <BoxView.GestureRecognizers>
-                        <TapGestureRecognizer Tapped="OnFlyoutBackdropTapped" />
+                        <TapGestureRecognizer Tapped="OnContextMenuFlyoutBackdropTapped" />
                     </BoxView.GestureRecognizers>
                 </BoxView>
-                <ContentPresenter x:Name="FlyoutContent"
+                <ContentPresenter x:Name="ContextMenuFlyoutContent"
                     HorizontalOptions="Fill"
                     VerticalOptions="End" />
             </Grid>
         </Grid>
 
-        <!-- Secondary Flyout Host -->
-        <Grid x:Name="SecondaryFlyoutHost"
+        <!-- Player Bar Flyout Host -->
+        <Grid x:Name="PlayerBarFlyoutHost"
             Grid.Row="0"
             Grid.RowSpan="3"
             BackgroundColor="Transparent"
             InputTransparent="False"
             IsVisible="False"
-            ZIndex="125">
+            ZIndex="123">
             <Grid>
                 <BoxView BackgroundColor="#80000000">
                     <BoxView.GestureRecognizers>
-                        <TapGestureRecognizer Tapped="OnSecondaryFlyoutBackdropTapped" />
+                        <TapGestureRecognizer Tapped="OnPlayerBarFlyoutBackdropTapped" />
                     </BoxView.GestureRecognizers>
                 </BoxView>
-                <ContentPresenter x:Name="SecondaryFlyoutContent"
+                <ContentPresenter x:Name="PlayerBarFlyoutContent"
+                    HorizontalOptions="Fill"
+                    VerticalOptions="End" />
+            </Grid>
+        </Grid>
+
+        <!-- Queue Flyout Host -->
+        <Grid x:Name="QueueFlyoutHost"
+            Grid.Row="0"
+            Grid.RowSpan="3"
+            BackgroundColor="Transparent"
+            InputTransparent="False"
+            IsVisible="False"
+            ZIndex="126">
+            <Grid>
+                <BoxView BackgroundColor="#80000000">
+                    <BoxView.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnQueueFlyoutBackdropTapped" />
+                    </BoxView.GestureRecognizers>
+                </BoxView>
+                <ContentPresenter x:Name="QueueFlyoutContent"
                     HorizontalOptions="Fill"
                     VerticalOptions="End" />
             </Grid>

@@ -6,7 +6,8 @@
     xmlns:behaviors="clr-namespace:mashin.Views.Desktop.Behaviors"
     xmlns:converters="clr-namespace:mashin.Converters"
     xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
-    xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons">
+    xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
+    xmlns:models="clr-namespace:mashin.Models">
 
     <ContentView.Resources>
         <!--  Playback State Converter  -->
@@ -417,5 +418,77 @@
                 </HorizontalStackLayout>
             </Grid>
         </Border>
+
+        <!--  Device Selection Flyout  -->
+        <Grid IsVisible="{Binding IsDeviceSelectionFlyoutOpen}">
+            <BoxView BackgroundColor="Transparent">
+                <BoxView.GestureRecognizers>
+                    <TapGestureRecognizer Command="{Binding CloseDeviceSelectionFlyoutCommand}" />
+                </BoxView.GestureRecognizers>
+            </BoxView>
+
+            <Border Margin="16,0,16,120"
+                Padding="12"
+                BackgroundColor="{DynamicResource BackgroundSecondary}"
+                HorizontalOptions="Fill"
+                VerticalOptions="End"
+                Stroke="{DynamicResource SeparatorColor}"
+                StrokeThickness="1">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="12" />
+                </Border.StrokeShape>
+                <Border.Shadow>
+                    <Shadow Brush="{DynamicResource ShadowColorStrong}"
+                        Opacity="{DynamicResource ShadowOpacityStrong}"
+                        Radius="20"
+                        Offset="0,8" />
+                </Border.Shadow>
+
+                <VerticalStackLayout Spacing="10">
+                    <Label FontSize="14"
+                        Margin="0,0,0,8"
+                        Text="Wiedergabegeraet"
+                        TextColor="{DynamicResource TextPrimary}" />
+
+                    <ActivityIndicator Color="{DynamicResource AccentColor}"
+                        IsRunning="{Binding IsLoadingPlayers}"
+                        IsVisible="{Binding IsLoadingPlayers}" />
+
+                    <Label FontSize="12"
+                        IsVisible="{Binding HasNoAvailablePlayers}"
+                        Text="Keine Music-Assistant-Geraete gefunden."
+                        TextColor="{DynamicResource TextSecondary}" />
+
+                    <ScrollView MaximumHeightRequest="260">
+                        <VerticalStackLayout
+                            BindableLayout.ItemsSource="{Binding AvailablePlayers}"
+                            RadioButtonGroup.GroupName="MobileDeviceSelection"
+                            RadioButtonGroup.SelectedValue="{Binding SelectedPlayerId, Mode=TwoWay}"
+                            Spacing="8">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate x:DataType="models:Player">
+                                    <Grid Padding="0,2"
+                                        ColumnDefinitions="*,Auto"
+                                        ColumnSpacing="10">
+                                        <VerticalStackLayout Grid.Column="0"
+                                            Spacing="0">
+                                            <Label FontSize="14"
+                                                Text="{Binding Name}"
+                                                TextColor="{DynamicResource TextPrimary}" />
+                                        </VerticalStackLayout>
+
+                                        <RadioButton Grid.Column="1"
+                                            IsEnabled="{Binding Available}"
+                                            MinimumWidthRequest="0"
+                                            Value="{Binding PlayerId}"
+                                            VerticalOptions="Center" />
+                                    </Grid>
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                        </VerticalStackLayout>
+                    </ScrollView>
+                </VerticalStackLayout>
+            </Border>
+        </Grid>
     </Grid>
 </ContentView>
