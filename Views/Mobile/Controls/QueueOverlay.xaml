@@ -17,10 +17,10 @@
             </Border.StrokeShape>
 
             <Grid RowDefinitions="Auto,*"
+                Padding="16,0,16,0"
                 RowSpacing="10">
 
                 <VerticalStackLayout Grid.Row="0"
-                    Padding="16,0,16,0"
                     Spacing="10">
                     <Grid HeightRequest="28">
                         <Grid.GestureRecognizers>
@@ -72,7 +72,7 @@
                 </VerticalStackLayout>
 
                 <controls:TableView Grid.Row="1"
-                    Margin="0,0,0,0"
+                    Margin="0"
                     ItemsSource="{Binding CurrentQueueItems}"
                     PlaybackContextItem="{Binding CurrentPlayerQueue}"
                     ShowContextMenuAtAnchorCommand="{Binding ShowQueueContextMenuAtAnchorCommand}"
