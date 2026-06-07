@@ -348,6 +348,166 @@
             </Border>
         </DataTemplate>
 
+        <!--  Queue Item Row Template  -->
+        <DataTemplate x:Key="QueueItemTemplate" x:DataType="models:QueueItem">
+            <Border Padding="8,6"
+                BackgroundColor="Transparent"
+                StrokeThickness="0">
+                <Border.Behaviors>
+                    <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                        LongPressCompleted="OnRowLongPressCompleted"
+                        LongPressDuration="420"
+                        PressedAnimationDuration="250"
+                        PressedAnimationEasing="CubicOut"
+                        ShouldMakeChildrenInputTransparent="False"
+                        TouchGestureCompleted="OnRowTouchCompleted" />
+                </Border.Behaviors>
+                <Border.Triggers>
+                    <DataTrigger Binding="{Binding MediaItem.IsSelected}"
+                        TargetType="Border"
+                        Value="True">
+                        <Setter Property="BackgroundColor"
+                            Value="{DynamicResource SelectionBackground}" />
+                    </DataTrigger>
+                </Border.Triggers>
+
+                <Grid ColumnDefinitions="52,*,Auto,20,40"
+                    ColumnSpacing="10">
+                    <Grid Grid.ColumnSpan="2"
+                        ColumnDefinitions="52,*"
+                        ColumnSpacing="10">
+                        <Border Grid.Column="0"
+                            BackgroundColor="{DynamicResource BackgroundTertiary}"
+                            HeightRequest="52"
+                            StrokeThickness="0"
+                            VerticalOptions="Center"
+                            WidthRequest="52">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="8" />
+                            </Border.StrokeShape>
+                            <ffimageloading:CachedImage Aspect="AspectFill"
+                                LoadingPriority="{Binding MediaItem, Converter={StaticResource MediaItemLoadingPriorityConverter}}"
+                                Source="{Binding MediaItem.ImageUri}" />
+                        </Border>
+
+                        <VerticalStackLayout Grid.Column="1"
+                            Spacing="1"
+                            VerticalOptions="Center">
+                            <Label FontFamily="PoppinsRegular"
+                                FontSize="14"
+                                LineBreakMode="TailTruncation"
+                                MaxLines="1"
+                                Text="{Binding MediaItem.DisplayName}"
+                                TextColor="{DynamicResource TextPrimary}" />
+                            <Label FontFamily="PoppinsRegular"
+                                FontSize="12"
+                                LineBreakMode="TailTruncation"
+                                MaxLines="1"
+                                Text="{Binding MediaItem.ArtistName}"
+                                TextColor="{DynamicResource TextSecondary}" />
+                        </VerticalStackLayout>
+                    </Grid>
+
+                    <Label Grid.Column="2"
+                        FontFamily="PoppinsRegular"
+                        FontSize="12"
+                        HorizontalOptions="End"
+                        Text="{Binding DurationTimeSpan, StringFormat='{0:mm\\:ss}'}"
+                        TextColor="{DynamicResource TextSecondary}"
+                        VerticalOptions="Center" />
+
+                    <ffimageloading:SvgCachedImage Grid.Column="3"
+                        HeightRequest="16"
+                        HorizontalOptions="Center"
+                        Source="{Binding MediaItem.ProviderManifest.IconSvg}"
+                        VerticalOptions="Center"
+                        WidthRequest="16">
+                        <ffimageloading:SvgCachedImage.Triggers>
+                            <DataTrigger Binding="{Binding MediaItem.ProviderManifest.IconSvg}"
+                                TargetType="ffimageloading:SvgCachedImage"
+                                Value="{x:Null}">
+                                <Setter Property="IsVisible"
+                                    Value="False" />
+                            </DataTrigger>
+                        </ffimageloading:SvgCachedImage.Triggers>
+                    </ffimageloading:SvgCachedImage>
+
+                    <Border Grid.Column="4"
+                        BackgroundColor="Transparent"
+                        HeightRequest="20"
+                        HorizontalOptions="Center"
+                        IsVisible="{Binding Source={x:Reference self}, Path=HasSelection}"
+                        InputTransparent="True"
+                        Margin="0"
+                        StrokeThickness="0"
+                        VerticalOptions="Center"
+                        WidthRequest="20">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="10" />
+                        </Border.StrokeShape>
+                        <Border BackgroundColor="Transparent"
+                            HeightRequest="20"
+                            HorizontalOptions="Center"
+                            Stroke="{DynamicResource IconSecondary}"
+                            StrokeThickness="1"
+                            VerticalOptions="Center"
+                            WidthRequest="20">
+                            <Border.StrokeShape>
+                                <Ellipse />
+                            </Border.StrokeShape>
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding MediaItem.IsSelected}"
+                                    TargetType="Border"
+                                    Value="True">
+                                    <Setter Property="BackgroundColor"
+                                        Value="{DynamicResource AccentColor}" />
+                                    <Setter Property="Stroke"
+                                        Value="{DynamicResource AccentColor}" />
+                                    <Setter Property="StrokeThickness"
+                                        Value="1" />
+                                </DataTrigger>
+                            </Border.Triggers>
+                            <Label FontSize="14"
+                                HorizontalOptions="Center"
+                                IsVisible="{Binding MediaItem.IsSelected}"
+                                Text="{mi:Fluent Icon=Checkmark16, FontOverride=True}"
+                                TextColor="{DynamicResource IconPrimary}"
+                                VerticalOptions="Center" />
+                        </Border>
+                    </Border>
+
+                    <Border Grid.Column="4"
+                        WidthRequest="40"
+                        HeightRequest="40"
+                        Padding="0"
+                        HorizontalOptions="Center"
+                        VerticalOptions="Center"
+                        IsVisible="{Binding Source={x:Reference self}, Path=HasSelection, Converter={StaticResource InvertedBoolConverter}}"
+                        BackgroundColor="Transparent"
+                        StrokeThickness="0">
+                        <Border.Behaviors>
+                            <toolkit:TouchBehavior
+                                PressedBackgroundColor="{StaticResource SelectionBackground}"
+                                PressedAnimationDuration="250"
+                                PressedAnimationEasing="CubicOut" />
+                        </Border.Behaviors>
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="20" />
+                        </Border.StrokeShape>
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Tapped="OnMoreButtonTapped" />
+                        </Border.GestureRecognizers>
+                        <Label
+                            FontSize="18"
+                            HorizontalOptions="Center"
+                            Text="{mi:Fluent Icon=MoreVertical48, FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center" />
+                    </Border>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
         <!--  Skeleton Row Template  -->
         <DataTemplate x:Key="SkeletonTemplate" x:DataType="models:TableViewSkeleton">
             <Grid ColumnDefinitions="52,*,32,32"
@@ -386,6 +546,7 @@
         <!--  Template Selector  -->
         <controls:MobileTableViewTemplateSelector x:Key="MobileTableViewTemplateSelector"
             PlaylistTemplate="{StaticResource PlaylistTemplate}"
+            QueueItemTemplate="{StaticResource QueueItemTemplate}"
             TrackTemplate="{StaticResource TrackTemplate}"
             SkeletonTemplate="{StaticResource SkeletonTemplate}" />
     </ContentView.Resources>

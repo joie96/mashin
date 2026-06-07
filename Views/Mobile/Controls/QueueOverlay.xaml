@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView
+    x:Class="mashin.Views.Mobile.Controls.QueueOverlay"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:controls="clr-namespace:mashin.Views.Mobile.Controls">
+
+    <Grid>
+        <Border x:Name="OverlaySheet"
+            BackgroundColor="{DynamicResource BackgroundSecondary}"
+            Padding="0,16,0,12"
+            StrokeThickness="0"
+            TranslationY="1200"
+            VerticalOptions="Fill">
+            <Border.StrokeShape>
+                <RoundRectangle CornerRadius="0" />
+            </Border.StrokeShape>
+
+            <Grid RowDefinitions="Auto,*"
+                RowSpacing="10">
+
+                <VerticalStackLayout Grid.Row="0"
+                    Padding="16,0,16,0"
+                    Spacing="10">
+                    <Grid HeightRequest="28">
+                        <Grid.GestureRecognizers>
+                            <PanGestureRecognizer PanUpdated="OnSheetPanUpdated" />
+                        </Grid.GestureRecognizers>
+                        <Border
+                            BackgroundColor="{DynamicResource BackgroundTertiary}"
+                            HeightRequest="4"
+                            HorizontalOptions="Center"
+                            StrokeThickness="0"
+                            VerticalOptions="Center"
+                            WidthRequest="52">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="2" />
+                            </Border.StrokeShape>
+                        </Border>
+                    </Grid>
+
+                    <HorizontalStackLayout
+                        HorizontalOptions="Center"
+                        Spacing="8">
+                        <Label FontAttributes="Bold"
+                            FontFamily="PoppinsRegular"
+                            FontSize="14"
+                            Text="Warteschlange"
+                            TextColor="{DynamicResource TextSecondary}"
+                            VerticalOptions="Center" />
+                        <Label FontFamily="PoppinsRegular"
+                            FontSize="14"
+                            Text="•"
+                            TextColor="{DynamicResource TextTertiary}"
+                            VerticalOptions="Center" />
+                        <Label FontFamily="PoppinsRegular"
+                            FontSize="14"
+                            Text="{Binding QueueTrackCountText}"
+                            TextColor="{DynamicResource TextTertiary}"
+                            VerticalOptions="Center" />
+                        <Label FontFamily="PoppinsRegular"
+                            FontSize="14"
+                            Text="•"
+                            TextColor="{DynamicResource TextTertiary}"
+                            VerticalOptions="Center" />
+                        <Label FontFamily="PoppinsRegular"
+                            FontSize="14"
+                            Text="{Binding QueueTotalDurationText}"
+                            TextColor="{DynamicResource TextTertiary}"
+                            VerticalOptions="Center" />
+                    </HorizontalStackLayout>
+                </VerticalStackLayout>
+
+                <controls:TableView Grid.Row="1"
+                    Margin="0,0,0,0"
+                    ItemsSource="{Binding CurrentQueueItems}"
+                    PlaybackContextItem="{Binding CurrentPlayerQueue}"
+                    ShowContextMenuAtAnchorCommand="{Binding ShowQueueContextMenuAtAnchorCommand}"
+                    VerticalOptions="Fill" />
+            </Grid>
+        </Border>
+    </Grid>
+</ContentView>

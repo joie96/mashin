@@ -87,6 +87,33 @@ public partial class PlayerBarOverlay : ContentView
         DismissRequested?.Invoke(this, EventArgs.Empty);
     }
 
+    private async void OnQueueButtonTapped(object? sender, TappedEventArgs e)
+    {
+        var overlayService = ResolveOverlayService();
+        if (overlayService == null || BindingContext == null)
+        {
+            return;
+        }
+
+        if (overlayService.IsQueueOverlayAnimating)
+        {
+            return;
+        }
+
+        if (overlayService.IsQueueOverlayOpen)
+        {
+            await overlayService.HideQueueOverlayAsync();
+            return;
+        }
+
+        if (overlayService.IsPlayerBarOverlayOpen)
+        {
+            await overlayService.HidePlayerBarOverlayAsync();
+        }
+
+        await overlayService.ShowQueueOverlayAsync(BindingContext);
+    }
+
     private void OnSheetPanUpdated(object? sender, PanUpdatedEventArgs e)
     {
         HandlePanUpdated(e);
@@ -210,5 +237,16 @@ public partial class PlayerBarOverlay : ContentView
         }
 
         return Math.Max(200, sheetHeight + 28);
+    }
+
+    private static mashin.Services.IOverlayService? ResolveOverlayService()
+    {
+        var services = Application.Current?.Handler?.MauiContext?.Services;
+        if (services == null)
+        {
+            return null;
+        }
+
+        return services.GetService(typeof(mashin.Services.IOverlayService)) as mashin.Services.IOverlayService;
     }
 }

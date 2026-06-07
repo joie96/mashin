@@ -322,14 +322,13 @@
                         </Grid>
                     </Border>
 
-                    <Border x:Name="QueueButtonAnchor"
+                    <Border x:Name="QueueButton"
                         BackgroundColor="Transparent"
                         HeightRequest="44"
                         StrokeThickness="0"
                         WidthRequest="44">
                         <Border.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding ShowQueueContextMenuAtAnchorCommand}"
-                                CommandParameter="{x:Reference QueueButtonAnchor}" />
+                            <TapGestureRecognizer Tapped="OnQueueButtonTapped" />
                         </Border.GestureRecognizers>
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="22" />

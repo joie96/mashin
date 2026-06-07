@@ -3,6 +3,8 @@ using mashin.Views.Desktop.Controls;
 using mashin.Views.Mobile.Controls;
 using Microsoft.Extensions.Logging;
 using System.Threading;
+using DesktopQueueOverlay = mashin.Views.Desktop.Controls.QueueOverlay;
+using MobileQueueOverlay = mashin.Views.Mobile.Controls.QueueOverlay;
 
 namespace mashin.Services;
 
@@ -72,7 +74,8 @@ public sealed class OverlayService : IOverlayService
     private readonly UpdatePlaylistOverlay _updatePlaylistOverlay;
     private readonly DeletePlaylistOverlay _deletePlaylistOverlay;
     private readonly LoginOverlay _loginOverlay;
-    private readonly QueueOverlay _queueOverlay;
+    private readonly DesktopQueueOverlay _desktopQueueOverlay;
+    private readonly MobileQueueOverlay _mobileQueueOverlay;
     private readonly PlayerBarOverlay _playerBarOverlay;
     private readonly SelectionIndicatorOverlay _selectionIndicatorOverlay;
 
@@ -119,7 +122,10 @@ public sealed class OverlayService : IOverlayService
         _loginOverlay.PasswordCompleted += OnLoginPasswordCompleted;
         _loginOverlay.LoginClicked += OnLoginClicked;
 
-        _queueOverlay = new QueueOverlay();
+        _desktopQueueOverlay = new DesktopQueueOverlay();
+
+        _mobileQueueOverlay = new MobileQueueOverlay();
+        _mobileQueueOverlay.DismissRequested += async (_, _) => await HideQueueOverlayAsync();
 
         _playerBarOverlay = new PlayerBarOverlay();
         _playerBarOverlay.DismissRequested += async (_, _) => await HidePlayerBarOverlayAsync();
@@ -202,9 +208,9 @@ public sealed class OverlayService : IOverlayService
 
     #region Queue API
 
-    public bool IsQueueOverlayOpen => _queueOverlay.IsOpen;
+    public bool IsQueueOverlayOpen => IsMobileDevice() ? _mobileQueueOverlay.IsOpen : _desktopQueueOverlay.IsOpen;
 
-    public bool IsQueueOverlayAnimating => _queueOverlay.IsAnimating;
+    public bool IsQueueOverlayAnimating => IsMobileDevice() ? _mobileQueueOverlay.IsAnimating : _desktopQueueOverlay.IsAnimating;
 
     public bool IsPlayerBarOverlayOpen => _playerBarOverlay.IsOpen;
 
@@ -260,12 +266,23 @@ public sealed class OverlayService : IOverlayService
 
         await MainThread.InvokeOnMainThreadAsync(async () =>
         {
-            // Force a clean rebind cycle in case the same view model instance is reused.
-            _queueOverlay.BindingContext = null;
-            _queueOverlay.BindingContext = bindingContext;
+            var useMobileQueueOverlay = IsMobileDevice();
+            var queueOverlayView = useMobileQueueOverlay ? (View)_mobileQueueOverlay : _desktopQueueOverlay;
 
-            await ShowFlyoutLayerAsync(_queueOverlay, () => _ = HideQueueOverlayAsync(), FlyoutLayoutMode.Bottom);
-            await _queueOverlay.ShowAsync();
+            // Force a clean rebind cycle in case the same view model instance is reused.
+            queueOverlayView.BindingContext = null;
+            queueOverlayView.BindingContext = bindingContext;
+
+            var layoutMode = useMobileQueueOverlay ? FlyoutLayoutMode.FullHeight : FlyoutLayoutMode.Bottom;
+            await ShowFlyoutLayerAsync(queueOverlayView, () => _ = HideQueueOverlayAsync(), layoutMode);
+
+            if (useMobileQueueOverlay)
+            {
+                await _mobileQueueOverlay.ShowAsync();
+                return;
+            }
+
+            await _desktopQueueOverlay.ShowAsync();
         });
     }
 
@@ -275,7 +292,15 @@ public sealed class OverlayService : IOverlayService
 
         await MainThread.InvokeOnMainThreadAsync(async () =>
         {
-            await _queueOverlay.HideAsync();
+            if (_mobileQueueOverlay.IsOpen)
+            {
+                await _mobileQueueOverlay.HideAsync();
+            }
+
+            if (_desktopQueueOverlay.IsOpen)
+            {
+                await _desktopQueueOverlay.HideAsync();
+            }
 
             if (_flyoutHost != null)
             {
@@ -858,6 +883,12 @@ public sealed class OverlayService : IOverlayService
         }
 
         throw new InvalidOperationException("OverlayService is not initialized. Call Initialize from MainPage first.");
+    }
+
+    private static bool IsMobileDevice()
+    {
+        //return DeviceInfo.Current.Idiom == DeviceIdiom.Phone || DeviceInfo.Current.Idiom == DeviceIdiom.Tablet;
+        return true;
     }
 
     private static bool IsSupportedSelectionControl(object selectionControl)

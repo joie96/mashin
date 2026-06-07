@@ -130,11 +130,16 @@ public partial class TableView : ContentView
             return;
         }
 
-        foreach (var item in items.OfType<INotifyPropertyChanged>())
+        foreach (var item in items)
         {
-            if (_observedItems.Add(item))
+            if (item is INotifyPropertyChanged itemNotifier && _observedItems.Add(itemNotifier))
             {
-                item.PropertyChanged += OnObservedItemPropertyChanged;
+                itemNotifier.PropertyChanged += OnObservedItemPropertyChanged;
+            }
+
+            if (ResolveMediaItem(item) is INotifyPropertyChanged mediaItemNotifier && _observedItems.Add(mediaItemNotifier))
+            {
+                mediaItemNotifier.PropertyChanged += OnObservedItemPropertyChanged;
             }
         }
     }
@@ -157,27 +162,8 @@ public partial class TableView : ContentView
 
     private void OnItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        if (e.OldItems != null)
-        {
-            foreach (var oldItem in e.OldItems.OfType<INotifyPropertyChanged>())
-            {
-                if (_observedItems.Remove(oldItem))
-                {
-                    oldItem.PropertyChanged -= OnObservedItemPropertyChanged;
-                }
-            }
-        }
-
-        if (e.NewItems != null)
-        {
-            foreach (var newItem in e.NewItems.OfType<INotifyPropertyChanged>())
-            {
-                if (_observedItems.Add(newItem))
-                {
-                    newItem.PropertyChanged += OnObservedItemPropertyChanged;
-                }
-            }
-        }
+        DetachSelectionObservers();
+        AttachSelectionObservers(ItemsSource);
 
         RefreshVisibleItems();
         UpdateSelectionIndicator();
@@ -199,7 +185,13 @@ public partial class TableView : ContentView
 
     private void OnRowTouchCompleted(object? sender, EventArgs e)
     {
-        if (sender is not BindableObject { BindingContext: MediaItem mediaItem })
+        if (sender is not BindableObject { BindingContext: { } rowItem })
+        {
+            return;
+        }
+
+        var mediaItem = ResolveMediaItem(rowItem);
+        if (mediaItem == null)
         {
             return;
         }
@@ -211,7 +203,13 @@ public partial class TableView : ContentView
 
     private void OnRowLongPressCompleted(object? sender, EventArgs e)
     {
-        if (sender is not BindableObject { BindingContext: MediaItem mediaItem })
+        if (sender is not BindableObject { BindingContext: { } rowItem })
+        {
+            return;
+        }
+
+        var mediaItem = ResolveMediaItem(rowItem);
+        if (mediaItem == null)
         {
             return;
         }
@@ -226,7 +224,13 @@ public partial class TableView : ContentView
 
     private void OnRowTapped(object? sender, TappedEventArgs e)
     {
-        if (sender is not BindableObject { BindingContext: MediaItem mediaItem })
+        if (sender is not BindableObject { BindingContext: { } rowItem })
+        {
+            return;
+        }
+
+        var mediaItem = ResolveMediaItem(rowItem);
+        if (mediaItem == null)
         {
             return;
         }
@@ -277,7 +281,12 @@ public partial class TableView : ContentView
 
     private void OnMoreButtonTapped(object? sender, TappedEventArgs e)
     {
-        if (sender is not View anchorView || sender is not BindableObject { BindingContext: MediaItem })
+        if (sender is not View anchorView || sender is not BindableObject { BindingContext: { } rowItem })
+        {
+            return;
+        }
+
+        if (ResolveMediaItem(rowItem) == null)
         {
             return;
         }
@@ -310,9 +319,13 @@ public partial class TableView : ContentView
             return;
         }
 
-        foreach (var item in ItemsSource.OfType<MediaItem>())
+        foreach (var item in ItemsSource)
         {
-            item.IsSelected = true;
+            var mediaItem = ResolveMediaItem(item);
+            if (mediaItem != null)
+            {
+                mediaItem.IsSelected = true;
+            }
         }
 
         UpdateSelectionIndicator();
@@ -325,9 +338,13 @@ public partial class TableView : ContentView
             return;
         }
 
-        foreach (var item in ItemsSource.OfType<MediaItem>())
+        foreach (var item in ItemsSource)
         {
-            item.IsSelected = false;
+            var mediaItem = ResolveMediaItem(item);
+            if (mediaItem != null)
+            {
+                mediaItem.IsSelected = false;
+            }
         }
 
         UpdateSelectionIndicator();
@@ -431,7 +448,17 @@ public partial class TableView : ContentView
             return false;
         }
 
-        return ItemsSource.OfType<MediaItem>().Any(item => item.IsSelected);
+        return ItemsSource.Select(ResolveMediaItem).Any(mediaItem => mediaItem?.IsSelected == true);
+    }
+
+    private static MediaItem? ResolveMediaItem(object? rowItem)
+    {
+        return rowItem switch
+        {
+            MediaItem mediaItem => mediaItem,
+            QueueItem queueItem => queueItem.MediaItem,
+            _ => null
+        };
     }
 
     #region Paging
@@ -522,6 +549,7 @@ public partial class TableView : ContentView
 public sealed class MobileTableViewTemplateSelector : DataTemplateSelector
 {
     public DataTemplate? PlaylistTemplate { get; set; }
+    public DataTemplate? QueueItemTemplate { get; set; }
     public DataTemplate? TrackTemplate { get; set; }
     public DataTemplate? SkeletonTemplate { get; set; }
 
@@ -535,6 +563,11 @@ public sealed class MobileTableViewTemplateSelector : DataTemplateSelector
         if (item is Playlist && PlaylistTemplate != null)
         {
             return PlaylistTemplate;
+        }
+
+        if (item is QueueItem && QueueItemTemplate != null)
+        {
+            return QueueItemTemplate;
         }
 
         if (item is Track && TrackTemplate != null)
@@ -552,11 +585,16 @@ public sealed class MobileTableViewTemplateSelector : DataTemplateSelector
             return TrackTemplate;
         }
 
+        if (QueueItemTemplate != null)
+        {
+            return QueueItemTemplate;
+        }
+
         if (SkeletonTemplate != null)
         {
             return SkeletonTemplate;
         }
 
-        throw new InvalidOperationException("MobileTableViewTemplateSelector requires PlaylistTemplate, TrackTemplate, or SkeletonTemplate.");
+        throw new InvalidOperationException("MobileTableViewTemplateSelector requires PlaylistTemplate, QueueItemTemplate, TrackTemplate, or SkeletonTemplate.");
     }
 }
