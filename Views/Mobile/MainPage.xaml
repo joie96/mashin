@@ -457,6 +457,26 @@
             </Grid>
         </Grid>
 
+        <!-- Secondary Flyout Host -->
+        <Grid x:Name="SecondaryFlyoutHost"
+            Grid.Row="0"
+            Grid.RowSpan="3"
+            BackgroundColor="Transparent"
+            InputTransparent="False"
+            IsVisible="False"
+            ZIndex="125">
+            <Grid>
+                <BoxView BackgroundColor="#80000000">
+                    <BoxView.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnSecondaryFlyoutBackdropTapped" />
+                    </BoxView.GestureRecognizers>
+                </BoxView>
+                <ContentPresenter x:Name="SecondaryFlyoutContent"
+                    HorizontalOptions="Fill"
+                    VerticalOptions="End" />
+            </Grid>
+        </Grid>
+
         <!--! Overlay Host -->
         <Grid x:Name="OverlayHost"
             Grid.Row="0"

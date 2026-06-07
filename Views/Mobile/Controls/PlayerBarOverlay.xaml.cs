@@ -106,11 +106,6 @@ public partial class PlayerBarOverlay : ContentView
             return;
         }
 
-        if (overlayService.IsPlayerBarOverlayOpen)
-        {
-            await overlayService.HidePlayerBarOverlayAsync();
-        }
-
         await overlayService.ShowQueueOverlayAsync(BindingContext);
     }
 

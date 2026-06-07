@@ -20,9 +20,12 @@ public interface IOverlayService
         Grid flyoutHost,
         ContentPresenter flyoutContent,
         Grid? selectionIndicatorHost = null,
-        ContentPresenter? selectionIndicatorContent = null);
+        ContentPresenter? selectionIndicatorContent = null,
+        Grid? secondaryFlyoutHost = null,
+        ContentPresenter? secondaryFlyoutContent = null);
     void OnBackdropTapped();
     void OnFlyoutBackdropTapped();
+    void OnSecondaryFlyoutBackdropTapped();
 
     Task ShowContextMenuMainAsync(View menuView, Action? onClose);
     Task HideContextMenuMainAsync();
@@ -67,6 +70,12 @@ public sealed class OverlayService : IOverlayService
         FullHeight
     }
 
+    private enum FlyoutLayer
+    {
+        Primary,
+        Secondary
+    }
+
     private readonly ILogger<OverlayService> _logger;
     private readonly SemaphoreSlim _overlayLock = new(1, 1);
 
@@ -81,14 +90,17 @@ public sealed class OverlayService : IOverlayService
 
     private Grid? _overlayHost;
     private ContentPresenter? _overlayContent;
-    private Grid? _flyoutHost;
-    private ContentPresenter? _flyoutContent;
+    private Grid? _primaryFlyoutHost;
+    private ContentPresenter? _primaryFlyoutContent;
+    private Grid? _secondaryFlyoutHost;
+    private ContentPresenter? _secondaryFlyoutContent;
     private Grid? _selectionIndicatorHost;
     private ContentPresenter? _selectionIndicatorContent;
     private object? _selectionIndicatorControl;
 
     private Action? _overlayCloseAction;
-    private Action? _flyoutCloseAction;
+    private Action? _primaryFlyoutCloseAction;
+    private Action? _secondaryFlyoutCloseAction;
 
     private TaskCompletionSource<string?>? _createPlaylistTcs;
     private TaskCompletionSource<string?>? _updatePlaylistTcs;
@@ -146,12 +158,16 @@ public sealed class OverlayService : IOverlayService
         Grid flyoutHost,
         ContentPresenter flyoutContent,
         Grid? selectionIndicatorHost = null,
-        ContentPresenter? selectionIndicatorContent = null)
+        ContentPresenter? selectionIndicatorContent = null,
+        Grid? secondaryFlyoutHost = null,
+        ContentPresenter? secondaryFlyoutContent = null)
     {
         _overlayHost = overlayHost;
         _overlayContent = overlayContent;
-        _flyoutHost = flyoutHost;
-        _flyoutContent = flyoutContent;
+        _primaryFlyoutHost = flyoutHost;
+        _primaryFlyoutContent = flyoutContent;
+        _secondaryFlyoutHost = secondaryFlyoutHost;
+        _secondaryFlyoutContent = secondaryFlyoutContent;
         _selectionIndicatorHost = selectionIndicatorHost;
         _selectionIndicatorContent = selectionIndicatorContent;
     }
@@ -163,7 +179,12 @@ public sealed class OverlayService : IOverlayService
 
     public void OnFlyoutBackdropTapped()
     {
-        _flyoutCloseAction?.Invoke();
+        _primaryFlyoutCloseAction?.Invoke();
+    }
+
+    public void OnSecondaryFlyoutBackdropTapped()
+    {
+        _secondaryFlyoutCloseAction?.Invoke();
     }
 
     #endregion
@@ -172,12 +193,12 @@ public sealed class OverlayService : IOverlayService
 
     public Task ShowContextMenuMainAsync(View menuView, Action? onClose)
     {
-        return ShowFlyoutLayerAsync(menuView, onClose, FlyoutLayoutMode.Bottom);
+        return ShowFlyoutLayerAsync(menuView, onClose, FlyoutLayoutMode.Bottom, FlyoutLayer.Primary);
     }
 
     public Task HideContextMenuMainAsync()
     {
-        return HideFlyoutLayerAsync();
+        return HideFlyoutLayerAsync(FlyoutLayer.Primary);
     }
 
     public Task ShowContextMenuSubMenuAsync(View subMenuView, Action? onClose)
@@ -216,7 +237,7 @@ public sealed class OverlayService : IOverlayService
 
     public bool IsOverlayOpen => _overlayHost?.IsVisible == true;
 
-    public bool IsFlyoutOpen => _flyoutHost?.IsVisible == true;
+    public bool IsFlyoutOpen => _primaryFlyoutHost?.IsVisible == true || _secondaryFlyoutHost?.IsVisible == true;
 
     public async Task ShowPlayerBarOverlayAsync(object bindingContext)
     {
@@ -233,7 +254,7 @@ public sealed class OverlayService : IOverlayService
             _playerBarOverlay.BindingContext = null;
             _playerBarOverlay.BindingContext = bindingContext;
 
-            await ShowFlyoutLayerAsync(_playerBarOverlay, () => _ = HidePlayerBarOverlayAsync(), FlyoutLayoutMode.FullHeight);
+            await ShowFlyoutLayerAsync(_playerBarOverlay, () => _ = HidePlayerBarOverlayAsync(), FlyoutLayoutMode.FullHeight, FlyoutLayer.Primary);
             await _playerBarOverlay.AnimateInAsync();
         });
     }
@@ -246,12 +267,12 @@ public sealed class OverlayService : IOverlayService
         {
             await _playerBarOverlay.AnimateOutAsync();
 
-            if (_flyoutHost != null)
+            if (_primaryFlyoutHost != null)
             {
-                _flyoutHost.IsVisible = false;
+                _primaryFlyoutHost.IsVisible = false;
             }
 
-            _flyoutCloseAction = null;
+            _primaryFlyoutCloseAction = null;
         });
     }
 
@@ -274,7 +295,8 @@ public sealed class OverlayService : IOverlayService
             queueOverlayView.BindingContext = bindingContext;
 
             var layoutMode = useMobileQueueOverlay ? FlyoutLayoutMode.FullHeight : FlyoutLayoutMode.Bottom;
-            await ShowFlyoutLayerAsync(queueOverlayView, () => _ = HideQueueOverlayAsync(), layoutMode);
+            var layer = useMobileQueueOverlay ? FlyoutLayer.Secondary : FlyoutLayer.Primary;
+            await ShowFlyoutLayerAsync(queueOverlayView, () => _ = HideQueueOverlayAsync(), layoutMode, layer);
 
             if (useMobileQueueOverlay)
             {
@@ -292,6 +314,8 @@ public sealed class OverlayService : IOverlayService
 
         await MainThread.InvokeOnMainThreadAsync(async () =>
         {
+            var useMobileQueueOverlay = IsMobileDevice();
+
             if (_mobileQueueOverlay.IsOpen)
             {
                 await _mobileQueueOverlay.HideAsync();
@@ -302,13 +326,24 @@ public sealed class OverlayService : IOverlayService
                 await _desktopQueueOverlay.HideAsync();
             }
 
-            if (_flyoutHost != null)
+            if (useMobileQueueOverlay)
             {
-                _flyoutHost.IsVisible = false;
+                if (_secondaryFlyoutHost != null)
+                {
+                    _secondaryFlyoutHost.IsVisible = false;
+                }
+
+                _secondaryFlyoutCloseAction = null;
+                return;
+            }
+
+            if (_primaryFlyoutHost != null)
+            {
+                _primaryFlyoutHost.IsVisible = false;
             }
 
             // Keep queue content mounted so TableView does not run full unload cleanup.
-            _flyoutCloseAction = null;
+            _primaryFlyoutCloseAction = null;
         });
     }
 
@@ -340,6 +375,24 @@ public sealed class OverlayService : IOverlayService
                 return;
             }
 
+            if (_secondaryFlyoutHost?.IsVisible == true)
+            {
+                if (IsQueueOverlayOpen)
+                {
+                    await HideQueueOverlayAsync();
+                    return;
+                }
+
+                if (_secondaryFlyoutCloseAction != null)
+                {
+                    _secondaryFlyoutCloseAction.Invoke();
+                    return;
+                }
+
+                await HideFlyoutLayerAsync(FlyoutLayer.Secondary);
+                return;
+            }
+
             if (IsPlayerBarOverlayOpen)
             {
                 await HidePlayerBarOverlayAsync();
@@ -352,13 +405,13 @@ public sealed class OverlayService : IOverlayService
                 return;
             }
 
-            if (_flyoutCloseAction != null)
+            if (_primaryFlyoutCloseAction != null)
             {
-                _flyoutCloseAction.Invoke();
+                _primaryFlyoutCloseAction.Invoke();
                 return;
             }
 
-            await HideFlyoutLayerAsync();
+            await HideFlyoutLayerAsync(FlyoutLayer.Primary);
         });
     }
 
@@ -817,28 +870,38 @@ public sealed class OverlayService : IOverlayService
         });
     }
 
-    private Task ShowFlyoutLayerAsync(View flyout, Action? onClose, FlyoutLayoutMode layoutMode)
+    private Task ShowFlyoutLayerAsync(View flyout, Action? onClose, FlyoutLayoutMode layoutMode, FlyoutLayer layer)
     {
         return MainThread.InvokeOnMainThreadAsync(() =>
         {
             EnsureInitialized();
-            ShowFlyoutInternal(flyout, onClose, layoutMode);
+            ShowFlyoutInternal(flyout, onClose, layoutMode, layer);
         });
     }
 
-    private Task HideFlyoutLayerAsync()
+    private Task HideFlyoutLayerAsync(FlyoutLayer layer)
     {
         return MainThread.InvokeOnMainThreadAsync(() =>
         {
-            if (_flyoutHost == null || _flyoutContent == null)
+            var host = layer == FlyoutLayer.Primary ? _primaryFlyoutHost : _secondaryFlyoutHost;
+            var content = layer == FlyoutLayer.Primary ? _primaryFlyoutContent : _secondaryFlyoutContent;
+            if (host == null || content == null)
             {
                 return;
             }
 
-            _flyoutHost.IsVisible = false;
-            _flyoutContent.Content = null;
-            _flyoutContent.VerticalOptions = LayoutOptions.End;
-            _flyoutCloseAction = null;
+            host.IsVisible = false;
+            content.Content = null;
+            content.VerticalOptions = LayoutOptions.End;
+
+            if (layer == FlyoutLayer.Primary)
+            {
+                _primaryFlyoutCloseAction = null;
+            }
+            else
+            {
+                _secondaryFlyoutCloseAction = null;
+            }
         });
     }
 
@@ -854,15 +917,17 @@ public sealed class OverlayService : IOverlayService
         _overlayHost.IsVisible = true;
     }
 
-    private void ShowFlyoutInternal(View flyout, Action? onClose, FlyoutLayoutMode layoutMode)
+    private void ShowFlyoutInternal(View flyout, Action? onClose, FlyoutLayoutMode layoutMode, FlyoutLayer layer)
     {
-        if (_flyoutHost == null || _flyoutContent == null)
+        var host = layer == FlyoutLayer.Primary ? _primaryFlyoutHost : _secondaryFlyoutHost;
+        var content = layer == FlyoutLayer.Primary ? _primaryFlyoutContent : _secondaryFlyoutContent;
+        if (host == null || content == null)
         {
             return;
         }
 
         var useFullHeight = layoutMode == FlyoutLayoutMode.FullHeight;
-        _flyoutContent.VerticalOptions = useFullHeight ? LayoutOptions.Fill : LayoutOptions.End;
+        content.VerticalOptions = useFullHeight ? LayoutOptions.Fill : LayoutOptions.End;
         flyout.VerticalOptions = useFullHeight ? LayoutOptions.Fill : LayoutOptions.End;
 
         if (useFullHeight)
@@ -870,14 +935,22 @@ public sealed class OverlayService : IOverlayService
             flyout.HeightRequest = -1;
         }
 
-        _flyoutContent.Content = flyout;
-        _flyoutCloseAction = onClose;
-        _flyoutHost.IsVisible = true;
+        content.Content = flyout;
+        host.IsVisible = true;
+
+        if (layer == FlyoutLayer.Primary)
+        {
+            _primaryFlyoutCloseAction = onClose;
+        }
+        else
+        {
+            _secondaryFlyoutCloseAction = onClose;
+        }
     }
 
     private void EnsureInitialized()
     {
-        if (_overlayHost != null && _overlayContent != null && _flyoutHost != null && _flyoutContent != null)
+        if (_overlayHost != null && _overlayContent != null && _primaryFlyoutHost != null && _primaryFlyoutContent != null)
         {
             return;
         }

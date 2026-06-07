@@ -36,7 +36,9 @@ public partial class MainPage : ContentPage
             FlyoutHost,
             FlyoutContent,
             selectionIndicatorHost,
-            selectionIndicatorContent);
+            selectionIndicatorContent,
+            SecondaryFlyoutHost,
+            SecondaryFlyoutContent);
 
         if (_navigationService is NavigationService navService)
         {
@@ -74,6 +76,11 @@ public partial class MainPage : ContentPage
         _overlayService.OnFlyoutBackdropTapped();
     }
 
+    private void OnSecondaryFlyoutBackdropTapped(object? sender, TappedEventArgs e)
+    {
+        _overlayService.OnSecondaryFlyoutBackdropTapped();
+    }
+
     private async void OnPlayerBarTapped(object? sender, TappedEventArgs e)
     {
         if (_viewModel.CurrentTrack is null)
@@ -97,34 +104,54 @@ public partial class MainPage : ContentPage
             return true;
         }
 
-        if (_overlayService.IsPlayerBarOverlayOpen)
+        if (_overlayService.IsOverlayOpen)
         {
-            _ = HandleAndroidBackAsync(closePlayerBarOverlay: true, closeOverlay: false, closeFlyout: false, navigateBack: false);
+            _ = HandleAndroidBackAsync(
+                shouldCloseOverlay: true,
+                shouldCloseSecondaryFlyout: false,
+                shouldClosePrimaryFlyout: false,
+                shouldNavigateBack: false);
             return true;
         }
 
-        if (_overlayService.IsOverlayOpen)
+        if (_overlayService.IsQueueOverlayOpen)
         {
-            _ = HandleAndroidBackAsync(closePlayerBarOverlay: false, closeOverlay: true, closeFlyout: false, navigateBack: false);
+            _ = HandleAndroidBackAsync(
+                shouldCloseOverlay: false,
+                shouldCloseSecondaryFlyout: true,
+                shouldClosePrimaryFlyout: false,
+                shouldNavigateBack: false);
             return true;
         }
 
         if (_overlayService.IsFlyoutOpen)
         {
-            _ = HandleAndroidBackAsync(closePlayerBarOverlay: false, closeOverlay: false, closeFlyout: true, navigateBack: false);
+            _ = HandleAndroidBackAsync(
+                shouldCloseOverlay: false,
+                shouldCloseSecondaryFlyout: false,
+                shouldClosePrimaryFlyout: true,
+                shouldNavigateBack: false);
             return true;
         }
 
         if (_navigationService.CanGoBack)
         {
-            _ = HandleAndroidBackAsync(closePlayerBarOverlay: false, closeOverlay: false, closeFlyout: false, navigateBack: true);
+            _ = HandleAndroidBackAsync(
+                shouldCloseOverlay: false,
+                shouldCloseSecondaryFlyout: false,
+                shouldClosePrimaryFlyout: false,
+                shouldNavigateBack: true);
             return true;
         }
 
         return base.OnBackButtonPressed();
     }
 
-    private async Task HandleAndroidBackAsync(bool closePlayerBarOverlay, bool closeOverlay, bool closeFlyout, bool navigateBack)
+    private async Task HandleAndroidBackAsync(
+        bool shouldCloseOverlay,
+        bool shouldCloseSecondaryFlyout,
+        bool shouldClosePrimaryFlyout,
+        bool shouldNavigateBack)
     {
         if (_isHandlingBackNavigation)
         {
@@ -134,25 +161,25 @@ public partial class MainPage : ContentPage
         _isHandlingBackNavigation = true;
         try
         {
-            if (closePlayerBarOverlay)
-            {
-                await _overlayService.HidePlayerBarOverlayAsync();
-                return;
-            }
-
-            if (closeOverlay)
+            if (shouldCloseOverlay)
             {
                 await _overlayService.CloseOverlayAsync();
                 return;
             }
 
-            if (closeFlyout)
+            if (shouldCloseSecondaryFlyout)
             {
                 await _overlayService.CloseFlyoutAsync();
                 return;
             }
 
-            if (navigateBack)
+            if (shouldClosePrimaryFlyout)
+            {
+                await _overlayService.CloseFlyoutAsync();
+                return;
+            }
+
+            if (shouldNavigateBack)
             {
                 await _navigationService.GoBackAsync();
             }
