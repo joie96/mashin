@@ -71,7 +71,8 @@
                     </HorizontalStackLayout>
                 </VerticalStackLayout>
 
-                <controls:TableView Grid.Row="1"
+                <controls:TableView x:Name="QueueItemsTable"
+                    Grid.Row="1"
                     Margin="0"
                     ItemsSource="{Binding CurrentQueueItems}"
                     PlaybackContextItem="{Binding CurrentPlayerQueue}"

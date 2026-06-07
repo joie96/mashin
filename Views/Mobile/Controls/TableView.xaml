@@ -556,7 +556,11 @@
         ItemSizingStrategy="MeasureFirstItem"
         ItemsSource="{Binding Source={x:Reference self}, Path=VisibleItems}"
         ItemsUpdatingScrollMode="KeepScrollOffset"
+        Scrolled="OnItemsCollectionScrolled"
         SelectionMode="None">
+        <CollectionView.GestureRecognizers>
+            <PanGestureRecognizer PanUpdated="OnItemsCollectionPanUpdated" />
+        </CollectionView.GestureRecognizers>
         <CollectionView.ItemsLayout>
             <LinearItemsLayout Orientation="Vertical" ItemSpacing="0" />
         </CollectionView.ItemsLayout>

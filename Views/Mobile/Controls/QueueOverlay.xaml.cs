@@ -11,10 +11,14 @@ public partial class QueueOverlay : ContentView
     private bool _isSheetDragging;
     private bool _canDismissForCurrentPan;
     private bool _dismissTriggered;
+    private double _queueVerticalOffset;
 
     public QueueOverlay()
     {
         InitializeComponent();
+
+        QueueItemsTable.ItemsPanUpdated += OnQueueItemsPanUpdated;
+        QueueItemsTable.VerticalOffsetChanged += OnQueueItemsVerticalOffsetChanged;
     }
 
     public bool IsOpen { get; private set; }
@@ -71,10 +75,25 @@ public partial class QueueOverlay : ContentView
 
     private void OnSheetPanUpdated(object? sender, PanUpdatedEventArgs e)
     {
+        HandlePanUpdated(e);
+    }
+
+    private void OnQueueItemsPanUpdated(object? sender, PanUpdatedEventArgs e)
+    {
+        HandlePanUpdated(e);
+    }
+
+    private void OnQueueItemsVerticalOffsetChanged(object? sender, double verticalOffset)
+    {
+        _queueVerticalOffset = verticalOffset;
+    }
+
+    private void HandlePanUpdated(PanUpdatedEventArgs e)
+    {
         switch (e.StatusType)
         {
             case GestureStatus.Started:
-                _canDismissForCurrentPan = IsOpen && !IsAnimating;
+                _canDismissForCurrentPan = IsOpen && !IsAnimating && IsScrollAtTop();
                 _isSheetDragging = _canDismissForCurrentPan;
                 break;
 
@@ -116,6 +135,11 @@ public partial class QueueOverlay : ContentView
                 _canDismissForCurrentPan = false;
                 break;
         }
+    }
+
+    private bool IsScrollAtTop()
+    {
+        return _queueVerticalOffset <= 0d;
     }
 
     private double GetSlideDistance()

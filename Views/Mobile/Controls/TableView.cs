@@ -22,6 +22,7 @@ public partial class TableView : ContentView
     private int _loadedItemCount = InitialLoadCount;
     private bool _hasMoreItems;
     private bool _hasSelection;
+    private double _verticalOffset;
 
     #endregion
 
@@ -94,6 +95,14 @@ public partial class TableView : ContentView
     public IReadOnlyList<object> VisibleItems => _visibleItems;
 
     public bool HasSelection => _hasSelection;
+
+    public double VerticalOffset => _verticalOffset;
+
+    public bool IsScrolledToTop => _verticalOffset <= 0d;
+
+    public event EventHandler<PanUpdatedEventArgs>? ItemsPanUpdated;
+
+    public event EventHandler<double>? VerticalOffsetChanged;
 
     #endregion
 
@@ -306,6 +315,17 @@ public partial class TableView : ContentView
         }
 
         AppendVisibleItemsPage();
+    }
+
+    private void OnItemsCollectionPanUpdated(object? sender, PanUpdatedEventArgs e)
+    {
+        ItemsPanUpdated?.Invoke(this, e);
+    }
+
+    private void OnItemsCollectionScrolled(object? sender, ItemsViewScrolledEventArgs e)
+    {
+        _verticalOffset = e.VerticalOffset;
+        VerticalOffsetChanged?.Invoke(this, _verticalOffset);
     }
 
     #endregion
