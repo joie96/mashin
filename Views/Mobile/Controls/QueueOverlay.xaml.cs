@@ -41,6 +41,9 @@ public partial class QueueOverlay : ContentView
             IsVisible = true;
             OverlaySheet.TranslationY = GetSlideDistance();
 
+            // Let the view render one frame at its start position before animating in.
+            await Task.Yield();
+
             await OverlaySheet.TranslateToAsync(0, 0, InSlideDurationMs, Easing.SinOut);
 
             IsOpen = true;

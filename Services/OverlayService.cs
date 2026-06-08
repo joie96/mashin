@@ -92,6 +92,7 @@ public sealed class OverlayService : IOverlayService
 
     private readonly ILogger<OverlayService> _logger;
     private readonly SemaphoreSlim _overlayLock = new(1, 1);
+    private int _queueWarmupRunId;
 
     private readonly CreatePlaylistOverlay _createPlaylistOverlay;
     private readonly UpdatePlaylistOverlay _updatePlaylistOverlay;
@@ -262,7 +263,7 @@ public sealed class OverlayService : IOverlayService
 
     #endregion
 
-    #region Queue API
+    #region Overlay State
 
     public bool IsQueueOverlayOpen => IsMobileDevice() ? _mobileQueueOverlay.IsOpen : _desktopQueueOverlay.IsOpen;
 
@@ -273,6 +274,10 @@ public sealed class OverlayService : IOverlayService
     public bool IsOverlayOpen => _overlayHost?.IsVisible == true;
 
     public bool IsFlyoutOpen => _flyoutHosts.Values.Any(registration => registration.Host.IsVisible);
+
+    #endregion
+
+    #region Player Bar Overlay
 
     public async Task ShowPlayerBarOverlayAsync(object bindingContext)
     {
@@ -285,13 +290,20 @@ public sealed class OverlayService : IOverlayService
 
         await MainThread.InvokeOnMainThreadAsync(async () =>
         {
-            // Force a clean rebind cycle in case the same view model instance is reused.
-            _playerBarOverlay.BindingContext = null;
-            _playerBarOverlay.BindingContext = bindingContext;
+            if (!ReferenceEquals(_playerBarOverlay.BindingContext, bindingContext))
+            {
+                _playerBarOverlay.BindingContext = bindingContext;
+            }
 
             var hostType = IsMobileDevice() ? FlyoutHostType.PlayerBar : FlyoutHostType.Default;
             await ShowFlyoutLayerAsync(_playerBarOverlay, () => _ = HidePlayerBarOverlayAsync(), FlyoutLayoutMode.FullHeight, hostType);
             await _playerBarOverlay.AnimateInAsync();
+
+            if (IsMobileDevice())
+            {
+                // Run queue preload after the player bar animation has fully settled.
+                _ = PreloadQueueOverlayAsync(bindingContext);
+            }
         });
     }
 
@@ -313,6 +325,10 @@ public sealed class OverlayService : IOverlayService
         });
     }
 
+    #endregion
+
+    #region Queue Overlay
+
     public async Task ShowQueueOverlayAsync(object bindingContext)
     {
         if (bindingContext == null)
@@ -325,11 +341,15 @@ public sealed class OverlayService : IOverlayService
         await MainThread.InvokeOnMainThreadAsync(async () =>
         {
             var useMobileQueueOverlay = IsMobileDevice();
-            var queueOverlayView = useMobileQueueOverlay ? (View)_mobileQueueOverlay : _desktopQueueOverlay;
 
-            // Force a clean rebind cycle in case the same view model instance is reused.
-            queueOverlayView.BindingContext = null;
-            queueOverlayView.BindingContext = bindingContext;
+            if (useMobileQueueOverlay)
+            {
+                Interlocked.Increment(ref _queueWarmupRunId);
+                RestoreQueueHostVisualState();
+            }
+
+            var queueOverlayView = useMobileQueueOverlay ? (View)_mobileQueueOverlay : _desktopQueueOverlay;
+            var bindingContextChanged = !ReferenceEquals(queueOverlayView.BindingContext, bindingContext);
 
             var layoutMode = useMobileQueueOverlay ? FlyoutLayoutMode.FullHeight : FlyoutLayoutMode.Bottom;
             var hostType = useMobileQueueOverlay ? FlyoutHostType.Queue : FlyoutHostType.Default;
@@ -337,12 +357,107 @@ public sealed class OverlayService : IOverlayService
 
             if (useMobileQueueOverlay)
             {
+                if (bindingContextChanged)
+                {
+                    queueOverlayView.BindingContext = bindingContext;
+                }
+
                 await _mobileQueueOverlay.ShowAsync();
                 return;
             }
 
+            if (bindingContextChanged)
+            {
+                queueOverlayView.BindingContext = bindingContext;
+            }
+
             await _desktopQueueOverlay.ShowAsync();
         });
+    }
+
+    private async Task PreloadQueueOverlayAsync(object bindingContext)
+    {
+        if (!IsMobileDevice())
+        {
+            return;
+        }
+
+        // Give the UI pipeline a moment to present the completed player bar animation.
+        await Task.Yield();
+        await Task.Yield();
+
+        var canPreload = await MainThread.InvokeOnMainThreadAsync(() =>
+            _playerBarOverlay.IsOpen && !_playerBarOverlay.IsAnimating);
+
+        if (!canPreload)
+        {
+            return;
+        }
+
+        var warmupRunId = Interlocked.Increment(ref _queueWarmupRunId);
+
+        try
+        {
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                if (warmupRunId != _queueWarmupRunId)
+                {
+                    return;
+                }
+
+                if (_mobileQueueOverlay.IsOpen || _mobileQueueOverlay.IsAnimating)
+                {
+                    return;
+                }
+
+                if (!_flyoutHosts.TryGetValue(FlyoutHostType.Queue, out var queueRegistration))
+                {
+                    return;
+                }
+
+                queueRegistration.Content.VerticalOptions = LayoutOptions.Fill;
+                _mobileQueueOverlay.VerticalOptions = LayoutOptions.Fill;
+                _mobileQueueOverlay.HeightRequest = -1;
+
+                if (!ReferenceEquals(queueRegistration.Content.Content, _mobileQueueOverlay))
+                {
+                    queueRegistration.Content.Content = _mobileQueueOverlay;
+                }
+
+                if (!ReferenceEquals(_mobileQueueOverlay.BindingContext, bindingContext))
+                {
+                    _mobileQueueOverlay.BindingContext = bindingContext;
+                }
+
+                // Keep warmup invisible and non-interactive while layout/realization runs.
+                queueRegistration.Host.InputTransparent = true;
+                queueRegistration.Host.Opacity = 0;
+                queueRegistration.Host.IsVisible = true;
+            });
+
+            await Task.Yield();
+            await Task.Yield();
+
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                if (warmupRunId != _queueWarmupRunId)
+                {
+                    return;
+                }
+
+                if (!_flyoutHosts.TryGetValue(FlyoutHostType.Queue, out var queueRegistration))
+                {
+                    return;
+                }
+
+                queueRegistration.Host.IsVisible = false;
+                RestoreQueueHostVisualState();
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Queue warmup failed");
+        }
     }
 
     public async Task HideQueueOverlayAsync()
@@ -365,7 +480,8 @@ public sealed class OverlayService : IOverlayService
 
             if (useMobileQueueOverlay)
             {
-                await HideFlyoutLayerAsync(FlyoutHostType.Queue);
+                // Keep queue content mounted to avoid template rebuild on reopen.
+                await HideFlyoutLayerAsync(FlyoutHostType.Queue, clearContent: false);
                 return;
             }
 
@@ -373,6 +489,10 @@ public sealed class OverlayService : IOverlayService
             await HideFlyoutLayerAsync(FlyoutHostType.Default, clearContent: false);
         });
     }
+
+    #endregion
+
+    #region General Overlay Visibility And Selection
 
     public Task CloseOverlayAsync()
     {
@@ -1007,6 +1127,15 @@ public sealed class OverlayService : IOverlayService
         if (_flyoutHosts.TryGetValue(hostType, out var registration))
         {
             registration.CloseAction = null;
+        }
+    }
+
+    private void RestoreQueueHostVisualState()
+    {
+        if (_flyoutHosts.TryGetValue(FlyoutHostType.Queue, out var queueRegistration))
+        {
+            queueRegistration.Host.Opacity = 1;
+            queueRegistration.Host.InputTransparent = false;
         }
     }
 

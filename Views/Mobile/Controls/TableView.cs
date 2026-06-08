@@ -1,6 +1,7 @@
 using mashin.Collections;
 using mashin.Models;
 using mashin.Services;
+using System.Collections;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Linq;
@@ -139,18 +140,7 @@ public partial class TableView : ContentView
             return;
         }
 
-        foreach (var item in items)
-        {
-            if (item is INotifyPropertyChanged itemNotifier && _observedItems.Add(itemNotifier))
-            {
-                itemNotifier.PropertyChanged += OnObservedItemPropertyChanged;
-            }
-
-            if (ResolveMediaItem(item) is INotifyPropertyChanged mediaItemNotifier && _observedItems.Add(mediaItemNotifier))
-            {
-                mediaItemNotifier.PropertyChanged += OnObservedItemPropertyChanged;
-            }
-        }
+        ObserveItems(items);
     }
 
     private void DetachSelectionObservers()
@@ -171,11 +161,85 @@ public partial class TableView : ContentView
 
     private void OnItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        DetachSelectionObservers();
-        AttachSelectionObservers(ItemsSource);
+        switch (e.Action)
+        {
+            case NotifyCollectionChangedAction.Add:
+                ObserveItems(e.NewItems);
+                break;
+
+            case NotifyCollectionChangedAction.Remove:
+                UnobserveItems(e.OldItems);
+                break;
+
+            case NotifyCollectionChangedAction.Replace:
+                UnobserveItems(e.OldItems);
+                ObserveItems(e.NewItems);
+                break;
+
+            case NotifyCollectionChangedAction.Move:
+                break;
+
+            case NotifyCollectionChangedAction.Reset:
+            default:
+                DetachSelectionObservers();
+                AttachSelectionObservers(ItemsSource);
+                break;
+        }
 
         RefreshVisibleItems();
         UpdateSelectionIndicator();
+    }
+
+    private void ObserveItems(IEnumerable? items)
+    {
+        if (items == null)
+        {
+            return;
+        }
+
+        foreach (var item in items)
+        {
+            ObserveItem(item);
+        }
+    }
+
+    private void UnobserveItems(IEnumerable? items)
+    {
+        if (items == null)
+        {
+            return;
+        }
+
+        foreach (var item in items)
+        {
+            UnobserveItem(item);
+        }
+    }
+
+    private void ObserveItem(object? item)
+    {
+        if (item is INotifyPropertyChanged itemNotifier && _observedItems.Add(itemNotifier))
+        {
+            itemNotifier.PropertyChanged += OnObservedItemPropertyChanged;
+        }
+
+        if (ResolveMediaItem(item) is INotifyPropertyChanged mediaItemNotifier && _observedItems.Add(mediaItemNotifier))
+        {
+            mediaItemNotifier.PropertyChanged += OnObservedItemPropertyChanged;
+        }
+    }
+
+    private void UnobserveItem(object? item)
+    {
+        if (item is INotifyPropertyChanged itemNotifier && _observedItems.Remove(itemNotifier))
+        {
+            itemNotifier.PropertyChanged -= OnObservedItemPropertyChanged;
+        }
+
+        if (ResolveMediaItem(item) is INotifyPropertyChanged mediaItemNotifier && _observedItems.Remove(mediaItemNotifier))
+        {
+            mediaItemNotifier.PropertyChanged -= OnObservedItemPropertyChanged;
+        }
     }
 
     private void OnObservedItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -493,9 +557,15 @@ public partial class TableView : ContentView
             return;
         }
 
-        var sourceItems = ItemsSource.ToList();
-        var totalCount = sourceItems.Count;
-        if (totalCount == 0)
+        if (_loadedItemCount <= 0)
+        {
+            _loadedItemCount = InitialLoadCount;
+        }
+
+        var requestedCount = Math.Max(0, _loadedItemCount);
+        var nextItems = TakePrefixItems(ItemsSource, requestedCount + 1);
+
+        if (nextItems.Count == 0)
         {
             _visibleItems.Clear();
             _loadedItemCount = 0;
@@ -503,10 +573,14 @@ public partial class TableView : ContentView
             return;
         }
 
-        var visibleCount = Math.Min(_loadedItemCount, totalCount);
-        _visibleItems.ReplaceRange(sourceItems.Take(visibleCount));
-        _loadedItemCount = visibleCount;
-        UpdateHasMoreItems(visibleCount < totalCount);
+        var hasMoreItems = nextItems.Count > requestedCount;
+        if (hasMoreItems)
+        {
+            nextItems.RemoveAt(nextItems.Count - 1);
+        }
+
+        _visibleItems.ReplaceRange(nextItems);
+        UpdateHasMoreItems(hasMoreItems);
     }
 
     private void AppendVisibleItemsPage()
@@ -516,31 +590,36 @@ public partial class TableView : ContentView
             return;
         }
 
-        var sourceItems = ItemsSource.ToList();
-        var totalCount = sourceItems.Count;
-        if (totalCount == 0)
+        _loadedItemCount = Math.Max(0, _loadedItemCount) + LoadMoreCount;
+        RefreshVisibleItems();
+    }
+
+    private static List<object> TakePrefixItems(IEnumerable<object> source, int maxCount)
+    {
+        var prefix = new List<object>();
+        if (maxCount <= 0)
         {
-            _visibleItems.Clear();
-            _loadedItemCount = 0;
-            UpdateHasMoreItems(false);
-            return;
+            return prefix;
         }
 
-        if (_visibleItems.Count > totalCount)
+        if (source is IList<object> list)
         {
-            RefreshVisibleItems();
-            return;
+            var count = Math.Min(list.Count, maxCount);
+            for (var index = 0; index < count; index++)
+            {
+                prefix.Add(list[index]);
+            }
+
+            return prefix;
         }
 
-        var currentCount = _visibleItems.Count;
-        var nextCount = Math.Min(currentCount + LoadMoreCount, totalCount);
-        if (nextCount > currentCount)
+        using var enumerator = source.GetEnumerator();
+        while (prefix.Count < maxCount && enumerator.MoveNext())
         {
-            _visibleItems.AddRange(sourceItems.Skip(currentCount).Take(nextCount - currentCount));
+            prefix.Add(enumerator.Current);
         }
 
-        _loadedItemCount = nextCount;
-        UpdateHasMoreItems(nextCount < totalCount);
+        return prefix;
     }
 
     #endregion
