@@ -2,17 +2,27 @@ namespace mashin.Views.Mobile.Controls;
 
 public partial class QueueOverlay : ContentView
 {
+    #region Constants
+
     private const double DragDismissThreshold = 100d;
     private const double DragResistance = 0.92d;
     private const uint InSlideDurationMs = 300;
     private const uint OutSlideDurationMs = 240;
     private const uint DragCancelSnapBackDurationMs = 180;
 
+    #endregion
+
+    #region Fields
+
     private bool _isSheetDragging;
     private bool _canDismissForCurrentPan;
     private bool _dismissTriggered;
     private bool _isInteractiveOpening;
     private double _queueVerticalOffset;
+
+    #endregion
+
+    #region Construction
 
     public QueueOverlay()
     {
@@ -22,11 +32,23 @@ public partial class QueueOverlay : ContentView
         QueueItemsTable.VerticalOffsetChanged += OnQueueItemsVerticalOffsetChanged;
     }
 
+    #endregion
+
+    #region State
+
     public bool IsOpen { get; private set; }
 
     public bool IsAnimating { get; private set; }
 
+    #endregion
+
+    #region Events
+
     public event EventHandler? DismissRequested;
+
+    #endregion
+
+    #region Public API
 
     public async Task ShowAsync()
     {
@@ -143,6 +165,10 @@ public partial class QueueOverlay : ContentView
         }
     }
 
+    #endregion
+
+    #region Gesture Handling
+
     private void OnSheetPanUpdated(object? sender, PanUpdatedEventArgs e)
     {
         HandlePanUpdated(e);
@@ -207,6 +233,10 @@ public partial class QueueOverlay : ContentView
         }
     }
 
+    #endregion
+
+    #region Helpers
+
     private bool IsScrollAtTop()
     {
         return _queueVerticalOffset <= 0d;
@@ -222,4 +252,6 @@ public partial class QueueOverlay : ContentView
 
         return Math.Max(200, sheetHeight + 24);
     }
+
+    #endregion
 }

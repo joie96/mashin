@@ -6,12 +6,29 @@ namespace mashin.Views.Mobile;
 
 public partial class MainPage : ContentPage
 {
+    #region Constants
+
+    private const double PlayerBarOpenThreshold = 70d;
+    private const double PlayerBarOpenReleaseThreshold = 130d;
+    private const double PlayerBarDragResistance = 0.92d;
+
+    #endregion
+
+    #region Fields
+
     private readonly MainViewModel _viewModel;
     private readonly INavigationService _navigationService;
     private readonly IOverlayService _overlayService;
     private readonly ILogger<MainPage> _logger;
     private bool _isHandlingBackNavigation;
     private Task? _initializeTask;
+    private bool _playerBarDragStarted;
+    private bool _suppressNextPlayerBarTap;
+    private double _playerBarDragDistance;
+
+    #endregion
+
+    #region Construction
 
     public MainPage(
         MainViewModel viewModel,
@@ -54,6 +71,10 @@ public partial class MainPage : ContentPage
         _navigationService.IsNavigating = false;
     }
 
+    #endregion
+
+    #region Lifecycle
+
     private void OnLoaded(object? sender, EventArgs e)
     {
         _initializeTask ??= InitializeViewModelAsync();
@@ -70,6 +91,10 @@ public partial class MainPage : ContentPage
             _logger.LogError(ex, "Failed to initialize main view model");
         }
     }
+
+    #endregion
+
+    #region Overlay And Flyout Backdrops
 
     private void OnOverlayBackdropTapped(object? sender, TappedEventArgs e)
     {
@@ -91,8 +116,18 @@ public partial class MainPage : ContentPage
         _overlayService.OnQueueFlyoutBackdropTapped();
     }
 
+    #endregion
+
+    #region Player Bar Gestures
+
     private async void OnPlayerBarTapped(object? sender, TappedEventArgs e)
     {
+        if (_suppressNextPlayerBarTap)
+        {
+            _suppressNextPlayerBarTap = false;
+            return;
+        }
+
         if (_viewModel.CurrentTrack is null)
         {
             return;
@@ -100,6 +135,64 @@ public partial class MainPage : ContentPage
 
         await _overlayService.ShowPlayerBarOverlayAsync(_viewModel);
     }
+
+    private void OnPlayerBarPanUpdated(object? sender, PanUpdatedEventArgs e)
+    {
+        if (_viewModel.CurrentTrack is null)
+        {
+            return;
+        }
+
+        switch (e.StatusType)
+        {
+            case GestureStatus.Started:
+                _playerBarDragStarted = false;
+                _playerBarDragDistance = 0;
+                break;
+
+            case GestureStatus.Running:
+                if (Math.Abs(e.TotalX) > Math.Abs(e.TotalY))
+                {
+                    return;
+                }
+
+                if (e.TotalY >= 0)
+                {
+                    return;
+                }
+
+                var upwardPullDistance = Math.Abs(e.TotalY) * PlayerBarDragResistance;
+
+                if (!_playerBarDragStarted && upwardPullDistance >= PlayerBarOpenThreshold)
+                {
+                    _overlayService.BeginPlayerBarOverlayInteractiveOpen(_viewModel);
+                    _playerBarDragStarted = true;
+                }
+
+                if (_playerBarDragStarted)
+                {
+                    _playerBarDragDistance = upwardPullDistance;
+                    _overlayService.UpdatePlayerBarOverlayInteractiveOpen(_playerBarDragDistance);
+                }
+
+                break;
+
+            case GestureStatus.Completed:
+            case GestureStatus.Canceled:
+                if (_playerBarDragStarted)
+                {
+                    var shouldOpenOverlay = _playerBarDragDistance >= PlayerBarOpenReleaseThreshold;
+                    _ = _overlayService.EndPlayerBarOverlayInteractiveOpenAsync(shouldOpenOverlay);
+                    _suppressNextPlayerBarTap = true;
+                }
+
+                _playerBarDragStarted = false;
+                _playerBarDragDistance = 0;
+                break;
+        }
+    }
+
+    #endregion
 
     #region Android Back Button Handling
     protected override bool OnBackButtonPressed()

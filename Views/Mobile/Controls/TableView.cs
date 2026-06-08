@@ -13,14 +13,14 @@ public partial class TableView : ContentView
 {
     #region Fields
 
-    private const int InitialLoadCount = 15;
+    private const int DefaultInitialLoadCount = 15;
     private const int LoadMoreCount = 10;
 
     private readonly HashSet<MediaItem> _suppressNextTap = new();
     private readonly HashSet<INotifyPropertyChanged> _observedItems = new();
     private readonly ObservableRangeCollection<object> _visibleItems = new();
     private INotifyCollectionChanged? _observedCollection;
-    private int _loadedItemCount = InitialLoadCount;
+    private int _loadedItemCount = DefaultInitialLoadCount;
     private bool _hasMoreItems;
     private bool _hasSelection;
     private double _verticalOffset;
@@ -47,6 +47,14 @@ public partial class TableView : ContentView
 
     public static readonly BindableProperty LongPressCommandProperty =
         BindableProperty.Create(nameof(LongPressCommand), typeof(ICommand), typeof(TableView));
+
+    public static readonly BindableProperty InitialLoadCountProperty =
+        BindableProperty.Create(
+            nameof(InitialLoadCount),
+            typeof(int),
+            typeof(TableView),
+            DefaultInitialLoadCount,
+            propertyChanged: OnInitialLoadCountChanged);
 
     #endregion
 
@@ -91,6 +99,12 @@ public partial class TableView : ContentView
         set => SetValue(LongPressCommandProperty, value);
     }
 
+    public int InitialLoadCount
+    {
+        get => (int)GetValue(InitialLoadCountProperty);
+        set => SetValue(InitialLoadCountProperty, value);
+    }
+
     public bool HasMoreItems => _hasMoreItems;
 
     public IReadOnlyList<object> VisibleItems => _visibleItems;
@@ -118,13 +132,35 @@ public partial class TableView : ContentView
 
         if (!ReferenceEquals(oldValue, newValue))
         {
-            tableView._loadedItemCount = InitialLoadCount;
+            tableView._loadedItemCount = tableView.InitialLoadCount > 0
+                ? tableView.InitialLoadCount
+                : DefaultInitialLoadCount;
         }
 
         tableView.DetachSelectionObservers();
         tableView.AttachSelectionObservers(newValue as IEnumerable<object>);
         tableView.RefreshVisibleItems();
         tableView.UpdateSelectionIndicator();
+    }
+
+    private static void OnInitialLoadCountChanged(BindableObject bindable, object? oldValue, object? newValue)
+    {
+        if (bindable is not TableView tableView)
+        {
+            return;
+        }
+
+        var configuredInitialLoadCount = newValue as int? ?? tableView.InitialLoadCount;
+        var initialLoadCount = configuredInitialLoadCount > 0
+            ? configuredInitialLoadCount
+            : DefaultInitialLoadCount;
+        if (tableView._loadedItemCount == initialLoadCount && Equals(oldValue, newValue))
+        {
+            return;
+        }
+
+        tableView._loadedItemCount = initialLoadCount;
+        tableView.RefreshVisibleItems();
     }
 
     private void AttachSelectionObservers(IEnumerable<object>? items)
@@ -559,7 +595,9 @@ public partial class TableView : ContentView
 
         if (_loadedItemCount <= 0)
         {
-            _loadedItemCount = InitialLoadCount;
+            _loadedItemCount = InitialLoadCount > 0
+                ? InitialLoadCount
+                : DefaultInitialLoadCount;
         }
 
         var requestedCount = Math.Max(0, _loadedItemCount);

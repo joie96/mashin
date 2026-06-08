@@ -100,6 +100,9 @@
             Padding="0"
             BackgroundColor="{DynamicResource PlayerBarBackground}"
             StrokeThickness="0">
+            <Border.GestureRecognizers>
+                <PanGestureRecognizer PanUpdated="OnPlayerBarPanUpdated" />
+            </Border.GestureRecognizers>
             <Border.StrokeShape>
                 <RoundRectangle CornerRadius="12" />
             </Border.StrokeShape>

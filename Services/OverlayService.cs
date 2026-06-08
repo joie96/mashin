@@ -49,10 +49,14 @@ public interface IOverlayService
     bool IsQueueOverlayAnimating { get; }
     bool IsQueueOverlayInteractiveOpening { get; }
     bool IsPlayerBarOverlayOpen { get; }
+    bool IsPlayerBarOverlayInteractiveOpening { get; }
     bool IsOverlayOpen { get; }
     bool IsFlyoutOpen { get; }
     Task ShowPlayerBarOverlayAsync(object bindingContext);
     Task HidePlayerBarOverlayAsync();
+    void BeginPlayerBarOverlayInteractiveOpen(object bindingContext);
+    void UpdatePlayerBarOverlayInteractiveOpen(double upwardPullDistance);
+    Task EndPlayerBarOverlayInteractiveOpenAsync(bool openPlayerBar);
     Task ShowQueueOverlayAsync(object bindingContext);
     Task HideQueueOverlayAsync();
     void BeginQueueOverlayInteractiveOpen(object bindingContext);
@@ -98,6 +102,7 @@ public sealed class OverlayService : IOverlayService
     private readonly SemaphoreSlim _overlayLock = new(1, 1);
     private int _queueWarmupRunId;
     private bool _isQueueInteractiveOpening;
+    private bool _isPlayerBarInteractiveOpening;
 
     private readonly CreatePlaylistOverlay _createPlaylistOverlay;
     private readonly UpdatePlaylistOverlay _updatePlaylistOverlay;
@@ -278,6 +283,8 @@ public sealed class OverlayService : IOverlayService
 
     public bool IsPlayerBarOverlayOpen => _playerBarOverlay.IsOpen;
 
+    public bool IsPlayerBarOverlayInteractiveOpening => IsMobileDevice() && _isPlayerBarInteractiveOpening;
+
     public bool IsOverlayOpen => _overlayHost?.IsVisible == true;
 
     public bool IsFlyoutOpen => _flyoutHosts.Values.Any(registration => registration.Host.IsVisible);
@@ -297,6 +304,8 @@ public sealed class OverlayService : IOverlayService
 
         await MainThread.InvokeOnMainThreadAsync(async () =>
         {
+            _isPlayerBarInteractiveOpening = false;
+
             if (!ReferenceEquals(_playerBarOverlay.BindingContext, bindingContext))
             {
                 _playerBarOverlay.BindingContext = bindingContext;
@@ -314,12 +323,104 @@ public sealed class OverlayService : IOverlayService
         });
     }
 
+    public void BeginPlayerBarOverlayInteractiveOpen(object bindingContext)
+    {
+        if (bindingContext == null)
+        {
+            return;
+        }
+
+        if (!IsMobileDevice())
+        {
+            return;
+        }
+
+        EnsureInitialized();
+
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            if (_playerBarOverlay.IsOpen || _playerBarOverlay.IsAnimating || _isPlayerBarInteractiveOpening)
+            {
+                return;
+            }
+
+            if (!ReferenceEquals(_playerBarOverlay.BindingContext, bindingContext))
+            {
+                _playerBarOverlay.BindingContext = bindingContext;
+            }
+
+            ShowFlyoutInternal(_playerBarOverlay, () => _ = HidePlayerBarOverlayAsync(), FlyoutLayoutMode.FullHeight, FlyoutHostType.PlayerBar);
+            _playerBarOverlay.BeginInteractiveOpen();
+            _isPlayerBarInteractiveOpening = true;
+        });
+    }
+
+    public void UpdatePlayerBarOverlayInteractiveOpen(double upwardPullDistance)
+    {
+        if (!IsMobileDevice())
+        {
+            return;
+        }
+
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            if (!_isPlayerBarInteractiveOpening)
+            {
+                return;
+            }
+
+            _playerBarOverlay.UpdateInteractiveOpen(Math.Max(0, upwardPullDistance));
+        });
+    }
+
+    public async Task EndPlayerBarOverlayInteractiveOpenAsync(bool openPlayerBar)
+    {
+        if (!IsMobileDevice())
+        {
+            return;
+        }
+
+        EnsureInitialized();
+
+        await MainThread.InvokeOnMainThreadAsync(async () =>
+        {
+            if (!_isPlayerBarInteractiveOpening)
+            {
+                return;
+            }
+
+            if (openPlayerBar)
+            {
+                await _playerBarOverlay.CompleteInteractiveOpenAsync();
+                _isPlayerBarInteractiveOpening = false;
+
+                if (_playerBarOverlay.BindingContext != null)
+                {
+                    _ = PreloadQueueOverlayAsync(_playerBarOverlay.BindingContext);
+                }
+
+                return;
+            }
+
+            await _playerBarOverlay.CancelInteractiveOpenAsync();
+            _isPlayerBarInteractiveOpening = false;
+
+            if (_flyoutHosts.TryGetValue(FlyoutHostType.PlayerBar, out var registration))
+            {
+                registration.Host.IsVisible = false;
+            }
+
+            ClearFlyoutCloseAction(FlyoutHostType.PlayerBar);
+        });
+    }
+
     public async Task HidePlayerBarOverlayAsync()
     {
         EnsureInitialized();
 
         await MainThread.InvokeOnMainThreadAsync(async () =>
         {
+            _isPlayerBarInteractiveOpening = false;
             await _playerBarOverlay.AnimateOutAsync();
 
             var hostType = IsMobileDevice() ? FlyoutHostType.PlayerBar : FlyoutHostType.Default;

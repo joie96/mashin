@@ -22,6 +22,7 @@ public partial class PlayerBarOverlay : ContentView
     private bool _isSheetDragging;
     private bool _canDismissForCurrentPan;
     private bool _dismissTriggered;
+    private bool _isInteractiveOpening;
     private bool _queueDragStarted;
     private double _queueDragDistance;
 
@@ -57,13 +58,88 @@ public partial class PlayerBarOverlay : ContentView
 
     public Task HideAsync() => AnimateOutAsync();
 
+    public void BeginInteractiveOpen()
+    {
+        if (IsOpen || IsAnimating)
+        {
+            return;
+        }
+
+        _dismissTriggered = false;
+        _isInteractiveOpening = true;
+        Backdrop.Opacity = 0;
+        OverlaySheet.TranslationY = GetSlideDistance();
+    }
+
+    public void UpdateInteractiveOpen(double upwardPullDistance)
+    {
+        if (!_isInteractiveOpening || IsAnimating)
+        {
+            return;
+        }
+
+        var slideDistance = GetSlideDistance();
+        var clampedDistance = Math.Clamp(upwardPullDistance, 0, slideDistance);
+        OverlaySheet.TranslationY = slideDistance - clampedDistance;
+        Backdrop.Opacity = Math.Clamp(clampedDistance / slideDistance, 0, 1);
+    }
+
+    public async Task CompleteInteractiveOpenAsync()
+    {
+        if (!_isInteractiveOpening || IsAnimating)
+        {
+            return;
+        }
+
+        IsAnimating = true;
+        try
+        {
+            _isInteractiveOpening = false;
+
+            await Task.WhenAll(
+                Backdrop.FadeToAsync(1, BackdropInDurationMs, Easing.SinOut),
+                OverlaySheet.TranslateToAsync(0, 0, InSlideDurationMs, Easing.SinOut));
+
+            IsOpen = true;
+        }
+        finally
+        {
+            IsAnimating = false;
+        }
+    }
+
+    public async Task CancelInteractiveOpenAsync()
+    {
+        if (!_isInteractiveOpening || IsAnimating)
+        {
+            return;
+        }
+
+        IsAnimating = true;
+        try
+        {
+            _isInteractiveOpening = false;
+            var slideDistance = GetSlideDistance();
+
+            await Task.WhenAll(
+                Backdrop.FadeToAsync(0, DragCancelSnapBackDurationMs, Easing.SinOut),
+                OverlaySheet.TranslateToAsync(0, slideDistance, DragCancelSnapBackDurationMs, Easing.SinOut));
+
+            IsOpen = false;
+        }
+        finally
+        {
+            IsAnimating = false;
+        }
+    }
+
     #endregion
 
     #region Overlay Animation
 
     public async Task AnimateInAsync()
     {
-        if (IsOpen || IsAnimating)
+        if (IsOpen || IsAnimating || _isInteractiveOpening)
         {
             return;
         }
@@ -89,7 +165,7 @@ public partial class PlayerBarOverlay : ContentView
 
     public async Task AnimateOutAsync()
     {
-        if (!IsOpen || IsAnimating)
+        if ((!IsOpen && !_isInteractiveOpening) || IsAnimating)
         {
             return;
         }
@@ -98,6 +174,7 @@ public partial class PlayerBarOverlay : ContentView
         try
         {
             _dismissTriggered = true;
+            _isInteractiveOpening = false;
             var slideDistance = GetSlideDistance();
 
             await Task.WhenAll(
@@ -131,7 +208,7 @@ public partial class PlayerBarOverlay : ContentView
         switch (e.StatusType)
         {
             case GestureStatus.Started:
-                _canDismissForCurrentPan = IsOpen && !IsAnimating;
+                _canDismissForCurrentPan = IsOpen && !IsAnimating && !_isInteractiveOpening;
                 _isSheetDragging = _canDismissForCurrentPan;
                 _queueDragStarted = false;
                 _queueDragDistance = 0;
