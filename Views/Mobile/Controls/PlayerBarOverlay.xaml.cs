@@ -5,7 +5,7 @@ public partial class PlayerBarOverlay : ContentView
     #region Constants
 
     private const double DragDismissThreshold = 100d;
-    private const double QueueOpenThreshold = 90d;
+    private const double QueueOpenThreshold = 10d;
     private const double QueueOpenReleaseThreshold = 140d;
     private const double DragResistance = 0.92d;
     private const double CoverHeightFactor = 0.5d;

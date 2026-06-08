@@ -426,6 +426,9 @@ public sealed class DefaultContextMenuService : IContextMenuService
             _currentMenuClosedTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             await _overlayService.ShowContextMenuFlyoutAsync(_mainMenu, CloseMenu);
+
+            // Ensure first layout/frame before running the menu's own slide-in animation.
+            await Task.Yield();
             await _mainMenu.AnimateInAsync();
 
             await _currentMenuClosedTcs.Task;

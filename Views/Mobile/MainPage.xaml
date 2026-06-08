@@ -100,9 +100,6 @@
             Padding="0"
             BackgroundColor="{DynamicResource PlayerBarBackground}"
             StrokeThickness="0">
-            <Border.GestureRecognizers>
-                <PanGestureRecognizer PanUpdated="OnPlayerBarPanUpdated" />
-            </Border.GestureRecognizers>
             <Border.StrokeShape>
                 <RoundRectangle CornerRadius="12" />
             </Border.StrokeShape>
@@ -121,6 +118,7 @@
                     VerticalOptions="Fill"
                     WidthRequest="{Binding Source={x:Reference PlayerBarBorder}, Path=Height}">
                     <Border.GestureRecognizers>
+                        <PanGestureRecognizer PanUpdated="OnPlayerBarPanUpdated" />
                         <TapGestureRecognizer Tapped="OnPlayerBarTapped" />
                     </Border.GestureRecognizers>
                     <Border.StrokeShape>
@@ -156,6 +154,7 @@
                         RowSpacing="1"
                         VerticalOptions="Center">
                         <Grid.GestureRecognizers>
+                            <PanGestureRecognizer PanUpdated="OnPlayerBarPanUpdated" />
                             <TapGestureRecognizer Tapped="OnPlayerBarTapped" />
                         </Grid.GestureRecognizers>
                         <Label Grid.Row="0"

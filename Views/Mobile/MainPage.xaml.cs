@@ -8,7 +8,7 @@ public partial class MainPage : ContentPage
 {
     #region Constants
 
-    private const double PlayerBarOpenThreshold = 70d;
+    private const double PlayerBarOpenThreshold = 0d;
     private const double PlayerBarOpenReleaseThreshold = 130d;
     private const double PlayerBarDragResistance = 0.92d;
 
