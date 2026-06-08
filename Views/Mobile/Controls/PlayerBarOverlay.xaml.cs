@@ -2,7 +2,11 @@ namespace mashin.Views.Mobile.Controls;
 
 public partial class PlayerBarOverlay : ContentView
 {
+    #region Constants
+
     private const double DragDismissThreshold = 100d;
+    private const double QueueOpenThreshold = 90d;
+    private const double QueueOpenReleaseThreshold = 140d;
     private const double DragResistance = 0.92d;
     private const double CoverHeightFactor = 0.5d;
     private const uint BackdropInDurationMs = 220;
@@ -11,21 +15,51 @@ public partial class PlayerBarOverlay : ContentView
     private const uint OutSlideDurationMs = 260;
     private const uint DragCancelSnapBackDurationMs = 180;
 
+    #endregion
+
+    #region Fields
+
     private bool _isSheetDragging;
     private bool _canDismissForCurrentPan;
     private bool _dismissTriggered;
+    private bool _queueDragStarted;
+    private double _queueDragDistance;
+
+    #endregion
+
+    #region State
 
     public bool IsOpen { get; private set; }
 
     public bool IsAnimating { get; private set; }
 
+    #endregion
+
+    #region Events
+
     public event EventHandler? DismissRequested;
+
+    #endregion
+
+    #region Construction
 
     public PlayerBarOverlay()
     {
         InitializeComponent();
         WireCoverHeightUpdates();
     }
+
+    #endregion
+
+    #region Public API
+
+    public Task ShowAsync() => AnimateInAsync();
+
+    public Task HideAsync() => AnimateOutAsync();
+
+    #endregion
+
+    #region Overlay Animation
 
     public async Task AnimateInAsync()
     {
@@ -78,14 +112,102 @@ public partial class PlayerBarOverlay : ContentView
         }
     }
 
-    public Task ShowAsync() => AnimateInAsync();
+    #endregion
 
-    public Task HideAsync() => AnimateOutAsync();
+    #region Gesture Handlers
 
     private void OnBackdropTapped(object? sender, TappedEventArgs e)
     {
         DismissRequested?.Invoke(this, EventArgs.Empty);
     }
+
+    private void OnSheetPanUpdated(object? sender, PanUpdatedEventArgs e)
+    {
+        HandlePanUpdated(e);
+    }
+
+    private void HandlePanUpdated(PanUpdatedEventArgs e)
+    {
+        switch (e.StatusType)
+        {
+            case GestureStatus.Started:
+                _canDismissForCurrentPan = IsOpen && !IsAnimating;
+                _isSheetDragging = _canDismissForCurrentPan;
+                _queueDragStarted = false;
+                _queueDragDistance = 0;
+                break;
+
+            case GestureStatus.Running when _isSheetDragging:
+                if (_dismissTriggered || !_canDismissForCurrentPan)
+                {
+                    break;
+                }
+
+                // Keep horizontal gestures (e.g. slider scrubbing) from triggering dismiss.
+                if (Math.Abs(e.TotalX) > Math.Abs(e.TotalY))
+                {
+                    return;
+                }
+
+                if (e.TotalY < 0)
+                {
+                    var upwardPullDistance = Math.Abs(e.TotalY) * DragResistance;
+
+                    if (!_queueDragStarted && upwardPullDistance >= QueueOpenThreshold)
+                    {
+                        BeginQueueOverlaySwipeDrag();
+                        _queueDragStarted = true;
+                    }
+
+                    if (_queueDragStarted)
+                    {
+                        _queueDragDistance = upwardPullDistance;
+                        UpdateQueueOverlaySwipeDrag(_queueDragDistance);
+                    }
+
+                    return;
+                }
+
+                if (e.TotalY <= 0)
+                {
+                    return;
+                }
+
+                var translationY = Math.Max(0, e.TotalY * DragResistance);
+                OverlaySheet.TranslationY = translationY;
+
+                if (translationY >= DragDismissThreshold)
+                {
+                    _dismissTriggered = true;
+                    DismissRequested?.Invoke(this, EventArgs.Empty);
+                }
+
+                break;
+
+            case GestureStatus.Completed:
+            case GestureStatus.Canceled:
+                if (_queueDragStarted)
+                {
+                    var shouldOpenQueue = _queueDragDistance >= QueueOpenReleaseThreshold;
+                    _ = EndQueueOverlaySwipeDragAsync(shouldOpenQueue);
+                }
+
+                if (!_dismissTriggered && OverlaySheet.TranslationY > 0)
+                {
+                    _ = OverlaySheet.TranslateToAsync(0, 0, DragCancelSnapBackDurationMs, Easing.SinOut);
+                }
+
+                _isSheetDragging = false;
+                _canDismissForCurrentPan = false;
+                _queueDragStarted = false;
+                _queueDragDistance = 0;
+                break;
+        }
+    }
+
+    #endregion
+
+    #region Queue Overlay
 
     private async void OnQueueButtonTapped(object? sender, TappedEventArgs e)
     {
@@ -109,60 +231,52 @@ public partial class PlayerBarOverlay : ContentView
         await overlayService.ShowQueueOverlayAsync(BindingContext);
     }
 
-    private void OnSheetPanUpdated(object? sender, PanUpdatedEventArgs e)
+    private void BeginQueueOverlaySwipeDrag()
     {
-        HandlePanUpdated(e);
-    }
-
-    private void HandlePanUpdated(PanUpdatedEventArgs e)
-    {
-        switch (e.StatusType)
+        var overlayService = ResolveOverlayService();
+        if (overlayService == null || BindingContext == null)
         {
-            case GestureStatus.Started:
-                _canDismissForCurrentPan = IsOpen && !IsAnimating;
-                _isSheetDragging = _canDismissForCurrentPan;
-                break;
-
-            case GestureStatus.Running when _isSheetDragging:
-                if (_dismissTriggered || !_canDismissForCurrentPan)
-                {
-                    break;
-                }
-
-                // Keep horizontal gestures (e.g. slider scrubbing) from triggering dismiss.
-                if (Math.Abs(e.TotalX) > Math.Abs(e.TotalY))
-                {
-                    return;
-                }
-
-                if (e.TotalY <= 0)
-                {
-                    return;
-                }
-
-                var translationY = Math.Max(0, e.TotalY * DragResistance);
-                OverlaySheet.TranslationY = translationY;
-
-                if (translationY >= DragDismissThreshold)
-                {
-                    _dismissTriggered = true;
-                    DismissRequested?.Invoke(this, EventArgs.Empty);
-                }
-
-                break;
-
-            case GestureStatus.Completed:
-            case GestureStatus.Canceled:
-                if (!_dismissTriggered)
-                {
-                    _ = OverlaySheet.TranslateToAsync(0, 0, DragCancelSnapBackDurationMs, Easing.SinOut);
-                }
-
-                _isSheetDragging = false;
-                _canDismissForCurrentPan = false;
-                break;
+            return;
         }
+
+        if (overlayService.IsQueueOverlayAnimating || overlayService.IsQueueOverlayOpen)
+        {
+            return;
+        }
+
+        overlayService.BeginQueueOverlayInteractiveOpen(BindingContext);
     }
+
+    private void UpdateQueueOverlaySwipeDrag(double upwardPullDistance)
+    {
+        var overlayService = ResolveOverlayService();
+        if (overlayService == null)
+        {
+            return;
+        }
+
+        overlayService.UpdateQueueOverlayInteractiveOpen(upwardPullDistance);
+    }
+
+    private async Task EndQueueOverlaySwipeDragAsync(bool shouldOpenQueue)
+    {
+        var overlayService = ResolveOverlayService();
+        if (overlayService == null)
+        {
+            return;
+        }
+
+        if (!overlayService.IsQueueOverlayInteractiveOpening)
+        {
+            return;
+        }
+
+        await overlayService.EndQueueOverlayInteractiveOpenAsync(shouldOpenQueue);
+    }
+
+    #endregion
+
+    #region Layout Sizing
 
     private void WireCoverHeightUpdates()
     {
@@ -223,6 +337,10 @@ public partial class PlayerBarOverlay : ContentView
         CoverArtBorder.HeightRequest = targetSide;
     }
 
+    #endregion
+
+    #region Helpers
+
     private double GetSlideDistance()
     {
         var sheetHeight = Height;
@@ -244,4 +362,6 @@ public partial class PlayerBarOverlay : ContentView
 
         return services.GetService(typeof(mashin.Services.IOverlayService)) as mashin.Services.IOverlayService;
     }
+
+    #endregion
 }

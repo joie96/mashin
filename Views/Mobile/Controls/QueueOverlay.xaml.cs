@@ -11,6 +11,7 @@ public partial class QueueOverlay : ContentView
     private bool _isSheetDragging;
     private bool _canDismissForCurrentPan;
     private bool _dismissTriggered;
+    private bool _isInteractiveOpening;
     private double _queueVerticalOffset;
 
     public QueueOverlay()
@@ -29,7 +30,7 @@ public partial class QueueOverlay : ContentView
 
     public async Task ShowAsync()
     {
-        if (IsOpen || IsAnimating)
+        if (IsOpen || IsAnimating || _isInteractiveOpening)
         {
             return;
         }
@@ -56,7 +57,7 @@ public partial class QueueOverlay : ContentView
 
     public async Task HideAsync()
     {
-        if (!IsOpen || IsAnimating)
+        if ((!IsOpen && !_isInteractiveOpening) || IsAnimating)
         {
             return;
         }
@@ -67,6 +68,72 @@ public partial class QueueOverlay : ContentView
             _dismissTriggered = true;
             await OverlaySheet.TranslateToAsync(0, GetSlideDistance(), OutSlideDurationMs, Easing.SinIn);
 
+            IsVisible = false;
+            IsOpen = false;
+        }
+        finally
+        {
+            IsAnimating = false;
+        }
+    }
+
+    public void BeginInteractiveOpen()
+    {
+        if (IsOpen || IsAnimating)
+        {
+            return;
+        }
+
+        _dismissTriggered = false;
+        _isInteractiveOpening = true;
+        IsVisible = true;
+        OverlaySheet.TranslationY = GetSlideDistance();
+    }
+
+    public void UpdateInteractiveOpen(double upwardPullDistance)
+    {
+        if (!_isInteractiveOpening || IsAnimating)
+        {
+            return;
+        }
+
+        var slideDistance = GetSlideDistance();
+        var translationY = Math.Clamp(slideDistance - upwardPullDistance, 0, slideDistance);
+        OverlaySheet.TranslationY = translationY;
+    }
+
+    public async Task CompleteInteractiveOpenAsync()
+    {
+        if (!_isInteractiveOpening || IsAnimating)
+        {
+            return;
+        }
+
+        IsAnimating = true;
+        try
+        {
+            _isInteractiveOpening = false;
+            await OverlaySheet.TranslateToAsync(0, 0, InSlideDurationMs, Easing.SinOut);
+            IsOpen = true;
+        }
+        finally
+        {
+            IsAnimating = false;
+        }
+    }
+
+    public async Task CancelInteractiveOpenAsync()
+    {
+        if (!_isInteractiveOpening || IsAnimating)
+        {
+            return;
+        }
+
+        IsAnimating = true;
+        try
+        {
+            _isInteractiveOpening = false;
+            await OverlaySheet.TranslateToAsync(0, GetSlideDistance(), DragCancelSnapBackDurationMs, Easing.SinOut);
             IsVisible = false;
             IsOpen = false;
         }
@@ -96,7 +163,7 @@ public partial class QueueOverlay : ContentView
         switch (e.StatusType)
         {
             case GestureStatus.Started:
-                _canDismissForCurrentPan = IsOpen && !IsAnimating && IsScrollAtTop();
+                _canDismissForCurrentPan = IsOpen && !IsAnimating && !_isInteractiveOpening && IsScrollAtTop();
                 _isSheetDragging = _canDismissForCurrentPan;
                 break;
 

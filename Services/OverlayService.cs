@@ -47,6 +47,7 @@ public interface IOverlayService
 
     bool IsQueueOverlayOpen { get; }
     bool IsQueueOverlayAnimating { get; }
+    bool IsQueueOverlayInteractiveOpening { get; }
     bool IsPlayerBarOverlayOpen { get; }
     bool IsOverlayOpen { get; }
     bool IsFlyoutOpen { get; }
@@ -54,6 +55,9 @@ public interface IOverlayService
     Task HidePlayerBarOverlayAsync();
     Task ShowQueueOverlayAsync(object bindingContext);
     Task HideQueueOverlayAsync();
+    void BeginQueueOverlayInteractiveOpen(object bindingContext);
+    void UpdateQueueOverlayInteractiveOpen(double upwardPullDistance);
+    Task EndQueueOverlayInteractiveOpenAsync(bool openQueue);
     Task CloseOverlayAsync();
     Task CloseFlyoutAsync();
     Task ShowSelectionIndicatorAsync(object selectionControl);
@@ -93,6 +97,7 @@ public sealed class OverlayService : IOverlayService
     private readonly ILogger<OverlayService> _logger;
     private readonly SemaphoreSlim _overlayLock = new(1, 1);
     private int _queueWarmupRunId;
+    private bool _isQueueInteractiveOpening;
 
     private readonly CreatePlaylistOverlay _createPlaylistOverlay;
     private readonly UpdatePlaylistOverlay _updatePlaylistOverlay;
@@ -269,6 +274,8 @@ public sealed class OverlayService : IOverlayService
 
     public bool IsQueueOverlayAnimating => IsMobileDevice() ? _mobileQueueOverlay.IsAnimating : _desktopQueueOverlay.IsAnimating;
 
+    public bool IsQueueOverlayInteractiveOpening => IsMobileDevice() && _isQueueInteractiveOpening;
+
     public bool IsPlayerBarOverlayOpen => _playerBarOverlay.IsOpen;
 
     public bool IsOverlayOpen => _overlayHost?.IsVisible == true;
@@ -328,6 +335,89 @@ public sealed class OverlayService : IOverlayService
     #endregion
 
     #region Queue Overlay
+
+    public void BeginQueueOverlayInteractiveOpen(object bindingContext)
+    {
+        if (bindingContext == null)
+        {
+            return;
+        }
+
+        if (!IsMobileDevice())
+        {
+            return;
+        }
+
+        EnsureInitialized();
+
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            if (_mobileQueueOverlay.IsOpen || _mobileQueueOverlay.IsAnimating || _isQueueInteractiveOpening)
+            {
+                return;
+            }
+
+            Interlocked.Increment(ref _queueWarmupRunId);
+            RestoreQueueHostVisualState();
+
+            if (!ReferenceEquals(_mobileQueueOverlay.BindingContext, bindingContext))
+            {
+                _mobileQueueOverlay.BindingContext = bindingContext;
+            }
+
+            ShowFlyoutInternal(_mobileQueueOverlay, () => _ = HideQueueOverlayAsync(), FlyoutLayoutMode.FullHeight, FlyoutHostType.Queue);
+            _mobileQueueOverlay.BeginInteractiveOpen();
+            _isQueueInteractiveOpening = true;
+        });
+    }
+
+    public void UpdateQueueOverlayInteractiveOpen(double upwardPullDistance)
+    {
+        if (!IsMobileDevice())
+        {
+            return;
+        }
+
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            if (!_isQueueInteractiveOpening)
+            {
+                return;
+            }
+
+            _mobileQueueOverlay.UpdateInteractiveOpen(Math.Max(0, upwardPullDistance));
+        });
+    }
+
+    public async Task EndQueueOverlayInteractiveOpenAsync(bool openQueue)
+    {
+        if (!IsMobileDevice())
+        {
+            return;
+        }
+
+        EnsureInitialized();
+
+        await MainThread.InvokeOnMainThreadAsync(async () =>
+        {
+            if (!_isQueueInteractiveOpening)
+            {
+                return;
+            }
+
+            if (openQueue)
+            {
+                await _mobileQueueOverlay.CompleteInteractiveOpenAsync();
+                _isQueueInteractiveOpening = false;
+                return;
+            }
+
+            await _mobileQueueOverlay.CancelInteractiveOpenAsync();
+            _isQueueInteractiveOpening = false;
+            await HideFlyoutLayerAsync(FlyoutHostType.Queue, clearContent: false);
+            RestoreQueueHostVisualState();
+        });
+    }
 
     public async Task ShowQueueOverlayAsync(object bindingContext)
     {
@@ -467,6 +557,7 @@ public sealed class OverlayService : IOverlayService
         await MainThread.InvokeOnMainThreadAsync(async () =>
         {
             var useMobileQueueOverlay = IsMobileDevice();
+            _isQueueInteractiveOpening = false;
 
             if (_mobileQueueOverlay.IsOpen)
             {
