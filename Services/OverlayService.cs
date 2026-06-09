@@ -1345,8 +1345,8 @@ public sealed class OverlayService : IOverlayService
 
     private static bool IsMobileDevice()
     {
-        //return DeviceInfo.Current.Idiom == DeviceIdiom.Phone || DeviceInfo.Current.Idiom == DeviceIdiom.Tablet;
-        return true;
+        return DeviceInfo.Current.Idiom == DeviceIdiom.Phone || DeviceInfo.Current.Idiom == DeviceIdiom.Tablet;
+        
     }
 
     private static bool IsSupportedSelectionControl(object selectionControl)

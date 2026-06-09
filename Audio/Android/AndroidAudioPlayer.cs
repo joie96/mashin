@@ -6,6 +6,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Android.Media;
+using Android.OS;
 using Microsoft.Extensions.Logging;
 using Sendspin.SDK.Audio;
 using Sendspin.SDK.Models;
@@ -184,6 +185,16 @@ namespace mashin.Audio.Android
 
         private void PlaybackLoop()
         {
+            try
+            {
+                Process.SetThreadPriority(global::Android.OS.ThreadPriority.Audio);
+                _logger.LogDebug("Set Android playback thread priority to Audio");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to set Android playback thread priority");
+            }
+
             var floatBuffer = new float[4096];
             var writeBuffer = new float[floatBuffer.Length];
             var diagnosticsLeft = 12;

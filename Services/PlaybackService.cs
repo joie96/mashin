@@ -72,6 +72,16 @@ public interface IPlaybackService : IAsyncDisposable, INotifyPropertyChanged
     string? ActivePlayerId { get; }
     string? ActiveQueueId { get; }
     PlaybackStateModel PlaybackState { get; set; }
+    int Volume { get; }
+    bool IsMuted { get; }
+    bool? ShuffleEnabled { get; }
+    string? RepeatMode { get; }
+    bool? DontStopTheMusicEnabled { get; }
+    bool? FlowModeEnabled { get; }
+    int? CurrentQueueIndex { get; }
+    int QueueItemCount { get; }
+    double DurationSeconds { get; }
+    double PositionSeconds { get; }
 
     PlayerQueue? CurrentPlayerQueue { get; }
     Track? CurrentTrack { get; }
@@ -117,6 +127,16 @@ public sealed class PlaybackService : IPlaybackService
     private string? _activePlayerId;
     private string? _activeQueueId;
     private PlaybackStateModel _playbackState = new(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow);
+    private int _volume;
+    private bool _isMuted;
+    private bool? _shuffleEnabled;
+    private string? _repeatMode;
+    private bool? _dontStopTheMusicEnabled;
+    private bool? _flowModeEnabled;
+    private int? _currentQueueIndex;
+    private int _queueItemCount;
+    private double _durationSeconds;
+    private double _positionSeconds;
     private PlayerQueue? _currentPlayerQueue;
     private Track? _currentTrack;
     private readonly List<QueueItem> _currentQueueItems = new();
@@ -152,6 +172,66 @@ public sealed class PlaybackService : IPlaybackService
         set => SetProperty(ref _playbackState, value);
     }
 
+    public int Volume
+    {
+        get => _volume;
+        private set => SetProperty(ref _volume, Math.Clamp(value, 0, 100));
+    }
+
+    public bool IsMuted
+    {
+        get => _isMuted;
+        private set => SetProperty(ref _isMuted, value);
+    }
+
+    public bool? ShuffleEnabled
+    {
+        get => _shuffleEnabled;
+        private set => SetProperty(ref _shuffleEnabled, value);
+    }
+
+    public string? RepeatMode
+    {
+        get => _repeatMode;
+        private set => SetProperty(ref _repeatMode, value);
+    }
+
+    public bool? DontStopTheMusicEnabled
+    {
+        get => _dontStopTheMusicEnabled;
+        private set => SetProperty(ref _dontStopTheMusicEnabled, value);
+    }
+
+    public bool? FlowModeEnabled
+    {
+        get => _flowModeEnabled;
+        private set => SetProperty(ref _flowModeEnabled, value);
+    }
+
+    public int? CurrentQueueIndex
+    {
+        get => _currentQueueIndex;
+        private set => SetProperty(ref _currentQueueIndex, value);
+    }
+
+    public int QueueItemCount
+    {
+        get => _queueItemCount;
+        private set => SetProperty(ref _queueItemCount, Math.Max(0, value));
+    }
+
+    public double DurationSeconds
+    {
+        get => _durationSeconds;
+        private set => SetProperty(ref _durationSeconds, Math.Max(0, value));
+    }
+
+    public double PositionSeconds
+    {
+        get => _positionSeconds;
+        private set => SetProperty(ref _positionSeconds, Math.Max(0, value));
+    }
+
     public PlayerQueue? CurrentPlayerQueue
     {
         get => _currentPlayerQueue;
@@ -183,6 +263,12 @@ public sealed class PlaybackService : IPlaybackService
 
         _sendspinPlayerService.PropertyChanged += OnSendspinPlayerPropertyChanged;
         PlaybackState = _sendspinPlayerService.PlayerState;
+        Volume = _sendspinPlayerService.Volume;
+        IsMuted = _sendspinPlayerService.IsMuted;
+        ShuffleEnabled = _sendspinPlayerService.ShuffleEnabled;
+        RepeatMode = _sendspinPlayerService.RepeatMode;
+        DurationSeconds = _sendspinPlayerService.DurationSeconds;
+        PositionSeconds = _sendspinPlayerService.PositionSeconds;
     }
 
 #endregion
@@ -404,7 +490,7 @@ public sealed class PlaybackService : IPlaybackService
 
 #endregion
 
-#region Refresh
+#region Remote Path: Queue Polling via MusicAssistant
 
     private async Task RunLoopAsync(CancellationToken cancellationToken)
     {
@@ -458,15 +544,55 @@ public sealed class PlaybackService : IPlaybackService
             var activeQueue = await _musicAssistant.GetActiveQueueForPlayerAsync(activePlayerId);
             if (activeQueue == null)
             {
+                DontStopTheMusicEnabled = null;
+                FlowModeEnabled = null;
+                CurrentQueueIndex = null;
+                QueueItemCount = 0;
                 UpdateState(null, null, Array.Empty<QueueItem>());
                 return;
             }
+
+            DontStopTheMusicEnabled = activeQueue.DontStopTheMusicEnabled;
+            FlowModeEnabled = activeQueue.FlowMode;
+            CurrentQueueIndex = activeQueue.CurrentIndex;
+            QueueItemCount = Math.Max(0, activeQueue.ItemCount);
 
             Track? currentTrack = activeQueue.CurrentItem?.MediaItem;
             if (currentTrack != null)
             {
                 currentTrack.Favorite = !string.IsNullOrWhiteSpace(currentTrack.Uri)
                     && favoriteTrackUris.Contains(currentTrack.Uri);
+
+                DurationSeconds = Math.Max(0, currentTrack.Duration);
+            }
+
+            if (activeQueue.ElapsedTime is double elapsedTime)
+            {
+                PositionSeconds = Math.Max(0, elapsedTime);
+            }
+
+            if (activeQueue.ShuffleEnabled.HasValue)
+            {
+                ShuffleEnabled = activeQueue.ShuffleEnabled;
+            }
+
+            if (activeQueue.RepeatMode.HasValue)
+            {
+                RepeatMode = activeQueue.RepeatMode.Value.ToString();
+            }
+
+            if (!IsLocalTarget())
+            {
+                var player = await _musicAssistant.GetPlayerAsync(activePlayerId, raiseUnavailable: false);
+                if (player?.VolumeLevel is int volumeLevel)
+                {
+                    Volume = volumeLevel;
+                }
+
+                if (player?.VolumeMuted is bool volumeMuted)
+                {
+                    IsMuted = volumeMuted;
+                }
             }
 
             var queueItems = new List<QueueItem>();
@@ -505,12 +631,18 @@ public sealed class PlaybackService : IPlaybackService
 
 #endregion
 
-#region Queue State Update
+#region Remote Refresh Path: Queue Apply and Diff
 
     private void UpdateState(PlayerQueue? nextQueue, Track? nextTrack, IReadOnlyList<QueueItem> nextQueueItems)
     {
+        var localTrackEnriched = false;
+        if (IsLocalTarget())
+        {
+            (nextTrack, localTrackEnriched) = MergeLocalTrackWithQueueTrack(nextTrack);
+        }
+
         var queueChanged = !ArePlayerQueuesEqual(CurrentPlayerQueue, nextQueue);
-        var currentTrackChanged = !AreTracksEqual(CurrentTrack, nextTrack);
+        var currentTrackChanged = !AreTracksEqual(CurrentTrack, nextTrack) || localTrackEnriched;
         var queueItemsChanged = !AreQueueItemListsEqual(_currentQueueItems, nextQueueItems);
 
         if (queueChanged)
@@ -523,7 +655,11 @@ public sealed class PlaybackService : IPlaybackService
 
         if (currentTrackChanged)
         {
-            CurrentTrack = nextTrack;
+            if (!ReferenceEquals(CurrentTrack, nextTrack))
+            {
+                CurrentTrack = nextTrack;
+            }
+
             CurrentTrackUpdated?.Invoke(this, EventArgs.Empty);
         }
 
@@ -538,7 +674,7 @@ public sealed class PlaybackService : IPlaybackService
 
 #endregion
 
-#region Event Handlers
+#region Local Refresh Path: Sendspin Event-Based Immediate Updates
 
     private void OnSendspinPlayerPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -557,12 +693,400 @@ public sealed class PlaybackService : IPlaybackService
             }
 
             PlaybackState = localState;
+            return;
         }
+
+        if (e.PropertyName == nameof(ISendspinPlayerService.Volume))
+        {
+            Volume = _sendspinPlayerService.Volume;
+            return;
+        }
+
+        if (e.PropertyName == nameof(ISendspinPlayerService.IsMuted))
+        {
+            IsMuted = _sendspinPlayerService.IsMuted;
+            return;
+        }
+
+        if (e.PropertyName == nameof(ISendspinPlayerService.DurationSeconds))
+        {
+            DurationSeconds = _sendspinPlayerService.DurationSeconds;
+            return;
+        }
+
+        if (e.PropertyName == nameof(ISendspinPlayerService.PositionSeconds))
+        {
+            PositionSeconds = _sendspinPlayerService.PositionSeconds;
+            return;
+        }
+
+        if (e.PropertyName == nameof(ISendspinPlayerService.TrackTitle)
+            || e.PropertyName == nameof(ISendspinPlayerService.TrackArtist)
+            || e.PropertyName == nameof(ISendspinPlayerService.TrackAlbum)
+            || e.PropertyName == nameof(ISendspinPlayerService.TrackImageUri))
+        {
+            SyncLocalTrackFromSendspin();
+            return;
+        }
+
+        if (e.PropertyName == nameof(ISendspinPlayerService.ShuffleEnabled)
+            || e.PropertyName == nameof(ISendspinPlayerService.RepeatMode))
+        {
+            SyncLocalQueueSettingsFromSendspin();
+        }
+    }
+
+    private void SyncLocalTrackFromSendspin()
+    {
+        var updatedTrack = CreateTrackFromSendspinSnapshot(CurrentTrack);
+        if (CurrentTrack != null && AreTrackUiFieldsEqual(CurrentTrack, updatedTrack))
+        {
+            return;
+        }
+
+        CurrentTrack = updatedTrack;
+        CurrentTrackUpdated?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void SyncLocalQueueSettingsFromSendspin()
+    {
+        ShuffleEnabled = _sendspinPlayerService.ShuffleEnabled;
+        RepeatMode = _sendspinPlayerService.RepeatMode;
+
+        var existingQueue = CurrentPlayerQueue;
+        if (existingQueue == null)
+        {
+            return;
+        }
+
+        var changed = false;
+
+        var sendspinShuffle = _sendspinPlayerService.ShuffleEnabled;
+        if (existingQueue.ShuffleEnabled != sendspinShuffle)
+        {
+            existingQueue.ShuffleEnabled = sendspinShuffle;
+            changed = true;
+        }
+
+        if (TryParseRepeatMode(_sendspinPlayerService.RepeatMode, out var sendspinRepeatMode)
+            && existingQueue.RepeatMode != sendspinRepeatMode)
+        {
+            existingQueue.RepeatMode = sendspinRepeatMode;
+            changed = true;
+        }
+
+        if (!changed)
+        {
+            return;
+        }
+
+        CurrentPlayerQueueUpdated?.Invoke(this, EventArgs.Empty);
+    }
+
+    private (Track? Track, bool EnrichedExistingTrack) MergeLocalTrackWithQueueTrack(Track? queueTrack)
+    {
+        if (queueTrack == null)
+        {
+            return (CurrentTrack, false);
+        }
+
+        if (CurrentTrack == null)
+        {
+            var localTrack = CreateTrackFromSendspinSnapshot(queueTrack);
+            var enriched = MergeMissingTrackDataFromQueue(localTrack, queueTrack);
+            return (localTrack, enriched);
+        }
+
+        if (!AreSameTrackIdentity(CurrentTrack, queueTrack))
+        {
+            var switchedTrack = CreateTrackFromSendspinSnapshot(queueTrack);
+            var enriched = MergeMissingTrackDataFromQueue(switchedTrack, queueTrack);
+            return (switchedTrack, enriched);
+        }
+
+        var changed = MergeMissingTrackDataFromQueue(CurrentTrack, queueTrack);
+        return (CurrentTrack, changed);
+    }
+
+    private Track CreateTrackFromSendspinSnapshot(Track? baseTrack)
+    {
+        var track = new Track
+        {
+            ItemId = baseTrack?.ItemId ?? string.Empty,
+            Provider = baseTrack?.Provider ?? string.Empty,
+            SortName = baseTrack?.SortName,
+            Uri = baseTrack?.Uri,
+            Duration = baseTrack?.Duration ?? 0,
+            Artists = baseTrack?.Artists,
+            Album = baseTrack?.Album,
+            DiscNumber = baseTrack?.DiscNumber ?? 0,
+            TrackNumber = baseTrack?.TrackNumber ?? 0,
+            ProviderMappings = baseTrack?.ProviderMappings?.ToList() ?? new List<ProviderMapping>(),
+            Metadata = baseTrack?.Metadata,
+            Favorite = baseTrack?.Favorite ?? false,
+            ExternalIds = baseTrack?.ExternalIds,
+            Index = baseTrack?.Index ?? 0,
+        };
+
+        var title = _sendspinPlayerService.TrackTitle;
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            track.Name = title;
+        }
+
+        var artist = _sendspinPlayerService.TrackArtist;
+        if (!string.IsNullOrWhiteSpace(artist))
+        {
+            track.Artists = new List<Artist> { new() { Name = artist } };
+        }
+
+        var album = _sendspinPlayerService.TrackAlbum;
+        if (!string.IsNullOrWhiteSpace(album))
+        {
+            track.Album ??= new Album();
+            track.Album.Name = album;
+        }
+
+        var imageUri = _sendspinPlayerService.TrackImageUri;
+        if (!string.IsNullOrWhiteSpace(imageUri))
+        {
+            SetTrackImage(track, imageUri);
+        }
+
+        return track;
+    }
+
+    private static bool MergeMissingTrackDataFromQueue(Track target, Track source)
+    {
+        var changed = false;
+
+        if (string.IsNullOrWhiteSpace(target.ItemId) && !string.IsNullOrWhiteSpace(source.ItemId))
+        {
+            target.ItemId = source.ItemId;
+            changed = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(target.Provider) && !string.IsNullOrWhiteSpace(source.Provider))
+        {
+            target.Provider = source.Provider;
+            changed = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(target.Uri) && !string.IsNullOrWhiteSpace(source.Uri))
+        {
+            target.Uri = source.Uri;
+            changed = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(target.Name) && !string.IsNullOrWhiteSpace(source.Name))
+        {
+            target.Name = source.Name;
+            changed = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(target.SortName) && !string.IsNullOrWhiteSpace(source.SortName))
+        {
+            target.SortName = source.SortName;
+            changed = true;
+        }
+
+        if (target.Duration <= 0 && source.Duration > 0)
+        {
+            target.Duration = source.Duration;
+            changed = true;
+        }
+
+        if (target.DiscNumber <= 0 && source.DiscNumber > 0)
+        {
+            target.DiscNumber = source.DiscNumber;
+            changed = true;
+        }
+
+        if (target.TrackNumber <= 0 && source.TrackNumber > 0)
+        {
+            target.TrackNumber = source.TrackNumber;
+            changed = true;
+        }
+
+        if ((target.Artists == null || target.Artists.Count == 0) && source.Artists is { Count: > 0 })
+        {
+            target.Artists = source.Artists;
+            changed = true;
+        }
+
+        if (target.Album == null && source.Album != null)
+        {
+            target.Album = source.Album;
+            changed = true;
+        }
+        else if (target.Album != null && source.Album != null)
+        {
+            changed |= MergeMissingAlbumData(target.Album, source.Album);
+        }
+
+        if ((target.ProviderMappings == null || target.ProviderMappings.Count == 0)
+            && source.ProviderMappings is { Count: > 0 })
+        {
+            target.ProviderMappings = source.ProviderMappings;
+            changed = true;
+        }
+
+        if (target.ExternalIds == null && source.ExternalIds != null)
+        {
+            target.ExternalIds = source.ExternalIds;
+            changed = true;
+        }
+
+        if (target.Metadata == null && source.Metadata != null)
+        {
+            target.Metadata = source.Metadata;
+            changed = true;
+        }
+        else if (target.Metadata != null && source.Metadata != null)
+        {
+            if ((target.Metadata.Images == null || target.Metadata.Images.Count == 0)
+                && source.Metadata.Images is { Count: > 0 })
+            {
+                target.Metadata.Images = source.Metadata.Images;
+                changed = true;
+            }
+        }
+
+        if (!target.Favorite && source.Favorite)
+        {
+            target.Favorite = true;
+            changed = true;
+        }
+
+        if (target.Index <= 0 && source.Index > 0)
+        {
+            target.Index = source.Index;
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private static bool MergeMissingAlbumData(Album target, Album source)
+    {
+        var changed = false;
+
+        if (string.IsNullOrWhiteSpace(target.ItemId) && !string.IsNullOrWhiteSpace(source.ItemId))
+        {
+            target.ItemId = source.ItemId;
+            changed = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(target.Provider) && !string.IsNullOrWhiteSpace(source.Provider))
+        {
+            target.Provider = source.Provider;
+            changed = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(target.Uri) && !string.IsNullOrWhiteSpace(source.Uri))
+        {
+            target.Uri = source.Uri;
+            changed = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(target.Name) && !string.IsNullOrWhiteSpace(source.Name))
+        {
+            target.Name = source.Name;
+            changed = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(target.SortName) && !string.IsNullOrWhiteSpace(source.SortName))
+        {
+            target.SortName = source.SortName;
+            changed = true;
+        }
+
+        if (target.Metadata == null && source.Metadata != null)
+        {
+            target.Metadata = source.Metadata;
+            changed = true;
+        }
+        else if (target.Metadata != null && source.Metadata != null)
+        {
+            if ((target.Metadata.Images == null || target.Metadata.Images.Count == 0)
+                && source.Metadata.Images is { Count: > 0 })
+            {
+                target.Metadata.Images = source.Metadata.Images;
+                changed = true;
+            }
+        }
+
+        if ((target.Artists == null || target.Artists.Count == 0) && source.Artists is { Count: > 0 })
+        {
+            target.Artists = source.Artists;
+            changed = true;
+        }
+
+        if (!target.Year.HasValue && source.Year.HasValue)
+        {
+            target.Year = source.Year;
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private static void SetTrackImage(Track track, string imageUri)
+    {
+        track.Metadata ??= new MediaItemMetadata();
+        track.Metadata.Images =
+        [
+            new MediaItemImage
+            {
+                Type = "thumb",
+                Path = imageUri,
+                Provider = track.Provider,
+                RemotelyAccessible = true,
+            }
+        ];
+
+        track.Album ??= new Album();
+        track.Album.Metadata ??= new MediaItemMetadata();
+        track.Album.Metadata.Images =
+        [
+            new MediaItemImage
+            {
+                Type = "thumb",
+                Path = imageUri,
+                Provider = track.Provider,
+                RemotelyAccessible = true,
+            }
+        ];
+    }
+
+    private static bool AreSameTrackIdentity(Track left, Track right)
+    {
+        if (!string.IsNullOrWhiteSpace(left.Uri) && !string.IsNullOrWhiteSpace(right.Uri))
+        {
+            return string.Equals(left.Uri, right.Uri, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!string.IsNullOrWhiteSpace(left.ItemId) && !string.IsNullOrWhiteSpace(right.ItemId))
+        {
+            return string.Equals(left.ItemId, right.ItemId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private static bool AreTrackUiFieldsEqual(Track left, Track right)
+    {
+        return string.Equals(left.Name, right.Name, StringComparison.Ordinal)
+            && string.Equals(left.ArtistName, right.ArtistName, StringComparison.Ordinal)
+            && string.Equals(left.AlbumName, right.AlbumName, StringComparison.Ordinal)
+            && string.Equals(left.ImageUri, right.ImageUri, StringComparison.Ordinal)
+            && string.Equals(left.Uri, right.Uri, StringComparison.Ordinal)
+            && string.Equals(left.ItemId, right.ItemId, StringComparison.Ordinal);
     }
 
 #endregion
 
-#region ChangeSet Builder for Queue Items
+#region Queue-ChangeSet Builder
 
     private static QueueItemsChangeSet BuildQueueItemsChangeSet(IReadOnlyList<QueueItem> previous, IReadOnlyList<QueueItem> next)
     {
@@ -655,7 +1179,7 @@ public sealed class PlaybackService : IPlaybackService
 
 #endregion
 
-#region Helpers
+#region Shared Helpers
 
     private void SyncPlaybackStateFromQueue(PlayerQueue? queue)
     {
@@ -711,7 +1235,29 @@ public sealed class PlaybackService : IPlaybackService
 
     private static bool AreTracksEqual(Track? left, Track? right)
     {
-        return string.Equals(GetTrackKey(left), GetTrackKey(right), StringComparison.Ordinal);
+        if (left == null && right == null)
+        {
+            return true;
+        }
+
+        if (left == null || right == null)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(left.Uri) && !string.IsNullOrWhiteSpace(right.Uri))
+        {
+            return string.Equals(left.Uri, right.Uri, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!string.IsNullOrWhiteSpace(left.ItemId) && !string.IsNullOrWhiteSpace(right.ItemId))
+        {
+            return string.Equals(left.ItemId, right.ItemId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return string.Equals(left.Name, right.Name, StringComparison.Ordinal)
+            && string.Equals(left.ArtistName, right.ArtistName, StringComparison.Ordinal)
+            && string.Equals(left.AlbumName, right.AlbumName, StringComparison.Ordinal);
     }
 
     private static bool AreQueueItemListsEqual(IReadOnlyList<QueueItem> left, IReadOnlyList<QueueItem> right)
@@ -773,22 +1319,35 @@ public sealed class PlaybackService : IPlaybackService
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
-    private static RepeatMode GetNextRepeatMode(string? repeatMode)
+    private static mashin.Models.RepeatMode GetNextRepeatMode(string? repeatMode)
     {
         var currentMode = repeatMode?.Trim().ToLowerInvariant() switch
         {
-            "all" => RepeatMode.All,
-            "one" => RepeatMode.One,
-            _ => RepeatMode.Off
+            "all" => mashin.Models.RepeatMode.All,
+            "one" => mashin.Models.RepeatMode.One,
+            _ => mashin.Models.RepeatMode.Off
         };
 
         return currentMode switch
         {
-            RepeatMode.Off => RepeatMode.All,
-            RepeatMode.All => RepeatMode.One,
-            RepeatMode.One => RepeatMode.Off,
-            _ => RepeatMode.Off
+            mashin.Models.RepeatMode.Off => mashin.Models.RepeatMode.All,
+            mashin.Models.RepeatMode.All => mashin.Models.RepeatMode.One,
+            mashin.Models.RepeatMode.One => mashin.Models.RepeatMode.Off,
+            _ => mashin.Models.RepeatMode.Off
         };
+    }
+
+    private static bool TryParseRepeatMode(string? repeatMode, out mashin.Models.RepeatMode parsedMode)
+    {
+        parsedMode = repeatMode?.Trim().ToLowerInvariant() switch
+        {
+            "all" => mashin.Models.RepeatMode.All,
+            "one" => mashin.Models.RepeatMode.One,
+            "off" => mashin.Models.RepeatMode.Off,
+            _ => mashin.Models.RepeatMode.Off
+        };
+
+        return !string.IsNullOrWhiteSpace(repeatMode);
     }
 
     private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string propertyName = "")

@@ -258,10 +258,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         _musicAssistant.LoginRequired += OnLoginRequired;
 
-        // Subscribe to player state events
-        _sendspinPlayerService.PropertyChanged += OnPlayerServicePropertyChanged;
+        // Subscribe to playback state events
         _playbackService.PropertyChanged += OnPlaybackServicePropertyChanged;
         PlayState = _playbackService.PlaybackState;
+        ApplyPlaybackStatusFromService();
 
         // Subscribe to playback/queue updates
         _playbackService.CurrentPlayerQueueUpdated += OnCurrentPlayerQueueUpdated;
@@ -739,7 +739,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _musicAssistant.LoginRequired -= OnLoginRequired;
 
         _playbackService.PropertyChanged -= OnPlaybackServicePropertyChanged;
-        _sendspinPlayerService.PropertyChanged -= OnPlayerServicePropertyChanged;
         _playbackService.CurrentPlayerQueueUpdated -= OnCurrentPlayerQueueUpdated;
         _playbackService.CurrentTrackUpdated -= OnCurrentTrackUpdated;
         _playbackService.CurrentQueueItemsUpdated -= OnCurrentQueueItemsUpdated;
@@ -967,78 +966,83 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     #region Event Handlers
 
-    private void OnPlayerServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        switch (e.PropertyName)
-        {
-            case nameof(ISendspinPlayerService.Volume):
-                _suppressVolumeCommand = true;
-                try
-                {
-                    Volume = _sendspinPlayerService.Volume;
-                    _settings.SetInitialVolume(_sendspinPlayerService.Volume);
-                }
-                finally
-                {
-                    _suppressVolumeCommand = false;
-                }
-                break;
-
-            case nameof(ISendspinPlayerService.IsMuted):
-                IsMuted = _sendspinPlayerService.IsMuted;
-                _settings.SetInitialMuted(_sendspinPlayerService.IsMuted);
-                break;
-
-            case nameof(ISendspinPlayerService.RepeatMode):
-                RepeatMode = _sendspinPlayerService.RepeatMode;
-                break;
-
-            case nameof(ISendspinPlayerService.DurationSeconds):
-                if (!IsLocalPlaybackTarget())
-                {
-                    break;
-                }
-
-                Duration = _sendspinPlayerService.DurationSeconds;
-                if (SliderPosition > Duration)
-                {
-                    SliderPosition = Duration;
-                }
-                break;
-
-            case nameof(ISendspinPlayerService.PositionSeconds):
-                if (!IsLocalPlaybackTarget())
-                {
-                    break;
-                }
-
-                if (PlayState.State != PlayerPlaybackState.Seeking)
-                {
-                    var position = _sendspinPlayerService.PositionSeconds;
-                    Position = position;
-                    SliderPosition = position;
-                }
-                break;
-
-            case nameof(ISendspinPlayerService.TrackTitle):
-            case nameof(ISendspinPlayerService.TrackArtist):
-            case nameof(ISendspinPlayerService.TrackAlbum):
-                if (CurrentTrack == null
-                    || !string.Equals(CurrentTrack.Name, _sendspinPlayerService.TrackTitle, StringComparison.Ordinal)
-                    || !string.Equals(CurrentTrack.ArtistName, _sendspinPlayerService.TrackArtist, StringComparison.Ordinal)
-                    || !string.Equals(CurrentTrack.AlbumName, _sendspinPlayerService.TrackAlbum, StringComparison.Ordinal))
-                {
-                    _ = _playbackService.RefreshNowAsync();
-                }
-                break;
-        }
-    }
-
     private void OnPlaybackServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(IPlaybackService.PlaybackState))
         {
             PlayState = _playbackService.PlaybackState;
+            return;
+        }
+
+        if (e.PropertyName == nameof(IPlaybackService.Volume))
+        {
+            _suppressVolumeCommand = true;
+            try
+            {
+                Volume = _playbackService.Volume;
+                _settings.SetInitialVolume(_playbackService.Volume);
+            }
+            finally
+            {
+                _suppressVolumeCommand = false;
+            }
+
+            return;
+        }
+
+        if (e.PropertyName == nameof(IPlaybackService.IsMuted))
+        {
+            IsMuted = _playbackService.IsMuted;
+            _settings.SetInitialMuted(_playbackService.IsMuted);
+            return;
+        }
+
+        if (e.PropertyName == nameof(IPlaybackService.ShuffleEnabled))
+        {
+            ShuffleEnabled = _playbackService.ShuffleEnabled;
+            return;
+        }
+
+        if (e.PropertyName == nameof(IPlaybackService.RepeatMode))
+        {
+            RepeatMode = _playbackService.RepeatMode;
+            return;
+        }
+
+        if (e.PropertyName == nameof(IPlaybackService.DurationSeconds))
+        {
+            Duration = _playbackService.DurationSeconds;
+            if (SliderPosition > Duration)
+            {
+                SliderPosition = Duration;
+            }
+
+            return;
+        }
+
+        if (e.PropertyName == nameof(IPlaybackService.PositionSeconds))
+        {
+            if (PlayState.State != PlayerPlaybackState.Seeking)
+            {
+                var position = _playbackService.PositionSeconds;
+                Position = position;
+                SliderPosition = position;
+            }
+
+            return;
+        }
+
+        if (e.PropertyName == nameof(IPlaybackService.DontStopTheMusicEnabled))
+        {
+            _isApplyingQueueSettings = true;
+            try
+            {
+                IsDontStopTheMusicEnabled = _playbackService.DontStopTheMusicEnabled == true;
+            }
+            finally
+            {
+                _isApplyingQueueSettings = false;
+            }
         }
     }
 
@@ -1693,13 +1697,44 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _isApplyingQueueSettings = true;
         try
         {
-            ShuffleEnabled = queue?.ShuffleEnabled;
-            RepeatMode = queue?.RepeatMode?.ToString();
-            IsDontStopTheMusicEnabled = queue?.DontStopTheMusicEnabled == true;
+            IsDontStopTheMusicEnabled = _playbackService.DontStopTheMusicEnabled == true;
         }
         finally
         {
             _isApplyingQueueSettings = false;
+        }
+    }
+
+    private void ApplyPlaybackStatusFromService()
+    {
+        _suppressVolumeCommand = true;
+        try
+        {
+            Volume = _playbackService.Volume;
+        }
+        finally
+        {
+            _suppressVolumeCommand = false;
+        }
+
+        IsMuted = _playbackService.IsMuted;
+        ShuffleEnabled = _playbackService.ShuffleEnabled;
+        RepeatMode = _playbackService.RepeatMode;
+        _isApplyingQueueSettings = true;
+        try
+        {
+            IsDontStopTheMusicEnabled = _playbackService.DontStopTheMusicEnabled == true;
+        }
+        finally
+        {
+            _isApplyingQueueSettings = false;
+        }
+
+        Duration = _playbackService.DurationSeconds;
+        if (PlayState.State != PlayerPlaybackState.Seeking)
+        {
+            Position = _playbackService.PositionSeconds;
+            SliderPosition = _playbackService.PositionSeconds;
         }
     }
 

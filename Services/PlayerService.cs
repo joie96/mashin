@@ -26,6 +26,7 @@ public interface ISendspinPlayerService : IAsyncDisposable, INotifyPropertyChang
     string? TrackTitle { get; }
     string? TrackArtist { get; }
     string? TrackAlbum { get; }
+    string? TrackImageUri { get; }
     bool IsMuted { get; }
     bool? ShuffleEnabled { get; }
     string? RepeatMode { get; }
@@ -66,6 +67,7 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
     private string? _trackTitle;
     private string? _trackArtist;
     private string? _trackAlbum;
+    private string? _trackImageUri;
     private bool _isMuted;
     private bool? _shuffleEnabled;
     private string? _repeatMode;
@@ -125,6 +127,12 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
     {
         get => _trackAlbum;
         private set => SetProperty(ref _trackAlbum, value);
+    }
+
+    public string? TrackImageUri
+    {
+        get => _trackImageUri;
+        private set => SetProperty(ref _trackImageUri, value);
     }
 
     public bool IsMuted
@@ -426,11 +434,6 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
 
     private void OnGroupStateChanged(object? sender, GroupState group)
     {
-        // Playing state -> use AudioPlayer state for more immediate feedback (instead of waiting for metadata update with progress info)
-        //var stateName = group.PlaybackState.ToString();
-        //var mappedPlayState = MapServerPlaybackState(stateName);
-        //SetPlayerState(new PlaybackStateModel(mappedPlayState, DateTimeOffset.UtcNow));
-
         // Volume and mute state
         var clampedVolume = Math.Max(0, Math.Min(100, group.Volume));
         Volume = clampedVolume;
@@ -460,6 +463,7 @@ public sealed class SendspinPlayerService : ISendspinPlayerService
         TrackTitle = md.Title;
         TrackArtist = md.Artist;
         TrackAlbum = md.Album;
+        TrackImageUri = md.ArtworkUrl;
 
         // Position tracking
         var progress = md.Progress;
