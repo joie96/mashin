@@ -712,7 +712,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         BuildCurrentTrackContextMenuItems();
 
         // Set initial queue state
-        await _playbackService.RefreshNowAsync();
+        await _playbackService.RefreshRemoteQueueStateAsync();
         CurrentPlayerQueue = _playbackService.CurrentPlayerQueue;
         ApplyQueueSettingsFromCurrentQueue(_playbackService.CurrentPlayerQueue);
 
@@ -728,7 +728,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
 
         // Start queue sync loop
-        await _playbackService.StartAsync();
+        await _playbackService.StartRemoteQueuePollingAsync();
     }
 
     public async ValueTask DisposeAsync()

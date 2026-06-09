@@ -125,6 +125,9 @@
                         <RoundRectangle CornerRadius="12,0,12,0" />
                     </Border.StrokeShape>
                     <ffimageloading:CachedImage Aspect="AspectFill"
+                        FadeAnimationEnabled="True"
+                        FadeAnimationForCachedImages="True"
+                        FadeAnimationDuration="180"
                         Source="{Binding CurrentTrack.ImageUri}" />
                 </Border>
 

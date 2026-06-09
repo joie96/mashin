@@ -147,13 +147,13 @@ public sealed class PlaybackNotificationService : Service
                     await playback.PreviousTrackAsync();
                     break;
                 case ActionStop:
-                    await playback.StopAsync();
+                    await playback.StopRemoteQueuePollingAsync();
                     break;
             }
 
             if (!string.IsNullOrWhiteSpace(action))
             {
-                await playback.RefreshNowAsync();
+                await playback.RefreshRemoteQueueStateAsync();
             }
         }
         catch
@@ -268,7 +268,7 @@ public sealed class PlaybackNotificationService : Service
         {
             try
             {
-                await playback.StopAsync();
+                await playback.StopRemoteQueuePollingAsync();
             }
             catch
             {

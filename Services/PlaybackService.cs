@@ -77,7 +77,6 @@ public interface IPlaybackService : IAsyncDisposable, INotifyPropertyChanged
     bool? ShuffleEnabled { get; }
     string? RepeatMode { get; }
     bool? DontStopTheMusicEnabled { get; }
-    bool? FlowModeEnabled { get; }
     int? CurrentQueueIndex { get; }
     int QueueItemCount { get; }
     double DurationSeconds { get; }
@@ -90,9 +89,9 @@ public interface IPlaybackService : IAsyncDisposable, INotifyPropertyChanged
     Task InitializeAsync(CancellationToken cancellationToken = default);
     Task SetActivePlayerAsync(string? playerId, CancellationToken cancellationToken = default);
 
-    Task StartAsync(CancellationToken cancellationToken = default);
-    Task StopAsync();
-    Task RefreshNowAsync(CancellationToken cancellationToken = default);
+    Task StartRemoteQueuePollingAsync(CancellationToken cancellationToken = default);
+    Task StopRemoteQueuePollingAsync();
+    Task RefreshRemoteQueueStateAsync(CancellationToken cancellationToken = default);
 
     Task TogglePlayPauseAsync(CancellationToken cancellationToken = default);
     Task NextTrackAsync(CancellationToken cancellationToken = default);
@@ -132,7 +131,6 @@ public sealed class PlaybackService : IPlaybackService
     private bool? _shuffleEnabled;
     private string? _repeatMode;
     private bool? _dontStopTheMusicEnabled;
-    private bool? _flowModeEnabled;
     private int? _currentQueueIndex;
     private int _queueItemCount;
     private double _durationSeconds;
@@ -200,12 +198,6 @@ public sealed class PlaybackService : IPlaybackService
     {
         get => _dontStopTheMusicEnabled;
         private set => SetProperty(ref _dontStopTheMusicEnabled, value);
-    }
-
-    public bool? FlowModeEnabled
-    {
-        get => _flowModeEnabled;
-        private set => SetProperty(ref _flowModeEnabled, value);
     }
 
     public int? CurrentQueueIndex
@@ -284,10 +276,10 @@ public sealed class PlaybackService : IPlaybackService
     public async Task SetActivePlayerAsync(string? playerId, CancellationToken cancellationToken = default)
     {
         ActivePlayerId = playerId;
-        await RefreshNowAsync(cancellationToken);
+        await RefreshRemoteQueueStateAsync(cancellationToken);
     }
 
-    public async Task StartAsync(CancellationToken cancellationToken = default)
+    public async Task StartRemoteQueuePollingAsync(CancellationToken cancellationToken = default)
     {
         await _startStopLock.WaitAsync(cancellationToken);
         try
@@ -298,17 +290,17 @@ public sealed class PlaybackService : IPlaybackService
             }
 
             _loopCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            _loopTask = RunLoopAsync(_loopCts.Token);
+            _loopTask = RunRemoteQueuePollingLoopAsync(_loopCts.Token);
         }
         finally
         {
             _startStopLock.Release();
         }
 
-        await RefreshNowAsync(cancellationToken);
+        await RefreshRemoteQueueStateAsync(cancellationToken);
     }
 
-    public async Task StopAsync()
+    public async Task StopRemoteQueuePollingAsync()
     {
         await _startStopLock.WaitAsync();
 
@@ -352,12 +344,12 @@ public sealed class PlaybackService : IPlaybackService
         }
     }
 
-    public async Task RefreshNowAsync(CancellationToken cancellationToken = default)
+    public async Task RefreshRemoteQueueStateAsync(CancellationToken cancellationToken = default)
     {
         await _refreshLock.WaitAsync(cancellationToken);
         try
         {
-            await RefreshStateCoreAsync(cancellationToken);
+            await RefreshRemoteQueueStateCoreAsync(cancellationToken);
         }
         finally
         {
@@ -367,7 +359,7 @@ public sealed class PlaybackService : IPlaybackService
 
     public async ValueTask DisposeAsync()
     {
-        await StopAsync();
+        await StopRemoteQueuePollingAsync();
         _sendspinPlayerService.PropertyChanged -= OnSendspinPlayerPropertyChanged;
         _startStopLock.Dispose();
         _refreshLock.Dispose();
@@ -473,7 +465,7 @@ public sealed class PlaybackService : IPlaybackService
 
         var nextShuffleEnabled = !(currentShuffleEnabled ?? false);
         await _musicAssistant.SetShuffleAsync(ActiveQueueId, nextShuffleEnabled);
-        await RefreshNowAsync(cancellationToken);
+        await RefreshRemoteQueueStateAsync(cancellationToken);
     }
 
     public async Task ToggleRepeatModeAsync(string? currentRepeatMode, CancellationToken cancellationToken = default)
@@ -492,7 +484,7 @@ public sealed class PlaybackService : IPlaybackService
 
 #region Remote Path: Queue Polling via MusicAssistant
 
-    private async Task RunLoopAsync(CancellationToken cancellationToken)
+    private async Task RunRemoteQueuePollingLoopAsync(CancellationToken cancellationToken)
     {
         using var timer = new PeriodicTimer(QueueRefreshInterval);
 
@@ -500,7 +492,7 @@ public sealed class PlaybackService : IPlaybackService
         {
             try
             {
-                await RefreshNowAsync(cancellationToken);
+                await RefreshRemoteQueueStateAsync(cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -513,9 +505,7 @@ public sealed class PlaybackService : IPlaybackService
         }
     }
 
-
-
-    private async Task RefreshStateCoreAsync(CancellationToken cancellationToken)
+    private async Task RefreshRemoteQueueStateCoreAsync(CancellationToken cancellationToken)
     {
         var activePlayerId = !string.IsNullOrWhiteSpace(ActivePlayerId)
             ? ActivePlayerId
@@ -523,7 +513,7 @@ public sealed class PlaybackService : IPlaybackService
 
         if (string.IsNullOrWhiteSpace(activePlayerId))
         {
-            UpdateState(null, null, Array.Empty<QueueItem>());
+            ApplyRemoteQueueStateUpdate(null, null, Array.Empty<QueueItem>());
             return;
         }
 
@@ -534,6 +524,8 @@ public sealed class PlaybackService : IPlaybackService
 
         try
         {
+            var isLocalTarget = IsLocalTarget();
+
             var favoritesSnapshot = await _userDataService.GetFavoritesSnapshotAsync(cancellationToken);
             var favoriteTrackUris = favoritesSnapshot?.Tracks
                 .Select(track => track.Uri)
@@ -545,15 +537,13 @@ public sealed class PlaybackService : IPlaybackService
             if (activeQueue == null)
             {
                 DontStopTheMusicEnabled = null;
-                FlowModeEnabled = null;
                 CurrentQueueIndex = null;
                 QueueItemCount = 0;
-                UpdateState(null, null, Array.Empty<QueueItem>());
+                ApplyRemoteQueueStateUpdate(null, null, Array.Empty<QueueItem>());
                 return;
             }
 
             DontStopTheMusicEnabled = activeQueue.DontStopTheMusicEnabled;
-            FlowModeEnabled = activeQueue.FlowMode;
             CurrentQueueIndex = activeQueue.CurrentIndex;
             QueueItemCount = Math.Max(0, activeQueue.ItemCount);
 
@@ -563,25 +553,28 @@ public sealed class PlaybackService : IPlaybackService
                 currentTrack.Favorite = !string.IsNullOrWhiteSpace(currentTrack.Uri)
                     && favoriteTrackUris.Contains(currentTrack.Uri);
 
-                DurationSeconds = Math.Max(0, currentTrack.Duration);
+                if (!isLocalTarget)
+                {
+                    DurationSeconds = Math.Max(0, currentTrack.Duration);
+                }
             }
 
-            if (activeQueue.ElapsedTime is double elapsedTime)
+            if (!isLocalTarget && activeQueue.ElapsedTime is double elapsedTime)
             {
                 PositionSeconds = Math.Max(0, elapsedTime);
             }
 
-            if (activeQueue.ShuffleEnabled.HasValue)
+            if (!isLocalTarget && activeQueue.ShuffleEnabled.HasValue)
             {
                 ShuffleEnabled = activeQueue.ShuffleEnabled;
             }
 
-            if (activeQueue.RepeatMode.HasValue)
+            if (!isLocalTarget && activeQueue.RepeatMode.HasValue)
             {
                 RepeatMode = activeQueue.RepeatMode.Value.ToString();
             }
 
-            if (!IsLocalTarget())
+            if (!isLocalTarget)
             {
                 var player = await _musicAssistant.GetPlayerAsync(activePlayerId, raiseUnavailable: false);
                 if (player?.VolumeLevel is int volumeLevel)
@@ -620,20 +613,16 @@ public sealed class PlaybackService : IPlaybackService
                 currentTrack = firstQueueTrack;
             }
 
-            UpdateState(activeQueue, currentTrack, queueItems);
+            ApplyRemoteQueueStateUpdate(activeQueue, currentTrack, queueItems);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to refresh playback state");
-            UpdateState(null, null, Array.Empty<QueueItem>());
+            ApplyRemoteQueueStateUpdate(null, null, Array.Empty<QueueItem>());
         }
     }
 
-#endregion
-
-#region Remote Refresh Path: Queue Apply and Diff
-
-    private void UpdateState(PlayerQueue? nextQueue, Track? nextTrack, IReadOnlyList<QueueItem> nextQueueItems)
+    private void ApplyRemoteQueueStateUpdate(PlayerQueue? nextQueue, Track? nextTrack, IReadOnlyList<QueueItem> nextQueueItems)
     {
         var localTrackEnriched = false;
         if (IsLocalTarget())
@@ -725,7 +714,8 @@ public sealed class PlaybackService : IPlaybackService
             || e.PropertyName == nameof(ISendspinPlayerService.TrackAlbum)
             || e.PropertyName == nameof(ISendspinPlayerService.TrackImageUri))
         {
-            SyncLocalTrackFromSendspin();
+            var forceUpdate = e.PropertyName == nameof(ISendspinPlayerService.TrackImageUri);
+            SyncLocalTrackFromSendspin(forceUpdate);
             return;
         }
 
@@ -736,10 +726,10 @@ public sealed class PlaybackService : IPlaybackService
         }
     }
 
-    private void SyncLocalTrackFromSendspin()
+    private void SyncLocalTrackFromSendspin(bool forceUpdate = false)
     {
         var updatedTrack = CreateTrackFromSendspinSnapshot(CurrentTrack);
-        if (CurrentTrack != null && AreTrackUiFieldsEqual(CurrentTrack, updatedTrack))
+        if (!forceUpdate && CurrentTrack != null && AreTrackUiFieldsEqual(CurrentTrack, updatedTrack))
         {
             return;
         }
@@ -790,6 +780,11 @@ public sealed class PlaybackService : IPlaybackService
             return (CurrentTrack, false);
         }
 
+        if (!DoesQueueTrackMatchCurrentSendspinTrack(queueTrack))
+        {
+            return (CurrentTrack, false);
+        }
+
         if (CurrentTrack == null)
         {
             var localTrack = CreateTrackFromSendspinSnapshot(queueTrack);
@@ -806,6 +801,48 @@ public sealed class PlaybackService : IPlaybackService
 
         var changed = MergeMissingTrackDataFromQueue(CurrentTrack, queueTrack);
         return (CurrentTrack, changed);
+    }
+
+    private bool DoesQueueTrackMatchCurrentSendspinTrack(Track queueTrack)
+    {
+        if (CurrentTrack != null && AreSameTrackIdentity(CurrentTrack, queueTrack))
+        {
+            return true;
+        }
+
+        var sendspinTitle = _sendspinPlayerService.TrackTitle;
+        var sendspinArtist = _sendspinPlayerService.TrackArtist;
+        var sendspinAlbum = _sendspinPlayerService.TrackAlbum;
+
+        var hasComparableSendspinInfo =
+            !string.IsNullOrWhiteSpace(sendspinTitle)
+            || !string.IsNullOrWhiteSpace(sendspinArtist)
+            || !string.IsNullOrWhiteSpace(sendspinAlbum);
+
+        if (!hasComparableSendspinInfo)
+        {
+            return false;
+        }
+
+        var titleMatches = IsSameTextIfPresent(sendspinTitle, queueTrack.Name);
+        var artistMatches = IsSameTextIfPresent(sendspinArtist, queueTrack.ArtistName);
+        var albumMatches = IsSameTextIfPresent(sendspinAlbum, queueTrack.AlbumName);
+
+        var anyCompared = !string.IsNullOrWhiteSpace(sendspinTitle)
+            || !string.IsNullOrWhiteSpace(sendspinArtist)
+            || !string.IsNullOrWhiteSpace(sendspinAlbum);
+
+        return anyCompared && titleMatches && artistMatches && albumMatches;
+    }
+
+    private static bool IsSameTextIfPresent(string? left, string? right)
+    {
+        if (string.IsNullOrWhiteSpace(left))
+        {
+            return true;
+        }
+
+        return string.Equals(left.Trim(), right?.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
     private Track CreateTrackFromSendspinSnapshot(Track? baseTrack)

@@ -106,7 +106,7 @@ public class MediaItemActions : IMediaItemActions
                 mediaItems,
                 QueueOption.Replace,
                 startItem: startItem);
-            await _playbackService.RefreshNowAsync();
+            await _playbackService.RefreshRemoteQueueStateAsync();
         }
         catch (Exception ex)
         {
@@ -148,7 +148,7 @@ public class MediaItemActions : IMediaItemActions
                 mediaItems,
                 QueueOption.Next,
                 startItem: startItem);
-            await _playbackService.RefreshNowAsync();
+            await _playbackService.RefreshRemoteQueueStateAsync();
         }
         catch (Exception ex)
         {
@@ -190,7 +190,7 @@ public class MediaItemActions : IMediaItemActions
                 mediaItems,
                 QueueOption.Add,
                 startItem: startItem);
-            await _playbackService.RefreshNowAsync();
+            await _playbackService.RefreshRemoteQueueStateAsync();
         }
         catch (Exception ex)
         {
@@ -298,7 +298,7 @@ public class MediaItemActions : IMediaItemActions
             if (!string.IsNullOrWhiteSpace(duplicateQueueItemId))
             {
                 await _musicAssistant.DeleteQueueItemAsync(queueId, duplicateQueueItemId);
-                await _playbackService.RefreshNowAsync();
+                await _playbackService.RefreshRemoteQueueStateAsync();
             }
 
             var queueItems = _playbackService.CurrentQueueItems.ToList();
@@ -365,7 +365,7 @@ public class MediaItemActions : IMediaItemActions
                     queueItemOrder.Insert(targetPosition, queueItemId);
                 }
 
-                await _playbackService.RefreshNowAsync();
+                await _playbackService.RefreshRemoteQueueStateAsync();
             }
 
             // No final play_index call: playback should continue on the already started random track.
@@ -590,7 +590,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.ClearQueueAsync(queueId, skipStop);
-            await _playbackService.RefreshNowAsync();
+            await _playbackService.RefreshRemoteQueueStateAsync();
         }
         catch (Exception ex)
         {
@@ -620,7 +620,7 @@ public class MediaItemActions : IMediaItemActions
 
             _playbackService.PlaybackState = new PlaybackStateModel(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
             await _musicAssistant.PlayIndexAsync(queueId, index);
-            await _playbackService.RefreshNowAsync();
+            await _playbackService.RefreshRemoteQueueStateAsync();
         }
         catch (Exception ex)
         {
@@ -648,7 +648,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.DeleteQueueItemAsync(queueId, itemIndex);
-            await _playbackService.RefreshNowAsync();
+            await _playbackService.RefreshRemoteQueueStateAsync();
         }
         catch (Exception ex)
         {
@@ -676,7 +676,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.DeleteQueueItemAsync(queueId, itemId);
-            await _playbackService.RefreshNowAsync();
+            await _playbackService.RefreshRemoteQueueStateAsync();
         }
         catch (Exception ex)
         {
@@ -704,7 +704,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.MoveQueueItemAsync(queueId, queueItemId, posShift);
-            await _playbackService.RefreshNowAsync();
+            await _playbackService.RefreshRemoteQueueStateAsync();
         }
         catch (Exception ex)
         {
@@ -726,7 +726,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             await _musicAssistant.SetDontStopTheMusicAsync(queueId, dontStopTheMusicEnabled);
-            await _playbackService.RefreshNowAsync();
+            await _playbackService.RefreshRemoteQueueStateAsync();
         }
         catch (Exception ex)
         {
