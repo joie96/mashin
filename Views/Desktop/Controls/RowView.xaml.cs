@@ -5,6 +5,7 @@ using Microsoft.Maui.Layouts;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Threading;
 using System.Windows.Input;
 
@@ -352,7 +353,7 @@ public partial class RowView : ContentView
             return;
         }
 
-        _playbackService.CurrentTrackUpdated += OnCurrentTrackUpdated;
+        _playbackService.PropertyChanged += OnPlaybackServicePropertyChanged;
         SetCurrentTrackUri(_playbackService.CurrentTrack?.Uri);
     }
 
@@ -363,12 +364,22 @@ public partial class RowView : ContentView
             return;
         }
 
-        _playbackService.CurrentTrackUpdated -= OnCurrentTrackUpdated;
+        _playbackService.PropertyChanged -= OnPlaybackServicePropertyChanged;
         _playbackService = null;
         SetCurrentTrackUri(null);
     }
 
-    private void OnCurrentTrackUpdated(object? sender, EventArgs e)
+    private void OnPlaybackServicePropertyChanged(object? sender, global::System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(IPlaybackService.CurrentTrack))
+        {
+            return;
+        }
+
+        OnCurrentTrackUpdated();
+    }
+
+    private void OnCurrentTrackUpdated()
     {
         var currentTrackUri = _playbackService?.CurrentTrack?.Uri;
 

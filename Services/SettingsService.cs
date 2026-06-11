@@ -10,7 +10,7 @@ public class SettingsService
     // Central default values
     private const string DefaultMusicAssistantUrl = "http://192.168.1.2:8095";
     private const string DefaultSendspinUrl = "ws://192.168.1.2:8927/sendspin";
-    private const int DefaultBufferCapacity = 64_000_000;
+    private const int DefaultSendspinBufferCapacity = 64_000_000;
 
     // Preferences keys
     private const string MusicAssistantUrlKey = "music_assistant_url";
@@ -18,8 +18,8 @@ public class SettingsService
     private const string AuthTokenKey = "auth_token";
     private const string UsernameKey = "username";
     private const string ThemeModeKey = "theme_mode";
-    private const string BufferCapacityKey = "buffer_capacity";
-    private const string AudioFormatsKey = "audio_formats"; // JSON serialized
+    private const string SendspinBufferCapacityKey = "buffer_capacity";
+    private const string SendspinAudioFormatsKey = "audio_formats"; // JSON serialized
     private const string InitialVolumeKey = "sendspin_initial_volume";
     private const string InitialMutedKey = "sendspin_initial_muted";
     private const int DefaultInitialVolume = 50;
@@ -40,9 +40,10 @@ public class SettingsService
     // Theme setting (uses MAUI's AppTheme)
     public AppTheme ThemeMode { get; set; }
 
-    // Audio/streaming settings
-    public int BufferCapacity { get; set; }
-    public List<AudioFormat> AudioFormats { get; set; }
+    // Sendspin streaming settings
+    public int SendspinBufferCapacity { get; set; }
+    public List<AudioFormat> SendspinAudioFormats { get; set; }
+   
     public int InitialVolume { get; private set; }
     public bool InitialMuted { get; private set; }
 
@@ -62,31 +63,32 @@ public class SettingsService
         var themeInt = Preferences.Get(ThemeModeKey, (int)AppTheme.Dark);
         ThemeMode = (AppTheme)themeInt;
 
-        // Load buffer capacity
-        BufferCapacity = Preferences.Get(BufferCapacityKey, DefaultBufferCapacity);
+        // Load Sendspin buffer capacity
+        SendspinBufferCapacity = Preferences.Get(SendspinBufferCapacityKey, DefaultSendspinBufferCapacity);
 
-        // Load audio formats (as JSON)
-        var formatsJson = Preferences.Get(AudioFormatsKey, string.Empty);
-        if (!string.IsNullOrEmpty(formatsJson))
+        // Load Sendspin audio formats (as JSON)
+        var sendspinFormatsJson = Preferences.Get(SendspinAudioFormatsKey, string.Empty);
+        if (!string.IsNullOrEmpty(sendspinFormatsJson))
         {
             try
             {
-                AudioFormats = System.Text.Json.JsonSerializer.Deserialize<List<AudioFormat>>(formatsJson)
-                              ?? BuildPreferredAudioFormats("opus")!;
+            SendspinAudioFormats = System.Text.Json.JsonSerializer.Deserialize<List<AudioFormat>>(sendspinFormatsJson)
+                                       ?? BuildSendspinPreferredAudioFormats("opus")!;
             }
             catch
             {
-                AudioFormats = BuildPreferredAudioFormats("opus")!;
+                SendspinAudioFormats = BuildSendspinPreferredAudioFormats("opus")!;
             }
         }
         else
         {
-            AudioFormats = BuildPreferredAudioFormats("opus")!;
+            SendspinAudioFormats = BuildSendspinPreferredAudioFormats("opus")!;
         }
 
         // Keep a single preferred codec persisted in settings.
-        var normalizedCodec = AudioFormats.FirstOrDefault()?.Codec;
-        AudioFormats = BuildPreferredAudioFormats(normalizedCodec ?? "opus") ?? BuildPreferredAudioFormats("opus")!;
+        var normalizedCodec = SendspinAudioFormats.FirstOrDefault()?.Codec;
+        SendspinAudioFormats = BuildSendspinPreferredAudioFormats(normalizedCodec ?? "opus")
+            ?? BuildSendspinPreferredAudioFormats("opus")!;
 
         // Load initial player state for Sendspin handshake
         InitialVolume = Math.Clamp(Preferences.Get(InitialVolumeKey, DefaultInitialVolume), 0, 100);
@@ -117,33 +119,66 @@ public class SettingsService
         // Theme
         Preferences.Set(ThemeModeKey, (int)ThemeMode);
 
-        // Buffer capacity
-        Preferences.Set(BufferCapacityKey, BufferCapacity);
+        // Sendspin buffer capacity
+        Preferences.Set(SendspinBufferCapacityKey, SendspinBufferCapacity);
 
-        // Save audio formats as JSON
-        var formatsJson = System.Text.Json.JsonSerializer.Serialize(AudioFormats);
-        Preferences.Set(AudioFormatsKey, formatsJson);
+        // Save Sendspin audio formats as JSON
+        var sendspinFormatsJson = System.Text.Json.JsonSerializer.Serialize(SendspinAudioFormats);
+        Preferences.Set(SendspinAudioFormatsKey, sendspinFormatsJson);
 
-        // Save initial Sendspin player state
+        // Initial Volume
         Preferences.Set(InitialVolumeKey, InitialVolume);
         Preferences.Set(InitialMutedKey, InitialMuted);
     }
 
-    public ClientCapabilities GetClientCapabilities()
+    public ClientCapabilities GetSendspinClientCapabilities()
     {
-        var clientName = GetClientName();
+        var clientName = GetSendspinClientName();
 
         return new ClientCapabilities
         {
             ClientName = $"Mashin ({clientName})",
-            ClientId = $"mashin-{clientName.Replace(" ", string.Empty).ToLowerInvariant()}",
+            ClientId = GetSendspinClientId(),
             ProductName = "Mashin Client",
             SoftwareVersion = "0.0.1",
-            BufferCapacity = BufferCapacity,
-            AudioFormats = AudioFormats,
+            BufferCapacity = SendspinBufferCapacity,
+            AudioFormats = SendspinAudioFormats,
             InitialVolume = InitialVolume,
             InitialMuted = InitialMuted,
         };
+    }
+
+    public string GetSendspinClientName()
+    {
+#if ANDROID || IOS
+        return Microsoft.Maui.Devices.DeviceInfo.Name;
+#else
+        return Environment.MachineName;
+#endif
+    }
+
+    public string GetSendspinClientId()
+    {
+        var compactClientName = GetSendspinClientName().Replace(" ", string.Empty).ToLowerInvariant();
+        return $"mashin-{compactClientName}";
+    }
+
+    public string GetSendspinMusicAssistantPlayerId()
+    {
+        var sourceId = GetSendspinClientId();
+
+        if (string.IsNullOrWhiteSpace(sourceId))
+        {
+            return string.Empty;
+        }
+
+        var normalized = sourceId.Trim();
+        if (normalized.StartsWith("up", StringComparison.OrdinalIgnoreCase))
+        {
+            return normalized.ToLowerInvariant();
+        }
+
+        return string.Concat("up", normalized.Replace("-", string.Empty, StringComparison.Ordinal).ToLowerInvariant());
     }
 
     public int GetInitialVolume() => InitialVolume;
@@ -173,9 +208,9 @@ public class SettingsService
         Preferences.Set(InitialMutedKey, InitialMuted);
     }
 
-    public string GetPreferredAudioCodec()
+    public string GetSendspinPreferredAudioCodec()
     {
-        var codec = AudioFormats.FirstOrDefault()?.Codec?.Trim().ToLowerInvariant();
+        var codec = SendspinAudioFormats.FirstOrDefault()?.Codec?.Trim().ToLowerInvariant();
         return codec switch
         {
             "opus" => "opus",
@@ -185,7 +220,7 @@ public class SettingsService
         };
     }
 
-    public bool SetPreferredAudioCodec(string codec)
+    public bool SetSendspinPreferredAudioCodec(string codec)
     {
         var normalizedCodec = codec?.Trim().ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(normalizedCodec))
@@ -193,34 +228,29 @@ public class SettingsService
             return false;
         }
 
-        var preferredFormats = BuildPreferredAudioFormats(normalizedCodec);
+        var preferredFormats = BuildSendspinPreferredAudioFormats(normalizedCodec);
         if (preferredFormats == null)
         {
             return false;
         }
 
-        var changed = AudioFormats.Count != preferredFormats.Count
-            || AudioFormats.Count == 0
-            || !string.Equals(AudioFormats[0].Codec, preferredFormats[0].Codec, StringComparison.OrdinalIgnoreCase);
-        AudioFormats = preferredFormats;
+        var changed = SendspinAudioFormats.Count != preferredFormats.Count
+            || SendspinAudioFormats.Count == 0
+            || !string.Equals(SendspinAudioFormats[0].Codec, preferredFormats[0].Codec, StringComparison.OrdinalIgnoreCase);
+        SendspinAudioFormats = preferredFormats;
         Save();
         return changed;
     }
+
+    public ClientCapabilities GetClientCapabilities() => GetSendspinClientCapabilities();
+    public string GetPreferredAudioCodec() => GetSendspinPreferredAudioCodec();
+    public bool SetPreferredAudioCodec(string codec) => SetSendspinPreferredAudioCodec(codec);
 
     #endregion
 
     #region Helpers
 
-    private static string GetClientName()
-    {
-#if ANDROID || IOS
-        return Microsoft.Maui.Devices.DeviceInfo.Name;
-#else
-        return Environment.MachineName;
-#endif
-    }
-
-    private static List<AudioFormat>? BuildPreferredAudioFormats(string codec)
+    private static List<AudioFormat>? BuildSendspinPreferredAudioFormats(string codec)
     {
         var normalizedCodec = codec.Trim().ToLowerInvariant();
         var preferred = normalizedCodec switch

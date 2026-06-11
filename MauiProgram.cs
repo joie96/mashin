@@ -50,11 +50,12 @@ public static class MauiProgram
             });
 #if DEBUG
         builder.Logging.AddDebug();
-        
+
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
         builder.Logging.AddFilter("Sendspin.SDK", LogLevel.Warning);
         builder.Logging.AddFilter("mashin", LogLevel.Warning);
+        builder.Logging.AddFilter("mashin.Services.PlaybackService", LogLevel.Debug);
 #else
         // Production Logging
         builder.Logging.SetMinimumLevel(LogLevel.Information);
@@ -110,7 +111,11 @@ public static class MauiProgram
                     return new UntimedAudioSampleSource((UntimedAudioBuffer)buffer);
                 });
         });
-        builder.Services.AddSingleton<ISendspinPlayerService, SendspinPlayerService>();
+        builder.Services.AddSingleton<SendspinPlayerService>();
+        builder.Services.AddSingleton<ISendspinPlayerService>(sp => sp.GetRequiredService<SendspinPlayerService>());
+        builder.Services.AddSingleton<IPlayerService>(sp => sp.GetRequiredService<SendspinPlayerService>());
+        builder.Services.AddSingleton<IPlayerService, LocalDummyPlayerService>();
+        builder.Services.AddSingleton<IPlayerService, RemotePlayerService>();
 
 
         // ViewModels registrieren

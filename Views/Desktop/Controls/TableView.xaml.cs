@@ -912,13 +912,12 @@ public partial class TableView : ContentView
         SelectSingle(item);
         SyncSelectionAndHeaderState(item);
 
-        // if queue, play the queue index
-        var queueId = (PlaybackContextItem as PlayerQueue)?.QueueId;
+        // if queue, play the queue index via playback service
         var itemIndex = GetIndexOf(item);
 
-        if (!string.IsNullOrWhiteSpace(queueId) && itemIndex is >= 0)
+        if (PlaybackContextItem is PlayerQueue && itemIndex is >= 0 && _playbackService != null)
         {
-            await MediaActions.PlayIndexAsync(queueId, itemIndex.Value);
+            await _playbackService.PlayQueueIndexAsync(itemIndex.Value);
             return;
         }
 
@@ -948,13 +947,12 @@ public partial class TableView : ContentView
         SelectSingle(item);
         SyncSelectionAndHeaderState(item);
 
-        // if queue, play the queue index
-        var queueId = (PlaybackContextItem as PlayerQueue)?.QueueId;
+        // if queue, play the queue index via playback service
         var itemIndex = GetIndexOf(item);
 
-        if (!string.IsNullOrWhiteSpace(queueId) && itemIndex is >= 0)
+        if (PlaybackContextItem is PlayerQueue && itemIndex is >= 0 && _playbackService != null)
         {
-            await MediaActions.PlayIndexAsync(queueId, itemIndex.Value);
+            await _playbackService.PlayQueueIndexAsync(itemIndex.Value);
             return;
         }
 
@@ -1164,7 +1162,7 @@ public partial class TableView : ContentView
             {
                 _currentTrack = _playbackService.CurrentTrack;
                 SetCurrentTrackUri(_currentTrack?.Uri);
-                _playbackService.CurrentTrackUpdated += OnCurrentTrackUpdated;
+                _playbackService.PropertyChanged += OnPlaybackServicePropertyChanged;
 
                 if (_currentTrack != null)
                 {
@@ -1188,7 +1186,7 @@ public partial class TableView : ContentView
     {
         if (_playbackService != null)
         {
-            _playbackService.CurrentTrackUpdated -= OnCurrentTrackUpdated;
+            _playbackService.PropertyChanged -= OnPlaybackServicePropertyChanged;
 
             if (_currentTrack != null)
             {
@@ -1208,7 +1206,17 @@ public partial class TableView : ContentView
         SetCurrentPlayState(new PlaybackStateModel(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow));
     }
 
-    private void OnCurrentTrackUpdated(object? sender, EventArgs e)
+    private void OnPlaybackServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(IPlaybackService.CurrentTrack))
+        {
+            return;
+        }
+
+        OnCurrentTrackUpdated();
+    }
+
+    private void OnCurrentTrackUpdated()
     {
         if (_currentTrack != null)
         {

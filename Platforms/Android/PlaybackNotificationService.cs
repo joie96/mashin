@@ -92,8 +92,6 @@ public sealed class PlaybackNotificationService : Service
 
         if (_playbackService != null)
         {
-            _playbackService.CurrentTrackUpdated -= OnPlaybackSourceChanged;
-            _playbackService.CurrentPlayerQueueUpdated -= OnPlaybackSourceChanged;
             _playbackService.PropertyChanged -= OnPlaybackPropertyChanged;
         }
 
@@ -147,14 +145,9 @@ public sealed class PlaybackNotificationService : Service
                     await playback.PreviousTrackAsync();
                     break;
                 case ActionStop:
-                    await playback.StopRemoteQueuePollingAsync();
                     break;
             }
 
-            if (!string.IsNullOrWhiteSpace(action))
-            {
-                await playback.RefreshRemoteQueueStateAsync();
-            }
         }
         catch
         {
@@ -164,16 +157,10 @@ public sealed class PlaybackNotificationService : Service
         await UpdateNotificationAsync();
     }
 
-    private void OnPlaybackSourceChanged(object? sender, EventArgs e)
-    {
-        _ = UpdateNotificationAsync();
-    }
-
     private void OnPlaybackPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(IPlaybackService.PlaybackState)
-            || e.PropertyName == nameof(IPlaybackService.CurrentTrack)
-            || e.PropertyName == nameof(IPlaybackService.CurrentPlayerQueue))
+            || e.PropertyName == nameof(IPlaybackService.CurrentTrack))
         {
             _ = UpdateNotificationAsync();
         }
@@ -264,17 +251,7 @@ public sealed class PlaybackNotificationService : Service
         TryAttachPlaybackService();
 
         var playback = _playbackService;
-        if (playback != null)
-        {
-            try
-            {
-                await playback.StopRemoteQueuePollingAsync();
-            }
-            catch
-            {
-                // Force stop service/notification even if stopping playback fails.
-            }
-        }
+
 
         if (_isForeground)
         {
@@ -558,8 +535,6 @@ public sealed class PlaybackNotificationService : Service
         }
 
         _playbackService = playbackService;
-        _playbackService.CurrentTrackUpdated += OnPlaybackSourceChanged;
-        _playbackService.CurrentPlayerQueueUpdated += OnPlaybackSourceChanged;
         _playbackService.PropertyChanged += OnPlaybackPropertyChanged;
     }
 
