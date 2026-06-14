@@ -354,7 +354,7 @@ public partial class RowView : ContentView
         }
 
         _playbackService.PropertyChanged += OnPlaybackServicePropertyChanged;
-        SetCurrentTrackUri(_playbackService.CurrentTrack?.Uri);
+        SetCurrentTrackUri(_playbackService.CurrentQueueItem?.MediaItem?.Uri);
     }
 
     private void DetachPlaybackStateSource()
@@ -371,7 +371,7 @@ public partial class RowView : ContentView
 
     private void OnPlaybackServicePropertyChanged(object? sender, global::System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(IPlaybackService.CurrentTrack))
+        if (e.PropertyName != nameof(IPlaybackService.CurrentQueueItem))
         {
             return;
         }
@@ -381,7 +381,7 @@ public partial class RowView : ContentView
 
     private void OnCurrentTrackUpdated()
     {
-        var currentTrackUri = _playbackService?.CurrentTrack?.Uri;
+        var currentTrackUri = _playbackService?.CurrentQueueItem?.MediaItem?.Uri;
 
         if (MainThread.IsMainThread)
         {

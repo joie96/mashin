@@ -168,6 +168,12 @@ public sealed class UntimedAudioBuffer : ITimedAudioBuffer
     }
 
     /// <inheritdoc/>
+    public void NotifyReconnect()
+    {
+        // Untimed buffer has no sync state to reset.
+    }
+
+    /// <inheritdoc/>
     public void Clear()
     {
         _writePos = 0;

@@ -6,7 +6,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Dispatching;
 using Microsoft.Maui.Graphics;
-using Sendspin.SDK.Connection;
 using Sendspin.SDK.Models;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
@@ -27,7 +26,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private readonly SettingsService _settings;
     private readonly MusicAssistantService _musicAssistant;
     private readonly IUserDataService _userDataService;
-    private readonly ISendspinPlayerService _sendspinPlayerService;
     private readonly INavigationService _navigationService;
     private readonly IOverlayService _overlayService;
     private readonly IContextMenuService _contextMenuService;
@@ -101,7 +99,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         SettingsService settings,
         MusicAssistantService musicAssistant,
         IUserDataService userDataService,
-        ISendspinPlayerService playerService,
         INavigationService navigationService,
         IOverlayService overlayService,
         IMediaItemActions mediaActions,
@@ -112,7 +109,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _settings = settings;
         _musicAssistant = musicAssistant;
         _userDataService = userDataService;
-        _sendspinPlayerService = playerService;
         _navigationService = navigationService;
         _overlayService = overlayService;
         _contextMenuService = contextMenuService;
@@ -286,6 +282,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             Position = _playbackService.PositionSeconds;
             SliderPosition = _playbackService.PositionSeconds;
         }
+        CurrentTrack = _playbackService.CurrentQueueItem?.MediaItem;
 
         // Keep the UI toggle in sync with persisted theme preference.
         IsDarkTheme = _settings.ThemeMode != AppTheme.Light;
@@ -700,16 +697,25 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         CurrentSection = NavigationSection.Home;
         await _navigationService.NavigateToAsync<HomePage>();
 
-        // Establish connection to Sendspin server (if configured).
-        if (!string.IsNullOrWhiteSpace(_settings.SendspinUrl))
-        {
-            var uri = new Uri(_settings.SendspinUrl);
-            await _sendspinPlayerService.ConnectAsync(uri);
-        }
-
         await RefreshAvailablePlayersAsync();
         ApplyInitialSelectedPlayer();
-        await _playbackService.InitializeAsync();
+        try
+        {
+            await _playbackService.InitializeAsync();
+        }
+        catch (Exception ex) when (ex is TimeoutException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex, "Playback initialization failed for Sendspin. Falling back to LocalOffline mode.");
+
+            try
+            {
+                await _playbackService.SetOutputModeAsync(PlaybackOutputMode.LocalOffline);
+            }
+            catch (Exception fallbackEx)
+            {
+                _logger.LogWarning(fallbackEx, "Failed to switch playback output to LocalOffline after initialization error.");
+            }
+        }
 
         // Load playlists once and keep local list refreshed as needed.
         await RefreshPlaylistsAsync();
@@ -957,7 +963,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         try
         {
-            await _sendspinPlayerService.UpdatePreferredAudioCodecAsync(codec);
+            await _playbackService.SetPreferredAudioCodecAsync(codec);
         }
         catch (Exception ex)
         {
@@ -1047,9 +1053,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             return;
         }
 
-        if (e.PropertyName == nameof(IPlaybackService.CurrentTrack))
+        if (e.PropertyName == nameof(IPlaybackService.CurrentQueueItem))
         {
-            CurrentTrack = _playbackService.CurrentTrack;
+            CurrentTrack = _playbackService.CurrentQueueItem?.MediaItem;
         }
     }
 
@@ -1310,10 +1316,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             .Where(id => selectedIdSet.Contains(id))
             .ToList();
 
-        // Calculate target position for each selected item, based on current queue order and current playing index.
-        var currentIndex = Math.Max(0, _playbackService.CurrentQueueIndex ?? 0);
+        // Calculate target position based strictly on the derived current queue item index.
+        var currentIndex = _playbackService.CurrentQueueIndex;
+        if (currentIndex is null)
+        {
+            _logger.LogInformation("Current queue index is unknown, cannot move selected items next.");
+            return;
+        }
+
         var queueItemOrder = queueItems.Select(item => item.QueueItemId).ToList();
-        var insertPosition = Math.Min(currentIndex + 1, queueItemOrder.Count);
+        var insertPosition = Math.Min(currentIndex.Value + 1, queueItemOrder.Count);
 
         foreach (var queueItemId in selectedQueueItemIds)
         {
@@ -1431,8 +1443,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private void ApplyInitialSelectedPlayer()
     {
+        var preferredSendspinPlayerId = _settings.GetSendspinMusicAssistantPlayerId();
+
         var preferredPlayerId = _availablePlayers
-            .FirstOrDefault(player => string.Equals(player.PlayerId, _sendspinPlayerService.PlayerId, StringComparison.Ordinal))?.PlayerId
+            .FirstOrDefault(player => string.Equals(player.PlayerId, preferredSendspinPlayerId, StringComparison.Ordinal))?.PlayerId
             ?? _availablePlayers.FirstOrDefault(player => player.Available)?.PlayerId
             ?? _availablePlayers.FirstOrDefault()?.PlayerId;
 
@@ -1442,7 +1456,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
 
         SetSelectedPlayerSilently(preferredPlayerId);
-        _ = _playbackService.SetOutputModeAsync(_playbackService.OutputMode, preferredPlayerId);
     }
 
     private async Task ToggleDeviceSelectionFlyoutAsync()
@@ -1467,11 +1480,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         try
         {
+            var preferredSendspinPlayerId = _settings.GetSendspinMusicAssistantPlayerId();
+
             var players = await _musicAssistant.GetPlayersAsync(returnUnavailable: true);
             var orderedPlayers = players
                 .Where(player => player.Available)
                 .Where(player => !string.IsNullOrWhiteSpace(player.PlayerId))
-                .OrderByDescending(player => string.Equals(player.PlayerId, _sendspinPlayerService.PlayerId, StringComparison.Ordinal))
+                .OrderByDescending(player => string.Equals(player.PlayerId, preferredSendspinPlayerId, StringComparison.Ordinal))
                 .ThenBy(player => player.Name, StringComparer.CurrentCultureIgnoreCase)
                 .ToList();
 

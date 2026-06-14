@@ -157,7 +157,6 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
     public PlaylistDetailViewModel(
         MusicAssistantService musicAssistant,
-        ISendspinPlayerService playerService,
         IUserDataService userDataService,
         IOverlayService overlayService,
         IMediaItemActions mediaActions,

@@ -134,15 +134,23 @@ public class SettingsService
     public ClientCapabilities GetSendspinClientCapabilities()
     {
         var clientName = GetSendspinClientName();
+        var configuredFormats = SendspinAudioFormats;
+
+        if (configuredFormats == null || configuredFormats.Count == 0)
+        {
+            configuredFormats = BuildSendspinPreferredAudioFormats("opus")!;
+        }
 
         return new ClientCapabilities
         {
             ClientName = $"Mashin ({clientName})",
             ClientId = GetSendspinClientId(),
-            ProductName = "Mashin Client",
-            SoftwareVersion = "0.0.1",
+            Roles = new List<string> { "player@v1" },
+            ProductName = "mashin",
+            Manufacturer = "mashin",
+            SoftwareVersion = "1.0",
             BufferCapacity = SendspinBufferCapacity,
-            AudioFormats = SendspinAudioFormats,
+            AudioFormats = configuredFormats,
             InitialVolume = InitialVolume,
             InitialMuted = InitialMuted,
         };

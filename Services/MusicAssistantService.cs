@@ -1619,33 +1619,113 @@ public class MusicAssistantService
             throw new ArgumentException("Media items list cannot be null or empty", nameof(mediaItems));
         }
 
-        var uris = mediaItems
-            .Where(item => !string.IsNullOrEmpty(item.Uri))
-            .Select(item => item.Uri!)
-            .ToArray();
+        var mediaPayload = mediaItems
+            .Where(item => !string.IsNullOrWhiteSpace(item.ItemId) && !string.IsNullOrWhiteSpace(item.Provider))
+            .Select(CreateMediaItemPayload)
+            .ToList();
 
-        if (uris.Length == 0)
+        if (mediaPayload.Count == 0)
         {
-            throw new ArgumentException("No valid URIs found in media items", nameof(mediaItems));
+            throw new ArgumentException("No valid media items with item_id/provider found", nameof(mediaItems));
         }
 
-        _logger.LogInformation("Playing {Count} media item(s) on queue: {QueueId}", uris.Length, queueId);
+        _logger.LogInformation("Playing {Count} media item object(s) on queue: {QueueId}", mediaPayload.Count, queueId);
 
         var args = new Dictionary<string, object>
         {
             ["queue_id"] = queueId,
-            ["media"] = uris,
+            ["media"] = mediaPayload,
             ["option"] = option.ToString().ToLowerInvariant(),
             ["radio_mode"] = radioMode
         };
 
-        if (startItem is MediaItem startMediaItem && !string.IsNullOrWhiteSpace(startMediaItem.ItemId))
+        if (startItem is MediaItem startMediaItem)
         {
-            args["start_item"] = startMediaItem.ItemId;
+            if (!string.IsNullOrWhiteSpace(startMediaItem.Uri))
+            {
+                args["start_item"] = startMediaItem.Uri;
+            }
+            else
+            {
+                args["start_item"] = CreateMediaItemPayload(startMediaItem);
+            }
+        }
+        else if (startItem is string startItemString && !string.IsNullOrWhiteSpace(startItemString))
+        {
+            args["start_item"] = startItemString;
         }
 
         await SendCommandAsync<object>("player_queues/play_media", args);
     }
+
+    // Helper to create the media item payload for play_media command, which requires a specific structure and may differ from the standard MediaItem serialization.
+    private static object CreateMediaItemPayload(MediaItem mediaItem)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["item_id"] = mediaItem.ItemId,
+            ["provider"] = mediaItem.Provider,
+            ["name"] = string.IsNullOrWhiteSpace(mediaItem.Name) ? mediaItem.ItemId : mediaItem.Name,
+            ["sort_name"] = mediaItem.SortName,
+            ["uri"] = mediaItem.Uri,
+            ["media_type"] = mediaItem.MediaType == MediaType.PodcastEpisode
+                ? "podcast_episode"
+                : mediaItem.MediaType.ToString().ToLowerInvariant(),
+            ["provider_mappings"] = mediaItem.ProviderMappings.Select(mapping => new
+            {
+                item_id = mapping.ItemId,
+                provider_domain = mapping.ProviderDomain,
+                provider_instance = mapping.ProviderInstance,
+                available = mapping.Available,
+                url = mapping.Url
+            }).ToList(),
+            ["favorite"] = mediaItem.Favorite
+        };
+
+        switch (mediaItem)
+        {
+            case Track track:
+                payload["duration"] = track.Duration;
+                payload["disc_number"] = track.DiscNumber;
+                payload["track_number"] = track.TrackNumber;
+                payload["artists"] = track.Artists?.Select(CreateMediaItemMappingPayload).ToList();
+                payload["album"] = track.Album != null ? CreateMediaItemMappingPayload(track.Album) : null;
+                break;
+            case Album album:
+                payload["year"] = album.Year;
+                payload["album_type"] = album.AlbumType;
+                payload["artists"] = album.Artists?.Select(CreateMediaItemMappingPayload).ToList();
+                break;
+            case Playlist playlist:
+                payload["owner"] = playlist.Owner;
+                payload["is_editable"] = playlist.IsEditable;
+                break;
+            case PodcastEpisode episode:
+                payload["duration"] = episode.Duration;
+                payload["podcast"] = episode.Podcast != null
+                    ? CreateMediaItemMappingPayload(episode.Podcast)
+                    : null;
+                break;
+        }
+
+        return payload;
+    }
+
+    // Helper to create a simplified media item mapping payload for nested items (e.g. track's album or artists), which only includes basic info and is used in the play_media command.
+    private static object CreateMediaItemMappingPayload(MediaItem mediaItem)
+        => new
+        {
+            item_id = mediaItem.ItemId,
+            provider = mediaItem.Provider,
+            name = string.IsNullOrWhiteSpace(mediaItem.Name) ? mediaItem.ItemId : mediaItem.Name,
+            version = (string?)null,
+            sort_name = mediaItem.SortName,
+            uri = mediaItem.Uri,
+            available = true,
+            media_type = mediaItem.MediaType == MediaType.PodcastEpisode
+                ? "podcast_episode"
+                : mediaItem.MediaType.ToString().ToLowerInvariant()
+        };
 
     /// <summary>
     /// Play a single media item on the given queue.

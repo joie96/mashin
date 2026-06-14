@@ -26,6 +26,8 @@ using MauiIcons.Fluent.Filled;
 using Microsoft.Extensions.Logging;
 using Sendspin.SDK.Audio;
 using Sendspin.SDK.Client;
+using Sendspin.SDK.Connection;
+using Sendspin.SDK.Models;
 using Sendspin.SDK.Synchronization;
 
 namespace mashin;
@@ -64,6 +66,7 @@ public static class MauiProgram
         // Services registrieren
         builder.Services.AddSingleton<SettingsService>();
         builder.Services.AddSingleton<MusicAssistantService>();
+        builder.Services.AddSingleton<IMusicAssistantEventHub, MusicAssistantEventHub>();
         builder.Services.AddSingleton<IUserDataService, UserDataService>();
         builder.Services.AddSingleton<IMediaItemActions, MediaItemActions>();
         builder.Services.AddSingleton<INavigationService, NavigationService>();
@@ -81,7 +84,11 @@ public static class MauiProgram
 #endif
 
 
-        // Sendspin components
+        // Audio services
+        builder.Services.AddSingleton<ConnectionOptions>(_ => new ConnectionOptions
+        {
+            AutoReconnect = true
+        });
         builder.Services.AddSingleton<IClockSynchronizer, KalmanClockSynchronizer>();
         builder.Services.AddSingleton<IAudioPlayer>(sp =>
         {
@@ -111,9 +118,18 @@ public static class MauiProgram
                     return new UntimedAudioSampleSource((UntimedAudioBuffer)buffer);
                 });
         });
-        builder.Services.AddSingleton<SendspinPlayerService>();
-        builder.Services.AddSingleton<ISendspinPlayerService>(sp => sp.GetRequiredService<SendspinPlayerService>());
-        builder.Services.AddSingleton<IPlayerService>(sp => sp.GetRequiredService<SendspinPlayerService>());
+
+        // Sendspin services
+        builder.Services.AddSingleton<ClientCapabilities>(sp =>
+        {
+            var settings = sp.GetRequiredService<SettingsService>();
+            return settings.GetSendspinClientCapabilities();
+        });
+
+        // Player services
+        builder.Services.AddSingleton<ISendspinConnection, SendspinConnection>();
+        builder.Services.AddSingleton<ISendspinClient, SendspinClientService>();
+        builder.Services.AddSingleton<IPlayerService, SendspinPlayerService>();
         builder.Services.AddSingleton<IPlayerService, LocalDummyPlayerService>();
         builder.Services.AddSingleton<IPlayerService, RemotePlayerService>();
 

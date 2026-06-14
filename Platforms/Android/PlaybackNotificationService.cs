@@ -160,7 +160,7 @@ public sealed class PlaybackNotificationService : Service
     private void OnPlaybackPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(IPlaybackService.PlaybackState)
-            || e.PropertyName == nameof(IPlaybackService.CurrentTrack))
+            || e.PropertyName == nameof(IPlaybackService.CurrentQueueItem))
         {
             _ = UpdateNotificationAsync();
         }
@@ -181,7 +181,7 @@ public sealed class PlaybackNotificationService : Service
                 return;
             }
 
-            var track = playback.CurrentTrack;
+            var track = playback.CurrentQueueItem?.MediaItem;
             var state = playback.PlaybackState.State;
             var hasTrack = track != null;
 
@@ -303,7 +303,7 @@ public sealed class PlaybackNotificationService : Service
                 }
 
                 var state = playback.PlaybackState.State;
-                var hasTrack = playback.CurrentTrack != null;
+                var hasTrack = playback.CurrentQueueItem?.MediaItem != null;
                 var shouldShow = hasTrack || state is PlayerPlaybackState.Playing or PlayerPlaybackState.Buffering or PlayerPlaybackState.Paused or PlayerPlaybackState.Seeking;
 
                 if (shouldShow || !IsAppInBackground())

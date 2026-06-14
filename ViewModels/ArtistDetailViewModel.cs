@@ -222,7 +222,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
     public ArtistDetailViewModel(
         MusicAssistantService musicAssistant,
-        ISendspinPlayerService playerService,
         IUserDataService userDataService,
         IMediaItemActions mediaActions,
         IContextMenuService contextMenuService,
