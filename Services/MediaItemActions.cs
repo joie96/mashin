@@ -14,11 +14,6 @@ namespace mashin.Services;
 /// </summary>
 public interface IMediaItemActions
 {
-    Task PlayMediaAsync(object item, object? startItem = null);
-    Task PlayMediaNextAsync(object item, object? startItem = null);
-    Task PlayMediaLastAsync(object item, object? startItem = null);
-    Task ShufflePlayMediaAsync(IEnumerable<MediaItem> items);
-    Task ShufflePlayMediaAsync(MediaItem parentItem, IEnumerable<MediaItem> associatedItems);
     Task AddToPlaylistAsync(object item, Playlist playlist);
     Task RemoveFromPlaylistAsync(object item, Playlist playlist);
     Task AddToFavoritesAsync(object item);
@@ -38,7 +33,6 @@ public class MediaItemActions : IMediaItemActions
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly IUserDataService _userDataService;
-    private readonly IPlaybackService _playbackService;
     private readonly ILogger<MediaItemActions> _logger;
 
     #endregion
@@ -48,81 +42,16 @@ public class MediaItemActions : IMediaItemActions
     public MediaItemActions(
         MusicAssistantService musicAssistant,
         IUserDataService userDataService,
-        IPlaybackService playbackService,
         ILogger<MediaItemActions> logger)
     {
         _musicAssistant = musicAssistant;
         _userDataService = userDataService;
-        _playbackService = playbackService;
         _logger = logger;
     }
 
     #endregion
 
     #region Media Item Actions
-
-    /// <summary>
-    /// Plays the specified media item(s), replacing the current queue.
-    /// </summary>
-    public async Task PlayMediaAsync(object item, object? startItem = null)
-    {
-        if (startItem is MediaItem startMediaItem)
-        {
-            await _playbackService.PlayMediaAsync(new List<MediaItem> { startMediaItem });
-            return;
-        }
-
-        var mediaItems = GetMediaItemsFromParameter(item);
-        await _playbackService.PlayMediaAsync(mediaItems);
-    }
-
-    /// <summary>
-    /// Plays the specified media item(s) next in the queue.
-    /// </summary>
-    public async Task PlayMediaNextAsync(object item, object? startItem = null)
-    {
-        if (startItem is MediaItem startMediaItem)
-        {
-            await _playbackService.PlayMediaNextAsync(new List<MediaItem> { startMediaItem });
-            return;
-        }
-
-        var mediaItems = GetMediaItemsFromParameter(item);
-        await _playbackService.PlayMediaNextAsync(mediaItems);
-    }
-
-    /// <summary>
-    /// Adds the specified media item(s) to the end of the queue.
-    /// </summary>
-    public async Task PlayMediaLastAsync(object item, object? startItem = null)
-    {
-        if (startItem is MediaItem startMediaItem)
-        {
-            await _playbackService.PlayMediaLastAsync(new List<MediaItem> { startMediaItem });
-            return;
-        }
-
-        var mediaItems = GetMediaItemsFromParameter(item);
-        await _playbackService.PlayMediaLastAsync(mediaItems);
-    }
-
-    /// <summary>
-    /// Shuffles a standalone collection, starts with one random item,
-    /// then queues the remaining shuffled items next.
-    /// </summary>
-    public async Task ShufflePlayMediaAsync(IEnumerable<MediaItem> items)
-    {
-        await _playbackService.ShufflePlayMediaAsync(items.ToList());
-    }
-
-    /// <summary>
-    /// Plays one random associated item immediately, queues the parent item next,
-    /// then shuffles queue entries from position 2.
-    /// </summary>
-    public async Task ShufflePlayMediaAsync(MediaItem parentItem, IEnumerable<MediaItem> associatedItems)
-    {
-        await _playbackService.ShufflePlayMediaAsync(associatedItems.ToList());
-    }
 
     /// <summary>
     /// Adds the currently selected items to the specified playlist.

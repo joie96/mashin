@@ -1,6 +1,7 @@
 using mashin.Models;
 using mashin.Services;
 using mashin.Collections;
+using Microsoft.Extensions.DependencyInjection;
 using System.Collections.Specialized;
 using System.Windows.Input;
 
@@ -622,12 +623,18 @@ public partial class SlideView : ContentView
 
     private async void OnPlayOverlayClicked(object? sender, TappedEventArgs e)
     {
-        if (CurrentItem is not MediaItem item || MediaActions == null)
+        if (CurrentItem is not MediaItem item)
         {
             return;
         }
 
-        await MediaActions.PlayMediaAsync(item);
+        var playbackService = ResolvePlaybackService();
+        if (playbackService == null)
+        {
+            return;
+        }
+
+        await playbackService.PlayMediaAsync(new List<MediaItem> { item });
     }
 
     private async void OnFavoriteIconTapped(object? sender, TappedEventArgs e)
@@ -672,6 +679,17 @@ public partial class SlideView : ContentView
     #endregion
 
     #region Card palette
+
+    private static IPlaybackService? ResolvePlaybackService()
+    {
+        var services = Application.Current?.Handler?.MauiContext?.Services;
+        if (services == null)
+        {
+            return null;
+        }
+
+        return services.GetService<IPlaybackService>();
+    }
 
     private async Task ApplySlideCardBackgroundToCardAsync(FFImageLoading.Maui.CachedImage? backgroundImage, MediaItem? mediaItem)
     {

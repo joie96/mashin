@@ -17,6 +17,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly IMediaItemActions _mediaActions;
+    private readonly IPlaybackService _playbackService;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
     private readonly IUserDataService _userDataService;
@@ -468,6 +469,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
     public HomeViewModel(
         MusicAssistantService musicAssistant,
         IMediaItemActions mediaActions,
+        IPlaybackService playbackService,
         IContextMenuService contextMenuService,
         INavigationService navigationService,
         IUserDataService userDataService,
@@ -475,6 +477,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
     {
         _musicAssistant = musicAssistant;
         _mediaActions = mediaActions;
+        _playbackService = playbackService;
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
         _userDataService = userDataService;
@@ -497,7 +500,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 return;
             }
 
-            await _mediaActions.PlayMediaAsync(track);
+            await _playbackService.PlayMediaAsync(new List<MediaItem> { track });
         });
 
         ShowTrackContextMenuAtAnchorCommand = new Command<View>(async anchor =>
@@ -1010,14 +1013,14 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
-                    await _mediaActions.PlayMediaNextAsync(GetSelectedTracks()))
+                    await _playbackService.PlayMediaNextAsync(GetSelectedTracks().Cast<MediaItem>().ToList()))
             },
             new()
             {
                 Text = "Als Letztes spielen",
                 Icon = FluentIcons.ArrowNext12,
                 Command = new Command(async () =>
-                    await _mediaActions.PlayMediaLastAsync(GetSelectedTracks()))
+                    await _playbackService.PlayMediaLastAsync(GetSelectedTracks().Cast<MediaItem>().ToList()))
             },
             new() { IsSeparator = true },
             new()
@@ -1048,21 +1051,21 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             {
                 Text = "Abspielen",
                 Icon = FluentIcons.Play12,
-                Command = new Command(async () => await _mediaActions.PlayMediaAsync(GetSelectedPlaylists()))
+                Command = new Command(async () => await _playbackService.PlayMediaAsync(GetSelectedPlaylists().Cast<MediaItem>().ToList()))
             },
             new()
             {
                 Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
-                    await _mediaActions.PlayMediaNextAsync(GetSelectedPlaylists()))
+                    await _playbackService.PlayMediaNextAsync(GetSelectedPlaylists().Cast<MediaItem>().ToList()))
             },
             new()
             {
                 Text = "Als Letztes spielen",
                 Icon = FluentIcons.ArrowNext12,
                 Command = new Command(async () =>
-                    await _mediaActions.PlayMediaLastAsync(GetSelectedPlaylists()))
+                    await _playbackService.PlayMediaLastAsync(GetSelectedPlaylists().Cast<MediaItem>().ToList()))
             },
             new() { IsSeparator = true },
             new()
@@ -1093,21 +1096,21 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             {
                 Text = "Abspielen",
                 Icon = FluentIcons.Play12,
-                Command = new Command(async () => await _mediaActions.PlayMediaAsync(GetSelectedArtists()))
+                Command = new Command(async () => await _playbackService.PlayMediaAsync(GetSelectedArtists().Cast<MediaItem>().ToList()))
             },
             new()
             {
                 Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
-                    await _mediaActions.PlayMediaNextAsync(GetSelectedArtists()))
+                    await _playbackService.PlayMediaNextAsync(GetSelectedArtists().Cast<MediaItem>().ToList()))
             },
             new()
             {
                 Text = "Als Letztes spielen",
                 Icon = FluentIcons.ArrowNext12,
                 Command = new Command(async () =>
-                    await _mediaActions.PlayMediaLastAsync(GetSelectedArtists()))
+                    await _playbackService.PlayMediaLastAsync(GetSelectedArtists().Cast<MediaItem>().ToList()))
             },
             new() { IsSeparator = true },
             new()
@@ -1291,11 +1294,11 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             return;
         }
 
-        await _mediaActions.PlayMediaAsync(selectedTracks[0]);
+        await _playbackService.PlayMediaAsync(new List<MediaItem> { selectedTracks[0] });
 
         if (selectedTracks.Count > 1)
         {
-            await _mediaActions.PlayMediaNextAsync(selectedTracks.Skip(1).ToList());
+            await _playbackService.PlayMediaNextAsync(selectedTracks.Skip(1).Cast<MediaItem>().ToList());
         }
     }
 
@@ -1331,7 +1334,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
         await PlayCollectionRandomAsync(sectionArtists);
     }
 
-    private async Task PlayCollectionFirstAsync<T>(IEnumerable<T>? items) where T : class
+    private async Task PlayCollectionFirstAsync<T>(IEnumerable<T>? items) where T : MediaItem
     {
         if (items == null)
         {
@@ -1344,10 +1347,10 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             return;
         }
 
-        await _mediaActions.PlayMediaAsync(firstItem);
+        await _playbackService.PlayMediaAsync(new List<MediaItem> { firstItem });
     }
 
-    private async Task PlayCollectionRandomAsync<T>(IEnumerable<T>? items) where T : class
+    private async Task PlayCollectionRandomAsync<T>(IEnumerable<T>? items) where T : MediaItem
     {
         if (items == null)
         {
@@ -1361,7 +1364,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
         }
 
         var randomIndex = Random.Shared.Next(entries.Count);
-        await _mediaActions.PlayMediaAsync(entries[randomIndex]);
+        await _playbackService.PlayMediaAsync(new List<MediaItem> { entries[randomIndex] });
     }
 
     private async Task ApplyFavoriteStateAsync<T>(IEnumerable<T> items) where T : MediaItem

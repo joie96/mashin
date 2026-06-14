@@ -1,6 +1,7 @@
 using mashin.Collections;
 using mashin.Models;
 using mashin.Services;
+using Microsoft.Extensions.DependencyInjection;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Linq;
@@ -329,17 +330,34 @@ public partial class RowView : ContentView
 
     private async void OnPlayOverlayClicked(object? sender, TappedEventArgs e)
     {
-        if (sender is not BindableObject { BindingContext: MediaItem item } || MediaActions == null)
+        if (sender is not BindableObject { BindingContext: MediaItem item })
         {
             return;
         }
 
-        await MediaActions.PlayMediaAsync(item);
+        var playbackService = ResolvePlaybackService();
+        if (playbackService == null)
+        {
+            return;
+        }
+
+        await playbackService.PlayMediaAsync(new List<MediaItem> { item });
     }
 
     #endregion
 
     #region Helpers
+
+    private static IPlaybackService? ResolvePlaybackService()
+    {
+        var services = Application.Current?.Handler?.MauiContext?.Services;
+        if (services == null)
+        {
+            return null;
+        }
+
+        return services.GetService<IPlaybackService>();
+    }
 
     private static object GetPrimaryNavigationParameter(MediaItem mediaItem)
     {

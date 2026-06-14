@@ -13,7 +13,7 @@ namespace mashin.Services;
 public interface IPlayerService : INotifyPropertyChanged, IAsyncDisposable
 {
     PlaybackOutputMode OutputMode { get; }
-    PlaybackStateModel PlayerState { get; }
+    PlaybackState PlayerState { get; }
     int Volume { get; }
     bool IsMuted { get; }
 
@@ -45,7 +45,7 @@ public sealed class SendspinPlayerService : IPlayerService
     private bool _isConnected;
     private string? _connectedServerName;
     private string? _playerId;
-    private PlaybackStateModel _playerState = new(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow);
+    private PlaybackState _playerState = PlaybackState.Idle;
     private int _volume = 50;
     private bool _isMuted;
     private string? _activePlayerId;
@@ -101,7 +101,7 @@ public sealed class SendspinPlayerService : IPlayerService
         private set => SetProperty(ref _playerId, value);
     }
 
-    public PlaybackStateModel PlayerState
+    public PlaybackState PlayerState
     {
         get => _playerState;
         set => SetProperty(ref _playerState, value);
@@ -270,7 +270,7 @@ public sealed class SendspinPlayerService : IPlayerService
         await _sendspinClient.DisconnectAsync("client_disconnect");
         IsConnected = false;
         ConnectedServerName = null;
-        PlayerState = new PlaybackStateModel(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow);
+        PlayerState = PlaybackState.Idle;
     }
 
     #endregion
@@ -319,7 +319,7 @@ public sealed class LocalDummyPlayerService : IPlayerService
 {
     #region Fields
 
-    private PlaybackStateModel _playerState = new(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow);
+    private PlaybackState _playerState = PlaybackState.Idle;
     private int _volume = 50;
     private bool _isMuted;
 
@@ -335,7 +335,7 @@ public sealed class LocalDummyPlayerService : IPlayerService
 
     public PlaybackOutputMode OutputMode => PlaybackOutputMode.LocalOffline;
 
-    public PlaybackStateModel PlayerState
+    public PlaybackState PlayerState
     {
         get => _playerState;
         private set => SetProperty(ref _playerState, value);
@@ -362,10 +362,10 @@ public sealed class LocalDummyPlayerService : IPlayerService
 
     public Task TogglePlayPauseAsync(CancellationToken cancellationToken = default)
     {
-        var next = PlayerState.State == PlayerPlaybackState.Playing
-            ? PlayerPlaybackState.Paused
-            : PlayerPlaybackState.Playing;
-        PlayerState = new PlaybackStateModel(next, DateTimeOffset.UtcNow);
+        var next = PlayerState == PlaybackState.Playing
+            ? PlaybackState.Paused
+            : PlaybackState.Playing;
+        PlayerState = next;
         return Task.CompletedTask;
     }
 
@@ -430,7 +430,7 @@ public sealed class RemotePlayerService : IPlayerService
 
     private readonly MusicAssistantService _musicAssistant;
 
-    private PlaybackStateModel _playerState = new(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow);
+    private PlaybackState _playerState = PlaybackState.Idle;
     private int _volume = 50;
     private bool _isMuted;
     private string? _activePlayerId;
@@ -456,7 +456,7 @@ public sealed class RemotePlayerService : IPlayerService
 
     public PlaybackOutputMode OutputMode => PlaybackOutputMode.RemoteOnly;
 
-    public PlaybackStateModel PlayerState
+    public PlaybackState PlayerState
     {
         get => _playerState;
         private set => SetProperty(ref _playerState, value);
@@ -487,10 +487,10 @@ public sealed class RemotePlayerService : IPlayerService
 
     public Task TogglePlayPauseAsync(CancellationToken cancellationToken = default)
     {
-        var next = PlayerState.State == PlayerPlaybackState.Playing
-            ? PlayerPlaybackState.Paused
-            : PlayerPlaybackState.Playing;
-        PlayerState = new PlaybackStateModel(next, DateTimeOffset.UtcNow);
+        var next = PlayerState == PlaybackState.Playing
+            ? PlaybackState.Paused
+            : PlaybackState.Playing;
+        PlayerState = next;
         if (string.IsNullOrWhiteSpace(_activePlayerId))
         {
             return Task.CompletedTask;

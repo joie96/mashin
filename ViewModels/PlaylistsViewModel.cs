@@ -20,6 +20,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
     private readonly IOverlayService _overlayService;
     private readonly INavigationService _navigationService;
     private readonly IMediaItemActions _mediaActions;
+    private readonly IPlaybackService _playbackService;
     private readonly IContextMenuService _contextMenuService;
     private readonly ILogger<PlaylistsViewModel> _logger;
     private readonly ObservableCollection<ContextMenuItem> _playlistContextMenuItems = new();
@@ -42,6 +43,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         IOverlayService overlayService,
         INavigationService navigationService,
         IMediaItemActions mediaActions,
+        IPlaybackService playbackService,
         IContextMenuService contextMenuService,
         ILogger<PlaylistsViewModel> logger)
     {
@@ -50,6 +52,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         _overlayService = overlayService;
         _navigationService = navigationService;
         _mediaActions = mediaActions;
+        _playbackService = playbackService;
         _contextMenuService = contextMenuService;
         _logger = logger;
 
@@ -309,21 +312,21 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         {
             Text = "Abspielen",
             Icon = FluentIcons.Play12,
-            Command = new Command(async () => await _mediaActions.PlayMediaAsync(GetPlaylistsForAction()))
+            Command = new Command(async () => await _playbackService.PlayMediaAsync(GetPlaylistsForAction().Cast<MediaItem>().ToList()))
         });
 
         _playlistContextMenuItems.Add(new ContextMenuItem
         {
             Text = "Als Nächstes spielen",
             Icon = FluentIcons.ArrowForward16,
-            Command = new Command(async () => await _mediaActions.PlayMediaNextAsync(GetPlaylistsForAction()))
+            Command = new Command(async () => await _playbackService.PlayMediaNextAsync(GetPlaylistsForAction().Cast<MediaItem>().ToList()))
         });
 
         _playlistContextMenuItems.Add(new ContextMenuItem
         {
             Text = "Als Letztes spielen",
             Icon = FluentIcons.ArrowNext12,
-            Command = new Command(async () => await _mediaActions.PlayMediaLastAsync(GetPlaylistsForAction()))
+            Command = new Command(async () => await _playbackService.PlayMediaLastAsync(GetPlaylistsForAction().Cast<MediaItem>().ToList()))
         });
 
         _playlistContextMenuItems.Add(new ContextMenuItem { IsSeparator = true });

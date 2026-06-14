@@ -1,6 +1,7 @@
 using mashin.Collections;
 using mashin.Models;
 using mashin.Services;
+using Microsoft.Extensions.DependencyInjection;
 using System.Collections;
 using System.Collections.Specialized;
 using System.ComponentModel;
@@ -367,16 +368,16 @@ public partial class TableView : ContentView
         // Default mobile behavior: tapping a track directly plays it.
         if (mediaItem is Track track)
         {
-            var mediaActions = ResolveMediaActions();
-            if (mediaActions != null)
+            var playbackService = ResolvePlaybackService();
+            if (playbackService != null)
             {
                 if (PlaybackContextItem is MediaItem parentItem)
                 {
-                    await mediaActions.PlayMediaAsync(parentItem, track);
+                    await playbackService.PlayMediaAsync(new List<MediaItem> { track });
                     return;
                 }
 
-                await mediaActions.PlayMediaAsync(track);
+                await playbackService.PlayMediaAsync(new List<MediaItem> { track });
                 return;
             }
         }
@@ -550,7 +551,7 @@ public partial class TableView : ContentView
         OnPropertyChanged(nameof(HasMoreItems));
     }
 
-    private static IMediaItemActions? ResolveMediaActions()
+    private static IPlaybackService? ResolvePlaybackService()
     {
         var services = Application.Current?.Handler?.MauiContext?.Services;
         if (services == null)
@@ -558,7 +559,7 @@ public partial class TableView : ContentView
             return null;
         }
 
-        return services.GetService(typeof(IMediaItemActions)) as IMediaItemActions;
+        return services.GetService<IPlaybackService>();
     }
 
     private bool HasAnySelectedItems()

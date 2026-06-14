@@ -255,6 +255,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
     }
 
     public IMediaItemActions MediaActions { get; }
+    public IPlaybackService PlaybackService { get; }
 
     public ICommand AlbumTappedCommand { get; }
     public ICommand ArtistTappedCommand { get; }
@@ -323,6 +324,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
     public SearchViewModel(
         MusicAssistantService musicAssistant,
         IMediaItemActions mediaActions,
+        IPlaybackService playbackService,
         IContextMenuService contextMenuService,
         INavigationService navigationService,
         ILogger<SearchViewModel> logger)
@@ -333,6 +335,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
         _logger = logger;
 
         MediaActions = mediaActions;
+        PlaybackService = playbackService;
 
         AlbumTappedCommand = new Command<object>(async parameter => await _navigationService.NavigateToAsync<AlbumDetailPage>(parameter));
 
@@ -347,12 +350,12 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 return;
             }
 
-            await MediaActions.PlayMediaAsync(tracks[0]);
+            await PlaybackService.PlayMediaAsync(new List<MediaItem> { tracks[0] });
 
             var remainingTracks = tracks.Skip(1).ToList();
             if (remainingTracks.Count > 0)
             {
-                await MediaActions.PlayMediaNextAsync(remainingTracks);
+                await PlaybackService.PlayMediaNextAsync(remainingTracks.Cast<MediaItem>().ToList());
             }
         });
 
@@ -364,7 +367,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 return;
             }
 
-            await MediaActions.ShufflePlayMediaAsync(tracks);
+            await PlaybackService.ShufflePlayMediaAsync(tracks.Cast<MediaItem>().ToList());
         });
 
         PlayAlbumsCommand = new Command(async () =>
@@ -375,7 +378,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 return;
             }
 
-            await MediaActions.PlayMediaAsync(albums[0]);
+            await PlaybackService.PlayMediaAsync(new List<MediaItem> { albums[0] });
         });
 
         ShuffleAlbumsCommand = new Command(async () =>
@@ -387,7 +390,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
             }
 
             var randomIndex = _shuffleRandom.Next(albums.Count);
-            await MediaActions.PlayMediaAsync(albums[randomIndex]);
+            await PlaybackService.PlayMediaAsync(new List<MediaItem> { albums[randomIndex] });
         });
 
         PlayPlaylistsCommand = new Command(async () =>
@@ -398,7 +401,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 return;
             }
 
-            await MediaActions.PlayMediaAsync(playlists[0]);
+            await PlaybackService.PlayMediaAsync(new List<MediaItem> { playlists[0] });
         });
 
         ShufflePlaylistsCommand = new Command(async () =>
@@ -410,7 +413,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
             }
 
             var randomIndex = _shuffleRandom.Next(playlists.Count);
-            await MediaActions.PlayMediaAsync(playlists[randomIndex]);
+            await PlaybackService.PlayMediaAsync(new List<MediaItem> { playlists[randomIndex] });
         });
 
         PlayArtistsCommand = new Command(async () =>
@@ -421,7 +424,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 return;
             }
 
-            await MediaActions.PlayMediaAsync(artists[0]);
+            await PlaybackService.PlayMediaAsync(new List<MediaItem> { artists[0] });
         });
 
         ShuffleArtistsCommand = new Command(async () =>
@@ -433,7 +436,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
             }
 
             var randomIndex = _shuffleRandom.Next(artists.Count);
-            await MediaActions.PlayMediaAsync(artists[randomIndex]);
+            await PlaybackService.PlayMediaAsync(new List<MediaItem> { artists[randomIndex] });
         });
 
         ShowTrackContextMenuAtAnchorCommand = new Command<View>(async (anchor) =>
@@ -727,14 +730,20 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaNextAsync(Tracks.Where(t => t.IsSelected)))
+                {
+                    var items = Tracks.Where(t => t.IsSelected).Select(t => (MediaItem)t).ToList();
+                    await PlaybackService.PlayMediaNextAsync(items);
+                })
             },
             new()
             {
                 Text = "Als Letztes spielen",
                 Icon = FluentIcons.ArrowNext12,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaLastAsync(Tracks.Where(t => t.IsSelected)))
+                {
+                    var items = Tracks.Where(t => t.IsSelected).Select(t => (MediaItem)t).ToList();
+                    await PlaybackService.PlayMediaLastAsync(items);
+                })
             },
             new() { IsSeparator = true },
             new()
@@ -773,21 +782,30 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 Text = "Abspielen",
                 Icon = FluentIcons.Play12,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaAsync(Albums.Where(a => a.IsSelected)))
+                {
+                    var items = Albums.Where(a => a.IsSelected).Select(a => (MediaItem)a).ToList();
+                    await PlaybackService.PlayMediaAsync(items);
+                })
             },
             new()
             {
                 Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaNextAsync(Albums.Where(a => a.IsSelected)))
+                {
+                    var items = Albums.Where(a => a.IsSelected).Select(a => (MediaItem)a).ToList();
+                    await PlaybackService.PlayMediaNextAsync(items);
+                })
             },
             new()
             {
                 Text = "Als Letztes spielen",
                 Icon = FluentIcons.ArrowNext12,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaLastAsync(Albums.Where(a => a.IsSelected)))
+                {
+                    var items = Albums.Where(a => a.IsSelected).Select(a => (MediaItem)a).ToList();
+                    await PlaybackService.PlayMediaLastAsync(items);
+                })
             },
             new() { IsSeparator = true },
             new()
@@ -819,21 +837,30 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 Text = "Abspielen",
                 Icon = FluentIcons.Play12,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaAsync(Playlists.Where(p => p.IsSelected)))
+                {
+                    var items = Playlists.Where(p => p.IsSelected).Select(p => (MediaItem)p).ToList();
+                    await PlaybackService.PlayMediaAsync(items);
+                })
             },
             new()
             {
                 Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaNextAsync(Playlists.Where(p => p.IsSelected)))
+                {
+                    var items = Playlists.Where(p => p.IsSelected).Select(p => (MediaItem)p).ToList();
+                    await PlaybackService.PlayMediaNextAsync(items);
+                })
             },
             new()
             {
                 Text = "Als Letztes spielen",
                 Icon = FluentIcons.ArrowNext12,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaLastAsync(Playlists.Where(p => p.IsSelected)))
+                {
+                    var items = Playlists.Where(p => p.IsSelected).Select(p => (MediaItem)p).ToList();
+                    await PlaybackService.PlayMediaLastAsync(items);
+                })
             },
             new() { IsSeparator = true },
             new()
@@ -865,21 +892,30 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 Text = "Abspielen",
                 Icon = FluentIcons.Play12,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaAsync(Artists.Where(a => a.IsSelected)))
+                {
+                    var items = Artists.Where(a => a.IsSelected).Select(a => (MediaItem)a).ToList();
+                    await PlaybackService.PlayMediaAsync(items);
+                })
             },
             new()
             {
                 Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaNextAsync(Artists.Where(a => a.IsSelected)))
+                {
+                    var items = Artists.Where(a => a.IsSelected).Select(a => (MediaItem)a).ToList();
+                    await PlaybackService.PlayMediaNextAsync(items);
+                })
             },
             new()
             {
                 Text = "Als Letztes spielen",
                 Icon = FluentIcons.ArrowNext12,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaLastAsync(Artists.Where(a => a.IsSelected)))
+                {
+                    var items = Artists.Where(a => a.IsSelected).Select(a => (MediaItem)a).ToList();
+                    await PlaybackService.PlayMediaLastAsync(items);
+                })
             },
             new() { IsSeparator = true },
             new()
@@ -914,12 +950,12 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
         // multiple tracks selected:  play the first one and queue the rest selected tracks
         if (selectedTracks.Count > 1)
         {
-            await MediaActions.PlayMediaAsync(selectedTracks.First());
+            await PlaybackService.PlayMediaAsync(new List<MediaItem> { selectedTracks.First() });
 
             var remainingTracks = selectedTracks.Skip(1).ToList();
             if (remainingTracks.Count > 0)
             {
-                await MediaActions.PlayMediaNextAsync(remainingTracks);
+                await PlaybackService.PlayMediaNextAsync(remainingTracks.Cast<MediaItem>().ToList());
             }
 
             return;
@@ -927,7 +963,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
 
         // single track selected: play track and queue remaining tracks in cyclic order
         var selectedTrack = selectedTracks.First();
-        await MediaActions.PlayMediaAsync(selectedTrack);
+        await PlaybackService.PlayMediaAsync(new List<MediaItem> { selectedTrack });
 
         var selectedIndex = trackList.IndexOf(selectedTrack);
         if (selectedIndex < 0 || trackList.Count <= 1)
@@ -950,7 +986,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
 
         if (itemsToQueue.Count > 0)
         {
-            await MediaActions.PlayMediaNextAsync(itemsToQueue);
+            await PlaybackService.PlayMediaNextAsync(itemsToQueue.Cast<MediaItem>().ToList());
         }
     }
 

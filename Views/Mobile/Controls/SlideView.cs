@@ -1,6 +1,7 @@
 using mashin.Models;
 using mashin.Services;
 using mashin.Collections;
+using Microsoft.Extensions.DependencyInjection;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Linq;
@@ -347,12 +348,18 @@ public partial class SlideView : ContentView
 
     private async void OnPlayOverlayClicked(object? sender, TappedEventArgs e)
     {
-        if (sender is not BindableObject { BindingContext: MediaItem item } || MediaActions == null)
+        if (sender is not BindableObject { BindingContext: MediaItem item })
         {
             return;
         }
 
-        await MediaActions.PlayMediaAsync(item);
+        var playbackService = ResolvePlaybackService();
+        if (playbackService == null)
+        {
+            return;
+        }
+
+        await playbackService.PlayMediaAsync(new List<MediaItem> { item });
     }
 
     private void OnLoadMoreTapped(object? sender, TappedEventArgs e)
@@ -394,10 +401,14 @@ public partial class SlideView : ContentView
             return;
         }
 
-        if (mediaItem is Track && MediaActions != null)
+        if (mediaItem is Track)
         {
-            await MediaActions.PlayMediaAsync(mediaItem);
-            return;
+            var playbackService = ResolvePlaybackService();
+            if (playbackService != null)
+            {
+                await playbackService.PlayMediaAsync(new List<MediaItem> { mediaItem });
+                return;
+            }
         }
 
         var command = PrimaryInfoTappedCommand;
@@ -526,6 +537,17 @@ public partial class SlideView : ContentView
     }
 
     #region Paging
+
+    private static IPlaybackService? ResolvePlaybackService()
+    {
+        var services = Application.Current?.Handler?.MauiContext?.Services;
+        if (services == null)
+        {
+            return null;
+        }
+
+        return services.GetService<IPlaybackService>();
+    }
 
     private void RefreshVisibleItems()
     {

@@ -139,6 +139,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
     }
 
     public IMediaItemActions MediaActions { get; }
+    public IPlaybackService PlaybackService { get; }
 
     public ICommand AlbumTappedCommand { get; }
     public ICommand ArtistTappedCommand { get; }
@@ -229,6 +230,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
         MusicAssistantService musicAssistant,
         IUserDataService userDataService,
         IMediaItemActions mediaActions,
+        IPlaybackService playbackService,
         IContextMenuService contextMenuService,
         INavigationService navigationService,
         ILogger<AlbumDetailViewModel> logger)
@@ -240,6 +242,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
         _logger = logger;
 
         MediaActions = mediaActions;
+        PlaybackService = playbackService;
 
         AlbumTappedCommand = new Command<object>(async parameter => await _navigationService.NavigateToAsync<AlbumDetailPage>(parameter));
 
@@ -249,7 +252,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
         {
             if (Album != null)
             {
-                await MediaActions.PlayMediaAsync(Album);
+                await PlaybackService.PlayMediaAsync(new List<MediaItem> { Album });
             }
         });
 
@@ -266,7 +269,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 return;
             }
 
-            await MediaActions.ShufflePlayMediaAsync(Album, tracks);
+            await PlaybackService.ShufflePlayMediaAsync(tracks.Cast<MediaItem>().ToList());
         });
 
         PlayTracksCommand = new Command(async () =>
@@ -277,12 +280,12 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 return;
             }
 
-            await MediaActions.PlayMediaAsync(tracks[0]);
+            await PlaybackService.PlayMediaAsync(new List<MediaItem> { tracks[0] });
 
             var remainingTracks = tracks.Skip(1).ToList();
             if (remainingTracks.Count > 0)
             {
-                await MediaActions.PlayMediaNextAsync(remainingTracks);
+                await PlaybackService.PlayMediaNextAsync(remainingTracks.Cast<MediaItem>().ToList());
             }
         });
 
@@ -299,7 +302,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 return;
             }
 
-            await MediaActions.ShufflePlayMediaAsync(Album, tracks);
+            await PlaybackService.ShufflePlayMediaAsync(tracks.Cast<MediaItem>().ToList());
         });
 
         PlayOtherAlbumsCommand = new Command(async () =>
@@ -310,7 +313,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 return;
             }
 
-            await MediaActions.PlayMediaAsync(albums[0]);
+            await PlaybackService.PlayMediaAsync(new List<MediaItem> { albums[0] });
         });
 
         ShuffleOtherAlbumsCommand = new Command(async () =>
@@ -322,7 +325,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
             }
 
             var randomIndex = _shuffleRandom.Next(albums.Count);
-            await MediaActions.PlayMediaAsync(albums[randomIndex]);
+            await PlaybackService.PlayMediaAsync(new List<MediaItem> { albums[randomIndex] });
         });
 
         PlaySimilarArtistsCommand = new Command(async () =>
@@ -333,7 +336,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 return;
             }
 
-            await MediaActions.PlayMediaAsync(similarArtists[0]);
+            await PlaybackService.PlayMediaAsync(new List<MediaItem> { similarArtists[0] });
         });
 
         ShuffleSimilarArtistsCommand = new Command(async () =>
@@ -345,7 +348,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
             }
 
             var randomIndex = _shuffleRandom.Next(similarArtists.Count);
-            await MediaActions.PlayMediaAsync(similarArtists[randomIndex]);
+            await PlaybackService.PlayMediaAsync(new List<MediaItem> { similarArtists[randomIndex] });
         });
 
         ToggleAlbumFavoriteCommand = new Command(async () =>
@@ -680,13 +683,13 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
             {
                 Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
-                Command = new Command(async () => await MediaActions.PlayMediaNextAsync(Album))
+                Command = new Command(async () => await PlaybackService.PlayMediaNextAsync(new List<MediaItem> { Album }))
             },
             new()
             {
                 Text = "Als Letztes spielen",
                 Icon = FluentIcons.ArrowNext12,
-                Command = new Command(async () => await MediaActions.PlayMediaLastAsync(Album))
+                Command = new Command(async () => await PlaybackService.PlayMediaLastAsync(new List<MediaItem> { Album }))
             },
             new() { IsSeparator = true }
         };
@@ -744,14 +747,14 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaNextAsync(Tracks.Where(t => t.IsSelected)))
+                    await PlaybackService.PlayMediaNextAsync(Tracks.Where(t => t.IsSelected).Cast<MediaItem>().ToList()))
             },
             new()
             {
                 Text = "Als Letztes spielen",
                 Icon = FluentIcons.ArrowNext12,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaLastAsync(Tracks.Where(t => t.IsSelected)))
+                    await PlaybackService.PlayMediaLastAsync(Tracks.Where(t => t.IsSelected).Cast<MediaItem>().ToList()))
             },
             new() { IsSeparator = true },
             new()
@@ -804,12 +807,12 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
         // multiple tracks selected:  play the first one and queue the rest selected tracks
         if (selectedTracks.Count > 1)
         {
-            await MediaActions.PlayMediaAsync(selectedTracks.First());
+            await PlaybackService.PlayMediaAsync(new List<MediaItem> { selectedTracks.First() });
 
             var remainingTracks = selectedTracks.Skip(1).ToList();
             if (remainingTracks.Count > 0)
             {
-                await MediaActions.PlayMediaNextAsync(remainingTracks);
+                await PlaybackService.PlayMediaNextAsync(remainingTracks.Cast<MediaItem>().ToList());
             }
 
             return;
@@ -817,7 +820,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
 
         // single track selected: play track and queue remaining tracks in cyclic order
         var selectedTrack = selectedTracks.First();
-        await MediaActions.PlayMediaAsync(selectedTrack);
+        await PlaybackService.PlayMediaAsync(new List<MediaItem> { selectedTrack });
 
         var selectedIndex = trackList.IndexOf(selectedTrack);
         if (selectedIndex < 0 || trackList.Count <= 1)
@@ -840,7 +843,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
 
         if (itemsToQueue.Count > 0)
         {
-            await MediaActions.PlayMediaNextAsync(itemsToQueue);
+            await PlaybackService.PlayMediaNextAsync(itemsToQueue.Cast<MediaItem>().ToList());
         }
     }
 
@@ -853,21 +856,21 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 Text = "Abspielen",
                 Icon = FluentIcons.Play12,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaAsync(OtherAlbums.Where(a => a.IsSelected)))
+                    await PlaybackService.PlayMediaAsync(OtherAlbums.Where(a => a.IsSelected).Cast<MediaItem>().ToList()))
             },
             new()
             {
                 Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaNextAsync(OtherAlbums.Where(a => a.IsSelected)))
+                    await PlaybackService.PlayMediaNextAsync(OtherAlbums.Where(a => a.IsSelected).Cast<MediaItem>().ToList()))
             },
             new()
             {
                 Text = "Als Letztes spielen",
                 Icon = FluentIcons.ArrowNext12,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaLastAsync(OtherAlbums.Where(a => a.IsSelected)))
+                    await PlaybackService.PlayMediaLastAsync(OtherAlbums.Where(a => a.IsSelected).Cast<MediaItem>().ToList()))
             },
             new() { IsSeparator = true },
             new()
@@ -900,21 +903,21 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 Text = "Abspielen",
                 Icon = FluentIcons.Play12,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaAsync(SimilarArtists.Where(a => a.IsSelected)))
+                    await PlaybackService.PlayMediaAsync(SimilarArtists.Where(a => a.IsSelected).Cast<MediaItem>().ToList()))
             },
             new()
             {
                 Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaNextAsync(SimilarArtists.Where(a => a.IsSelected)))
+                    await PlaybackService.PlayMediaNextAsync(SimilarArtists.Where(a => a.IsSelected).Cast<MediaItem>().ToList()))
             },
             new()
             {
                 Text = "Als Letztes spielen",
                 Icon = FluentIcons.ArrowNext12,
                 Command = new Command(async () =>
-                    await MediaActions.PlayMediaLastAsync(SimilarArtists.Where(a => a.IsSelected)))
+                    await PlaybackService.PlayMediaLastAsync(SimilarArtists.Where(a => a.IsSelected).Cast<MediaItem>().ToList()))
             },
             new() { IsSeparator = true },
             new()

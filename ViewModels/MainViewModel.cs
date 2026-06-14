@@ -1,4 +1,4 @@
-﻿using mashin.Models;
+using mashin.Models;
 using mashin.Services;
 using mashin.Views.Desktop;
 using MauiIcons.Fluent;
@@ -6,7 +6,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Dispatching;
 using Microsoft.Maui.Graphics;
-using Sendspin.SDK.Models;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
@@ -14,7 +13,6 @@ using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using mashin.Collections;
 using MauiIcons.Fluent.Filled;
-using PlayerRepeatMode = mashin.Models.RepeatMode;
 
 namespace mashin.ViewModels;
 
@@ -38,7 +36,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private bool _isMuted;
     private bool? _shuffleEnabled;
     private string? _repeatMode;
-    private PlaybackStateModel _playState = new(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow);
+    private PlaybackState _playState = PlaybackState.Idle;
+    private bool _isSeeking;
     private double _duration;
     private double _position;
     private double _sliderPosition;
@@ -277,7 +276,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
 
         Duration = _playbackService.DurationSeconds;
-        if (PlayState.State != PlayerPlaybackState.Seeking)
+        if (!_isSeeking)
         {
             Position = _playbackService.PositionSeconds;
             SliderPosition = _playbackService.PositionSeconds;
@@ -324,7 +323,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     #region Bindable Properties (Playback)
 
-    public PlaybackStateModel PlayState
+    public PlaybackState PlayState
     {
         get => _playState;
         private set => SetProperty(ref _playState, value);
@@ -369,9 +368,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public bool IsShuffleActive => ShuffleEnabled == true;
 
-    public bool IsRepeatEnabled => GetNormalizedRepeatMode(RepeatMode) is not PlayerRepeatMode.Off;
+    public bool IsRepeatEnabled => GetNormalizedRepeatMode(RepeatMode) is not mashin.Models.RepeatMode.Off;
 
-    public bool IsRepeatOne => GetNormalizedRepeatMode(RepeatMode) == PlayerRepeatMode.One;
+    public bool IsRepeatOne => GetNormalizedRepeatMode(RepeatMode) == mashin.Models.RepeatMode.One;
 
     public double Duration
     {
@@ -839,7 +838,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         try
         {
             _logger.LogInformation("Play playlist: {Name}", playlist.Name);
-            await MediaActions.PlayMediaAsync(playlist);
+            await _playbackService.PlayMediaAsync(new List<MediaItem> { playlist });
         }
         catch (Exception ex)
         {
@@ -933,16 +932,19 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             Position = clamped;
             SliderPosition = clamped;
             await _playbackService.SeekAsync(clamped, Duration);
+            _isSeeking = false;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to seek");
+            _isSeeking = false;
         }
     }
 
     private void BeginSeek()
     {
-        _playbackService.PlaybackState = new PlaybackStateModel(PlayerPlaybackState.Seeking, DateTimeOffset.UtcNow);
+        _isSeeking = true;
+        _playbackService.PlaybackState = PlaybackState.Buffering;
     }
 
     private async Task SetVolumeAsync(int volume)
@@ -980,6 +982,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (e.PropertyName == nameof(IPlaybackService.PlaybackState))
         {
             PlayState = _playbackService.PlaybackState;
+            if (_playbackService.PlaybackState != PlaybackState.Buffering)
+            {
+                _isSeeking = false;
+            }
             return;
         }
 
@@ -1031,7 +1037,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         if (e.PropertyName == nameof(IPlaybackService.PositionSeconds))
         {
-            if (PlayState.State != PlayerPlaybackState.Seeking)
+            if (!_isSeeking)
             {
                 var position = _playbackService.PositionSeconds;
                 Position = position;
@@ -1120,7 +1126,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             },
             new()
             {
-                Text = "Als Nächstes spielen",
+                Text = "Als N�chstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () => await MoveSelectedQueueItemsNextAsync())
             },
@@ -1139,7 +1145,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Wiedergabeliste hinzufügen",
+                Text = "Zu Wiedergabeliste hinzuf�gen",
                 Icon = FluentIcons.Add12,
                 SubItems = new ObservableCollection<ContextMenuItem>(
                     _playlists
@@ -1160,7 +1166,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Favoriten hinzufügen",
+                Text = "Zu Favoriten hinzuf�gen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                         await MediaActions.AddToFavoritesAsync(
@@ -1306,7 +1312,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         if (selectedQueueItemIds.Count == 0)
         {
-            _logger.LogInformation("No queue items selected for 'Als Nächstes spielen'");
+            _logger.LogInformation("No queue items selected for 'Als N�chstes spielen'");
             return;
         }
 
@@ -1719,24 +1725,24 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     #region Helper - Repeat Mode
 
-    private static PlayerRepeatMode GetNextRepeatMode(string? repeatMode)
+    private static mashin.Models.RepeatMode GetNextRepeatMode(string? repeatMode)
     {
         return GetNormalizedRepeatMode(repeatMode) switch
         {
-            PlayerRepeatMode.All => PlayerRepeatMode.One,
-            PlayerRepeatMode.One => PlayerRepeatMode.Off,
-            _ => PlayerRepeatMode.All,
+            mashin.Models.RepeatMode.All => mashin.Models.RepeatMode.One,
+            mashin.Models.RepeatMode.One => mashin.Models.RepeatMode.Off,
+            _ => mashin.Models.RepeatMode.All,
         };
     }
 
-    private static PlayerRepeatMode GetNormalizedRepeatMode(string? repeatMode)
+    private static mashin.Models.RepeatMode GetNormalizedRepeatMode(string? repeatMode)
     {
-        if (Enum.TryParse<PlayerRepeatMode>(repeatMode, true, out var parsedMode))
+        if (Enum.TryParse<mashin.Models.RepeatMode>(repeatMode, true, out var parsedMode))
         {
             return parsedMode;
         }
 
-        return PlayerRepeatMode.Off;
+        return mashin.Models.RepeatMode.Off;
     }
 
     #endregion

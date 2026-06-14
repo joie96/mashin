@@ -76,7 +76,7 @@ public class PlayStateToBoolConverter : IValueConverter
 {
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
-        if (value is not PlaybackStateModel playStateModel)
+        if (value is not PlaybackState playState)
         {
             return false;
         }
@@ -90,12 +90,12 @@ public class PlayStateToBoolConverter : IValueConverter
 
         return token switch
         {
-            "unknown" => playStateModel.State == PlayerPlaybackState.Unknown,
-            "stopped" => playStateModel.State == PlayerPlaybackState.Stopped,
-            "paused" => playStateModel.State is PlayerPlaybackState.Paused or PlayerPlaybackState.Stopped or PlayerPlaybackState.Unknown,
-            "buffering" => playStateModel.State is PlayerPlaybackState.Buffering or PlayerPlaybackState.Seeking,
-            "playing" => playStateModel.State == PlayerPlaybackState.Playing,
-            "seeking" => playStateModel.State is PlayerPlaybackState.Seeking or PlayerPlaybackState.Buffering,
+            "unknown" => playState == PlaybackState.Unknown,
+            "stopped" => playState == PlaybackState.Idle,
+            "paused" => playState is PlaybackState.Paused or PlaybackState.Idle or PlaybackState.Unknown,
+            "buffering" => playState == PlaybackState.Buffering,
+            "playing" => playState == PlaybackState.Playing,
+            "seeking" => playState == PlaybackState.Buffering,
             _ => false,
         };
     }

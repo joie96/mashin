@@ -19,7 +19,7 @@ public interface IPlaybackService : IAsyncDisposable, INotifyPropertyChanged
 {
     PlaybackOutputMode OutputMode { get; }
     string? ActivePlayerId { get; }
-    PlaybackStateModel PlaybackState { get; set; }
+    PlaybackState PlaybackState { get; set; }
     int Volume { get; }
     bool IsMuted { get; }
     bool? ShuffleEnabled { get; }
@@ -83,7 +83,7 @@ public sealed class PlaybackService : IPlaybackService
     private string? _activePlayerId;
     private IPlayerService _activePlayer;
 
-    private PlaybackStateModel _playbackState = new(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow);
+    private PlaybackState _playbackState = mashin.Models.PlaybackState.Idle;
     private int _volume = 50;
     private bool _isMuted;
     private bool? _shuffleEnabled;
@@ -138,7 +138,7 @@ public sealed class PlaybackService : IPlaybackService
                     break;
                 }
 
-                if (_playbackState.State != PlayerPlaybackState.Playing)
+                if (_playbackState != mashin.Models.PlaybackState.Playing)
                 {
                     continue;
                 }
@@ -183,7 +183,7 @@ public sealed class PlaybackService : IPlaybackService
         private set => SetProperty(ref _activePlayerId, Normalize(value));
     }
 
-    public PlaybackStateModel PlaybackState
+    public PlaybackState PlaybackState
     {
         get => _playbackState;
         set => SetProperty(ref _playbackState, value);
@@ -348,7 +348,7 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        PlaybackState = new PlaybackStateModel(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+        PlaybackState = mashin.Models.PlaybackState.Buffering;
 
         await _musicAssistant.PlayMediaAsync(ActivePlayerId!, resolvedItems, QueueOption.Replace);
     }
@@ -374,7 +374,7 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        PlaybackState = new PlaybackStateModel(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+        PlaybackState = mashin.Models.PlaybackState.Buffering;
 
         await _musicAssistant.PlayMediaAsync(ActivePlayerId!, resolvedItems, QueueOption.Next);
     }
@@ -400,7 +400,7 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        PlaybackState = new PlaybackStateModel(PlayerPlaybackState.Buffering, DateTimeOffset.UtcNow);
+        PlaybackState = mashin.Models.PlaybackState.Buffering;
 
         await _musicAssistant.PlayMediaAsync(ActivePlayerId!, resolvedItems, QueueOption.Add);
     }
@@ -737,7 +737,7 @@ public sealed class PlaybackService : IPlaybackService
                 _elapsedTimeLastUpdatedUtc = elapsedUpdatedAtUtc;
             }
 
-            PlaybackState = new PlaybackStateModel(MapState(e.Queue.State), DateTimeOffset.UtcNow);
+            PlaybackState = MapState(e.Queue.State);
         }
 
         var shouldReloadQueueItems = string.Equals(e.Event, "queue_items_updated", StringComparison.OrdinalIgnoreCase)
@@ -862,7 +862,7 @@ public sealed class PlaybackService : IPlaybackService
                 _elapsedTimeLastUpdatedUtc = elapsedUpdatedAtUtc;
             }
 
-            PlaybackState = new PlaybackStateModel(MapState(queue.State), DateTimeOffset.UtcNow);
+            PlaybackState = MapState(queue.State);
 
             _logger.LogDebug(
                 "Queue snapshot applied. QueueId={QueueId}, Items={ItemCount}, CurrentIndex={CurrentIndex}, CurrentItemId={CurrentItemId}, State={State}, Elapsed={Elapsed}",
@@ -909,7 +909,7 @@ public sealed class PlaybackService : IPlaybackService
         ShuffleEnabled = null;
         RepeatMode = null;
         DontStopTheMusicEnabled = null;
-        PlaybackState = new PlaybackStateModel(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow);
+        PlaybackState = mashin.Models.PlaybackState.Idle;
     }
 
     #endregion
@@ -944,15 +944,15 @@ public sealed class PlaybackService : IPlaybackService
         return mashin.Models.RepeatMode.Off;
     }
 
-    private static PlayerPlaybackState MapState(PlaybackState? state)
+    private static PlaybackState MapState(mashin.Models.PlaybackState? state)
     {
         return state switch
         {
-            Models.PlaybackState.Playing => PlayerPlaybackState.Playing,
-            Models.PlaybackState.Paused => PlayerPlaybackState.Paused,
-            Models.PlaybackState.Buffering => PlayerPlaybackState.Buffering,
-            Models.PlaybackState.Idle => PlayerPlaybackState.Stopped,
-            _ => PlayerPlaybackState.Unknown
+            mashin.Models.PlaybackState.Playing => mashin.Models.PlaybackState.Playing,
+            mashin.Models.PlaybackState.Paused => mashin.Models.PlaybackState.Paused,
+            mashin.Models.PlaybackState.Buffering => mashin.Models.PlaybackState.Buffering,
+            mashin.Models.PlaybackState.Idle => mashin.Models.PlaybackState.Idle,
+            _ => mashin.Models.PlaybackState.Unknown
         };
     }
 

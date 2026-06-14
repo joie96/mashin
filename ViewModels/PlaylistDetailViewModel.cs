@@ -1,4 +1,4 @@
-﻿using mashin.Collections;
+using mashin.Collections;
 using mashin.Models;
 using mashin.Services;
 using mashin.Views.Desktop;
@@ -128,6 +128,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     }
 
     public IMediaItemActions MediaActions { get; }
+    public IPlaybackService PlaybackService { get; }
     public ICommand AlbumTappedCommand { get; }
     public ICommand ArtistTappedCommand { get; }
     public ICommand ShowHeaderContextMenuAtAnchorCommand { get; }
@@ -160,6 +161,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         IUserDataService userDataService,
         IOverlayService overlayService,
         IMediaItemActions mediaActions,
+        IPlaybackService playbackService,
         IContextMenuService contextMenuService,
         INavigationService navigationService,
         ILogger<PlaylistDetailViewModel> logger)
@@ -172,6 +174,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         _logger = logger;
 
         MediaActions = mediaActions;
+        PlaybackService = playbackService;
 
         AlbumTappedCommand = new Command<object>(async parameter => 
         { 
@@ -227,7 +230,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         {
             if (Playlist != null)
             {
-                await MediaActions.PlayMediaAsync(Playlist);
+                await PlaybackService.PlayMediaAsync(new List<MediaItem> { Playlist });
             }
         });
 
@@ -244,7 +247,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 return;
             }
 
-            await MediaActions.ShufflePlayMediaAsync(playlist, Tracks);
+            await PlaybackService.ShufflePlayMediaAsync(Tracks.Cast<MediaItem>().ToList());
         });
 
         TogglePlaylistFavoriteCommand = new Command(async () =>
@@ -487,15 +490,23 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         {
             new()
             {
-                Text = "Als Nächstes spielen",
+                Text = "Als N�chstes spielen",
                 Icon = FluentIcons.ArrowForward16,
-                Command = new Command(async () => await MediaActions.PlayMediaNextAsync(Playlist))
+                Command = new Command(async () =>
+                {
+                    var items = new List<MediaItem> { Playlist! };
+                    await PlaybackService.PlayMediaNextAsync(items);
+                })
             },
             new()
             {
                 Text = "Als Letztes spielen",
                 Icon = FluentIcons.ArrowNext12,
-                Command = new Command(async () => await MediaActions.PlayMediaLastAsync(Playlist))
+                Command = new Command(async () =>
+                {
+                    var items = new List<MediaItem> { Playlist! };
+                    await PlaybackService.PlayMediaLastAsync(items);
+                })
             },
             new() { IsSeparator = true }
         };
@@ -519,7 +530,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         {
             menu.Add(new ContextMenuItem
             {
-                Text = "Zu Favoriten hinzufügen",
+                Text = "Zu Favoriten hinzuf�gen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                 {
@@ -541,7 +552,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
         menu.Add(new ContextMenuItem
         {
-            Text = "Wiedergabeliste löschen",
+            Text = "Wiedergabeliste l�schen",
             Icon = FluentIcons.Delete12,
             Command = new Command(async () => await DeletePlaylistAsync())
         });
@@ -573,28 +584,34 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                         return;
                     }
 
-                    await MediaActions.PlayMediaAsync(tracksForAction[0]);
+                    await PlaybackService.PlayMediaAsync(new List<MediaItem> { tracksForAction[0] });
 
                     var remainingTracks = tracksForAction.Skip(1).ToList();
                     if (remainingTracks.Count > 0)
                     {
-                        await MediaActions.PlayMediaNextAsync(remainingTracks);
+                        await PlaybackService.PlayMediaNextAsync(remainingTracks.Cast<MediaItem>().ToList());
                     }
                 })
             },
             new()
             {
-                Text = "Als Nächstes spielen",
+                Text = "Als N�chstes spielen",
                 Icon = FluentIcons.ArrowForward16,
-                Command = new Command(async () => 
-                    await MediaActions.PlayMediaNextAsync(GetContextMenuTargetTracks()))
+                Command = new Command(async () =>
+                {
+                    var items = GetContextMenuTargetTracks().Select(track => (MediaItem)track).ToList();
+                    await PlaybackService.PlayMediaNextAsync(items);
+                })
             },
             new()
             {
                 Text = "Als Letztes spielen",
                 Icon = FluentIcons.ArrowNext12,
-                Command = new Command(async () => 
-                    await MediaActions.PlayMediaLastAsync(GetContextMenuTargetTracks()))
+                Command = new Command(async () =>
+                {
+                    var items = GetContextMenuTargetTracks().Select(track => (MediaItem)track).ToList();
+                    await PlaybackService.PlayMediaLastAsync(items);
+                })
             }
         };
 
@@ -604,7 +621,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
             menu.Add(new ContextMenuItem
             {
-                Text = "Künstler:inn öffnen",
+                Text = "K�nstler:inn �ffnen",
                 Icon = FluentIcons.Person12,
                 Command = new Command(async () =>
                 {
@@ -623,7 +640,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
             menu.Add(new ContextMenuItem
             {
-                Text = "Album öffnen",
+                Text = "Album �ffnen",
                 Icon = FluentIcons.Open16,
                 Command = new Command(async () =>
                 {
@@ -645,7 +662,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
         menu.Add(new ContextMenuItem
         {
-            Text = "Zu Wiedergabeliste hinzufügen",
+            Text = "Zu Wiedergabeliste hinzuf�gen",
             Icon = FluentIcons.Add12,
             SubItems = new ObservableCollection<ContextMenuItem>(
                 playlists
@@ -699,7 +716,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             {
                 menu.Add(new ContextMenuItem
                 {
-                    Text = "Zu Favoriten hinzufügen",
+                    Text = "Zu Favoriten hinzuf�gen",
                     Icon = FluentIcons.Heart12,
                     Command = new Command(async () =>
                         await MediaActions.AddToFavoritesAsync(GetContextMenuTargetTracks()))
@@ -710,7 +727,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         {
             menu.Add(new ContextMenuItem
             {
-                Text = "Zu Favoriten hinzufügen",
+                Text = "Zu Favoriten hinzuf�gen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                     await MediaActions.AddToFavoritesAsync(GetContextMenuTargetTracks()))

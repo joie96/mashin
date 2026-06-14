@@ -49,7 +49,7 @@ public partial class TableView : ContentView
         BindableProperty.Create(nameof(CurrentTrackUri), typeof(string), typeof(TableView));
 
     public static readonly BindableProperty CurrentPlayStateProperty =
-        BindableProperty.Create(nameof(CurrentPlayState), typeof(PlaybackStateModel), typeof(TableView), defaultValue: new PlaybackStateModel(PlayerPlaybackState.Stopped, DateTimeOffset.MinValue));
+        BindableProperty.Create(nameof(CurrentPlayState), typeof(PlaybackState), typeof(TableView), defaultValue: PlaybackState.Idle);
 
     public static readonly BindableProperty PageSizeProperty =
         BindableProperty.Create(nameof(PageSize), typeof(int), typeof(TableView), defaultValue: 10, propertyChanged: OnPageSizeChanged);
@@ -155,9 +155,9 @@ public partial class TableView : ContentView
         private set => SetValue(CurrentTrackUriProperty, value);
     }
 
-    public PlaybackStateModel CurrentPlayState
+    public PlaybackState CurrentPlayState
     {
-        get => (PlaybackStateModel)GetValue(CurrentPlayStateProperty);
+        get => (PlaybackState)GetValue(CurrentPlayStateProperty);
         private set => SetValue(CurrentPlayStateProperty, value);
     }
 
@@ -898,10 +898,12 @@ public partial class TableView : ContentView
 
     private async void OnRowDoubleTapped(object? sender, Microsoft.Maui.Controls.TappedEventArgs e)
     {
-        if (sender is not Border border || MediaActions == null)
+        if (sender is not Border border || MediaActions == null || _playbackService == null)
         {
             return;
         }
+
+        var playbackService = _playbackService;
 
         var item = GetMediaItem(border.BindingContext);
         if (item == null)
@@ -917,26 +919,28 @@ public partial class TableView : ContentView
 
         if (PlaybackContextItem is PlayerQueue && itemIndex is >= 0 && _playbackService != null)
         {
-            await _playbackService.PlayQueueIndexAsync(itemIndex.Value);
+            await playbackService.PlayQueueIndexAsync(itemIndex.Value);
             return;
         }
 
         // otherwise, play the parent context and start at the clicked item
         if (PlaybackContextItem is MediaItem parentItem)
         {
-            await MediaActions.PlayMediaAsync(parentItem, item);
+            await playbackService.PlayMediaAsync(new List<MediaItem> { item });
             return;
         }
 
-        await MediaActions.PlayMediaAsync(item);
+        await playbackService.PlayMediaAsync(new List<MediaItem> { item });
     }
 
     private async void OnPlayOverlayClicked(object? sender, Microsoft.Maui.Controls.TappedEventArgs e)
     {
-        if (sender is not Border playOverlay || MediaActions == null)
+        if (sender is not Border playOverlay || MediaActions == null || _playbackService == null)
         {
             return;
         }
+
+        var playbackService = _playbackService;
 
         var item = GetMediaItem(playOverlay.BindingContext);
         if (item == null)
@@ -952,18 +956,18 @@ public partial class TableView : ContentView
 
         if (PlaybackContextItem is PlayerQueue && itemIndex is >= 0 && _playbackService != null)
         {
-            await _playbackService.PlayQueueIndexAsync(itemIndex.Value);
+            await playbackService.PlayQueueIndexAsync(itemIndex.Value);
             return;
         }
 
         // otherwise, play the parent context and start at the clicked item
         if (PlaybackContextItem is MediaItem parentItem)
         {
-            await MediaActions.PlayMediaAsync(parentItem, item);
+            await playbackService.PlayMediaAsync(new List<MediaItem> { item });
             return;
         }
 
-        await MediaActions.PlayMediaAsync(item);
+        await playbackService.PlayMediaAsync(new List<MediaItem> { item });
     }
 
     private async void OnFavoriteIconTapped(object? sender, Microsoft.Maui.Controls.TappedEventArgs e)
@@ -1187,7 +1191,7 @@ public partial class TableView : ContentView
         _currentQueueItem = null;
         _currentTrackMediaItem = null;
         SetCurrentTrackUri(null);
-        SetCurrentPlayState(new PlaybackStateModel(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow));
+        SetCurrentPlayState(PlaybackState.Idle);
     }
 
     private void OnPlaybackServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -1195,7 +1199,7 @@ public partial class TableView : ContentView
         if (e.PropertyName == nameof(IPlaybackService.PlaybackState))
         {
             var currentPlayerState = _playbackService?.PlaybackState
-                ?? new PlaybackStateModel(PlayerPlaybackState.Stopped, DateTimeOffset.UtcNow);
+                ?? PlaybackState.Idle;
 
             if (MainThread.IsMainThread)
             {
@@ -1311,7 +1315,7 @@ public partial class TableView : ContentView
         CurrentTrackUri = uri;
     }
 
-    private void SetCurrentPlayState(PlaybackStateModel playerState)
+    private void SetCurrentPlayState(PlaybackState playerState)
     {
         if (CurrentPlayState == playerState)
         {

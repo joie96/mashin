@@ -2,6 +2,7 @@ using FuzzySharp;
 using mashin.Collections;
 using mashin.Models;
 using mashin.Services;
+using Microsoft.Extensions.DependencyInjection;
 using System.Collections.Specialized;
 using System.Globalization;
 using System.Text;
@@ -207,12 +208,18 @@ public partial class ListView : ContentView
 
     private async void OnPlayOverlayClicked(object? sender, TappedEventArgs e)
     {
-        if (sender is not Border playButton || playButton.BindingContext is not MediaItem item || MediaActions == null)
+        if (sender is not Border playButton || playButton.BindingContext is not MediaItem item)
         {
             return;
         }
 
-        await MediaActions.PlayMediaAsync(item);
+        var playbackService = ResolvePlaybackService();
+        if (playbackService == null)
+        {
+            return;
+        }
+
+        await playbackService.PlayMediaAsync(new List<MediaItem> { item });
     }
 
     private void OnLoadMoreTapped(object? sender, TappedEventArgs e)
@@ -244,6 +251,17 @@ public partial class ListView : ContentView
     #endregion
 
     #region Helpers
+
+    private static IPlaybackService? ResolvePlaybackService()
+    {
+        var services = Application.Current?.Handler?.MauiContext?.Services;
+        if (services == null)
+        {
+            return null;
+        }
+
+        return services.GetService<IPlaybackService>();
+    }
 
     private static Color GetAccentColorFromText(string? text)
     {

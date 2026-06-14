@@ -182,10 +182,10 @@ public sealed class PlaybackNotificationService : Service
             }
 
             var track = playback.CurrentQueueItem?.MediaItem;
-            var state = playback.PlaybackState.State;
+            var state = playback.PlaybackState;
             var hasTrack = track != null;
 
-            var shouldShow = hasTrack || state is PlayerPlaybackState.Playing or PlayerPlaybackState.Buffering or PlayerPlaybackState.Paused or PlayerPlaybackState.Seeking;
+            var shouldShow = hasTrack || state is PlaybackState.Playing or PlaybackState.Buffering or PlaybackState.Paused;
 
             if (!shouldShow)
             {
@@ -219,9 +219,12 @@ public sealed class PlaybackNotificationService : Service
             CancelBackgroundIdleShutdown();
 
             var artwork = await TryGetArtworkBitmapAsync(track?.ImageUri);
-            UpdateMediaSession(track, state, artwork);
+            var durationSeconds = Math.Max(0, playback.DurationSeconds);
+            var positionSeconds = Math.Clamp(playback.PositionSeconds, 0, durationSeconds > 0 ? durationSeconds : double.MaxValue);
 
-            var notification = BuildNotification(track, state, artwork);
+            UpdateMediaSession(track, state, artwork, positionSeconds);
+
+            var notification = BuildNotification(track, state, artwork, positionSeconds, durationSeconds);
             if (!_isForeground)
             {
                 if (OperatingSystem.IsAndroidVersionAtLeast(29))
@@ -302,9 +305,9 @@ public sealed class PlaybackNotificationService : Service
                     return;
                 }
 
-                var state = playback.PlaybackState.State;
+                var state = playback.PlaybackState;
                 var hasTrack = playback.CurrentQueueItem?.MediaItem != null;
-                var shouldShow = hasTrack || state is PlayerPlaybackState.Playing or PlayerPlaybackState.Buffering or PlayerPlaybackState.Paused or PlayerPlaybackState.Seeking;
+                var shouldShow = hasTrack || state is PlaybackState.Playing or PlaybackState.Buffering or PlaybackState.Paused;
 
                 if (shouldShow || !IsAppInBackground())
                 {
@@ -353,7 +356,7 @@ public sealed class PlaybackNotificationService : Service
 
     // Builds the visible media notification with title, artist, album and optional artwork.
     #pragma warning disable CA1422
-    private Notification BuildNotification(Track? track, PlayerPlaybackState state, Bitmap? artwork)
+    private Notification BuildNotification(Track? track, PlaybackState state, Bitmap? artwork, double positionSeconds, double durationSeconds)
     {
         var immutableFlag = Build.VERSION.SdkInt >= BuildVersionCodes.M
             ? ImmutableCompatFlag
@@ -371,7 +374,7 @@ public sealed class PlaybackNotificationService : Service
         var nextIntent = CreateActionIntent(ActionNext, 103);
         var stopIntent = CreateActionIntent(ActionStop, 104);
 
-        var isPlaying = state is PlayerPlaybackState.Playing or PlayerPlaybackState.Seeking or PlayerPlaybackState.Buffering;
+        var isPlaying = state is PlaybackState.Playing or PlaybackState.Buffering;
         var playPauseIcon = isPlaying ? Android.Resource.Drawable.IcMediaPause : Android.Resource.Drawable.IcMediaPlay;
         var playPauseLabel = isPlaying ? "Pause" : "Play";
 
@@ -394,6 +397,18 @@ public sealed class PlaybackNotificationService : Service
         builder.SetContentIntent(contentIntent);
         builder.SetDeleteIntent(stopIntent);
         builder.SetOngoing(isPlaying);
+
+        if (durationSeconds > 0)
+        {
+            var durationProgress = Math.Max(1, (int)Math.Round(durationSeconds, MidpointRounding.AwayFromZero));
+            var positionProgress = Math.Clamp((int)Math.Round(positionSeconds, MidpointRounding.AwayFromZero), 0, durationProgress);
+            builder.SetProgress(durationProgress, positionProgress, false);
+        }
+        else
+        {
+            builder.SetProgress(0, 0, false);
+        }
+
         if (artwork != null)
         {
             builder.SetLargeIcon(artwork);
@@ -426,7 +441,7 @@ public sealed class PlaybackNotificationService : Service
     #region Media Session Sync
 
     // Mirrors current playback metadata/state to the Android media session.
-    private void UpdateMediaSession(Track? track, PlayerPlaybackState state, Bitmap? artwork)
+    private void UpdateMediaSession(Track? track, PlaybackState state, Bitmap? artwork, double positionSeconds)
     {
         var mediaSession = _mediaSession;
         if (mediaSession == null)
@@ -442,7 +457,8 @@ public sealed class PlaybackNotificationService : Service
             | SessionPlaybackState.ActionSkipToNext
             | SessionPlaybackState.ActionSkipToPrevious
             | SessionPlaybackState.ActionStop);
-        playbackStateBuilder.SetState(MapPlaybackState(state), SessionPlaybackState.PlaybackPositionUnknown, 1f);
+        var positionMs = (long)Math.Max(0, positionSeconds * 1000d);
+        playbackStateBuilder.SetState(MapPlaybackState(state), positionMs, 1f);
         var playbackState = playbackStateBuilder.Build();
 
         var metadataBuilder = new MediaMetadata.Builder();
@@ -459,15 +475,14 @@ public sealed class PlaybackNotificationService : Service
         mediaSession.SetMetadata(metadataBuilder.Build()!);
     }
 
-    private static SessionPlaybackStateCode MapPlaybackState(PlayerPlaybackState state)
+    private static SessionPlaybackStateCode MapPlaybackState(PlaybackState state)
     {
         return state switch
         {
-            PlayerPlaybackState.Playing => SessionPlaybackStateCode.Playing,
-            PlayerPlaybackState.Paused => SessionPlaybackStateCode.Paused,
-            PlayerPlaybackState.Buffering => SessionPlaybackStateCode.Buffering,
-            PlayerPlaybackState.Seeking => SessionPlaybackStateCode.FastForwarding,
-            PlayerPlaybackState.Stopped => SessionPlaybackStateCode.Stopped,
+            PlaybackState.Playing => SessionPlaybackStateCode.Playing,
+            PlaybackState.Paused => SessionPlaybackStateCode.Paused,
+            PlaybackState.Buffering => SessionPlaybackStateCode.Buffering,
+            PlaybackState.Idle => SessionPlaybackStateCode.Stopped,
             _ => SessionPlaybackStateCode.None
         };
     }

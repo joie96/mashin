@@ -1037,7 +1037,7 @@ public partial class RowView : ContentView
 
     private async void OnGridItemDoubleTapped(object? sender, TappedEventArgs e)
     {
-        if (sender is not Border border || border.BindingContext is not MediaItem item || MediaActions == null)
+        if (sender is not Border border || border.BindingContext is not MediaItem item || MediaActions == null || _playbackService == null)
         {
             return;
         }
@@ -1047,12 +1047,12 @@ public partial class RowView : ContentView
         SyncSelectionState();
 
         // Play immediately
-        await MediaActions.PlayMediaAsync(item);
+        await _playbackService.PlayMediaAsync(new List<MediaItem> { item });
     }
 
     private async void OnPlayOverlayClicked(object? sender, TappedEventArgs e)
     {
-        if (sender is not Border playOverlay || MediaActions == null)
+        if (sender is not Border playOverlay || MediaActions == null || _playbackService == null)
         {
             return;
         }
@@ -1065,7 +1065,7 @@ public partial class RowView : ContentView
         SelectSingle(item);
         SyncSelectionState();
 
-        await MediaActions.PlayMediaAsync(item);
+        await _playbackService.PlayMediaAsync(new List<MediaItem> { item });
     }
 
     private async void OnFavoriteIconTapped(object? sender, TappedEventArgs e)
