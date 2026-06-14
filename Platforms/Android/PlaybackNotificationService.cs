@@ -182,10 +182,10 @@ public sealed class PlaybackNotificationService : Service
             }
 
             var track = playback.CurrentQueueItem?.MediaItem;
-            var state = playback.PlaybackState;
+            var state = playback.PlaybackState.State;
             var hasTrack = track != null;
 
-            var shouldShow = hasTrack || state is PlaybackState.Playing or PlaybackState.Buffering or PlaybackState.Paused;
+            var shouldShow = hasTrack || state is PlaybackStateKind.Playing or PlaybackStateKind.Buffering or PlaybackStateKind.Paused;
 
             if (!shouldShow)
             {
@@ -305,9 +305,9 @@ public sealed class PlaybackNotificationService : Service
                     return;
                 }
 
-                var state = playback.PlaybackState;
+                var state = playback.PlaybackState.State;
                 var hasTrack = playback.CurrentQueueItem?.MediaItem != null;
-                var shouldShow = hasTrack || state is PlaybackState.Playing or PlaybackState.Buffering or PlaybackState.Paused;
+                var shouldShow = hasTrack || state is PlaybackStateKind.Playing or PlaybackStateKind.Buffering or PlaybackStateKind.Paused;
 
                 if (shouldShow || !IsAppInBackground())
                 {
@@ -356,7 +356,7 @@ public sealed class PlaybackNotificationService : Service
 
     // Builds the visible media notification with title, artist, album and optional artwork.
     #pragma warning disable CA1422
-    private Notification BuildNotification(Track? track, PlaybackState state, Bitmap? artwork, double positionSeconds, double durationSeconds)
+    private Notification BuildNotification(Track? track, PlaybackStateKind state, Bitmap? artwork, double positionSeconds, double durationSeconds)
     {
         var immutableFlag = Build.VERSION.SdkInt >= BuildVersionCodes.M
             ? ImmutableCompatFlag
@@ -374,7 +374,7 @@ public sealed class PlaybackNotificationService : Service
         var nextIntent = CreateActionIntent(ActionNext, 103);
         var stopIntent = CreateActionIntent(ActionStop, 104);
 
-        var isPlaying = state is PlaybackState.Playing or PlaybackState.Buffering;
+        var isPlaying = state is PlaybackStateKind.Playing or PlaybackStateKind.Buffering;
         var playPauseIcon = isPlaying ? Android.Resource.Drawable.IcMediaPause : Android.Resource.Drawable.IcMediaPlay;
         var playPauseLabel = isPlaying ? "Pause" : "Play";
 
@@ -441,7 +441,7 @@ public sealed class PlaybackNotificationService : Service
     #region Media Session Sync
 
     // Mirrors current playback metadata/state to the Android media session.
-    private void UpdateMediaSession(Track? track, PlaybackState state, Bitmap? artwork, double positionSeconds)
+    private void UpdateMediaSession(Track? track, PlaybackStateKind state, Bitmap? artwork, double positionSeconds)
     {
         var mediaSession = _mediaSession;
         if (mediaSession == null)
@@ -475,14 +475,14 @@ public sealed class PlaybackNotificationService : Service
         mediaSession.SetMetadata(metadataBuilder.Build()!);
     }
 
-    private static SessionPlaybackStateCode MapPlaybackState(PlaybackState state)
+    private static SessionPlaybackStateCode MapPlaybackState(PlaybackStateKind state)
     {
         return state switch
         {
-            PlaybackState.Playing => SessionPlaybackStateCode.Playing,
-            PlaybackState.Paused => SessionPlaybackStateCode.Paused,
-            PlaybackState.Buffering => SessionPlaybackStateCode.Buffering,
-            PlaybackState.Idle => SessionPlaybackStateCode.Stopped,
+            PlaybackStateKind.Playing => SessionPlaybackStateCode.Playing,
+            PlaybackStateKind.Paused => SessionPlaybackStateCode.Paused,
+            PlaybackStateKind.Buffering => SessionPlaybackStateCode.Buffering,
+            PlaybackStateKind.Idle => SessionPlaybackStateCode.Stopped,
             _ => SessionPlaybackStateCode.None
         };
     }

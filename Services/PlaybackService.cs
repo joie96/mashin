@@ -19,7 +19,7 @@ public interface IPlaybackService : IAsyncDisposable, INotifyPropertyChanged
 {
     PlaybackOutputMode OutputMode { get; }
     string? ActivePlayerId { get; }
-    PlaybackState PlaybackState { get; set; }
+    PlaybackStateCustom PlaybackState { get; set; }
     int Volume { get; }
     bool IsMuted { get; }
     bool? ShuffleEnabled { get; }
@@ -83,7 +83,11 @@ public sealed class PlaybackService : IPlaybackService
     private string? _activePlayerId;
     private IPlayerService _activePlayer;
 
-    private PlaybackState _playbackState = mashin.Models.PlaybackState.Idle;
+    private PlaybackStateCustom _playbackState = new()
+    {
+        State = PlaybackStateKind.Idle,
+        ActiveSinceUtc = DateTimeOffset.UtcNow
+    };
     private int _volume = 50;
     private bool _isMuted;
     private bool? _shuffleEnabled;
@@ -97,7 +101,6 @@ public sealed class PlaybackService : IPlaybackService
     private double _positionSeconds;
     private double? _elapsedTimeAnchorSeconds;
     private DateTimeOffset? _elapsedTimeLastUpdatedUtc;
-
     #endregion
 
     #region Construction
@@ -138,7 +141,7 @@ public sealed class PlaybackService : IPlaybackService
                     break;
                 }
 
-                if (_playbackState != mashin.Models.PlaybackState.Playing)
+                if (_playbackState.State != PlaybackStateKind.Playing)
                 {
                     continue;
                 }
@@ -183,10 +186,14 @@ public sealed class PlaybackService : IPlaybackService
         private set => SetProperty(ref _activePlayerId, Normalize(value));
     }
 
-    public PlaybackState PlaybackState
+    public PlaybackStateCustom PlaybackState
     {
         get => _playbackState;
-        set => SetProperty(ref _playbackState, value);
+        set => SetProperty(ref _playbackState, value ?? new PlaybackStateCustom
+        {
+            State = PlaybackStateKind.Unknown,
+            ActiveSinceUtc = DateTimeOffset.UtcNow
+        });
     }
 
     public int Volume
@@ -348,7 +355,7 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        PlaybackState = mashin.Models.PlaybackState.Buffering;
+        PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.PendingToPlaying, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         await _musicAssistant.PlayMediaAsync(ActivePlayerId!, resolvedItems, QueueOption.Replace);
     }
@@ -374,7 +381,7 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        PlaybackState = mashin.Models.PlaybackState.Buffering;
+        PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.PendingToPlaying, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         await _musicAssistant.PlayMediaAsync(ActivePlayerId!, resolvedItems, QueueOption.Next);
     }
@@ -400,7 +407,7 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        PlaybackState = mashin.Models.PlaybackState.Buffering;
+        PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.PendingToPlaying, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         await _musicAssistant.PlayMediaAsync(ActivePlayerId!, resolvedItems, QueueOption.Add);
     }
@@ -513,22 +520,40 @@ public sealed class PlaybackService : IPlaybackService
 
     public async Task TogglePlayPauseAsync(CancellationToken cancellationToken = default)
     {
+        var wasPlayingBeforeToggle = PlaybackState.State == PlaybackStateKind.Playing;
+
+        PlaybackState = new PlaybackStateCustom
+        {
+            State = wasPlayingBeforeToggle ? PlaybackStateKind.PendingToPaused : PlaybackStateKind.PendingToPlaying,
+            ActiveSinceUtc = DateTimeOffset.UtcNow
+        };
         await _activePlayer.TogglePlayPauseAsync(cancellationToken);
-        PlaybackState = _activePlayer.PlayerState;
+
+        if (OutputMode == PlaybackOutputMode.LocalOffline)
+        {
+            PlaybackState = new PlaybackStateCustom
+            {
+                State = MapState(_activePlayer.PlayerState),
+                ActiveSinceUtc = DateTimeOffset.UtcNow
+            };
+        }
     }
 
     public async Task NextTrackAsync(CancellationToken cancellationToken = default)
     {
+        PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.PendingToNextTrack, ActiveSinceUtc = DateTimeOffset.UtcNow };
         await _activePlayer.NextAsync(cancellationToken);
     }
 
     public async Task PreviousTrackAsync(CancellationToken cancellationToken = default)
     {
+        PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.PendingToPreviousTrack, ActiveSinceUtc = DateTimeOffset.UtcNow };
         await _activePlayer.PreviousAsync(cancellationToken);
     }
 
     public async Task SeekAsync(double seconds, double durationSeconds, CancellationToken cancellationToken = default)
     {
+        PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.PendingToSeek, ActiveSinceUtc = DateTimeOffset.UtcNow };
         var clamped = (int)Math.Round(Math.Clamp(seconds, 0, Math.Max(0, durationSeconds)));
         await _activePlayer.SeekAsync(clamped, cancellationToken);
         PositionSeconds = clamped;
@@ -661,6 +686,16 @@ public sealed class PlaybackService : IPlaybackService
 
         var eventQueueId = Normalize(e.Queue?.QueueId) ?? Normalize(e.QueueId);
 
+        _logger.LogDebug(
+            "Queue event incoming: Event={Event}, QueueId={QueueId}, HasQueuePayload={HasQueuePayload}, PayloadState={PayloadState}, PayloadCurrentIndex={PayloadCurrentIndex}, PayloadElapsed={PayloadElapsed}, PayloadItemId={PayloadItemId}",
+            e.Event,
+            eventQueueId,
+            e.Queue != null,
+            e.Queue?.State,
+            e.Queue?.CurrentIndex,
+            e.Queue?.ElapsedTime,
+            e.Queue?.CurrentItem?.QueueItemId);
+
         // Filter by active queue id, not player id. In MA these ids can differ
         // when a player has an active source/group queue.
         if (!string.IsNullOrWhiteSpace(_activeQueueId)
@@ -688,6 +723,16 @@ public sealed class PlaybackService : IPlaybackService
                 var clampedElapsed = Math.Max(0, elapsedSeconds);
                 PositionSeconds = clampedElapsed;
 
+                _logger.LogDebug(
+                    "Queue time updated: QueueId={QueueId}, ElapsedSeconds={ElapsedSeconds}",
+                    eventQueueId,
+                    clampedElapsed);
+
+                if (PlaybackState.IsPending || PlaybackState.State == PlaybackStateKind.Buffering)
+                {
+                    PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.Playing, ActiveSinceUtc = DateTimeOffset.UtcNow };
+                }
+
                 lock (_progressSync)
                 {
                     _elapsedTimeAnchorSeconds = clampedElapsed;
@@ -697,11 +742,6 @@ public sealed class PlaybackService : IPlaybackService
 
             return;
         }
-
-        _logger.LogDebug("Queue event received: Event={Event}, QueueId={QueueId}, HasQueuePayload={HasQueuePayload}",
-            e.Event,
-            eventQueueId,
-            e.Queue != null);
 
         if (e.Queue != null)
         {
@@ -737,15 +777,41 @@ public sealed class PlaybackService : IPlaybackService
                 _elapsedTimeLastUpdatedUtc = elapsedUpdatedAtUtc;
             }
 
-            PlaybackState = MapState(e.Queue.State);
+            var mappedState = MapState(e.Queue.State);
+            var suppressTransientIdle =
+                mappedState == PlaybackStateKind.Idle
+                && (PlaybackState.State == PlaybackStateKind.PendingToPlaying
+                    || PlaybackState.State == PlaybackStateKind.PendingToNextTrack
+                    || PlaybackState.State == PlaybackStateKind.PendingToPreviousTrack
+                    || PlaybackState.State == PlaybackStateKind.PendingToSeek)
+                && (DateTimeOffset.UtcNow - PlaybackState.ActiveSinceUtc) <= TimeSpan.FromSeconds(2)
+                && e.Queue.CurrentItem != null;
+
+            if (suppressTransientIdle)
+            {
+                _logger.LogDebug(
+                    "Suppressing transient idle while waiting for playback confirmation. QueueId={QueueId}, ItemId={ItemId}, Elapsed={Elapsed}",
+                    eventQueueId,
+                    e.Queue.CurrentItem?.QueueItemId,
+                    e.Queue.ElapsedTime);
+            }
+            else
+            {
+                PlaybackState = new PlaybackStateCustom { State = mappedState, ActiveSinceUtc = DateTimeOffset.UtcNow };
+            }
         }
 
+        // Confirm via HTTP only when item ordering/content may have changed or payload is missing.
         var shouldReloadQueueItems = string.Equals(e.Event, "queue_items_updated", StringComparison.OrdinalIgnoreCase)
             || string.Equals(e.Event, "queue_added", StringComparison.OrdinalIgnoreCase);
+        var shouldConfirmQueueState = shouldReloadQueueItems || e.Queue == null;
 
-        var shouldConfirmQueueState = shouldReloadQueueItems
-            || string.Equals(e.Event, "queue_updated", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(e.Event, "queue_settings_updated", StringComparison.OrdinalIgnoreCase);
+        _logger.LogDebug(
+            "Queue event decision: Event={Event}, QueueId={QueueId}, ShouldReloadQueueItems={ShouldReloadQueueItems}, ShouldConfirmQueueState={ShouldConfirmQueueState}",
+            e.Event,
+            eventQueueId,
+            shouldReloadQueueItems,
+            shouldConfirmQueueState);
 
         if (!shouldConfirmQueueState)
         {
@@ -862,7 +928,28 @@ public sealed class PlaybackService : IPlaybackService
                 _elapsedTimeLastUpdatedUtc = elapsedUpdatedAtUtc;
             }
 
-            PlaybackState = MapState(queue.State);
+            var mappedState = MapState(queue.State);
+            var suppressTransientIdle =
+                mappedState == PlaybackStateKind.Idle
+                && (PlaybackState.State == PlaybackStateKind.PendingToPlaying
+                    || PlaybackState.State == PlaybackStateKind.PendingToNextTrack
+                    || PlaybackState.State == PlaybackStateKind.PendingToPreviousTrack
+                    || PlaybackState.State == PlaybackStateKind.PendingToSeek)
+                && (DateTimeOffset.UtcNow - PlaybackState.ActiveSinceUtc) <= TimeSpan.FromSeconds(2)
+                && queue.CurrentItem != null;
+
+            if (suppressTransientIdle)
+            {
+                _logger.LogDebug(
+                    "Suppressing transient idle from HTTP snapshot while waiting for playback confirmation. QueueId={QueueId}, ItemId={ItemId}, Elapsed={Elapsed}",
+                    queue.QueueId,
+                    queue.CurrentItem?.QueueItemId,
+                    queue.ElapsedTime);
+            }
+            else
+            {
+                PlaybackState = new PlaybackStateCustom { State = mappedState, ActiveSinceUtc = DateTimeOffset.UtcNow };
+            }
 
             _logger.LogDebug(
                 "Queue snapshot applied. QueueId={QueueId}, Items={ItemCount}, CurrentIndex={CurrentIndex}, CurrentItemId={CurrentItemId}, State={State}, Elapsed={Elapsed}",
@@ -909,7 +996,7 @@ public sealed class PlaybackService : IPlaybackService
         ShuffleEnabled = null;
         RepeatMode = null;
         DontStopTheMusicEnabled = null;
-        PlaybackState = mashin.Models.PlaybackState.Idle;
+        PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
     }
 
     #endregion
@@ -921,7 +1008,15 @@ public sealed class PlaybackService : IPlaybackService
         Volume = _activePlayer.Volume;
         IsMuted = _activePlayer.IsMuted;
 
-        PlaybackState = _activePlayer.PlayerState;
+        // Only sync playback state from the player when in LocalOffline mode, as in other modes the MA event hub is the source of truth for playback state.
+        if (OutputMode == PlaybackOutputMode.LocalOffline)
+        {
+            PlaybackState = new PlaybackStateCustom
+            {
+                State = MapState(_activePlayer.PlayerState),
+                ActiveSinceUtc = DateTimeOffset.UtcNow
+            };
+        }
     }
 
     private static string? Normalize(string? value)
@@ -944,15 +1039,15 @@ public sealed class PlaybackService : IPlaybackService
         return mashin.Models.RepeatMode.Off;
     }
 
-    private static PlaybackState MapState(mashin.Models.PlaybackState? state)
+    private static PlaybackStateKind MapState(mashin.Models.PlaybackState? state)
     {
         return state switch
         {
-            mashin.Models.PlaybackState.Playing => mashin.Models.PlaybackState.Playing,
-            mashin.Models.PlaybackState.Paused => mashin.Models.PlaybackState.Paused,
-            mashin.Models.PlaybackState.Buffering => mashin.Models.PlaybackState.Buffering,
-            mashin.Models.PlaybackState.Idle => mashin.Models.PlaybackState.Idle,
-            _ => mashin.Models.PlaybackState.Unknown
+            mashin.Models.PlaybackState.Playing => PlaybackStateKind.Playing,
+            mashin.Models.PlaybackState.Paused => PlaybackStateKind.Paused,
+            mashin.Models.PlaybackState.Buffering => PlaybackStateKind.Buffering,
+            mashin.Models.PlaybackState.Idle => PlaybackStateKind.Idle,
+            _ => PlaybackStateKind.Unknown
         };
     }
 

@@ -36,7 +36,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private bool _isMuted;
     private bool? _shuffleEnabled;
     private string? _repeatMode;
-    private PlaybackState _playState = PlaybackState.Idle;
+    private PlaybackStateCustom _playState = new()
+    {
+        State = PlaybackStateKind.Idle,
+        ActiveSinceUtc = DateTimeOffset.UtcNow
+    };
     private bool _isSeeking;
     private double _duration;
     private double _position;
@@ -323,7 +327,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     #region Bindable Properties (Playback)
 
-    public PlaybackState PlayState
+    public PlaybackStateCustom PlayState
     {
         get => _playState;
         private set => SetProperty(ref _playState, value);
@@ -944,7 +948,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private void BeginSeek()
     {
         _isSeeking = true;
-        _playbackService.PlaybackState = PlaybackState.Buffering;
+        _playbackService.PlaybackState = new PlaybackStateCustom
+        {
+            State = PlaybackStateKind.PendingToSeek,
+            ActiveSinceUtc = DateTimeOffset.UtcNow
+        };
     }
 
     private async Task SetVolumeAsync(int volume)
@@ -982,7 +990,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (e.PropertyName == nameof(IPlaybackService.PlaybackState))
         {
             PlayState = _playbackService.PlaybackState;
-            if (_playbackService.PlaybackState != PlaybackState.Buffering)
+            if (_playbackService.PlaybackState.State != PlaybackStateKind.Buffering
+                && !_playbackService.PlaybackState.IsPending)
             {
                 _isSeeking = false;
             }

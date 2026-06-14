@@ -49,7 +49,15 @@ public partial class TableView : ContentView
         BindableProperty.Create(nameof(CurrentTrackUri), typeof(string), typeof(TableView));
 
     public static readonly BindableProperty CurrentPlayStateProperty =
-        BindableProperty.Create(nameof(CurrentPlayState), typeof(PlaybackState), typeof(TableView), defaultValue: PlaybackState.Idle);
+        BindableProperty.Create(
+            nameof(CurrentPlayState),
+            typeof(PlaybackStateCustom),
+            typeof(TableView),
+            defaultValue: new PlaybackStateCustom
+            {
+                State = PlaybackStateKind.Idle,
+                ActiveSinceUtc = DateTimeOffset.UtcNow
+            });
 
     public static readonly BindableProperty PageSizeProperty =
         BindableProperty.Create(nameof(PageSize), typeof(int), typeof(TableView), defaultValue: 10, propertyChanged: OnPageSizeChanged);
@@ -155,9 +163,9 @@ public partial class TableView : ContentView
         private set => SetValue(CurrentTrackUriProperty, value);
     }
 
-    public PlaybackState CurrentPlayState
+    public PlaybackStateCustom CurrentPlayState
     {
-        get => (PlaybackState)GetValue(CurrentPlayStateProperty);
+        get => (PlaybackStateCustom)GetValue(CurrentPlayStateProperty);
         private set => SetValue(CurrentPlayStateProperty, value);
     }
 
@@ -1191,7 +1199,11 @@ public partial class TableView : ContentView
         _currentQueueItem = null;
         _currentTrackMediaItem = null;
         SetCurrentTrackUri(null);
-        SetCurrentPlayState(PlaybackState.Idle);
+        SetCurrentPlayState(new PlaybackStateCustom
+        {
+            State = PlaybackStateKind.Idle,
+            ActiveSinceUtc = DateTimeOffset.UtcNow
+        });
     }
 
     private void OnPlaybackServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -1199,7 +1211,7 @@ public partial class TableView : ContentView
         if (e.PropertyName == nameof(IPlaybackService.PlaybackState))
         {
             var currentPlayerState = _playbackService?.PlaybackState
-                ?? PlaybackState.Idle;
+                ?? new PlaybackStateCustom { State = PlaybackStateKind.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
             if (MainThread.IsMainThread)
             {
@@ -1315,9 +1327,9 @@ public partial class TableView : ContentView
         CurrentTrackUri = uri;
     }
 
-    private void SetCurrentPlayState(PlaybackState playerState)
+    private void SetCurrentPlayState(PlaybackStateCustom playerState)
     {
-        if (CurrentPlayState == playerState)
+        if (CurrentPlayState.State == playerState.State)
         {
             return;
         }
