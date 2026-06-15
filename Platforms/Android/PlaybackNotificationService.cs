@@ -160,7 +160,9 @@ public sealed class PlaybackNotificationService : Service
     private void OnPlaybackPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(IPlaybackService.PlaybackState)
-            || e.PropertyName == nameof(IPlaybackService.CurrentQueueItem))
+            || e.PropertyName == nameof(IPlaybackService.CurrentQueueItem)
+            || e.PropertyName == nameof(IPlaybackService.PositionSeconds)
+            || e.PropertyName == nameof(IPlaybackService.DurationSeconds))
         {
             _ = UpdateNotificationAsync();
         }
@@ -222,7 +224,7 @@ public sealed class PlaybackNotificationService : Service
             var durationSeconds = Math.Max(0, playback.DurationSeconds);
             var positionSeconds = Math.Clamp(playback.PositionSeconds, 0, durationSeconds > 0 ? durationSeconds : double.MaxValue);
 
-            UpdateMediaSession(track, state, artwork, positionSeconds);
+            UpdateMediaSession(track, state, artwork, positionSeconds, durationSeconds);
 
             var notification = BuildNotification(track, state, artwork, positionSeconds, durationSeconds);
             if (!_isForeground)
@@ -441,7 +443,7 @@ public sealed class PlaybackNotificationService : Service
     #region Media Session Sync
 
     // Mirrors current playback metadata/state to the Android media session.
-    private void UpdateMediaSession(Track? track, PlaybackStateKind state, Bitmap? artwork, double positionSeconds)
+    private void UpdateMediaSession(Track? track, PlaybackStateKind state, Bitmap? artwork, double positionSeconds, double durationSeconds)
     {
         var mediaSession = _mediaSession;
         if (mediaSession == null)
@@ -458,13 +460,15 @@ public sealed class PlaybackNotificationService : Service
             | SessionPlaybackState.ActionSkipToPrevious
             | SessionPlaybackState.ActionStop);
         var positionMs = (long)Math.Max(0, positionSeconds * 1000d);
-        playbackStateBuilder.SetState(MapPlaybackState(state), positionMs, 1f);
+        var playbackSpeed = state is PlaybackStateKind.Playing ? 1f : 0f;
+        playbackStateBuilder.SetState(MapPlaybackState(state), positionMs, playbackSpeed, SystemClock.ElapsedRealtime());
         var playbackState = playbackStateBuilder.Build();
 
         var metadataBuilder = new MediaMetadata.Builder();
         metadataBuilder.PutString(MediaMetadata.MetadataKeyTitle, track?.Name ?? string.Empty);
         metadataBuilder.PutString(MediaMetadata.MetadataKeyArtist, track?.ArtistName ?? string.Empty);
         metadataBuilder.PutString(MediaMetadata.MetadataKeyAlbum, track?.AlbumName ?? string.Empty);
+        metadataBuilder.PutLong(MediaMetadata.MetadataKeyDuration, (long)Math.Max(0, durationSeconds * 1000d));
         if (artwork != null)
         {
             metadataBuilder.PutBitmap(MediaMetadata.MetadataKeyAlbumArt, artwork);
