@@ -852,7 +852,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     #endregion
 
-    #region Player Actions
+    #region Playback Actions
 
     private async Task TogglePlayPauseAsync()
     {
