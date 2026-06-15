@@ -659,6 +659,190 @@ namespace mashin.Models
     }
 
     /// <summary>
+    /// Music Assistant API StreamType enum
+    /// </summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public enum StreamType
+    {
+        [JsonStringEnumMemberName("http")]
+        Http,
+        [JsonStringEnumMemberName("encrypted_http")]
+        EncryptedHttp,
+        [JsonStringEnumMemberName("hls")]
+        Hls,
+        [JsonStringEnumMemberName("icy")]
+        Icy,
+        [JsonStringEnumMemberName("shoutcast")]
+        Shoutcast,
+        [JsonStringEnumMemberName("in_band")]
+        InBand,
+        [JsonStringEnumMemberName("local_file")]
+        LocalFile,
+        [JsonStringEnumMemberName("named_pipe")]
+        NamedPipe,
+        [JsonStringEnumMemberName("other_ffmpeg")]
+        OtherFfmpeg,
+        [JsonStringEnumMemberName("custom")]
+        Custom,
+        [JsonStringEnumMemberName("unknown")]
+        Unknown
+    }
+
+    /// <summary>
+    /// Music Assistant API VolumeNormalizationMode enum
+    /// </summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public enum VolumeNormalizationMode
+    {
+        [JsonStringEnumMemberName("disabled")]
+        Disabled,
+        [JsonStringEnumMemberName("dynamic")]
+        Dynamic,
+        [JsonStringEnumMemberName("measurement_only")]
+        MeasurementOnly,
+        [JsonStringEnumMemberName("fallback_fixed_gain")]
+        FallbackFixedGain,
+        [JsonStringEnumMemberName("fixed_gain")]
+        FixedGain,
+        [JsonStringEnumMemberName("fallback_dynamic")]
+        FallbackDynamic,
+        [JsonStringEnumMemberName("unknown")]
+        Unknown
+    }
+
+    /// <summary>
+    /// Music Assistant API ContentType enum
+    /// </summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public enum ContentType
+    {
+        [JsonStringEnumMemberName("ogg")]
+        Ogg,
+        [JsonStringEnumMemberName("wav")]
+        Wav,
+        [JsonStringEnumMemberName("aiff")]
+        Aiff,
+        [JsonStringEnumMemberName("mpeg")]
+        Mpeg,
+        [JsonStringEnumMemberName("m4a")]
+        M4a,
+        [JsonStringEnumMemberName("mp4")]
+        Mp4,
+        [JsonStringEnumMemberName("mp4a")]
+        Mp4a,
+        [JsonStringEnumMemberName("m4b")]
+        M4b,
+        [JsonStringEnumMemberName("dsf")]
+        Dsf,
+        [JsonStringEnumMemberName("flac")]
+        Flac,
+        [JsonStringEnumMemberName("mp3")]
+        Mp3,
+        [JsonStringEnumMemberName("wma")]
+        Wma,
+        [JsonStringEnumMemberName("wmav2")]
+        Wmav2,
+        [JsonStringEnumMemberName("wmapro")]
+        Wmapro,
+        [JsonStringEnumMemberName("wavpack")]
+        Wavpack,
+        [JsonStringEnumMemberName("tak")]
+        Tak,
+        [JsonStringEnumMemberName("ape")]
+        Ape,
+        [JsonStringEnumMemberName("mpc")]
+        Mpc,
+        [JsonStringEnumMemberName("aac")]
+        Aac,
+        [JsonStringEnumMemberName("alac")]
+        Alac,
+        [JsonStringEnumMemberName("opus")]
+        Opus,
+        [JsonStringEnumMemberName("vorbis")]
+        Vorbis,
+        [JsonStringEnumMemberName("ac3")]
+        Ac3,
+        [JsonStringEnumMemberName("eac3")]
+        Eac3,
+        [JsonStringEnumMemberName("dts")]
+        Dts,
+        [JsonStringEnumMemberName("truehd")]
+        Truehd,
+        [JsonStringEnumMemberName("dtshd")]
+        Dtshd,
+        [JsonStringEnumMemberName("dtsx")]
+        Dtsx,
+        [JsonStringEnumMemberName("cook")]
+        Cook,
+        [JsonStringEnumMemberName("ralf")]
+        Ralf,
+        [JsonStringEnumMemberName("mp2")]
+        Mp2,
+        [JsonStringEnumMemberName("mp1")]
+        Mp1,
+        [JsonStringEnumMemberName("dra")]
+        Dra,
+        [JsonStringEnumMemberName("atrac3")]
+        Atrac3,
+        [JsonStringEnumMemberName("s16le")]
+        S16Le,
+        [JsonStringEnumMemberName("s24le")]
+        S24Le,
+        [JsonStringEnumMemberName("s32le")]
+        S32Le,
+        [JsonStringEnumMemberName("f32le")]
+        F32Le,
+        [JsonStringEnumMemberName("f64le")]
+        F64Le,
+        [JsonStringEnumMemberName("s16be")]
+        S16Be,
+        [JsonStringEnumMemberName("s24be")]
+        S24Be,
+        [JsonStringEnumMemberName("s32be")]
+        S32Be,
+        [JsonStringEnumMemberName("pcm_bluray")]
+        PcmBluray,
+        [JsonStringEnumMemberName("pcm_dvd")]
+        PcmDvd,
+        [JsonStringEnumMemberName("adpcm_ima_qt")]
+        AdpcmImaQt,
+        [JsonStringEnumMemberName("adpcm_ms")]
+        AdpcmMs,
+        [JsonStringEnumMemberName("adpcm_swf")]
+        AdpcmSwf,
+        [JsonStringEnumMemberName("dsd_lsbf")]
+        DsdLsbf,
+        [JsonStringEnumMemberName("dsd_msbf")]
+        DsdMsbf,
+        [JsonStringEnumMemberName("dsd_lsbf_planar")]
+        DsdLsbfPlanar,
+        [JsonStringEnumMemberName("dsd_msbf_planar")]
+        DsdMsbfPlanar,
+        [JsonStringEnumMemberName("amr_nb")]
+        AmrNb,
+        [JsonStringEnumMemberName("amr_wb")]
+        AmrWb,
+        [JsonStringEnumMemberName("speex")]
+        Speex,
+        [JsonStringEnumMemberName("alaw")]
+        Alaw,
+        [JsonStringEnumMemberName("mulaw")]
+        Mulaw,
+        [JsonStringEnumMemberName("g722")]
+        G722,
+        [JsonStringEnumMemberName("g726")]
+        G726,
+        [JsonStringEnumMemberName("pcm")]
+        Pcm,
+        [JsonStringEnumMemberName("nut")]
+        Nut,
+        [JsonStringEnumMemberName("?")]
+        Question,
+        [JsonStringEnumMemberName("unknown")]
+        Unknown
+    }
+
+    /// <summary>
     /// Music Assistant API PlayerQueue wrapper
     /// </summary>
     public class PlayerQueue
@@ -723,6 +907,9 @@ namespace mashin.Models
     /// </summary>
     public class QueueItem
     {
+        [JsonPropertyName("queue_id")]
+        public string QueueId { get; set; } = string.Empty;
+
         [JsonPropertyName("queue_item_id")]
         public string QueueItemId { get; set; } = string.Empty;
 
@@ -732,14 +919,149 @@ namespace mashin.Models
         [JsonPropertyName("duration")]
         public int? Duration { get; set; }
 
+        [JsonPropertyName("sort_index")]
+        public int? SortIndex { get; set; }
+
+        [JsonPropertyName("streamdetails")]
+        public StreamDetails? StreamDetails { get; set; }
+
         [JsonPropertyName("media_item")]
         public Track? MediaItem { get; set; }
 
         [JsonPropertyName("image")]
         public MediaItemImage? Image { get; set; }
 
+        [JsonPropertyName("index")]
+        public int? Index { get; set; }
+
+        [JsonPropertyName("available")]
+        public bool? Available { get; set; }
+
+        [JsonPropertyName("extra_attributes")]
+        public Dictionary<string, JsonElement>? ExtraAttributes { get; set; }
+
         [JsonIgnore]
         public TimeSpan? DurationTimeSpan => Duration.HasValue ? TimeSpan.FromSeconds(Duration.Value) : null;
+    }
+
+    /// <summary>
+    /// Music Assistant API StreamDetails wrapper
+    /// </summary>
+    public class StreamDetails
+    {
+        [JsonPropertyName("provider")]
+        public string Provider { get; set; } = string.Empty;
+
+        [JsonPropertyName("item_id")]
+        public string ItemId { get; set; } = string.Empty;
+
+        [JsonPropertyName("audio_format")]
+        public AudioFormat AudioFormat { get; set; } = new();
+
+        [JsonPropertyName("media_type")]
+        public MediaType? MediaType { get; set; }
+
+        [JsonPropertyName("stream_type")]
+        public StreamType? StreamType { get; set; }
+
+        [JsonPropertyName("duration")]
+        public int? Duration { get; set; }
+
+        [JsonPropertyName("size")]
+        public long? Size { get; set; }
+
+        [JsonPropertyName("stream_metadata")]
+        public StreamMetadata? StreamMetadata { get; set; }
+
+        [JsonPropertyName("loudness")]
+        public double? Loudness { get; set; }
+
+        [JsonPropertyName("loudness_album")]
+        public double? LoudnessAlbum { get; set; }
+
+        [JsonPropertyName("prefer_album_loudness")]
+        public bool? PreferAlbumLoudness { get; set; }
+
+        [JsonPropertyName("volume_normalization_mode")]
+        public VolumeNormalizationMode? VolumeNormalizationMode { get; set; }
+
+        [JsonPropertyName("volume_normalization_gain_correct")]
+        public double? VolumeNormalizationGainCorrect { get; set; }
+
+        [JsonPropertyName("target_loudness")]
+        public double? TargetLoudness { get; set; }
+
+        [JsonPropertyName("dsp")]
+        public Dictionary<string, JsonElement>? Dsp { get; set; }
+
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement>? AdditionalData { get; set; }
+    }
+
+    /// <summary>
+    /// Music Assistant API AudioFormat wrapper
+    /// </summary>
+    public class AudioFormat
+    {
+        [JsonPropertyName("content_type")]
+        public ContentType? ContentType { get; set; }
+
+        [JsonPropertyName("codec_type")]
+        public ContentType? CodecType { get; set; }
+
+        [JsonPropertyName("sample_rate")]
+        public int? SampleRate { get; set; }
+
+        [JsonPropertyName("bit_depth")]
+        public int? BitDepth { get; set; }
+
+        [JsonPropertyName("channels")]
+        public int? Channels { get; set; }
+
+        [JsonPropertyName("bit_rate")]
+        public int? BitRate { get; set; }
+
+        [JsonPropertyName("output_format_str")]
+        public string? OutputFormatString { get; set; }
+
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement>? AdditionalData { get; set; }
+    }
+
+    /// <summary>
+    /// Music Assistant API StreamMetadata wrapper
+    /// </summary>
+    public class StreamMetadata
+    {
+        [JsonPropertyName("title")]
+        public string Title { get; set; } = string.Empty;
+
+        [JsonPropertyName("artist")]
+        public string? Artist { get; set; }
+
+        [JsonPropertyName("album")]
+        public string? Album { get; set; }
+
+        [JsonPropertyName("image_url")]
+        public string? ImageUrl { get; set; }
+
+        [JsonPropertyName("duration")]
+        public int? Duration { get; set; }
+
+        [JsonPropertyName("description")]
+        public string? Description { get; set; }
+
+        [JsonPropertyName("uri")]
+        public string? Uri { get; set; }
+
+        [JsonPropertyName("elapsed_time")]
+        public int? ElapsedTime { get; set; }
+
+        [JsonPropertyName("elapsed_time_last_updated")]
+        public double? ElapsedTimeLastUpdated { get; set; }
+
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement>? AdditionalData { get; set; }
     }
 
     /// <summary>

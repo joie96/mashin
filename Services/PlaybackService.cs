@@ -71,7 +71,6 @@ public sealed class PlaybackService : IPlaybackService
     private readonly Dictionary<PlaybackOutputMode, IPlayerService> _players;
 
     private readonly ObservableRangeCollection<QueueItem> _currentQueueItems = new();
-    private readonly SemaphoreSlim _queueRefreshGate = new(1, 1);
     private readonly CancellationTokenSource _disposeCts = new();
     private readonly object _progressSync = new();
     private CancellationTokenSource? _queueConfirmCts;
@@ -724,8 +723,6 @@ public sealed class PlaybackService : IPlaybackService
 
         _disposeCts.Dispose();
 
-        _queueRefreshGate.Dispose();
-
         foreach (var player in _players.Values.Distinct())
         {
             await player.DisposeAsync();
@@ -745,47 +742,34 @@ public sealed class PlaybackService : IPlaybackService
 
         var eventQueueId = Normalize(e.Queue?.QueueId) ?? Normalize(e.QueueId);
 
-        _logger.LogDebug(
-            "Queue event incoming: Event={Event}, QueueId={QueueId}, HasQueuePayload={HasQueuePayload}, PayloadState={PayloadState}, PayloadCurrentIndex={PayloadCurrentIndex}, PayloadElapsed={PayloadElapsed}, PayloadItemId={PayloadItemId}",
-            e.Event,
-            eventQueueId,
-            e.Queue != null,
-            e.Queue?.State,
-            e.Queue?.CurrentIndex,
-            e.Queue?.ElapsedTime,
-            e.Queue?.CurrentItem?.QueueItemId);
-
-        // Filter by active queue id, not player id. In MA these ids can differ
-        // when a player has an active source/group queue.
+        // Only process events for the active queue
         if (!string.IsNullOrWhiteSpace(_activeQueueId)
             && !string.IsNullOrWhiteSpace(eventQueueId)
             && !string.Equals(eventQueueId, _activeQueueId, StringComparison.Ordinal))
         {
-            _logger.LogDebug("Ignored queue event for different queue. Event={Event}, EventQueueId={EventQueueId}, ActiveQueueId={ActiveQueueId}",
-                e.Event,
-                eventQueueId,
-                _activeQueueId);
             return;
         }
 
-        // Learn active queue id as soon as we can to make subsequent filtering precise.
+        // Learn active queue id as soon as possible
         if (string.IsNullOrWhiteSpace(_activeQueueId) && !string.IsNullOrWhiteSpace(eventQueueId))
         {
             _activeQueueId = eventQueueId;
         }
 
+        // queue time update events: keep playback progress event-driven without queue HTTP fetches
         if (string.Equals(e.Event, "queue_time_updated", StringComparison.OrdinalIgnoreCase))
         {
-            // Keep playback progress event-driven without queue HTTP fetches.
             if (e.ElapsedTimeSeconds is double elapsedSeconds)
             {
                 var clampedElapsed = Math.Max(0, elapsedSeconds);
 
+                // Seek guard: ignore elapsed time updates that regress behind a recent seek target within a short time window, as they are likely stale events from before the seek was issued
                 if (ShouldIgnoreSeekRegression(clampedElapsed, source: "queue_time_updated"))
                 {
                     return;
                 }
 
+                // Transition guard: after a track change, ignore elapsed time updates that don't show plausible forward progress for the new track within a short time window, as they are likely stale events from the previous track
                 var currentItemId = Normalize(_currentQueueItem?.QueueItemId);
                 if (ShouldIgnoreTrackTransitionOutlier(currentItemId, clampedElapsed, source: "queue_time_updated"))
                 {
@@ -814,9 +798,9 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        if (e.Queue != null)
+        // other queue events: apply event state updates immediately, enrich with debounced HTTP refreshes if queue items changed
         {
-            // Apply queue state immediately from the MA websocket event stream.
+            // Apply event state updates
             _activeQueueId = Normalize(e.Queue.QueueId) ?? _activeQueueId;
 
             var previousQueueItemId = Normalize(_currentQueueItem?.QueueItemId);
@@ -837,11 +821,13 @@ public sealed class PlaybackService : IPlaybackService
                 ? Math.Max(0, e.Queue.ElapsedTime.Value)
                 : (isTrackChanged ? 0 : PositionSeconds);
 
+            // Seek guard: if the event contains an elapsed time that regresses behind a recent seek target within a short time window, treat it as a likely stale event from before the seek was issued and ignore the regression by keeping the current position
             if (ShouldIgnoreSeekRegression(queueElapsed, source: "queue_payload"))
             {
                 queueElapsed = PositionSeconds;
             }
 
+            // Transition guard: if this is a track change and the event contains an elapsed time that doesn't show plausible forward progress for the new track within a short time window, treat it as a likely stale event from the previous track and ignore it by keeping the current position
             var ignoreQueuePayloadProgress = !isTrackChanged
                 && ShouldIgnoreTransitionQueuePayloadProgress(incomingQueueItemId, queueElapsed);
 
@@ -860,8 +846,7 @@ public sealed class PlaybackService : IPlaybackService
                 }
             }
 
-            // Track changes may arrive with stale elapsed_time_last_updated values from the previous item.
-            // For freshly started items, pin the anchor timestamp to now to prevent artificial fast-forwarding.
+            // If the track changed but the elapsed time in the event is very low (e.g. 0 or 1 second), it's likely that the elapsed time was reset by the player before the new track actually started playing. In this case, update the elapsed time anchor to prevent interpolation from jumping back to a high elapsed time for the new track.
             if (isTrackChanged && queueElapsed <= 1)
             {
                 elapsedUpdatedAtUtc = DateTimeOffset.UtcNow;
@@ -903,19 +888,7 @@ public sealed class PlaybackService : IPlaybackService
             PlaybackState = new PlaybackStateCustom { State = effectiveState, ActiveSinceUtc = DateTimeOffset.UtcNow };
         }
 
-        // Confirm via HTTP only when item ordering/content may have changed or payload is missing.
-        var shouldReloadQueueItems = string.Equals(e.Event, "queue_items_updated", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(e.Event, "queue_added", StringComparison.OrdinalIgnoreCase);
-        var shouldConfirmQueueState = shouldReloadQueueItems || e.Queue == null;
-
-        _logger.LogDebug(
-            "Queue event decision: Event={Event}, QueueId={QueueId}, ShouldReloadQueueItems={ShouldReloadQueueItems}, ShouldConfirmQueueState={ShouldConfirmQueueState}",
-            e.Event,
-            eventQueueId,
-            shouldReloadQueueItems,
-            shouldConfirmQueueState);
-
-        if (!shouldConfirmQueueState)
+        if (!ShouldRefreshQueue(e))
         {
             return;
         }
@@ -945,8 +918,8 @@ public sealed class PlaybackService : IPlaybackService
                     return;
                 }
 
-                _logger.LogDebug("Confirming queue snapshot after event burst. RequestId={RequestId}, QueueId={QueueId}, ReloadQueueItems={ReloadQueueItems}", requestId, _activeQueueId, shouldReloadQueueItems);
-                await RefreshQueueAsync(nextCts.Token, shouldReloadQueueItems);
+                _logger.LogInformation("Queue refresh triggered by event. Event={Event}, QueueId={QueueId}, RequestId={RequestId}", e.Event, _activeQueueId, requestId);
+                await RefreshQueueAsync(nextCts.Token);
             }
             catch (OperationCanceledException)
             {
@@ -964,20 +937,9 @@ public sealed class PlaybackService : IPlaybackService
 
     #region Queue Sync
 
-    private async Task RefreshQueueAsync(CancellationToken cancellationToken = default, bool reloadQueueItems = true)
+    private async Task RefreshQueueAsync(CancellationToken cancellationToken = default)
     {
         if (OutputMode == PlaybackOutputMode.LocalOffline || string.IsNullOrWhiteSpace(ActivePlayerId))
-        {
-            return;
-        }
-
-        _logger.LogDebug("Refreshing queue snapshot. ActivePlayerId={ActivePlayerId}, ReloadQueueItems={ReloadQueueItems}", ActivePlayerId, reloadQueueItems);
-
-        try
-        {
-            await _queueRefreshGate.WaitAsync(cancellationToken);
-        }
-        catch (OperationCanceledException)
         {
             return;
         }
@@ -995,11 +957,9 @@ public sealed class PlaybackService : IPlaybackService
             _activeQueueId = Normalize(queue.QueueId);
 
             // Reconcile event-based state with an authoritative snapshot from MA.
-            if (reloadQueueItems || _currentQueueItems.Count == 0)
-            {
-                var queueItems = await _musicAssistant.GetQueueItemsAsync(queue.QueueId);
-                _currentQueueItems.ReplaceRange(queueItems);
-            }
+            _logger.LogInformation("Executing queue items refresh via HTTP. QueueId={QueueId}, ActivePlayerId={ActivePlayerId}", queue.QueueId, ActivePlayerId);
+            var queueItems = await _musicAssistant.GetQueueItemsAsync(queue.QueueId);
+            _currentQueueItems.ReplaceRange(queueItems);
 
             QueueItemCount = queue.ItemCount;
             ShuffleEnabled = queue.ShuffleEnabled;
@@ -1045,7 +1005,7 @@ public sealed class PlaybackService : IPlaybackService
             PlaybackState = new PlaybackStateCustom { State = effectiveState, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
             _logger.LogDebug(
-                "Queue snapshot applied. QueueId={QueueId}, Items={ItemCount}, CurrentIndex={CurrentIndex}, CurrentItemId={CurrentItemId}, State={State}, Elapsed={Elapsed}",
+                "Full Queue refresh via HTTP applied. QueueId={QueueId}, Items={ItemCount}, CurrentIndex={CurrentIndex}, CurrentItemId={CurrentItemId}, State={State}, Elapsed={Elapsed}",
                 queue.QueueId,
                 queue.ItemCount,
                 queue.CurrentIndex,
@@ -1061,10 +1021,6 @@ public sealed class PlaybackService : IPlaybackService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to refresh queue snapshot for player {PlayerId}", ActivePlayerId);
-        }
-        finally
-        {
-            _queueRefreshGate.Release();
         }
     }
 
@@ -1137,6 +1093,47 @@ public sealed class PlaybackService : IPlaybackService
         }
 
         return mashin.Models.RepeatMode.Off;
+    }
+
+    private bool ShouldRefreshQueue(MusicAssistantQueueEvent queueEvent)
+    {
+        if (string.Equals(queueEvent.Event, "queue_items_updated", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(queueEvent.Event, "queue_added", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var queue = queueEvent.Queue;
+        if (queue == null)
+        {
+            return false;
+        }
+
+        if (_currentQueueItems.Count == 0)
+        {
+            return queue.ItemCount > 0;
+        }
+
+        if (_currentQueueItems.Count != queue.ItemCount)
+        {
+            return true;
+        }
+
+        var snapshotCurrentItemId = Normalize(queue.CurrentItem?.QueueItemId);
+        if (string.IsNullOrWhiteSpace(snapshotCurrentItemId))
+        {
+            return false;
+        }
+
+        if (queue.CurrentIndex is int currentIndex
+            && currentIndex >= 0
+            && currentIndex < _currentQueueItems.Count)
+        {
+            var localItemIdAtIndex = Normalize(_currentQueueItems[currentIndex]?.QueueItemId);
+            return !string.Equals(localItemIdAtIndex, snapshotCurrentItemId, StringComparison.Ordinal);
+        }
+
+        return false;
     }
 
     private PlaybackStateKind ResolveEffectivePlaybackState(PlaybackStateKind mappedState)

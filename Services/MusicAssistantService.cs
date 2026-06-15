@@ -1679,6 +1679,7 @@ public class MusicAssistantService
                 available = mapping.Available,
                 url = mapping.Url
             }).ToList(),
+            ["metadata"] = CreateMediaItemMetadataPayload(mediaItem.Metadata),
             ["favorite"] = mediaItem.Favorite
         };
 
@@ -1722,10 +1723,35 @@ public class MusicAssistantService
             sort_name = mediaItem.SortName,
             uri = mediaItem.Uri,
             available = true,
+            metadata = CreateMediaItemMetadataPayload(mediaItem.Metadata),
             media_type = mediaItem.MediaType == MediaType.PodcastEpisode
                 ? "podcast_episode"
                 : mediaItem.MediaType.ToString().ToLowerInvariant()
         };
+
+    private static object? CreateMediaItemMetadataPayload(MediaItemMetadata? metadata)
+    {
+        if (metadata == null)
+        {
+            return null;
+        }
+
+        return new
+        {
+            description = metadata.Description,
+            images = metadata.Images?.Select(image => new
+            {
+                type = image.Type,
+                path = image.Path,
+                provider = image.Provider,
+                remotely_accessible = image.RemotelyAccessible
+            }).ToList(),
+            genres = metadata.Genres,
+            label = metadata.Label,
+            popularity = metadata.Popularity,
+            release_date = metadata.ReleaseDate
+        };
+    }
 
     /// <summary>
     /// Play a single media item on the given queue.
