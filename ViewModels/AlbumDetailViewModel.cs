@@ -528,7 +528,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
 
             for (var i = 0; i < tracks.Count; i++)
             {
-                tracks[i].Index = tracks[i].TrackNumber > 0 ? tracks[i].TrackNumber : i + 1;
+                tracks[i].Index = tracks[i].TrackNumber > 0 ? tracks[i].TrackNumber - 1 : i;
                 if (Album != null)
                 {
                     tracks[i].Album = Album;

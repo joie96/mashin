@@ -1591,6 +1591,27 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<QueueItem>>("player_queues/items", args);
         var queueItems = result ?? new List<QueueItem>();
 
+        var sortIndexRankMap = queueItems
+            .Where(item => item.SortIndex.HasValue)
+            .Select(item => item.SortIndex!.Value)
+            .Distinct()
+            .OrderBy(sortIndex => sortIndex)
+            .Select((sortIndex, rank) => new { sortIndex, rank })
+            .ToDictionary(entry => entry.sortIndex, entry => entry.rank);
+
+        var nextIndex = sortIndexRankMap.Count;
+        foreach (var item in queueItems)
+        {
+            if (item.SortIndex.HasValue && sortIndexRankMap.TryGetValue(item.SortIndex.Value, out var rank))
+            {
+                item.Index = rank;
+            }
+            else
+            {
+                item.Index = nextIndex++;
+            }
+        }
+
         var queueTracks = queueItems
             .Select(queueItem => queueItem.MediaItem)
             .OfType<Track>()

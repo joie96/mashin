@@ -907,6 +907,8 @@ namespace mashin.Models
     /// </summary>
     public class QueueItem
     {
+        private int _index;
+
         [JsonPropertyName("queue_id")]
         public string QueueId { get; set; } = string.Empty;
 
@@ -931,8 +933,12 @@ namespace mashin.Models
         [JsonPropertyName("image")]
         public MediaItemImage? Image { get; set; }
 
-        [JsonPropertyName("index")]
-        public int? Index { get; set; }
+        [JsonIgnore]
+        public int Index
+        {
+            get => _index;
+            set => _index = value;
+        }
 
         [JsonPropertyName("available")]
         public bool? Available { get; set; }

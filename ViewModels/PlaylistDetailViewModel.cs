@@ -373,7 +373,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
             for (var i = 0; i < tracks.Count; i++)
             {
-                tracks[i].Index = i + 1;
+                tracks[i].Index = i;
                 tracks[i].Favorite = await _userDataService.IsFavoriteAsync(tracks[i]);
             }
 

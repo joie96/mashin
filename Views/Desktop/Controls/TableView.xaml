@@ -17,6 +17,7 @@
         <converters:InvertedBoolConverter x:Key="InvertedBoolConverter"/>
         <converters:PlayStateToBoolConverter x:Key="PlayStateToBoolConverter"/>
         <converters:StringEqualsConverter x:Key="StringEqualsConverter"/>
+        <converters:DisplayIndexConverter x:Key="DisplayIndexConverter"/>
 
         <DataTemplate x:Key="TrackHeaderTemplate">
             <Grid RowDefinitions="Auto,Auto,Auto"
@@ -385,7 +386,7 @@
                           VerticalOptions="Center">
                         <Label HorizontalOptions="Center"
                                IsVisible="True"
-                               Text="{Binding Index}"
+                               Text="{Binding Index, Converter={StaticResource DisplayIndexConverter}}"
                                TextColor="{DynamicResource TextTertiary}"
                                VerticalOptions="Center">
                             <Label.Triggers>
@@ -766,7 +767,7 @@
                           VerticalOptions="Center">
                         <Label HorizontalOptions="Center"
                                IsVisible="True"
-                               Text="{Binding MediaItem.Index}"
+                               Text="{Binding Index, Converter={StaticResource DisplayIndexConverter}}"
                                TextColor="{DynamicResource TextTertiary}"
                                VerticalOptions="Center">
                             <Label.Triggers>

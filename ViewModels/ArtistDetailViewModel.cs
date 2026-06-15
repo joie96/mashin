@@ -663,7 +663,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             var processedTracks = new List<Track>();
             for (var i = 0; i < tracks.Count; i++)
             {
-                tracks[i].Index = i + 1;
+                tracks[i].Index = i;
 
                 // try to fill missing album year from already loaded albums
                 var album = tracks[i].Album;

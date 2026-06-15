@@ -560,7 +560,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
 
             for (var i = 0; i < tracks.Count; i++)
             {
-                tracks[i].Index = i + 1;
+                tracks[i].Index = i;
                 tracks[i].Favorite = true;
             }
 

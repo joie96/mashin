@@ -630,7 +630,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 var tracks = results.Tracks ?? new List<Track>();
                 for (var i = 0; i < tracks.Count; i++)
                 {
-                    tracks[i].Index = i + 1;
+                    tracks[i].Index = i;
                 }
 
                 Tracks = new ObservableRangeCollection<Track>(tracks);
