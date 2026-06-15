@@ -936,7 +936,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             Position = clamped;
             SliderPosition = clamped;
             await _playbackService.SeekAsync(clamped, Duration);
-            _isSeeking = false;
         }
         catch (Exception ex)
         {
@@ -948,11 +947,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private void BeginSeek()
     {
         _isSeeking = true;
-        _playbackService.PlaybackState = new PlaybackStateCustom
-        {
-            State = PlaybackStateKind.PendingToSeek,
-            ActiveSinceUtc = DateTimeOffset.UtcNow
-        };
     }
 
     private async Task SetVolumeAsync(int volume)

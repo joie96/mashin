@@ -99,8 +99,22 @@ public sealed class PlaybackService : IPlaybackService
     private int _queueItemCount;
     private double _durationSeconds;
     private double _positionSeconds;
+
+    // Anchors for interpolation of playback position between MA websocket events
     private double? _elapsedTimeAnchorSeconds;
     private DateTimeOffset? _elapsedTimeLastUpdatedUtc;
+    
+    // Seek protection to prevent regression of playback position when MA sends stale elapsed time updates after a seek operation.
+    private DateTimeOffset? _seekProtectionUntilUtc;
+    private double? _pendingSeekTargetSeconds;
+    private string? _pendingSeekQueueItemId;
+    
+    // Track transition guard: after item change, accept only plausible queue_time updates for a short window to avoid old-track elapsed events causing forward jumps.
+    private string? _transitionGuardQueueItemId;
+    private DateTimeOffset? _transitionGuardStartedUtc;
+    private double? _transitionGuardStartElapsedSeconds;
+    private DateTimeOffset? _transitionGuardUntilUtc;
+    
     #endregion
 
     #region Construction
@@ -600,6 +614,13 @@ public sealed class PlaybackService : IPlaybackService
         {
             _elapsedTimeAnchorSeconds = clamped;
             _elapsedTimeLastUpdatedUtc = DateTimeOffset.UtcNow;
+            _pendingSeekTargetSeconds = clamped;
+            _pendingSeekQueueItemId = Normalize(_currentQueueItem?.QueueItemId);
+            _seekProtectionUntilUtc = DateTimeOffset.UtcNow.AddMilliseconds(1200);
+            _transitionGuardQueueItemId = null;
+            _transitionGuardStartedUtc = null;
+            _transitionGuardStartElapsedSeconds = null;
+            _transitionGuardUntilUtc = null;
         }
     }
 
@@ -759,6 +780,18 @@ public sealed class PlaybackService : IPlaybackService
             if (e.ElapsedTimeSeconds is double elapsedSeconds)
             {
                 var clampedElapsed = Math.Max(0, elapsedSeconds);
+
+                if (ShouldIgnoreSeekRegression(clampedElapsed, source: "queue_time_updated"))
+                {
+                    return;
+                }
+
+                var currentItemId = Normalize(_currentQueueItem?.QueueItemId);
+                if (ShouldIgnoreTrackTransitionOutlier(currentItemId, clampedElapsed, source: "queue_time_updated"))
+                {
+                    return;
+                }
+
                 PositionSeconds = clampedElapsed;
 
                 _logger.LogDebug(
@@ -786,6 +819,10 @@ public sealed class PlaybackService : IPlaybackService
             // Apply queue state immediately from the MA websocket event stream.
             _activeQueueId = Normalize(e.Queue.QueueId) ?? _activeQueueId;
 
+            var previousQueueItemId = Normalize(_currentQueueItem?.QueueItemId);
+            var incomingQueueItemId = Normalize(e.Queue.CurrentItem?.QueueItemId);
+            var isTrackChanged = !string.Equals(previousQueueItemId, incomingQueueItemId, StringComparison.Ordinal);
+
             QueueItemCount = e.Queue.ItemCount;
             ShuffleEnabled = e.Queue.ShuffleEnabled;
             RepeatMode = e.Queue.RepeatMode?.ToString();
@@ -796,8 +833,22 @@ public sealed class PlaybackService : IPlaybackService
             CurrentQueueIndex = e.Queue.CurrentIndex;
 
             DurationSeconds = Math.Max(0, e.Queue.CurrentItem?.Duration ?? 0);
-            var queueElapsed = Math.Max(0, e.Queue.ElapsedTime ?? PositionSeconds);
-            PositionSeconds = queueElapsed;
+            var queueElapsed = e.Queue.ElapsedTime.HasValue
+                ? Math.Max(0, e.Queue.ElapsedTime.Value)
+                : (isTrackChanged ? 0 : PositionSeconds);
+
+            if (ShouldIgnoreSeekRegression(queueElapsed, source: "queue_payload"))
+            {
+                queueElapsed = PositionSeconds;
+            }
+
+            var ignoreQueuePayloadProgress = !isTrackChanged
+                && ShouldIgnoreTransitionQueuePayloadProgress(incomingQueueItemId, queueElapsed);
+
+            if (!ignoreQueuePayloadProgress)
+            {
+                PositionSeconds = queueElapsed;
+            }
 
             var elapsedUpdatedAtUtc = DateTimeOffset.UtcNow;
             if (e.Queue.ElapsedTimeLastUpdated is double elapsedUpdatedEpochSeconds && elapsedUpdatedEpochSeconds > 0)
@@ -809,10 +860,32 @@ public sealed class PlaybackService : IPlaybackService
                 }
             }
 
-            lock (_progressSync)
+            // Track changes may arrive with stale elapsed_time_last_updated values from the previous item.
+            // For freshly started items, pin the anchor timestamp to now to prevent artificial fast-forwarding.
+            if (isTrackChanged && queueElapsed <= 1)
             {
-                _elapsedTimeAnchorSeconds = queueElapsed;
-                _elapsedTimeLastUpdatedUtc = elapsedUpdatedAtUtc;
+                elapsedUpdatedAtUtc = DateTimeOffset.UtcNow;
+            }
+
+            if (isTrackChanged)
+            {
+                var transitionStartedUtc = DateTimeOffset.UtcNow;
+                lock (_progressSync)
+                {
+                    _transitionGuardQueueItemId = incomingQueueItemId;
+                    _transitionGuardStartedUtc = transitionStartedUtc;
+                    _transitionGuardStartElapsedSeconds = queueElapsed;
+                    _transitionGuardUntilUtc = transitionStartedUtc.AddSeconds(4);
+                }
+            }
+
+            if (!ignoreQueuePayloadProgress)
+            {
+                lock (_progressSync)
+                {
+                    _elapsedTimeAnchorSeconds = queueElapsed;
+                    _elapsedTimeLastUpdatedUtc = elapsedUpdatedAtUtc;
+                }
             }
 
             var mappedState = MapState(e.Queue.State);
@@ -1007,6 +1080,13 @@ public sealed class PlaybackService : IPlaybackService
         {
             _elapsedTimeAnchorSeconds = null;
             _elapsedTimeLastUpdatedUtc = null;
+            _seekProtectionUntilUtc = null;
+            _pendingSeekTargetSeconds = null;
+            _pendingSeekQueueItemId = null;
+            _transitionGuardQueueItemId = null;
+            _transitionGuardStartedUtc = null;
+            _transitionGuardStartElapsedSeconds = null;
+            _transitionGuardUntilUtc = null;
         }
 
         CurrentQueueIndex = null;
@@ -1092,6 +1172,214 @@ public sealed class PlaybackService : IPlaybackService
 
             _ => mappedState,
         };
+    }
+
+    private bool ShouldIgnoreSeekRegression(double candidateSeconds, string source)
+    {
+        DateTimeOffset? seekProtectionUntilUtc;
+        double? pendingSeekTargetSeconds;
+        string? pendingSeekQueueItemId;
+
+        lock (_progressSync)
+        {
+            seekProtectionUntilUtc = _seekProtectionUntilUtc;
+            pendingSeekTargetSeconds = _pendingSeekTargetSeconds;
+            pendingSeekQueueItemId = _pendingSeekQueueItemId;
+        }
+
+        if (seekProtectionUntilUtc is not DateTimeOffset protectionUntil
+            || pendingSeekTargetSeconds is not double seekTarget)
+        {
+            return false;
+        }
+
+        var currentItemId = Normalize(_currentQueueItem?.QueueItemId);
+        if (!string.Equals(pendingSeekQueueItemId, currentItemId, StringComparison.Ordinal))
+        {
+            lock (_progressSync)
+            {
+                _seekProtectionUntilUtc = null;
+                _pendingSeekTargetSeconds = null;
+                _pendingSeekQueueItemId = null;
+            }
+
+            return false;
+        }
+
+        if (DateTimeOffset.UtcNow >= protectionUntil)
+        {
+            lock (_progressSync)
+            {
+                _seekProtectionUntilUtc = null;
+                _pendingSeekTargetSeconds = null;
+                _pendingSeekQueueItemId = null;
+            }
+
+            return false;
+        }
+
+        var lowerBound = Math.Max(0, seekTarget - 1.5);
+        var upperBound = seekTarget + 3.0;
+        if (candidateSeconds < lowerBound || candidateSeconds > upperBound)
+        {
+            _logger.LogDebug(
+                "Ignored seek regression/outlier. Source={Source}, Candidate={Candidate}, SeekTarget={SeekTarget}",
+                source,
+                candidateSeconds,
+                seekTarget);
+            return true;
+        }
+
+        lock (_progressSync)
+        {
+            _seekProtectionUntilUtc = null;
+            _pendingSeekTargetSeconds = null;
+            _pendingSeekQueueItemId = null;
+        }
+
+        return false;
+    }
+
+    private bool ShouldIgnoreTrackTransitionOutlier(string? currentItemId, double candidateSeconds, string source)
+    {
+        string? guardItemId;
+        DateTimeOffset? guardStartedUtc;
+        double? guardStartElapsedSeconds;
+        DateTimeOffset? guardUntilUtc;
+
+        lock (_progressSync)
+        {
+            guardItemId = _transitionGuardQueueItemId;
+            guardStartedUtc = _transitionGuardStartedUtc;
+            guardStartElapsedSeconds = _transitionGuardStartElapsedSeconds;
+            guardUntilUtc = _transitionGuardUntilUtc;
+        }
+
+        if (string.IsNullOrWhiteSpace(guardItemId)
+            || guardStartedUtc is not DateTimeOffset startedUtc
+            || guardStartElapsedSeconds is not double startElapsedSeconds
+            || guardUntilUtc is not DateTimeOffset untilUtc)
+        {
+            return false;
+        }
+
+        // Guard belongs to a previous item; drop it.
+        if (!string.Equals(guardItemId, currentItemId, StringComparison.Ordinal))
+        {
+            lock (_progressSync)
+            {
+                _transitionGuardQueueItemId = null;
+                _transitionGuardStartedUtc = null;
+                _transitionGuardStartElapsedSeconds = null;
+                _transitionGuardUntilUtc = null;
+            }
+
+            return false;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (now >= untilUtc)
+        {
+            lock (_progressSync)
+            {
+                _transitionGuardQueueItemId = null;
+                _transitionGuardStartedUtc = null;
+                _transitionGuardStartElapsedSeconds = null;
+                _transitionGuardUntilUtc = null;
+            }
+
+            return false;
+        }
+
+        // queue_time_updated should not jump far ahead of what is plausible since transition start.
+        const double jitterSeconds = 1.5;
+        var maxPlausible = Math.Max(0, startElapsedSeconds + (now - startedUtc).TotalSeconds + jitterSeconds);
+        if (candidateSeconds > maxPlausible)
+        {
+            _logger.LogDebug(
+                "Ignored transition outlier. Source={Source}, Candidate={Candidate}, MaxPlausible={MaxPlausible}, ItemId={ItemId}",
+                source,
+                candidateSeconds,
+                maxPlausible,
+                currentItemId);
+            return true;
+        }
+
+        // First plausible queue_time_updated confirms the new track timing model.
+        lock (_progressSync)
+        {
+            _transitionGuardQueueItemId = null;
+            _transitionGuardStartedUtc = null;
+            _transitionGuardStartElapsedSeconds = null;
+            _transitionGuardUntilUtc = null;
+        }
+
+        return false;
+    }
+
+    private bool ShouldIgnoreTransitionQueuePayloadProgress(string? currentItemId, double candidateSeconds)
+    {
+        string? guardItemId;
+        DateTimeOffset? guardStartedUtc;
+        double? guardStartElapsedSeconds;
+        DateTimeOffset? guardUntilUtc;
+
+        lock (_progressSync)
+        {
+            guardItemId = _transitionGuardQueueItemId;
+            guardStartedUtc = _transitionGuardStartedUtc;
+            guardStartElapsedSeconds = _transitionGuardStartElapsedSeconds;
+            guardUntilUtc = _transitionGuardUntilUtc;
+        }
+
+        if (string.IsNullOrWhiteSpace(guardItemId)
+            || guardStartedUtc is not DateTimeOffset startedUtc
+            || guardStartElapsedSeconds is not double startElapsedSeconds
+            || guardUntilUtc is not DateTimeOffset untilUtc)
+        {
+            return false;
+        }
+
+        if (!string.Equals(guardItemId, currentItemId, StringComparison.Ordinal))
+        {
+            lock (_progressSync)
+            {
+                _transitionGuardQueueItemId = null;
+                _transitionGuardStartedUtc = null;
+                _transitionGuardStartElapsedSeconds = null;
+                _transitionGuardUntilUtc = null;
+            }
+
+            return false;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (now >= untilUtc)
+        {
+            lock (_progressSync)
+            {
+                _transitionGuardQueueItemId = null;
+                _transitionGuardStartedUtc = null;
+                _transitionGuardStartElapsedSeconds = null;
+                _transitionGuardUntilUtc = null;
+            }
+
+            return false;
+        }
+
+        const double jitterSeconds = 1.0;
+        var maxPlausible = Math.Max(0, startElapsedSeconds + (now - startedUtc).TotalSeconds + jitterSeconds);
+        if (candidateSeconds > maxPlausible)
+        {
+            _logger.LogDebug(
+                "Ignored queue payload transition outlier. Candidate={Candidate}, MaxPlausible={MaxPlausible}, ItemId={ItemId}",
+                candidateSeconds,
+                maxPlausible,
+                currentItemId);
+        }
+
+        // While transition guard is active, queue_time_updated is authoritative for progress.
+        return true;
     }
 
     private static PlaybackStateKind MapState(mashin.Models.PlaybackState? state)
