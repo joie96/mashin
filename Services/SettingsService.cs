@@ -145,7 +145,13 @@ public class SettingsService
         {
             ClientName = $"Mashin ({clientName})",
             ClientId = GetSendspinClientId(),
-            Roles = new List<string> { "player@v1" },
+            Roles = new List<string>
+            {
+                "controller@v1",
+                "player@v1",
+                "metadata@v1",
+                "artwork@v1"
+            },
             ProductName = "mashin",
             Manufacturer = "mashin",
             SoftwareVersion = "1.0",

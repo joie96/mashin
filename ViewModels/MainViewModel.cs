@@ -38,7 +38,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private string? _repeatMode;
     private PlaybackStateCustom _playState = new()
     {
-        State = PlaybackStateKind.Idle,
+        State = PlaybackStateType.Idle,
         ActiveSinceUtc = DateTimeOffset.UtcNow
     };
     private bool _isSeeking;
@@ -984,7 +984,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (e.PropertyName == nameof(IPlaybackService.PlaybackState))
         {
             PlayState = _playbackService.PlaybackState;
-            if (_playbackService.PlaybackState.State != PlaybackStateKind.Buffering
+            if (_playbackService.PlaybackState.State != PlaybackStateType.Buffering
                 && !_playbackService.PlaybackState.IsPending)
             {
                 _isSeeking = false;

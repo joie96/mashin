@@ -55,7 +55,7 @@ public partial class TableView : ContentView
             typeof(TableView),
             defaultValue: new PlaybackStateCustom
             {
-                State = PlaybackStateKind.Idle,
+                State = PlaybackStateType.Idle,
                 ActiveSinceUtc = DateTimeOffset.UtcNow
             });
 
@@ -1201,7 +1201,7 @@ public partial class TableView : ContentView
         SetCurrentTrackUri(null);
         SetCurrentPlayState(new PlaybackStateCustom
         {
-            State = PlaybackStateKind.Idle,
+            State = PlaybackStateType.Idle,
             ActiveSinceUtc = DateTimeOffset.UtcNow
         });
     }
@@ -1211,7 +1211,7 @@ public partial class TableView : ContentView
         if (e.PropertyName == nameof(IPlaybackService.PlaybackState))
         {
             var currentPlayerState = _playbackService?.PlaybackState
-                ?? new PlaybackStateCustom { State = PlaybackStateKind.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+                ?? new PlaybackStateCustom { State = PlaybackStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
             if (MainThread.IsMainThread)
             {

@@ -84,31 +84,31 @@ public class PlayStateToBoolConverter : IValueConverter
 
         var playState = value is PlaybackStateCustom playbackStateCustom
             ? playbackStateCustom.State
-            : PlaybackStateKind.Unknown;
+            : PlaybackStateType.Unknown;
 
         var token = stateParameter.Trim().ToLowerInvariant();
 
         return token switch
         {
-            "unknown" => playState == PlaybackStateKind.Unknown,
-            "stopped" => playState == PlaybackStateKind.Idle,
-            "paused" => playState is PlaybackStateKind.Paused or PlaybackStateKind.Idle or PlaybackStateKind.Unknown,
-            "buffering" => playState is PlaybackStateKind.Buffering
-                or PlaybackStateKind.PendingToPlaying
-                or PlaybackStateKind.PendingToPaused
-                or PlaybackStateKind.PendingToNextTrack
-                or PlaybackStateKind.PendingToPreviousTrack
-                or PlaybackStateKind.PendingToSeek,
-            "playing" => playState == PlaybackStateKind.Playing,
-            "seeking" => playState == PlaybackStateKind.PendingToSeek,
-            "show-play-icon" => playState is PlaybackStateKind.Paused or PlaybackStateKind.Idle or PlaybackStateKind.Unknown,
-            "show-pause-icon" => playState is PlaybackStateKind.Playing
-                or PlaybackStateKind.Buffering
-                or PlaybackStateKind.PendingToPlaying
-                or PlaybackStateKind.PendingToPaused
-                or PlaybackStateKind.PendingToNextTrack
-                or PlaybackStateKind.PendingToPreviousTrack
-                or PlaybackStateKind.PendingToSeek,
+            "unknown" => playState == PlaybackStateType.Unknown,
+            "stopped" => playState == PlaybackStateType.Idle,
+            "paused" => playState is PlaybackStateType.Paused or PlaybackStateType.Idle or PlaybackStateType.Unknown,
+            "buffering" => playState is PlaybackStateType.Buffering
+                or PlaybackStateType.PendingToPlaying
+                or PlaybackStateType.PendingToPaused
+                or PlaybackStateType.PendingToNextTrack
+                or PlaybackStateType.PendingToPreviousTrack
+                or PlaybackStateType.PendingToSeek,
+            "playing" => playState == PlaybackStateType.Playing,
+            "seeking" => playState == PlaybackStateType.PendingToSeek,
+            "show-play-icon" => playState is PlaybackStateType.Paused or PlaybackStateType.Idle or PlaybackStateType.Unknown,
+            "show-pause-icon" => playState is PlaybackStateType.Playing
+                or PlaybackStateType.Buffering
+                or PlaybackStateType.PendingToPlaying
+                or PlaybackStateType.PendingToPaused
+                or PlaybackStateType.PendingToNextTrack
+                or PlaybackStateType.PendingToPreviousTrack
+                or PlaybackStateType.PendingToSeek,
             _ => false,
         };
     }

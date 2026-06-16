@@ -1,6 +1,6 @@
 namespace mashin.Models;
 
-public enum PlaybackStateKind
+public enum PlaybackStateType
 {
     Unknown,
     Idle,
@@ -16,14 +16,14 @@ public enum PlaybackStateKind
 
 public sealed class PlaybackStateCustom
 {
-    public PlaybackStateKind State { get; set; } = PlaybackStateKind.Unknown;
+    public PlaybackStateType State { get; set; } = PlaybackStateType.Unknown;
 
     public DateTimeOffset ActiveSinceUtc { get; set; } = DateTimeOffset.UtcNow;
 
     public bool IsPending =>
-        State == PlaybackStateKind.PendingToPlaying
-        || State == PlaybackStateKind.PendingToPaused
-        || State == PlaybackStateKind.PendingToNextTrack
-        || State == PlaybackStateKind.PendingToPreviousTrack
-        || State == PlaybackStateKind.PendingToSeek;
+        State == PlaybackStateType.PendingToPlaying
+        || State == PlaybackStateType.PendingToPaused
+        || State == PlaybackStateType.PendingToNextTrack
+        || State == PlaybackStateType.PendingToPreviousTrack
+        || State == PlaybackStateType.PendingToSeek;
 }

@@ -72,10 +72,8 @@ public sealed class PlaybackService : IPlaybackService
 
     private readonly ObservableRangeCollection<QueueItem> _currentQueueItems = new();
     private readonly CancellationTokenSource _disposeCts = new();
-    private readonly object _progressSync = new();
     private CancellationTokenSource? _queueConfirmCts;
     private int _queueConfirmRequestId;
-    private Task? _progressInterpolationTask;
 
     private PlaybackOutputMode _outputMode = PlaybackOutputMode.LocalSendspin;
 
@@ -84,7 +82,7 @@ public sealed class PlaybackService : IPlaybackService
 
     private PlaybackStateCustom _playbackState = new()
     {
-        State = PlaybackStateKind.Idle,
+        State = PlaybackStateType.Idle,
         ActiveSinceUtc = DateTimeOffset.UtcNow
     };
     private int _volume = 50;
@@ -98,21 +96,6 @@ public sealed class PlaybackService : IPlaybackService
     private int _queueItemCount;
     private double _durationSeconds;
     private double _positionSeconds;
-
-    // Anchors for interpolation of playback position between MA websocket events
-    private double? _elapsedTimeAnchorSeconds;
-    private DateTimeOffset? _elapsedTimeLastUpdatedUtc;
-    
-    // Seek protection to prevent regression of playback position when MA sends stale elapsed time updates after a seek operation.
-    private DateTimeOffset? _seekProtectionUntilUtc;
-    private double? _pendingSeekTargetSeconds;
-    private string? _pendingSeekQueueItemId;
-    
-    // Track transition guard: after item change, accept only plausible queue_time updates for a short window to avoid old-track elapsed events causing forward jumps.
-    private string? _transitionGuardQueueItemId;
-    private DateTimeOffset? _transitionGuardStartedUtc;
-    private double? _transitionGuardStartElapsedSeconds;
-    private DateTimeOffset? _transitionGuardUntilUtc;
     
     #endregion
 
@@ -140,47 +123,6 @@ public sealed class PlaybackService : IPlaybackService
 
         _activePlayer.PropertyChanged += OnActivePlayerPropertyChanged;
         _musicAssistantEventHub.QueueEventReceived += OnQueueEventReceived;
-
-        _progressInterpolationTask = Task.Run(async () =>
-        {
-            while (!_disposeCts.IsCancellationRequested)
-            {
-                try
-                {
-                    await Task.Delay(TimeSpan.FromMilliseconds(250), _disposeCts.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-
-                if (_playbackState.State != PlaybackStateKind.Playing)
-                {
-                    continue;
-                }
-
-                double? elapsedAnchor;
-                DateTimeOffset? elapsedAnchorUpdatedUtc;
-                lock (_progressSync)
-                {
-                    elapsedAnchor = _elapsedTimeAnchorSeconds;
-                    elapsedAnchorUpdatedUtc = _elapsedTimeLastUpdatedUtc;
-                }
-
-                if (elapsedAnchor is not double anchorSeconds || elapsedAnchorUpdatedUtc is not DateTimeOffset updatedUtc)
-                {
-                    continue;
-                }
-
-                var interpolated = anchorSeconds + Math.Max(0, (DateTimeOffset.UtcNow - updatedUtc).TotalSeconds);
-                if (_durationSeconds > 0)
-                {
-                    interpolated = Math.Min(interpolated, _durationSeconds);
-                }
-
-                PositionSeconds = interpolated;
-            }
-        }, CancellationToken.None);
     }
 
     #endregion
@@ -204,7 +146,7 @@ public sealed class PlaybackService : IPlaybackService
         get => _playbackState;
         set => SetProperty(ref _playbackState, value ?? new PlaybackStateCustom
         {
-            State = PlaybackStateKind.Unknown,
+            State = PlaybackStateType.Unknown,
             ActiveSinceUtc = DateTimeOffset.UtcNow
         });
     }
@@ -368,7 +310,7 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.PendingToPlaying, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.PendingToPlaying, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         try
         {
@@ -376,7 +318,7 @@ public sealed class PlaybackService : IPlaybackService
         }
         catch (Exception ex)
         {
-            PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+            PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
             _logger.LogError(ex, "PlayMedia request failed for ActivePlayerId={ActivePlayerId}", ActivePlayerId);
             throw;
         }
@@ -403,7 +345,7 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.PendingToPlaying, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.PendingToPlaying, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         try
         {
@@ -411,7 +353,7 @@ public sealed class PlaybackService : IPlaybackService
         }
         catch (Exception ex)
         {
-            PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+            PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
             _logger.LogError(ex, "PlayMediaNext request failed for ActivePlayerId={ActivePlayerId}", ActivePlayerId);
             throw;
         }
@@ -438,7 +380,7 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.PendingToPlaying, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.PendingToPlaying, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         try
         {
@@ -446,7 +388,7 @@ public sealed class PlaybackService : IPlaybackService
         }
         catch (Exception ex)
         {
-            PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+            PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
             _logger.LogError(ex, "PlayMediaLast request failed for ActivePlayerId={ActivePlayerId}", ActivePlayerId);
             throw;
         }
@@ -473,7 +415,7 @@ public sealed class PlaybackService : IPlaybackService
             (mediaItems[i], mediaItems[j]) = (mediaItems[j], mediaItems[i]);
         }
 
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.PendingToPlaying, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.PendingToPlaying, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         try
         {
@@ -481,7 +423,7 @@ public sealed class PlaybackService : IPlaybackService
         }
         catch (Exception ex)
         {
-            PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+            PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
             _logger.LogError(ex, "ShufflePlayMedia request failed for ActivePlayerId={ActivePlayerId}", ActivePlayerId);
             throw;
         }
@@ -571,56 +513,23 @@ public sealed class PlaybackService : IPlaybackService
 
     public async Task TogglePlayPauseAsync(CancellationToken cancellationToken = default)
     {
-        var wasPlayingBeforeToggle = PlaybackState.State == PlaybackStateKind.Playing;
-
-        PlaybackState = new PlaybackStateCustom
-        {
-            State = wasPlayingBeforeToggle ? PlaybackStateKind.PendingToPaused : PlaybackStateKind.PendingToPlaying,
-            ActiveSinceUtc = DateTimeOffset.UtcNow
-        };
         await _activePlayer.TogglePlayPauseAsync(cancellationToken);
-
-        if (OutputMode == PlaybackOutputMode.LocalOffline)
-        {
-            PlaybackState = new PlaybackStateCustom
-            {
-                State = MapState(_activePlayer.PlayerState),
-                ActiveSinceUtc = DateTimeOffset.UtcNow
-            };
-        }
     }
 
     public async Task NextTrackAsync(CancellationToken cancellationToken = default)
     {
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.PendingToNextTrack, ActiveSinceUtc = DateTimeOffset.UtcNow };
         await _activePlayer.NextAsync(cancellationToken);
     }
 
     public async Task PreviousTrackAsync(CancellationToken cancellationToken = default)
     {
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.PendingToPreviousTrack, ActiveSinceUtc = DateTimeOffset.UtcNow };
         await _activePlayer.PreviousAsync(cancellationToken);
     }
 
     public async Task SeekAsync(double seconds, double durationSeconds, CancellationToken cancellationToken = default)
     {
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.PendingToSeek, ActiveSinceUtc = DateTimeOffset.UtcNow };
         var clamped = (int)Math.Round(Math.Clamp(seconds, 0, Math.Max(0, durationSeconds)));
         await _activePlayer.SeekAsync(clamped, cancellationToken);
-        PositionSeconds = clamped;
-
-        lock (_progressSync)
-        {
-            _elapsedTimeAnchorSeconds = clamped;
-            _elapsedTimeLastUpdatedUtc = DateTimeOffset.UtcNow;
-            _pendingSeekTargetSeconds = clamped;
-            _pendingSeekQueueItemId = Normalize(_currentQueueItem?.QueueItemId);
-            _seekProtectionUntilUtc = DateTimeOffset.UtcNow.AddMilliseconds(1200);
-            _transitionGuardQueueItemId = null;
-            _transitionGuardStartedUtc = null;
-            _transitionGuardStartElapsedSeconds = null;
-            _transitionGuardUntilUtc = null;
-        }
     }
 
     public async Task SetVolumeAsync(int volume, CancellationToken cancellationToken = default)
@@ -709,18 +618,6 @@ public sealed class PlaybackService : IPlaybackService
 
         _disposeCts.Cancel();
 
-        if (_progressInterpolationTask != null)
-        {
-            try
-            {
-                await _progressInterpolationTask;
-            }
-            catch (OperationCanceledException)
-            {
-                // Expected on shutdown.
-            }
-        }
-
         _disposeCts.Dispose();
 
         foreach (var player in _players.Values.Distinct())
@@ -756,136 +653,41 @@ public sealed class PlaybackService : IPlaybackService
             _activeQueueId = eventQueueId;
         }
 
-        // queue time update events: keep playback progress event-driven without queue HTTP fetches
         if (string.Equals(e.Event, "queue_time_updated", StringComparison.OrdinalIgnoreCase))
         {
-            if (e.ElapsedTimeSeconds is double elapsedSeconds)
-            {
-                var clampedElapsed = Math.Max(0, elapsedSeconds);
+            return;
+        }
 
-                // Seek guard: ignore elapsed time updates that regress behind a recent seek target within a short time window, as they are likely stale events from before the seek was issued
-                if (ShouldIgnoreSeekRegression(clampedElapsed, source: "queue_time_updated"))
-                {
-                    return;
-                }
-
-                // Transition guard: after a track change, ignore elapsed time updates that don't show plausible forward progress for the new track within a short time window, as they are likely stale events from the previous track
-                var currentItemId = Normalize(_currentQueueItem?.QueueItemId);
-                if (ShouldIgnoreTrackTransitionOutlier(currentItemId, clampedElapsed, source: "queue_time_updated"))
-                {
-                    return;
-                }
-
-                PositionSeconds = clampedElapsed;
-
-                _logger.LogDebug(
-                    "Queue time updated: QueueId={QueueId}, ElapsedSeconds={ElapsedSeconds}",
-                    eventQueueId,
-                    clampedElapsed);
-
-                if (PlaybackState.IsPending || PlaybackState.State == PlaybackStateKind.Buffering)
-                {
-                    PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.Playing, ActiveSinceUtc = DateTimeOffset.UtcNow };
-                }
-
-                lock (_progressSync)
-                {
-                    _elapsedTimeAnchorSeconds = clampedElapsed;
-                    _elapsedTimeLastUpdatedUtc = DateTimeOffset.UtcNow;
-                }
-            }
-
+        var queue = e.Queue;
+        if (queue == null)
+        {
             return;
         }
 
         // other queue events: apply event state updates immediately, enrich with debounced HTTP refreshes if queue items changed
         {
             // Apply event state updates
-            _activeQueueId = Normalize(e.Queue.QueueId) ?? _activeQueueId;
+            _activeQueueId = Normalize(queue.QueueId) ?? _activeQueueId;
 
-            var previousQueueItemId = Normalize(_currentQueueItem?.QueueItemId);
-            var incomingQueueItemId = Normalize(e.Queue.CurrentItem?.QueueItemId);
-            var isTrackChanged = !string.Equals(previousQueueItemId, incomingQueueItemId, StringComparison.Ordinal);
+            QueueItemCount = queue.ItemCount;
+            ShuffleEnabled = queue.ShuffleEnabled;
+            RepeatMode = queue.RepeatMode?.ToString();
+            DontStopTheMusicEnabled = queue.DontStopTheMusicEnabled;
 
-            QueueItemCount = e.Queue.ItemCount;
-            ShuffleEnabled = e.Queue.ShuffleEnabled;
-            RepeatMode = e.Queue.RepeatMode?.ToString();
-            DontStopTheMusicEnabled = e.Queue.DontStopTheMusicEnabled;
+            SetProperty(ref _currentQueueItem, queue.CurrentItem, nameof(CurrentQueueItem));
 
-            SetProperty(ref _currentQueueItem, e.Queue.CurrentItem, nameof(CurrentQueueItem));
+            CurrentQueueIndex = queue.CurrentIndex;
 
-            CurrentQueueIndex = e.Queue.CurrentIndex;
-
-            DurationSeconds = Math.Max(0, e.Queue.CurrentItem?.Duration ?? 0);
-            var queueElapsed = e.Queue.ElapsedTime.HasValue
-                ? Math.Max(0, e.Queue.ElapsedTime.Value)
-                : (isTrackChanged ? 0 : PositionSeconds);
-
-            // Seek guard: if the event contains an elapsed time that regresses behind a recent seek target within a short time window, treat it as a likely stale event from before the seek was issued and ignore the regression by keeping the current position
-            if (ShouldIgnoreSeekRegression(queueElapsed, source: "queue_payload"))
-            {
-                queueElapsed = PositionSeconds;
-            }
-
-            // Transition guard: if this is a track change and the event contains an elapsed time that doesn't show plausible forward progress for the new track within a short time window, treat it as a likely stale event from the previous track and ignore it by keeping the current position
-            var ignoreQueuePayloadProgress = !isTrackChanged
-                && ShouldIgnoreTransitionQueuePayloadProgress(incomingQueueItemId, queueElapsed);
-
-            if (!ignoreQueuePayloadProgress)
-            {
-                PositionSeconds = queueElapsed;
-            }
-
-            var elapsedUpdatedAtUtc = DateTimeOffset.UtcNow;
-            if (e.Queue.ElapsedTimeLastUpdated is double elapsedUpdatedEpochSeconds && elapsedUpdatedEpochSeconds > 0)
-            {
-                var elapsedUpdatedEpochMilliseconds = (long)Math.Round(elapsedUpdatedEpochSeconds * 1000d, MidpointRounding.AwayFromZero);
-                if (elapsedUpdatedEpochMilliseconds > 0)
-                {
-                    elapsedUpdatedAtUtc = DateTimeOffset.FromUnixTimeMilliseconds(elapsedUpdatedEpochMilliseconds);
-                }
-            }
-
-            // If the track changed but the elapsed time in the event is very low (e.g. 0 or 1 second), it's likely that the elapsed time was reset by the player before the new track actually started playing. In this case, update the elapsed time anchor to prevent interpolation from jumping back to a high elapsed time for the new track.
-            if (isTrackChanged && queueElapsed <= 1)
-            {
-                elapsedUpdatedAtUtc = DateTimeOffset.UtcNow;
-            }
-
-            if (isTrackChanged)
-            {
-                var transitionStartedUtc = DateTimeOffset.UtcNow;
-                lock (_progressSync)
-                {
-                    _transitionGuardQueueItemId = incomingQueueItemId;
-                    _transitionGuardStartedUtc = transitionStartedUtc;
-                    _transitionGuardStartElapsedSeconds = queueElapsed;
-                    _transitionGuardUntilUtc = transitionStartedUtc.AddSeconds(4);
-                }
-            }
-
-            if (!ignoreQueuePayloadProgress)
-            {
-                lock (_progressSync)
-                {
-                    _elapsedTimeAnchorSeconds = queueElapsed;
-                    _elapsedTimeLastUpdatedUtc = elapsedUpdatedAtUtc;
-                }
-            }
-
-            var mappedState = MapState(e.Queue.State);
-            var effectiveState = ResolveEffectivePlaybackState(mappedState);
-
-            if (effectiveState != mappedState)
-            {
-                _logger.LogDebug(
-                    "Keeping pending playback state. QueueId={QueueId}, PendingState={PendingState}, IncomingState={IncomingState}",
-                    eventQueueId,
-                    PlaybackState.State,
-                    mappedState);
-            }
-
-            PlaybackState = new PlaybackStateCustom { State = effectiveState, ActiveSinceUtc = DateTimeOffset.UtcNow };
+            _logger.LogDebug(
+                "Queue event applied. Event={Event}, QueueId={QueueId}, ItemCount={ItemCount}, CurrentIndex={CurrentIndex}, CurrentItemId={CurrentItemId}, ShuffleEnabled={ShuffleEnabled}, RepeatMode={RepeatMode}, DontStopTheMusicEnabled={DontStopTheMusicEnabled}",
+                e.Event,
+                _activeQueueId,
+                queue.ItemCount,
+                queue.CurrentIndex,
+                queue.CurrentItem?.QueueItemId,
+                queue.ShuffleEnabled,
+                queue.RepeatMode,
+                queue.DontStopTheMusicEnabled);
         }
 
         if (!ShouldRefreshQueue(e))
@@ -918,7 +720,7 @@ public sealed class PlaybackService : IPlaybackService
                     return;
                 }
 
-                _logger.LogInformation("Queue refresh triggered by event. Event={Event}, QueueId={QueueId}, RequestId={RequestId}", e.Event, _activeQueueId, requestId);
+                _logger.LogInformation("Queue HTTP refresh triggered. Event={Event}, QueueId={QueueId}, RequestId={RequestId}", e.Event, _activeQueueId, requestId);
                 await RefreshQueueAsync(nextCts.Token);
             }
             catch (OperationCanceledException)
@@ -970,48 +772,15 @@ public sealed class PlaybackService : IPlaybackService
 
             CurrentQueueIndex = queue.CurrentIndex;
 
-            DurationSeconds = Math.Max(0, queue.CurrentItem?.Duration ?? 0);
-            var queueElapsed = Math.Max(0, queue.ElapsedTime ?? 0);
-            PositionSeconds = queueElapsed;
-
-            var elapsedUpdatedAtUtc = DateTimeOffset.UtcNow;
-            if (queue.ElapsedTimeLastUpdated is double elapsedUpdatedEpochSeconds && elapsedUpdatedEpochSeconds > 0)
-            {
-                var elapsedUpdatedEpochMilliseconds = (long)Math.Round(elapsedUpdatedEpochSeconds * 1000d, MidpointRounding.AwayFromZero);
-                if (elapsedUpdatedEpochMilliseconds > 0)
-                {
-                    elapsedUpdatedAtUtc = DateTimeOffset.FromUnixTimeMilliseconds(elapsedUpdatedEpochMilliseconds);
-                }
-            }
-
-            lock (_progressSync)
-            {
-                _elapsedTimeAnchorSeconds = queueElapsed;
-                _elapsedTimeLastUpdatedUtc = elapsedUpdatedAtUtc;
-            }
-
-            var mappedState = MapState(queue.State);
-            var effectiveState = ResolveEffectivePlaybackState(mappedState);
-
-            if (effectiveState != mappedState)
-            {
-                _logger.LogDebug(
-                    "Keeping pending playback state from HTTP snapshot. QueueId={QueueId}, PendingState={PendingState}, IncomingState={IncomingState}",
-                    queue.QueueId,
-                    PlaybackState.State,
-                    mappedState);
-            }
-
-            PlaybackState = new PlaybackStateCustom { State = effectiveState, ActiveSinceUtc = DateTimeOffset.UtcNow };
-
             _logger.LogDebug(
-                "Full Queue refresh via HTTP applied. QueueId={QueueId}, Items={ItemCount}, CurrentIndex={CurrentIndex}, CurrentItemId={CurrentItemId}, State={State}, Elapsed={Elapsed}",
+                "Queue HTTP refresh applied. QueueId={QueueId}, ItemCount={ItemCount}, CurrentIndex={CurrentIndex}, CurrentItemId={CurrentItemId}, ShuffleEnabled={ShuffleEnabled}, RepeatMode={RepeatMode}, DontStopTheMusicEnabled={DontStopTheMusicEnabled}",
                 queue.QueueId,
                 queue.ItemCount,
                 queue.CurrentIndex,
                 queue.CurrentItem?.QueueItemId,
-                queue.State,
-                queue.ElapsedTime);
+                queue.ShuffleEnabled,
+                queue.RepeatMode,
+                queue.DontStopTheMusicEnabled);
 
         }
         catch (OperationCanceledException)
@@ -1032,27 +801,11 @@ public sealed class PlaybackService : IPlaybackService
         _currentQueueItems.ReplaceRange(Array.Empty<QueueItem>());
         SetProperty(ref _currentQueueItem, null, nameof(CurrentQueueItem));
 
-        lock (_progressSync)
-        {
-            _elapsedTimeAnchorSeconds = null;
-            _elapsedTimeLastUpdatedUtc = null;
-            _seekProtectionUntilUtc = null;
-            _pendingSeekTargetSeconds = null;
-            _pendingSeekQueueItemId = null;
-            _transitionGuardQueueItemId = null;
-            _transitionGuardStartedUtc = null;
-            _transitionGuardStartElapsedSeconds = null;
-            _transitionGuardUntilUtc = null;
-        }
-
         CurrentQueueIndex = null;
         QueueItemCount = 0;
-        DurationSeconds = 0;
-        PositionSeconds = 0;
         ShuffleEnabled = null;
         RepeatMode = null;
         DontStopTheMusicEnabled = null;
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateKind.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
     }
 
     #endregion
@@ -1063,16 +816,9 @@ public sealed class PlaybackService : IPlaybackService
     {
         Volume = _activePlayer.Volume;
         IsMuted = _activePlayer.IsMuted;
-
-        // Only sync playback state from the player when in LocalOffline mode, as in other modes the MA event hub is the source of truth for playback state.
-        if (OutputMode == PlaybackOutputMode.LocalOffline)
-        {
-            PlaybackState = new PlaybackStateCustom
-            {
-                State = MapState(_activePlayer.PlayerState),
-                ActiveSinceUtc = DateTimeOffset.UtcNow
-            };
-        }
+        DurationSeconds = _activePlayer.DurationSeconds;
+        PositionSeconds = _activePlayer.PositionSeconds;
+        PlaybackState = _activePlayer.PlaybackState;
     }
 
     private static string? Normalize(string? value)
@@ -1134,261 +880,6 @@ public sealed class PlaybackService : IPlaybackService
         }
 
         return false;
-    }
-
-    private PlaybackStateKind ResolveEffectivePlaybackState(PlaybackStateKind mappedState)
-    {
-        var currentState = PlaybackState;
-
-        if (!currentState.IsPending)
-        {
-            return mappedState;
-        }
-
-        return currentState.State switch
-        {
-            PlaybackStateKind.PendingToPlaying
-                when mappedState is PlaybackStateKind.Idle or PlaybackStateKind.Buffering or PlaybackStateKind.Unknown
-                => PlaybackStateKind.PendingToPlaying,
-
-            PlaybackStateKind.PendingToNextTrack
-                when mappedState is PlaybackStateKind.Idle or PlaybackStateKind.Buffering or PlaybackStateKind.Unknown
-                => PlaybackStateKind.PendingToNextTrack,
-
-            PlaybackStateKind.PendingToPreviousTrack
-                when mappedState is PlaybackStateKind.Idle or PlaybackStateKind.Buffering or PlaybackStateKind.Unknown
-                => PlaybackStateKind.PendingToPreviousTrack,
-
-            PlaybackStateKind.PendingToSeek
-                when mappedState is PlaybackStateKind.Idle or PlaybackStateKind.Buffering or PlaybackStateKind.Unknown
-                => PlaybackStateKind.PendingToSeek,
-
-            PlaybackStateKind.PendingToPaused
-                when mappedState is PlaybackStateKind.Playing or PlaybackStateKind.Buffering or PlaybackStateKind.Unknown
-                => PlaybackStateKind.PendingToPaused,
-
-            _ => mappedState,
-        };
-    }
-
-    private bool ShouldIgnoreSeekRegression(double candidateSeconds, string source)
-    {
-        DateTimeOffset? seekProtectionUntilUtc;
-        double? pendingSeekTargetSeconds;
-        string? pendingSeekQueueItemId;
-
-        lock (_progressSync)
-        {
-            seekProtectionUntilUtc = _seekProtectionUntilUtc;
-            pendingSeekTargetSeconds = _pendingSeekTargetSeconds;
-            pendingSeekQueueItemId = _pendingSeekQueueItemId;
-        }
-
-        if (seekProtectionUntilUtc is not DateTimeOffset protectionUntil
-            || pendingSeekTargetSeconds is not double seekTarget)
-        {
-            return false;
-        }
-
-        var currentItemId = Normalize(_currentQueueItem?.QueueItemId);
-        if (!string.Equals(pendingSeekQueueItemId, currentItemId, StringComparison.Ordinal))
-        {
-            lock (_progressSync)
-            {
-                _seekProtectionUntilUtc = null;
-                _pendingSeekTargetSeconds = null;
-                _pendingSeekQueueItemId = null;
-            }
-
-            return false;
-        }
-
-        if (DateTimeOffset.UtcNow >= protectionUntil)
-        {
-            lock (_progressSync)
-            {
-                _seekProtectionUntilUtc = null;
-                _pendingSeekTargetSeconds = null;
-                _pendingSeekQueueItemId = null;
-            }
-
-            return false;
-        }
-
-        var lowerBound = Math.Max(0, seekTarget - 1.5);
-        var upperBound = seekTarget + 3.0;
-        if (candidateSeconds < lowerBound || candidateSeconds > upperBound)
-        {
-            _logger.LogDebug(
-                "Ignored seek regression/outlier. Source={Source}, Candidate={Candidate}, SeekTarget={SeekTarget}",
-                source,
-                candidateSeconds,
-                seekTarget);
-            return true;
-        }
-
-        lock (_progressSync)
-        {
-            _seekProtectionUntilUtc = null;
-            _pendingSeekTargetSeconds = null;
-            _pendingSeekQueueItemId = null;
-        }
-
-        return false;
-    }
-
-    private bool ShouldIgnoreTrackTransitionOutlier(string? currentItemId, double candidateSeconds, string source)
-    {
-        string? guardItemId;
-        DateTimeOffset? guardStartedUtc;
-        double? guardStartElapsedSeconds;
-        DateTimeOffset? guardUntilUtc;
-
-        lock (_progressSync)
-        {
-            guardItemId = _transitionGuardQueueItemId;
-            guardStartedUtc = _transitionGuardStartedUtc;
-            guardStartElapsedSeconds = _transitionGuardStartElapsedSeconds;
-            guardUntilUtc = _transitionGuardUntilUtc;
-        }
-
-        if (string.IsNullOrWhiteSpace(guardItemId)
-            || guardStartedUtc is not DateTimeOffset startedUtc
-            || guardStartElapsedSeconds is not double startElapsedSeconds
-            || guardUntilUtc is not DateTimeOffset untilUtc)
-        {
-            return false;
-        }
-
-        // Guard belongs to a previous item; drop it.
-        if (!string.Equals(guardItemId, currentItemId, StringComparison.Ordinal))
-        {
-            lock (_progressSync)
-            {
-                _transitionGuardQueueItemId = null;
-                _transitionGuardStartedUtc = null;
-                _transitionGuardStartElapsedSeconds = null;
-                _transitionGuardUntilUtc = null;
-            }
-
-            return false;
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        if (now >= untilUtc)
-        {
-            lock (_progressSync)
-            {
-                _transitionGuardQueueItemId = null;
-                _transitionGuardStartedUtc = null;
-                _transitionGuardStartElapsedSeconds = null;
-                _transitionGuardUntilUtc = null;
-            }
-
-            return false;
-        }
-
-        // queue_time_updated should not jump far ahead of what is plausible since transition start.
-        const double jitterSeconds = 1.5;
-        var maxPlausible = Math.Max(0, startElapsedSeconds + (now - startedUtc).TotalSeconds + jitterSeconds);
-        if (candidateSeconds > maxPlausible)
-        {
-            _logger.LogDebug(
-                "Ignored transition outlier. Source={Source}, Candidate={Candidate}, MaxPlausible={MaxPlausible}, ItemId={ItemId}",
-                source,
-                candidateSeconds,
-                maxPlausible,
-                currentItemId);
-            return true;
-        }
-
-        // First plausible queue_time_updated confirms the new track timing model.
-        lock (_progressSync)
-        {
-            _transitionGuardQueueItemId = null;
-            _transitionGuardStartedUtc = null;
-            _transitionGuardStartElapsedSeconds = null;
-            _transitionGuardUntilUtc = null;
-        }
-
-        return false;
-    }
-
-    private bool ShouldIgnoreTransitionQueuePayloadProgress(string? currentItemId, double candidateSeconds)
-    {
-        string? guardItemId;
-        DateTimeOffset? guardStartedUtc;
-        double? guardStartElapsedSeconds;
-        DateTimeOffset? guardUntilUtc;
-
-        lock (_progressSync)
-        {
-            guardItemId = _transitionGuardQueueItemId;
-            guardStartedUtc = _transitionGuardStartedUtc;
-            guardStartElapsedSeconds = _transitionGuardStartElapsedSeconds;
-            guardUntilUtc = _transitionGuardUntilUtc;
-        }
-
-        if (string.IsNullOrWhiteSpace(guardItemId)
-            || guardStartedUtc is not DateTimeOffset startedUtc
-            || guardStartElapsedSeconds is not double startElapsedSeconds
-            || guardUntilUtc is not DateTimeOffset untilUtc)
-        {
-            return false;
-        }
-
-        if (!string.Equals(guardItemId, currentItemId, StringComparison.Ordinal))
-        {
-            lock (_progressSync)
-            {
-                _transitionGuardQueueItemId = null;
-                _transitionGuardStartedUtc = null;
-                _transitionGuardStartElapsedSeconds = null;
-                _transitionGuardUntilUtc = null;
-            }
-
-            return false;
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        if (now >= untilUtc)
-        {
-            lock (_progressSync)
-            {
-                _transitionGuardQueueItemId = null;
-                _transitionGuardStartedUtc = null;
-                _transitionGuardStartElapsedSeconds = null;
-                _transitionGuardUntilUtc = null;
-            }
-
-            return false;
-        }
-
-        const double jitterSeconds = 1.0;
-        var maxPlausible = Math.Max(0, startElapsedSeconds + (now - startedUtc).TotalSeconds + jitterSeconds);
-        if (candidateSeconds > maxPlausible)
-        {
-            _logger.LogDebug(
-                "Ignored queue payload transition outlier. Candidate={Candidate}, MaxPlausible={MaxPlausible}, ItemId={ItemId}",
-                candidateSeconds,
-                maxPlausible,
-                currentItemId);
-        }
-
-        // While transition guard is active, queue_time_updated is authoritative for progress.
-        return true;
-    }
-
-    private static PlaybackStateKind MapState(mashin.Models.PlaybackState? state)
-    {
-        return state switch
-        {
-            mashin.Models.PlaybackState.Playing => PlaybackStateKind.Playing,
-            mashin.Models.PlaybackState.Paused => PlaybackStateKind.Paused,
-            mashin.Models.PlaybackState.Buffering => PlaybackStateKind.Buffering,
-            mashin.Models.PlaybackState.Idle => PlaybackStateKind.Idle,
-            _ => PlaybackStateKind.Unknown
-        };
     }
 
     private async Task<List<MediaItem>> ResolvePlayableMediaItemsAsync(IReadOnlyList<MediaItem> items)

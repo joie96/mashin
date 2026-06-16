@@ -58,6 +58,9 @@ public static class MauiProgram
         builder.Logging.AddFilter("Sendspin.SDK", LogLevel.Warning);
         builder.Logging.AddFilter("mashin", LogLevel.Warning);
         builder.Logging.AddFilter("mashin.Services.PlaybackService", LogLevel.Debug);
+        builder.Logging.AddFilter("mashin.Services.SendspinPlayerService", LogLevel.Debug);
+        builder.Logging.AddFilter("mashin.Services.RemotePlayerService", LogLevel.Debug);
+        builder.Logging.AddFilter("mashin.Services.LocalDummyPlayerService", LogLevel.Debug);
 #else
         // Production Logging
         builder.Logging.SetMinimumLevel(LogLevel.Information);
