@@ -15,6 +15,17 @@ namespace mashin.Services;
 /// </summary>
 public class MusicAssistantService
 {
+    private static readonly SocketsHttpHandler SharedHttpHandler = new()
+    {
+        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
+        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+        PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+        MaxConnectionsPerServer = 16,
+        ConnectTimeout = TimeSpan.FromSeconds(10),
+        UseCookies = false,
+        EnableMultipleHttp2Connections = true
+    };
+
     private readonly ILogger<MusicAssistantService> _logger;
     private readonly SettingsService _settings;
     private readonly HttpClient _httpClient;
@@ -50,10 +61,13 @@ public class MusicAssistantService
     {
         _logger = logger;
         _settings = settings;
-        _httpClient = new HttpClient
+
+        _httpClient = new HttpClient(SharedHttpHandler, disposeHandler: false)
         {
             Timeout = TimeSpan.FromSeconds(60),
-            BaseAddress = new Uri(settings.MusicAssistantUrl)
+            BaseAddress = new Uri(settings.MusicAssistantUrl),
+            DefaultRequestVersion = HttpVersion.Version20,
+            DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower
         };
 
         _authToken = _settings.AuthToken;
@@ -82,7 +96,7 @@ public class MusicAssistantService
             _logger.LogDebug("Sending command: {Command}", command);
 
             var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = await _httpClient.PostAsync("/api", content);
+            using var response = await _httpClient.PostAsync("/api", content);
 
             if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
             {

@@ -305,6 +305,8 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
                 }
 
                 using var socket = new ClientWebSocket();
+                socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
+                socket.Options.SetBuffer(16 * 1024, 16 * 1024);
                 _socket = socket;
 
                 var websocketUri = BuildWebSocketUri(_settings.MusicAssistantUrl);
