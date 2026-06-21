@@ -662,12 +662,19 @@ public sealed class PlaybackService : IPlaybackService
         // Apply event state updates
         _activeQueueId = Normalize(queue.QueueId) ?? _activeQueueId;
 
+        var previousQueueItem = _currentQueueItem;
+
         QueueItemCount = queue.ItemCount;
         ShuffleEnabled = queue.ShuffleEnabled;
         RepeatMode = queue.RepeatMode?.ToString();
         DontStopTheMusicEnabled = queue.DontStopTheMusicEnabled;
 
         SetProperty(ref _currentQueueItem, queue.CurrentItem, nameof(CurrentQueueItem));
+
+        if (HasTrackChanged(previousQueueItem, _currentQueueItem))
+        {
+            PositionSeconds = 0;
+        }
 
         CurrentQueueIndex = queue.CurrentIndex;
 
@@ -761,7 +768,14 @@ public sealed class PlaybackService : IPlaybackService
             RepeatMode = queue.RepeatMode?.ToString();
             DontStopTheMusicEnabled = queue.DontStopTheMusicEnabled;
 
+            var previousQueueItem = _currentQueueItem;
+
             SetProperty(ref _currentQueueItem, queue.CurrentItem, nameof(CurrentQueueItem));
+
+            if (HasTrackChanged(previousQueueItem, _currentQueueItem))
+            {
+                PositionSeconds = 0;
+            }
 
             CurrentQueueIndex = queue.CurrentIndex;
 
@@ -793,6 +807,8 @@ public sealed class PlaybackService : IPlaybackService
         _activeQueueId = null;
         _currentQueueItems.ReplaceRange(Array.Empty<QueueItem>());
         SetProperty(ref _currentQueueItem, null, nameof(CurrentQueueItem));
+        PositionSeconds = 0;
+        DurationSeconds = 0;
 
         CurrentQueueIndex = null;
         QueueItemCount = 0;
@@ -964,6 +980,28 @@ public sealed class PlaybackService : IPlaybackService
         }
 
         return null;
+    }
+
+    private static bool HasTrackChanged(QueueItem? previousItem, QueueItem? nextItem)
+    {
+        var previousQueueItemId = Normalize(previousItem?.QueueItemId);
+        var nextQueueItemId = Normalize(nextItem?.QueueItemId);
+
+        if (!string.IsNullOrWhiteSpace(previousQueueItemId)
+            && !string.IsNullOrWhiteSpace(nextQueueItemId))
+        {
+            return !string.Equals(previousQueueItemId, nextQueueItemId, StringComparison.Ordinal);
+        }
+
+        var previousTrackId = Normalize(previousItem?.MediaItem?.ItemId);
+        var nextTrackId = Normalize(nextItem?.MediaItem?.ItemId);
+
+        if (string.IsNullOrWhiteSpace(previousTrackId) || string.IsNullOrWhiteSpace(nextTrackId))
+        {
+            return false;
+        }
+
+        return !string.Equals(previousTrackId, nextTrackId, StringComparison.Ordinal);
     }
 
     private bool SetProperty<T>(ref T storage, T value, [CallerMemberName] string? propertyName = null)
