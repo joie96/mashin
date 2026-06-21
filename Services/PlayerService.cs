@@ -5,7 +5,6 @@ using Sendspin.SDK.Connection;
 using Sendspin.SDK.Models;
 using Sendspin.SDK.Protocol.Messages;
 using System.ComponentModel;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 
 namespace mashin.Services;
@@ -41,7 +40,16 @@ public sealed class SendspinPlayerService : IPlayerService
 {
     #region Fields
 
+    private sealed class ProgressAnchor
+    {
+        public long? ServerTimestampUs { get; init; }
+        public double ServerPositionSeconds { get; init; }
+        public DateTimeOffset LocalReceivedUtc { get; init; }
+    }
+
     private const int PositionTimerIntervalMs = 250;
+    private const double SeekGuardToleranceSeconds = 3;
+    private const int SeekGuardLifetimeSeconds = 10;
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly ILogger<SendspinPlayerService> _logger;
@@ -63,8 +71,9 @@ public sealed class SendspinPlayerService : IPlayerService
     private int _volume = 50;
     private bool _isMuted;
     private string? _activePlayerId;
-    private double _lastServerPosition;
-    private DateTimeOffset? _lastServerPositionUpdateUtc;
+    private ProgressAnchor? _progressAnchor;
+    private double? _seekGuardTargetPositionSeconds;
+    private DateTimeOffset? _seekGuardExpiresUtc;
     private readonly Task _progressInterpolationTask;
 
     #endregion
@@ -97,26 +106,23 @@ public sealed class SendspinPlayerService : IPlayerService
                 try
                 {
                     await Task.Delay(PositionTimerIntervalMs, _disposeCts.Token);
-                    if (PlaybackState.State != PlaybackStateType.Playing)
-                    {
+                    if (PlaybackState.State != PlaybackStateType.Playing)                    {
                         continue;
                     }
 
-                    double anchorPosition;
-                    DateTimeOffset? anchorUpdatedUtc;
+                    ProgressAnchor? anchor;
                     lock (_progressSync)
                     {
-                        anchorPosition = _lastServerPosition;
-                        anchorUpdatedUtc = _lastServerPositionUpdateUtc;
+                        anchor = _progressAnchor;
                     }
 
-                    if (anchorUpdatedUtc is not DateTimeOffset updatedUtc)
+                    if (anchor is null)
                     {
                         continue;
                     }
 
-                    var elapsedSeconds = Math.Max(0, (DateTimeOffset.UtcNow - updatedUtc).TotalSeconds);
-                    var interpolated = anchorPosition + elapsedSeconds;
+                    var elapsedSeconds = Math.Max(0, (DateTimeOffset.UtcNow - anchor.LocalReceivedUtc).TotalSeconds);
+                    var interpolated = anchor.ServerPositionSeconds + elapsedSeconds;
                     if (DurationSeconds > 0)
                     {
                         interpolated = Math.Min(interpolated, DurationSeconds);
@@ -125,7 +131,7 @@ public sealed class SendspinPlayerService : IPlayerService
                     _logger.LogTrace(
                         "Interpolated playback position: {InterpolatedPositionSeconds:F3}s (anchor={AnchorPositionSeconds:F3}s, elapsed={ElapsedSeconds:F3}s)",
                         interpolated,
-                        anchorPosition,
+                        anchor.ServerPositionSeconds,
                         elapsedSeconds);
 
                     PositionSeconds = interpolated;
@@ -314,6 +320,13 @@ public sealed class SendspinPlayerService : IPlayerService
 
         PositionSeconds = clamped;
         UpdateProgressAnchor(clamped);
+        lock (_progressSync)
+        {
+            _seekGuardTargetPositionSeconds = clamped;
+            _seekGuardExpiresUtc = DateTimeOffset.UtcNow.AddSeconds(SeekGuardLifetimeSeconds);
+        }
+        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Seeking, ActiveSinceUtc = DateTimeOffset.UtcNow };
+
         _logger.LogInformation("Sendspin seek requested via MusicAssistant. TargetPlayerId={TargetPlayerId}, Seconds={Seconds}", targetPlayerId, clamped);
         return _musicAssistant.PlayerSeekAsync(targetPlayerId, clamped);
     }
@@ -472,13 +485,18 @@ public sealed class SendspinPlayerService : IPlayerService
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         return true;
     }
-    private void UpdateProgressAnchor(double positionSeconds)
+    private void UpdateProgressAnchor(double positionSeconds, long? serverTimestampUs = null)
     {
         var clamped = Math.Max(0, positionSeconds);
+        var localReceivedUtc = DateTimeOffset.UtcNow;
         lock (_progressSync)
         {
-            _lastServerPosition = clamped;
-            _lastServerPositionUpdateUtc = DateTimeOffset.UtcNow;
+            _progressAnchor = new ProgressAnchor
+            {
+                ServerTimestampUs = serverTimestampUs,
+                ServerPositionSeconds = clamped,
+                LocalReceivedUtc = localReceivedUtc
+            };
         }
     }
 
@@ -486,8 +504,7 @@ public sealed class SendspinPlayerService : IPlayerService
     {
         lock (_progressSync)
         {
-            _lastServerPosition = PositionSeconds;
-            _lastServerPositionUpdateUtc = null;
+            _progressAnchor = null;
         }
     }
 
@@ -504,104 +521,142 @@ public sealed class SendspinPlayerService : IPlayerService
     private void ApplySendspinGroupState(GroupState groupState)
     {
         var currentState = PlaybackState.State;
-        var nextState = MapSendspinPlaybackState(groupState.PlaybackState);
+        var nextState = MapSendspinPlaybackState(groupState.PlaybackState, currentState);
+        
         var metadata = groupState.Metadata;
-        var suppressIdleWhilePaused = currentState == PlaybackStateType.Paused
-            && nextState == PlaybackStateType.Idle;
+        var metadataTimestamp = metadata?.Timestamp;
+        var metadataProgress = metadata?.Progress;
+        var metadataProgressPositionMs = metadataProgress?.TrackProgress;
+        var metadataProgressDurationMs = metadataProgress?.TrackDuration;
+        var metadataProgressPositionSeconds = metadataProgressPositionMs / 1000d;
+        var metadataProgressDurationSeconds = metadataProgressDurationMs / 1000d;
+        var nowUtc = DateTimeOffset.UtcNow;
+        
+        long? progressAnchorLocalTimestampUs;
+        double progressAnchorServerPositionSeconds;
+        long? progressAnchorServerTimestampUs;
+        
+        double? seekGuardTargetPositionSeconds;
+        DateTimeOffset? seekGuardExpiresUtc;
+        lock (_progressSync)
+        {
+            progressAnchorLocalTimestampUs = _progressAnchor is null
+                ? null
+                : _progressAnchor.LocalReceivedUtc.ToUnixTimeMilliseconds() * 1000;
+            progressAnchorServerPositionSeconds = _progressAnchor?.ServerPositionSeconds ?? 0;
+            progressAnchorServerTimestampUs = _progressAnchor?.ServerTimestampUs;
+            
+            if (_seekGuardExpiresUtc.HasValue && _seekGuardExpiresUtc.Value <= nowUtc)
+            {
+                _seekGuardExpiresUtc = null;
+                _seekGuardTargetPositionSeconds = null;
+            }
 
+            seekGuardTargetPositionSeconds = _seekGuardTargetPositionSeconds;
+            seekGuardExpiresUtc = _seekGuardExpiresUtc;
+        }
+        
         _logger.LogDebug(
-            "Sendspin group update received. GroupPlaybackState={GroupPlaybackState}, MappedState={MappedState}, Duration={Duration}, Position={Position}, Progress={Progress}",
+            "Sendspin group update received. GroupPlaybackState={GroupPlaybackState}, MappedState={MappedState}, MetadataTimestamp={MetadataTimestamp}, LocalTimestamp={LocalTimestamp}, LocalServerTimestamp={LocalServerTimestamp}, LocalPositionSeconds={LocalPositionSeconds:F3}, ProgressDurationMs={ProgressDurationMs}, ProgressPositionMs={ProgressPositionMs}, PlaybackSpeed={PlaybackSpeed}",
             groupState.PlaybackState,
             nextState,
-            metadata?.Duration.HasValue == true ? metadata.Duration.Value : false,
-            metadata?.Position.HasValue == true ? metadata.Position.Value : false,
-            metadata?.Progress is not null ? metadata.Progress : false);
+            metadataTimestamp,
+            progressAnchorLocalTimestampUs,
+            progressAnchorServerTimestampUs,
+            progressAnchorServerPositionSeconds,
+            metadataProgressDurationMs,
+            metadataProgressPositionMs,
+            metadataProgress?.PlaybackSpeed);
 
-        // Keep paused state stable when Sendspin emits a transient Idle during resume.
-        var playbackStateToApply = suppressIdleWhilePaused ? currentState : nextState;
-        if (suppressIdleWhilePaused)
-        {
-            _logger.LogDebug(
-            "Sendspin group update keeps current state. CurrentState={CurrentState}, IncomingState={NextState}.",
-            currentState,
-                nextState);
-        }
-
+        // Set PlaybackState
         PlaybackState = new PlaybackStateCustom
         {
-            State = playbackStateToApply,
+            State = nextState,
             ActiveSinceUtc = DateTimeOffset.UtcNow
         };
 
-        var hasPositionUpdate = false;
-
-        if (metadata is not null)
+        // Set DurationSeconds
+        if (metadataProgressDurationSeconds.HasValue)
         {
-            if (metadata.Duration.HasValue)
+            DurationSeconds = Math.Max(0, metadataProgressDurationSeconds.Value);
+        }
+
+        // Don't update position & progress anchor if metadata timestamp is older than current progress anchor, except when resuming from paused to playing
+        if (metadataTimestamp.HasValue
+            && progressAnchorServerTimestampUs.HasValue
+            && metadataTimestamp.Value <= progressAnchorServerTimestampUs.Value
+            && !(currentState == PlaybackStateType.Paused && nextState == PlaybackStateType.Playing))
+        {
+            _logger.LogDebug(
+                "Sendspin group update skipped because metadata timestamp is not newer than current progress anchor. MetadataTimestamp={MetadataTimestamp}, ProgressAnchorServerTimestamp={ProgressAnchorServerTimestamp}",
+                metadataTimestamp,
+                progressAnchorServerTimestampUs);
+            return;
+        }
+
+        // Don't update position & progress anchor if seek guard is active and incoming position does not match seek target.
+        if (seekGuardTargetPositionSeconds.HasValue
+            && seekGuardExpiresUtc.HasValue
+            && seekGuardExpiresUtc.Value > nowUtc)
+        {
+            if (seekGuardTargetPositionSeconds is not double seekGuardTargetPosition)
             {
-                DurationSeconds = Math.Max(0, metadata.Duration.Value);
+                return;
             }
 
-            if (metadata.Position.HasValue)
+            if (!metadataProgressPositionSeconds.HasValue)
             {
-                var nextPosition = Math.Max(0, metadata.Position.Value);
-                if (DurationSeconds > 0)
-                {
-                    nextPosition = Math.Min(nextPosition, DurationSeconds);
-                }
+                _logger.LogDebug(
+                    "Sendspin group update skipped because seek guard is active but metadata position is missing. SeekTargetPositionSeconds={SeekTargetPositionSeconds}, SeekGuardExpiresUtc={SeekGuardExpiresUtc}",
+                    seekGuardTargetPosition,
+                    seekGuardExpiresUtc);
+                return;
+            }
 
-                PositionSeconds = nextPosition;
-                UpdateProgressAnchor(nextPosition);
-                hasPositionUpdate = true;
-            }
-            else if (metadata.Progress is null)
+            var seekGuardDeltaSeconds = Math.Abs(metadataProgressPositionSeconds.Value - seekGuardTargetPosition);
+            if (seekGuardDeltaSeconds > SeekGuardToleranceSeconds)
             {
-                // Keep displayed position, but stop interpolation until fresh progress arrives.
-                lock (_progressSync)
-                {
-                    _lastServerPositionUpdateUtc = null;
-                }
-                _logger.LogDebug("Sendspin group update without position/progress. Interpolation anchor timestamp cleared.");
+                _logger.LogDebug(
+                    "Sendspin group update skipped by seek guard. MetadataPositionSeconds={MetadataPositionSeconds:F3}, SeekTargetPositionSeconds={SeekTargetPositionSeconds:F3}, DeltaSeconds={DeltaSeconds:F3}, ToleranceSeconds={ToleranceSeconds:F3}, SeekGuardExpiresUtc={SeekGuardExpiresUtc}",
+                    metadataProgressPositionSeconds.Value,
+                    seekGuardTargetPosition,
+                    seekGuardDeltaSeconds,
+                    SeekGuardToleranceSeconds,
+                    seekGuardExpiresUtc);
+                return;
             }
+
+            lock (_progressSync)
+            {
+                _seekGuardTargetPositionSeconds = null;
+                _seekGuardExpiresUtc = null;
+            }
+        }
+
+        // Set PositionSeconds & progress anchor
+        if (metadataProgressPositionSeconds.HasValue)
+        {
+            var nextPosition = Math.Max(0, metadataProgressPositionSeconds.Value);
+            if (DurationSeconds > 0)
+            {
+                nextPosition = Math.Min(nextPosition, DurationSeconds);
+            }
+        
+            PositionSeconds = nextPosition;
+            UpdateProgressAnchor(nextPosition, metadataTimestamp);
         }
         
-        if (playbackStateToApply == PlaybackStateType.Playing)
-        {
-            // if next state is Playing but no position update was received, we might be resuming from pause or starting new playback without position info.
-            if (!hasPositionUpdate && currentState != PlaybackStateType.Playing)
-            {
-                if (currentState == PlaybackStateType.Paused)
-                {
-                    // Resume without explicit position: continue from current UI position.
-                    UpdateProgressAnchor(PositionSeconds);
-
-                    _logger.LogDebug(
-                        "Sendspin resumed Playing without position after state transition ({CurrentState} -> {NextState}); continuing from current position {PositionSeconds:F3}s.",
-                        currentState,
-                        nextState,
-                        PositionSeconds);
-                }
-                else
-                {
-                    // New playback phase without explicit position: start interpolation at 0.
-                    PositionSeconds = 0;
-                    UpdateProgressAnchor(0);
-
-                    _logger.LogDebug(
-                        "Sendspin entered Playing without position after state transition ({CurrentState} -> {NextState}); starting interpolation at 0s.",
-                        currentState,
-                        nextState);
-                }
-            }
-        }
-        else
-        {
-            ResetProgressAnchor();
-        }
     }
 
-    private static PlaybackStateType MapSendspinPlaybackState(Sendspin.SDK.Models.PlaybackState state)
+    private static PlaybackStateType MapSendspinPlaybackState(Sendspin.SDK.Models.PlaybackState state, PlaybackStateType currentState)
     {
+        // Keep paused state stable when Sendspin emits a transient Idle during resume.
+        if (state == Sendspin.SDK.Models.PlaybackState.Idle
+            && currentState == PlaybackStateType.Paused)
+        {
+            return PlaybackStateType.Paused;
+        }
+
         return state switch
         {
             Sendspin.SDK.Models.PlaybackState.Playing => PlaybackStateType.Playing,

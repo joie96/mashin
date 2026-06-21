@@ -310,7 +310,7 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.PendingToPlaying, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         try
         {
@@ -345,7 +345,7 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.PendingToPlaying, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         try
         {
@@ -380,7 +380,7 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.PendingToPlaying, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         try
         {
@@ -415,7 +415,7 @@ public sealed class PlaybackService : IPlaybackService
             (mediaItems[i], mediaItems[j]) = (mediaItems[j], mediaItems[i]);
         }
 
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.PendingToPlaying, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         try
         {
@@ -536,14 +536,12 @@ public sealed class PlaybackService : IPlaybackService
     {
         var clamped = Math.Clamp(volume, 0, 100);
         await _activePlayer.SetVolumeAsync(clamped, cancellationToken);
-        Volume = clamped;
     }
 
     public async Task ToggleMuteAsync(bool currentMuted, CancellationToken cancellationToken = default)
     {
         var next = !currentMuted;
         await _activePlayer.SetMutedAsync(next, cancellationToken);
-        IsMuted = next;
     }
 
     public async Task SetPreferredAudioCodecAsync(string codec, CancellationToken cancellationToken = default)
@@ -567,7 +565,6 @@ public sealed class PlaybackService : IPlaybackService
     public async Task ToggleShuffleAsync(bool? currentShuffleEnabled, CancellationToken cancellationToken = default)
     {
         var next = !(currentShuffleEnabled ?? false);
-        ShuffleEnabled = next;
         await _activePlayer.SetShuffleAsync(next, cancellationToken);
     }
 
@@ -580,7 +577,6 @@ public sealed class PlaybackService : IPlaybackService
             _ => mashin.Models.RepeatMode.Off
         };
 
-        RepeatMode = next.ToString();
         await _activePlayer.SetRepeatModeAsync(next, cancellationToken);
     }
 
@@ -599,7 +595,6 @@ public sealed class PlaybackService : IPlaybackService
         }
 
         await _musicAssistant.SetDontStopTheMusicAsync(queue.QueueId, enabled);
-        DontStopTheMusicEnabled = enabled;
     }
 
     #endregion
@@ -663,32 +658,30 @@ public sealed class PlaybackService : IPlaybackService
         {
             return;
         }
+   
+        // Apply event state updates
+        _activeQueueId = Normalize(queue.QueueId) ?? _activeQueueId;
 
-        // other queue events: apply event state updates immediately, enrich with debounced HTTP refreshes if queue items changed
-        {
-            // Apply event state updates
-            _activeQueueId = Normalize(queue.QueueId) ?? _activeQueueId;
+        QueueItemCount = queue.ItemCount;
+        ShuffleEnabled = queue.ShuffleEnabled;
+        RepeatMode = queue.RepeatMode?.ToString();
+        DontStopTheMusicEnabled = queue.DontStopTheMusicEnabled;
 
-            QueueItemCount = queue.ItemCount;
-            ShuffleEnabled = queue.ShuffleEnabled;
-            RepeatMode = queue.RepeatMode?.ToString();
-            DontStopTheMusicEnabled = queue.DontStopTheMusicEnabled;
+        SetProperty(ref _currentQueueItem, queue.CurrentItem, nameof(CurrentQueueItem));
 
-            SetProperty(ref _currentQueueItem, queue.CurrentItem, nameof(CurrentQueueItem));
+        CurrentQueueIndex = queue.CurrentIndex;
 
-            CurrentQueueIndex = queue.CurrentIndex;
-
-            _logger.LogDebug(
-                "Queue event applied. Event={Event}, QueueId={QueueId}, ItemCount={ItemCount}, CurrentIndex={CurrentIndex}, CurrentItemId={CurrentItemId}, ShuffleEnabled={ShuffleEnabled}, RepeatMode={RepeatMode}, DontStopTheMusicEnabled={DontStopTheMusicEnabled}",
-                e.Event,
-                _activeQueueId,
-                queue.ItemCount,
-                queue.CurrentIndex,
-                queue.CurrentItem?.QueueItemId,
-                queue.ShuffleEnabled,
-                queue.RepeatMode,
-                queue.DontStopTheMusicEnabled);
-        }
+        _logger.LogDebug(
+            "Queue event applied. Event={Event}, QueueId={QueueId}, ItemCount={ItemCount}, CurrentIndex={CurrentIndex}, CurrentItemId={CurrentItemId}, ShuffleEnabled={ShuffleEnabled}, RepeatMode={RepeatMode}, DontStopTheMusicEnabled={DontStopTheMusicEnabled}",
+            e.Event,
+            _activeQueueId,
+            queue.ItemCount,
+            queue.CurrentIndex,
+            queue.CurrentItem?.QueueItemId,
+            queue.ShuffleEnabled,
+            queue.RepeatMode,
+            queue.DontStopTheMusicEnabled);
+        
 
         if (!ShouldRefreshQueue(e))
         {

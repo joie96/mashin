@@ -93,22 +93,13 @@ public class PlayStateToBoolConverter : IValueConverter
             "unknown" => playState == PlaybackStateType.Unknown,
             "stopped" => playState == PlaybackStateType.Idle,
             "paused" => playState is PlaybackStateType.Paused or PlaybackStateType.Idle or PlaybackStateType.Unknown,
-            "buffering" => playState is PlaybackStateType.Buffering
-                or PlaybackStateType.PendingToPlaying
-                or PlaybackStateType.PendingToPaused
-                or PlaybackStateType.PendingToNextTrack
-                or PlaybackStateType.PendingToPreviousTrack
-                or PlaybackStateType.PendingToSeek,
+            "buffering" => playState is PlaybackStateType.Buffering or PlaybackStateType.Seeking,
             "playing" => playState == PlaybackStateType.Playing,
-            "seeking" => playState == PlaybackStateType.PendingToSeek,
+            "seeking" => playState == PlaybackStateType.Seeking,
             "show-play-icon" => playState is PlaybackStateType.Paused or PlaybackStateType.Idle or PlaybackStateType.Unknown,
             "show-pause-icon" => playState is PlaybackStateType.Playing
                 or PlaybackStateType.Buffering
-                or PlaybackStateType.PendingToPlaying
-                or PlaybackStateType.PendingToPaused
-                or PlaybackStateType.PendingToNextTrack
-                or PlaybackStateType.PendingToPreviousTrack
-                or PlaybackStateType.PendingToSeek,
+                or PlaybackStateType.Seeking,
             _ => false,
         };
     }

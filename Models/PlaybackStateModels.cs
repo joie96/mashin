@@ -7,11 +7,7 @@ public enum PlaybackStateType
     Playing,
     Paused,
     Buffering,
-    PendingToPlaying,
-    PendingToPaused,
-    PendingToNextTrack,
-    PendingToPreviousTrack,
-    PendingToSeek
+    Seeking
 }
 
 public sealed class PlaybackStateCustom
@@ -21,9 +17,6 @@ public sealed class PlaybackStateCustom
     public DateTimeOffset ActiveSinceUtc { get; set; } = DateTimeOffset.UtcNow;
 
     public bool IsPending =>
-        State == PlaybackStateType.PendingToPlaying
-        || State == PlaybackStateType.PendingToPaused
-        || State == PlaybackStateType.PendingToNextTrack
-        || State == PlaybackStateType.PendingToPreviousTrack
-        || State == PlaybackStateType.PendingToSeek;
+        State == PlaybackStateType.Buffering
+        || State == PlaybackStateType.Seeking;
 }
