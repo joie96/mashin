@@ -71,7 +71,7 @@ public partial class App : Application
 
         var services = Handler!.MauiContext!.Services;
         Page mainPage;
-        if (DeviceInfo.Current.Platform == DevicePlatform.Android)
+        if (SettingsService.IsMobile())
         {
             mainPage = services.GetRequiredService<MobileMainPage>();
         }
@@ -79,8 +79,6 @@ public partial class App : Application
         {
             mainPage = services.GetRequiredService<DesktopMainPage>();
         }
-        
-        mainPage = services.GetRequiredService<MobileMainPage>();
         
         var window = new Window(mainPage);
 

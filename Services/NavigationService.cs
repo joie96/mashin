@@ -1,6 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Maui.Devices;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using FFImageLoading;
@@ -224,9 +223,7 @@ public class NavigationService : INavigationService
 
     private static Type ResolveTargetPageType(Type requestedPageType)
     {
-        var isMobile = DeviceInfo.Idiom == DeviceIdiom.Phone || DeviceInfo.Idiom == DeviceIdiom.Tablet;
-        
-        isMobile = true; // force mobile for testing on desktop
+        var isMobile = SettingsService.IsMobile();
 
         if (!isMobile)
         {

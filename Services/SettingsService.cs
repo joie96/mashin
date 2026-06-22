@@ -1,5 +1,6 @@
 ﻿using Sendspin.SDK.Client;
 using Sendspin.SDK.Models;
+using Microsoft.Maui.Devices;
 
 namespace mashin.Services;
 
@@ -259,6 +260,11 @@ public class SettingsService
     public ClientCapabilities GetClientCapabilities() => GetSendspinClientCapabilities();
     public string GetPreferredAudioCodec() => GetSendspinPreferredAudioCodec();
     public bool SetPreferredAudioCodec(string codec) => SetSendspinPreferredAudioCodec(codec);
+
+    public static bool IsMobile()
+    {
+        return DeviceInfo.Idiom == DeviceIdiom.Phone || DeviceInfo.Idiom == DeviceIdiom.Tablet;
+    }
 
     #endregion
 

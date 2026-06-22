@@ -237,13 +237,13 @@ public sealed class OverlayService : IOverlayService
 
     public Task ShowContextMenuFlyoutAsync(View menuView, Action? onClose)
     {
-        var hostType = IsMobileDevice() ? FlyoutHostType.ContextMenu : FlyoutHostType.Default;
+        var hostType = SettingsService.IsMobile() ? FlyoutHostType.ContextMenu : FlyoutHostType.Default;
         return ShowFlyoutLayerAsync(menuView, onClose, FlyoutLayoutMode.Bottom, hostType);
     }
 
     public Task HideContextMenuFlyoutAsync()
     {
-        var hostType = IsMobileDevice() ? FlyoutHostType.ContextMenu : FlyoutHostType.Default;
+        var hostType = SettingsService.IsMobile() ? FlyoutHostType.ContextMenu : FlyoutHostType.Default;
         return HideFlyoutLayerAsync(hostType);
     }
 
@@ -275,15 +275,15 @@ public sealed class OverlayService : IOverlayService
 
     #region Overlay State
 
-    public bool IsQueueOverlayOpen => IsMobileDevice() ? _mobileQueueOverlay.IsOpen : _desktopQueueOverlay.IsOpen;
+    public bool IsQueueOverlayOpen => SettingsService.IsMobile() ? _mobileQueueOverlay.IsOpen : _desktopQueueOverlay.IsOpen;
 
-    public bool IsQueueOverlayAnimating => IsMobileDevice() ? _mobileQueueOverlay.IsAnimating : _desktopQueueOverlay.IsAnimating;
+    public bool IsQueueOverlayAnimating => SettingsService.IsMobile() ? _mobileQueueOverlay.IsAnimating : _desktopQueueOverlay.IsAnimating;
 
-    public bool IsQueueOverlayInteractiveOpening => IsMobileDevice() && _isQueueInteractiveOpening;
+    public bool IsQueueOverlayInteractiveOpening => SettingsService.IsMobile() && _isQueueInteractiveOpening;
 
     public bool IsPlayerBarOverlayOpen => _playerBarOverlay.IsOpen;
 
-    public bool IsPlayerBarOverlayInteractiveOpening => IsMobileDevice() && _isPlayerBarInteractiveOpening;
+    public bool IsPlayerBarOverlayInteractiveOpening => SettingsService.IsMobile() && _isPlayerBarInteractiveOpening;
 
     public bool IsOverlayOpen => _overlayHost?.IsVisible == true;
 
@@ -311,11 +311,11 @@ public sealed class OverlayService : IOverlayService
                 _playerBarOverlay.BindingContext = bindingContext;
             }
 
-            var hostType = IsMobileDevice() ? FlyoutHostType.PlayerBar : FlyoutHostType.Default;
+            var hostType = SettingsService.IsMobile() ? FlyoutHostType.PlayerBar : FlyoutHostType.Default;
             await ShowFlyoutLayerAsync(_playerBarOverlay, () => _ = HidePlayerBarOverlayAsync(), FlyoutLayoutMode.FullHeight, hostType);
             await _playerBarOverlay.AnimateInAsync();
 
-            if (IsMobileDevice())
+            if (SettingsService.IsMobile())
             {
                 // Run queue preload after the player bar animation has fully settled.
                 _ = PreloadQueueOverlayAsync(bindingContext);
@@ -330,7 +330,7 @@ public sealed class OverlayService : IOverlayService
             return;
         }
 
-        if (!IsMobileDevice())
+        if (!SettingsService.IsMobile())
         {
             return;
         }
@@ -357,7 +357,7 @@ public sealed class OverlayService : IOverlayService
 
     public void UpdatePlayerBarOverlayInteractiveOpen(double upwardPullDistance)
     {
-        if (!IsMobileDevice())
+        if (!SettingsService.IsMobile())
         {
             return;
         }
@@ -375,7 +375,7 @@ public sealed class OverlayService : IOverlayService
 
     public async Task EndPlayerBarOverlayInteractiveOpenAsync(bool openPlayerBar)
     {
-        if (!IsMobileDevice())
+        if (!SettingsService.IsMobile())
         {
             return;
         }
@@ -423,7 +423,7 @@ public sealed class OverlayService : IOverlayService
             _isPlayerBarInteractiveOpening = false;
             await _playerBarOverlay.AnimateOutAsync();
 
-            var hostType = IsMobileDevice() ? FlyoutHostType.PlayerBar : FlyoutHostType.Default;
+            var hostType = SettingsService.IsMobile() ? FlyoutHostType.PlayerBar : FlyoutHostType.Default;
             if (_flyoutHosts.TryGetValue(hostType, out var registration))
             {
                 registration.Host.IsVisible = false;
@@ -444,7 +444,7 @@ public sealed class OverlayService : IOverlayService
             return;
         }
 
-        if (!IsMobileDevice())
+        if (!SettingsService.IsMobile())
         {
             return;
         }
@@ -474,7 +474,7 @@ public sealed class OverlayService : IOverlayService
 
     public void UpdateQueueOverlayInteractiveOpen(double upwardPullDistance)
     {
-        if (!IsMobileDevice())
+        if (!SettingsService.IsMobile())
         {
             return;
         }
@@ -492,7 +492,7 @@ public sealed class OverlayService : IOverlayService
 
     public async Task EndQueueOverlayInteractiveOpenAsync(bool openQueue)
     {
-        if (!IsMobileDevice())
+        if (!SettingsService.IsMobile())
         {
             return;
         }
@@ -531,7 +531,7 @@ public sealed class OverlayService : IOverlayService
 
         await MainThread.InvokeOnMainThreadAsync(async () =>
         {
-            var useMobileQueueOverlay = IsMobileDevice();
+            var useMobileQueueOverlay = SettingsService.IsMobile();
 
             if (useMobileQueueOverlay)
             {
@@ -568,7 +568,7 @@ public sealed class OverlayService : IOverlayService
 
     private async Task PreloadQueueOverlayAsync(object bindingContext)
     {
-        if (!IsMobileDevice())
+        if (!SettingsService.IsMobile())
         {
             return;
         }
@@ -657,7 +657,7 @@ public sealed class OverlayService : IOverlayService
 
         await MainThread.InvokeOnMainThreadAsync(async () =>
         {
-            var useMobileQueueOverlay = IsMobileDevice();
+            var useMobileQueueOverlay = SettingsService.IsMobile();
             _isQueueInteractiveOpening = false;
 
             if (_mobileQueueOverlay.IsOpen)
@@ -1341,12 +1341,6 @@ public sealed class OverlayService : IOverlayService
         }
 
         throw new InvalidOperationException("OverlayService is not initialized. Call Initialize from MainPage first.");
-    }
-
-    private static bool IsMobileDevice()
-    {
-        return DeviceInfo.Current.Idiom == DeviceIdiom.Phone || DeviceInfo.Current.Idiom == DeviceIdiom.Tablet;
-        
     }
 
     private static bool IsSupportedSelectionControl(object selectionControl)

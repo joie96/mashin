@@ -5,7 +5,10 @@ using Sendspin.SDK.Connection;
 using Sendspin.SDK.Models;
 using Sendspin.SDK.Protocol.Messages;
 using System.ComponentModel;
+using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace mashin.Services;
 
@@ -45,11 +48,13 @@ public sealed class SendspinPlayerService : IPlayerService
         public long? ServerTimestampUs { get; init; }
         public double ServerPositionSeconds { get; init; }
         public DateTimeOffset LocalReceivedUtc { get; init; }
+        public string? TrackIdentity { get; init; }
     }
 
     private const int PositionTimerIntervalMs = 250;
     private const double SeekGuardToleranceSeconds = 3;
     private const int SeekGuardLifetimeSeconds = 10;
+    private static readonly TimeSpan PlayingStabilizationWindow = TimeSpan.FromSeconds(5);
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly ILogger<SendspinPlayerService> _logger;
@@ -72,9 +77,10 @@ public sealed class SendspinPlayerService : IPlayerService
     private bool _isMuted;
     private string? _activePlayerId;
     private ProgressAnchor? _progressAnchor;
+    private readonly Task _progressInterpolationTask;
     private double? _seekGuardTargetPositionSeconds;
     private DateTimeOffset? _seekGuardExpiresUtc;
-    private readonly Task _progressInterpolationTask;
+    
 
     #endregion
 
@@ -485,17 +491,24 @@ public sealed class SendspinPlayerService : IPlayerService
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         return true;
     }
-    private void UpdateProgressAnchor(double positionSeconds, long? serverTimestampUs = null)
+    private void UpdateProgressAnchor(double positionSeconds, long? serverTimestampUs = null, string? trackIdentity = null)
     {
         var clamped = Math.Max(0, positionSeconds);
         var localReceivedUtc = DateTimeOffset.UtcNow;
         lock (_progressSync)
         {
+            var anchorTrackIdentity = trackIdentity;
+            if (string.IsNullOrWhiteSpace(anchorTrackIdentity))
+            {
+                anchorTrackIdentity = _progressAnchor?.TrackIdentity;
+            }
+
             _progressAnchor = new ProgressAnchor
             {
                 ServerTimestampUs = serverTimestampUs,
                 ServerPositionSeconds = clamped,
-                LocalReceivedUtc = localReceivedUtc
+                LocalReceivedUtc = localReceivedUtc,
+                TrackIdentity = anchorTrackIdentity
             };
         }
     }
@@ -518,6 +531,45 @@ public sealed class SendspinPlayerService : IPlayerService
         return value.Trim();
     }
 
+    private static string? BuildTrackIdentity(TrackMetadata? metadata)
+    {
+        if (metadata == null)
+        {
+            return null;
+        }
+
+        var rawTitle = metadata?.Title;
+        var rawArtist = metadata?.Artist;
+        var rawAlbum = metadata?.Album;
+
+        var title = string.IsNullOrWhiteSpace(rawTitle)
+            ? string.Empty
+            : Regex.Replace(rawTitle.Trim().ToLowerInvariant().Normalize(NormalizationForm.FormKC), "\\s+", " ");
+
+        var artist = string.IsNullOrWhiteSpace(rawArtist)
+            ? string.Empty
+            : Regex.Replace(rawArtist.Trim().ToLowerInvariant().Normalize(NormalizationForm.FormKC), "\\s+", " ");
+
+        var album = string.IsNullOrWhiteSpace(rawAlbum)
+            ? string.Empty
+            : Regex.Replace(rawAlbum.Trim().ToLowerInvariant().Normalize(NormalizationForm.FormKC), "\\s+", " ");
+
+        var durationSeconds = metadata?.Duration;
+        var durationPart = durationSeconds.HasValue
+            ? Math.Round(Math.Max(0, durationSeconds.Value)).ToString(CultureInfo.InvariantCulture)
+            : string.Empty;
+
+        if (title.Length == 0
+            && artist.Length == 0
+            && album.Length == 0
+            && durationPart.Length == 0)
+        {
+            return null;
+        }
+
+        return string.Concat(title, "-", artist, "-", album, "-", durationPart);
+    }
+
     private void ApplySendspinGroupState(GroupState groupState)
     {
         var currentState = PlaybackState.State;
@@ -530,11 +582,14 @@ public sealed class SendspinPlayerService : IPlayerService
         var metadataProgressDurationMs = metadataProgress?.TrackDuration;
         var metadataProgressPositionSeconds = metadataProgressPositionMs / 1000d;
         var metadataProgressDurationSeconds = metadataProgressDurationMs / 1000d;
+        var incomingTrackIdentity = BuildTrackIdentity(metadata);
         var nowUtc = DateTimeOffset.UtcNow;
         
         long? progressAnchorLocalTimestampUs;
         double progressAnchorServerPositionSeconds;
         long? progressAnchorServerTimestampUs;
+        string? progressAnchorTrackIdentity;
+        bool trackIdentityChanged;
         
         double? seekGuardTargetPositionSeconds;
         DateTimeOffset? seekGuardExpiresUtc;
@@ -545,11 +600,21 @@ public sealed class SendspinPlayerService : IPlayerService
                 : _progressAnchor.LocalReceivedUtc.ToUnixTimeMilliseconds() * 1000;
             progressAnchorServerPositionSeconds = _progressAnchor?.ServerPositionSeconds ?? 0;
             progressAnchorServerTimestampUs = _progressAnchor?.ServerTimestampUs;
+            progressAnchorTrackIdentity = _progressAnchor?.TrackIdentity;
+            trackIdentityChanged = !string.IsNullOrWhiteSpace(incomingTrackIdentity)
+                && !string.IsNullOrWhiteSpace(progressAnchorTrackIdentity)
+                && !string.Equals(incomingTrackIdentity, progressAnchorTrackIdentity, StringComparison.Ordinal);
             
             if (_seekGuardExpiresUtc.HasValue && _seekGuardExpiresUtc.Value <= nowUtc)
             {
                 _seekGuardExpiresUtc = null;
                 _seekGuardTargetPositionSeconds = null;
+            }
+            
+            if (trackIdentityChanged)
+            {
+                _seekGuardTargetPositionSeconds = null;
+                _seekGuardExpiresUtc = null;
             }
 
             seekGuardTargetPositionSeconds = _seekGuardTargetPositionSeconds;
@@ -557,22 +622,28 @@ public sealed class SendspinPlayerService : IPlayerService
         }
         
         _logger.LogDebug(
-            "Sendspin group update received. GroupPlaybackState={GroupPlaybackState}, MappedState={MappedState}, MetadataTimestamp={MetadataTimestamp}, LocalTimestamp={LocalTimestamp}, LocalServerTimestamp={LocalServerTimestamp}, LocalPositionSeconds={LocalPositionSeconds:F3}, ProgressDurationMs={ProgressDurationMs}, ProgressPositionMs={ProgressPositionMs}, PlaybackSpeed={PlaybackSpeed}",
+            "Sendspin group update received. GroupPlaybackState={GroupPlaybackState}, MappedState={MappedState}, MetadataTimestamp={MetadataTimestamp}, LocalTimestamp={LocalTimestamp}, LocalServerTimestamp={LocalServerTimestamp}, LocalPositionSeconds={LocalPositionSeconds:F3}, CurrentTrackIdentity={CurrentTrackIdentity}, IncomingTrackIdentity={IncomingTrackIdentity}, ProgressDurationMs={ProgressDurationMs}, ProgressPositionMs={ProgressPositionMs}, PlaybackSpeed={PlaybackSpeed}",
             groupState.PlaybackState,
             nextState,
             metadataTimestamp,
             progressAnchorLocalTimestampUs,
             progressAnchorServerTimestampUs,
             progressAnchorServerPositionSeconds,
+            progressAnchorTrackIdentity,
+            incomingTrackIdentity,
             metadataProgressDurationMs,
             metadataProgressPositionMs,
             metadataProgress?.PlaybackSpeed);
 
         // Set PlaybackState
+        var nextActiveSinceUtc = (currentState != nextState || trackIdentityChanged)
+            ? nowUtc
+            : PlaybackState.ActiveSinceUtc;
+
         PlaybackState = new PlaybackStateCustom
         {
             State = nextState,
-            ActiveSinceUtc = DateTimeOffset.UtcNow
+            ActiveSinceUtc = nextActiveSinceUtc
         };
 
         // Set DurationSeconds
@@ -581,10 +652,35 @@ public sealed class SendspinPlayerService : IPlayerService
             DurationSeconds = Math.Max(0, metadataProgressDurationSeconds.Value);
         }
 
+        // Don't update position & progress anchor while playback is stabilizing in playing state.
+        if (PlaybackState.State == PlaybackStateType.Playing
+            && nowUtc - PlaybackState.ActiveSinceUtc < PlayingStabilizationWindow)
+        {
+            _logger.LogDebug(
+                "Sendspin group update skipped during playing stabilization window. ActiveSinceUtc={ActiveSinceUtc}, WindowSeconds={WindowSeconds}",
+                PlaybackState.ActiveSinceUtc,
+                PlayingStabilizationWindow.TotalSeconds);
+            return;
+        }
+
+        // Don't update position & progress anchor if track identity changed but incoming metadata timestamp is stale.
+        if (trackIdentityChanged
+            && metadataTimestamp.HasValue
+            && progressAnchorServerTimestampUs.HasValue
+            && metadataTimestamp.Value <= progressAnchorServerTimestampUs.Value)
+        {
+            _logger.LogDebug(
+                "Sendspin group update skipped because track identity changed but metadata timestamp is stale. MetadataTimestamp={MetadataTimestamp}, ProgressAnchorServerTimestamp={ProgressAnchorServerTimestamp}",
+                metadataTimestamp,
+                progressAnchorServerTimestampUs);
+            return;
+        }
+
         // Don't update position & progress anchor if metadata timestamp is older than current progress anchor, except when resuming from paused to playing
         if (metadataTimestamp.HasValue
             && progressAnchorServerTimestampUs.HasValue
             && metadataTimestamp.Value <= progressAnchorServerTimestampUs.Value
+            && !trackIdentityChanged
             && !(currentState == PlaybackStateType.Paused && nextState == PlaybackStateType.Playing))
         {
             _logger.LogDebug(
@@ -595,7 +691,8 @@ public sealed class SendspinPlayerService : IPlayerService
         }
 
         // Don't update position & progress anchor if seek guard is active and incoming position does not match seek target.
-        if (seekGuardTargetPositionSeconds.HasValue
+        if (!trackIdentityChanged
+            && seekGuardTargetPositionSeconds.HasValue
             && seekGuardExpiresUtc.HasValue
             && seekGuardExpiresUtc.Value > nowUtc)
         {
@@ -643,7 +740,15 @@ public sealed class SendspinPlayerService : IPlayerService
             }
         
             PositionSeconds = nextPosition;
-            UpdateProgressAnchor(nextPosition, metadataTimestamp);
+            UpdateProgressAnchor(nextPosition, metadataTimestamp, incomingTrackIdentity);
+            return;
+        }
+
+        // Reset position when track changed but position is missing.
+        if (trackIdentityChanged)
+        {
+            PositionSeconds = 0;
+            UpdateProgressAnchor(0, metadataTimestamp, incomingTrackIdentity);
         }
         
     }

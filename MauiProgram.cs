@@ -24,6 +24,7 @@ using MobileSearchPage = mashin.Views.Mobile.SearchPage;
 using MauiIcons.Fluent;
 using MauiIcons.Fluent.Filled;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Console;
 using Sendspin.SDK.Audio;
 using Sendspin.SDK.Client;
 using Sendspin.SDK.Connection;
@@ -51,7 +52,11 @@ public static class MauiProgram
                 fonts.AddFont("Poppins-SemiBold.ttf", "PoppinsSemibold");
             });
 #if DEBUG
-        builder.Logging.AddDebug();
+        builder.Logging.AddSimpleConsole(options =>
+        {
+            options.TimestampFormat = "HH:mm:ss.fff ";
+            options.SingleLine = true;
+        });
 
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
@@ -62,6 +67,12 @@ public static class MauiProgram
         builder.Logging.AddFilter("mashin.Services.RemotePlayerService", LogLevel.Debug);
         builder.Logging.AddFilter("mashin.Services.LocalDummyPlayerService", LogLevel.Debug);
 #else
+        builder.Logging.AddSimpleConsole(options =>
+        {
+            options.TimestampFormat = "HH:mm:ss.fff ";
+            options.SingleLine = true;
+        });
+
         // Production Logging
         builder.Logging.SetMinimumLevel(LogLevel.Information);
 #endif
