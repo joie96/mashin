@@ -5,10 +5,7 @@ using Sendspin.SDK.Connection;
 using Sendspin.SDK.Models;
 using Sendspin.SDK.Protocol.Messages;
 using System.ComponentModel;
-using System.Globalization;
 using System.Runtime.CompilerServices;
-using System.Text;
-using System.Text.RegularExpressions;
 
 namespace mashin.Services;
 
@@ -43,20 +40,10 @@ public sealed class SendspinPlayerService : IPlayerService
 {
     #region Fields
 
-    private sealed class ProgressAnchor
-    {
-        public long? ServerTimestampUs { get; init; }
-        public double ServerPositionSeconds { get; init; }
-        public DateTimeOffset LocalReceivedUtc { get; init; }
-        public string? TrackIdentity { get; init; }
-    }
-
     private const int PositionTimerIntervalMs = 250;
-    private const double SeekGuardToleranceSeconds = 3;
-    private const int SeekGuardLifetimeSeconds = 10;
-    private static readonly TimeSpan PlayingStabilizationWindow = TimeSpan.FromSeconds(5);
 
     private readonly MusicAssistantService _musicAssistant;
+    private readonly IMusicAssistantEventHub _musicAssistantEventHub;
     private readonly ILogger<SendspinPlayerService> _logger;
     private readonly SettingsService _settingsService;
     private readonly ISendspinClient _sendspinClient;
@@ -76,10 +63,10 @@ public sealed class SendspinPlayerService : IPlayerService
     private int _volume = 50;
     private bool _isMuted;
     private string? _activePlayerId;
-    private ProgressAnchor? _progressAnchor;
+    private string? _activeQueueId;
+    private double _lastServerPosition;
+    private DateTimeOffset? _lastServerPositionUpdateUtc;
     private readonly Task _progressInterpolationTask;
-    private double? _seekGuardTargetPositionSeconds;
-    private DateTimeOffset? _seekGuardExpiresUtc;
     
 
     #endregion
@@ -88,11 +75,13 @@ public sealed class SendspinPlayerService : IPlayerService
 
     public SendspinPlayerService(
         MusicAssistantService musicAssistant,
+        IMusicAssistantEventHub musicAssistantEventHub,
         ILogger<SendspinPlayerService> logger,
         SettingsService settingsService,
         ISendspinClient sendspinClient)
     {
         _musicAssistant = musicAssistant;
+        _musicAssistantEventHub = musicAssistantEventHub;
         _logger = logger;
         _settingsService = settingsService;
         _sendspinClient = sendspinClient;
@@ -100,10 +89,11 @@ public sealed class SendspinPlayerService : IPlayerService
         _activePlayerId = _playerId;
 
         _sendspinClient.PlayerStateChanged += OnSendspinPlayerStateChanged;
-        _sendspinClient.GroupStateChanged += OnSendspinGroupStateChanged;
         _sendspinClient.ConnectionStateChanged += OnSendspinConnectionStateChanged;
+        _musicAssistantEventHub.QueueEventReceived += OnMusicAssistantQueueEventReceived;
+        _musicAssistantEventHub.PlayerEventReceived += OnMusicAssistantPlayerEventReceived;
 
-        _logger.LogInformation("Sendspin position interpolation task starting.");
+        _logger.LogInformation("Music Assistant position interpolation task starting for Sendspin player.");
 
         _progressInterpolationTask = Task.Run(async () =>
         {
@@ -112,44 +102,38 @@ public sealed class SendspinPlayerService : IPlayerService
                 try
                 {
                     await Task.Delay(PositionTimerIntervalMs, _disposeCts.Token);
-                    if (PlaybackState.State != PlaybackStateType.Playing)                    {
-                        continue;
-                    }
-
-                    ProgressAnchor? anchor;
-                    lock (_progressSync)
-                    {
-                        anchor = _progressAnchor;
-                    }
-
-                    if (anchor is null)
-                    {
-                        continue;
-                    }
-
-                    var elapsedSeconds = Math.Max(0, (DateTimeOffset.UtcNow - anchor.LocalReceivedUtc).TotalSeconds);
-                    var interpolated = anchor.ServerPositionSeconds + elapsedSeconds;
-                    if (DurationSeconds > 0)
-                    {
-                        interpolated = Math.Min(interpolated, DurationSeconds);
-                    }
-
-                    _logger.LogTrace(
-                        "Interpolated playback position: {InterpolatedPositionSeconds:F3}s (anchor={AnchorPositionSeconds:F3}s, elapsed={ElapsedSeconds:F3}s)",
-                        interpolated,
-                        anchor.ServerPositionSeconds,
-                        elapsedSeconds);
-
-                    PositionSeconds = interpolated;
                 }
                 catch (OperationCanceledException)
                 {
                     break;
                 }
-                catch (Exception ex)
+
+                if (PlaybackState.State != PlaybackStateType.Playing)
                 {
-                    _logger.LogError(ex, "Sendspin interpolation tick failed.");
+                    continue;
                 }
+
+                double anchorPosition;
+                DateTimeOffset? anchorUpdatedUtc;
+                lock (_progressSync)
+                {
+                    anchorPosition = _lastServerPosition;
+                    anchorUpdatedUtc = _lastServerPositionUpdateUtc;
+                }
+
+                if (anchorUpdatedUtc is not DateTimeOffset updatedUtc)
+                {
+                    continue;
+                }
+
+                var elapsedSeconds = Math.Max(0, (DateTimeOffset.UtcNow - updatedUtc).TotalSeconds);
+                var interpolated = anchorPosition + elapsedSeconds;
+                if (DurationSeconds > 0)
+                {
+                    interpolated = Math.Min(interpolated, DurationSeconds);
+                }
+
+                PositionSeconds = interpolated;
             }
         }, CancellationToken.None);
     }
@@ -267,6 +251,7 @@ public sealed class SendspinPlayerService : IPlayerService
     {
         _logger.LogDebug("Sendspin deactivate requested. ActivePlayerId={ActivePlayerId}", _activePlayerId);
         _activePlayerId = null;
+        _activeQueueId = null;
         PositionSeconds = 0;
         DurationSeconds = 0;
         ResetProgressAnchor();
@@ -325,12 +310,6 @@ public sealed class SendspinPlayerService : IPlayerService
         }
 
         PositionSeconds = clamped;
-        UpdateProgressAnchor(clamped);
-        lock (_progressSync)
-        {
-            _seekGuardTargetPositionSeconds = clamped;
-            _seekGuardExpiresUtc = DateTimeOffset.UtcNow.AddSeconds(SeekGuardLifetimeSeconds);
-        }
         PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Seeking, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         _logger.LogInformation("Sendspin seek requested via MusicAssistant. TargetPlayerId={TargetPlayerId}, Seconds={Seconds}", targetPlayerId, clamped);
@@ -373,8 +352,9 @@ public sealed class SendspinPlayerService : IPlayerService
     public async ValueTask DisposeAsync()
     {
         _sendspinClient.PlayerStateChanged -= OnSendspinPlayerStateChanged;
-        _sendspinClient.GroupStateChanged -= OnSendspinGroupStateChanged;
         _sendspinClient.ConnectionStateChanged -= OnSendspinConnectionStateChanged;
+        _musicAssistantEventHub.QueueEventReceived -= OnMusicAssistantQueueEventReceived;
+        _musicAssistantEventHub.PlayerEventReceived -= OnMusicAssistantPlayerEventReceived;
 
         _disposeCts.Cancel();
         try
@@ -404,10 +384,7 @@ public sealed class SendspinPlayerService : IPlayerService
         Volume = currentPlayerState.Volume;
         IsMuted = currentPlayerState.Muted;
 
-        if (_sendspinClient.CurrentGroup is { } currentGroup)
-        {
-            ApplySendspinGroupState(currentGroup);
-        }
+        await RefreshQueueStateAsync(cancellationToken);
 
         _logger.LogInformation("Sendspin client connected. Server={Server}, IsConnected={IsConnected}, PlayerId={PlayerId}", ConnectedServerName, IsConnected, PlayerId);
     }
@@ -417,6 +394,7 @@ public sealed class SendspinPlayerService : IPlayerService
         await _sendspinClient.DisconnectAsync("client_disconnect");
         IsConnected = false;
         ConnectedServerName = null;
+        _activeQueueId = null;
         ResetProgressAnchor();
         PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
         _logger.LogInformation("Sendspin client disconnected by client request.");
@@ -426,11 +404,13 @@ public sealed class SendspinPlayerService : IPlayerService
 
     #region Event Handlers
 
+    // Use PlayerStateChanged event to update volume and mute state
     private void OnSendspinPlayerStateChanged(object? sender, object state)
     {
         // PlayerState is used as a source for volume and mute state, but not for playback state or position, which are derived from GroupState
         if (state is null)
         {
+            _logger.LogDebug("Sendspin PlayerStateChanged ignored because payload is null.");
             return;
         }
 
@@ -439,7 +419,7 @@ public sealed class SendspinPlayerService : IPlayerService
             dynamic playerState = state;
             Volume = Convert.ToInt32(playerState.Volume);
             IsMuted = Convert.ToBoolean(playerState.Muted);
-            _logger.LogDebug("Sendspin player state update applied. Volume={Volume}, IsMuted={IsMuted}", Volume, IsMuted);
+            _logger.LogDebug("Sendspin PlayerStateChanged applied. PayloadType={PayloadType}, VolumeRaw={VolumeRaw}, MutedRaw={MutedRaw}, Volume={Volume}, IsMuted={IsMuted}", state.GetType().FullName, (object?)playerState.Volume, (object?)playerState.Muted, Volume, IsMuted);
         }
         catch (Exception ex)
         {
@@ -447,31 +427,138 @@ public sealed class SendspinPlayerService : IPlayerService
         }
     }
 
-    private void OnSendspinGroupStateChanged(object? sender, object state)
-    {
-        if (state is null)
-        {
-            return;
-        }
-
-        if (state is GroupState groupState)
-        {
-            ApplySendspinGroupState(groupState);
-            return;
-        }
-
-        _logger.LogWarning("Sendspin GroupStateChanged payload has unexpected type {Type}", state.GetType().FullName);
-    }
-
     private void OnSendspinConnectionStateChanged(object? sender, ConnectionStateChangedEventArgs e)
     {
-        _logger.LogInformation("Sendspin connection state changed. OldState={OldState}, NewState={NewState}", e.OldState, e.NewState);
+        _logger.LogInformation("Sendspin connection state changed. OldState={OldState}, NewState={NewState}, WasConnected={WasConnected}, ActivePlayerId={ActivePlayerId}, ActiveQueueId={ActiveQueueId}", e.OldState, e.NewState, IsConnected, _activePlayerId, _activeQueueId);
         IsConnected = e.NewState == ConnectionState.Connected;
         if (!IsConnected)
         {
             ConnectedServerName = null;
+            _activeQueueId = null;
             ResetProgressAnchor();
             PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        }
+    }
+
+    // Use MusicAssistant Player Events to update playback state and position when the active player is updated
+    private void OnMusicAssistantPlayerEventReceived(object? sender, MusicAssistantPlayerEvent e)
+    {
+        if (string.IsNullOrWhiteSpace(_activePlayerId))
+        {
+            _logger.LogDebug("MusicAssistant PlayerEvent ignored because no active Sendspin player is selected.");
+            return;
+        }
+
+        var eventPlayerId = Normalize(e.Player?.PlayerId) ?? Normalize(e.PlayerId);
+        if (string.IsNullOrWhiteSpace(eventPlayerId)
+            || !string.Equals(eventPlayerId, Normalize(_activePlayerId), StringComparison.Ordinal))
+        {
+            _logger.LogDebug("MusicAssistant PlayerEvent ignored due to player mismatch. EventPlayerId={EventPlayerId}, ActivePlayerId={ActivePlayerId}", eventPlayerId, _activePlayerId);
+            return;
+        }
+
+        // Keep active queue id in sync with MA player updates.
+        var nextQueueId = Normalize(e.Player?.ActiveSource);
+        if (!string.IsNullOrWhiteSpace(nextQueueId))
+        {
+            _activeQueueId = nextQueueId;
+        }
+
+        // Keep playback state in sync when queue state is not updated yet.
+        var mappedState = MapMusicAssistantPlaybackStateFromPlayer(e.Player?.State);
+        PlaybackState = new PlaybackStateCustom
+        {
+            State = mappedState,
+            ActiveSinceUtc = DateTimeOffset.UtcNow
+        };
+
+        _logger.LogDebug("MusicAssistant PlayerEvent applied. EventPlayerId={EventPlayerId}, PayloadPlayerId={PayloadPlayerId}, SourceState={SourceState}, MappedState={MappedState}, ActiveQueueId={ActiveQueueId}", e.PlayerId, e.Player?.PlayerId, e.Player?.State, mappedState, _activeQueueId);
+
+        if (mappedState != PlaybackStateType.Playing)
+        {
+            ResetProgressAnchor();
+        }
+    }
+
+    // Use MusicAssistant Queue Events to update playback state and position when the active queue is updated
+    private void OnMusicAssistantQueueEventReceived(object? sender, MusicAssistantQueueEvent e)
+    {
+        if (string.IsNullOrWhiteSpace(_activePlayerId))
+        {
+            _logger.LogDebug("MusicAssistant QueueEvent ignored because no active Sendspin player is selected.");
+            return;
+        }
+
+        var eventQueueId = Normalize(e.Queue?.QueueId) ?? Normalize(e.QueueItems?.QueueId) ?? Normalize(e.QueueId);
+        if (!string.IsNullOrWhiteSpace(_activeQueueId)
+            && !string.IsNullOrWhiteSpace(eventQueueId)
+            && !string.Equals(eventQueueId, _activeQueueId, StringComparison.Ordinal))
+        {
+            _logger.LogDebug("MusicAssistant QueueEvent ignored due to queue mismatch. EventQueueId={EventQueueId}, ActiveQueueId={ActiveQueueId}", eventQueueId, _activeQueueId);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_activeQueueId) && !string.IsNullOrWhiteSpace(eventQueueId))
+        {
+            _activeQueueId = eventQueueId;
+        }
+
+        // Set PositionSeconds from queue_time_updated.
+        if (string.Equals(e.Event, "queue_time_updated", StringComparison.OrdinalIgnoreCase))
+        {
+            if (e.ElapsedTimeSeconds is double elapsedSeconds)
+            {
+                var clamped = Math.Max(0, elapsedSeconds);
+                PositionSeconds = clamped;
+                UpdateProgressAnchor(clamped);
+                _logger.LogDebug("MusicAssistant QueueEvent applied. Event={EventName}, QueueId={QueueId}, ElapsedSecondsRaw={ElapsedSecondsRaw}, ElapsedSecondsClamped={ElapsedSecondsClamped}, ActiveQueueId={ActiveQueueId}", e.Event, e.QueueId, elapsedSeconds, clamped, _activeQueueId);
+            }
+            else
+            {
+                _logger.LogDebug("MusicAssistant QueueEvent ignored because elapsed time is missing. Event={EventName}, QueueId={QueueId}, ActiveQueueId={ActiveQueueId}", e.Event, e.QueueId, _activeQueueId);
+            }
+
+            return;
+        }
+
+        // Set DurationSeconds from queue payload or queue items payload.
+        if (e.Queue?.CurrentItem?.Duration is int queueItemDuration)
+        {
+            DurationSeconds = Math.Max(0, queueItemDuration);
+        }
+        else if (e.QueueItems?.CurrentItem?.Duration is int queueItemsDuration)
+        {
+            DurationSeconds = Math.Max(0, queueItemsDuration);
+        }
+
+        // Set PositionSeconds from queue elapsed time when present.
+        if (e.Queue?.ElapsedTime.HasValue == true)
+        {
+            var clamped = Math.Max(0, e.Queue.ElapsedTime.Value);
+            PositionSeconds = clamped;
+            UpdateProgressAnchor(clamped);
+        }
+
+        // Set PlaybackState from queue state.
+        if (e.Queue?.State is mashin.Models.PlaybackState queueState)
+        {
+            var mappedState = MapMusicAssistantPlaybackStateFromQueue(queueState);
+            PlaybackState = new PlaybackStateCustom
+            {
+                State = mappedState,
+                ActiveSinceUtc = DateTimeOffset.UtcNow
+            };
+
+            _logger.LogDebug("MusicAssistant QueueEvent applied. Event={EventName}, QueueId={QueueId}, DurationSeconds={DurationSeconds}, PositionSeconds={PositionSeconds}, QueueState={QueueState}, MappedState={MappedState}, ActiveQueueId={ActiveQueueId}", e.Event, e.QueueId, DurationSeconds, PositionSeconds, queueState, mappedState, _activeQueueId);
+
+            if (PlaybackState.State != PlaybackStateType.Playing)
+            {
+                ResetProgressAnchor();
+            }
+        }
+        else
+        {
+            _logger.LogDebug("MusicAssistant QueueEvent processed without queue state. Event={EventName}, QueueId={QueueId}, DurationSeconds={DurationSeconds}, PositionSeconds={PositionSeconds}, ActiveQueueId={ActiveQueueId}", e.Event, e.QueueId, DurationSeconds, PositionSeconds, _activeQueueId);
         }
     }
 
@@ -491,35 +578,6 @@ public sealed class SendspinPlayerService : IPlayerService
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         return true;
     }
-    private void UpdateProgressAnchor(double positionSeconds, long? serverTimestampUs = null, string? trackIdentity = null)
-    {
-        var clamped = Math.Max(0, positionSeconds);
-        var localReceivedUtc = DateTimeOffset.UtcNow;
-        lock (_progressSync)
-        {
-            var anchorTrackIdentity = trackIdentity;
-            if (string.IsNullOrWhiteSpace(anchorTrackIdentity))
-            {
-                anchorTrackIdentity = _progressAnchor?.TrackIdentity;
-            }
-
-            _progressAnchor = new ProgressAnchor
-            {
-                ServerTimestampUs = serverTimestampUs,
-                ServerPositionSeconds = clamped,
-                LocalReceivedUtc = localReceivedUtc,
-                TrackIdentity = anchorTrackIdentity
-            };
-        }
-    }
-
-    private void ResetProgressAnchor()
-    {
-        lock (_progressSync)
-        {
-            _progressAnchor = null;
-        }
-    }
 
     private static string? Normalize(string? value)
     {
@@ -531,244 +589,87 @@ public sealed class SendspinPlayerService : IPlayerService
         return value.Trim();
     }
 
-    private static string? BuildTrackIdentity(TrackMetadata? metadata)
+    private async Task RefreshQueueStateAsync(CancellationToken cancellationToken)
     {
-        if (metadata == null)
+        if (string.IsNullOrWhiteSpace(_activePlayerId))
         {
-            return null;
+            return;
         }
 
-        var rawTitle = metadata?.Title;
-        var rawArtist = metadata?.Artist;
-        var rawAlbum = metadata?.Album;
-
-        var title = string.IsNullOrWhiteSpace(rawTitle)
-            ? string.Empty
-            : Regex.Replace(rawTitle.Trim().ToLowerInvariant().Normalize(NormalizationForm.FormKC), "\\s+", " ");
-
-        var artist = string.IsNullOrWhiteSpace(rawArtist)
-            ? string.Empty
-            : Regex.Replace(rawArtist.Trim().ToLowerInvariant().Normalize(NormalizationForm.FormKC), "\\s+", " ");
-
-        var album = string.IsNullOrWhiteSpace(rawAlbum)
-            ? string.Empty
-            : Regex.Replace(rawAlbum.Trim().ToLowerInvariant().Normalize(NormalizationForm.FormKC), "\\s+", " ");
-
-        var durationSeconds = metadata?.Duration;
-        var durationPart = durationSeconds.HasValue
-            ? Math.Round(Math.Max(0, durationSeconds.Value)).ToString(CultureInfo.InvariantCulture)
-            : string.Empty;
-
-        if (title.Length == 0
-            && artist.Length == 0
-            && album.Length == 0
-            && durationPart.Length == 0)
+        try
         {
-            return null;
-        }
+            var queue = await _musicAssistant.GetActiveQueueForPlayerAsync(_activePlayerId);
+            if (queue == null)
+            {
+                return;
+            }
 
-        return string.Concat(title, "-", artist, "-", album, "-", durationPart);
+            _activeQueueId = Normalize(queue.QueueId);
+            DurationSeconds = Math.Max(0, queue.CurrentItem?.Duration ?? 0);
+
+            if (queue.ElapsedTime.HasValue)
+            {
+                var clamped = Math.Max(0, queue.ElapsedTime.Value);
+                PositionSeconds = clamped;
+                UpdateProgressAnchor(clamped);
+            }
+
+            PlaybackState = new PlaybackStateCustom
+            {
+                State = MapMusicAssistantPlaybackStateFromQueue(queue.State),
+                ActiveSinceUtc = DateTimeOffset.UtcNow
+            };
+
+            if (PlaybackState.State != PlaybackStateType.Playing)
+            {
+                ResetProgressAnchor();
+            }
+        }
+        catch
+        {
+            // Snapshot refresh is best-effort.
+        }
     }
 
-    private void ApplySendspinGroupState(GroupState groupState)
+    private void UpdateProgressAnchor(double positionSeconds)
     {
-        var currentState = PlaybackState.State;
-        var nextState = MapSendspinPlaybackState(groupState.PlaybackState, currentState);
-        
-        var metadata = groupState.Metadata;
-        var metadataTimestamp = metadata?.Timestamp;
-        var metadataProgress = metadata?.Progress;
-        var metadataProgressPositionMs = metadataProgress?.TrackProgress;
-        var metadataProgressDurationMs = metadataProgress?.TrackDuration;
-        var metadataProgressPositionSeconds = metadataProgressPositionMs / 1000d;
-        var metadataProgressDurationSeconds = metadataProgressDurationMs / 1000d;
-        var incomingTrackIdentity = BuildTrackIdentity(metadata);
-        var nowUtc = DateTimeOffset.UtcNow;
-        
-        long? progressAnchorLocalTimestampUs;
-        double progressAnchorServerPositionSeconds;
-        long? progressAnchorServerTimestampUs;
-        string? progressAnchorTrackIdentity;
-        bool trackIdentityChanged;
-        
-        double? seekGuardTargetPositionSeconds;
-        DateTimeOffset? seekGuardExpiresUtc;
+        var clamped = Math.Max(0, positionSeconds);
         lock (_progressSync)
         {
-            progressAnchorLocalTimestampUs = _progressAnchor is null
-                ? null
-                : _progressAnchor.LocalReceivedUtc.ToUnixTimeMilliseconds() * 1000;
-            progressAnchorServerPositionSeconds = _progressAnchor?.ServerPositionSeconds ?? 0;
-            progressAnchorServerTimestampUs = _progressAnchor?.ServerTimestampUs;
-            progressAnchorTrackIdentity = _progressAnchor?.TrackIdentity;
-            trackIdentityChanged = !string.IsNullOrWhiteSpace(incomingTrackIdentity)
-                && !string.IsNullOrWhiteSpace(progressAnchorTrackIdentity)
-                && !string.Equals(incomingTrackIdentity, progressAnchorTrackIdentity, StringComparison.Ordinal);
-            
-            if (_seekGuardExpiresUtc.HasValue && _seekGuardExpiresUtc.Value <= nowUtc)
-            {
-                _seekGuardExpiresUtc = null;
-                _seekGuardTargetPositionSeconds = null;
-            }
-            
-            if (trackIdentityChanged)
-            {
-                _seekGuardTargetPositionSeconds = null;
-                _seekGuardExpiresUtc = null;
-            }
-
-            seekGuardTargetPositionSeconds = _seekGuardTargetPositionSeconds;
-            seekGuardExpiresUtc = _seekGuardExpiresUtc;
+            _lastServerPosition = clamped;
+            _lastServerPositionUpdateUtc = DateTimeOffset.UtcNow;
         }
-        
-        _logger.LogDebug(
-            "Sendspin group update received. GroupPlaybackState={GroupPlaybackState}, MappedState={MappedState}, MetadataTimestamp={MetadataTimestamp}, LocalTimestamp={LocalTimestamp}, LocalServerTimestamp={LocalServerTimestamp}, LocalPositionSeconds={LocalPositionSeconds:F3}, CurrentTrackIdentity={CurrentTrackIdentity}, IncomingTrackIdentity={IncomingTrackIdentity}, ProgressDurationMs={ProgressDurationMs}, ProgressPositionMs={ProgressPositionMs}, PlaybackSpeed={PlaybackSpeed}",
-            groupState.PlaybackState,
-            nextState,
-            metadataTimestamp,
-            progressAnchorLocalTimestampUs,
-            progressAnchorServerTimestampUs,
-            progressAnchorServerPositionSeconds,
-            progressAnchorTrackIdentity,
-            incomingTrackIdentity,
-            metadataProgressDurationMs,
-            metadataProgressPositionMs,
-            metadataProgress?.PlaybackSpeed);
-
-        // Set PlaybackState
-        var nextActiveSinceUtc = (currentState != nextState || trackIdentityChanged)
-            ? nowUtc
-            : PlaybackState.ActiveSinceUtc;
-
-        PlaybackState = new PlaybackStateCustom
-        {
-            State = nextState,
-            ActiveSinceUtc = nextActiveSinceUtc
-        };
-
-        // Set DurationSeconds
-        if (metadataProgressDurationSeconds.HasValue)
-        {
-            DurationSeconds = Math.Max(0, metadataProgressDurationSeconds.Value);
-        }
-
-        // Don't update position & progress anchor while playback is stabilizing in playing state.
-        if (PlaybackState.State == PlaybackStateType.Playing
-            && nowUtc - PlaybackState.ActiveSinceUtc < PlayingStabilizationWindow)
-        {
-            _logger.LogDebug(
-                "Sendspin group update skipped during playing stabilization window. ActiveSinceUtc={ActiveSinceUtc}, WindowSeconds={WindowSeconds}",
-                PlaybackState.ActiveSinceUtc,
-                PlayingStabilizationWindow.TotalSeconds);
-            return;
-        }
-
-        // Don't update position & progress anchor if track identity changed but incoming metadata timestamp is stale.
-        if (trackIdentityChanged
-            && metadataTimestamp.HasValue
-            && progressAnchorServerTimestampUs.HasValue
-            && metadataTimestamp.Value <= progressAnchorServerTimestampUs.Value)
-        {
-            _logger.LogDebug(
-                "Sendspin group update skipped because track identity changed but metadata timestamp is stale. MetadataTimestamp={MetadataTimestamp}, ProgressAnchorServerTimestamp={ProgressAnchorServerTimestamp}",
-                metadataTimestamp,
-                progressAnchorServerTimestampUs);
-            return;
-        }
-
-        // Don't update position & progress anchor if metadata timestamp is older than current progress anchor, except when resuming from paused to playing
-        if (metadataTimestamp.HasValue
-            && progressAnchorServerTimestampUs.HasValue
-            && metadataTimestamp.Value <= progressAnchorServerTimestampUs.Value
-            && !trackIdentityChanged
-            && !(currentState == PlaybackStateType.Paused && nextState == PlaybackStateType.Playing))
-        {
-            _logger.LogDebug(
-                "Sendspin group update skipped because metadata timestamp is not newer than current progress anchor. MetadataTimestamp={MetadataTimestamp}, ProgressAnchorServerTimestamp={ProgressAnchorServerTimestamp}",
-                metadataTimestamp,
-                progressAnchorServerTimestampUs);
-            return;
-        }
-
-        // Don't update position & progress anchor if seek guard is active and incoming position does not match seek target.
-        if (!trackIdentityChanged
-            && seekGuardTargetPositionSeconds.HasValue
-            && seekGuardExpiresUtc.HasValue
-            && seekGuardExpiresUtc.Value > nowUtc)
-        {
-            if (seekGuardTargetPositionSeconds is not double seekGuardTargetPosition)
-            {
-                return;
-            }
-
-            if (!metadataProgressPositionSeconds.HasValue)
-            {
-                _logger.LogDebug(
-                    "Sendspin group update skipped because seek guard is active but metadata position is missing. SeekTargetPositionSeconds={SeekTargetPositionSeconds}, SeekGuardExpiresUtc={SeekGuardExpiresUtc}",
-                    seekGuardTargetPosition,
-                    seekGuardExpiresUtc);
-                return;
-            }
-
-            var seekGuardDeltaSeconds = Math.Abs(metadataProgressPositionSeconds.Value - seekGuardTargetPosition);
-            if (seekGuardDeltaSeconds > SeekGuardToleranceSeconds)
-            {
-                _logger.LogDebug(
-                    "Sendspin group update skipped by seek guard. MetadataPositionSeconds={MetadataPositionSeconds:F3}, SeekTargetPositionSeconds={SeekTargetPositionSeconds:F3}, DeltaSeconds={DeltaSeconds:F3}, ToleranceSeconds={ToleranceSeconds:F3}, SeekGuardExpiresUtc={SeekGuardExpiresUtc}",
-                    metadataProgressPositionSeconds.Value,
-                    seekGuardTargetPosition,
-                    seekGuardDeltaSeconds,
-                    SeekGuardToleranceSeconds,
-                    seekGuardExpiresUtc);
-                return;
-            }
-
-            lock (_progressSync)
-            {
-                _seekGuardTargetPositionSeconds = null;
-                _seekGuardExpiresUtc = null;
-            }
-        }
-
-        // Set PositionSeconds & progress anchor
-        if (metadataProgressPositionSeconds.HasValue)
-        {
-            var nextPosition = Math.Max(0, metadataProgressPositionSeconds.Value);
-            if (DurationSeconds > 0)
-            {
-                nextPosition = Math.Min(nextPosition, DurationSeconds);
-            }
-        
-            PositionSeconds = nextPosition;
-            UpdateProgressAnchor(nextPosition, metadataTimestamp, incomingTrackIdentity);
-            return;
-        }
-
-        // Reset position when track changed but position is missing.
-        if (trackIdentityChanged)
-        {
-            PositionSeconds = 0;
-            UpdateProgressAnchor(0, metadataTimestamp, incomingTrackIdentity);
-        }
-        
     }
 
-    private static PlaybackStateType MapSendspinPlaybackState(Sendspin.SDK.Models.PlaybackState state, PlaybackStateType currentState)
+    private void ResetProgressAnchor()
     {
-        // Keep paused state stable when Sendspin emits a transient Idle during resume.
-        if (state == Sendspin.SDK.Models.PlaybackState.Idle
-            && currentState == PlaybackStateType.Paused)
+        lock (_progressSync)
         {
-            return PlaybackStateType.Paused;
+            _lastServerPosition = PositionSeconds;
+            _lastServerPositionUpdateUtc = null;
         }
+    }
 
+    private static PlaybackStateType MapMusicAssistantPlaybackStateFromQueue(mashin.Models.PlaybackState? state)
+    {
         return state switch
         {
-            Sendspin.SDK.Models.PlaybackState.Playing => PlaybackStateType.Playing,
-            Sendspin.SDK.Models.PlaybackState.Paused => PlaybackStateType.Paused,
-            Sendspin.SDK.Models.PlaybackState.Idle => PlaybackStateType.Idle,
-            Sendspin.SDK.Models.PlaybackState.Stopped => PlaybackStateType.Paused,
-            Sendspin.SDK.Models.PlaybackState.Error => PlaybackStateType.Unknown,
+            mashin.Models.PlaybackState.Playing => PlaybackStateType.Playing,
+            mashin.Models.PlaybackState.Paused => PlaybackStateType.Paused,
+            mashin.Models.PlaybackState.Buffering => PlaybackStateType.Buffering,
+            mashin.Models.PlaybackState.Idle => PlaybackStateType.Idle,
+            _ => PlaybackStateType.Unknown
+        };
+    }
+
+    private static PlaybackStateType MapMusicAssistantPlaybackStateFromPlayer(string? state)
+    {
+        return state?.Trim().ToLowerInvariant() switch
+        {
+            "playing" => PlaybackStateType.Playing,
+            "paused" => PlaybackStateType.Paused,
+            "buffering" => PlaybackStateType.Buffering,
+            "idle" => PlaybackStateType.Idle,
             _ => PlaybackStateType.Unknown
         };
     }

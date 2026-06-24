@@ -1,6 +1,7 @@
 ﻿using FFImageLoading.Maui;
 using CommunityToolkit.Maui;
 using mashin.Audio;
+using mashin.Logging;
 using mashin.Services;
 using mashin.ViewModels;
 using DesktopAlbumDetailPage = mashin.Views.Desktop.AlbumDetailPage;
@@ -52,10 +53,14 @@ public static class MauiProgram
                 fonts.AddFont("Poppins-SemiBold.ttf", "PoppinsSemibold");
             });
 #if DEBUG
-        builder.Logging.AddSimpleConsole(options =>
+        builder.Logging.AddConsoleFormatter<CustomConsoleFormatter, SimpleConsoleFormatterOptions>(options =>
         {
-            options.TimestampFormat = "HH:mm:ss.fff ";
-            options.SingleLine = true;
+            options.TimestampFormat = "HH:mm:ss.fff";
+        });
+
+        builder.Logging.AddConsole(options =>
+        {
+            options.FormatterName = CustomConsoleFormatter.FormatterName;
         });
 
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
@@ -67,10 +72,14 @@ public static class MauiProgram
         builder.Logging.AddFilter("mashin.Services.RemotePlayerService", LogLevel.Debug);
         builder.Logging.AddFilter("mashin.Services.LocalDummyPlayerService", LogLevel.Debug);
 #else
-        builder.Logging.AddSimpleConsole(options =>
+        builder.Logging.AddConsoleFormatter<CustomConsoleFormatter, SimpleConsoleFormatterOptions>(options =>
         {
-            options.TimestampFormat = "HH:mm:ss.fff ";
-            options.SingleLine = true;
+            options.TimestampFormat = "HH:mm:ss.fff";
+        });
+
+        builder.Logging.AddConsole(options =>
+        {
+            options.FormatterName = CustomConsoleFormatter.FormatterName;
         });
 
         // Production Logging

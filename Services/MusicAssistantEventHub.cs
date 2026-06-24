@@ -17,13 +17,6 @@ public sealed record MusicAssistantEvent(
     JsonElement Data,
     DateTimeOffset ReceivedAt);
 
-public sealed record MusicAssistantQueueEvent(
-    string Event,
-    string? QueueId,
-    PlayerQueue? Queue,
-    double? ElapsedTimeSeconds,
-    DateTimeOffset ReceivedAt);
-
 public interface IMusicAssistantEventHub : IAsyncDisposable
 {
     #region Interface Core
@@ -43,6 +36,12 @@ public interface IMusicAssistantEventHub : IAsyncDisposable
 
     IAsyncEnumerable<MusicAssistantQueueEvent> QueueEvents(CancellationToken cancellationToken = default);
     #endregion
+
+    #region Interface Player
+    event EventHandler<MusicAssistantPlayerEvent>? PlayerEventReceived;
+
+    IAsyncEnumerable<MusicAssistantPlayerEvent> PlayerEvents(CancellationToken cancellationToken = default);
+    #endregion
 }
 
 public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
@@ -51,10 +50,22 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
     private static readonly HashSet<string> QueueEventsFilter = new(StringComparer.OrdinalIgnoreCase)
     {
         "queue_added",
+        "queue_removed",
         "queue_updated",
         "queue_items_updated",
         "queue_time_updated",
         "queue_settings_updated"
+    };
+
+    private static readonly HashSet<string> PlayerEventsFilter = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "player_added",
+        "player_updated",
+        "player_removed",
+        "player_settings_updated",
+        "player_config_updated",
+        "player_dsp_config_updated",
+        "player_options_updated"
     };
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -76,6 +87,7 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private readonly ConcurrentDictionary<Guid, Channel<MusicAssistantEvent>> _eventSubscribers = new();
     private readonly ConcurrentDictionary<Guid, Channel<MusicAssistantQueueEvent>> _queueSubscribers = new();
+    private readonly ConcurrentDictionary<Guid, Channel<MusicAssistantPlayerEvent>> _playerSubscribers = new();
 
     private CancellationTokenSource? _runCts;
     private Task? _runTask;
@@ -182,8 +194,14 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
             channel.Writer.TryComplete();
         }
 
+        foreach (var channel in _playerSubscribers.Values)
+        {
+            channel.Writer.TryComplete();
+        }
+
         _eventSubscribers.Clear();
         _queueSubscribers.Clear();
+        _playerSubscribers.Clear();
         _lifecycleGate.Dispose();
     }
 
@@ -253,9 +271,29 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
 
         PlayerQueue? queue = null;
         double? elapsedTimeSeconds = null;
+        MusicAssistantQueueItems? queueItems = null;
+        MusicAssistantQueueSettings? queueSettings = null;
+        Dictionary<string, JsonElement>? additionalData = null;
         if (hubEvent.Data.ValueKind == JsonValueKind.Object)
         {
-            queue = JsonSerializer.Deserialize<PlayerQueue>(hubEvent.Data.GetRawText(), JsonOptions);
+            if (string.Equals(hubEvent.Event, "queue_added", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(hubEvent.Event, "queue_updated", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(hubEvent.Event, "queue_removed", StringComparison.OrdinalIgnoreCase))
+            {
+                queue = JsonSerializer.Deserialize<PlayerQueue>(hubEvent.Data.GetRawText(), JsonOptions);
+            }
+            else if (string.Equals(hubEvent.Event, "queue_items_updated", StringComparison.OrdinalIgnoreCase))
+            {
+                queueItems = JsonSerializer.Deserialize<MusicAssistantQueueItems>(hubEvent.Data.GetRawText(), JsonOptions);
+            }
+            else if (string.Equals(hubEvent.Event, "queue_settings_updated", StringComparison.OrdinalIgnoreCase))
+            {
+                queueSettings = JsonSerializer.Deserialize<MusicAssistantQueueSettings>(hubEvent.Data.GetRawText(), JsonOptions);
+            }
+            else
+            {
+                additionalData = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(hubEvent.Data.GetRawText(), JsonOptions);
+            }
         }
         else if (string.Equals(hubEvent.Event, "queue_time_updated", StringComparison.OrdinalIgnoreCase)
             && hubEvent.Data.ValueKind == JsonValueKind.Number
@@ -269,6 +307,9 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
             QueueId: hubEvent.ObjectId,
             Queue: queue,
             ElapsedTimeSeconds: elapsedTimeSeconds,
+            QueueItems: queueItems,
+            QueueSettings: queueSettings,
+            AdditionalData: additionalData,
             ReceivedAt: hubEvent.ReceivedAt);
 
         return true;
@@ -283,6 +324,135 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
             if (!subscriber.Writer.TryWrite(queueEvent))
             {
                 _logger.LogDebug("Dropping queue event for one subscriber due to backpressure.");
+            }
+        }
+    }
+    #endregion
+
+    #region Player Projection
+    public event EventHandler<MusicAssistantPlayerEvent>? PlayerEventReceived;
+
+    public async IAsyncEnumerable<MusicAssistantPlayerEvent> PlayerEvents(
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var subscriberId = Guid.NewGuid();
+        var channel = Channel.CreateUnbounded<MusicAssistantPlayerEvent>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false
+        });
+
+        _playerSubscribers[subscriberId] = channel;
+
+        try
+        {
+            await foreach (var playerEvent in channel.Reader.ReadAllAsync(cancellationToken))
+            {
+                yield return playerEvent;
+            }
+        }
+        finally
+        {
+            _playerSubscribers.TryRemove(subscriberId, out var removedChannel);
+            removedChannel?.Writer.TryComplete();
+        }
+    }
+
+    private bool TryCreatePlayerEvent(MusicAssistantEvent hubEvent, out MusicAssistantPlayerEvent playerEvent)
+    {
+        playerEvent = default!;
+        if (!PlayerEventsFilter.Contains(hubEvent.Event))
+        {
+            return false;
+        }
+
+        Player? player = null;
+        MusicAssistantPlayerSettings? playerSettings = null;
+        MusicAssistantPlayerConfig? playerConfig = null;
+        MusicAssistantPlayerDspConfig? playerDspConfig = null;
+        MusicAssistantPlayerOptions? playerOptions = null;
+        Dictionary<string, JsonElement>? additionalData = null;
+        if (hubEvent.Data.ValueKind == JsonValueKind.Object)
+        {
+            if (string.Equals(hubEvent.Event, "player_added", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(hubEvent.Event, "player_updated", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(hubEvent.Event, "player_removed", StringComparison.OrdinalIgnoreCase))
+            {
+                player = JsonSerializer.Deserialize<Player>(hubEvent.Data.GetRawText(), JsonOptions);
+            }
+            else if (string.Equals(hubEvent.Event, "player_settings_updated", StringComparison.OrdinalIgnoreCase))
+            {
+                playerSettings = JsonSerializer.Deserialize<MusicAssistantPlayerSettings>(hubEvent.Data.GetRawText(), JsonOptions);
+            }
+            else if (string.Equals(hubEvent.Event, "player_config_updated", StringComparison.OrdinalIgnoreCase))
+            {
+                playerConfig = JsonSerializer.Deserialize<MusicAssistantPlayerConfig>(hubEvent.Data.GetRawText(), JsonOptions);
+            }
+            else if (string.Equals(hubEvent.Event, "player_dsp_config_updated", StringComparison.OrdinalIgnoreCase))
+            {
+                playerDspConfig = JsonSerializer.Deserialize<MusicAssistantPlayerDspConfig>(hubEvent.Data.GetRawText(), JsonOptions);
+            }
+            else
+            {
+                additionalData = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(hubEvent.Data.GetRawText(), JsonOptions);
+            }
+        }
+        else if (string.Equals(hubEvent.Event, "player_options_updated", StringComparison.OrdinalIgnoreCase)
+            && hubEvent.Data.ValueKind == JsonValueKind.Array)
+        {
+            try
+            {
+                var payloadParts = JsonSerializer.Deserialize<List<JsonElement>>(hubEvent.Data.GetRawText(), JsonOptions);
+                if (payloadParts is { Count: >= 2 })
+                {
+                    var previous = payloadParts[0].ValueKind == JsonValueKind.Array
+                        ? JsonSerializer.Deserialize<List<MusicAssistantPlayerOption>>(payloadParts[0].GetRawText(), JsonOptions)
+                        : null;
+                    var current = payloadParts[1].ValueKind == JsonValueKind.Array
+                        ? JsonSerializer.Deserialize<List<MusicAssistantPlayerOption>>(payloadParts[1].GetRawText(), JsonOptions)
+                        : null;
+
+                    playerOptions = new MusicAssistantPlayerOptions
+                    {
+                        PreviousOptions = previous,
+                        CurrentOptions = current
+                    };
+                }
+            }
+            catch
+            {
+                // Keep parsing resilient: unavailable option payload should not drop the whole event.
+            }
+        }
+
+        var playerId = !string.IsNullOrWhiteSpace(hubEvent.ObjectId)
+            ? hubEvent.ObjectId
+            : player?.PlayerId
+            ?? playerConfig?.PlayerId;
+
+        playerEvent = new MusicAssistantPlayerEvent(
+            Event: hubEvent.Event,
+            PlayerId: playerId,
+            Player: player,
+            PlayerSettings: playerSettings,
+            PlayerConfig: playerConfig,
+            PlayerDspConfig: playerDspConfig,
+            PlayerOptions: playerOptions,
+            AdditionalData: additionalData,
+            ReceivedAt: hubEvent.ReceivedAt);
+
+        return true;
+    }
+
+    private void BroadcastPlayerEvent(MusicAssistantPlayerEvent playerEvent)
+    {
+        PlayerEventReceived?.Invoke(this, playerEvent);
+
+        foreach (var subscriber in _playerSubscribers.Values)
+        {
+            if (!subscriber.Writer.TryWrite(playerEvent))
+            {
+                _logger.LogDebug("Dropping player event for one subscriber due to backpressure.");
             }
         }
     }
@@ -430,6 +600,11 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
                 if (TryCreateQueueEvent(hubEvent, out var queueEvent))
                 {
                     BroadcastQueueEvent(queueEvent);
+                }
+
+                if (TryCreatePlayerEvent(hubEvent, out var playerEvent))
+                {
+                    BroadcastPlayerEvent(playerEvent);
                 }
             }
             catch (Exception ex)
