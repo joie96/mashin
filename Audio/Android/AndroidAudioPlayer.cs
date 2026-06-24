@@ -15,6 +15,10 @@ namespace mashin.Audio.Android
 {
     public sealed class AndroidAudioPlayer : IAudioPlayer
     {
+        #region Constants And Fields
+
+        private const float AudibleSampleThreshold = 0.0001f;
+
         private readonly ILogger<AndroidAudioPlayer> _logger;
         private Sendspin.SDK.Models.AudioFormat? _format;
         private IAudioSampleSource? _source;
@@ -23,9 +27,14 @@ namespace mashin.Audio.Android
         private readonly object _playbackLock = new();
         private volatile bool _isPlaying;
         private volatile bool _disposed;
+        private int _awaitingAudiblePlayback;
 
         private float _volume = 1.0f;
         private bool _isMuted;
+
+        #endregion
+
+        #region Construction
 
         public AndroidAudioPlayer(ILogger<AndroidAudioPlayer> logger)
         {
@@ -33,6 +42,10 @@ namespace mashin.Audio.Android
             State = AudioPlayerState.Uninitialized;
             _logger.LogInformation("AndroidAudioPlayer instantiated");
         }
+
+        #endregion
+
+        #region Properties
 
         public AudioPlayerState State { get; private set; }
 
@@ -56,8 +69,16 @@ namespace mashin.Audio.Android
 
         public int OutputLatencyMs { get; private set; }
 
+    #endregion
+
+    #region Events
+
         public event EventHandler<AudioPlayerState>? StateChanged;
         public event EventHandler<AudioPlayerError>? ErrorOccurred;
+
+    #endregion
+
+    #region Initialization
 
         public Task InitializeAsync(Sendspin.SDK.Models.AudioFormat format, CancellationToken cancellationToken = default)
         {
@@ -130,6 +151,10 @@ namespace mashin.Audio.Android
             _logger.LogInformation("Sample source configured: {SourceType}", source.GetType().FullName);
         }
 
+        #endregion
+
+        #region Transport Controls
+
         public void Play()
         {
             if (_audioTrack == null || _format == null)
@@ -143,9 +168,9 @@ namespace mashin.Audio.Android
                 }
 
                 _isPlaying = true;
+                Interlocked.Exchange(ref _awaitingAudiblePlayback, 1);
                 _audioTrack.SetVolume(1.0f);
                 _audioTrack.Play();
-                SetState(AudioPlayerState.Playing);
 
                 _playbackThread = new Thread(PlaybackLoop)
                 {
@@ -155,7 +180,7 @@ namespace mashin.Audio.Android
                 _playbackThread.Start();
             }
 
-            _logger.LogInformation("Playback started");
+            _logger.LogInformation("Playback started, waiting for first audible audio before setting Playing state");
         }
 
         public void Pause()
@@ -163,6 +188,7 @@ namespace mashin.Audio.Android
             if (!_isPlaying) return;
 
             _isPlaying = false;
+            Interlocked.Exchange(ref _awaitingAudiblePlayback, 0);
             _audioTrack?.Pause();
             _audioTrack?.Flush();
             JoinPlaybackThreadIfNeeded();
@@ -175,6 +201,7 @@ namespace mashin.Audio.Android
             if (!_isPlaying) return;
 
             _isPlaying = false;
+            Interlocked.Exchange(ref _awaitingAudiblePlayback, 0);
             _audioTrack?.Pause();
             _audioTrack?.Flush();
             _audioTrack?.Stop();
@@ -182,6 +209,10 @@ namespace mashin.Audio.Android
             SetState(AudioPlayerState.Stopped);
             _logger.LogInformation("Playback stopped");
         }
+
+        #endregion
+
+        #region Playback Loop
 
         private void PlaybackLoop()
         {
@@ -266,6 +297,19 @@ namespace mashin.Audio.Android
                         }
                     }
 
+                    var hasAudibleSamples = false;
+                    if (gain > 0f)
+                    {
+                        for (int i = 0; i < writeBuffer.Length; i++)
+                        {
+                            if (Math.Abs(writeBuffer[i]) >= AudibleSampleThreshold)
+                            {
+                                hasAudibleSamples = true;
+                                break;
+                            }
+                        }
+                    }
+
                     var track = _audioTrack;
                     if (track == null)
                     {
@@ -298,6 +342,12 @@ namespace mashin.Audio.Android
                         totalWritten += written;
                     }
 
+                    if (hasAudibleSamples && totalWritten > 0 && Interlocked.CompareExchange(ref _awaitingAudiblePlayback, 0, 1) == 1)
+                    {
+                        SetState(AudioPlayerState.Playing);
+                        _logger.LogDebug("First audible audio rendered; player state set to Playing");
+                    }
+
                     if (diagnosticsLeft > 0)
                     {
                         var firstSample = writeBuffer.Length > 0 ? writeBuffer[0] : 0f;
@@ -324,6 +374,7 @@ namespace mashin.Audio.Android
                 }
                 catch (Exception ex)
                 {
+                    Interlocked.Exchange(ref _awaitingAudiblePlayback, 0);
                     _logger.LogError(ex, "Error in playback loop");
                     SetState(AudioPlayerState.Error);
                     ErrorOccurred?.Invoke(this, new AudioPlayerError("Playback error", ex));
@@ -334,12 +385,17 @@ namespace mashin.Audio.Android
             _logger.LogInformation("Playback loop exited (isPlaying={IsPlaying}, disposed={Disposed})", _isPlaying, _disposed);
         }
 
+        #endregion
+
+        #region Lifetime
+
         public ValueTask DisposeAsync()
         {
             if (_disposed) return ValueTask.CompletedTask;
 
             _disposed = true;
             _isPlaying = false;
+            Interlocked.Exchange(ref _awaitingAudiblePlayback, 0);
 
             _playbackThread?.Join(1000);
 
@@ -351,6 +407,10 @@ namespace mashin.Audio.Android
             SetState(AudioPlayerState.Uninitialized);
             return ValueTask.CompletedTask;
         }
+
+        #endregion
+
+        #region Helpers
 
         private void JoinPlaybackThreadIfNeeded()
         {
@@ -385,6 +445,8 @@ namespace mashin.Audio.Android
         {
             throw new NotImplementedException();
         }
+
+        #endregion
     }
 }
 #pragma warning restore CA1416

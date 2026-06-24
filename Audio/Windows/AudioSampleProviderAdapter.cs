@@ -17,6 +17,8 @@ namespace mashin.Audio.Windows;
 /// </summary>
 internal sealed class AudioSampleProviderAdapter : ISampleProvider
 {
+    private const float AudibleSampleThreshold = 0.0001f;
+
     private readonly IAudioSampleSource _source;
     private static bool _prioritySet = false;
 
@@ -36,6 +38,13 @@ internal sealed class AudioSampleProviderAdapter : ISampleProvider
     /// When muted, zeros are written instead of actual audio.
     /// </summary>
     public bool IsMuted { get; set; }
+
+    /// <summary>
+    /// Raised once when the first non-silent sample chunk is rendered.
+    /// </summary>
+    public event Action? AudibleSamplesRendered;
+
+    private bool _audibleSamplesReported;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AudioSampleProviderAdapter"/> class.
@@ -97,7 +106,26 @@ internal sealed class AudioSampleProviderAdapter : ISampleProvider
             }
         }
 
+        if (!_audibleSamplesReported && samplesRead > 0 && volume > 0f)
+        {
+            var span = buffer.AsSpan(offset, samplesRead);
+            for (var i = 0; i < span.Length; i++)
+            {
+                if (Math.Abs(span[i]) >= AudibleSampleThreshold)
+                {
+                    _audibleSamplesReported = true;
+                    AudibleSamplesRendered?.Invoke();
+                    break;
+                }
+            }
+        }
+
         return samplesRead;
+    }
+
+    public void ResetAudibleSampleDetection()
+    {
+        _audibleSamplesReported = false;
     }
 }
 #endif

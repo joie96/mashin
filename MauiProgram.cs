@@ -118,6 +118,7 @@ public static class MauiProgram
             var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
             return AudioPlayerFactory.Create(loggerFactory);
         });
+        builder.Services.AddSingleton<IAudioPlayerStateFeed, AudioPlayerStateFeed>();
         builder.Services.AddSingleton<IAudioDecoderFactory, AudioDecoderFactory>();
         builder.Services.AddSingleton<IAudioPipeline>(sp =>
         {
@@ -188,14 +189,6 @@ public static class MauiProgram
         builder.Services.AddTransient<MobileSearchPage>();
 
         var app = builder.Build();
-
-        var startupLogger = app.Services
-            .GetRequiredService<ILoggerFactory>()
-            .CreateLogger("mashin.Startup");
-        var resolvedPlayer = app.Services.GetRequiredService<IAudioPlayer>();
-        startupLogger.LogInformation(
-            "Resolved IAudioPlayer implementation: {AudioPlayerType}",
-            resolvedPlayer.GetType().FullName);
 
         return app;
     }

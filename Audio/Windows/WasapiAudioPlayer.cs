@@ -29,6 +29,8 @@ namespace mashin.Audio.Windows;
 /// </remarks>
 public sealed class WasapiAudioPlayer : IAudioPlayer
 {
+    #region Constants And Fields
+
     private const int RequestedLatencyMs = 200;
 
     private readonly ILogger<WasapiAudioPlayer> _logger;
@@ -41,6 +43,11 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
     private int _outputLatencyMs;
     private bool _isOutputInitialized;
     private string _currentDeviceDisplayName = "System Default";
+    private int _awaitingAudiblePlayback;
+
+    #endregion
+
+    #region Properties
 
     /// <summary>
     /// Gets the detected output latency in milliseconds.
@@ -84,11 +91,19 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
         }
     }
 
+    #endregion
+
+    #region Events
+
     /// <inheritdoc/>
     public event EventHandler<AudioPlayerState>? StateChanged;
 
     /// <inheritdoc/>
     public event EventHandler<AudioPlayerError>? ErrorOccurred;
+
+    #endregion
+
+    #region Construction
 
     /// <summary>
     /// Initializes a new instance of the <see cref="WasapiAudioPlayer"/> class.
@@ -103,6 +118,10 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
         _logger = logger;
         _deviceId = deviceId;
     }
+
+    #endregion
+
+    #region Initialization
 
     /// <inheritdoc/>
     public Task InitializeAsync(AudioFormat format, CancellationToken cancellationToken = default)
@@ -148,6 +167,7 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
         _sampleProvider = new AudioSampleProviderAdapter(source, _format);
         _sampleProvider.Volume = _volume;
         _sampleProvider.IsMuted = _isMuted;
+        _sampleProvider.AudibleSamplesRendered += OnAudibleSamplesRendered;
 
         // AudioClient can only be initialized once per WasapiOut instance.
         // Recreate the output device if we need to attach a new sample source.
@@ -164,6 +184,10 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
         _logger.LogDebug("Sample source configured");
     }
 
+    #endregion
+
+    #region Transport Controls
+
     /// <inheritdoc/>
     public void Play()
     {
@@ -172,14 +196,16 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
             throw new InvalidOperationException("Player not initialized or no sample source set.");
         }
 
+        Interlocked.Exchange(ref _awaitingAudiblePlayback, 1);
+        _sampleProvider.ResetAudibleSampleDetection();
         _wasapiOut.Play();
-        SetState(AudioPlayerState.Playing);
-        _logger.LogInformation("Playback started");
+        _logger.LogInformation("Playback started, waiting for first audible audio before setting Playing state");
     }
 
     /// <inheritdoc/>
     public void Pause()
     {
+        Interlocked.Exchange(ref _awaitingAudiblePlayback, 0);
         _wasapiOut?.Pause();
         SetState(AudioPlayerState.Paused);
         _logger.LogInformation("Playback paused");
@@ -188,6 +214,7 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
     /// <inheritdoc/>
     public void Stop()
     {
+        Interlocked.Exchange(ref _awaitingAudiblePlayback, 0);
         _wasapiOut?.Stop();
         SetState(AudioPlayerState.Stopped);
         _logger.LogInformation("Playback stopped");
@@ -228,9 +255,10 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
                     // Resume playback if we were playing
                     if (wasPlaying && currentSampleProvider != null)
                     {
+                        Interlocked.Exchange(ref _awaitingAudiblePlayback, 1);
+                        currentSampleProvider.ResetAudibleSampleDetection();
                         var output = _wasapiOut ?? throw new InvalidOperationException("Audio output is not available for playback after device switch.");
                         output.Play();
-                        SetState(AudioPlayerState.Playing);
                         _logger.LogInformation("Playback resumed on new device");
                     }
 
@@ -250,9 +278,15 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
             cancellationToken);
     }
 
+            #endregion
+
+            #region Lifetime
+
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
+        Interlocked.Exchange(ref _awaitingAudiblePlayback, 0);
+
         if (_wasapiOut != null)
         {
             _wasapiOut.PlaybackStopped -= OnPlaybackStopped;
@@ -262,14 +296,24 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
         }
 
         _isOutputInitialized = false;
+        if (_sampleProvider != null)
+        {
+            _sampleProvider.AudibleSamplesRendered -= OnAudibleSamplesRendered;
+        }
         _sampleProvider = null;
         SetState(AudioPlayerState.Uninitialized);
 
         await Task.CompletedTask;
     }
 
+    #endregion
+
+    #region Helpers
+
     private void OnPlaybackStopped(object? sender, StoppedEventArgs e)
     {
+        Interlocked.Exchange(ref _awaitingAudiblePlayback, 0);
+
         if (e.Exception != null)
         {
             _logger.LogError(e.Exception, "Playback stopped due to error");
@@ -293,8 +337,21 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
         }
     }
 
+    private void OnAudibleSamplesRendered()
+    {
+        if (Interlocked.CompareExchange(ref _awaitingAudiblePlayback, 0, 1) != 1)
+        {
+            return;
+        }
+
+        SetState(AudioPlayerState.Playing);
+        _logger.LogDebug("First audible audio rendered; player state set to Playing");
+    }
+
     private void CreateOutputForCurrentDevice()
     {
+        Interlocked.Exchange(ref _awaitingAudiblePlayback, 0);
+
         if (_wasapiOut != null)
         {
             _wasapiOut.PlaybackStopped -= OnPlaybackStopped;
@@ -340,6 +397,8 @@ public sealed class WasapiAudioPlayer : IAudioPlayer
             return null;
         }
     }
+
+    #endregion
 
 }
 #endif

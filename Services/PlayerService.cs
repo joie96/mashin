@@ -1,5 +1,7 @@
 ﻿using mashin.Models;
 using Microsoft.Extensions.Logging;
+using mashin.Audio;
+using Sendspin.SDK.Audio;
 using Sendspin.SDK.Client;
 using Sendspin.SDK.Connection;
 using Sendspin.SDK.Models;
@@ -47,6 +49,7 @@ public sealed class SendspinPlayerService : IPlayerService
     private readonly ILogger<SendspinPlayerService> _logger;
     private readonly SettingsService _settingsService;
     private readonly ISendspinClient _sendspinClient;
+    private readonly IAudioPlayerStateFeed _audioPlayerStateFeed;
     private readonly CancellationTokenSource _disposeCts = new();
     private readonly object _progressSync = new();
 
@@ -78,18 +81,21 @@ public sealed class SendspinPlayerService : IPlayerService
         IMusicAssistantEventHub musicAssistantEventHub,
         ILogger<SendspinPlayerService> logger,
         SettingsService settingsService,
-        ISendspinClient sendspinClient)
+        ISendspinClient sendspinClient,
+        IAudioPlayerStateFeed audioPlayerStateFeed)
     {
         _musicAssistant = musicAssistant;
         _musicAssistantEventHub = musicAssistantEventHub;
         _logger = logger;
         _settingsService = settingsService;
         _sendspinClient = sendspinClient;
+        _audioPlayerStateFeed = audioPlayerStateFeed;
         _playerId = _settingsService.GetSendspinClientId();
         _activePlayerId = _playerId;
 
         _sendspinClient.PlayerStateChanged += OnSendspinPlayerStateChanged;
         _sendspinClient.ConnectionStateChanged += OnSendspinConnectionStateChanged;
+        _audioPlayerStateFeed.StateChanged += OnLocalAudioPlayerStateChanged;
         _musicAssistantEventHub.QueueEventReceived += OnMusicAssistantQueueEventReceived;
         _musicAssistantEventHub.PlayerEventReceived += OnMusicAssistantPlayerEventReceived;
 
@@ -353,6 +359,7 @@ public sealed class SendspinPlayerService : IPlayerService
     {
         _sendspinClient.PlayerStateChanged -= OnSendspinPlayerStateChanged;
         _sendspinClient.ConnectionStateChanged -= OnSendspinConnectionStateChanged;
+        _audioPlayerStateFeed.StateChanged -= OnLocalAudioPlayerStateChanged;
         _musicAssistantEventHub.QueueEventReceived -= OnMusicAssistantQueueEventReceived;
         _musicAssistantEventHub.PlayerEventReceived -= OnMusicAssistantPlayerEventReceived;
 
@@ -437,6 +444,28 @@ public sealed class SendspinPlayerService : IPlayerService
             _activeQueueId = null;
             ResetProgressAnchor();
             PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        }
+    }
+
+    private void OnLocalAudioPlayerStateChanged(object? sender, AudioPlayerState state)
+    {
+        if (string.IsNullOrWhiteSpace(_activePlayerId))
+        {
+            return;
+        }
+
+        var mappedState = MapLocalAudioPlayerState(state);
+        PlaybackState = new PlaybackStateCustom
+        {
+            State = mappedState,
+            ActiveSinceUtc = DateTimeOffset.UtcNow
+        };
+
+        _logger.LogDebug("Local audio player state applied. SourceState={SourceState}, MappedState={MappedState}, ActivePlayerId={ActivePlayerId}", state, mappedState, _activePlayerId);
+
+        if (mappedState != PlaybackStateType.Playing)
+        {
+            ResetProgressAnchor();
         }
     }
 
@@ -670,6 +699,18 @@ public sealed class SendspinPlayerService : IPlayerService
             "paused" => PlaybackStateType.Paused,
             "buffering" => PlaybackStateType.Buffering,
             "idle" => PlaybackStateType.Idle,
+            _ => PlaybackStateType.Unknown
+        };
+    }
+
+    private static PlaybackStateType MapLocalAudioPlayerState(AudioPlayerState state)
+    {
+        return state switch
+        {
+            AudioPlayerState.Playing => PlaybackStateType.Playing,
+            AudioPlayerState.Paused => PlaybackStateType.Paused,
+            AudioPlayerState.Stopped => PlaybackStateType.Idle,
+            AudioPlayerState.Uninitialized => PlaybackStateType.Idle,
             _ => PlaybackStateType.Unknown
         };
     }
