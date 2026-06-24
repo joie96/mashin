@@ -2,7 +2,7 @@ using Sendspin.SDK.Audio;
 using Sendspin.SDK.Models;
 using System.Threading;
 
-namespace mashin.Audio;
+namespace mashin.Audio.Pipeline;
 
 /// <summary>
 /// Lock-free FIFO audio buffer without time synchronization.

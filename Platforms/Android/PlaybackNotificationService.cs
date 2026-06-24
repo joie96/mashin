@@ -187,7 +187,7 @@ public sealed class PlaybackNotificationService : Service
             var state = playback.PlaybackState.State;
             var hasTrack = track != null;
 
-            var shouldShow = hasTrack || state is PlaybackStateType.Playing or PlaybackStateType.Buffering or PlaybackStateType.Paused;
+            var shouldShow = hasTrack || state is PlayerStateType.Playing or PlayerStateType.Buffering or PlayerStateType.Paused;
 
             if (!shouldShow)
             {
@@ -309,7 +309,7 @@ public sealed class PlaybackNotificationService : Service
 
                 var state = playback.PlaybackState.State;
                 var hasTrack = playback.CurrentQueueItem?.MediaItem != null;
-                var shouldShow = hasTrack || state is PlaybackStateType.Playing or PlaybackStateType.Buffering or PlaybackStateType.Paused;
+                var shouldShow = hasTrack || state is PlayerStateType.Playing or PlayerStateType.Buffering or PlayerStateType.Paused;
 
                 if (shouldShow || !IsAppInBackground())
                 {
@@ -358,7 +358,7 @@ public sealed class PlaybackNotificationService : Service
 
     // Builds the visible media notification with title, artist, album and optional artwork.
     #pragma warning disable CA1422
-    private Notification BuildNotification(Track? track, PlaybackStateType state, Bitmap? artwork, double positionSeconds, double durationSeconds)
+    private Notification BuildNotification(Track? track, PlayerStateType state, Bitmap? artwork, double positionSeconds, double durationSeconds)
     {
         var immutableFlag = Build.VERSION.SdkInt >= BuildVersionCodes.M
             ? ImmutableCompatFlag
@@ -376,7 +376,7 @@ public sealed class PlaybackNotificationService : Service
         var nextIntent = CreateActionIntent(ActionNext, 103);
         var stopIntent = CreateActionIntent(ActionStop, 104);
 
-        var isPlaying = state is PlaybackStateType.Playing or PlaybackStateType.Buffering;
+        var isPlaying = state is PlayerStateType.Playing or PlayerStateType.Buffering;
         var playPauseIcon = isPlaying ? Android.Resource.Drawable.IcMediaPause : Android.Resource.Drawable.IcMediaPlay;
         var playPauseLabel = isPlaying ? "Pause" : "Play";
 
@@ -443,7 +443,7 @@ public sealed class PlaybackNotificationService : Service
     #region Media Session Sync
 
     // Mirrors current playback metadata/state to the Android media session.
-    private void UpdateMediaSession(Track? track, PlaybackStateType state, Bitmap? artwork, double positionSeconds, double durationSeconds)
+    private void UpdateMediaSession(Track? track, PlayerStateType state, Bitmap? artwork, double positionSeconds, double durationSeconds)
     {
         var mediaSession = _mediaSession;
         if (mediaSession == null)
@@ -460,7 +460,7 @@ public sealed class PlaybackNotificationService : Service
             | SessionPlaybackState.ActionSkipToPrevious
             | SessionPlaybackState.ActionStop);
         var positionMs = (long)Math.Max(0, positionSeconds * 1000d);
-        var playbackSpeed = state is PlaybackStateType.Playing ? 1f : 0f;
+        var playbackSpeed = state is PlayerStateType.Playing ? 1f : 0f;
         playbackStateBuilder.SetState(MapPlaybackState(state), positionMs, playbackSpeed, SystemClock.ElapsedRealtime());
         var playbackState = playbackStateBuilder.Build();
 
@@ -479,14 +479,14 @@ public sealed class PlaybackNotificationService : Service
         mediaSession.SetMetadata(metadataBuilder.Build()!);
     }
 
-    private static SessionPlaybackStateCode MapPlaybackState(PlaybackStateType state)
+    private static SessionPlaybackStateCode MapPlaybackState(PlayerStateType state)
     {
         return state switch
         {
-            PlaybackStateType.Playing => SessionPlaybackStateCode.Playing,
-            PlaybackStateType.Paused => SessionPlaybackStateCode.Paused,
-            PlaybackStateType.Buffering => SessionPlaybackStateCode.Buffering,
-            PlaybackStateType.Idle => SessionPlaybackStateCode.Stopped,
+            PlayerStateType.Playing => SessionPlaybackStateCode.Playing,
+            PlayerStateType.Paused => SessionPlaybackStateCode.Paused,
+            PlayerStateType.Buffering => SessionPlaybackStateCode.Buffering,
+            PlayerStateType.Idle => SessionPlaybackStateCode.Stopped,
             _ => SessionPlaybackStateCode.None
         };
     }

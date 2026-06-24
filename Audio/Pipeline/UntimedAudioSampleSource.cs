@@ -1,18 +1,29 @@
+using mashin.Audio;
+using mashin.Models;
 using Sendspin.SDK.Audio;
 using Sendspin.SDK.Models;
 
-namespace mashin.Audio;
+namespace mashin.Audio.Pipeline;
 
 /// <summary>
 /// Simple audio sample source without time synchronization.
 /// Reads directly from UntimedAudioBuffer without any timestamp handling.
 /// </summary>
-public sealed class UntimedAudioSampleSource : IAudioSampleSource
+public sealed class UntimedAudioSampleSource : IAudioSampleSource, IRendererSampleSource
 {
     private readonly UntimedAudioBuffer _buffer;
 
     /// <inheritdoc/>
     public AudioFormat Format => _buffer.Format;
+
+    AudioFormatModel IRendererSampleSource.Format => new()
+    {
+        Codec = string.IsNullOrWhiteSpace(_buffer.Format.Codec) ? "unknown" : _buffer.Format.Codec,
+        SampleRate = _buffer.Format.SampleRate,
+        Channels = _buffer.Format.Channels,
+        BitDepth = _buffer.Format.BitDepth,
+        Bitrate = _buffer.Format.Bitrate
+    };
 
     /// <summary>
     /// Initializes a new instance of the <see cref="UntimedAudioSampleSource"/> class.

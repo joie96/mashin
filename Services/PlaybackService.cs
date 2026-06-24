@@ -19,7 +19,7 @@ public interface IPlaybackService : IAsyncDisposable, INotifyPropertyChanged
 {
     PlaybackOutputMode OutputMode { get; }
     string? ActivePlayerId { get; }
-    PlaybackStateCustom PlaybackState { get; set; }
+    PlayerState PlaybackState { get; set; }
     int Volume { get; }
     bool IsMuted { get; }
     bool? ShuffleEnabled { get; }
@@ -80,9 +80,9 @@ public sealed class PlaybackService : IPlaybackService
     private string? _activePlayerId;
     private IPlayerService _activePlayer;
 
-    private PlaybackStateCustom _playbackState = new()
+    private PlayerState _playbackState = new()
     {
-        State = PlaybackStateType.Idle,
+        State = PlayerStateType.Idle,
         ActiveSinceUtc = DateTimeOffset.UtcNow
     };
     private int _volume = 50;
@@ -141,12 +141,12 @@ public sealed class PlaybackService : IPlaybackService
         private set => SetProperty(ref _activePlayerId, Normalize(value));
     }
 
-    public PlaybackStateCustom PlaybackState
+    public PlayerState PlaybackState
     {
         get => _playbackState;
-        set => SetProperty(ref _playbackState, value ?? new PlaybackStateCustom
+        set => SetProperty(ref _playbackState, value ?? new PlayerState
         {
-            State = PlaybackStateType.Unknown,
+            State = PlayerStateType.Unknown,
             ActiveSinceUtc = DateTimeOffset.UtcNow
         });
     }
@@ -310,7 +310,7 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        PlaybackState = new PlayerState { State = PlayerStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         try
         {
@@ -318,7 +318,7 @@ public sealed class PlaybackService : IPlaybackService
         }
         catch (Exception ex)
         {
-            PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+            PlaybackState = new PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
             _logger.LogError(ex, "PlayMedia request failed for ActivePlayerId={ActivePlayerId}", ActivePlayerId);
             throw;
         }
@@ -345,7 +345,7 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        PlaybackState = new PlayerState { State = PlayerStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         try
         {
@@ -353,7 +353,7 @@ public sealed class PlaybackService : IPlaybackService
         }
         catch (Exception ex)
         {
-            PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+            PlaybackState = new PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
             _logger.LogError(ex, "PlayMediaNext request failed for ActivePlayerId={ActivePlayerId}", ActivePlayerId);
             throw;
         }
@@ -380,7 +380,7 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        PlaybackState = new PlayerState { State = PlayerStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         try
         {
@@ -388,7 +388,7 @@ public sealed class PlaybackService : IPlaybackService
         }
         catch (Exception ex)
         {
-            PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+            PlaybackState = new PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
             _logger.LogError(ex, "PlayMediaLast request failed for ActivePlayerId={ActivePlayerId}", ActivePlayerId);
             throw;
         }
@@ -415,7 +415,7 @@ public sealed class PlaybackService : IPlaybackService
             (mediaItems[i], mediaItems[j]) = (mediaItems[j], mediaItems[i]);
         }
 
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        PlaybackState = new PlayerState { State = PlayerStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         try
         {
@@ -423,7 +423,7 @@ public sealed class PlaybackService : IPlaybackService
         }
         catch (Exception ex)
         {
-            PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+            PlaybackState = new PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
             _logger.LogError(ex, "ShufflePlayMedia request failed for ActivePlayerId={ActivePlayerId}", ActivePlayerId);
             throw;
         }

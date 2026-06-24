@@ -1,4 +1,4 @@
-﻿#if WINDOWS
+#if WINDOWS
 
 // <copyright file="AudioSampleProviderAdapter.cs" company="Sendspin Windows Client">
 // Licensed under the MIT License. See LICENSE file in the project root.
@@ -6,20 +6,20 @@
 
 using Microsoft.VisualBasic;
 using NAudio.Wave;
-using Sendspin.SDK.Audio;
-using Sendspin.SDK.Models;
+using mashin.Audio;
+using mashin.Models;
 
-namespace mashin.Audio.Windows;
+namespace mashin.Audio.Renderers.Windows;
 
 /// <summary>
-/// Adapts <see cref="IAudioSampleSource"/> to NAudio's <see cref="ISampleProvider"/> interface.
+/// Adapts <see cref="IRendererSampleSource"/> to NAudio's <see cref="ISampleProvider"/> interface.
 /// This allows our audio pipeline to integrate with NAudio's playback infrastructure.
 /// </summary>
 internal sealed class AudioSampleProviderAdapter : ISampleProvider
 {
     private const float AudibleSampleThreshold = 0.0001f;
 
-    private readonly IAudioSampleSource _source;
+    private readonly IRendererSampleSource _source;
     private static bool _prioritySet = false;
 
     /// <summary>
@@ -51,7 +51,7 @@ internal sealed class AudioSampleProviderAdapter : ISampleProvider
     /// </summary>
     /// <param name="source">The audio sample source to adapt.</param>
     /// <param name="format">Audio format configuration.</param>
-    public AudioSampleProviderAdapter(IAudioSampleSource source, AudioFormat format)
+    public AudioSampleProviderAdapter(IRendererSampleSource source, AudioFormatModel format)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(format);

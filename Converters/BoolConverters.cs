@@ -82,24 +82,24 @@ public class PlayStateToBoolConverter : IValueConverter
             return false;
         }
 
-        var playState = value is PlaybackStateCustom playbackStateCustom
+        var playState = value is PlayerState playbackStateCustom
             ? playbackStateCustom.State
-            : PlaybackStateType.Unknown;
+            : PlayerStateType.Unknown;
 
         var token = stateParameter.Trim().ToLowerInvariant();
 
         return token switch
         {
-            "unknown" => playState == PlaybackStateType.Unknown,
-            "stopped" => playState == PlaybackStateType.Idle,
-            "paused" => playState is PlaybackStateType.Paused or PlaybackStateType.Idle or PlaybackStateType.Unknown,
-            "buffering" => playState is PlaybackStateType.Buffering or PlaybackStateType.Seeking,
-            "playing" => playState == PlaybackStateType.Playing,
-            "seeking" => playState == PlaybackStateType.Seeking,
-            "show-play-icon" => playState is PlaybackStateType.Paused or PlaybackStateType.Idle or PlaybackStateType.Unknown,
-            "show-pause-icon" => playState is PlaybackStateType.Playing
-                or PlaybackStateType.Buffering
-                or PlaybackStateType.Seeking,
+            "unknown" => playState == PlayerStateType.Unknown,
+            "stopped" => playState == PlayerStateType.Idle,
+            "paused" => playState is PlayerStateType.Paused or PlayerStateType.Idle or PlayerStateType.Unknown,
+            "buffering" => playState is PlayerStateType.Buffering or PlayerStateType.Seeking,
+            "playing" => playState == PlayerStateType.Playing,
+            "seeking" => playState == PlayerStateType.Seeking,
+            "show-play-icon" => playState is PlayerStateType.Paused or PlayerStateType.Idle or PlayerStateType.Unknown,
+            "show-pause-icon" => playState is PlayerStateType.Playing
+                or PlayerStateType.Buffering
+                or PlayerStateType.Seeking,
             _ => false,
         };
     }

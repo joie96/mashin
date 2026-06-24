@@ -1,6 +1,6 @@
 using Sendspin.SDK.Audio;
 
-namespace mashin.Audio;
+namespace mashin.Audio.Abstractions;
 
 public interface IAudioPlayerStateFeed
 {

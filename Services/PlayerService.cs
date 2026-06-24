@@ -1,6 +1,6 @@
 ﻿using mashin.Models;
 using Microsoft.Extensions.Logging;
-using mashin.Audio;
+using mashin.Audio.Abstractions;
 using Sendspin.SDK.Audio;
 using Sendspin.SDK.Client;
 using Sendspin.SDK.Connection;
@@ -16,7 +16,7 @@ namespace mashin.Services;
 public interface IPlayerService : INotifyPropertyChanged, IAsyncDisposable
 {
     PlaybackOutputMode OutputMode { get; }
-    PlaybackStateCustom PlaybackState { get; }
+    Models.PlayerState PlaybackState { get; }
     double PositionSeconds { get; }
     double DurationSeconds { get; }
     int Volume { get; }
@@ -56,9 +56,9 @@ public sealed class SendspinPlayerService : IPlayerService
     private bool _isConnected;
     private string? _connectedServerName;
     private string? _playerId;
-    private PlaybackStateCustom _playbackState = new()
+    private Models.PlayerState _playbackState = new()
     {
-        State = PlaybackStateType.Idle,
+        State = PlayerStateType.Idle,
         ActiveSinceUtc = DateTimeOffset.UtcNow
     };
     private double _positionSeconds;
@@ -114,7 +114,7 @@ public sealed class SendspinPlayerService : IPlayerService
                     break;
                 }
 
-                if (PlaybackState.State != PlaybackStateType.Playing)
+                if (PlaybackState.State != PlayerStateType.Playing)
                 {
                     continue;
                 }
@@ -174,12 +174,12 @@ public sealed class SendspinPlayerService : IPlayerService
         private set => SetProperty(ref _playerId, value);
     }
 
-    public PlaybackStateCustom PlaybackState
+    public Models.PlayerState PlaybackState
     {
         get => _playbackState;
-        private set => SetProperty(ref _playbackState, value ?? new PlaybackStateCustom
+        private set => SetProperty(ref _playbackState, value ?? new Models.PlayerState
         {
-            State = PlaybackStateType.Unknown,
+            State = PlayerStateType.Unknown,
             ActiveSinceUtc = DateTimeOffset.UtcNow
         });
     }
@@ -261,7 +261,7 @@ public sealed class SendspinPlayerService : IPlayerService
         PositionSeconds = 0;
         DurationSeconds = 0;
         ResetProgressAnchor();
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        PlaybackState = new Models.PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
         await DisconnectAsync();
     }
 
@@ -273,11 +273,11 @@ public sealed class SendspinPlayerService : IPlayerService
             return;
         }
 
-        var command = PlaybackState.State == PlaybackStateType.Playing
+        var command = PlaybackState.State == PlayerStateType.Playing
             ? Commands.Pause
             : Commands.Play;
 
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        PlaybackState = new Models.PlayerState { State = PlayerStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         _logger.LogInformation("Sendspin command dispatch. Command={Command}, ActivePlayerId={ActivePlayerId}, PlaybackState={PlaybackState}", command, _activePlayerId, PlaybackState.State);
         await _sendspinClient.SendCommandAsync(command);
@@ -291,7 +291,7 @@ public sealed class SendspinPlayerService : IPlayerService
             return;
         }
 
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        PlaybackState = new Models.PlayerState { State = PlayerStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         _logger.LogInformation("Sendspin command dispatch. Command={Command}, ActivePlayerId={ActivePlayerId}", Commands.Next, _activePlayerId);
         await _sendspinClient.SendCommandAsync(Commands.Next);
@@ -305,7 +305,7 @@ public sealed class SendspinPlayerService : IPlayerService
             return;
         }
 
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        PlaybackState = new Models.PlayerState { State = PlayerStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         _logger.LogInformation("Sendspin command dispatch. Command={Command}, ActivePlayerId={ActivePlayerId}", Commands.Previous, _activePlayerId);
         await _sendspinClient.SendCommandAsync(Commands.Previous);
@@ -322,7 +322,7 @@ public sealed class SendspinPlayerService : IPlayerService
         }
 
         PositionSeconds = clamped;
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Seeking, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        PlaybackState = new Models.PlayerState { State = PlayerStateType.Seeking, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         _logger.LogInformation("Sendspin seek requested via MusicAssistant. TargetPlayerId={TargetPlayerId}, Seconds={Seconds}", targetPlayerId, clamped);
         return _musicAssistant.PlayerSeekAsync(targetPlayerId, clamped);
@@ -409,7 +409,7 @@ public sealed class SendspinPlayerService : IPlayerService
         ConnectedServerName = null;
         _activeQueueId = null;
         ResetProgressAnchor();
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        PlaybackState = new Models.PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
         _logger.LogInformation("Sendspin client disconnected by client request.");
     }
 
@@ -449,7 +449,7 @@ public sealed class SendspinPlayerService : IPlayerService
             ConnectedServerName = null;
             _activeQueueId = null;
             ResetProgressAnchor();
-            PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+            PlaybackState = new Models.PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
         }
     }
 
@@ -463,7 +463,7 @@ public sealed class SendspinPlayerService : IPlayerService
 
         var mappedState = MapLocalAudioPlayerState(state);
 
-        PlaybackState = new PlaybackStateCustom
+        PlaybackState = new Models.PlayerState
         {
             State = mappedState,
             ActiveSinceUtc = DateTimeOffset.UtcNow
@@ -471,7 +471,7 @@ public sealed class SendspinPlayerService : IPlayerService
 
         _logger.LogDebug("Local audio player state applied. SourceState={SourceState}, MappedState={MappedState}, ActivePlayerId={ActivePlayerId}", state, mappedState, _activePlayerId);
 
-        if (mappedState != PlaybackStateType.Playing)
+        if (mappedState != PlayerStateType.Playing)
         {
             ResetProgressAnchor();
         }
@@ -649,13 +649,13 @@ public sealed class SendspinPlayerService : IPlayerService
                 UpdateProgressAnchor(clamped);
             }
 
-            PlaybackState = new PlaybackStateCustom
+            PlaybackState = new Models.PlayerState
             {
                 State = MapMusicAssistantPlaybackStateFromQueue(queue.State),
                 ActiveSinceUtc = DateTimeOffset.UtcNow
             };
 
-            if (PlaybackState.State != PlaybackStateType.Playing)
+            if (PlaybackState.State != PlayerStateType.Playing)
             {
                 ResetProgressAnchor();
             }
@@ -685,39 +685,39 @@ public sealed class SendspinPlayerService : IPlayerService
         }
     }
 
-    private static PlaybackStateType MapMusicAssistantPlaybackStateFromQueue(mashin.Models.PlaybackState? state)
+    private static PlayerStateType MapMusicAssistantPlaybackStateFromQueue(mashin.Models.PlaybackState? state)
     {
         return state switch
         {
-            mashin.Models.PlaybackState.Playing => PlaybackStateType.Playing,
-            mashin.Models.PlaybackState.Paused => PlaybackStateType.Paused,
-            mashin.Models.PlaybackState.Buffering => PlaybackStateType.Buffering,
-            mashin.Models.PlaybackState.Idle => PlaybackStateType.Idle,
-            _ => PlaybackStateType.Unknown
+            mashin.Models.PlaybackState.Playing => PlayerStateType.Playing,
+            mashin.Models.PlaybackState.Paused => PlayerStateType.Paused,
+            mashin.Models.PlaybackState.Buffering => PlayerStateType.Buffering,
+            mashin.Models.PlaybackState.Idle => PlayerStateType.Idle,
+            _ => PlayerStateType.Unknown
         };
     }
 
-    private static PlaybackStateType MapMusicAssistantPlaybackStateFromPlayer(string? state)
+    private static PlayerStateType MapMusicAssistantPlaybackStateFromPlayer(string? state)
     {
         return state?.Trim().ToLowerInvariant() switch
         {
-            "playing" => PlaybackStateType.Playing,
-            "paused" => PlaybackStateType.Paused,
-            "buffering" => PlaybackStateType.Buffering,
-            "idle" => PlaybackStateType.Idle,
-            _ => PlaybackStateType.Unknown
+            "playing" => PlayerStateType.Playing,
+            "paused" => PlayerStateType.Paused,
+            "buffering" => PlayerStateType.Buffering,
+            "idle" => PlayerStateType.Idle,
+            _ => PlayerStateType.Unknown
         };
     }
 
-    private static PlaybackStateType MapLocalAudioPlayerState(AudioPlayerState state)
+    private static PlayerStateType MapLocalAudioPlayerState(AudioPlayerState state)
     {
         return state switch
         {
-            AudioPlayerState.Playing => PlaybackStateType.Playing,
-            AudioPlayerState.Paused => PlaybackStateType.Paused,
-            AudioPlayerState.Stopped => PlaybackStateType.Idle,
-            AudioPlayerState.Uninitialized => PlaybackStateType.Idle,
-            _ => PlaybackStateType.Unknown
+            AudioPlayerState.Playing => PlayerStateType.Playing,
+            AudioPlayerState.Paused => PlayerStateType.Paused,
+            AudioPlayerState.Stopped => PlayerStateType.Idle,
+            AudioPlayerState.Uninitialized => PlayerStateType.Idle,
+            _ => PlayerStateType.Unknown
         };
     }
 
@@ -732,9 +732,9 @@ public sealed class LocalDummyPlayerService : IPlayerService
 {
     #region Fields
 
-    private PlaybackStateCustom _playbackState = new()
+    private Models.PlayerState _playbackState = new()
     {
-        State = PlaybackStateType.Idle,
+        State = PlayerStateType.Idle,
         ActiveSinceUtc = DateTimeOffset.UtcNow
     };
     private double _positionSeconds;
@@ -754,7 +754,7 @@ public sealed class LocalDummyPlayerService : IPlayerService
 
     public PlaybackOutputMode OutputMode => PlaybackOutputMode.LocalOffline;
 
-    public PlaybackStateCustom PlaybackState
+    public Models.PlayerState PlaybackState
     {
         get => _playbackState;
         private set => SetProperty(ref _playbackState, value);
@@ -793,10 +793,10 @@ public sealed class LocalDummyPlayerService : IPlayerService
 
     public Task TogglePlayPauseAsync(CancellationToken cancellationToken = default)
     {
-        var next = PlaybackState.State == PlaybackStateType.Playing
-            ? PlaybackStateType.Paused
-            : PlaybackStateType.Playing;
-        PlaybackState = new PlaybackStateCustom { State = next, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        var next = PlaybackState.State == PlayerStateType.Playing
+            ? PlayerStateType.Paused
+            : PlayerStateType.Playing;
+        PlaybackState = new Models.PlayerState { State = next, ActiveSinceUtc = DateTimeOffset.UtcNow };
         return Task.CompletedTask;
     }
 
@@ -867,9 +867,9 @@ public sealed class RemotePlayerService : IPlayerService
     private readonly CancellationTokenSource _disposeCts = new();
     private readonly object _progressSync = new();
 
-    private PlaybackStateCustom _playbackState = new()
+    private Models.PlayerState _playbackState = new()
     {
-        State = PlaybackStateType.Idle,
+        State = PlayerStateType.Idle,
         ActiveSinceUtc = DateTimeOffset.UtcNow
     };
     private double _positionSeconds;
@@ -907,7 +907,7 @@ public sealed class RemotePlayerService : IPlayerService
                     break;
                 }
 
-                if (PlaybackState.State != PlaybackStateType.Playing)
+                if (PlaybackState.State != PlayerStateType.Playing)
                 {
                     continue;
                 }
@@ -949,12 +949,12 @@ public sealed class RemotePlayerService : IPlayerService
 
     public PlaybackOutputMode OutputMode => PlaybackOutputMode.RemoteOnly;
 
-    public PlaybackStateCustom PlaybackState
+    public Models.PlayerState PlaybackState
     {
         get => _playbackState;
-        private set => SetProperty(ref _playbackState, value ?? new PlaybackStateCustom
+        private set => SetProperty(ref _playbackState, value ?? new Models.PlayerState
         {
-            State = PlaybackStateType.Unknown,
+            State = PlayerStateType.Unknown,
             ActiveSinceUtc = DateTimeOffset.UtcNow
         });
     }
@@ -1001,7 +1001,7 @@ public sealed class RemotePlayerService : IPlayerService
         PositionSeconds = 0;
         DurationSeconds = 0;
         ResetProgressAnchor();
-        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        PlaybackState = new Models.PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
         return Task.CompletedTask;
     }
 
@@ -1184,13 +1184,13 @@ public sealed class RemotePlayerService : IPlayerService
             UpdateProgressAnchor(clamped);
         }
 
-        PlaybackState = new PlaybackStateCustom
+        PlaybackState = new Models.PlayerState
         {
             State = MapState(queue.State),
             ActiveSinceUtc = DateTimeOffset.UtcNow
         };
 
-        if (PlaybackState.State != PlaybackStateType.Playing)
+        if (PlaybackState.State != PlayerStateType.Playing)
         {
             ResetProgressAnchor();
         }
@@ -1216,13 +1216,13 @@ public sealed class RemotePlayerService : IPlayerService
             var clamped = Math.Max(0, queue.ElapsedTime ?? 0);
             PositionSeconds = clamped;
             UpdateProgressAnchor(clamped);
-            PlaybackState = new PlaybackStateCustom
+            PlaybackState = new Models.PlayerState
             {
                 State = MapState(queue.State),
                 ActiveSinceUtc = DateTimeOffset.UtcNow
             };
 
-            if (PlaybackState.State != PlaybackStateType.Playing)
+            if (PlaybackState.State != PlayerStateType.Playing)
             {
                 ResetProgressAnchor();
             }
@@ -1262,15 +1262,15 @@ public sealed class RemotePlayerService : IPlayerService
         return value.Trim();
     }
 
-    private static PlaybackStateType MapState(mashin.Models.PlaybackState? state)
+    private static PlayerStateType MapState(mashin.Models.PlaybackState? state)
     {
         return state switch
         {
-            mashin.Models.PlaybackState.Playing => PlaybackStateType.Playing,
-            mashin.Models.PlaybackState.Paused => PlaybackStateType.Paused,
-            mashin.Models.PlaybackState.Buffering => PlaybackStateType.Buffering,
-            mashin.Models.PlaybackState.Idle => PlaybackStateType.Idle,
-            _ => PlaybackStateType.Unknown
+            mashin.Models.PlaybackState.Playing => PlayerStateType.Playing,
+            mashin.Models.PlaybackState.Paused => PlayerStateType.Paused,
+            mashin.Models.PlaybackState.Buffering => PlayerStateType.Buffering,
+            mashin.Models.PlaybackState.Idle => PlayerStateType.Idle,
+            _ => PlayerStateType.Unknown
         };
     }
 
