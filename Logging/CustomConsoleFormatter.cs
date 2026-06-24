@@ -23,6 +23,21 @@ public sealed class CustomConsoleFormatter : ConsoleFormatter, IDisposable
         _optionsReloadToken?.Dispose();
     }
 
+    private static string ToShortLevel(LogLevel level)
+    {
+        return level switch
+        {
+            LogLevel.Trace => "TRC",
+            LogLevel.Debug => "DBG",
+            LogLevel.Information => "INF",
+            LogLevel.Warning => "WRN",
+            LogLevel.Error => "ERR",
+            LogLevel.Critical => "CRT",
+            LogLevel.None => "NON",
+            _ => "UNK"
+        };
+    }
+
     public override void Write<TState>(in Microsoft.Extensions.Logging.Abstractions.LogEntry<TState> logEntry, IExternalScopeProvider? scopeProvider, TextWriter textWriter)
     {
         var formatter = logEntry.Formatter;
@@ -41,18 +56,16 @@ public sealed class CustomConsoleFormatter : ConsoleFormatter, IDisposable
             ? DateTimeOffset.Now.ToString("HH:mm:ss.fff")
             : DateTimeOffset.Now.ToString(_options.TimestampFormat);
 
-        var level = logEntry.LogLevel.ToString().ToUpperInvariant();
+        var level = ToShortLevel(logEntry.LogLevel);
         var category = logEntry.Category ?? "Unknown";
 
         textWriter.Write('[');
         textWriter.Write(timestamp);
-        textWriter.Write(' ');
+        textWriter.Write("] [");
         textWriter.Write(level);
-        textWriter.Write(": ");
+        textWriter.Write("] ");
         textWriter.Write(category);
-        textWriter.Write('[');
-        textWriter.Write(logEntry.EventId.Id);
-        textWriter.Write("]]");
+        textWriter.Write(":");
 
         if (!string.IsNullOrEmpty(message))
         {
