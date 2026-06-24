@@ -277,6 +277,8 @@ public sealed class SendspinPlayerService : IPlayerService
             ? Commands.Pause
             : Commands.Play;
 
+        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
+
         _logger.LogInformation("Sendspin command dispatch. Command={Command}, ActivePlayerId={ActivePlayerId}, PlaybackState={PlaybackState}", command, _activePlayerId, PlaybackState.State);
         await _sendspinClient.SendCommandAsync(command);
     }
@@ -289,6 +291,8 @@ public sealed class SendspinPlayerService : IPlayerService
             return;
         }
 
+        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
+
         _logger.LogInformation("Sendspin command dispatch. Command={Command}, ActivePlayerId={ActivePlayerId}", Commands.Next, _activePlayerId);
         await _sendspinClient.SendCommandAsync(Commands.Next);
     }
@@ -300,6 +304,8 @@ public sealed class SendspinPlayerService : IPlayerService
             _logger.LogWarning("Previous ignored: Sendspin client is not connected.");
             return;
         }
+
+        PlaybackState = new PlaybackStateCustom { State = PlaybackStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         _logger.LogInformation("Sendspin command dispatch. Command={Command}, ActivePlayerId={ActivePlayerId}", Commands.Previous, _activePlayerId);
         await _sendspinClient.SendCommandAsync(Commands.Previous);
@@ -447,6 +453,7 @@ public sealed class SendspinPlayerService : IPlayerService
         }
     }
 
+    // Set PlaybackState from local audio player state changes
     private void OnLocalAudioPlayerStateChanged(object? sender, AudioPlayerState state)
     {
         if (string.IsNullOrWhiteSpace(_activePlayerId))
@@ -455,6 +462,7 @@ public sealed class SendspinPlayerService : IPlayerService
         }
 
         var mappedState = MapLocalAudioPlayerState(state);
+
         PlaybackState = new PlaybackStateCustom
         {
             State = mappedState,
@@ -494,19 +502,18 @@ public sealed class SendspinPlayerService : IPlayerService
         }
 
         // Keep playback state in sync when queue state is not updated yet.
-        var mappedState = MapMusicAssistantPlaybackStateFromPlayer(e.Player?.State);
-        PlaybackState = new PlaybackStateCustom
-        {
-            State = mappedState,
-            ActiveSinceUtc = DateTimeOffset.UtcNow
-        };
+        // var mappedState = MapMusicAssistantPlaybackStateFromPlayer(e.Player?.State);
+        // PlaybackState = new PlaybackStateCustom
+        // {
+        //     State = mappedState,
+        //     ActiveSinceUtc = DateTimeOffset.UtcNow
+        // };
+        // if (mappedState != PlaybackStateType.Playing)
+        // {
+        //     ResetProgressAnchor();
+        // }
 
-        _logger.LogDebug("MusicAssistant PlayerEvent applied. EventPlayerId={EventPlayerId}, PayloadPlayerId={PayloadPlayerId}, SourceState={SourceState}, MappedState={MappedState}, ActiveQueueId={ActiveQueueId}", e.PlayerId, e.Player?.PlayerId, e.Player?.State, mappedState, _activeQueueId);
-
-        if (mappedState != PlaybackStateType.Playing)
-        {
-            ResetProgressAnchor();
-        }
+        _logger.LogDebug("MusicAssistant PlayerEvent applied (state ignored). EventPlayerId={EventPlayerId}, PayloadPlayerId={PayloadPlayerId}, SourceState={SourceState}, ActiveQueueId={ActiveQueueId}", e.PlayerId, e.Player?.PlayerId, e.Player?.State, _activeQueueId);
     }
 
     // Use MusicAssistant Queue Events to update playback state and position when the active queue is updated
@@ -568,22 +575,21 @@ public sealed class SendspinPlayerService : IPlayerService
             UpdateProgressAnchor(clamped);
         }
 
-        // Set PlaybackState from queue state.
+        // PlaybackState is intentionally not taken from MusicAssistant queue events.
         if (e.Queue?.State is mashin.Models.PlaybackState queueState)
         {
-            var mappedState = MapMusicAssistantPlaybackStateFromQueue(queueState);
-            PlaybackState = new PlaybackStateCustom
-            {
-                State = mappedState,
-                ActiveSinceUtc = DateTimeOffset.UtcNow
-            };
+            // var mappedState = MapMusicAssistantPlaybackStateFromQueue(queueState);
+            // PlaybackState = new PlaybackStateCustom
+            // {
+            //     State = mappedState,
+            //     ActiveSinceUtc = DateTimeOffset.UtcNow
+            // };
+            // if (PlaybackState.State != PlaybackStateType.Playing)
+            // {
+            //     ResetProgressAnchor();
+            // }
 
-            _logger.LogDebug("MusicAssistant QueueEvent applied. Event={EventName}, QueueId={QueueId}, DurationSeconds={DurationSeconds}, PositionSeconds={PositionSeconds}, QueueState={QueueState}, MappedState={MappedState}, ActiveQueueId={ActiveQueueId}", e.Event, e.QueueId, DurationSeconds, PositionSeconds, queueState, mappedState, _activeQueueId);
-
-            if (PlaybackState.State != PlaybackStateType.Playing)
-            {
-                ResetProgressAnchor();
-            }
+            _logger.LogDebug("MusicAssistant QueueEvent applied (state ignored). Event={EventName}, QueueId={QueueId}, DurationSeconds={DurationSeconds}, PositionSeconds={PositionSeconds}, QueueState={QueueState}, ActiveQueueId={ActiveQueueId}", e.Event, e.QueueId, DurationSeconds, PositionSeconds, queueState, _activeQueueId);
         }
         else
         {
