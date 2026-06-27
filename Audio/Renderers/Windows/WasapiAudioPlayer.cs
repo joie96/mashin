@@ -1,7 +1,7 @@
 #if WINDOWS
 
-using mashin.Audio;
-using mashin.Audio;
+using mashin.Audio.Renderers;
+using mashin.Audio.Renderers.Windows.Wasapi;
 using mashin.Models;
 using Microsoft.Extensions.Logging;
 using NAudio.CoreAudioApi;
@@ -19,7 +19,7 @@ public sealed class WasapiAudioPlayer : IAudioRenderer
     private readonly ILogger<WasapiAudioPlayer> _logger;
     private string? _deviceId;
     private WasapiOut? _wasapiOut;
-    private AudioSampleProviderAdapter? _sampleProvider;
+    private WasapiSampleProviderAdapter? _sampleProvider;
     private AudioFormatModel? _format;
     private float _volume = 1.0f;
     private bool _isMuted;
@@ -97,7 +97,7 @@ public sealed class WasapiAudioPlayer : IAudioRenderer
             cancellationToken);
     }
 
-    public void SetSampleSource(IRendererSampleSource source)
+    public void SetSampleSource(IAudioRendererSampleSource source)
     {
         if (_wasapiOut == null || _format == null)
         {
@@ -106,7 +106,7 @@ public sealed class WasapiAudioPlayer : IAudioRenderer
 
         ArgumentNullException.ThrowIfNull(source);
 
-        _sampleProvider = new AudioSampleProviderAdapter(source, _format)
+        _sampleProvider = new WasapiSampleProviderAdapter(source, _format)
         {
             Volume = _volume,
             IsMuted = _isMuted

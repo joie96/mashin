@@ -50,6 +50,7 @@
 
 	<ItemGroup>
 		<Compile Remove="Services\*_old.cs" />
+		<Compile Remove="sendspin-dotnet-main\**\*.cs" />
 	</ItemGroup>
 
 	<ItemGroup>

@@ -1,17 +1,21 @@
 ﻿using mashin.Models;
 using Microsoft.Extensions.Logging;
-using mashin.Audio.Abstractions;
+using mashin.Audio;
+using mashin.Audio.Renderers;
+using mashin.Audio.Pipeline;
+using mashin.Audio.Sources;
 using Sendspin.SDK.Audio;
 using Sendspin.SDK.Client;
 using Sendspin.SDK.Connection;
 using Sendspin.SDK.Models;
+using Sendspin.SDK.Protocol;
 using Sendspin.SDK.Protocol.Messages;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
 namespace mashin.Services;
 
-#region Interface
+#region Interfaces
 
 public interface IPlayerService : INotifyPropertyChanged, IAsyncDisposable
 {
@@ -25,20 +29,35 @@ public interface IPlayerService : INotifyPropertyChanged, IAsyncDisposable
     Task ActivateAsync(string? targetPlayerId, CancellationToken cancellationToken = default);
     Task DeactivateAsync();
     Task TogglePlayPauseAsync(CancellationToken cancellationToken = default);
-    Task NextAsync(CancellationToken cancellationToken = default);
-    Task PreviousAsync(CancellationToken cancellationToken = default);
     Task SeekAsync(double seconds, CancellationToken cancellationToken = default);
     Task SetVolumeAsync(int volume, CancellationToken cancellationToken = default);
     Task SetMutedAsync(bool muted, CancellationToken cancellationToken = default);
+}
+
+public interface IRemotePlayerService : IPlayerService
+{
+    Task NextAsync(CancellationToken cancellationToken = default);
+    Task PreviousAsync(CancellationToken cancellationToken = default);
     Task SetShuffleAsync(bool enabled, CancellationToken cancellationToken = default);
     Task SetRepeatModeAsync(mashin.Models.RepeatMode repeatMode, CancellationToken cancellationToken = default);
+}
+
+public interface ILocalPlayerService : IPlayerService
+{
+    QueueItem? CurrentQueueItem { get; }
+
+    event EventHandler<QueueItem?>? CurrentPlayingItemEnded;
+
+    Task SetSourceAsync(string sourcePath, double startSeconds = 0, CancellationToken cancellationToken = default);
+
+    void UpdateCurrentQueueItem(QueueItem? queueItem);
 }
 
 #endregion
 
 #region Sendspin Player
 
-public sealed class SendspinPlayerService : IPlayerService
+public sealed class SendspinPlayerService : IRemotePlayerService
 {
     #region Fields
 
@@ -97,7 +116,6 @@ public sealed class SendspinPlayerService : IPlayerService
         _sendspinClient.ConnectionStateChanged += OnSendspinConnectionStateChanged;
         _audioPlayerStateFeed.StateChanged += OnLocalAudioPlayerStateChanged;
         _musicAssistantEventHub.QueueEventReceived += OnMusicAssistantQueueEventReceived;
-        _musicAssistantEventHub.PlayerEventReceived += OnMusicAssistantPlayerEventReceived;
 
         _logger.LogInformation("Music Assistant position interpolation task starting for Sendspin player.");
 
@@ -208,6 +226,8 @@ public sealed class SendspinPlayerService : IPlayerService
         private set => SetProperty(ref _isMuted, value);
     }
 
+    public bool IsExternalSource => _sendspinClient.IsExternalSource;
+
     #endregion
 
     #region Commands
@@ -226,6 +246,34 @@ public sealed class SendspinPlayerService : IPlayerService
 
         _settingsService.SetSendspinPreferredAudioCodec(codec);
         return Task.CompletedTask;
+    }
+
+    public async Task SetExternalSourceAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        if (!IsConnected)
+        {
+            return;
+        }
+
+        if (enabled)
+        {
+            if (_sendspinClient.IsExternalSource)
+            {
+                return;
+            }
+
+            _logger.LogInformation("Sendspin external source enter requested. ActivePlayerId={ActivePlayerId}", _activePlayerId);
+            await _sendspinClient.EnterExternalSourceAsync();
+            return;
+        }
+
+        if (!_sendspinClient.IsExternalSource)
+        {
+            return;
+        }
+
+        _logger.LogInformation("Sendspin external source exit requested. ActivePlayerId={ActivePlayerId}", _activePlayerId);
+        await _sendspinClient.ExitExternalSourceAsync();
     }
 
     public async Task ActivateAsync(string? targetPlayerId, CancellationToken cancellationToken = default)
@@ -367,7 +415,6 @@ public sealed class SendspinPlayerService : IPlayerService
         _sendspinClient.ConnectionStateChanged -= OnSendspinConnectionStateChanged;
         _audioPlayerStateFeed.StateChanged -= OnLocalAudioPlayerStateChanged;
         _musicAssistantEventHub.QueueEventReceived -= OnMusicAssistantQueueEventReceived;
-        _musicAssistantEventHub.PlayerEventReceived -= OnMusicAssistantPlayerEventReceived;
 
         _disposeCts.Cancel();
         try
@@ -417,7 +464,7 @@ public sealed class SendspinPlayerService : IPlayerService
 
     #region Event Handlers
 
-    // Use PlayerStateChanged event to update volume and mute state
+    // Set Volume and Mute
     private void OnSendspinPlayerStateChanged(object? sender, object state)
     {
         // PlayerState is used as a source for volume and mute state, but not for playback state or position, which are derived from GroupState
@@ -453,15 +500,15 @@ public sealed class SendspinPlayerService : IPlayerService
         }
     }
 
-    // Set PlaybackState from local audio player state changes
-    private void OnLocalAudioPlayerStateChanged(object? sender, AudioPlayerState state)
+    // Set PlaybackState from locla audio renderer state changes
+    private void OnLocalAudioPlayerStateChanged(object? sender, PlayerStateType state)
     {
         if (string.IsNullOrWhiteSpace(_activePlayerId))
         {
             return;
         }
 
-        var mappedState = MapLocalAudioPlayerState(state);
+        var mappedState = NormalizeLocalAudioPlayerState(state);
 
         PlaybackState = new Models.PlayerState
         {
@@ -469,7 +516,7 @@ public sealed class SendspinPlayerService : IPlayerService
             ActiveSinceUtc = DateTimeOffset.UtcNow
         };
 
-        _logger.LogDebug("Local audio player state applied. SourceState={SourceState}, MappedState={MappedState}, ActivePlayerId={ActivePlayerId}", state, mappedState, _activePlayerId);
+        _logger.LogDebug("Local audio renderer state applied. SourceState={SourceState}, MappedState={MappedState}, ActivePlayerId={ActivePlayerId}", state, mappedState, _activePlayerId);
 
         if (mappedState != PlayerStateType.Playing)
         {
@@ -477,46 +524,7 @@ public sealed class SendspinPlayerService : IPlayerService
         }
     }
 
-    // Use MusicAssistant Player Events to update playback state and position when the active player is updated
-    private void OnMusicAssistantPlayerEventReceived(object? sender, MusicAssistantPlayerEvent e)
-    {
-        if (string.IsNullOrWhiteSpace(_activePlayerId))
-        {
-            _logger.LogDebug("MusicAssistant PlayerEvent ignored because no active Sendspin player is selected.");
-            return;
-        }
-
-        var eventPlayerId = Normalize(e.Player?.PlayerId) ?? Normalize(e.PlayerId);
-        if (string.IsNullOrWhiteSpace(eventPlayerId)
-            || !string.Equals(eventPlayerId, Normalize(_activePlayerId), StringComparison.Ordinal))
-        {
-            _logger.LogDebug("MusicAssistant PlayerEvent ignored due to player mismatch. EventPlayerId={EventPlayerId}, ActivePlayerId={ActivePlayerId}", eventPlayerId, _activePlayerId);
-            return;
-        }
-
-        // Keep active queue id in sync with MA player updates.
-        var nextQueueId = Normalize(e.Player?.ActiveSource);
-        if (!string.IsNullOrWhiteSpace(nextQueueId))
-        {
-            _activeQueueId = nextQueueId;
-        }
-
-        // Keep playback state in sync when queue state is not updated yet.
-        // var mappedState = MapMusicAssistantPlaybackStateFromPlayer(e.Player?.State);
-        // PlaybackState = new PlaybackStateCustom
-        // {
-        //     State = mappedState,
-        //     ActiveSinceUtc = DateTimeOffset.UtcNow
-        // };
-        // if (mappedState != PlaybackStateType.Playing)
-        // {
-        //     ResetProgressAnchor();
-        // }
-
-        _logger.LogDebug("MusicAssistant PlayerEvent applied (state ignored). EventPlayerId={EventPlayerId}, PayloadPlayerId={PayloadPlayerId}, SourceState={SourceState}, ActiveQueueId={ActiveQueueId}", e.PlayerId, e.Player?.PlayerId, e.Player?.State, _activeQueueId);
-    }
-
-    // Use MusicAssistant Queue Events to update playback state and position when the active queue is updated
+    // Set PositionSeconds and DurationSeconds from MusicAssistant queue events
     private void OnMusicAssistantQueueEventReceived(object? sender, MusicAssistantQueueEvent e)
     {
         if (string.IsNullOrWhiteSpace(_activePlayerId))
@@ -575,26 +583,8 @@ public sealed class SendspinPlayerService : IPlayerService
             UpdateProgressAnchor(clamped);
         }
 
-        // PlaybackState is intentionally not taken from MusicAssistant queue events.
-        if (e.Queue?.State is mashin.Models.PlaybackState queueState)
-        {
-            // var mappedState = MapMusicAssistantPlaybackStateFromQueue(queueState);
-            // PlaybackState = new PlaybackStateCustom
-            // {
-            //     State = mappedState,
-            //     ActiveSinceUtc = DateTimeOffset.UtcNow
-            // };
-            // if (PlaybackState.State != PlaybackStateType.Playing)
-            // {
-            //     ResetProgressAnchor();
-            // }
-
-            _logger.LogDebug("MusicAssistant QueueEvent applied (state ignored). Event={EventName}, QueueId={QueueId}, DurationSeconds={DurationSeconds}, PositionSeconds={PositionSeconds}, QueueState={QueueState}, ActiveQueueId={ActiveQueueId}", e.Event, e.QueueId, DurationSeconds, PositionSeconds, queueState, _activeQueueId);
-        }
-        else
-        {
-            _logger.LogDebug("MusicAssistant QueueEvent processed without queue state. Event={EventName}, QueueId={QueueId}, DurationSeconds={DurationSeconds}, PositionSeconds={PositionSeconds}, ActiveQueueId={ActiveQueueId}", e.Event, e.QueueId, DurationSeconds, PositionSeconds, _activeQueueId);
-        }
+        _logger.LogDebug("MusicAssistant QueueEvent processed. Event={EventName}, QueueId={QueueId}, DurationSeconds={DurationSeconds}, PositionSeconds={PositionSeconds}, ActiveQueueId={ActiveQueueId}", e.Event, e.QueueId, DurationSeconds, PositionSeconds, _activeQueueId);
+        
     }
 
 
@@ -709,15 +699,12 @@ public sealed class SendspinPlayerService : IPlayerService
         };
     }
 
-    private static PlayerStateType MapLocalAudioPlayerState(AudioPlayerState state)
+    private static PlayerStateType NormalizeLocalAudioPlayerState(PlayerStateType state)
     {
         return state switch
         {
-            AudioPlayerState.Playing => PlayerStateType.Playing,
-            AudioPlayerState.Paused => PlayerStateType.Paused,
-            AudioPlayerState.Stopped => PlayerStateType.Idle,
-            AudioPlayerState.Uninitialized => PlayerStateType.Idle,
-            _ => PlayerStateType.Unknown
+            PlayerStateType.Uninitialized => PlayerStateType.Idle,
+            _ => state
         };
     }
 
@@ -726,137 +713,10 @@ public sealed class SendspinPlayerService : IPlayerService
 
 #endregion
 
-#region Local Dummy Player
-
-public sealed class LocalDummyPlayerService : IPlayerService
-{
-    #region Fields
-
-    private Models.PlayerState _playbackState = new()
-    {
-        State = PlayerStateType.Idle,
-        ActiveSinceUtc = DateTimeOffset.UtcNow
-    };
-    private double _positionSeconds;
-    private double _durationSeconds;
-    private int _volume = 50;
-    private bool _isMuted;
-
-    #endregion
-
-    #region Events
-
-    public event PropertyChangedEventHandler? PropertyChanged;
-
-    #endregion
-
-    #region Properties
-
-    public PlaybackOutputMode OutputMode => PlaybackOutputMode.LocalOffline;
-
-    public Models.PlayerState PlaybackState
-    {
-        get => _playbackState;
-        private set => SetProperty(ref _playbackState, value);
-    }
-
-    public double PositionSeconds
-    {
-        get => _positionSeconds;
-        private set => SetProperty(ref _positionSeconds, Math.Max(0, value));
-    }
-
-    public double DurationSeconds
-    {
-        get => _durationSeconds;
-        private set => SetProperty(ref _durationSeconds, Math.Max(0, value));
-    }
-
-    public int Volume
-    {
-        get => _volume;
-        private set => SetProperty(ref _volume, Math.Clamp(value, 0, 100));
-    }
-
-    public bool IsMuted
-    {
-        get => _isMuted;
-        private set => SetProperty(ref _isMuted, value);
-    }
-
-    #endregion
-
-    #region Commands
-
-    public Task ActivateAsync(string? targetPlayerId, CancellationToken cancellationToken = default) => Task.CompletedTask;
-    public Task DeactivateAsync() => Task.CompletedTask;
-
-    public Task TogglePlayPauseAsync(CancellationToken cancellationToken = default)
-    {
-        var next = PlaybackState.State == PlayerStateType.Playing
-            ? PlayerStateType.Paused
-            : PlayerStateType.Playing;
-        PlaybackState = new Models.PlayerState { State = next, ActiveSinceUtc = DateTimeOffset.UtcNow };
-        return Task.CompletedTask;
-    }
-
-    public Task NextAsync(CancellationToken cancellationToken = default)
-    {
-        return Task.CompletedTask;
-    }
-
-    public Task PreviousAsync(CancellationToken cancellationToken = default)
-    {
-        return Task.CompletedTask;
-    }
-
-    public Task SeekAsync(double seconds, CancellationToken cancellationToken = default)
-    {
-        PositionSeconds = seconds;
-        return Task.CompletedTask;
-    }
-
-    public Task SetVolumeAsync(int volume, CancellationToken cancellationToken = default)
-    {
-        Volume = volume;
-        return Task.CompletedTask;
-    }
-
-    public Task SetMutedAsync(bool muted, CancellationToken cancellationToken = default)
-    {
-        IsMuted = muted;
-        return Task.CompletedTask;
-    }
-
-    public Task SetShuffleAsync(bool enabled, CancellationToken cancellationToken = default) => Task.CompletedTask;
-    public Task SetRepeatModeAsync(mashin.Models.RepeatMode repeatMode, CancellationToken cancellationToken = default) => Task.CompletedTask;
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-
-    #endregion
-
-    #region Helpers
-
-    private bool SetProperty<T>(ref T storage, T value, [CallerMemberName] string? propertyName = null)
-    {
-        if (EqualityComparer<T>.Default.Equals(storage, value))
-        {
-            return false;
-        }
-
-        storage = value;
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-        return true;
-    }
-
-    #endregion
-
-}
-
-#endregion
 
 #region Remote Player
 
-public sealed class RemotePlayerService : IPlayerService
+public sealed class RemotePlayerService : IRemotePlayerService
 {
     #region Fields
 
@@ -1275,6 +1135,393 @@ public sealed class RemotePlayerService : IPlayerService
     }
 
     #endregion
+}
+
+#endregion
+
+
+#region Local Audio Player
+
+public sealed class LocalAudioPlayerService : ILocalPlayerService
+{
+    #region Fields
+
+    private readonly ILogger<LocalAudioPlayerService> _logger;
+    private readonly IAudioPipeline _audioPipeline;
+    private readonly IAudioRenderer _audioRenderer;
+    private readonly LocalAudioChunkSource _localAudioChunkSource;
+
+    private Models.PlayerState _playbackState = new()
+    {
+        State = PlayerStateType.Idle,
+        ActiveSinceUtc = DateTimeOffset.UtcNow
+    };
+    private double _positionSeconds;
+    private double _durationSeconds;
+    private int _volume = 50;
+    private bool _isMuted;
+    private QueueItem? _currentQueueItem;
+    private string? _sourcePath;
+    private LocalAudioChunkStream? _chunkStream;
+    private CancellationTokenSource? _chunkFeedCts;
+    private Task? _chunkFeedTask;
+    private bool _pipelineStarted;
+
+    #endregion
+
+    #region Construction
+
+    public LocalAudioPlayerService(
+        ILogger<LocalAudioPlayerService> logger,
+        IAudioPipeline audioPipeline,
+        IAudioRenderer audioRenderer,
+        LocalAudioChunkSource localAudioChunkSource)
+    {
+        _logger = logger;
+        _audioPipeline = audioPipeline;
+        _audioRenderer = audioRenderer;
+        _localAudioChunkSource = localAudioChunkSource;
+
+        _audioRenderer.StateChanged += OnAudioRendererStateChanged;
+        _audioRenderer.ErrorOccurred += OnAudioRendererErrorOccurred;
+    }
+
+    #endregion
+
+    #region Events
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public event EventHandler<QueueItem?>? CurrentPlayingItemEnded;
+
+    #endregion
+
+    #region Properties
+
+    public PlaybackOutputMode OutputMode => PlaybackOutputMode.LocalOffline;
+
+    public Models.PlayerState PlaybackState
+    {
+        get => _playbackState;
+        private set => SetProperty(ref _playbackState, value);
+    }
+
+    public double PositionSeconds
+    {
+        get => _positionSeconds;
+        private set => SetProperty(ref _positionSeconds, Math.Max(0, value));
+    }
+
+    public double DurationSeconds
+    {
+        get => _durationSeconds;
+        private set => SetProperty(ref _durationSeconds, Math.Max(0, value));
+    }
+
+    public int Volume
+    {
+        get => _volume;
+        private set => SetProperty(ref _volume, Math.Clamp(value, 0, 100));
+    }
+
+    public bool IsMuted
+    {
+        get => _isMuted;
+        private set => SetProperty(ref _isMuted, value);
+    }
+
+    public QueueItem? CurrentQueueItem
+    {
+        get => _currentQueueItem;
+        private set
+        {
+            if (ReferenceEquals(_currentQueueItem, value))
+            {
+                return;
+            }
+
+            _currentQueueItem = value;
+        }
+    }
+
+    #endregion
+
+    #region Commands
+
+    public Task ActivateAsync(string? targetPlayerId, CancellationToken cancellationToken = default)
+    {
+        _sourcePath = NormalizeLocalPath(targetPlayerId);
+        return Task.CompletedTask;
+    }
+
+    public async Task DeactivateAsync()
+    {
+        await StopPipelinePlaybackAsync();
+        _audioRenderer.Stop();
+        _chunkStream = null;
+        CurrentQueueItem = null;
+        PositionSeconds = 0;
+        DurationSeconds = 0;
+        PlaybackState = new Models.PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+    }
+
+    public async Task TogglePlayPauseAsync(CancellationToken cancellationToken = default)
+    {
+        if (PlaybackState.State == PlayerStateType.Playing)
+        {
+            _audioRenderer.Pause();
+            return;
+        }
+
+        if (!_pipelineStarted)
+        {
+            if (string.IsNullOrWhiteSpace(_sourcePath))
+            {
+                _logger.LogWarning("Local playback requested without a configured source path.");
+                return;
+            }
+
+            await ConfigureTrackAsync(_sourcePath, 0, cancellationToken);
+        }
+
+        _audioRenderer.Play();
+    }
+
+    public async Task SeekAsync(double seconds, CancellationToken cancellationToken = default)
+    {
+        if (_chunkStream == null)
+        {
+            return;
+        }
+
+        var clamped = Math.Max(0, Math.Min(seconds, _chunkStream.DurationSeconds));
+        await ConfigureTrackAsync(_chunkStream.SourcePath, clamped, cancellationToken);
+        PositionSeconds = clamped;
+
+        if (PlaybackState.State == PlayerStateType.Playing || PlaybackState.State == PlayerStateType.Buffering)
+        {
+            _audioRenderer.Play();
+        }
+    }
+
+    public Task SetVolumeAsync(int volume, CancellationToken cancellationToken = default)
+    {
+        Volume = volume;
+        _audioRenderer.Volume = Volume / 100f;
+        if (_pipelineStarted)
+        {
+            _audioPipeline.SetVolume(Volume);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task SetMutedAsync(bool muted, CancellationToken cancellationToken = default)
+    {
+        IsMuted = muted;
+        _audioRenderer.IsMuted = muted;
+        if (_pipelineStarted)
+        {
+            _audioPipeline.SetMuted(muted);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _audioRenderer.StateChanged -= OnAudioRendererStateChanged;
+        _audioRenderer.ErrorOccurred -= OnAudioRendererErrorOccurred;
+        await StopPipelinePlaybackAsync();
+    }
+
+    public async Task SetSourceAsync(string sourcePath, double startSeconds = 0, CancellationToken cancellationToken = default)
+    {
+        var normalized = NormalizeLocalPath(sourcePath);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            _logger.LogWarning("SetSourceAsync ignored because no valid local source path was provided.");
+            return;
+        }
+
+        _sourcePath = normalized;
+        await ConfigureTrackAsync(normalized, startSeconds, cancellationToken);
+    }
+
+    public void UpdateCurrentQueueItem(QueueItem? queueItem)
+    {
+        CurrentQueueItem = queueItem;
+    }
+
+    #endregion
+
+    #region Helpers
+
+    private async Task ConfigureTrackAsync(string sourcePath, double startSeconds, CancellationToken cancellationToken)
+    {
+        await StopPipelinePlaybackAsync();
+
+        _chunkStream = _localAudioChunkSource.ReadChunks(sourcePath, startSeconds);
+
+        var pipelineFormat = new Sendspin.SDK.Models.AudioFormat
+        {
+            Codec = "pcm",
+            SampleRate = _chunkStream.Format.SampleRate,
+            Channels = _chunkStream.Format.Channels,
+            BitDepth = _chunkStream.Format.BitDepth,
+            Bitrate = _chunkStream.Format.Bitrate
+        };
+
+        await _audioPipeline.StartAsync(pipelineFormat, cancellationToken: cancellationToken);
+        _pipelineStarted = true;
+        _audioPipeline.SetVolume(Volume);
+        _audioPipeline.SetMuted(IsMuted);
+
+        _chunkFeedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _chunkFeedTask = Task.Run(() => FeedPipelineChunksAsync(_chunkStream, _chunkFeedCts.Token), _chunkFeedCts.Token);
+
+        DurationSeconds = _chunkStream.DurationSeconds;
+        PositionSeconds = Math.Max(0, Math.Min(startSeconds, DurationSeconds));
+        PlaybackState = new Models.PlayerState { State = PlayerStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
+
+        _logger.LogInformation("Configured local track. Source={Source}, StartSeconds={StartSeconds:F2}, DurationSeconds={DurationSeconds:F2}", sourcePath, PositionSeconds, DurationSeconds);
+    }
+
+    private async Task FeedPipelineChunksAsync(LocalAudioChunkStream stream, CancellationToken cancellationToken)
+    {
+        if (stream.Chunks.Count == 0)
+        {
+            _logger.LogWarning("Local chunk source produced no chunks for {Source}", stream.SourcePath);
+            return;
+        }
+
+        var sampleRate = Math.Max(1, stream.Format.SampleRate);
+        var channels = Math.Max(1, stream.Format.Channels);
+        var bitDepth = stream.Format.BitDepth.GetValueOrDefault(16);
+        var bytesPerSample = Math.Max(1, bitDepth / 8);
+        var bytesPerFrame = Math.Max(1, bytesPerSample * channels);
+
+        var leadTimeUs = 400_000L;
+        var maxSendAheadUs = 2_000_000L;
+        var baseTimestampUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L + leadTimeUs;
+
+        long framesSent = 0;
+
+        foreach (var chunk in stream.Chunks)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var chunkTimestampUs = baseTimestampUs + (framesSent * 1_000_000L / sampleRate);
+            while (chunkTimestampUs > (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L) + maxSendAheadUs)
+            {
+                await Task.Delay(10, cancellationToken);
+            }
+
+            _audioPipeline.ProcessAudioChunk(new AudioChunk
+            {
+                Slot = 0,
+                ServerTimestamp = chunkTimestampUs,
+                EncodedData = chunk
+            });
+
+            framesSent += chunk.Length / bytesPerFrame;
+        }
+
+        _logger.LogInformation(
+            "Finished feeding local chunks to audio pipeline. Source={Source}, Chunks={Chunks}, FramesSent={FramesSent}",
+            stream.SourcePath,
+            stream.Chunks.Count,
+            framesSent);
+
+        CurrentPlayingItemEnded?.Invoke(this, CurrentQueueItem);
+    }
+
+    private async Task StopPipelinePlaybackAsync()
+    {
+        if (_chunkFeedCts != null)
+        {
+            _chunkFeedCts.Cancel();
+            if (_chunkFeedTask != null)
+            {
+                try
+                {
+                    await _chunkFeedTask;
+                }
+                catch (OperationCanceledException)
+                {
+                }
+            }
+
+            _chunkFeedCts.Dispose();
+            _chunkFeedCts = null;
+            _chunkFeedTask = null;
+        }
+
+        if (_pipelineStarted)
+        {
+            try
+            {
+                await _audioPipeline.StopAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Stopping local audio pipeline failed.");
+            }
+
+            _pipelineStarted = false;
+        }
+    }
+
+    private static string? NormalizeLocalPath(string? source)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return null;
+        }
+
+        var value = source.Trim();
+        if (Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.IsFile)
+        {
+            return uri.LocalPath;
+        }
+
+        return value;
+    }
+
+    private void OnAudioRendererStateChanged(object? sender, PlayerStateType state)
+    {
+        var mapped = state == PlayerStateType.Uninitialized ? PlayerStateType.Idle : state;
+        PlaybackState = new Models.PlayerState
+        {
+            State = mapped,
+            ActiveSinceUtc = DateTimeOffset.UtcNow
+        };
+    }
+
+    private void OnAudioRendererErrorOccurred(object? sender, Exception ex)
+    {
+        _logger.LogError(ex, "Local renderer reported an audio error.");
+        PlaybackState = new Models.PlayerState
+        {
+            State = PlayerStateType.Error,
+            ActiveSinceUtc = DateTimeOffset.UtcNow
+        };
+    }
+
+    private bool SetProperty<T>(ref T storage, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(storage, value))
+        {
+            return false;
+        }
+
+        storage = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        return true;
+    }
+
+    #endregion
+
 }
 
 #endregion

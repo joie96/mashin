@@ -1,8 +1,9 @@
 ﻿using FFImageLoading.Maui;
 using CommunityToolkit.Maui;
-using mashin.Audio.Abstractions;
-using mashin.Audio.Composition;
+using mashin.Audio;
 using mashin.Audio.Pipeline;
+using mashin.Audio.Renderers;
+using mashin.Audio.Sources;
 using mashin.Logging;
 using mashin.Services;
 using mashin.ViewModels;
@@ -72,7 +73,7 @@ public static class MauiProgram
         builder.Logging.AddFilter("mashin.Services.PlaybackService", LogLevel.Debug);
         builder.Logging.AddFilter("mashin.Services.SendspinPlayerService", LogLevel.Debug);
         builder.Logging.AddFilter("mashin.Services.RemotePlayerService", LogLevel.Debug);
-        builder.Logging.AddFilter("mashin.Services.LocalDummyPlayerService", LogLevel.Debug);
+        builder.Logging.AddFilter("mashin.Services.LocalAudioPlayerService", LogLevel.Debug);
 #else
         builder.Logging.AddConsoleFormatter<CustomConsoleFormatter, SimpleConsoleFormatterOptions>(options =>
         {
@@ -109,20 +110,27 @@ public static class MauiProgram
 #endif
 
 
-        // Audio services
-        builder.Services.AddSingleton<ConnectionOptions>(_ => new ConnectionOptions
+        // Audio renderer
+        builder.Services.AddSingleton<IAudioRenderer>(sp =>
         {
-            AutoReconnect = true
+            var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+            return AudioPlayerFactory.CreateRenderer(loggerFactory);
         });
-        builder.Services.AddSingleton<IClockSynchronizer, KalmanClockSynchronizer>();
+
+        // Sendspin audio player derived from renderer
         builder.Services.AddSingleton<IAudioPlayer>(sp =>
         {
             var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
-            return AudioPlayerFactory.Create(loggerFactory);
+            var renderer = sp.GetRequiredService<IAudioRenderer>();
+            return AudioPlayerFactory.Create(renderer, loggerFactory);
         });
+
+
+        // Sendspin audio pipeline
+        builder.Services.AddSingleton<IClockSynchronizer, KalmanClockSynchronizer>();
         builder.Services.AddSingleton<IAudioPlayerStateFeed, AudioPlayerStateFeed>();
         builder.Services.AddSingleton<IAudioDecoderFactory, AudioDecoderFactory>();
-        builder.Services.AddSingleton<IAudioPipeline>(sp =>
+        builder.Services.AddKeyedSingleton<IAudioPipeline>("sendspin", (sp, _) =>
         {
             var logger = sp.GetRequiredService<ILogger<AudioPipeline>>();
             var decoderFactory = sp.GetRequiredService<IAudioDecoderFactory>();
@@ -145,7 +153,38 @@ public static class MauiProgram
                 });
         });
 
-        // Sendspin services
+        // Local audio pipeline
+        builder.Services.AddSingleton<LocalAudioChunkSource>();
+        builder.Services.AddKeyedSingleton<IAudioPipeline>("local", (sp, _) =>
+        {
+            var logger = sp.GetRequiredService<ILogger<AudioPipeline>>();
+            var decoderFactory = sp.GetRequiredService<IAudioDecoderFactory>();
+            var clockSync = sp.GetRequiredService<IClockSynchronizer>();
+
+            return new AudioPipeline(
+                logger,
+                decoderFactory,
+                clockSync,
+                bufferFactory: (format, sync) =>
+                {
+                    var buffer = new UntimedAudioBuffer(format, bufferCapacityMs: 30000);
+                    buffer.TargetBufferMilliseconds = 500;
+                    return buffer;
+                },
+                playerFactory: () => sp.GetRequiredService<IAudioPlayer>(),
+                sourceFactory: (buffer, timeFunc) =>
+                {
+                    return new UntimedAudioSampleSource((UntimedAudioBuffer)buffer);
+                },
+                waitForConvergence: false);
+        });
+
+        // Sendspin Client services
+        builder.Services.AddSingleton<ConnectionOptions>(_ => new ConnectionOptions
+        {
+            AutoReconnect = true
+        });
+
         builder.Services.AddSingleton<ClientCapabilities>(sp =>
         {
             var settings = sp.GetRequiredService<SettingsService>();
@@ -154,9 +193,24 @@ public static class MauiProgram
 
         // Player services
         builder.Services.AddSingleton<ISendspinConnection, SendspinConnection>();
-        builder.Services.AddSingleton<ISendspinClient, SendspinClientService>();
+        builder.Services.AddSingleton<ISendspinClient>(sp =>
+        {
+            return new SendspinClientService(
+                sp.GetRequiredService<ILogger<SendspinClientService>>(),
+                sp.GetRequiredService<ISendspinConnection>(),
+                clockSynchronizer: sp.GetRequiredService<IClockSynchronizer>(),
+                capabilities: sp.GetRequiredService<ClientCapabilities>(),
+                audioPipeline: sp.GetRequiredKeyedService<IAudioPipeline>("sendspin"));
+        });
         builder.Services.AddSingleton<IPlayerService, SendspinPlayerService>();
-        builder.Services.AddSingleton<IPlayerService, LocalDummyPlayerService>();
+            builder.Services.AddSingleton<IPlayerService>(sp =>
+            {
+                return new LocalAudioPlayerService(
+                sp.GetRequiredService<ILogger<LocalAudioPlayerService>>(),
+                sp.GetRequiredKeyedService<IAudioPipeline>("local"),
+                sp.GetRequiredService<IAudioRenderer>(),
+                sp.GetRequiredService<LocalAudioChunkSource>());
+            });
         builder.Services.AddSingleton<IPlayerService, RemotePlayerService>();
 
 

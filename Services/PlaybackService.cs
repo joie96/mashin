@@ -2,14 +2,18 @@ using mashin.Collections;
 using mashin.Models;
 using Microsoft.Extensions.Logging;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.CompilerServices;
 
 namespace mashin.Services;
 
 public enum PlaybackOutputMode
 {
+    // Play local/offline files directly on this device.
     LocalOffline,
+    // Hybrid mode: use Sendspin as MA player while local-capable tracks can be rendered locally.
     LocalSendspin,
+    // Control a different MA player/device (not this device's local audio output path).
     RemoteOnly
 }
 
@@ -63,23 +67,32 @@ public interface IPlaybackService : IAsyncDisposable, INotifyPropertyChanged
 public sealed class PlaybackService : IPlaybackService
 {
     #region Fields
+    
+    // Preload window for online tracks in hybrid mode (Local + Sendspin). If the current track position is within this window and next track not cached, we will prewarm it on sendpsin
+    private const double PrewarmWindowSeconds = 20;
 
+    // Core services
     private readonly MusicAssistantService _musicAssistant;
     private readonly SettingsService _settingsService;
     private readonly IMusicAssistantEventHub _musicAssistantEventHub;
     private readonly ILogger<PlaybackService> _logger;
     private readonly Dictionary<PlaybackOutputMode, IPlayerService> _players;
+    private readonly ILocalPlayerService? _localPlayer;
+    private readonly SendspinPlayerService? _sendspinPlayer;
+    private readonly Task _hybridMonitorTask;
 
+    // Queue 
     private readonly ObservableRangeCollection<QueueItem> _currentQueueItems = new();
     private readonly CancellationTokenSource _disposeCts = new();
     private CancellationTokenSource? _queueConfirmCts;
     private int _queueConfirmRequestId;
 
+    // Active output/player routing
     private PlaybackOutputMode _outputMode = PlaybackOutputMode.LocalSendspin;
-
     private string? _activePlayerId;
     private IPlayerService _activePlayer;
 
+    // Playback states projected to UI
     private PlayerState _playbackState = new()
     {
         State = PlayerStateType.Idle,
@@ -96,7 +109,13 @@ public sealed class PlaybackService : IPlaybackService
     private int _queueItemCount;
     private double _durationSeconds;
     private double _positionSeconds;
-    
+
+    // Hybrid LocalSendspin runtime state.
+    private bool _isHybridLocalPlaybackActive;
+    private string? _hybridActiveQueueItemId;
+    private bool _prewarmTriggered;
+    private int? _prewarmedQueueIndex;
+
     #endregion
 
     #region Construction
@@ -117,12 +136,28 @@ public sealed class PlaybackService : IPlaybackService
             .GroupBy(service => service.OutputMode)
             .ToDictionary(group => group.Key, group => group.First());
 
+        _localPlayer = _players.TryGetValue(PlaybackOutputMode.LocalOffline, out var local)
+            ? local as ILocalPlayerService
+            : null;
+        _sendspinPlayer = _players.TryGetValue(PlaybackOutputMode.LocalSendspin, out var sendspinPlayer)
+            ? sendspinPlayer as SendspinPlayerService
+            : null;
+
         _activePlayer = _players.TryGetValue(PlaybackOutputMode.LocalSendspin, out var sendspin)
             ? sendspin
             : _players.Values.First();
 
         _activePlayer.PropertyChanged += OnActivePlayerPropertyChanged;
+        if (_localPlayer != null)
+        {
+            _localPlayer.CurrentPlayingItemEnded += OnLocalPlayerCurrentPlayingItemEnded;
+            _localPlayer.PropertyChanged += OnLocalPlayerPropertyChanged;
+        }
+
         _musicAssistantEventHub.QueueEventReceived += OnQueueEventReceived;
+
+        // Start the hybrid monitor loop in the background to handle prewarming and hybrid playback (sendspin + local) state management
+        _hybridMonitorTask = Task.Run(HybridMonitorLoopAsync, CancellationToken.None);
     }
 
     #endregion
@@ -255,6 +290,7 @@ public sealed class PlaybackService : IPlaybackService
         if (!ReferenceEquals(_activePlayer, nextPlayer))
         {
             _activePlayer.PropertyChanged -= OnActivePlayerPropertyChanged;
+
             await _activePlayer.DeactivateAsync();
             _activePlayer = nextPlayer;
             _activePlayer.PropertyChanged += OnActivePlayerPropertyChanged;
@@ -264,6 +300,30 @@ public sealed class PlaybackService : IPlaybackService
 
         await _activePlayer.ActivateAsync(resolvedTargetPlayerId, cancellationToken);
         ActivePlayerId = resolvedTargetPlayerId;
+
+        // When leaving LocalSendspin: reset hybrid state and disable Sendspin external source.
+        if (mode != PlaybackOutputMode.LocalSendspin)
+        {
+            _isHybridLocalPlaybackActive = false;
+            _prewarmTriggered = false;
+            _prewarmedQueueIndex = null;
+            _hybridActiveQueueItemId = null;
+
+            if (_sendspinPlayer != null)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _sendspinPlayer.SetExternalSourceAsync(false, _disposeCts.Token);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed to exit external source while switching away from LocalSendspin mode.");
+                    }
+                }, CancellationToken.None);
+            }
+        }
 
         _logger.LogDebug("Output mode activated: Mode={Mode}, ActivePlayerId={ActivePlayerId}, PlayerService={PlayerService}",
             OutputMode,
@@ -288,6 +348,7 @@ public sealed class PlaybackService : IPlaybackService
     #endregion
 
     #region Media Commands
+    // Queue manipulation and enqueue commands.
 
     public async Task PlayMediaAsync(IReadOnlyList<MediaItem> items)
     {
@@ -297,9 +358,15 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        if (OutputMode == PlaybackOutputMode.LocalOffline || string.IsNullOrWhiteSpace(ActivePlayerId))
+        if (OutputMode == PlaybackOutputMode.LocalOffline)
         {
-            _logger.LogWarning("PlayMedia ignored in LocalOffline mode.");
+            await PlayMediaLocalAsync(items, QueueOption.Replace);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(ActivePlayerId))
+        {
+            _logger.LogWarning("PlayMedia ignored because there is no active player id.");
             return;
         }
 
@@ -311,6 +378,7 @@ public sealed class PlaybackService : IPlaybackService
         }
 
         PlaybackState = new PlayerState { State = PlayerStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        _logger.LogDebug("PlayMedia request set PlaybackState to Buffering. OutputMode={OutputMode}, ActivePlayerId={ActivePlayerId}, ItemCount={ItemCount}", OutputMode, ActivePlayerId, items.Count);
 
         try
         {
@@ -332,9 +400,15 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        if (OutputMode == PlaybackOutputMode.LocalOffline || string.IsNullOrWhiteSpace(ActivePlayerId))
+        if (OutputMode == PlaybackOutputMode.LocalOffline)
         {
-            _logger.LogWarning("PlayMediaNext ignored in LocalOffline mode.");
+            await PlayMediaLocalAsync(items, QueueOption.Next);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(ActivePlayerId))
+        {
+            _logger.LogWarning("PlayMediaNext ignored because there is no active player id.");
             return;
         }
 
@@ -346,6 +420,7 @@ public sealed class PlaybackService : IPlaybackService
         }
 
         PlaybackState = new PlayerState { State = PlayerStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        _logger.LogDebug("PlayMediaNext request set PlaybackState to Buffering. OutputMode={OutputMode}, ActivePlayerId={ActivePlayerId}, ItemCount={ItemCount}", OutputMode, ActivePlayerId, items.Count);
 
         try
         {
@@ -367,9 +442,15 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        if (OutputMode == PlaybackOutputMode.LocalOffline || string.IsNullOrWhiteSpace(ActivePlayerId))
+        if (OutputMode == PlaybackOutputMode.LocalOffline)
         {
-            _logger.LogWarning("PlayMediaLast ignored in LocalOffline mode.");
+            await PlayMediaLocalAsync(items, QueueOption.Add);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(ActivePlayerId))
+        {
+            _logger.LogWarning("PlayMediaLast ignored because there is no active player id.");
             return;
         }
 
@@ -381,6 +462,7 @@ public sealed class PlaybackService : IPlaybackService
         }
 
         PlaybackState = new PlayerState { State = PlayerStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        _logger.LogDebug("PlayMediaLast request set PlaybackState to Buffering. OutputMode={OutputMode}, ActivePlayerId={ActivePlayerId}, ItemCount={ItemCount}", OutputMode, ActivePlayerId, items.Count);
 
         try
         {
@@ -396,9 +478,15 @@ public sealed class PlaybackService : IPlaybackService
 
     public async Task ShufflePlayMediaAsync(IReadOnlyList<MediaItem> items)
     {
-        if (OutputMode == PlaybackOutputMode.LocalOffline || string.IsNullOrWhiteSpace(ActivePlayerId))
+        if (OutputMode == PlaybackOutputMode.LocalOffline)
         {
-            _logger.LogWarning("ShufflePlayMedia ignored in LocalOffline mode.");
+            await PlayMediaLocalAsync(items ?? Array.Empty<MediaItem>(), QueueOption.Replace, shuffle: true);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(ActivePlayerId))
+        {
+            _logger.LogWarning("ShufflePlayMedia ignored because there is no active player id.");
             return;
         }
 
@@ -416,6 +504,7 @@ public sealed class PlaybackService : IPlaybackService
         }
 
         PlaybackState = new PlayerState { State = PlayerStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        _logger.LogDebug("ShufflePlayMedia request set PlaybackState to Buffering. OutputMode={OutputMode}, ActivePlayerId={ActivePlayerId}, ItemCount={ItemCount}", OutputMode, ActivePlayerId, mediaItems.Count);
 
         try
         {
@@ -448,13 +537,32 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        if (OutputMode == PlaybackOutputMode.LocalOffline || string.IsNullOrWhiteSpace(ActivePlayerId))
+        if (OutputMode == PlaybackOutputMode.LocalSendspin)
         {
-            _logger.LogWarning("PlayQueueIndex ignored in LocalOffline mode.");
+            if (index >= _currentQueueItems.Count)
+            {
+                _logger.LogWarning("PlayQueueIndex ignored because index is out of range. Index={Index}, QueueCount={QueueCount}", index, _currentQueueItems.Count);
+                return;
+            }
+
+            await StartQueueItemByPolicyAsync(_currentQueueItems[index], index, cancellationToken);
             return;
         }
 
-        var queue = await _musicAssistant.GetActiveQueueForPlayerAsync(ActivePlayerId);
+        if (OutputMode == PlaybackOutputMode.LocalOffline)
+        {
+            if (index >= _currentQueueItems.Count)
+            {
+                _logger.LogWarning("PlayQueueIndex ignored for local queue because index is out of range. Index={Index}, QueueCount={QueueCount}", index, _currentQueueItems.Count);
+                return;
+            }
+
+            var queueItem = _currentQueueItems[index];
+            await StartLocalQueueItemAsync(queueItem, index);
+            return;
+        }
+
+        var queue = await _musicAssistant.GetActiveQueueForPlayerAsync(ActivePlayerId!);
         if (string.IsNullOrWhiteSpace(queue?.QueueId))
         {
             return;
@@ -470,9 +578,65 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        if (OutputMode == PlaybackOutputMode.LocalOffline || string.IsNullOrWhiteSpace(ActivePlayerId))
+        if (OutputMode == PlaybackOutputMode.LocalOffline)
         {
-            _logger.LogWarning("MoveQueueItem ignored in LocalOffline mode.");
+            if (_currentQueueItems.Count == 0 || posShift == 0)
+            {
+                return;
+            }
+
+            var queueItems = _currentQueueItems.ToList();
+            var sourceIndex = queueItems.FindIndex(item => string.Equals(item.QueueItemId, queueItemId, StringComparison.Ordinal));
+            if (sourceIndex < 0)
+            {
+                _logger.LogWarning("MoveQueueItem ignored for local queue because queue item was not found. QueueItemId={QueueItemId}", queueItemId);
+                return;
+            }
+
+            var targetIndex = Math.Clamp(sourceIndex + posShift, 0, queueItems.Count - 1);
+            if (targetIndex == sourceIndex)
+            {
+                return;
+            }
+
+            var movedItem = queueItems[sourceIndex];
+            queueItems.RemoveAt(sourceIndex);
+            queueItems.Insert(targetIndex, movedItem);
+
+            for (var i = 0; i < queueItems.Count; i++)
+            {
+                queueItems[i].Index = i;
+                queueItems[i].SortIndex = i;
+            }
+
+            var currentItemId = Normalize(_currentQueueItem?.QueueItemId);
+            QueueItem? currentItem = null;
+            int? currentIndex = null;
+            if (!string.IsNullOrWhiteSpace(currentItemId))
+            {
+                var indexById = queueItems.FindIndex(item => string.Equals(item.QueueItemId, currentItemId, StringComparison.Ordinal));
+                if (indexById >= 0)
+                {
+                    currentIndex = indexById;
+                    currentItem = queueItems[indexById];
+                }
+            }
+
+            _currentQueueItems.ReplaceRange(queueItems);
+
+            CurrentQueueIndex = currentIndex;
+            SetProperty(ref _currentQueueItem, currentItem, nameof(CurrentQueueItem));
+
+            if (_activePlayer is ILocalPlayerService localPlayer)
+            {
+                localPlayer.UpdateCurrentQueueItem(currentItem);
+            }
+
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(ActivePlayerId))
+        {
             return;
         }
 
@@ -492,13 +656,61 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        if (OutputMode == PlaybackOutputMode.LocalOffline || string.IsNullOrWhiteSpace(ActivePlayerId))
+        if (OutputMode == PlaybackOutputMode.LocalOffline)
         {
-            _logger.LogWarning("DeleteQueueItem ignored in LocalOffline mode.");
+            if (_currentQueueItems.Count == 0)
+            {
+                return;
+            }
+
+            var queueItems = _currentQueueItems.ToList();
+            var removeIndex = queueItems.FindIndex(item => string.Equals(item.QueueItemId, queueItemId, StringComparison.Ordinal));
+            if (removeIndex < 0)
+            {
+                _logger.LogWarning("DeleteQueueItem ignored for local queue because queue item was not found. QueueItemId={QueueItemId}", queueItemId);
+                return;
+            }
+
+            queueItems.RemoveAt(removeIndex);
+
+            for (var i = 0; i < queueItems.Count; i++)
+            {
+                queueItems[i].Index = i;
+                queueItems[i].SortIndex = i;
+            }
+
+            var currentItemId = Normalize(_currentQueueItem?.QueueItemId);
+            QueueItem? currentItem = null;
+            int? currentIndex = null;
+            if (!string.IsNullOrWhiteSpace(currentItemId))
+            {
+                var indexById = queueItems.FindIndex(item => string.Equals(item.QueueItemId, currentItemId, StringComparison.Ordinal));
+                if (indexById >= 0)
+                {
+                    currentIndex = indexById;
+                    currentItem = queueItems[indexById];
+                }
+            }
+
+            _currentQueueItems.ReplaceRange(queueItems);
+            QueueItemCount = queueItems.Count;
+            CurrentQueueIndex = currentIndex;
+            SetProperty(ref _currentQueueItem, currentItem, nameof(CurrentQueueItem));
+
+            if (_activePlayer is ILocalPlayerService localPlayer)
+            {
+                localPlayer.UpdateCurrentQueueItem(currentItem);
+            }
+
             return;
         }
 
-        var queue = await _musicAssistant.GetActiveQueueForPlayerAsync(ActivePlayerId);
+        if (string.IsNullOrWhiteSpace(ActivePlayerId))
+        {
+            return;
+        }
+
+        var queue = await _musicAssistant.GetActiveQueueForPlayerAsync(ActivePlayerId!);
         if (string.IsNullOrWhiteSpace(queue?.QueueId))
         {
             return;
@@ -510,37 +722,151 @@ public sealed class PlaybackService : IPlaybackService
     #endregion
 
     #region Transport Commands
+    // Runtime playback controls (play/pause/seek/next/previous).
 
     public async Task TogglePlayPauseAsync(CancellationToken cancellationToken = default)
     {
+        if (OutputMode == PlaybackOutputMode.LocalSendspin && _isHybridLocalPlaybackActive && _localPlayer != null)
+        {
+            await _localPlayer.TogglePlayPauseAsync(cancellationToken);
+            return;
+        }
+
         await _activePlayer.TogglePlayPauseAsync(cancellationToken);
     }
 
     public async Task NextTrackAsync(CancellationToken cancellationToken = default)
     {
-        await _activePlayer.NextAsync(cancellationToken);
+        if (OutputMode == PlaybackOutputMode.LocalSendspin && _currentQueueItems.Count > 0)
+        {
+            var nextIndex = _currentQueueIndex.HasValue
+                ? _currentQueueIndex.Value + 1
+                : 0;
+
+            if (nextIndex < 0 || nextIndex >= _currentQueueItems.Count)
+            {
+                _logger.LogDebug("NextTrack ignored because end was reached. CurrentIndex={CurrentIndex}, QueueCount={QueueCount}", _currentQueueIndex, _currentQueueItems.Count);
+                return;
+            }
+
+            await StartQueueItemByPolicyAsync(_currentQueueItems[nextIndex], nextIndex, cancellationToken);
+            return;
+        }
+
+        if (OutputMode == PlaybackOutputMode.LocalOffline)
+        {
+            if (_currentQueueItems.Count == 0)
+            {
+                return;
+            }
+
+            var nextIndex = _currentQueueIndex.HasValue
+                ? _currentQueueIndex.Value + 1
+                : 0;
+
+            if (nextIndex < 0 || nextIndex >= _currentQueueItems.Count)
+            {
+                _logger.LogDebug("NextTrack ignored for local queue because end was reached. CurrentIndex={CurrentIndex}, QueueCount={QueueCount}", _currentQueueIndex, _currentQueueItems.Count);
+                return;
+            }
+
+            await StartLocalQueueItemAsync(_currentQueueItems[nextIndex], nextIndex);
+            return;
+        }
+
+        if (_activePlayer is IRemotePlayerService remotePlayer)
+        {
+            await remotePlayer.NextAsync(cancellationToken);
+            return;
+        }
+
+        _logger.LogWarning("NextTrack requested in non-local mode but active player does not implement IRemotePlayerService. PlayerType={PlayerType}", _activePlayer.GetType().Name);
     }
 
     public async Task PreviousTrackAsync(CancellationToken cancellationToken = default)
     {
-        await _activePlayer.PreviousAsync(cancellationToken);
+        if (OutputMode == PlaybackOutputMode.LocalSendspin && _currentQueueItems.Count > 0)
+        {
+            var previousIndex = _currentQueueIndex.HasValue
+                ? _currentQueueIndex.Value - 1
+                : 0;
+
+            if (previousIndex < 0 || previousIndex >= _currentQueueItems.Count)
+            {
+                _logger.LogDebug("PreviousTrack ignored because start was reached. CurrentIndex={CurrentIndex}, QueueCount={QueueCount}", _currentQueueIndex, _currentQueueItems.Count);
+                return;
+            }
+
+            await StartQueueItemByPolicyAsync(_currentQueueItems[previousIndex], previousIndex, cancellationToken);
+            return;
+        }
+
+        if (OutputMode == PlaybackOutputMode.LocalOffline)
+        {
+            if (_currentQueueItems.Count == 0)
+            {
+                return;
+            }
+
+            var previousIndex = _currentQueueIndex.HasValue
+                ? _currentQueueIndex.Value - 1
+                : 0;
+
+            if (previousIndex < 0 || previousIndex >= _currentQueueItems.Count)
+            {
+                _logger.LogDebug("PreviousTrack ignored for local queue because start was reached. CurrentIndex={CurrentIndex}, QueueCount={QueueCount}", _currentQueueIndex, _currentQueueItems.Count);
+                return;
+            }
+
+            await StartLocalQueueItemAsync(_currentQueueItems[previousIndex], previousIndex);
+            return;
+        }
+
+        if (_activePlayer is IRemotePlayerService remotePlayer)
+        {
+            await remotePlayer.PreviousAsync(cancellationToken);
+            return;
+        }
+
+        _logger.LogWarning("PreviousTrack requested in non-local mode but active player does not implement IRemotePlayerService. PlayerType={PlayerType}", _activePlayer.GetType().Name);
     }
 
     public async Task SeekAsync(double seconds, double durationSeconds, CancellationToken cancellationToken = default)
     {
         var clamped = (int)Math.Round(Math.Clamp(seconds, 0, Math.Max(0, durationSeconds)));
+
+        if (OutputMode == PlaybackOutputMode.LocalSendspin && _isHybridLocalPlaybackActive && _localPlayer != null)
+        {
+            await _localPlayer.SeekAsync(clamped, cancellationToken);
+            return;
+        }
+
         await _activePlayer.SeekAsync(clamped, cancellationToken);
     }
 
     public async Task SetVolumeAsync(int volume, CancellationToken cancellationToken = default)
     {
         var clamped = Math.Clamp(volume, 0, 100);
+
+        if (OutputMode == PlaybackOutputMode.LocalSendspin && _isHybridLocalPlaybackActive && _localPlayer != null)
+        {
+            await _localPlayer.SetVolumeAsync(clamped, cancellationToken);
+            return;
+        }
+
         await _activePlayer.SetVolumeAsync(clamped, cancellationToken);
     }
 
     public async Task ToggleMuteAsync(bool currentMuted, CancellationToken cancellationToken = default)
     {
         var next = !currentMuted;
+
+        if (OutputMode == PlaybackOutputMode.LocalSendspin && _isHybridLocalPlaybackActive && _localPlayer != null)
+        {
+            await _localPlayer.SetMutedAsync(next, cancellationToken);
+            return;
+        }
+
         await _activePlayer.SetMutedAsync(next, cancellationToken);
     }
 
@@ -565,7 +891,19 @@ public sealed class PlaybackService : IPlaybackService
     public async Task ToggleShuffleAsync(bool? currentShuffleEnabled, CancellationToken cancellationToken = default)
     {
         var next = !(currentShuffleEnabled ?? false);
-        await _activePlayer.SetShuffleAsync(next, cancellationToken);
+        if (OutputMode == PlaybackOutputMode.LocalOffline)
+        {
+            ShuffleEnabled = next;
+            return;
+        }
+
+        if (_activePlayer is IRemotePlayerService remotePlayer)
+        {
+            await remotePlayer.SetShuffleAsync(next, cancellationToken);
+            return;
+        }
+
+        _logger.LogWarning("ToggleShuffle requested in non-local mode but active player does not implement IRemotePlayerService. PlayerType={PlayerType}", _activePlayer.GetType().Name);
     }
 
     public async Task ToggleRepeatModeAsync(string? currentRepeatMode, CancellationToken cancellationToken = default)
@@ -577,7 +915,19 @@ public sealed class PlaybackService : IPlaybackService
             _ => mashin.Models.RepeatMode.Off
         };
 
-        await _activePlayer.SetRepeatModeAsync(next, cancellationToken);
+        if (OutputMode == PlaybackOutputMode.LocalOffline)
+        {
+            RepeatMode = next.ToString();
+            return;
+        }
+
+        if (_activePlayer is IRemotePlayerService remotePlayer)
+        {
+            await remotePlayer.SetRepeatModeAsync(next, cancellationToken);
+            return;
+        }
+
+        _logger.LogWarning("ToggleRepeatMode requested in non-local mode but active player does not implement IRemotePlayerService. PlayerType={PlayerType}", _activePlayer.GetType().Name);
     }
 
     public async Task SetDontStopTheMusicAsync(bool enabled, CancellationToken cancellationToken = default)
@@ -600,18 +950,33 @@ public sealed class PlaybackService : IPlaybackService
     #endregion
 
     #region Disposal
+    // Shutdown sequence and subscription cleanup.
 
     public async ValueTask DisposeAsync()
     {
         await _musicAssistantEventHub.StopAsync(CancellationToken.None);
         _musicAssistantEventHub.QueueEventReceived -= OnQueueEventReceived;
         _activePlayer.PropertyChanged -= OnActivePlayerPropertyChanged;
+        if (_localPlayer != null)
+        {
+            _localPlayer.CurrentPlayingItemEnded -= OnLocalPlayerCurrentPlayingItemEnded;
+            _localPlayer.PropertyChanged -= OnLocalPlayerPropertyChanged;
+        }
 
         var queueConfirmCts = Interlocked.Exchange(ref _queueConfirmCts, null);
         queueConfirmCts?.Cancel();
         queueConfirmCts?.Dispose();
 
         _disposeCts.Cancel();
+
+        try
+        {
+            await _hybridMonitorTask;
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected during shutdown.
+        }
 
         _disposeCts.Dispose();
 
@@ -624,6 +989,7 @@ public sealed class PlaybackService : IPlaybackService
     #endregion
 
     #region Event Handling
+    // Inbound events from MA/local players and state reconciliation.
 
     private void OnQueueEventReceived(object? sender, MusicAssistantQueueEvent e)
     {
@@ -681,6 +1047,25 @@ public sealed class PlaybackService : IPlaybackService
             queue.ShuffleEnabled,
             queue.RepeatMode,
             queue.DontStopTheMusicEnabled);
+
+        if (OutputMode == PlaybackOutputMode.LocalSendspin)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await TryAdoptCurrentQueueItemByPolicyAsync(_disposeCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Ignore cancellation.
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Hybrid adoption by policy failed after queue event.");
+                }
+            }, CancellationToken.None);
+        }
         
 
         if (!ShouldRefreshQueue(e))
@@ -725,12 +1110,189 @@ public sealed class PlaybackService : IPlaybackService
 
     private void OnActivePlayerPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        SyncStateFromPlayer();
+        if (OutputMode == PlaybackOutputMode.LocalSendspin && _isHybridLocalPlaybackActive)
+        {
+            // While local track is active in hybrid mode, authoritative state comes from local player.
+            if (e.PropertyName == nameof(IPlayerService.PlaybackState)
+                || e.PropertyName == nameof(IPlayerService.PositionSeconds)
+                || e.PropertyName == nameof(IPlayerService.DurationSeconds))
+            {
+                return;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(e.PropertyName))
+        {
+            SyncStateFromPlayer();
+            return;
+        }
+
+        if (e.PropertyName == nameof(IPlayerService.Volume))
+        {
+            Volume = _activePlayer.Volume;
+            return;
+        }
+
+        if (e.PropertyName == nameof(IPlayerService.IsMuted))
+        {
+            IsMuted = _activePlayer.IsMuted;
+            return;
+        }
+
+        if (e.PropertyName == nameof(IPlayerService.DurationSeconds))
+        {
+            DurationSeconds = _activePlayer.DurationSeconds;
+            return;
+        }
+
+        if (e.PropertyName == nameof(IPlayerService.PositionSeconds))
+        {
+            PositionSeconds = _activePlayer.PositionSeconds;
+            return;
+        }
+
+        if (e.PropertyName == nameof(IPlayerService.PlaybackState))
+        {
+            PlaybackState = _activePlayer.PlaybackState;
+        }
+    }
+
+    private void OnLocalPlayerPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (OutputMode != PlaybackOutputMode.LocalSendspin || !_isHybridLocalPlaybackActive || _localPlayer == null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(e.PropertyName))
+        {
+            Volume = _localPlayer.Volume;
+            IsMuted = _localPlayer.IsMuted;
+            DurationSeconds = _localPlayer.DurationSeconds;
+            PositionSeconds = _localPlayer.PositionSeconds;
+            PlaybackState = _localPlayer.PlaybackState;
+            return;
+        }
+
+        if (e.PropertyName == nameof(IPlayerService.Volume))
+        {
+            Volume = _localPlayer.Volume;
+            return;
+        }
+
+        if (e.PropertyName == nameof(IPlayerService.IsMuted))
+        {
+            IsMuted = _localPlayer.IsMuted;
+            return;
+        }
+
+        if (e.PropertyName == nameof(IPlayerService.DurationSeconds))
+        {
+            DurationSeconds = _localPlayer.DurationSeconds;
+            return;
+        }
+
+        if (e.PropertyName == nameof(IPlayerService.PositionSeconds))
+        {
+            PositionSeconds = _localPlayer.PositionSeconds;
+            return;
+        }
+
+        if (e.PropertyName == nameof(IPlayerService.PlaybackState))
+        {
+            PlaybackState = _localPlayer.PlaybackState;
+        }
+    }
+
+    private void OnLocalPlayerCurrentPlayingItemEnded(object? sender, QueueItem? endedItem)
+    {
+        if (_disposeCts.IsCancellationRequested)
+        {
+            return;
+        }
+
+        if (OutputMode == PlaybackOutputMode.LocalSendspin)
+        {
+            if (!_isHybridLocalPlaybackActive)
+            {
+                return;
+            }
+
+            if (_currentQueueIndex is not int hybridCurrentIndex)
+            {
+                return;
+            }
+
+            var hybridNextIndex = hybridCurrentIndex + 1;
+            if (hybridNextIndex < 0 || hybridNextIndex >= _currentQueueItems.Count)
+            {
+                _logger.LogDebug("Hybrid local queue reached end. CurrentIndex={CurrentIndex}, QueueCount={QueueCount}", hybridCurrentIndex, _currentQueueItems.Count);
+                _isHybridLocalPlaybackActive = false;
+                _hybridActiveQueueItemId = null;
+                return;
+            }
+
+            var hybridNextItem = _currentQueueItems[hybridNextIndex];
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await StartQueueItemByPolicyAsync(hybridNextItem, hybridNextIndex, _disposeCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Ignore cancellation.
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to advance hybrid queue after local track end. NextIndex={NextIndex}, QueueItemId={QueueItemId}", hybridNextIndex, hybridNextItem.QueueItemId);
+                }
+            }, CancellationToken.None);
+
+            return;
+        }
+
+        if (OutputMode != PlaybackOutputMode.LocalOffline)
+        {
+            return;
+        }
+
+        if (_activePlayer is not ILocalPlayerService)
+        {
+            return;
+        }
+
+        if (_currentQueueIndex is not int currentIndex)
+        {
+            return;
+        }
+
+        var nextIndex = currentIndex + 1;
+        if (nextIndex < 0 || nextIndex >= _currentQueueItems.Count)
+        {
+            _logger.LogDebug("Local queue reached end. CurrentIndex={CurrentIndex}, QueueCount={QueueCount}", currentIndex, _currentQueueItems.Count);
+            return;
+        }
+
+        var nextItem = _currentQueueItems[nextIndex];
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await StartLocalQueueItemAsync(nextItem, nextIndex);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to advance local queue after track end. NextIndex={NextIndex}, QueueItemId={QueueItemId}", nextIndex, nextItem.QueueItemId);
+            }
+        }, CancellationToken.None);
     }
 
     #endregion
 
     #region Queue Sync
+    // Authoritative queue snapshot refresh and reset helpers.
 
     private async Task RefreshQueueAsync(CancellationToken cancellationToken = default)
     {
@@ -775,6 +1337,11 @@ public sealed class PlaybackService : IPlaybackService
                 queue.RepeatMode,
                 queue.DontStopTheMusicEnabled);
 
+            if (OutputMode == PlaybackOutputMode.LocalSendspin)
+            {
+                await TryAdoptCurrentQueueItemByPolicyAsync(cancellationToken);
+            }
+
         }
         catch (OperationCanceledException)
         {
@@ -805,10 +1372,533 @@ public sealed class PlaybackService : IPlaybackService
 
     #endregion
 
+    #region Local Playback
+    // Offline/local queue creation and local track startup logic.
+
+    private async Task PlayMediaLocalAsync(IReadOnlyList<MediaItem> items, QueueOption queueOption, bool shuffle = false)
+    {
+        if (OutputMode != PlaybackOutputMode.LocalOffline)
+        {
+            _logger.LogWarning("PlayMediaLocal ignored because OutputMode is not LocalOffline.");
+            return;
+        }
+
+        if (_activePlayer is not ILocalPlayerService localPlayer)
+        {
+            _logger.LogWarning("PlayMediaLocal ignored because active player is not local.");
+            return;
+        }
+
+        var resolvedTracks = ResolvePlayableLocalMediaItems(items ?? Array.Empty<MediaItem>());
+        if (resolvedTracks.Count == 0)
+        {
+            _logger.LogWarning("No playable tracks resolved for local queue update");
+            return;
+        }
+
+        if (shuffle)
+        {
+            for (var i = resolvedTracks.Count - 1; i > 0; i--)
+            {
+                var j = Random.Shared.Next(i + 1);
+                (resolvedTracks[i], resolvedTracks[j]) = (resolvedTracks[j], resolvedTracks[i]);
+            }
+        }
+
+        var incomingItems = CreateLocalQueueItems(resolvedTracks);
+        if (incomingItems.Count == 0)
+        {
+            _logger.LogWarning("Local queue update ignored because no queue items could be created.");
+            return;
+        }
+
+        var mergedItems = _currentQueueItems.ToList();
+        var previousCurrentItemId = Normalize(_currentQueueItem?.QueueItemId);
+        var hadCurrentItem = !string.IsNullOrWhiteSpace(previousCurrentItemId);
+        var insertionIndex = 0;
+
+        switch (queueOption)
+        {
+            case QueueOption.Replace:
+                mergedItems = incomingItems;
+                break;
+
+            case QueueOption.Next:
+                insertionIndex = _currentQueueIndex.HasValue
+                    ? Math.Clamp(_currentQueueIndex.Value + 1, 0, mergedItems.Count)
+                    : 0;
+                mergedItems.InsertRange(insertionIndex, incomingItems);
+                break;
+
+            default:
+                insertionIndex = mergedItems.Count;
+                mergedItems.AddRange(incomingItems);
+                break;
+        }
+
+        var resolvedCurrentIndex = ResolveLocalCurrentIndex(
+            mergedItems,
+            previousCurrentItemId,
+            _currentQueueIndex,
+            queueOption,
+            insertionIndex);
+
+        ApplyLocalQueueState(localPlayer, mergedItems, resolvedCurrentIndex);
+
+        var shouldStartPlayback = queueOption == QueueOption.Replace || !hadCurrentItem;
+        if (!shouldStartPlayback || resolvedCurrentIndex is not int startIndex || startIndex < 0 || startIndex >= mergedItems.Count)
+        {
+            return;
+        }
+
+        await StartLocalQueueItemAsync(mergedItems[startIndex], startIndex);
+    }
+
+    private static List<Track> ResolvePlayableLocalMediaItems(IReadOnlyList<MediaItem> items)
+    {
+        var resolvedTracks = new List<Track>();
+
+        // Offline placeholder: only directly supplied Track items are considered playable.
+        // Playlist/Album/Artist expansion will be implemented later via local DB integration.
+        foreach (var mediaItem in items)
+        {
+            if (mediaItem is Track track)
+            {
+                resolvedTracks.Add(track);
+            }
+        }
+
+        return resolvedTracks;
+    }
+
+    private async Task StartLocalQueueItemAsync(QueueItem queueItem, int queueIndex)
+    {
+        if (_activePlayer is not ILocalPlayerService localPlayer)
+        {
+            _logger.LogWarning("StartLocalQueueItem ignored because active player does not implement ILocalPlayerService.");
+            return;
+        }
+
+        var sourcePath = queueItem.MediaItem?.LocalPath;
+
+        if (string.IsNullOrWhiteSpace(sourcePath))
+        {
+            _logger.LogWarning("Cannot start local queue item because no local source path is available. QueueItemId={QueueItemId}", queueItem.QueueItemId);
+            return;
+        }
+
+        await localPlayer.SetSourceAsync(sourcePath);
+        localPlayer.UpdateCurrentQueueItem(queueItem);
+        SetProperty(ref _currentQueueItem, queueItem, nameof(CurrentQueueItem));
+        CurrentQueueIndex = queueIndex;
+        await localPlayer.TogglePlayPauseAsync();
+    }
+
+    private void ApplyLocalQueueState(ILocalPlayerService localPlayer, List<QueueItem> queueItems, int? currentIndex)
+    {
+        for (var i = 0; i < queueItems.Count; i++)
+        {
+            queueItems[i].Index = i;
+        }
+
+        _currentQueueItems.ReplaceRange(queueItems);
+        QueueItemCount = queueItems.Count;
+
+        QueueItem? currentItem = null;
+        if (currentIndex is int index && index >= 0 && index < queueItems.Count)
+        {
+            currentItem = queueItems[index];
+        }
+
+        CurrentQueueIndex = currentItem == null ? null : currentIndex;
+        SetProperty(ref _currentQueueItem, currentItem, nameof(CurrentQueueItem));
+        localPlayer.UpdateCurrentQueueItem(currentItem);
+    }
+
+    private static int? ResolveLocalCurrentIndex(
+        List<QueueItem> queueItems,
+        string? previousCurrentItemId,
+        int? previousCurrentIndex,
+        QueueOption queueOption,
+        int insertionIndex)
+    {
+        if (queueItems.Count == 0)
+        {
+            return null;
+        }
+
+        if (queueOption == QueueOption.Replace)
+        {
+            return 0;
+        }
+
+        if (!string.IsNullOrWhiteSpace(previousCurrentItemId))
+        {
+            var indexById = queueItems.FindIndex(item => string.Equals(item.QueueItemId, previousCurrentItemId, StringComparison.Ordinal));
+            if (indexById >= 0)
+            {
+                return indexById;
+            }
+        }
+
+        if (previousCurrentIndex is int index && index >= 0 && index < queueItems.Count)
+        {
+            return index;
+        }
+
+        return Math.Clamp(insertionIndex, 0, queueItems.Count - 1);
+    }
+
+    private static List<QueueItem> CreateLocalQueueItems(IReadOnlyList<Track> tracks)
+    {
+        const string localQueueId = "local-offline";
+        var queueItems = new List<QueueItem>(tracks.Count);
+
+        for (var i = 0; i < tracks.Count; i++)
+        {
+            var track = tracks[i];
+            queueItems.Add(new QueueItem
+            {
+                QueueId = localQueueId,
+                QueueItemId = Guid.NewGuid().ToString("N"),
+                Name = track.Name,
+                Duration = track.Duration,
+                SortIndex = i,
+                MediaItem = track,
+                Image = track.PrimaryImage,
+                Index = i,
+                Available = true
+            });
+        }
+
+        return queueItems;
+    }
+
+    #endregion
+
+    #region Hybrid Queue Orchestration
+
+    private async Task HybridMonitorLoopAsync()
+    {
+        while (!_disposeCts.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(500), _disposeCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            if (OutputMode != PlaybackOutputMode.LocalSendspin || !_isHybridLocalPlaybackActive)
+            {
+                continue;
+            }
+
+            if (_prewarmTriggered)
+            {
+                continue;
+            }
+
+            if (_currentQueueIndex is not int currentIndex)
+            {
+                continue;
+            }
+
+            var nextIndex = currentIndex + 1;
+            if (nextIndex < 0 || nextIndex >= _currentQueueItems.Count)
+            {
+                continue;
+            }
+
+            var nextItem = _currentQueueItems[nextIndex];
+            if (IsLocalPlayable(nextItem))
+            {
+                continue;
+            }
+
+            if (!CanUseRemotePlayback())
+            {
+                continue;
+            }
+
+            var remaining = Math.Max(0, DurationSeconds - PositionSeconds);
+            if (remaining > PrewarmWindowSeconds)
+            {
+                continue;
+            }
+
+            try
+            {
+                await PrepareRemotePrewarmAsync(_disposeCts.Token);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Hybrid remote prewarm failed.");
+            }
+        }
+    }
+
+    private async Task TryAdoptCurrentQueueItemByPolicyAsync(CancellationToken cancellationToken)
+    {
+        if (OutputMode != PlaybackOutputMode.LocalSendspin)
+        {
+            return;
+        }
+
+        if (_currentQueueIndex is not int currentIndex)
+        {
+            return;
+        }
+
+        if (_currentQueueItem == null)
+        {
+            return;
+        }
+
+        if (!IsLocalPlayable(_currentQueueItem))
+        {
+            return;
+        }
+
+        await StartHybridLocalQueueItemAsync(_currentQueueItem, currentIndex, PositionSeconds, cancellationToken);
+    }
+
+    private async Task StartQueueItemByPolicyAsync(QueueItem queueItem, int queueIndex, CancellationToken cancellationToken)
+    {
+        if (OutputMode != PlaybackOutputMode.LocalSendspin)
+        {
+            await StartLocalQueueItemAsync(queueItem, queueIndex);
+            return;
+        }
+
+        if (IsLocalPlayable(queueItem))
+        {
+            await StartHybridLocalQueueItemAsync(queueItem, queueIndex, 0, cancellationToken);
+            return;
+        }
+
+        if (CanUseRemotePlayback())
+        {
+            await StartHybridRemoteQueueItemAsync(queueIndex, 0, cancellationToken);
+            return;
+        }
+
+        _isHybridLocalPlaybackActive = false;
+        _hybridActiveQueueItemId = null;
+        _prewarmTriggered = false;
+        _prewarmedQueueIndex = null;
+        SetProperty(ref _currentQueueItem, queueItem, nameof(CurrentQueueItem));
+        CurrentQueueIndex = queueIndex;
+        PlaybackState = new PlayerState
+        {
+            State = PlayerStateType.Buffering,
+            ActiveSinceUtc = DateTimeOffset.UtcNow
+        };
+
+        _logger.LogInformation("Hybrid policy stalled at non-local item due to missing remote connectivity. QueueItemId={QueueItemId}, Index={Index}", queueItem.QueueItemId, queueIndex);
+    }
+
+    private async Task StartHybridLocalQueueItemAsync(QueueItem queueItem, int queueIndex, double startSeconds, CancellationToken cancellationToken)
+    {
+        if (_localPlayer == null)
+        {
+            return;
+        }
+
+        var localPath = GetLocalPath(queueItem);
+        if (string.IsNullOrWhiteSpace(localPath))
+        {
+            return;
+        }
+
+        var itemId = Normalize(queueItem.QueueItemId);
+        if (_isHybridLocalPlaybackActive
+            && string.Equals(itemId, _hybridActiveQueueItemId, StringComparison.Ordinal)
+            && _localPlayer.PlaybackState.State == PlayerStateType.Playing)
+        {
+            return;
+        }
+
+        await EnsureSendspinExternalSourceAsync(true, cancellationToken);
+
+        await _localPlayer.SetSourceAsync(localPath, startSeconds, cancellationToken);
+        _localPlayer.UpdateCurrentQueueItem(queueItem);
+
+        if (_localPlayer.PlaybackState.State != PlayerStateType.Playing)
+        {
+            await _localPlayer.TogglePlayPauseAsync(cancellationToken);
+        }
+
+        _isHybridLocalPlaybackActive = true;
+        _prewarmTriggered = false;
+        _hybridActiveQueueItemId = itemId;
+
+        SetProperty(ref _currentQueueItem, queueItem, nameof(CurrentQueueItem));
+        CurrentQueueIndex = queueIndex;
+
+        Volume = _localPlayer.Volume;
+        IsMuted = _localPlayer.IsMuted;
+        DurationSeconds = _localPlayer.DurationSeconds;
+        PositionSeconds = _localPlayer.PositionSeconds;
+        PlaybackState = _localPlayer.PlaybackState;
+
+        _logger.LogInformation("Hybrid local playback started. QueueItemId={QueueItemId}, Index={Index}, StartSeconds={StartSeconds:F2}", queueItem.QueueItemId, queueIndex, startSeconds);
+    }
+
+    private async Task StartHybridRemoteQueueItemAsync(int queueIndex, int seekSeconds, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(ActivePlayerId))
+        {
+            return;
+        }
+
+        var queue = await _musicAssistant.GetActiveQueueForPlayerAsync(ActivePlayerId!);
+        if (string.IsNullOrWhiteSpace(queue?.QueueId))
+        {
+            return;
+        }
+
+        await EnsureSendspinExternalSourceAsync(false, cancellationToken);
+
+        if (_prewarmTriggered && _prewarmedQueueIndex == queueIndex)
+        {
+            await _musicAssistant.PreviousAsync(queue.QueueId);
+        }
+        else
+        {
+            await _musicAssistant.PlayIndexAsync(queue.QueueId, queueIndex);
+            if (seekSeconds > 0)
+            {
+                await _musicAssistant.SeekAsync(queue.QueueId, seekSeconds);
+            }
+        }
+
+        _isHybridLocalPlaybackActive = false;
+        _hybridActiveQueueItemId = null;
+        _prewarmTriggered = false;
+        _prewarmedQueueIndex = null;
+
+        PlaybackState = new PlayerState
+        {
+            State = PlayerStateType.Buffering,
+            ActiveSinceUtc = DateTimeOffset.UtcNow
+        };
+
+        _logger.LogInformation("Hybrid remote playback started. QueueId={QueueId}, Index={Index}, SeekSeconds={SeekSeconds}", queue.QueueId, queueIndex, seekSeconds);
+    }
+
+    private async Task PrepareRemotePrewarmAsync(CancellationToken cancellationToken)
+    {
+        if (!_isHybridLocalPlaybackActive)
+        {
+            return;
+        }
+
+        if (!CanUseRemotePlayback())
+        {
+            return;
+        }
+
+        if (_currentQueueIndex is not int currentIndex)
+        {
+            return;
+        }
+
+        var nextIndex = currentIndex + 1;
+        if (nextIndex < 0 || nextIndex >= _currentQueueItems.Count)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(ActivePlayerId))
+        {
+            return;
+        }
+
+        var queue = await _musicAssistant.GetActiveQueueForPlayerAsync(ActivePlayerId!);
+        if (string.IsNullOrWhiteSpace(queue?.QueueId))
+        {
+            return;
+        }
+
+        await EnsureSendspinExternalSourceAsync(false, cancellationToken);
+
+        await _musicAssistant.PlayIndexAsync(queue.QueueId, nextIndex);
+        await _musicAssistant.PauseAsync(queue.QueueId);
+
+        _prewarmTriggered = true;
+        _prewarmedQueueIndex = nextIndex;
+
+        _logger.LogInformation("Hybrid remote prewarm prepared. QueueId={QueueId}, PrewarmedIndex={PrewarmedIndex}", queue.QueueId, nextIndex);
+    }
+
+    private async Task EnsureSendspinExternalSourceAsync(bool enabled, CancellationToken cancellationToken)
+    {
+        if (_sendspinPlayer == null)
+        {
+            return;
+        }
+
+        await _sendspinPlayer.SetExternalSourceAsync(enabled, cancellationToken);
+    }
+
+    private bool CanUseRemotePlayback()
+    {
+        if (OutputMode != PlaybackOutputMode.LocalSendspin)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(ActivePlayerId))
+        {
+            return false;
+        }
+
+        return _sendspinPlayer?.IsConnected == true;
+    }
+
+    private static string? GetLocalPath(QueueItem? queueItem)
+    {
+        var candidate = queueItem?.MediaItem?.LocalPath;
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return null;
+        }
+
+        var value = candidate.Trim();
+        if (Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.IsFile)
+        {
+            value = uri.LocalPath;
+        }
+
+        return value;
+    }
+
+    private static bool IsLocalPlayable(QueueItem? queueItem)
+    {
+        var localPath = GetLocalPath(queueItem);
+        return !string.IsNullOrWhiteSpace(localPath) && File.Exists(localPath);
+    }
+
+    #endregion
+
     #region Helpers
+    // Generic utility helpers used across orchestration code paths.
 
     private void SyncStateFromPlayer()
     {
+        if (OutputMode == PlaybackOutputMode.LocalSendspin && _isHybridLocalPlaybackActive && _localPlayer != null)
+        {
+            Volume = _localPlayer.Volume;
+            IsMuted = _localPlayer.IsMuted;
+            DurationSeconds = _localPlayer.DurationSeconds;
+            PositionSeconds = _localPlayer.PositionSeconds;
+            PlaybackState = _localPlayer.PlaybackState;
+            return;
+        }
+
         Volume = _activePlayer.Volume;
         IsMuted = _activePlayer.IsMuted;
         DurationSeconds = _activePlayer.DurationSeconds;

@@ -1,6 +1,6 @@
 using mashin.Models;
 
-namespace mashin.Audio;
+namespace mashin.Audio.Renderers;
 
 public interface IAudioRenderer : IAsyncDisposable
 {
@@ -18,7 +18,7 @@ public interface IAudioRenderer : IAsyncDisposable
 
     Task InitializeAsync(AudioFormatModel format, CancellationToken cancellationToken = default);
 
-    void SetSampleSource(IRendererSampleSource source);
+    void SetSampleSource(IAudioRendererSampleSource source);
 
     void Play();
 
@@ -27,4 +27,11 @@ public interface IAudioRenderer : IAsyncDisposable
     void Stop();
 
     Task SwitchDeviceAsync(string? deviceId, CancellationToken cancellationToken = default);
+}
+
+public interface IAudioRendererSampleSource
+{
+    AudioFormatModel Format { get; }
+
+    int Read(float[] buffer, int offset, int count);
 }

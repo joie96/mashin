@@ -1,0 +1,3 @@
+- lokales playback für alle commands erweitern
+- lokales playback index management
+- reconnect logik & wechsel zwischen offline online

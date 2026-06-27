@@ -1,20 +1,22 @@
-using mashin.Audio;
-using mashin.Audio;
+using mashin.Audio.Renderers;
 using mashin.Models;
 using Microsoft.Extensions.Logging;
 using Sendspin.SDK.Audio;
 using Sendspin.SDK.Models;
 
-namespace mashin.Audio.Adapters;
+namespace mashin.Audio.Renderers;
 
-public sealed class SendspinAudioPlayerAdapter : IAudioPlayer
+/// <summary>
+/// Adapts an <see cref="IAudioRenderer"/> to the Sendspin <see cref="IAudioPlayer"/> contract.
+/// </summary>
+public sealed class SendspinPlayerRendererAdapter : IAudioPlayer
 {
     private readonly IAudioRenderer _renderer;
-    private readonly ILogger<SendspinAudioPlayerAdapter> _logger;
+    private readonly ILogger<SendspinPlayerRendererAdapter> _logger;
 
-    public SendspinAudioPlayerAdapter(
+    public SendspinPlayerRendererAdapter(
         IAudioRenderer renderer,
-        ILogger<SendspinAudioPlayerAdapter> logger)
+        ILogger<SendspinPlayerRendererAdapter> logger)
     {
         _renderer = renderer;
         _logger = logger;
@@ -45,7 +47,7 @@ public sealed class SendspinAudioPlayerAdapter : IAudioPlayer
 
     public event EventHandler<AudioPlayerError>? ErrorOccurred;
 
-    public Task InitializeAsync(AudioFormat format, CancellationToken cancellationToken = default)
+    public Task InitializeAsync(Sendspin.SDK.Models.AudioFormat format, CancellationToken cancellationToken = default)
     {
         var rendererFormat = new AudioFormatModel
         {
@@ -125,7 +127,7 @@ public sealed class SendspinAudioPlayerAdapter : IAudioPlayer
         };
     }
 
-    private sealed class RendererSampleSourceAdapter : IRendererSampleSource
+    private sealed class RendererSampleSourceAdapter : IAudioRendererSampleSource
     {
         private readonly IAudioSampleSource _source;
 

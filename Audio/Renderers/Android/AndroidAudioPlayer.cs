@@ -6,7 +6,7 @@
 using Android.Media;
 using Android.OS;
 using mashin.Audio;
-using mashin.Audio;
+using mashin.Audio.Renderers;
 using mashin.Models;
 using Microsoft.Extensions.Logging;
 
@@ -18,7 +18,7 @@ public sealed class AndroidAudioPlayer : IAudioRenderer
 
     private readonly ILogger<AndroidAudioPlayer> _logger;
     private AudioFormatModel? _format;
-    private IRendererSampleSource? _source;
+    private IAudioRendererSampleSource? _source;
     private AudioTrack? _audioTrack;
     private Thread? _playbackThread;
     private readonly object _playbackLock = new();
@@ -121,7 +121,7 @@ public sealed class AndroidAudioPlayer : IAudioRenderer
         }, cancellationToken);
     }
 
-    public void SetSampleSource(IRendererSampleSource source)
+    public void SetSampleSource(IAudioRendererSampleSource source)
     {
         ArgumentNullException.ThrowIfNull(source);
         _source = source;

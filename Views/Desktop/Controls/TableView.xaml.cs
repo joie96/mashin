@@ -1211,7 +1211,7 @@ public partial class TableView : ContentView
         if (e.PropertyName == nameof(IPlaybackService.PlaybackState))
         {
             var currentPlayerState = _playbackService?.PlaybackState
-                ?? new PlayerState { State = PlaybackStatere.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+                ?? new PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
             if (MainThread.IsMainThread)
             {

@@ -1,25 +1,25 @@
 #if WINDOWS
 
-// <copyright file="AudioSampleProviderAdapter.cs" company="Sendspin Windows Client">
+// <copyright file="WasapiSampleProviderAdapter.cs" company="Sendspin Windows Client">
 // Licensed under the MIT License. See LICENSE file in the project root.
 // </copyright>
 
 using Microsoft.VisualBasic;
 using NAudio.Wave;
-using mashin.Audio;
+using mashin.Audio.Renderers;
 using mashin.Models;
 
-namespace mashin.Audio.Renderers.Windows;
+namespace mashin.Audio.Renderers.Windows.Wasapi;
 
 /// <summary>
-/// Adapts <see cref="IRendererSampleSource"/> to NAudio's <see cref="ISampleProvider"/> interface.
+/// Adapts <see cref="IAudioRendererSampleSource"/> to NAudio's <see cref="ISampleProvider"/> interface.
 /// This allows our audio pipeline to integrate with NAudio's playback infrastructure.
 /// </summary>
-internal sealed class AudioSampleProviderAdapter : ISampleProvider
+internal sealed class WasapiSampleProviderAdapter : ISampleProvider
 {
     private const float AudibleSampleThreshold = 0.0001f;
 
-    private readonly IRendererSampleSource _source;
+    private readonly IAudioRendererSampleSource _source;
     private static bool _prioritySet = false;
 
     /// <summary>
@@ -47,11 +47,11 @@ internal sealed class AudioSampleProviderAdapter : ISampleProvider
     private bool _audibleSamplesReported;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="AudioSampleProviderAdapter"/> class.
+    /// Initializes a new instance of the <see cref="WasapiSampleProviderAdapter"/> class.
     /// </summary>
     /// <param name="source">The audio sample source to adapt.</param>
     /// <param name="format">Audio format configuration.</param>
-    public AudioSampleProviderAdapter(IRendererSampleSource source, AudioFormatModel format)
+    public WasapiSampleProviderAdapter(IAudioRendererSampleSource source, AudioFormatModel format)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(format);

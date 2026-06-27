@@ -201,6 +201,9 @@ namespace mashin.Models
         public int TrackNumber { get; set; }
 
         [JsonIgnore]
+        public string? LocalPath { get; set; }
+
+        [JsonIgnore]
         public int Index
         {
             get => _index;
