@@ -545,7 +545,7 @@ public sealed class PlaybackService : IPlaybackService
                 return;
             }
 
-            await StartQueueItemByPolicyAsync(_currentQueueItems[index], index, cancellationToken);
+            await StartQueueItemByModeAsync(_currentQueueItems[index], index, cancellationToken);
             return;
         }
 
@@ -749,7 +749,7 @@ public sealed class PlaybackService : IPlaybackService
                 return;
             }
 
-            await StartQueueItemByPolicyAsync(_currentQueueItems[nextIndex], nextIndex, cancellationToken);
+            await StartQueueItemByModeAsync(_currentQueueItems[nextIndex], nextIndex, cancellationToken);
             return;
         }
 
@@ -797,7 +797,7 @@ public sealed class PlaybackService : IPlaybackService
                 return;
             }
 
-            await StartQueueItemByPolicyAsync(_currentQueueItems[previousIndex], previousIndex, cancellationToken);
+            await StartQueueItemByModeAsync(_currentQueueItems[previousIndex], previousIndex, cancellationToken);
             return;
         }
 
@@ -989,8 +989,8 @@ public sealed class PlaybackService : IPlaybackService
     #endregion
 
     #region Event Handling
-    // Inbound events from MA/local players and state reconciliation.
 
+    // MA Queue Events for queue state updates
     private void OnQueueEventReceived(object? sender, MusicAssistantQueueEvent e)
     {
         if (OutputMode == PlaybackOutputMode.LocalOffline || string.IsNullOrWhiteSpace(ActivePlayerId))
@@ -1054,7 +1054,7 @@ public sealed class PlaybackService : IPlaybackService
             {
                 try
                 {
-                    await TryAdoptCurrentQueueItemByPolicyAsync(_disposeCts.Token);
+                    await AdoptHybridCurrentItemAsync(_disposeCts.Token);
                 }
                 catch (OperationCanceledException)
                 {
@@ -1108,6 +1108,7 @@ public sealed class PlaybackService : IPlaybackService
         }, CancellationToken.None);
     }
 
+    // Active player property change events for playback state, position, duration, volume, and mute state.
     private void OnActivePlayerPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (OutputMode == PlaybackOutputMode.LocalSendspin && _isHybridLocalPlaybackActive)
@@ -1157,6 +1158,7 @@ public sealed class PlaybackService : IPlaybackService
         }
     }
 
+    // Local player property change events for playback state, position, duration, volume, and mute state (needed for hybrid local playback)
     private void OnLocalPlayerPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (OutputMode != PlaybackOutputMode.LocalSendspin || !_isHybridLocalPlaybackActive || _localPlayer == null)
@@ -1204,6 +1206,7 @@ public sealed class PlaybackService : IPlaybackService
         }
     }
 
+    // Local player event when the current playing item ends for to set next item in hybrid local playback mode or local offline mode
     private void OnLocalPlayerCurrentPlayingItemEnded(object? sender, QueueItem? endedItem)
     {
         if (_disposeCts.IsCancellationRequested)
@@ -1237,7 +1240,7 @@ public sealed class PlaybackService : IPlaybackService
             {
                 try
                 {
-                    await StartQueueItemByPolicyAsync(hybridNextItem, hybridNextIndex, _disposeCts.Token);
+                    await StartQueueItemByModeAsync(hybridNextItem, hybridNextIndex, _disposeCts.Token);
                 }
                 catch (OperationCanceledException)
                 {
@@ -1291,8 +1294,7 @@ public sealed class PlaybackService : IPlaybackService
 
     #endregion
 
-    #region Queue Sync
-    // Authoritative queue snapshot refresh and reset helpers.
+    #region Queue Sync (Music Assistant)
 
     private async Task RefreshQueueAsync(CancellationToken cancellationToken = default)
     {
@@ -1339,7 +1341,7 @@ public sealed class PlaybackService : IPlaybackService
 
             if (OutputMode == PlaybackOutputMode.LocalSendspin)
             {
-                await TryAdoptCurrentQueueItemByPolicyAsync(cancellationToken);
+                await AdoptHybridCurrentItemAsync(cancellationToken);
             }
 
         }
@@ -1372,8 +1374,7 @@ public sealed class PlaybackService : IPlaybackService
 
     #endregion
 
-    #region Local Playback
-    // Offline/local queue creation and local track startup logic.
+    #region Queue Playback (Local)
 
     private async Task PlayMediaLocalAsync(IReadOnlyList<MediaItem> items, QueueOption queueOption, bool shuffle = false)
     {
@@ -1576,7 +1577,7 @@ public sealed class PlaybackService : IPlaybackService
 
     #endregion
 
-    #region Hybrid Queue Orchestration
+    #region Queue Playback (Hybrid Sendspin)
 
     private async Task HybridMonitorLoopAsync()
     {
@@ -1618,7 +1619,7 @@ public sealed class PlaybackService : IPlaybackService
                 continue;
             }
 
-            if (!CanUseRemotePlayback())
+            if (!IsSendspinAvailable)
             {
                 continue;
             }
@@ -1631,16 +1632,16 @@ public sealed class PlaybackService : IPlaybackService
 
             try
             {
-                await PrepareRemotePrewarmAsync(_disposeCts.Token);
+                await PrewarmHybridSendspinAsync(_disposeCts.Token);
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Hybrid remote prewarm failed.");
+                _logger.LogDebug(ex, "Hybrid Sendspin prewarm failed.");
             }
         }
     }
 
-    private async Task TryAdoptCurrentQueueItemByPolicyAsync(CancellationToken cancellationToken)
+    private async Task AdoptHybridCurrentItemAsync(CancellationToken cancellationToken)
     {
         if (OutputMode != PlaybackOutputMode.LocalSendspin)
         {
@@ -1662,10 +1663,10 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        await StartHybridLocalQueueItemAsync(_currentQueueItem, currentIndex, PositionSeconds, cancellationToken);
+        await StartHybridLocalItemAsync(_currentQueueItem, currentIndex, PositionSeconds, cancellationToken);
     }
 
-    private async Task StartQueueItemByPolicyAsync(QueueItem queueItem, int queueIndex, CancellationToken cancellationToken)
+    private async Task StartQueueItemByModeAsync(QueueItem queueItem, int queueIndex, CancellationToken cancellationToken)
     {
         if (OutputMode != PlaybackOutputMode.LocalSendspin)
         {
@@ -1675,13 +1676,13 @@ public sealed class PlaybackService : IPlaybackService
 
         if (IsLocalPlayable(queueItem))
         {
-            await StartHybridLocalQueueItemAsync(queueItem, queueIndex, 0, cancellationToken);
+            await StartHybridLocalItemAsync(queueItem, queueIndex, 0, cancellationToken);
             return;
         }
 
-        if (CanUseRemotePlayback())
+        if (IsSendspinAvailable)
         {
-            await StartHybridRemoteQueueItemAsync(queueIndex, 0, cancellationToken);
+            await StartHybridSendspinItemAsync(queueIndex, 0, cancellationToken);
             return;
         }
 
@@ -1700,7 +1701,7 @@ public sealed class PlaybackService : IPlaybackService
         _logger.LogInformation("Hybrid policy stalled at non-local item due to missing remote connectivity. QueueItemId={QueueItemId}, Index={Index}", queueItem.QueueItemId, queueIndex);
     }
 
-    private async Task StartHybridLocalQueueItemAsync(QueueItem queueItem, int queueIndex, double startSeconds, CancellationToken cancellationToken)
+    private async Task StartHybridLocalItemAsync(QueueItem queueItem, int queueIndex, double startSeconds, CancellationToken cancellationToken)
     {
         if (_localPlayer == null)
         {
@@ -1721,7 +1722,10 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        await EnsureSendspinExternalSourceAsync(true, cancellationToken);
+        if (_sendspinPlayer != null)
+        {
+            await _sendspinPlayer.SetExternalSourceAsync(true, cancellationToken);
+        }
 
         await _localPlayer.SetSourceAsync(localPath, startSeconds, cancellationToken);
         _localPlayer.UpdateCurrentQueueItem(queueItem);
@@ -1747,7 +1751,7 @@ public sealed class PlaybackService : IPlaybackService
         _logger.LogInformation("Hybrid local playback started. QueueItemId={QueueItemId}, Index={Index}, StartSeconds={StartSeconds:F2}", queueItem.QueueItemId, queueIndex, startSeconds);
     }
 
-    private async Task StartHybridRemoteQueueItemAsync(int queueIndex, int seekSeconds, CancellationToken cancellationToken)
+    private async Task StartHybridSendspinItemAsync(int queueIndex, int seekSeconds, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(ActivePlayerId))
         {
@@ -1760,7 +1764,10 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        await EnsureSendspinExternalSourceAsync(false, cancellationToken);
+        if (_sendspinPlayer != null)
+        {
+            await _sendspinPlayer.SetExternalSourceAsync(false, cancellationToken);
+        }
 
         if (_prewarmTriggered && _prewarmedQueueIndex == queueIndex)
         {
@@ -1786,17 +1793,17 @@ public sealed class PlaybackService : IPlaybackService
             ActiveSinceUtc = DateTimeOffset.UtcNow
         };
 
-        _logger.LogInformation("Hybrid remote playback started. QueueId={QueueId}, Index={Index}, SeekSeconds={SeekSeconds}", queue.QueueId, queueIndex, seekSeconds);
+        _logger.LogInformation("Hybrid Sendspin playback started. QueueId={QueueId}, Index={Index}, SeekSeconds={SeekSeconds}", queue.QueueId, queueIndex, seekSeconds);
     }
 
-    private async Task PrepareRemotePrewarmAsync(CancellationToken cancellationToken)
+    private async Task PrewarmHybridSendspinAsync(CancellationToken cancellationToken)
     {
         if (!_isHybridLocalPlaybackActive)
         {
             return;
         }
 
-        if (!CanUseRemotePlayback())
+        if (!IsSendspinAvailable)
         {
             return;
         }
@@ -1823,7 +1830,10 @@ public sealed class PlaybackService : IPlaybackService
             return;
         }
 
-        await EnsureSendspinExternalSourceAsync(false, cancellationToken);
+        if (_sendspinPlayer != null)
+        {
+            await _sendspinPlayer.SetExternalSourceAsync(false, cancellationToken);
+        }
 
         await _musicAssistant.PlayIndexAsync(queue.QueueId, nextIndex);
         await _musicAssistant.PauseAsync(queue.QueueId);
@@ -1831,33 +1841,13 @@ public sealed class PlaybackService : IPlaybackService
         _prewarmTriggered = true;
         _prewarmedQueueIndex = nextIndex;
 
-        _logger.LogInformation("Hybrid remote prewarm prepared. QueueId={QueueId}, PrewarmedIndex={PrewarmedIndex}", queue.QueueId, nextIndex);
+        _logger.LogInformation("Hybrid Sendspin prewarm prepared. QueueId={QueueId}, PrewarmedIndex={PrewarmedIndex}", queue.QueueId, nextIndex);
     }
 
-    private async Task EnsureSendspinExternalSourceAsync(bool enabled, CancellationToken cancellationToken)
-    {
-        if (_sendspinPlayer == null)
-        {
-            return;
-        }
-
-        await _sendspinPlayer.SetExternalSourceAsync(enabled, cancellationToken);
-    }
-
-    private bool CanUseRemotePlayback()
-    {
-        if (OutputMode != PlaybackOutputMode.LocalSendspin)
-        {
-            return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(ActivePlayerId))
-        {
-            return false;
-        }
-
-        return _sendspinPlayer?.IsConnected == true;
-    }
+    private bool IsSendspinAvailable =>
+        OutputMode == PlaybackOutputMode.LocalSendspin
+        && !string.IsNullOrWhiteSpace(ActivePlayerId)
+        && _sendspinPlayer?.IsConnected == true;
 
     private static string? GetLocalPath(QueueItem? queueItem)
     {
