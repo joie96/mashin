@@ -708,15 +708,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
         catch (Exception ex) when (ex is TimeoutException or TaskCanceledException)
         {
-            _logger.LogWarning(ex, "Playback initialization failed for Sendspin. Falling back to LocalOffline mode.");
+            _logger.LogWarning(ex, "Playback initialization failed for Sendspin. Falling back to Local mode.");
 
             try
             {
-                await _playbackService.SetOutputModeAsync(PlaybackOutputMode.LocalOffline);
+                await _playbackService.SetOutputModeAsync(PlaybackOutputMode.Local);
             }
             catch (Exception fallbackEx)
             {
-                _logger.LogWarning(fallbackEx, "Failed to switch playback output to LocalOffline after initialization error.");
+                _logger.LogWarning(fallbackEx, "Failed to switch playback output to Local after initialization error.");
             }
         }
 
