@@ -1231,7 +1231,9 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
     {
         _musicAssistant = musicAssistant;
         _musicAssistantEventHub = musicAssistantEventHub;
+
         _musicAssistantEventHub.QueueEventReceived += OnQueueEventReceived;
+        _musicAssistantEventHub.PlayerEventReceived += OnPlayerEventReceived;
 
         _progressInterpolationTask = Task.Run(async () =>
         {
@@ -1281,6 +1283,7 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
     #region Events
 
     public event PropertyChangedEventHandler? PropertyChanged;
+    public event EventHandler<PlaybackQueue>? QueueChanged;
 
     #endregion
 
@@ -1328,25 +1331,229 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
 
     #endregion
 
-    #region Commands
+    #region Lifecycle
 
     public async Task ActivateAsync(string? targetPlayerId, CancellationToken cancellationToken = default)
     {
-        _playerId = targetPlayerId;
+        _playerId = Normalize(targetPlayerId);
         _activeQueueId = null;
-        await RefreshQueueStateAsync(cancellationToken);
+        await RefreshStateFromMusicAssistantAsync(cancellationToken);
     }
 
     public Task DeactivateAsync()
     {
         _playerId = null;
         _activeQueueId = null;
+
+        _queue.QueueId = null;
+        _queue.CurrentIndex = null;
+        _queue.CurrentQueueItemId = null;
+        _queue.ItemCount = 0;
+        _queue.ShuffleEnabled = null;
+        _queue.RepeatMode = null;
+        _queue.DontStopTheMusicEnabled = null;
+        _queue.Items.Clear();
+
         PositionSeconds = 0;
         DurationSeconds = 0;
         ResetProgressAnchor();
         PlaybackState = new Models.PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        QueueChanged?.Invoke(this, _queue);
         return Task.CompletedTask;
     }
+
+    public async ValueTask DisposeAsync()
+    {
+        _musicAssistantEventHub.QueueEventReceived -= OnQueueEventReceived;
+        _musicAssistantEventHub.PlayerEventReceived -= OnPlayerEventReceived;
+
+        _disposeCts.Cancel();
+        try
+        {
+            await _progressInterpolationTask;
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected during shutdown.
+        }
+
+        _disposeCts.Dispose();
+    }
+
+    #endregion
+
+    #region Queue Management
+
+    public Task SetQueueAsync(PlaybackQueue queue, CancellationToken cancellationToken = default)
+    {
+        if (queue == null)
+        {
+            _queue.QueueId = null;
+            _queue.CurrentIndex = null;
+            _queue.CurrentQueueItemId = null;
+            _queue.ItemCount = 0;
+            _queue.ShuffleEnabled = null;
+            _queue.RepeatMode = null;
+            _queue.DontStopTheMusicEnabled = null;
+            _queue.Items.Clear();
+            QueueChanged?.Invoke(this, _queue);
+            return Task.CompletedTask;
+        }
+
+        _queue.QueueId = Normalize(queue.QueueId);
+        _queue.CurrentIndex = queue.CurrentIndex;
+        _queue.CurrentQueueItemId = Normalize(queue.CurrentQueueItemId);
+        _queue.ItemCount = Math.Max(0, queue.ItemCount);
+        _queue.ShuffleEnabled = queue.ShuffleEnabled;
+        _queue.RepeatMode = queue.RepeatMode;
+        _queue.DontStopTheMusicEnabled = queue.DontStopTheMusicEnabled;
+        _queue.Items.ReplaceRange(queue.Items.Select(CloneQueueItem));
+        QueueChanged?.Invoke(this, _queue);
+        return Task.CompletedTask;
+    }
+
+    #endregion
+
+    #region Media Commands
+
+    public async Task PlayMediaAsync(IReadOnlyList<MediaItem> items, CancellationToken cancellationToken = default)
+    {
+        var queueId = await ResolveQueueIdAsync();
+        if (string.IsNullOrWhiteSpace(queueId) || items.Count == 0)
+        {
+            return;
+        }
+
+        var resolvedItems = await ResolvePlayableMediaItemsAsync(items);
+        if (resolvedItems.Count == 0)
+        {
+            return;
+        }
+
+        await _musicAssistant.PlayMediaAsync(queueId, resolvedItems, mashin.Models.QueueOption.Replace);
+    }
+
+    public async Task PlayMediaNextAsync(IReadOnlyList<MediaItem> items, CancellationToken cancellationToken = default)
+    {
+        var queueId = await ResolveQueueIdAsync();
+        if (string.IsNullOrWhiteSpace(queueId) || items.Count == 0)
+        {
+            return;
+        }
+
+        var resolvedItems = await ResolvePlayableMediaItemsAsync(items);
+        if (resolvedItems.Count == 0)
+        {
+            return;
+        }
+
+        await _musicAssistant.PlayMediaAsync(queueId, resolvedItems, mashin.Models.QueueOption.Next);
+    }
+
+    public async Task PlayMediaReplaceNextAsync(IReadOnlyList<MediaItem> items, CancellationToken cancellationToken = default)
+    {
+        var queueId = await ResolveQueueIdAsync();
+        if (string.IsNullOrWhiteSpace(queueId) || items.Count == 0)
+        {
+            return;
+        }
+
+        var resolvedItems = await ResolvePlayableMediaItemsAsync(items);
+        if (resolvedItems.Count == 0)
+        {
+            return;
+        }
+
+        await _musicAssistant.PlayMediaAsync(queueId, resolvedItems, mashin.Models.QueueOption.ReplaceNext);
+    }
+
+    public async Task PlayMediaLastAsync(IReadOnlyList<MediaItem> items, CancellationToken cancellationToken = default)
+    {
+        var queueId = await ResolveQueueIdAsync();
+        if (string.IsNullOrWhiteSpace(queueId) || items.Count == 0)
+        {
+            return;
+        }
+
+        var resolvedItems = await ResolvePlayableMediaItemsAsync(items);
+        if (resolvedItems.Count == 0)
+        {
+            return;
+        }
+
+        await _musicAssistant.PlayMediaAsync(queueId, resolvedItems, mashin.Models.QueueOption.Add);
+    }
+
+    public async Task ShufflePlayMediaAsync(IReadOnlyList<MediaItem> items, CancellationToken cancellationToken = default)
+    {
+        var queueId = await ResolveQueueIdAsync();
+        if (string.IsNullOrWhiteSpace(queueId) || items.Count == 0)
+        {
+            return;
+        }
+
+        var resolvedItems = await ResolvePlayableMediaItemsAsync(items);
+        if (resolvedItems.Count == 0)
+        {
+            return;
+        }
+
+        for (var i = resolvedItems.Count - 1; i > 0; i--)
+        {
+            var j = Random.Shared.Next(i + 1);
+            (resolvedItems[i], resolvedItems[j]) = (resolvedItems[j], resolvedItems[i]);
+        }
+
+        await _musicAssistant.PlayMediaAsync(queueId, resolvedItems, mashin.Models.QueueOption.Replace);
+    }
+
+    public async Task ClearQueueAsync(bool skipStop = false, CancellationToken cancellationToken = default)
+    {
+        var queueId = await ResolveQueueIdAsync();
+        if (string.IsNullOrWhiteSpace(queueId))
+        {
+            return;
+        }
+
+        await _musicAssistant.ClearQueueAsync(queueId, skipStop);
+    }
+
+    public async Task PlayQueueIndexAsync(int index, CancellationToken cancellationToken = default)
+    {
+        var queueId = await ResolveQueueIdAsync();
+        if (string.IsNullOrWhiteSpace(queueId))
+        {
+            return;
+        }
+
+        await _musicAssistant.PlayIndexAsync(queueId, index);
+    }
+
+    public async Task MoveQueueItemAsync(string queueItemId, int posShift, CancellationToken cancellationToken = default)
+    {
+        var queueId = await ResolveQueueIdAsync();
+        if (string.IsNullOrWhiteSpace(queueId) || string.IsNullOrWhiteSpace(queueItemId))
+        {
+            return;
+        }
+
+        await _musicAssistant.MoveQueueItemAsync(queueId, queueItemId, posShift);
+    }
+
+    public async Task DeleteQueueItemAsync(string queueItemId, CancellationToken cancellationToken = default)
+    {
+        var queueId = await ResolveQueueIdAsync();
+        if (string.IsNullOrWhiteSpace(queueId) || string.IsNullOrWhiteSpace(queueItemId))
+        {
+            return;
+        }
+
+        await _musicAssistant.DeleteQueueItemAsync(queueId, queueItemId);
+    }
+
+    #endregion
+
+    #region Transport Commands
 
     public Task TogglePlayPauseAsync(CancellationToken cancellationToken = default)
     {
@@ -1435,21 +1642,155 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
         await _musicAssistant.SetRepeatAsync(queueId, repeatMode);
     }
 
-    public async ValueTask DisposeAsync()
+    public async Task SetDontStopTheMusicAsync(bool enabled, CancellationToken cancellationToken = default)
     {
-        _musicAssistantEventHub.QueueEventReceived -= OnQueueEventReceived;
-
-        _disposeCts.Cancel();
-        try
+        var queueId = await ResolveQueueIdAsync();
+        if (string.IsNullOrWhiteSpace(queueId))
         {
-            await _progressInterpolationTask;
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected during shutdown.
+            return;
         }
 
-        _disposeCts.Dispose();
+        await _musicAssistant.SetDontStopTheMusicAsync(queueId, enabled);
+    }
+
+    #endregion
+
+    #region Event Handlers
+
+    private void OnPlayerEventReceived(object? sender, MusicAssistantPlayerEvent e)
+    {
+        if (string.IsNullOrWhiteSpace(_playerId))
+        {
+            return;
+        }
+
+        var eventPlayerId = Normalize(e.Player?.PlayerId) ?? Normalize(e.PlayerId) ?? Normalize(e.PlayerConfig?.PlayerId);
+        if (!string.IsNullOrWhiteSpace(eventPlayerId)
+            && !string.Equals(eventPlayerId, _playerId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (e.Player == null)
+        {
+            return;
+        }
+
+        _playerId = Normalize(e.Player.PlayerId) ?? _playerId;
+
+        if (e.Player.VolumeLevel.HasValue)
+        {
+            Volume = e.Player.VolumeLevel.Value;
+        }
+
+        if (e.Player.VolumeMuted.HasValue)
+        {
+            IsMuted = e.Player.VolumeMuted.Value;
+        }
+
+        PlaybackState = new Models.PlayerState
+        {
+            State = MapMusicAssistantPlaybackStateFromPlayer(e.Player.State),
+            ActiveSinceUtc = DateTimeOffset.UtcNow
+        };
+
+        if (PlaybackState.State != PlayerStateType.Playing)
+        {
+            ResetProgressAnchor();
+        }
+    }
+
+    private void OnQueueEventReceived(object? sender, MusicAssistantQueueEvent e)
+    {
+        if (string.IsNullOrWhiteSpace(_playerId))
+        {
+            return;
+        }
+
+        var eventQueueId = Normalize(e.Queue?.QueueId) ?? Normalize(e.QueueItems?.QueueId) ?? Normalize(e.QueueId);
+        if (!string.IsNullOrWhiteSpace(_activeQueueId)
+            && !string.IsNullOrWhiteSpace(eventQueueId)
+            && !string.Equals(eventQueueId, _activeQueueId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_activeQueueId) && !string.IsNullOrWhiteSpace(eventQueueId))
+        {
+            _activeQueueId = eventQueueId;
+        }
+
+        var normalizedQueueId = Normalize(eventQueueId) ?? Normalize(_activeQueueId);
+        if (!string.IsNullOrWhiteSpace(normalizedQueueId))
+        {
+            _queue.QueueId = normalizedQueueId;
+        }
+
+        if (string.Equals(e.Event, "queue_time_updated", StringComparison.OrdinalIgnoreCase))
+        {
+            if (e.ElapsedTimeSeconds is double elapsedSeconds)
+            {
+                var clamped = Math.Max(0, elapsedSeconds);
+                PositionSeconds = clamped;
+                UpdateProgressAnchor(clamped);
+            }
+
+            return;
+        }
+
+        if (e.Queue != null)
+        {
+            _activeQueueId = Normalize(e.Queue.QueueId) ?? _activeQueueId;
+            _queue.QueueId = Normalize(e.Queue.QueueId) ?? _queue.QueueId;
+            _queue.CurrentIndex = e.Queue.CurrentIndex;
+            _queue.CurrentQueueItemId = Normalize(e.Queue.CurrentItem?.QueueItemId);
+            _queue.ItemCount = Math.Max(0, e.Queue.ItemCount);
+            _queue.ShuffleEnabled = e.Queue.ShuffleEnabled;
+            _queue.RepeatMode = e.Queue.RepeatMode;
+            _queue.DontStopTheMusicEnabled = e.Queue.DontStopTheMusicEnabled;
+
+            PlaybackState = new Models.PlayerState
+            {
+                State = MapMusicAssistantPlaybackStateFromQueue(e.Queue.State),
+                ActiveSinceUtc = DateTimeOffset.UtcNow
+            };
+
+            if (e.Queue.ElapsedTime.HasValue)
+            {
+                var clamped = Math.Max(0, e.Queue.ElapsedTime.Value);
+                PositionSeconds = clamped;
+                UpdateProgressAnchor(clamped);
+            }
+
+            DurationSeconds = Math.Max(0, e.Queue.CurrentItem?.Duration ?? 0);
+        }
+
+        if (e.QueueItems != null)
+        {
+            _queue.QueueId = Normalize(e.QueueItems.QueueId) ?? _queue.QueueId;
+            _queue.Items.ReplaceRange((e.QueueItems.Items ?? new List<QueueItem>()).Select(CloneQueueItem));
+            _queue.CurrentQueueItemId = Normalize(e.QueueItems.CurrentItem?.QueueItemId) ?? _queue.CurrentQueueItemId;
+            _queue.ItemCount = Math.Max(_queue.ItemCount, _queue.Items.Count);
+
+            if (e.QueueItems.CurrentItem?.Duration is int queueItemsDuration)
+            {
+                DurationSeconds = Math.Max(0, queueItemsDuration);
+            }
+        }
+
+        if (e.QueueSettings != null)
+        {
+            _queue.ShuffleEnabled = e.QueueSettings.ShuffleEnabled;
+            _queue.RepeatMode = e.QueueSettings.RepeatMode;
+            _queue.DontStopTheMusicEnabled = e.QueueSettings.DontStopTheMusicEnabled;
+        }
+
+        QueueChanged?.Invoke(this, _queue);
+
+        if (PlaybackState.State != PlayerStateType.Playing)
+        {
+            ResetProgressAnchor();
+        }
     }
 
     #endregion
@@ -1470,76 +1811,22 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
 
     private async Task<string?> ResolveQueueIdAsync()
     {
+        if (!string.IsNullOrWhiteSpace(_activeQueueId))
+        {
+            return _activeQueueId;
+        }
+
         if (string.IsNullOrWhiteSpace(_playerId))
         {
             return null;
         }
 
         var queue = await _musicAssistant.GetActiveQueueForPlayerAsync(_playerId);
-        return queue?.QueueId;
+        _activeQueueId = Normalize(queue?.QueueId);
+        return _activeQueueId;
     }
 
-    private void OnQueueEventReceived(object? sender, MusicAssistantQueueEvent e)
-    {
-        if (string.IsNullOrWhiteSpace(_playerId))
-        {
-            return;
-        }
-
-        var eventQueueId = Normalize(e.Queue?.QueueId) ?? Normalize(e.QueueId);
-        if (!string.IsNullOrWhiteSpace(_activeQueueId)
-            && !string.IsNullOrWhiteSpace(eventQueueId)
-            && !string.Equals(eventQueueId, _activeQueueId, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(_activeQueueId) && !string.IsNullOrWhiteSpace(eventQueueId))
-        {
-            _activeQueueId = eventQueueId;
-        }
-
-        if (string.Equals(e.Event, "queue_time_updated", StringComparison.OrdinalIgnoreCase))
-        {
-            if (e.ElapsedTimeSeconds is double elapsedSeconds)
-            {
-                var clamped = Math.Max(0, elapsedSeconds);
-                PositionSeconds = clamped;
-                UpdateProgressAnchor(clamped);
-            }
-
-            return;
-        }
-
-        var queue = e.Queue;
-        if (queue == null)
-        {
-            return;
-        }
-
-        _activeQueueId = Normalize(queue.QueueId) ?? _activeQueueId;
-        DurationSeconds = Math.Max(0, queue.CurrentItem?.Duration ?? 0);
-
-        if (queue.ElapsedTime.HasValue)
-        {
-            var clamped = Math.Max(0, queue.ElapsedTime.Value);
-            PositionSeconds = clamped;
-            UpdateProgressAnchor(clamped);
-        }
-
-        PlaybackState = new Models.PlayerState
-        {
-            State = MapState(queue.State),
-            ActiveSinceUtc = DateTimeOffset.UtcNow
-        };
-
-        if (PlaybackState.State != PlayerStateType.Playing)
-        {
-            ResetProgressAnchor();
-        }
-    }
-
-    private async Task RefreshQueueStateAsync(CancellationToken cancellationToken)
+    private async Task RefreshStateFromMusicAssistantAsync(CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_playerId))
         {
@@ -1548,6 +1835,26 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
 
         try
         {
+            var player = await _musicAssistant.GetPlayerAsync(_playerId);
+            if (player != null)
+            {
+                if (player.VolumeLevel.HasValue)
+                {
+                    Volume = player.VolumeLevel.Value;
+                }
+
+                if (player.VolumeMuted.HasValue)
+                {
+                    IsMuted = player.VolumeMuted.Value;
+                }
+
+                PlaybackState = new Models.PlayerState
+                {
+                    State = MapMusicAssistantPlaybackStateFromPlayer(player.State),
+                    ActiveSinceUtc = DateTimeOffset.UtcNow
+                };
+            }
+
             var queue = await _musicAssistant.GetActiveQueueForPlayerAsync(_playerId);
             if (queue == null)
             {
@@ -1555,15 +1862,36 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
             }
 
             _activeQueueId = Normalize(queue.QueueId);
+            _queue.QueueId = _activeQueueId;
+            _queue.CurrentIndex = queue.CurrentIndex;
+            _queue.CurrentQueueItemId = Normalize(queue.CurrentItem?.QueueItemId);
+            _queue.ItemCount = Math.Max(0, queue.ItemCount);
+            _queue.ShuffleEnabled = queue.ShuffleEnabled;
+            _queue.RepeatMode = queue.RepeatMode;
+            _queue.DontStopTheMusicEnabled = queue.DontStopTheMusicEnabled;
+
             DurationSeconds = Math.Max(0, queue.CurrentItem?.Duration ?? 0);
-            var clamped = Math.Max(0, queue.ElapsedTime ?? 0);
-            PositionSeconds = clamped;
-            UpdateProgressAnchor(clamped);
+            if (queue.ElapsedTime.HasValue)
+            {
+                var clamped = Math.Max(0, queue.ElapsedTime.Value);
+                PositionSeconds = clamped;
+                UpdateProgressAnchor(clamped);
+            }
+
             PlaybackState = new Models.PlayerState
             {
-                State = MapState(queue.State),
+                State = MapMusicAssistantPlaybackStateFromQueue(queue.State),
                 ActiveSinceUtc = DateTimeOffset.UtcNow
             };
+
+            if (!string.IsNullOrWhiteSpace(_activeQueueId))
+            {
+                var queueItems = await _musicAssistant.GetQueueItemsAsync(_activeQueueId);
+                _queue.Items.ReplaceRange(queueItems.Select(CloneQueueItem));
+                _queue.ItemCount = Math.Max(_queue.ItemCount, _queue.Items.Count);
+            }
+
+            QueueChanged?.Invoke(this, _queue);
 
             if (PlaybackState.State != PlayerStateType.Playing)
             {
@@ -1574,6 +1902,110 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
         {
             // Snapshot refresh is best-effort.
         }
+    }
+
+    private static QueueItem CloneQueueItem(QueueItem source)
+    {
+        return new QueueItem
+        {
+            QueueId = source.QueueId,
+            QueueItemId = source.QueueItemId,
+            Name = source.Name,
+            Duration = source.Duration,
+            SortIndex = source.SortIndex,
+            Index = source.Index,
+            StreamDetails = source.StreamDetails,
+            MediaItem = source.MediaItem,
+            Image = source.Image,
+            Available = source.Available,
+            ExtraAttributes = source.ExtraAttributes != null
+                ? new Dictionary<string, System.Text.Json.JsonElement>(source.ExtraAttributes)
+                : null
+        };
+    }
+
+    private async Task<List<MediaItem>> ResolvePlayableMediaItemsAsync(IReadOnlyList<MediaItem> items)
+    {
+        const int artistTopTracksLimit = 25;
+        var resolvedTracks = new List<MediaItem>();
+
+        foreach (var mediaItem in items)
+        {
+            if (mediaItem == null)
+            {
+                continue;
+            }
+
+            switch (mediaItem)
+            {
+                case Track track:
+                    resolvedTracks.Add(track);
+                    break;
+
+                case Playlist playlist:
+                {
+                    var provider = ResolveProviderInstanceOrDomain(playlist);
+                    if (string.IsNullOrWhiteSpace(provider) || string.IsNullOrWhiteSpace(playlist.ItemId))
+                    {
+                        break;
+                    }
+
+                    var playlistTracks = await _musicAssistant.GetPlaylistTracksAsync(playlist.ItemId, provider);
+                    resolvedTracks.AddRange(playlistTracks);
+                    break;
+                }
+
+                case Album album:
+                {
+                    var provider = ResolveProviderInstanceOrDomain(album);
+                    if (string.IsNullOrWhiteSpace(provider) || string.IsNullOrWhiteSpace(album.ItemId))
+                    {
+                        break;
+                    }
+
+                    var albumTracks = await _musicAssistant.GetAlbumTracksAsync(album.ItemId, provider);
+                    resolvedTracks.AddRange(albumTracks);
+                    break;
+                }
+
+                case Artist artist:
+                {
+                    var provider = ResolveProviderInstanceOrDomain(artist);
+                    if (string.IsNullOrWhiteSpace(provider) || string.IsNullOrWhiteSpace(artist.ItemId))
+                    {
+                        break;
+                    }
+
+                    var artistTracks = await _musicAssistant.GetArtistTracksAsync(artist.ItemId, provider);
+                    resolvedTracks.AddRange(artistTracks.Take(artistTopTracksLimit));
+                    break;
+                }
+            }
+        }
+
+        return resolvedTracks;
+    }
+
+    private static string? ResolveProviderInstanceOrDomain(MediaItem item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.Provider))
+        {
+            return item.Provider;
+        }
+
+        var mapping = item.ProviderMappings.FirstOrDefault();
+
+        if (!string.IsNullOrWhiteSpace(mapping?.ProviderInstance))
+        {
+            return mapping.ProviderInstance;
+        }
+
+        if (!string.IsNullOrWhiteSpace(mapping?.ProviderDomain))
+        {
+            return mapping.ProviderDomain;
+        }
+
+        return null;
     }
 
     private void UpdateProgressAnchor(double positionSeconds)
@@ -1605,7 +2037,7 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
         return value.Trim();
     }
 
-    private static PlayerStateType MapState(mashin.Models.PlaybackState? state)
+    private static PlayerStateType MapMusicAssistantPlaybackStateFromQueue(mashin.Models.PlaybackState? state)
     {
         return state switch
         {
@@ -1613,6 +2045,18 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
             mashin.Models.PlaybackState.Paused => PlayerStateType.Paused,
             mashin.Models.PlaybackState.Buffering => PlayerStateType.Buffering,
             mashin.Models.PlaybackState.Idle => PlayerStateType.Idle,
+            _ => PlayerStateType.Unknown
+        };
+    }
+
+    private static PlayerStateType MapMusicAssistantPlaybackStateFromPlayer(string? state)
+    {
+        return state?.Trim().ToLowerInvariant() switch
+        {
+            "playing" => PlayerStateType.Playing,
+            "paused" => PlayerStateType.Paused,
+            "buffering" => PlayerStateType.Buffering,
+            "idle" => PlayerStateType.Idle,
             _ => PlayerStateType.Unknown
         };
     }
