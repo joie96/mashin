@@ -155,14 +155,12 @@ public sealed class PlaybackService
         if (_players.TryGetValue(PlaybackOutputMode.Local, out var localPlayer))
         {
             await localPlayer.ActivateAsync(null, cancellationToken);
-            await localPlayer.SetQueueAsync(CloneQueue(_playbackQueue), cancellationToken);
         }
 
         if (_players.TryGetValue(PlaybackOutputMode.Sendspin, out var sendspinPlayer))
         {
             var sendspinPlayerId = _settingsService.GetSendspinMusicAssistantPlayerId();
             await sendspinPlayer.ActivateAsync(sendspinPlayerId, cancellationToken);
-            await sendspinPlayer.SetQueueAsync(CloneQueue(_playbackQueue), cancellationToken);
         }
 
         var defaultMode = _players.ContainsKey(PlaybackOutputMode.Sendspin)
@@ -247,6 +245,9 @@ public sealed class PlaybackService
     public Task PlayMediaNextAsync(IReadOnlyList<MediaItem> items)
         => RouteOnActivePlayerAsync(player => player.PlayMediaNextAsync(items ?? Array.Empty<MediaItem>()));
 
+    public Task PlayMediaReplaceNextAsync(IReadOnlyList<MediaItem> items)
+        => RouteOnActivePlayerAsync(player => player.PlayMediaReplaceNextAsync(items ?? Array.Empty<MediaItem>()));
+
     public Task PlayMediaLastAsync(IReadOnlyList<MediaItem> items)
         => RouteOnActivePlayerAsync(player => player.PlayMediaLastAsync(items ?? Array.Empty<MediaItem>()));
 
@@ -305,7 +306,7 @@ public sealed class PlaybackService
 
         if (_activePlayer is SendspinPlayerService sendspinPlayer)
         {
-            await sendspinPlayer.UpdatePreferredAudioCodecAsync(codec, cancellationToken);
+            await sendspinPlayer.SetPreferredAudioCodecAsync(codec, cancellationToken);
         }
     }
 
