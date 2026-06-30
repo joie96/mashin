@@ -1,4 +1,4 @@
-using mashin.Collections;
+﻿using mashin.Collections;
 using mashin.Models;
 using mashin.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -551,7 +551,7 @@ public partial class TableView : ContentView
         OnPropertyChanged(nameof(HasMoreItems));
     }
 
-    private static IPlaybackService? ResolvePlaybackService()
+    private static PlaybackService? ResolvePlaybackService()
     {
         var services = Application.Current?.Handler?.MauiContext?.Services;
         if (services == null)
@@ -559,7 +559,7 @@ public partial class TableView : ContentView
             return null;
         }
 
-        return services.GetService<IPlaybackService>();
+        return services.GetService<PlaybackService>();
     }
 
     private bool HasAnySelectedItems()
@@ -736,3 +736,4 @@ public sealed class MobileTableViewTemplateSelector : DataTemplateSelector
         throw new InvalidOperationException("MobileTableViewTemplateSelector requires PlaylistTemplate, QueueItemTemplate, TrackTemplate, or SkeletonTemplate.");
     }
 }
+

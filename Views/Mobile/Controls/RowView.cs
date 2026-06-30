@@ -1,4 +1,4 @@
-using mashin.Collections;
+﻿using mashin.Collections;
 using mashin.Models;
 using mashin.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -348,7 +348,7 @@ public partial class RowView : ContentView
 
     #region Helpers
 
-    private static IPlaybackService? ResolvePlaybackService()
+    private static PlaybackService? ResolvePlaybackService()
     {
         var services = Application.Current?.Handler?.MauiContext?.Services;
         if (services == null)
@@ -356,7 +356,7 @@ public partial class RowView : ContentView
             return null;
         }
 
-        return services.GetService<IPlaybackService>();
+        return services.GetService<PlaybackService>();
     }
 
     private static object GetPrimaryNavigationParameter(MediaItem mediaItem)

@@ -105,7 +105,7 @@
             </Border.StrokeShape>
             <Border.Triggers>
                 <DataTrigger TargetType="Border"
-                    Binding="{Binding CurrentTrack}"
+                    Binding="{Binding CurrentQueueItem}"
                     Value="{x:Null}">
                     <Setter Property="IsVisible" Value="False" />
                 </DataTrigger>
@@ -128,7 +128,7 @@
                         FadeAnimationEnabled="True"
                         FadeAnimationForCachedImages="True"
                         FadeAnimationDuration="180"
-                        Source="{Binding CurrentTrack.ImageUri}" />
+                        Source="{Binding CurrentQueueItem.MediaItem.ImageUri}" />
                 </Border>
 
                 <Grid x:Name="PlayerBarProgressHost"
@@ -166,14 +166,14 @@
                             FontSize="13"
                             LineBreakMode="TailTruncation"
                             MaxLines="1"
-                            Text="{Binding CurrentTrack.DisplayName}"
+                            Text="{Binding CurrentQueueItem.MediaItem.DisplayName}"
                             TextColor="{DynamicResource TextPrimary}" />
                         <Label Grid.Row="1"
                             FontFamily="PoppinsRegular"
                             FontSize="11"
                             LineBreakMode="TailTruncation"
                             MaxLines="1"
-                            Text="{Binding CurrentTrack.ArtistName}"
+                            Text="{Binding CurrentQueueItem.MediaItem.ArtistName}"
                             TextColor="{DynamicResource TextSecondary}" />
                     </Grid>
 

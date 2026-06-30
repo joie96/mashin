@@ -1,4 +1,4 @@
-using mashin.Collections;
+﻿using mashin.Collections;
 using mashin.Models;
 using mashin.Services;
 using mashin.Views.Desktop;
@@ -245,7 +245,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
     public bool ShowNoArtistsMessage => !IsLoadingArtists && !HasArtists;
 
     public IMediaItemActions MediaActions { get; }
-    public IPlaybackService PlaybackService { get; }
+    public PlaybackService PlaybackService { get; }
 
     public ICommand AlbumTappedCommand { get; }
     public ICommand ArtistTappedCommand { get; }
@@ -315,7 +315,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
         MusicAssistantService musicAssistant,
         IUserDataService userDataService,
         IMediaItemActions mediaActions,
-        IPlaybackService playbackService,
+        PlaybackService playbackService,
         IContextMenuService contextMenuService,
         INavigationService navigationService,
         ILogger<FavoritesViewModel> logger)
@@ -681,7 +681,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
             },
             new()
             {
-                Text = "Als Nächstes spielen",
+                Text = "Als NÃ¤chstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
                 {
@@ -702,14 +702,14 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Wiedergabeliste hinzufügen",
+                Text = "Zu Wiedergabeliste hinzufÃ¼gen",
                 Icon = FluentIcons.Add12,
                 SubItems = await GetPlaylistSubItemsAsync()
             },
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Favoriten hinzufügen",
+                Text = "Zu Favoriten hinzufÃ¼gen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                     await MediaActions.AddToFavoritesAsync(Tracks.Where(t => t.IsSelected)))
@@ -743,7 +743,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
             },
             new()
             {
-                Text = "Als Nächstes spielen",
+                Text = "Als NÃ¤chstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
                 {
@@ -764,7 +764,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Favoriten hinzufügen",
+                Text = "Zu Favoriten hinzufÃ¼gen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                     await MediaActions.AddToFavoritesAsync(Albums.Where(a => a.IsSelected)))
@@ -798,7 +798,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
             },
             new()
             {
-                Text = "Als Nächstes spielen",
+                Text = "Als NÃ¤chstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
                 {
@@ -819,7 +819,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Favoriten hinzufügen",
+                Text = "Zu Favoriten hinzufÃ¼gen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                     await MediaActions.AddToFavoritesAsync(Playlists.Where(p => p.IsSelected)))
@@ -853,7 +853,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
             },
             new()
             {
-                Text = "Als Nächstes spielen",
+                Text = "Als NÃ¤chstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
                 {
@@ -874,7 +874,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Favoriten hinzufügen",
+                Text = "Zu Favoriten hinzufÃ¼gen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                     await MediaActions.AddToFavoritesAsync(Artists.Where(a => a.IsSelected)))
@@ -1239,3 +1239,4 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
 
     #endregion
 }
+

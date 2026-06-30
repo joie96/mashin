@@ -1,4 +1,4 @@
-using mashin.Models;
+﻿using mashin.Models;
 using mashin.Services;
 using mashin.Views.Desktop;
 using MauiIcons.Fluent;
@@ -20,7 +20,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
     private readonly IOverlayService _overlayService;
     private readonly INavigationService _navigationService;
     private readonly IMediaItemActions _mediaActions;
-    private readonly IPlaybackService _playbackService;
+    private readonly PlaybackService _playbackService;
     private readonly IContextMenuService _contextMenuService;
     private readonly ILogger<PlaylistsViewModel> _logger;
     private readonly ObservableCollection<ContextMenuItem> _playlistContextMenuItems = new();
@@ -43,7 +43,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         IOverlayService overlayService,
         INavigationService navigationService,
         IMediaItemActions mediaActions,
-        IPlaybackService playbackService,
+        PlaybackService playbackService,
         IContextMenuService contextMenuService,
         ILogger<PlaylistsViewModel> logger)
     {
@@ -317,7 +317,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
         _playlistContextMenuItems.Add(new ContextMenuItem
         {
-            Text = "Als Nächstes spielen",
+            Text = "Als NÃ¤chstes spielen",
             Icon = FluentIcons.ArrowForward16,
             Command = new Command(async () => await _playbackService.PlayMediaNextAsync(GetPlaylistsForAction().Cast<MediaItem>().ToList()))
         });
@@ -348,7 +348,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
         _playlistContextMenuItems.Add(new ContextMenuItem
         {
-            Text = "Zu Favoriten hinzufügen",
+            Text = "Zu Favoriten hinzufÃ¼gen",
             Icon = FluentIcons.Heart12,
             Command = new Command(async () => await _mediaActions.AddToFavoritesAsync(GetPlaylistsForAction()))
         });
@@ -395,3 +395,4 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
     #endregion
 }
+

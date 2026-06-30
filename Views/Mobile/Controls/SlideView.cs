@@ -1,4 +1,4 @@
-using mashin.Models;
+﻿using mashin.Models;
 using mashin.Services;
 using mashin.Collections;
 using Microsoft.Extensions.DependencyInjection;
@@ -538,7 +538,7 @@ public partial class SlideView : ContentView
 
     #region Paging
 
-    private static IPlaybackService? ResolvePlaybackService()
+    private static PlaybackService? ResolvePlaybackService()
     {
         var services = Application.Current?.Handler?.MauiContext?.Services;
         if (services == null)
@@ -546,7 +546,7 @@ public partial class SlideView : ContentView
             return null;
         }
 
-        return services.GetService<IPlaybackService>();
+        return services.GetService<PlaybackService>();
     }
 
     private void RefreshVisibleItems()
@@ -674,3 +674,4 @@ public sealed class SlideViewTemplateSelector : DataTemplateSelector
         throw new InvalidOperationException("SlideViewTemplateSelector requires TrackTemplate or SkeletonTemplate.");
     }
 }
+

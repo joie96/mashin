@@ -1,4 +1,4 @@
-using mashin.Collections;
+﻿using mashin.Collections;
 using mashin.Models;
 using mashin.Services;
 using Microsoft.Maui.Layouts;
@@ -84,7 +84,7 @@ public partial class RowView : ContentView
     private List<object> _allItems = new();
     private INotifyCollectionChanged? _itemsSourceCollection;
     private IKeyboardService? _keyboardService;
-    private IPlaybackService? _playbackService;
+    private PlaybackService? _playbackService;
     private int? _anchorIndex;
     private bool _isCheckboxClick;
     private int _pageIndex;
@@ -347,7 +347,7 @@ public partial class RowView : ContentView
             return;
         }
 
-        _playbackService = mauiContext.Services.GetService<IPlaybackService>();
+        _playbackService = mauiContext.Services.GetService<PlaybackService>();
         if (_playbackService == null)
         {
             return;
@@ -371,7 +371,7 @@ public partial class RowView : ContentView
 
     private void OnPlaybackServicePropertyChanged(object? sender, global::System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(IPlaybackService.CurrentQueueItem))
+        if (e.PropertyName != nameof(PlaybackService.CurrentQueueItem))
         {
             return;
         }

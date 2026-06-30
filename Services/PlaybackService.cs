@@ -18,6 +18,7 @@ public sealed class PlaybackService
     #region Fields
 
     private readonly SettingsService _settingsService;
+    private readonly IMusicAssistantEventHub _musicAssistantEventHub;
     private readonly ILogger<PlaybackService> _logger;
     private readonly Dictionary<PlaybackOutputMode, IPlayerService> _players;
 
@@ -45,10 +46,12 @@ public sealed class PlaybackService
 
     public PlaybackService(
         SettingsService settingsService,
+        IMusicAssistantEventHub musicAssistantEventHub,
         IEnumerable<IPlayerService> playerServices,
         ILogger<PlaybackService> logger)
     {
         _settingsService = settingsService;
+        _musicAssistantEventHub = musicAssistantEventHub;
         _logger = logger;
 
         _players = playerServices
@@ -151,6 +154,8 @@ public sealed class PlaybackService
         {
             return;
         }
+
+        await _musicAssistantEventHub.StartAsync(cancellationToken);
 
         if (_players.TryGetValue(PlaybackOutputMode.Local, out var localPlayer))
         {

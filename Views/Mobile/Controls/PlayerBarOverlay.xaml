@@ -61,7 +61,7 @@
                             FadeAnimationEnabled="True"
                             FadeAnimationForCachedImages="True"
                             FadeAnimationDuration="180"
-                            Source="{Binding CurrentTrack.ImageUri}" />
+                            Source="{Binding CurrentQueueItem.MediaItem.ImageUri}" />
                     </Border>
 
                     <!--  Progress slider and time labels  -->
@@ -107,21 +107,21 @@
                             HorizontalTextAlignment="Center"
                             LineBreakMode="TailTruncation"
                             MaxLines="2"
-                            Text="{Binding CurrentTrack.DisplayName}"
+                            Text="{Binding CurrentQueueItem.MediaItem.DisplayName}"
                             TextColor="{DynamicResource TextPrimary}" />
                         <Label FontFamily="PoppinsRegular"
                             FontSize="16"
                             HorizontalTextAlignment="Center"
                             LineBreakMode="TailTruncation"
                             MaxLines="1"
-                            Text="{Binding CurrentTrack.AlbumName}"
+                            Text="{Binding CurrentQueueItem.MediaItem.AlbumName}"
                             TextColor="{DynamicResource TextTertiary}" />
                         <Label FontFamily="PoppinsRegular"
                             FontSize="14"
                             HorizontalTextAlignment="Center"
                             LineBreakMode="TailTruncation"
                             MaxLines="1"
-                            Text="{Binding CurrentTrack.ArtistName}"
+                            Text="{Binding CurrentQueueItem.MediaItem.ArtistName}"
                             TextColor="{DynamicResource TextSecondary}" />
                     </VerticalStackLayout>
 
@@ -302,7 +302,7 @@
                                 TextColor="{DynamicResource IconSecondary}"
                                 VerticalOptions="Center">
                                 <Label.Triggers>
-                                    <DataTrigger Binding="{Binding CurrentTrack.Favorite}"
+                                    <DataTrigger Binding="{Binding CurrentQueueItem.MediaItem.Favorite}"
                                         TargetType="Label"
                                         Value="True">
                                         <Setter Property="IsVisible" Value="False" />
@@ -316,7 +316,7 @@
                                 TextColor="{DynamicResource IconSecondary}"
                                 VerticalOptions="Center">
                                 <Label.Triggers>
-                                    <DataTrigger Binding="{Binding CurrentTrack.Favorite}"
+                                    <DataTrigger Binding="{Binding CurrentQueueItem.MediaItem.Favorite}"
                                         TargetType="Label"
                                         Value="True">
                                         <Setter Property="IsVisible" Value="True" />

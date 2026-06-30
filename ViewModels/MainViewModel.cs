@@ -1,4 +1,4 @@
-using mashin.Models;
+﻿using mashin.Models;
 using mashin.Services;
 using mashin.Views.Desktop;
 using MauiIcons.Fluent;
@@ -27,26 +27,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private readonly INavigationService _navigationService;
     private readonly IOverlayService _overlayService;
     private readonly IContextMenuService _contextMenuService;
-    private readonly IPlaybackService _playbackService;
+    private readonly PlaybackService _playbackService;
     private readonly ILogger<MainViewModel> _logger;
     private readonly ObservableRangeCollection<Playlist> _playlists = new();
 
 
     // Player
-    private bool _isMuted;
-    private bool? _shuffleEnabled;
-    private string? _repeatMode;
-    private PlayerState _playState = new()
-    {
-        State = PlayerStateType.Idle,
-        ActiveSinceUtc = DateTimeOffset.UtcNow
-    };
     private bool _isSeeking;
-    private double _duration;
-    private double _position;
     private double _sliderPosition;
-    private double _volume = 50;
-    private bool _suppressVolumeCommand;
     private bool _isAudioOptionsFlyoutOpen;
     private bool _isDeviceSelectionFlyoutOpen;
     private bool _isLoadingPlayers;
@@ -55,7 +43,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private string _selectedAudioQuality = "opus";
     private readonly ObservableRangeCollection<Player> _availablePlayers = new();
 
-    private bool _isDontStopTheMusicEnabled;
     private bool _isDarkTheme;
     private bool _isLoadingPlaylists;
 
@@ -64,9 +51,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private bool _isSearching;
 
     // Queue
-    private Track? _currentTrack;
-    private readonly ObservableRangeCollection<QueueItem> _currentQueueItems;
-
     // Context Menus
     private ObservableCollection<ContextMenuItem> _userMenuItems = new();
     private ObservableRangeCollection<ContextMenuItem> _queueContextMenuItems = new();
@@ -77,7 +61,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private NavigationSection _currentSection = NavigationSection.Home;
     private bool _isLoginOverlayActive;
 
-    public event EventHandler<Track?>? CurrentTrackChanged;
     public event Func<Task>? CloseQueueViewRequested;
 
     #endregion
@@ -106,7 +89,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         IOverlayService overlayService,
         IMediaItemActions mediaActions,
         IContextMenuService contextMenuService,
-        IPlaybackService playbackService,
+        PlaybackService playbackService,
         ILogger<MainViewModel> logger)
     {
         _settings = settings;
@@ -116,13 +99,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _overlayService = overlayService;
         _contextMenuService = contextMenuService;
         _playbackService = playbackService;
-        _currentQueueItems = _playbackService.CurrentQueueItems;
         _logger = logger;
         MediaActions = mediaActions;
         _selectedAudioQuality = _settings.GetSendspinPreferredAudioCodec();
-        _volume = _settings.GetInitialVolume();
-        _isMuted = _settings.GetInitialMuted();
-        _currentQueueItems.CollectionChanged += OnCurrentQueueItemsCollectionChanged;
+        _sliderPosition = _playbackService.PositionSeconds;
+        _playbackService.CurrentQueueItems.CollectionChanged += OnCurrentQueueItemsCollectionChanged;
         _availablePlayers.CollectionChanged += OnAvailablePlayersCollectionChanged;
 
         // Navigation Commands
@@ -175,7 +156,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         ShowCurrentTrackContextMenuCommand = new Command<View>(async anchor =>
         {
-            if (anchor == null || CurrentTrack == null)
+            if (anchor == null || CurrentQueueItem?.MediaItem == null)
             {
                 return;
             }
@@ -233,18 +214,19 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         ToggleCurrentTrackFavoriteCommand = new Command(async () =>
         {
-            if (CurrentTrack == null)
+            var currentTrack = CurrentQueueItem?.MediaItem;
+            if (currentTrack == null)
             {
                 return;
             }
 
-            if (CurrentTrack.Favorite)
+            if (currentTrack.Favorite)
             {
-                await MediaActions.RemoveFromFavoritesAsync(CurrentTrack);
+                await MediaActions.RemoveFromFavoritesAsync(currentTrack);
             }
             else
             {
-                await MediaActions.AddToFavoritesAsync(CurrentTrack);
+                await MediaActions.AddToFavoritesAsync(currentTrack);
             }
         });
 
@@ -258,34 +240,24 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         // Subscribe to playback state events
         _playbackService.PropertyChanged += OnPlaybackServicePropertyChanged;
-        PlayState = _playbackService.PlaybackState;
-        _suppressVolumeCommand = true;
-        try
+
+        var activePlayerId = _playbackService.ActivePlayerId;
+        if (!string.IsNullOrWhiteSpace(activePlayerId))
         {
-            Volume = _playbackService.Volume;
-        }
-        finally
-        {
-            _suppressVolumeCommand = false;
+            SetSelectedPlayerSilently(activePlayerId);
         }
 
-        IsMuted = _playbackService.IsMuted;
-        ShuffleEnabled = _playbackService.ShuffleEnabled;
-        RepeatMode = _playbackService.RepeatMode;
-        var dontStopTheMusicEnabled = _playbackService.DontStopTheMusicEnabled == true;
-        if (_isDontStopTheMusicEnabled != dontStopTheMusicEnabled)
-        {
-            _isDontStopTheMusicEnabled = dontStopTheMusicEnabled;
-            OnPropertyChanged(nameof(IsDontStopTheMusicEnabled));
-        }
-
-        Duration = _playbackService.DurationSeconds;
-        if (!_isSeeking)
-        {
-            Position = _playbackService.PositionSeconds;
-            SliderPosition = _playbackService.PositionSeconds;
-        }
-        CurrentTrack = _playbackService.CurrentQueueItem?.MediaItem;
+        OnPropertyChanged(nameof(PlayState));
+        OnPropertyChanged(nameof(Volume));
+        OnPropertyChanged(nameof(IsMuted));
+        OnPropertyChanged(nameof(ShuffleEnabled));
+        OnPropertyChanged(nameof(RepeatMode));
+        OnPropertyChanged(nameof(Duration));
+        OnPropertyChanged(nameof(Position));
+        OnPropertyChanged(nameof(CurrentQueueItem));
+        OnPropertyChanged(nameof(CurrentQueueItemPrimaryArtist));
+        OnPropertyChanged(nameof(QueueTrackCountText));
+        OnPropertyChanged(nameof(QueueTotalDurationText));
 
         // Keep the UI toggle in sync with persisted theme preference.
         IsDarkTheme = _settings.ThemeMode != AppTheme.Light;
@@ -329,14 +301,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public PlayerState PlayState
     {
-        get => _playState;
-        private set => SetProperty(ref _playState, value);
+        get => _playbackService.PlaybackState;
     }
 
     public bool IsMuted
     {
-        get => _isMuted;
-        private set => SetProperty(ref _isMuted, value);
+        get => _playbackService.IsMuted;
     }
 
     public bool IsDarkTheme
@@ -347,27 +317,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public bool? ShuffleEnabled
     {
-        get => _shuffleEnabled;
-        private set
-        {
-            if (SetProperty(ref _shuffleEnabled, value))
-            {
-                OnPropertyChanged(nameof(IsShuffleActive));
-            }
-        }
+        get => _playbackService.ShuffleEnabled;
     }
 
     public string? RepeatMode
     {
-        get => _repeatMode;
-        private set
-        {
-            if (SetProperty(ref _repeatMode, value))
-            {
-                OnPropertyChanged(nameof(IsRepeatEnabled));
-                OnPropertyChanged(nameof(IsRepeatOne));
-            }
-        }
+        get => _playbackService.RepeatMode;
     }
 
     public bool IsShuffleActive => ShuffleEnabled == true;
@@ -378,28 +333,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public double Duration
     {
-        get => _duration;
-        private set
-        {
-            if (SetProperty(ref _duration, value))
-            {
-                OnPropertyChanged(nameof(DurationText));
-                OnPropertyChanged(nameof(PlayerBarProgress));
-            }
-        }
+        get => _playbackService.DurationSeconds;
     }
 
     public double Position
     {
-        get => _position;
-        private set
-        {
-            if (SetProperty(ref _position, value))
-            {
-                OnPropertyChanged(nameof(PositionText));
-                OnPropertyChanged(nameof(PlayerBarProgress));
-            }
-        }
+        get => _isSeeking ? _sliderPosition : _playbackService.PositionSeconds;
     }
 
     public double SliderPosition
@@ -414,57 +353,33 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public double Volume
     {
-        get => _volume;
+        get => _playbackService.Volume;
         set
         {
-            if (!SetProperty(ref _volume, value))
-            {
-                return;
-            }
-
-            // Prevent volume echo: update from server should not send a "set_volume" back.
-            if (_suppressVolumeCommand)
-            {
-                return;
-            }
-
             var clamped = (int)Math.Round(Math.Max(0, Math.Min(100, value)));
+            if (clamped == _playbackService.Volume)
+            {
+                return;
+            }
             _ = SetVolumeAsync(clamped);
         }
     }
 
-    public Track? CurrentTrack
-    {
-        get => _currentTrack;
-        private set
-        {
-            var oldTrack = _currentTrack;
-
-            if (SetProperty(ref _currentTrack, value))
-            {
-                OnPropertyChanged(nameof(CurrentTrackPrimaryArtist));
-
-                if (oldTrack?.Uri != value?.Uri)
-                {
-                    CurrentTrackChanged?.Invoke(this, value);
-                }
-            }
-        }
-    }
+    public QueueItem? CurrentQueueItem => _playbackService.CurrentQueueItem;
 
     public double PlayerBarProgress => Duration <= 0 ? 0 : Math.Clamp(Position / Duration, 0, 1);
 
-    public Artist? CurrentTrackPrimaryArtist => CurrentTrack?.Artists?.FirstOrDefault();
+    public Artist? CurrentQueueItemPrimaryArtist => CurrentQueueItem?.MediaItem?.Artists?.FirstOrDefault();
 
-    public ObservableRangeCollection<QueueItem> CurrentQueueItems => _currentQueueItems;
+    public ObservableRangeCollection<QueueItem> CurrentQueueItems => _playbackService.CurrentQueueItems;
 
-    public string QueueTrackCountText => $"{_currentQueueItems.Count} Titel";
+    public string QueueTrackCountText => $"{_playbackService.QueueItemCount} Titel";
 
     public string QueueTotalDurationText
     {
         get
         {
-            var totalSeconds = _currentQueueItems
+            var totalSeconds = CurrentQueueItems
                 .Select(item => item.MediaItem)
                 .OfType<Track>()
                 .Sum(track => Math.Max(0, track.Duration));
@@ -474,10 +389,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public bool IsDontStopTheMusicEnabled
     {
-        get => _isDontStopTheMusicEnabled;
+        get => _playbackService.DontStopTheMusicEnabled == true;
         set
         {
-            if (!SetProperty(ref _isDontStopTheMusicEnabled, value))
+            if (value == (_playbackService.DontStopTheMusicEnabled == true))
             {
                 return;
             }
@@ -728,27 +643,32 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         BuildQueueContextMenuItems();
         BuildCurrentTrackContextMenuItems();
 
-        // Set initial queue state
-        var dontStopTheMusicEnabled = _playbackService.DontStopTheMusicEnabled == true;
-        if (_isDontStopTheMusicEnabled != dontStopTheMusicEnabled)
+        // Sync playback projection (queue + states) after service initialization.
+        SliderPosition = _playbackService.PositionSeconds;
+
+        var activePlayerId = _playbackService.ActivePlayerId;
+        if (!string.IsNullOrWhiteSpace(activePlayerId))
         {
-            _isDontStopTheMusicEnabled = dontStopTheMusicEnabled;
-            OnPropertyChanged(nameof(IsDontStopTheMusicEnabled));
+            SetSelectedPlayerSilently(activePlayerId);
         }
 
-        // Set initial position from playback service state
-        if (_playbackService.DurationSeconds > 0)
-        {
-            Duration = _playbackService.DurationSeconds;
-            Position = _playbackService.PositionSeconds;
-            SliderPosition = _playbackService.PositionSeconds;
-        }
+        OnPropertyChanged(nameof(PlayState));
+        OnPropertyChanged(nameof(Volume));
+        OnPropertyChanged(nameof(IsMuted));
+        OnPropertyChanged(nameof(ShuffleEnabled));
+        OnPropertyChanged(nameof(RepeatMode));
+        OnPropertyChanged(nameof(Duration));
+        OnPropertyChanged(nameof(Position));
+        OnPropertyChanged(nameof(CurrentQueueItem));
+        OnPropertyChanged(nameof(CurrentQueueItemPrimaryArtist));
+        OnPropertyChanged(nameof(QueueTrackCountText));
+        OnPropertyChanged(nameof(QueueTotalDurationText));
 
     }
 
     public async ValueTask DisposeAsync()
     {
-        _currentQueueItems.CollectionChanged -= OnCurrentQueueItemsCollectionChanged;
+        _playbackService.CurrentQueueItems.CollectionChanged -= OnCurrentQueueItemsCollectionChanged;
         _availablePlayers.CollectionChanged -= OnAvailablePlayersCollectionChanged;
 
         _musicAssistant.LoginRequired -= OnLoginRequired;
@@ -895,8 +815,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         try
         {
             await _playbackService.ToggleMuteAsync(IsMuted);
-            IsMuted = !IsMuted;
-            _settings.SetInitialMuted(IsMuted);
         }
         catch (Exception ex)
         {
@@ -933,8 +851,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         try
         {
             var clamped = Math.Max(0, Math.Min(Duration, seconds));
-            Position = clamped;
             SliderPosition = clamped;
+            OnPropertyChanged(nameof(Position));
+            OnPropertyChanged(nameof(PositionText));
+            OnPropertyChanged(nameof(PlayerBarProgress));
             await _playbackService.SeekAsync(clamped, Duration);
         }
         catch (Exception ex)
@@ -981,90 +901,107 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private void OnPlaybackServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(IPlaybackService.PlaybackState))
+        if (e.PropertyName == nameof(PlaybackService.PlaybackState))
         {
-            PlayState = _playbackService.PlaybackState;
             if (_playbackService.PlaybackState.State != PlayerStateType.Buffering
                 && _playbackService.PlaybackState.State != PlayerStateType.Seeking)
             {
                 _isSeeking = false;
             }
+
+            OnPropertyChanged(nameof(PlayState));
             return;
         }
 
-        if (e.PropertyName == nameof(IPlaybackService.Volume))
+        if (e.PropertyName == nameof(PlaybackService.Volume))
         {
-            _suppressVolumeCommand = true;
-            try
-            {
-                Volume = _playbackService.Volume;
-                _settings.SetInitialVolume(_playbackService.Volume);
-            }
-            finally
-            {
-                _suppressVolumeCommand = false;
-            }
+            _settings.SetInitialVolume(_playbackService.Volume);
+            OnPropertyChanged(nameof(Volume));
 
             return;
         }
 
-        if (e.PropertyName == nameof(IPlaybackService.IsMuted))
+        if (e.PropertyName == nameof(PlaybackService.IsMuted))
         {
-            IsMuted = _playbackService.IsMuted;
             _settings.SetInitialMuted(_playbackService.IsMuted);
+            OnPropertyChanged(nameof(IsMuted));
             return;
         }
 
-        if (e.PropertyName == nameof(IPlaybackService.ShuffleEnabled))
+        if (e.PropertyName == nameof(PlaybackService.ShuffleEnabled))
         {
-            ShuffleEnabled = _playbackService.ShuffleEnabled;
+            OnPropertyChanged(nameof(ShuffleEnabled));
+            OnPropertyChanged(nameof(IsShuffleActive));
             return;
         }
 
-        if (e.PropertyName == nameof(IPlaybackService.RepeatMode))
+        if (e.PropertyName == nameof(PlaybackService.RepeatMode))
         {
-            RepeatMode = _playbackService.RepeatMode;
+            OnPropertyChanged(nameof(RepeatMode));
+            OnPropertyChanged(nameof(IsRepeatEnabled));
+            OnPropertyChanged(nameof(IsRepeatOne));
             return;
         }
 
-        if (e.PropertyName == nameof(IPlaybackService.DurationSeconds))
+        if (e.PropertyName == nameof(PlaybackService.DurationSeconds))
         {
-            Duration = _playbackService.DurationSeconds;
             if (SliderPosition > Duration)
             {
                 SliderPosition = Duration;
             }
 
+            OnPropertyChanged(nameof(Duration));
+            OnPropertyChanged(nameof(DurationText));
+            OnPropertyChanged(nameof(PlayerBarProgress));
+
             return;
         }
 
-        if (e.PropertyName == nameof(IPlaybackService.PositionSeconds))
+        if (e.PropertyName == nameof(PlaybackService.PositionSeconds))
         {
             if (!_isSeeking)
             {
-                var position = _playbackService.PositionSeconds;
-                Position = position;
-                SliderPosition = position;
+                SliderPosition = _playbackService.PositionSeconds;
             }
+
+            OnPropertyChanged(nameof(Position));
+            OnPropertyChanged(nameof(PositionText));
+            OnPropertyChanged(nameof(PlayerBarProgress));
 
             return;
         }
 
-        if (e.PropertyName == nameof(IPlaybackService.DontStopTheMusicEnabled))
+        if (e.PropertyName == nameof(PlaybackService.DontStopTheMusicEnabled))
         {
-            var dontStopTheMusicEnabled = _playbackService.DontStopTheMusicEnabled == true;
-            if (_isDontStopTheMusicEnabled != dontStopTheMusicEnabled)
+            OnPropertyChanged(nameof(IsDontStopTheMusicEnabled));
+
+            return;
+        }
+
+        if (e.PropertyName == nameof(PlaybackService.CurrentQueueItem))
+        {
+            OnPropertyChanged(nameof(CurrentQueueItem));
+            OnPropertyChanged(nameof(CurrentQueueItemPrimaryArtist));
+            return;
+        }
+
+        if (e.PropertyName == nameof(PlaybackService.CurrentQueueItems)
+            || e.PropertyName == nameof(PlaybackService.QueueItemCount))
+        {
+            OnPropertyChanged(nameof(CurrentQueueItem));
+            OnPropertyChanged(nameof(CurrentQueueItemPrimaryArtist));
+            OnPropertyChanged(nameof(QueueTrackCountText));
+            OnPropertyChanged(nameof(QueueTotalDurationText));
+            return;
+        }
+
+        if (e.PropertyName == nameof(PlaybackService.ActivePlayerId))
+        {
+            var activePlayerId = _playbackService.ActivePlayerId;
+            if (!string.IsNullOrWhiteSpace(activePlayerId))
             {
-                _isDontStopTheMusicEnabled = dontStopTheMusicEnabled;
-                OnPropertyChanged(nameof(IsDontStopTheMusicEnabled));
+                SetSelectedPlayerSilently(activePlayerId);
             }
-
-            return;
-        }
-
-        if (e.PropertyName == nameof(IPlaybackService.CurrentQueueItem))
-        {
-            CurrentTrack = _playbackService.CurrentQueueItem?.MediaItem;
         }
     }
 
@@ -1078,6 +1015,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private void OnCurrentQueueItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        OnPropertyChanged(nameof(CurrentQueueItems));
+        OnPropertyChanged(nameof(CurrentQueueItem));
+        OnPropertyChanged(nameof(CurrentQueueItemPrimaryArtist));
         OnPropertyChanged(nameof(QueueTrackCountText));
         OnPropertyChanged(nameof(QueueTotalDurationText));
     }
@@ -1129,7 +1069,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             },
             new()
             {
-                Text = "Als N�chstes spielen",
+                Text = "Als Nï¿½chstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () => await MoveSelectedQueueItemsNextAsync())
             },
@@ -1148,7 +1088,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Wiedergabeliste hinzuf�gen",
+                Text = "Zu Wiedergabeliste hinzufï¿½gen",
                 Icon = FluentIcons.Add12,
                 SubItems = new ObservableCollection<ContextMenuItem>(
                     _playlists
@@ -1169,7 +1109,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Favoriten hinzuf�gen",
+                Text = "Zu Favoriten hinzufï¿½gen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                         await MediaActions.AddToFavoritesAsync(
@@ -1208,12 +1148,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                     Icon = FluentIcons.TextBulletListLtr16,
                     Command = new Command(async () =>
                     {
-                        if (CurrentTrack == null)
+                        var currentTrack = CurrentQueueItem?.MediaItem;
+                        if (currentTrack == null)
                         {
                             return;
                         }
 
-                        await MediaActions.AddToPlaylistAsync(CurrentTrack, playlist);
+                        await MediaActions.AddToPlaylistAsync(currentTrack, playlist);
                     })
                 }));
     }
@@ -1315,7 +1256,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         if (selectedQueueItemIds.Count == 0)
         {
-            _logger.LogInformation("No queue items selected for 'Als N�chstes spielen'");
+            _logger.LogInformation("No queue items selected for 'Als Nï¿½chstes spielen'");
             return;
         }
 
@@ -1539,33 +1480,26 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         try
         {
             await _playbackService.SetOutputModeAsync(_playbackService.OutputMode, playerId);
-            var dontStopTheMusicEnabled = _playbackService.DontStopTheMusicEnabled == true;
-            if (_isDontStopTheMusicEnabled != dontStopTheMusicEnabled)
-            {
-                _isDontStopTheMusicEnabled = dontStopTheMusicEnabled;
-                OnPropertyChanged(nameof(IsDontStopTheMusicEnabled));
-            }
+            OnPropertyChanged(nameof(IsDontStopTheMusicEnabled));
 
             var refreshedPlayer = selectedPlayer ?? await _musicAssistant.GetPlayerAsync(playerId, raiseUnavailable: true);
             if (refreshedPlayer != null)
             {
                 if (refreshedPlayer.VolumeLevel.HasValue)
                 {
-                    _suppressVolumeCommand = true;
-                    try
-                    {
-                        Volume = refreshedPlayer.VolumeLevel.Value;
-                    }
-                    finally
-                    {
-                        _suppressVolumeCommand = false;
-                    }
+                    await _playbackService.SetVolumeAsync(refreshedPlayer.VolumeLevel.Value);
                 }
 
                 if (refreshedPlayer.VolumeMuted.HasValue)
                 {
-                    IsMuted = refreshedPlayer.VolumeMuted.Value;
+                    if (refreshedPlayer.VolumeMuted.Value != _playbackService.IsMuted)
+                    {
+                        await _playbackService.ToggleMuteAsync(_playbackService.IsMuted);
+                    }
                 }
+
+                OnPropertyChanged(nameof(Volume));
+                OnPropertyChanged(nameof(IsMuted));
             }
 
             IsDeviceSelectionFlyoutOpen = false;

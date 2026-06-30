@@ -128,7 +128,7 @@ public partial class MainPage : ContentPage
             return;
         }
 
-        if (_viewModel.CurrentTrack is null)
+        if (_viewModel.CurrentQueueItem is null)
         {
             return;
         }
@@ -138,7 +138,7 @@ public partial class MainPage : ContentPage
 
     private void OnPlayerBarPanUpdated(object? sender, PanUpdatedEventArgs e)
     {
-        if (_viewModel.CurrentTrack is null)
+        if (_viewModel.CurrentQueueItem is null)
         {
             return;
         }

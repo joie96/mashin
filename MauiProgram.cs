@@ -97,7 +97,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<IMediaItemActions, MediaItemActions>();
         builder.Services.AddSingleton<INavigationService, NavigationService>();
         builder.Services.AddSingleton<IOverlayService, OverlayService>();
-        builder.Services.AddSingleton<IPlaybackService, PlaybackService>();
+        builder.Services.AddSingleton<PlaybackService>();
 
 #if WINDOWS
         builder.Services.AddSingleton<IContextMenuService, WindowsContextMenuService>();

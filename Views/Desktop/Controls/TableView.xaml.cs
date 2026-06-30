@@ -1,4 +1,4 @@
-using mashin.Collections;
+﻿using mashin.Collections;
 using mashin.Models;
 using mashin.Services;
 using Microsoft.Maui.ApplicationModel;
@@ -90,7 +90,7 @@ public partial class TableView : ContentView
     private INotifyCollectionChanged? _itemsSourceCollection;
     private List<object> _allItems = new();
     private IKeyboardService? _keyboardService;
-    private IPlaybackService? _playbackService;
+    private PlaybackService? _playbackService;
     private QueueItem? _currentQueueItem;
     private Track? _currentTrackMediaItem;
     private int? _anchorIndex;
@@ -1166,7 +1166,7 @@ public partial class TableView : ContentView
 
         if (_playbackService == null)
         {
-            _playbackService = mauiContext.Services.GetService<IPlaybackService>();
+            _playbackService = mauiContext.Services.GetService<PlaybackService>();
             if (_playbackService != null)
             {
                 _currentQueueItem = _playbackService.CurrentQueueItem;
@@ -1208,7 +1208,7 @@ public partial class TableView : ContentView
 
     private void OnPlaybackServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(IPlaybackService.PlaybackState))
+        if (e.PropertyName == nameof(PlaybackService.PlaybackState))
         {
             var currentPlayerState = _playbackService?.PlaybackState
                 ?? new PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
@@ -1225,7 +1225,7 @@ public partial class TableView : ContentView
             return;
         }
 
-        if (e.PropertyName != nameof(IPlaybackService.CurrentQueueItem))
+        if (e.PropertyName != nameof(PlaybackService.CurrentQueueItem))
         {
             return;
         }

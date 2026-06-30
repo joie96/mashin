@@ -1,4 +1,4 @@
-using FuzzySharp;
+﻿using FuzzySharp;
 using mashin.Collections;
 using mashin.Models;
 using mashin.Services;
@@ -252,7 +252,7 @@ public partial class ListView : ContentView
 
     #region Helpers
 
-    private static IPlaybackService? ResolvePlaybackService()
+    private static PlaybackService? ResolvePlaybackService()
     {
         var services = Application.Current?.Handler?.MauiContext?.Services;
         if (services == null)
@@ -260,7 +260,7 @@ public partial class ListView : ContentView
             return null;
         }
 
-        return services.GetService<IPlaybackService>();
+        return services.GetService<PlaybackService>();
     }
 
     private static Color GetAccentColorFromText(string? text)
@@ -383,3 +383,4 @@ public sealed class MobileListViewTemplateSelector : DataTemplateSelector
         throw new InvalidOperationException("MobileListViewTemplateSelector requires PlaylistTemplate or SkeletonTemplate.");
     }
 }
+

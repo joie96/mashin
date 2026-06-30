@@ -397,7 +397,7 @@
                         StrokeThickness="0"
                         VerticalOptions="Center"
                         WidthRequest="60">
-                        <ffimageloading:CachedImage Aspect="AspectFill" Source="{Binding CurrentTrack.ImageUri}" />
+                        <ffimageloading:CachedImage Aspect="AspectFill" Source="{Binding CurrentQueueItem.MediaItem.ImageUri}" />
                     </Border>
 
                     <Grid Grid.Column="1"
@@ -405,7 +405,7 @@
                         <desktopControls:MarqueeLabel FontSize="13"
                             LineBreakMode="TailTruncation"
                             MaxLines="1"
-                            Text="{Binding CurrentTrack.Name}"
+                            Text="{Binding CurrentQueueItem.MediaItem.Name}"
                             TextColor="{DynamicResource TextPrimary}"
                             VerticalOptions="End" />
                     </Grid>
@@ -417,12 +417,12 @@
                             FontSize="12"
                             LineBreakMode="TailTruncation"
                             MaxLines="1"
-                            Text="{Binding CurrentTrack.ArtistName}"
+                            Text="{Binding CurrentQueueItem.MediaItem.ArtistName}"
                             TextColor="{DynamicResource TextSecondary}"
                             VerticalOptions="Start">
                             <desktopControls:MarqueeLabel.Behaviors>
                                 <behaviors:LinkLabelBehavior Command="{Binding ArtistTappedCommand}"
-                                    CommandParameter="{Binding CurrentTrackPrimaryArtist}"
+                                    CommandParameter="{Binding CurrentQueueItemPrimaryArtist}"
                                     HoverTextColor="{DynamicResource TextPrimary}" />
                             </desktopControls:MarqueeLabel.Behaviors>
                         </desktopControls:MarqueeLabel>
@@ -446,14 +446,14 @@
                         <Grid>
                             <Label FontSize="18"
                                 HorizontalOptions="Center"
-                                IsVisible="{Binding CurrentTrack.Favorite, Converter={StaticResource InvertedBoolConverter}}"
+                                IsVisible="{Binding CurrentQueueItem.MediaItem.Favorite, Converter={StaticResource InvertedBoolConverter}}"
                                 Text="{mi:Fluent Icon=Heart24,
                                              FontOverride=True}"
                                 TextColor="{DynamicResource IconSecondary}"
                                 VerticalOptions="Center" />
                             <Label FontSize="18"
                                 HorizontalOptions="Center"
-                                IsVisible="{Binding CurrentTrack.Favorite}"
+                                IsVisible="{Binding CurrentQueueItem.MediaItem.Favorite}"
                                 Text="{mi:FluentFilled Icon=Heart48Filled,
                                              FontOverride=True}"
                                 TextColor="{DynamicResource IconSecondary}"

@@ -1,4 +1,4 @@
-using mashin.Collections;
+﻿using mashin.Collections;
 using mashin.Models;
 using mashin.Services;
 using mashin.Views.Desktop;
@@ -17,7 +17,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly IMediaItemActions _mediaActions;
-    private readonly IPlaybackService _playbackService;
+    private readonly PlaybackService _playbackService;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
     private readonly IUserDataService _userDataService;
@@ -469,7 +469,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
     public HomeViewModel(
         MusicAssistantService musicAssistant,
         IMediaItemActions mediaActions,
-        IPlaybackService playbackService,
+        PlaybackService playbackService,
         IContextMenuService contextMenuService,
         INavigationService navigationService,
         IUserDataService userDataService,
@@ -886,7 +886,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 await ApplyFavoriteStateAsync(artists);
 
                 var sectionName = string.IsNullOrWhiteSpace(folder.Name) ? folder.ItemId : folder.Name;
-                sectionName = sectionName.Replace("Similar Artists for", "Ähnlich zu", StringComparison.OrdinalIgnoreCase);
+                sectionName = sectionName.Replace("Similar Artists for", "Ã„hnlich zu", StringComparison.OrdinalIgnoreCase);
 
                 similarArtistSections.Add(new SimilarArtistSection(
                     sectionName,
@@ -1010,7 +1010,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             },
             new()
             {
-                Text = "Als Nächstes spielen",
+                Text = "Als NÃ¤chstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
                     await _playbackService.PlayMediaNextAsync(GetSelectedTracks().Cast<MediaItem>().ToList()))
@@ -1025,7 +1025,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Favoriten hinzufügen",
+                Text = "Zu Favoriten hinzufÃ¼gen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                     await _mediaActions.AddToFavoritesAsync(GetSelectedTracks()))
@@ -1055,7 +1055,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             },
             new()
             {
-                Text = "Als Nächstes spielen",
+                Text = "Als NÃ¤chstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
                     await _playbackService.PlayMediaNextAsync(GetSelectedPlaylists().Cast<MediaItem>().ToList()))
@@ -1070,7 +1070,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Favoriten hinzufügen",
+                Text = "Zu Favoriten hinzufÃ¼gen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                     await _mediaActions.AddToFavoritesAsync(GetSelectedPlaylists()))
@@ -1100,7 +1100,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             },
             new()
             {
-                Text = "Als Nächstes spielen",
+                Text = "Als NÃ¤chstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
                     await _playbackService.PlayMediaNextAsync(GetSelectedArtists().Cast<MediaItem>().ToList()))
@@ -1115,7 +1115,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Favoriten hinzufügen",
+                Text = "Zu Favoriten hinzufÃ¼gen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                     await _mediaActions.AddToFavoritesAsync(GetSelectedArtists()))
@@ -1450,3 +1450,4 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     #endregion
 }
+

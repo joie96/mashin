@@ -1,4 +1,4 @@
-using Android;
+﻿using Android;
 using Android.App;
 using Android.Content;
 using Android.Graphics;
@@ -41,7 +41,7 @@ public sealed class PlaybackNotificationService : Service
 
 #region Service State
 
-    private IPlaybackService? _playbackService;
+    private PlaybackService? _playbackService;
     private MediaSession? _mediaSession;
     private NotificationManager? _notificationManager;
     private bool _isForeground;
@@ -159,10 +159,10 @@ public sealed class PlaybackNotificationService : Service
 
     private void OnPlaybackPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(IPlaybackService.PlaybackState)
-            || e.PropertyName == nameof(IPlaybackService.CurrentQueueItem)
-            || e.PropertyName == nameof(IPlaybackService.PositionSeconds)
-            || e.PropertyName == nameof(IPlaybackService.DurationSeconds))
+        if (e.PropertyName == nameof(PlaybackService.PlaybackState)
+            || e.PropertyName == nameof(PlaybackService.CurrentQueueItem)
+            || e.PropertyName == nameof(PlaybackService.PositionSeconds)
+            || e.PropertyName == nameof(PlaybackService.DurationSeconds))
         {
             _ = UpdateNotificationAsync();
         }
@@ -547,7 +547,7 @@ public sealed class PlaybackNotificationService : Service
         }
 
         var services = IPlatformApplication.Current?.Services;
-        var playbackService = services?.GetService<IPlaybackService>();
+        var playbackService = services?.GetService<PlaybackService>();
         if (playbackService == null)
         {
             return;
@@ -631,3 +631,4 @@ public sealed class PlaybackNotificationService : Service
 
 #endregion
 }
+
