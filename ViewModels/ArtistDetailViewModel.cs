@@ -470,7 +470,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             await LoadTopTracksAsync(artistId, providerInstanceOrDomain);
 
             // Similar Artists
-            await LoadSimilarArtistsAsync(artistId);
+            await LoadSimilarArtistsAsync(artistId, providerInstanceOrDomain);
 
             
         }
@@ -658,7 +658,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         IsLoadingTracks = true;
         try
         {
-            var tracks = await _musicAssistant.GetArtistTracksAsync(artistId, provider);
+            var tracks = await _musicAssistant.GetArtistTopTracksAsync(artistId, provider);
 
             var processedTracks = new List<Track>();
             for (var i = 0; i < tracks.Count; i++)
@@ -696,80 +696,55 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         }
     }
 
-    private async Task LoadSimilarArtistsAsync(string artistId)
+    private async Task LoadSimilarArtistsAsync(string artistId, string provider)
     {
         IsLoadingSimilarArtists = true;
         try
         {
-            var topTrack = TopTracks.FirstOrDefault();
+            var similarArtists = await _musicAssistant.GetSimilarArtistsAsync(
+                artistId,
+                provider,
+                limit: 25);
 
-            var similarTracks = topTrack != null
-                ? await _musicAssistant.GetSimilarTracksAsync(
-                    topTrack.ItemId,
-                    topTrack.Provider,
-                    limit: 50,
-                    allowLookup: true)
-                : new List<Track>();
-
-            // Fallback: Try version from other provider if no similar tracks found (maby obsolet when allowLookup is fixed)
-            if (topTrack != null && similarTracks.Count == 0)
+            // similar_tracks fallback
+            if (similarArtists.Count == 0)
             {
-                var versions = await _musicAssistant.GetTrackVersionsAsync(topTrack.ItemId, topTrack.Provider);
-                var fallbackVersion = versions
-                    .FirstOrDefault(v => !string.Equals(v.Provider, topTrack.Provider, StringComparison.OrdinalIgnoreCase))
-                    ?? versions.FirstOrDefault();
-
-                if (fallbackVersion != null)
-                {
-                    similarTracks = await _musicAssistant.GetSimilarTracksAsync(
-                        fallbackVersion.ItemId,
-                        fallbackVersion.Provider,
+                var topTrack = TopTracks.FirstOrDefault();
+                var similarTracks = topTrack != null
+                    ? await _musicAssistant.GetSimilarTracksAsync(
+                        topTrack.ItemId,
+                        topTrack.Provider,
                         limit: 50,
-                        allowLookup: true);
-                }
-            }
+                        allowLookup: true)
+                    : new List<Track>();
 
-            var uniqueArtists = similarTracks
-                .SelectMany(track => track.Artists ?? Enumerable.Empty<Artist>())
-                .GroupBy(artist => artist.ItemId)
-                .Select(group => group.First())
-                .Where(artist => artist.ItemId != artistId)
-                .Take(15)
-                .ToList();
-
-            SimilarArtists = new ObservableRangeCollection<Artist>();
-
-            const int maxConcurrentRequests = 3;
-            using var throttler = new SemaphoreSlim(maxConcurrentRequests);
-
-            var fetchTasks = uniqueArtists.Select(async artistRef =>
-            {
-                if (string.IsNullOrWhiteSpace(artistRef.ItemId)
-                    || string.IsNullOrWhiteSpace(artistRef.Provider))
+                if (topTrack != null && similarTracks.Count == 0)
                 {
-                    return;
-                }
+                    var versions = await _musicAssistant.GetTrackVersionsAsync(topTrack.ItemId, topTrack.Provider);
+                    var fallbackVersion = versions
+                        .FirstOrDefault(v => !string.Equals(v.Provider, topTrack.Provider, StringComparison.OrdinalIgnoreCase))
+                        ?? versions.FirstOrDefault();
 
-                await throttler.WaitAsync();
-                try
-                {
-                    var resolvedArtist = await _musicAssistant.GetArtistAsync(artistRef.ItemId, artistRef.Provider);
-                    if (resolvedArtist != null)
+                    if (fallbackVersion != null)
                     {
-                        await MainThread.InvokeOnMainThreadAsync(() => SimilarArtists.Add(resolvedArtist));
+                        similarTracks = await _musicAssistant.GetSimilarTracksAsync(
+                            fallbackVersion.ItemId,
+                            fallbackVersion.Provider,
+                            limit: 50,
+                            allowLookup: true);
                     }
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to load details for artist: {ArtistId}", artistRef.ItemId);
-                }
-                finally
-                {
-                    throttler.Release();
-                }
-            });
 
-            await Task.WhenAll(fetchTasks);
+                similarArtists = similarTracks
+                    .SelectMany(track => track.Artists ?? Enumerable.Empty<Artist>())
+                    .GroupBy(artist => string.Concat(artist.Provider, "|", artist.ItemId))
+                    .Select(group => group.First())
+                    .Where(artist => artist.ItemId != artistId)
+                    .Take(25)
+                    .ToList();
+            }
+
+            SimilarArtists = new ObservableRangeCollection<Artist>(similarArtists);
 
             _ = BuildArtistContextMenuAsync();
         }

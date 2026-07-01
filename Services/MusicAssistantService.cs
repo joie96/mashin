@@ -575,6 +575,112 @@ public class MusicAssistantService
     }
 
     /// <summary>
+    /// Return top/featured tracks for an artist.
+    /// For a library artist this can aggregate tracks across mapped providers,
+    /// optionally restricted to a single provider instance.
+    /// </summary>
+    public async Task<List<Track>> GetArtistTopTracksAsync(
+        string itemId,
+        string providerInstanceIdOrDomain,
+        string? providerFilter = null)
+    {
+        _logger.LogInformation(
+            "Fetching top tracks for artist: {ItemId} (provider_filter: {ProviderFilter})",
+            itemId,
+            providerFilter ?? "<none>");
+
+        var args = new Dictionary<string, object>
+        {
+            ["item_id"] = itemId,
+            ["provider_instance_id_or_domain"] = providerInstanceIdOrDomain
+        };
+
+        if (!string.IsNullOrWhiteSpace(providerFilter))
+        {
+            args["provider_filter"] = providerFilter;
+        }
+
+        var result = await SendCommandAsync<List<Track>>("music/artists/top_tracks", args);
+        var tracks = result ?? new List<Track>();
+
+        _ = EnrichWithProviderInfoAsync(tracks);
+        return tracks;
+    }
+
+    /// <summary>
+    /// Return top/featured albums for an artist.
+    /// For a library artist this can aggregate albums across mapped providers,
+    /// optionally restricted to a single provider instance.
+    /// </summary>
+    public async Task<List<Album>> GetArtistTopAlbumsAsync(
+        string itemId,
+        string providerInstanceIdOrDomain,
+        string? providerFilter = null)
+    {
+        _logger.LogInformation(
+            "Fetching top albums for artist: {ItemId} (provider_filter: {ProviderFilter})",
+            itemId,
+            providerFilter ?? "<none>");
+
+        var args = new Dictionary<string, object>
+        {
+            ["item_id"] = itemId,
+            ["provider_instance_id_or_domain"] = providerInstanceIdOrDomain
+        };
+
+        if (!string.IsNullOrWhiteSpace(providerFilter))
+        {
+            args["provider_filter"] = providerFilter;
+        }
+
+        var result = await SendCommandAsync<List<Album>>("music/artists/top_albums", args);
+        var albums = result ?? new List<Album>();
+
+        _ = EnrichWithProviderInfoAsync(albums);
+        return albums;
+    }
+
+    /// <summary>
+    /// Return similar artists for an artist.
+    /// For a library artist this can aggregate similar artists across mapped
+    /// providers, optionally restricted to a single provider instance.
+    /// </summary>
+    public async Task<List<Artist>> GetSimilarArtistsAsync(
+        string itemId,
+        string providerInstanceIdOrDomain,
+        string? providerFilter = null,
+        int? limit = null)
+    {
+        _logger.LogInformation(
+            "Fetching similar artists for artist: {ItemId} (provider_filter: {ProviderFilter}, limit: {Limit})",
+            itemId,
+            providerFilter ?? "<none>",
+            limit?.ToString() ?? "<none>");
+
+        var args = new Dictionary<string, object>
+        {
+            ["item_id"] = itemId,
+            ["provider_instance_id_or_domain"] = providerInstanceIdOrDomain
+        };
+
+        if (!string.IsNullOrWhiteSpace(providerFilter))
+        {
+            args["provider_filter"] = providerFilter;
+        }
+
+        if (limit.HasValue)
+        {
+            args["limit"] = limit.Value;
+        }
+
+        var result = await SendCommandAsync<List<Artist>>("music/artists/similar_artists", args);
+        var artists = result ?? new List<Artist>();
+
+        _ = EnrichWithProviderInfoAsync(artists);
+        return artists;
+    }
+
+    /// <summary>
     /// Return the total number of items in the library.
     /// </summary>
     public async Task<int> GetArtistsCountAsync(bool favoriteOnly = false)
@@ -1647,7 +1753,8 @@ public class MusicAssistantService
      List<MediaItem> mediaItems,
      QueueOption option = QueueOption.Replace,
         bool radioMode = false,
-        object? startItem = null)
+        object? startItem = null,
+        string? sortBy = "original")
     {
         if (mediaItems == null || mediaItems.Count == 0)
         {
@@ -1674,21 +1781,24 @@ public class MusicAssistantService
             ["radio_mode"] = radioMode
         };
 
+        args["sort_by"] = string.IsNullOrWhiteSpace(sortBy) ? "original" : sortBy;
+
+        MediaItem? resolvedStartItem = null;
+
         if (startItem is MediaItem startMediaItem)
         {
-            if (!string.IsNullOrWhiteSpace(startMediaItem.Uri))
-            {
-                args["start_item"] = startMediaItem.Uri;
-            }
-            else
-            {
-                args["start_item"] = CreateMediaItemPayload(startMediaItem);
-            }
+            resolvedStartItem = startMediaItem;
         }
         else if (startItem is string startItemString && !string.IsNullOrWhiteSpace(startItemString))
         {
-            args["start_item"] = startItemString;
+            resolvedStartItem = mediaItems.FirstOrDefault(item =>
+                string.Equals(item.Uri, startItemString, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(item.ItemId, startItemString, StringComparison.OrdinalIgnoreCase));
         }
+
+        // Default to first item when startItem is not provided or cannot be resolved.
+        resolvedStartItem ??= mediaItems[0];
+        args["start_item"] = CreateMediaItemPayload(resolvedStartItem);
 
         await SendCommandAsync<object>("player_queues/play_media", args);
     }
@@ -1796,9 +1906,10 @@ public class MusicAssistantService
         MediaItem mediaItem,
         QueueOption option = QueueOption.Play,
         bool radioMode = false,
-        object? startItem = null)
+        object? startItem = null,
+        string? sortBy = "original")
     {
-        await PlayMediaAsync(queueId, new List<MediaItem> { mediaItem }, option, radioMode, startItem);
+        await PlayMediaAsync(queueId, new List<MediaItem> { mediaItem }, option, radioMode, startItem, sortBy);
     }
 
     /// <summary>
