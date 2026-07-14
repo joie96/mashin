@@ -271,7 +271,6 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
 
         PlayerQueue? queue = null;
         double? elapsedTimeSeconds = null;
-        MusicAssistantQueueItems? queueItems = null;
         MusicAssistantQueueSettings? queueSettings = null;
         Dictionary<string, JsonElement>? additionalData = null;
         if (hubEvent.Data.ValueKind == JsonValueKind.Object)
@@ -284,7 +283,7 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
             }
             else if (string.Equals(hubEvent.Event, "queue_items_updated", StringComparison.OrdinalIgnoreCase))
             {
-                queueItems = JsonSerializer.Deserialize<MusicAssistantQueueItems>(hubEvent.Data.GetRawText(), JsonOptions);
+                queue = JsonSerializer.Deserialize<PlayerQueue>(hubEvent.Data.GetRawText(), JsonOptions);
             }
             else if (string.Equals(hubEvent.Event, "queue_settings_updated", StringComparison.OrdinalIgnoreCase))
             {
@@ -307,7 +306,6 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
             QueueId: hubEvent.ObjectId,
             Queue: queue,
             ElapsedTimeSeconds: elapsedTimeSeconds,
-            QueueItems: queueItems,
             QueueSettings: queueSettings,
             AdditionalData: additionalData,
             ReceivedAt: hubEvent.ReceivedAt);
@@ -323,7 +321,7 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
         {
             if (!subscriber.Writer.TryWrite(queueEvent))
             {
-                _logger.LogDebug("Dropping queue event for one subscriber due to backpressure.");
+                _logger.LogWarning("Dropping queue event for one subscriber due to backpressure.");
             }
         }
     }
@@ -452,7 +450,7 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
         {
             if (!subscriber.Writer.TryWrite(playerEvent))
             {
-                _logger.LogDebug("Dropping player event for one subscriber due to backpressure.");
+                _logger.LogWarning("Dropping player event for one subscriber due to backpressure.");
             }
         }
     }
@@ -609,7 +607,7 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Failed to parse event message: {Message}", responseText);
+                _logger.LogWarning(ex, "Failed to parse event message: {Message}", responseText);
             }
         }
     }
@@ -622,7 +620,7 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
         {
             if (!subscriber.Writer.TryWrite(hubEvent))
             {
-                _logger.LogDebug("Dropping generic event for one subscriber due to backpressure.");
+                _logger.LogWarning("Dropping generic event for one subscriber due to backpressure.");
             }
         }
     }

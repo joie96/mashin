@@ -97,6 +97,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
     private double _lastServerPosition;
     private DateTimeOffset? _lastServerPositionUpdateUtc;
     private readonly Task _progressInterpolationTask;
+    private bool _eventHandlersSubscribed;
 
 
     #endregion
@@ -128,11 +129,6 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         DurationSeconds = 0;
         Volume = 50;
         IsMuted = false;
-
-        _sendspinClient.PlayerStateChanged += OnSendspinPlayerStateChanged;
-        _sendspinClient.ConnectionStateChanged += OnSendspinConnectionStateChanged;
-        _audioPlayerStateFeed.StateChanged += OnLocalAudioPlayerStateChanged;
-        _musicAssistantEventHub.QueueEventReceived += OnMusicAssistantQueueEventReceived;
 
         _logger.LogInformation("Music Assistant position interpolation task starting for Sendspin player.");
 
@@ -233,6 +229,91 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         get => _isMuted;
         private set => SetProperty(ref _isMuted, value);
     }
+
+    #endregion
+
+    #region Lifecycle
+
+    public async Task ActivateAsync(string? targetPlayerId, CancellationToken cancellationToken = default)
+    {
+        _logger.LogDebug("Sendspin activate requested. TargetPlayerId={TargetPlayerId}, CurrentPlayerId={CurrentPlayerId}", targetPlayerId, PlayerId);
+        if (!_eventHandlersSubscribed)
+        {
+            _sendspinClient.PlayerStateChanged += OnSendspinPlayerStateChanged;
+            _sendspinClient.ConnectionStateChanged += OnSendspinConnectionStateChanged;
+            _audioPlayerStateFeed.StateChanged += OnLocalAudioPlayerStateChanged;
+            _musicAssistantEventHub.QueueEventReceived += OnMusicAssistantQueueEventReceived;
+            _eventHandlersSubscribed = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(targetPlayerId))
+        {
+            PlayerId = targetPlayerId;
+        }
+
+        if (string.IsNullOrWhiteSpace(PlayerId))
+        {
+            PlayerId = _settingsService.GetSendspinClientId();
+        }
+
+        _logger.LogDebug("Sendspin activation resolved player id. PlayerId={PlayerId}", PlayerId);
+
+        if (!_isConnected
+            && Uri.TryCreate(_settingsService.SendspinUrl, UriKind.Absolute, out var configuredServerUri))
+        {
+            _logger.LogInformation("Connecting Sendspin client. Url={SendspinUrl}, PlayerId={PlayerId}", configuredServerUri, PlayerId);
+            await ConnectAsync(configuredServerUri, cancellationToken);
+        }
+        else if (!_isConnected)
+        {
+            _logger.LogWarning("Sendspin activate skipped connection because configured URL is invalid. Url={SendspinUrl}", _settingsService.SendspinUrl);
+        }
+    }
+
+    public async Task DeactivateAsync()
+    {
+        _logger.LogDebug("Sendspin deactivate requested. PlayerId={PlayerId}", PlayerId);
+        _activeQueueId = null;
+        PositionSeconds = 0;
+        DurationSeconds = 0;
+        ResetProgressAnchor();
+        PlaybackState = new Models.PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+        await DisconnectAsync();
+        if (_eventHandlersSubscribed)
+        {
+            _sendspinClient.PlayerStateChanged -= OnSendspinPlayerStateChanged;
+            _sendspinClient.ConnectionStateChanged -= OnSendspinConnectionStateChanged;
+            _audioPlayerStateFeed.StateChanged -= OnLocalAudioPlayerStateChanged;
+            _musicAssistantEventHub.QueueEventReceived -= OnMusicAssistantQueueEventReceived;
+            _eventHandlersSubscribed = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_eventHandlersSubscribed)
+        {
+            _sendspinClient.PlayerStateChanged -= OnSendspinPlayerStateChanged;
+            _sendspinClient.ConnectionStateChanged -= OnSendspinConnectionStateChanged;
+            _audioPlayerStateFeed.StateChanged -= OnLocalAudioPlayerStateChanged;
+            _musicAssistantEventHub.QueueEventReceived -= OnMusicAssistantQueueEventReceived;
+            _eventHandlersSubscribed = false;
+        }
+
+        _disposeCts.Cancel();
+        try
+        {
+            await _progressInterpolationTask;
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected during shutdown.
+        }
+
+        _disposeCts.Dispose();
+    }
+
+
 
     #endregion
 
@@ -495,45 +576,6 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
 
     #region Transport Commands
 
-    public async Task ActivateAsync(string? targetPlayerId, CancellationToken cancellationToken = default)
-    {
-        _logger.LogDebug("Sendspin activate requested. TargetPlayerId={TargetPlayerId}, CurrentPlayerId={CurrentPlayerId}", targetPlayerId, PlayerId);
-
-        if (!string.IsNullOrWhiteSpace(targetPlayerId))
-        {
-            PlayerId = targetPlayerId;
-        }
-
-        if (string.IsNullOrWhiteSpace(PlayerId))
-        {
-            PlayerId = _settingsService.GetSendspinClientId();
-        }
-
-        _logger.LogDebug("Sendspin activation resolved player id. PlayerId={PlayerId}", PlayerId);
-
-        if (!_isConnected
-            && Uri.TryCreate(_settingsService.SendspinUrl, UriKind.Absolute, out var configuredServerUri))
-        {
-            _logger.LogInformation("Connecting Sendspin client. Url={SendspinUrl}, PlayerId={PlayerId}", configuredServerUri, PlayerId);
-            await ConnectAsync(configuredServerUri, cancellationToken);
-        }
-        else if (!_isConnected)
-        {
-            _logger.LogWarning("Sendspin activate skipped connection because configured URL is invalid. Url={SendspinUrl}", _settingsService.SendspinUrl);
-        }
-    }
-
-    public async Task DeactivateAsync()
-    {
-        _logger.LogDebug("Sendspin deactivate requested. PlayerId={PlayerId}", PlayerId);
-        _activeQueueId = null;
-        PositionSeconds = 0;
-        DurationSeconds = 0;
-        ResetProgressAnchor();
-        PlaybackState = new Models.PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
-        await DisconnectAsync();
-    }
-
     public async Task TogglePlayPauseAsync(CancellationToken cancellationToken = default)
     {
         if (!_isConnected)
@@ -641,26 +683,6 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         await _musicAssistant.SetDontStopTheMusicAsync(queueId, enabled);
     }
 
-    public async ValueTask DisposeAsync()
-    {
-        _sendspinClient.PlayerStateChanged -= OnSendspinPlayerStateChanged;
-        _sendspinClient.ConnectionStateChanged -= OnSendspinConnectionStateChanged;
-        _audioPlayerStateFeed.StateChanged -= OnLocalAudioPlayerStateChanged;
-        _musicAssistantEventHub.QueueEventReceived -= OnMusicAssistantQueueEventReceived;
-
-        _disposeCts.Cancel();
-        try
-        {
-            await _progressInterpolationTask;
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected during shutdown.
-        }
-
-        _disposeCts.Dispose();
-    }
-
     #endregion
 
     #region Connection
@@ -676,7 +698,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         Volume = currentPlayerState.Volume;
         IsMuted = currentPlayerState.Muted;
 
-        await RefreshQueueStateAsync(cancellationToken);
+        await RefreshQueueAsync(cancellationToken);
 
         _logger.LogInformation("Sendspin client connected. Server={Server}, IsConnected={IsConnected}, PlayerId={PlayerId}", _connectedServerName, _isConnected, PlayerId);
     }
@@ -765,7 +787,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
             return;
         }
 
-        var eventQueueId = Normalize(e.Queue?.QueueId) ?? Normalize(e.QueueItems?.QueueId) ?? Normalize(e.QueueId);
+        var eventQueueId = Normalize(e.Queue?.QueueId) ?? Normalize(e.QueueId);
         if (!string.IsNullOrWhiteSpace(_activeQueueId)
             && !string.IsNullOrWhiteSpace(eventQueueId)
             && !string.Equals(eventQueueId, _activeQueueId, StringComparison.Ordinal))
@@ -804,7 +826,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
             return;
         }
 
-        // Set Queue properties and items
+        // Set Queue properties
         if (e.Queue != null)
         {
             _activeQueueId = Normalize(e.Queue.QueueId) ?? _activeQueueId;
@@ -817,12 +839,15 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
             queue.DontStopTheMusicEnabled = e.Queue.DontStopTheMusicEnabled;
         }
 
-        if (e.QueueItems != null)
+        // Set Queue items
+        if (string.Equals(e.Event, "queue_items_updated", StringComparison.OrdinalIgnoreCase))
         {
-            queue.QueueId = Normalize(e.QueueItems.QueueId) ?? queue.QueueId;
-            queue.Items.ReplaceRange((e.QueueItems.Items ?? new List<QueueItem>()).Select(CloneQueueItem));
-            queue.CurrentQueueItemId = Normalize(e.QueueItems.CurrentItem?.QueueItemId) ?? queue.CurrentQueueItemId;
-            queue.ItemCount = Math.Max(queue.ItemCount, queue.Items.Count);
+            var queueIdForItems = Normalize(queue.QueueId) ?? Normalize(_activeQueueId);
+            if (!string.IsNullOrWhiteSpace(queueIdForItems))
+            {
+                _logger.LogDebug("MusicAssistant queue_items_updated received. Refreshing queue items. QueueId={QueueId}, ActiveQueueId={ActiveQueueId}", queueIdForItems, _activeQueueId);
+                _ = RefreshQueueItemsAsync(queueIdForItems);
+            }
         }
 
         if (e.QueueSettings != null)
@@ -832,14 +857,10 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
             queue.DontStopTheMusicEnabled = e.QueueSettings.DontStopTheMusicEnabled;
         }
 
-        // Set DurationSeconds from queue payload or queue items payload.
+        // Set DurationSeconds from queue payload
         if (e.Queue?.CurrentItem?.Duration is int queueItemDuration)
         {
             DurationSeconds = Math.Max(0, queueItemDuration);
-        }
-        else if (e.QueueItems?.CurrentItem?.Duration is int queueItemsDuration)
-        {
-            DurationSeconds = Math.Max(0, queueItemsDuration);
         }
 
         // Set PositionSeconds from queue elapsed time when present.
@@ -1092,7 +1113,33 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         return _activeQueueId;
     }
 
-    private async Task RefreshQueueStateAsync(CancellationToken cancellationToken)
+    private async Task RefreshQueueItemsAsync(string queueId)
+    {
+        var normalizedQueueId = Normalize(queueId);
+        if (string.IsNullOrWhiteSpace(normalizedQueueId))
+        {
+            return;
+        }
+
+        try
+        {
+            var queueItems = await _musicAssistant.GetQueueItemsAsync(normalizedQueueId);
+            if (!string.Equals(normalizedQueueId, Normalize(_activeQueueId), StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _queue.Items.ReplaceRange(queueItems.Select(CloneQueueItem));
+            _queue.ItemCount = Math.Max(_queue.ItemCount, _queue.Items.Count);
+            QueueChanged?.Invoke(this, _queue);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to refresh queue items snapshot for queue {QueueId}.", normalizedQueueId);
+        }
+    }
+
+    private async Task RefreshQueueAsync(CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(PlayerId))
         {
@@ -1108,6 +1155,13 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
             }
 
             _activeQueueId = Normalize(queue.QueueId);
+            _queue.QueueId = _activeQueueId;
+            _queue.CurrentIndex = queue.CurrentIndex;
+            _queue.CurrentQueueItemId = Normalize(queue.CurrentItem?.QueueItemId);
+            _queue.ItemCount = Math.Max(0, queue.ItemCount);
+            _queue.ShuffleEnabled = queue.ShuffleEnabled;
+            _queue.RepeatMode = queue.RepeatMode;
+            _queue.DontStopTheMusicEnabled = queue.DontStopTheMusicEnabled;
             DurationSeconds = Math.Max(0, queue.CurrentItem?.Duration ?? 0);
 
             if (queue.ElapsedTime.HasValue)
@@ -1126,6 +1180,15 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
             if (PlaybackState.State != PlayerStateType.Playing)
             {
                 ResetProgressAnchor();
+            }
+
+            if (!string.IsNullOrWhiteSpace(_activeQueueId))
+            {
+                await RefreshQueueItemsAsync(_activeQueueId);
+            }
+            else
+            {
+                QueueChanged?.Invoke(this, _queue);
             }
         }
         catch
@@ -1202,6 +1265,7 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly IMusicAssistantEventHub _musicAssistantEventHub;
+    private readonly ILogger<RemotePlayerService> _logger;
     private readonly CancellationTokenSource _disposeCts = new();
     private readonly object _progressSync = new();
 
@@ -1220,6 +1284,7 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
     private double _lastServerPosition;
     private DateTimeOffset? _lastServerPositionUpdateUtc;
     private readonly Task _progressInterpolationTask;
+    private bool _eventHandlersSubscribed;
 
     #endregion
 
@@ -1227,13 +1292,14 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
 
     public RemotePlayerService(
         MusicAssistantService musicAssistant,
-        IMusicAssistantEventHub musicAssistantEventHub)
+        IMusicAssistantEventHub musicAssistantEventHub,
+        ILogger<RemotePlayerService> logger)
     {
         _musicAssistant = musicAssistant;
         _musicAssistantEventHub = musicAssistantEventHub;
+        _logger = logger;
 
-        _musicAssistantEventHub.QueueEventReceived += OnQueueEventReceived;
-        _musicAssistantEventHub.PlayerEventReceived += OnPlayerEventReceived;
+        _logger.LogInformation("Music Assistant position interpolation task starting for Remote player.");
 
         _progressInterpolationTask = Task.Run(async () =>
         {
@@ -1335,13 +1401,28 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
 
     public async Task ActivateAsync(string? targetPlayerId, CancellationToken cancellationToken = default)
     {
+        _logger.LogDebug("Remote activate requested. TargetPlayerId={TargetPlayerId}, CurrentPlayerId={CurrentPlayerId}", targetPlayerId, _playerId);
+        if (!_eventHandlersSubscribed)
+        {
+            _musicAssistantEventHub.QueueEventReceived += OnMusicAssistantQueueEventReceived;
+            _musicAssistantEventHub.PlayerEventReceived += OnMusicAssistantPlayerEventReceived;
+            _eventHandlersSubscribed = true;
+        }
         _playerId = Normalize(targetPlayerId);
         _activeQueueId = null;
-        await RefreshStateFromMusicAssistantAsync(cancellationToken);
+        _logger.LogDebug("Remote activation resolved player id. PlayerId={PlayerId}", _playerId);
+        await RefreshQueueAsync(cancellationToken);
     }
 
     public Task DeactivateAsync()
     {
+        _logger.LogDebug("Remote deactivate requested. PlayerId={PlayerId}", _playerId);
+        if (_eventHandlersSubscribed)
+        {
+            _musicAssistantEventHub.QueueEventReceived -= OnMusicAssistantQueueEventReceived;
+            _musicAssistantEventHub.PlayerEventReceived -= OnMusicAssistantPlayerEventReceived;
+            _eventHandlersSubscribed = false;
+        }
         _playerId = null;
         _activeQueueId = null;
 
@@ -1364,8 +1445,12 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        _musicAssistantEventHub.QueueEventReceived -= OnQueueEventReceived;
-        _musicAssistantEventHub.PlayerEventReceived -= OnPlayerEventReceived;
+        if (_eventHandlersSubscribed)
+        {
+            _musicAssistantEventHub.QueueEventReceived -= OnMusicAssistantQueueEventReceived;
+            _musicAssistantEventHub.PlayerEventReceived -= OnMusicAssistantPlayerEventReceived;
+            _eventHandlersSubscribed = false;
+        }
 
         _disposeCts.Cancel();
         try
@@ -1559,9 +1644,11 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
     {
         if (string.IsNullOrWhiteSpace(_playerId))
         {
+            _logger.LogWarning("TogglePlayPause ignored: no active remote player is selected.");
             return Task.CompletedTask;
         }
 
+        _logger.LogInformation("Remote command dispatch. Command={Command}, PlayerId={PlayerId}", "player_play_pause", _playerId);
         return _musicAssistant.PlayerPlayPauseAsync(_playerId);
     }
 
@@ -1569,9 +1656,11 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
     {
         if (string.IsNullOrWhiteSpace(_playerId))
         {
+            _logger.LogWarning("Next ignored: no active remote player is selected.");
             return;
         }
 
+        _logger.LogInformation("Remote command dispatch. Command={Command}, PlayerId={PlayerId}", "player_next", _playerId);
         await _musicAssistant.PlayerNextAsync(_playerId);
     }
 
@@ -1579,9 +1668,11 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
     {
         if (string.IsNullOrWhiteSpace(_playerId))
         {
+            _logger.LogWarning("Previous ignored: no active remote player is selected.");
             return;
         }
 
+        _logger.LogInformation("Remote command dispatch. Command={Command}, PlayerId={PlayerId}", "player_previous", _playerId);
         await _musicAssistant.PlayerPreviousAsync(_playerId);
     }
 
@@ -1590,17 +1681,20 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
         var clamped = Math.Max(0, (int)Math.Round(seconds));
         if (string.IsNullOrWhiteSpace(_playerId))
         {
+            _logger.LogWarning("Seek ignored: no active remote player is selected.");
             return Task.CompletedTask;
         }
 
         PositionSeconds = clamped;
         UpdateProgressAnchor(clamped);
+        _logger.LogInformation("Remote seek requested via MusicAssistant. PlayerId={PlayerId}, Seconds={Seconds}", _playerId, clamped);
         return _musicAssistant.PlayerSeekAsync(_playerId, clamped);
     }
 
     public Task SetVolumeAsync(int volume, CancellationToken cancellationToken = default)
     {
         Volume = volume;
+        _logger.LogDebug("Remote volume update requested. Volume={Volume}", Volume);
         if (string.IsNullOrWhiteSpace(_playerId))
         {
             return Task.CompletedTask;
@@ -1612,6 +1706,7 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
     public Task SetMutedAsync(bool muted, CancellationToken cancellationToken = default)
     {
         IsMuted = muted;
+        _logger.LogDebug("Remote mute update requested. IsMuted={IsMuted}", IsMuted);
         if (string.IsNullOrWhiteSpace(_playerId))
         {
             return Task.CompletedTask;
@@ -1625,9 +1720,11 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
         var queueId = await ResolveQueueIdAsync();
         if (string.IsNullOrWhiteSpace(queueId))
         {
+            _logger.LogWarning("SetShuffle ignored: no active queue id is available for remote player {PlayerId}", _playerId);
             return;
         }
 
+        _logger.LogInformation("Remote queue setting update requested. Setting={Setting}, Value={Value}, QueueId={QueueId}, PlayerId={PlayerId}", "shuffle", enabled, queueId, _playerId);
         await _musicAssistant.SetShuffleAsync(queueId, enabled);
     }
 
@@ -1636,9 +1733,11 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
         var queueId = await ResolveQueueIdAsync();
         if (string.IsNullOrWhiteSpace(queueId))
         {
+            _logger.LogWarning("SetRepeatMode ignored: no active queue id is available for remote player {PlayerId}", _playerId);
             return;
         }
 
+        _logger.LogInformation("Remote queue setting update requested. Setting={Setting}, Value={Value}, QueueId={QueueId}, PlayerId={PlayerId}", "repeat", repeatMode, queueId, _playerId);
         await _musicAssistant.SetRepeatAsync(queueId, repeatMode);
     }
 
@@ -1647,9 +1746,11 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
         var queueId = await ResolveQueueIdAsync();
         if (string.IsNullOrWhiteSpace(queueId))
         {
+            _logger.LogWarning("SetDontStopTheMusic ignored: no active queue id is available for remote player {PlayerId}", _playerId);
             return;
         }
 
+        _logger.LogInformation("Remote queue setting update requested. Setting={Setting}, Value={Value}, QueueId={QueueId}, PlayerId={PlayerId}", "dont_stop_the_music", enabled, queueId, _playerId);
         await _musicAssistant.SetDontStopTheMusicAsync(queueId, enabled);
     }
 
@@ -1657,10 +1758,11 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
 
     #region Event Handlers
 
-    private void OnPlayerEventReceived(object? sender, MusicAssistantPlayerEvent e)
+    private void OnMusicAssistantPlayerEventReceived(object? sender, MusicAssistantPlayerEvent e)
     {
         if (string.IsNullOrWhiteSpace(_playerId))
         {
+            _logger.LogDebug("MusicAssistant PlayerEvent ignored because no active remote player is selected.");
             return;
         }
 
@@ -1668,11 +1770,13 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
         if (!string.IsNullOrWhiteSpace(eventPlayerId)
             && !string.Equals(eventPlayerId, _playerId, StringComparison.Ordinal))
         {
+            _logger.LogDebug("MusicAssistant PlayerEvent ignored due to player mismatch. EventPlayerId={EventPlayerId}, ActivePlayerId={ActivePlayerId}", eventPlayerId, _playerId);
             return;
         }
 
         if (e.Player == null)
         {
+            _logger.LogDebug("MusicAssistant PlayerEvent ignored because payload does not include player details. Event={EventName}, PlayerId={PlayerId}", e.Event, e.PlayerId);
             return;
         }
 
@@ -1698,20 +1802,24 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
         {
             ResetProgressAnchor();
         }
+
+        _logger.LogDebug("MusicAssistant PlayerEvent processed. Event={EventName}, PlayerId={PlayerId}, PlaybackState={PlaybackState}, Volume={Volume}, IsMuted={IsMuted}", e.Event, _playerId, PlaybackState.State, Volume, IsMuted);
     }
 
-    private void OnQueueEventReceived(object? sender, MusicAssistantQueueEvent e)
+    private void OnMusicAssistantQueueEventReceived(object? sender, MusicAssistantQueueEvent e)
     {
         if (string.IsNullOrWhiteSpace(_playerId))
         {
+            _logger.LogDebug("MusicAssistant QueueEvent ignored because no active remote player is selected.");
             return;
         }
 
-        var eventQueueId = Normalize(e.Queue?.QueueId) ?? Normalize(e.QueueItems?.QueueId) ?? Normalize(e.QueueId);
+        var eventQueueId = Normalize(e.Queue?.QueueId) ?? Normalize(e.QueueId);
         if (!string.IsNullOrWhiteSpace(_activeQueueId)
             && !string.IsNullOrWhiteSpace(eventQueueId)
             && !string.Equals(eventQueueId, _activeQueueId, StringComparison.Ordinal))
         {
+            _logger.LogDebug("MusicAssistant QueueEvent ignored due to queue mismatch. EventQueueId={EventQueueId}, ActiveQueueId={ActiveQueueId}", eventQueueId, _activeQueueId);
             return;
         }
 
@@ -1733,6 +1841,11 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
                 var clamped = Math.Max(0, elapsedSeconds);
                 PositionSeconds = clamped;
                 UpdateProgressAnchor(clamped);
+                _logger.LogDebug("MusicAssistant QueueEvent applied. Event={EventName}, QueueId={QueueId}, ElapsedSecondsRaw={ElapsedSecondsRaw}, ElapsedSecondsClamped={ElapsedSecondsClamped}, ActiveQueueId={ActiveQueueId}", e.Event, e.QueueId, elapsedSeconds, clamped, _activeQueueId);
+            }
+            else
+            {
+                _logger.LogDebug("MusicAssistant QueueEvent ignored because elapsed time is missing. Event={EventName}, QueueId={QueueId}, ActiveQueueId={ActiveQueueId}", e.Event, e.QueueId, _activeQueueId);
             }
 
             return;
@@ -1765,16 +1878,13 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
             DurationSeconds = Math.Max(0, e.Queue.CurrentItem?.Duration ?? 0);
         }
 
-        if (e.QueueItems != null)
+        if (string.Equals(e.Event, "queue_items_updated", StringComparison.OrdinalIgnoreCase))
         {
-            _queue.QueueId = Normalize(e.QueueItems.QueueId) ?? _queue.QueueId;
-            _queue.Items.ReplaceRange((e.QueueItems.Items ?? new List<QueueItem>()).Select(CloneQueueItem));
-            _queue.CurrentQueueItemId = Normalize(e.QueueItems.CurrentItem?.QueueItemId) ?? _queue.CurrentQueueItemId;
-            _queue.ItemCount = Math.Max(_queue.ItemCount, _queue.Items.Count);
-
-            if (e.QueueItems.CurrentItem?.Duration is int queueItemsDuration)
+            var queueIdForItems = Normalize(_queue.QueueId) ?? Normalize(_activeQueueId);
+            if (!string.IsNullOrWhiteSpace(queueIdForItems))
             {
-                DurationSeconds = Math.Max(0, queueItemsDuration);
+                _logger.LogDebug("MusicAssistant queue_items_updated received. Refreshing queue items. QueueId={QueueId}, ActiveQueueId={ActiveQueueId}", queueIdForItems, _activeQueueId);
+                _ = RefreshQueueItemsAsync(queueIdForItems);
             }
         }
 
@@ -1791,6 +1901,8 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
         {
             ResetProgressAnchor();
         }
+
+        _logger.LogDebug("MusicAssistant QueueEvent processed. Event={EventName}, QueueId={QueueId}, DurationSeconds={DurationSeconds}, PositionSeconds={PositionSeconds}, ActiveQueueId={ActiveQueueId}", e.Event, e.QueueId, DurationSeconds, PositionSeconds, _activeQueueId);
     }
 
     #endregion
@@ -1826,7 +1938,33 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
         return _activeQueueId;
     }
 
-    private async Task RefreshStateFromMusicAssistantAsync(CancellationToken cancellationToken)
+    private async Task RefreshQueueItemsAsync(string queueId)
+    {
+        var normalizedQueueId = Normalize(queueId);
+        if (string.IsNullOrWhiteSpace(normalizedQueueId))
+        {
+            return;
+        }
+
+        try
+        {
+            var queueItems = await _musicAssistant.GetQueueItemsAsync(normalizedQueueId);
+            if (!string.Equals(normalizedQueueId, Normalize(_activeQueueId), StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _queue.Items.ReplaceRange(queueItems.Select(CloneQueueItem));
+            _queue.ItemCount = Math.Max(_queue.ItemCount, _queue.Items.Count);
+            QueueChanged?.Invoke(this, _queue);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to refresh queue items snapshot for queue {QueueId}.", normalizedQueueId);
+        }
+    }
+
+    private async Task RefreshQueueAsync(CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_playerId))
         {
@@ -1886,12 +2024,12 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
 
             if (!string.IsNullOrWhiteSpace(_activeQueueId))
             {
-                var queueItems = await _musicAssistant.GetQueueItemsAsync(_activeQueueId);
-                _queue.Items.ReplaceRange(queueItems.Select(CloneQueueItem));
-                _queue.ItemCount = Math.Max(_queue.ItemCount, _queue.Items.Count);
+                await RefreshQueueItemsAsync(_activeQueueId);
             }
-
-            QueueChanged?.Invoke(this, _queue);
+            else
+            {
+                QueueChanged?.Invoke(this, _queue);
+            }
 
             if (PlaybackState.State != PlayerStateType.Playing)
             {

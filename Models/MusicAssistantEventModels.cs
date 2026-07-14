@@ -8,7 +8,6 @@ public sealed record MusicAssistantQueueEvent(
     string? QueueId,
     PlayerQueue? Queue,
     double? ElapsedTimeSeconds,
-    MusicAssistantQueueItems? QueueItems,
     MusicAssistantQueueSettings? QueueSettings,
     Dictionary<string, JsonElement>? AdditionalData,
     DateTimeOffset ReceivedAt);
@@ -23,24 +22,6 @@ public sealed record MusicAssistantPlayerEvent(
     MusicAssistantPlayerOptions? PlayerOptions,
     Dictionary<string, JsonElement>? AdditionalData,
     DateTimeOffset ReceivedAt);
-
-public sealed class MusicAssistantQueueItems
-{
-    [JsonPropertyName("queue_id")]
-    public string? QueueId { get; set; }
-
-    [JsonPropertyName("items")]
-    public List<QueueItem>? Items { get; set; }
-
-    [JsonPropertyName("current_item")]
-    public QueueItem? CurrentItem { get; set; }
-
-    [JsonPropertyName("next_item")]
-    public QueueItem? NextItem { get; set; }
-
-    [JsonExtensionData]
-    public Dictionary<string, JsonElement>? AdditionalData { get; set; }
-}
 
 public sealed class MusicAssistantQueueSettings
 {

@@ -157,17 +157,6 @@ public sealed class PlaybackService
 
         await _musicAssistantEventHub.StartAsync(cancellationToken);
 
-        if (_players.TryGetValue(PlaybackOutputMode.Local, out var localPlayer))
-        {
-            await localPlayer.ActivateAsync(null, cancellationToken);
-        }
-
-        if (_players.TryGetValue(PlaybackOutputMode.Sendspin, out var sendspinPlayer))
-        {
-            var sendspinPlayerId = _settingsService.GetSendspinMusicAssistantPlayerId();
-            await sendspinPlayer.ActivateAsync(sendspinPlayerId, cancellationToken);
-        }
-
         var defaultMode = _players.ContainsKey(PlaybackOutputMode.Sendspin)
             ? PlaybackOutputMode.Sendspin
             : _players.ContainsKey(PlaybackOutputMode.Local)
@@ -196,11 +185,24 @@ public sealed class PlaybackService
             _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unsupported playback output mode.")
         };
 
+        var remoteTargetChanged = mode == PlaybackOutputMode.MA_Remote
+            && !string.Equals(Normalize(nextPlayer.PlayerId), Normalize(resolvedTargetPlayerId), StringComparison.Ordinal);
+        var playerChanged = !ReferenceEquals(nextPlayer, _activePlayer);
+        var shouldActivate = !_initialized || playerChanged || remoteTargetChanged;
+
+        if (playerChanged)
+        {
+            await _activePlayer.DeactivateAsync();
+        }
+
+        if (shouldActivate)
+        {
+            await nextPlayer.ActivateAsync(resolvedTargetPlayerId, cancellationToken);
+        }
+
         // if remote player: pull queue
         if (mode == PlaybackOutputMode.MA_Remote)
         {
-            await nextPlayer.ActivateAsync(resolvedTargetPlayerId, cancellationToken);
-
             var remoteQueue = nextPlayer.Queue;
             if (remoteQueue != null)
             {
