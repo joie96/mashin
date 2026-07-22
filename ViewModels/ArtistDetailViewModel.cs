@@ -745,6 +745,25 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                     .Where(artist => artist.ItemId != artistId)
                     .Take(25)
                     .ToList();
+
+                if (similarArtists.Count > 0)
+                {
+                    var enrichedArtists = await Task.WhenAll(similarArtists.Select(async artist =>
+                    {
+                        try
+                        {
+                            var fullArtist = await _musicAssistant.GetArtistAsync(artist.ItemId, artist.Provider);
+                            return fullArtist ?? artist;
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Failed to enrich similar fallback artist: {ArtistId} ({Provider})", artist.ItemId, artist.Provider);
+                            return artist;
+                        }
+                    }));
+
+                    similarArtists = enrichedArtists.ToList();
+                }
             }
 
             SimilarArtists = new ObservableRangeCollection<Artist>(similarArtists);

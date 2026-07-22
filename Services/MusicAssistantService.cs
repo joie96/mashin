@@ -1401,6 +1401,11 @@ public class MusicAssistantService
             {
                 folder.Image.Path = ResolveImagePath(folder.Image.Path, folder.Image.Provider);
             }
+
+            if (folder.Items != null && folder.Items.Count > 0)
+            {
+                ResolveMediaItemImages(folder.Items);
+            }
         }
 
         var items = folders
