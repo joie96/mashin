@@ -9,12 +9,16 @@
     xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
     xmlns:models="clr-namespace:mashin.Models"
-    x:Name="self">
+    x:Name="self"
+    Loaded="OnTableViewLoaded"
+    Unloaded="OnTableViewUnloaded">
 
     <ContentView.Resources>
         <converters:PlaylistMetadataTextConverter x:Key="PlaylistMetadataTextConverter" />
         <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
         <converters:MediaItemLoadingPriorityConverter x:Key="MediaItemLoadingPriorityConverter" />
+        <converters:PlayStateToBoolConverter x:Key="PlayStateToBoolConverter" />
+        <converters:StringEqualsConverter x:Key="StringEqualsConverter" />
 
         <!--  Playlist Row Template  -->
         <DataTemplate x:Key="PlaylistTemplate" x:DataType="models:Playlist">
@@ -228,12 +232,70 @@
                         <VerticalStackLayout Grid.Column="1"
                             Spacing="1"
                             VerticalOptions="Center">
-                            <Label FontFamily="PoppinsRegular"
-                                FontSize="14"
-                                LineBreakMode="TailTruncation"
-                                MaxLines="1"
-                                Text="{Binding DisplayName}"
-                                TextColor="{DynamicResource TextPrimary}" />
+                            <HorizontalStackLayout Spacing="6"
+                                VerticalOptions="Center">
+                                <Grid IsVisible="False"
+                                    VerticalOptions="Center">
+                                    <Grid.Triggers>
+                                        <DataTrigger TargetType="Grid"
+                                            Value="True">
+                                            <DataTrigger.Binding>
+                                                <MultiBinding Converter="{StaticResource StringEqualsConverter}">
+                                                    <Binding Path="Uri" />
+                                                    <Binding Path="CurrentTrackUri"
+                                                        Source="{x:Reference self}" />
+                                                </MultiBinding>
+                                            </DataTrigger.Binding>
+                                            <Setter Property="IsVisible"
+                                                Value="True" />
+                                        </DataTrigger>
+                                    </Grid.Triggers>
+
+                                    <Label FontSize="12"
+                                        HorizontalOptions="Center"
+                                        IsVisible="{Binding Path=CurrentPlayState, Source={x:Reference self}, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=show-play-icon}"
+                                        Text="{mi:FluentFilled Icon=Play12Filled, FontOverride=True}"
+                                        TextColor="{DynamicResource AccentColor}"
+                                        VerticalOptions="Center" />
+
+                                    <Label FontSize="12"
+                                        HorizontalOptions="Center"
+                                        IsVisible="{Binding Path=CurrentPlayState, Source={x:Reference self}, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=show-pause-icon}"
+                                        Text="{mi:FluentFilled Icon=Pause12Filled, FontOverride=True}"
+                                        TextColor="{DynamicResource AccentColor}"
+                                        VerticalOptions="Center" />
+
+                                    <ActivityIndicator Color="{DynamicResource AccentColor}"
+                                        HeightRequest="12"
+                                        HorizontalOptions="Center"
+                                        IsRunning="{Binding Path=CurrentPlayState, Source={x:Reference self}, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
+                                        IsVisible="{Binding Path=CurrentPlayState, Source={x:Reference self}, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
+                                        VerticalOptions="Center"
+                                        WidthRequest="12" />
+                                </Grid>
+
+                                <Label FontFamily="PoppinsRegular"
+                                    FontSize="14"
+                                    LineBreakMode="TailTruncation"
+                                    MaxLines="1"
+                                    Text="{Binding DisplayName}"
+                                    TextColor="{DynamicResource TextPrimary}">
+                                    <Label.Triggers>
+                                        <DataTrigger TargetType="Label"
+                                            Value="True">
+                                            <DataTrigger.Binding>
+                                                <MultiBinding Converter="{StaticResource StringEqualsConverter}">
+                                                    <Binding Path="Uri" />
+                                                    <Binding Path="CurrentTrackUri"
+                                                        Source="{x:Reference self}" />
+                                                </MultiBinding>
+                                            </DataTrigger.Binding>
+                                            <Setter Property="TextColor"
+                                                Value="{DynamicResource AccentColor}" />
+                                        </DataTrigger>
+                                    </Label.Triggers>
+                                </Label>
+                            </HorizontalStackLayout>
                             <Label FontFamily="PoppinsRegular"
                                 FontSize="12"
                                 LineBreakMode="TailTruncation"
@@ -393,12 +455,70 @@
                         <VerticalStackLayout Grid.Column="1"
                             Spacing="1"
                             VerticalOptions="Center">
-                            <Label FontFamily="PoppinsRegular"
-                                FontSize="14"
-                                LineBreakMode="TailTruncation"
-                                MaxLines="1"
-                                Text="{Binding MediaItem.DisplayName}"
-                                TextColor="{DynamicResource TextPrimary}" />
+                            <HorizontalStackLayout Spacing="6"
+                                VerticalOptions="Center">
+                                <Grid IsVisible="False"
+                                    VerticalOptions="Center">
+                                    <Grid.Triggers>
+                                        <DataTrigger TargetType="Grid"
+                                            Value="True">
+                                            <DataTrigger.Binding>
+                                                <MultiBinding Converter="{StaticResource StringEqualsConverter}">
+                                                    <Binding Path="MediaItem.Uri" />
+                                                    <Binding Path="CurrentTrackUri"
+                                                        Source="{x:Reference self}" />
+                                                </MultiBinding>
+                                            </DataTrigger.Binding>
+                                            <Setter Property="IsVisible"
+                                                Value="True" />
+                                        </DataTrigger>
+                                    </Grid.Triggers>
+
+                                    <Label FontSize="12"
+                                        HorizontalOptions="Center"
+                                        IsVisible="{Binding Path=CurrentPlayState, Source={x:Reference self}, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=show-play-icon}"
+                                        Text="{mi:FluentFilled Icon=Play12Filled, FontOverride=True}"
+                                        TextColor="{DynamicResource AccentColor}"
+                                        VerticalOptions="Center" />
+
+                                    <Label FontSize="12"
+                                        HorizontalOptions="Center"
+                                        IsVisible="{Binding Path=CurrentPlayState, Source={x:Reference self}, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=show-pause-icon}"
+                                        Text="{mi:FluentFilled Icon=Pause12Filled, FontOverride=True}"
+                                        TextColor="{DynamicResource AccentColor}"
+                                        VerticalOptions="Center" />
+
+                                    <ActivityIndicator Color="{DynamicResource AccentColor}"
+                                        HeightRequest="12"
+                                        HorizontalOptions="Center"
+                                        IsRunning="{Binding Path=CurrentPlayState, Source={x:Reference self}, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
+                                        IsVisible="{Binding Path=CurrentPlayState, Source={x:Reference self}, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
+                                        VerticalOptions="Center"
+                                        WidthRequest="12" />
+                                </Grid>
+
+                                <Label FontFamily="PoppinsRegular"
+                                    FontSize="14"
+                                    LineBreakMode="TailTruncation"
+                                    MaxLines="1"
+                                    Text="{Binding MediaItem.DisplayName}"
+                                    TextColor="{DynamicResource TextPrimary}">
+                                    <Label.Triggers>
+                                        <DataTrigger TargetType="Label"
+                                            Value="True">
+                                            <DataTrigger.Binding>
+                                                <MultiBinding Converter="{StaticResource StringEqualsConverter}">
+                                                    <Binding Path="MediaItem.Uri" />
+                                                    <Binding Path="CurrentTrackUri"
+                                                        Source="{x:Reference self}" />
+                                                </MultiBinding>
+                                            </DataTrigger.Binding>
+                                            <Setter Property="TextColor"
+                                                Value="{DynamicResource AccentColor}" />
+                                        </DataTrigger>
+                                    </Label.Triggers>
+                                </Label>
+                            </HorizontalStackLayout>
                             <Label FontFamily="PoppinsRegular"
                                 FontSize="12"
                                 LineBreakMode="TailTruncation"

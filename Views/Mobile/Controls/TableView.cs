@@ -2,6 +2,7 @@
 using mashin.Models;
 using mashin.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Maui.ApplicationModel;
 using System.Collections;
 using System.Collections.Specialized;
 using System.ComponentModel;
@@ -21,6 +22,9 @@ public partial class TableView : ContentView
     private readonly HashSet<INotifyPropertyChanged> _observedItems = new();
     private readonly ObservableRangeCollection<object> _visibleItems = new();
     private INotifyCollectionChanged? _observedCollection;
+    private PlaybackService? _playbackService;
+    private QueueItem? _currentQueueItem;
+    private Track? _currentTrackMediaItem;
     private int _loadedItemCount = DefaultInitialLoadCount;
     private bool _hasMoreItems;
     private bool _hasSelection;
@@ -42,6 +46,20 @@ public partial class TableView : ContentView
 
     public static readonly BindableProperty PlaybackContextItemProperty =
         BindableProperty.Create(nameof(PlaybackContextItem), typeof(object), typeof(TableView));
+
+    public static readonly BindableProperty CurrentTrackUriProperty =
+        BindableProperty.Create(nameof(CurrentTrackUri), typeof(string), typeof(TableView));
+
+    public static readonly BindableProperty CurrentPlayStateProperty =
+        BindableProperty.Create(
+            nameof(CurrentPlayState),
+            typeof(PlayerState),
+            typeof(TableView),
+            defaultValue: new PlayerState
+            {
+                State = PlayerStateType.Idle,
+                ActiveSinceUtc = DateTimeOffset.UtcNow
+            });
 
     public static readonly BindableProperty ShowContextMenuAtAnchorCommandProperty =
         BindableProperty.Create(nameof(ShowContextMenuAtAnchorCommand), typeof(ICommand), typeof(TableView));
@@ -66,6 +84,42 @@ public partial class TableView : ContentView
         InitializeComponent();
     }
 
+    protected override void OnHandlerChanged()
+    {
+        base.OnHandlerChanged();
+    }
+
+    private void OnTableViewLoaded(object? sender, EventArgs e)
+    {
+        DetachSelectionObservers();
+        AttachSelectionObservers(ItemsSource);
+        AttachPlaybackStateSource();
+        RefreshVisibleItems();
+        UpdateSelectionIndicator();
+        UpdateFavoriteStateForVisibleItems();
+    }
+
+    private void OnTableViewUnloaded(object? sender, EventArgs e)
+    {
+        DetachPlaybackStateSource();
+        DetachSelectionObservers();
+
+        ShortPressCommand = null;
+        LongPressCommand = null;
+        ShowContextMenuAtAnchorCommand = null;
+        PlaybackContextItem = null;
+
+        _suppressNextTap.Clear();
+        _visibleItems.Clear();
+        _loadedItemCount = 0;
+        UpdateHasMoreItems(false);
+
+        ItemsSource = null;
+        BindingContext = null;
+
+        UpdateSelectionIndicator();
+    }
+
     #endregion
 
     #region Properties
@@ -86,6 +140,18 @@ public partial class TableView : ContentView
     {
         get => GetValue(PlaybackContextItemProperty);
         set => SetValue(PlaybackContextItemProperty, value);
+    }
+
+    public string? CurrentTrackUri
+    {
+        get => (string?)GetValue(CurrentTrackUriProperty);
+        private set => SetValue(CurrentTrackUriProperty, value);
+    }
+
+    public PlayerState CurrentPlayState
+    {
+        get => (PlayerState)GetValue(CurrentPlayStateProperty);
+        private set => SetValue(CurrentPlayStateProperty, value);
     }
 
     public ICommand? ShowContextMenuAtAnchorCommand
@@ -368,17 +434,34 @@ public partial class TableView : ContentView
         // Default mobile behavior: tapping a track directly plays it.
         if (mediaItem is Track track)
         {
-            var playbackService = ResolvePlaybackService();
+            if (_playbackService == null)
+            {
+                return;
+            }
+
+            var playbackService = _playbackService;
             if (playbackService != null)
             {
-                if (PlaybackContextItem is MediaItem parentItem)
+                var itemIndex = GetIndexOf(mediaItem);
+
+                
+                // if queue, play the queue index via playback service
+                if (PlaybackContextItem is PlayerQueue && itemIndex is >= 0)
                 {
-                    await playbackService.PlayMediaAsync(new List<MediaItem> { track });
+                    await playbackService.PlayQueueIndexAsync(itemIndex.Value);
                     return;
                 }
 
-                await playbackService.PlayMediaAsync(new List<MediaItem> { track });
-                return;
+                // otherwise, play current and following items
+                if (itemIndex is >= 0)
+                {
+                    var playItems = GetPlayableItemsFromIndex(itemIndex.Value);
+                    if (playItems.Count > 0)
+                    {
+                        await playbackService.PlayMediaAsync(playItems);
+                        return;
+                    }
+                }
             }
         }
 
@@ -435,18 +518,9 @@ public partial class TableView : ContentView
 
     public void SelectAllItems()
     {
-        if (ItemsSource == null)
+        foreach (var item in EnumerateSelectableItems())
         {
-            return;
-        }
-
-        foreach (var item in ItemsSource)
-        {
-            var mediaItem = ResolveMediaItem(item);
-            if (mediaItem != null)
-            {
-                mediaItem.IsSelected = true;
-            }
+            item.IsSelected = true;
         }
 
         UpdateSelectionIndicator();
@@ -454,18 +528,9 @@ public partial class TableView : ContentView
 
     public void ClearSelection()
     {
-        if (ItemsSource == null)
+        foreach (var item in EnumerateSelectableItems())
         {
-            return;
-        }
-
-        foreach (var item in ItemsSource)
-        {
-            var mediaItem = ResolveMediaItem(item);
-            if (mediaItem != null)
-            {
-                mediaItem.IsSelected = false;
-            }
+            item.IsSelected = false;
         }
 
         UpdateSelectionIndicator();
@@ -540,6 +605,193 @@ public partial class TableView : ContentView
         return services.GetService(typeof(IOverlayService)) as IOverlayService;
     }
 
+    private void AttachPlaybackStateSource()
+    {
+        if (_playbackService != null)
+        {
+            return;
+        }
+
+        var mauiContext = Handler?.MauiContext
+            ?? Microsoft.Maui.Controls.Application.Current?.Handler?.MauiContext;
+        if (mauiContext == null)
+        {
+            return;
+        }
+
+        _playbackService = mauiContext.Services.GetService<PlaybackService>();
+        if (_playbackService == null)
+        {
+            return;
+        }
+
+        _currentQueueItem = _playbackService.CurrentQueueItem;
+        _currentTrackMediaItem = _currentQueueItem?.MediaItem;
+        SetCurrentTrackUri(_currentTrackMediaItem?.Uri);
+        SetCurrentPlayState(_playbackService.PlaybackState);
+
+        _playbackService.PropertyChanged += OnPlaybackServicePropertyChanged;
+
+        if (_currentTrackMediaItem != null)
+        {
+            _currentTrackMediaItem.PropertyChanged += OnCurrentTrackPropertyChanged;
+        }
+    }
+
+    private void DetachPlaybackStateSource()
+    {
+        if (_playbackService != null)
+        {
+            _playbackService.PropertyChanged -= OnPlaybackServicePropertyChanged;
+        }
+
+        if (_currentTrackMediaItem != null)
+        {
+            _currentTrackMediaItem.PropertyChanged -= OnCurrentTrackPropertyChanged;
+        }
+
+        _playbackService = null;
+        _currentQueueItem = null;
+        _currentTrackMediaItem = null;
+        SetCurrentTrackUri(null);
+        SetCurrentPlayState(new PlayerState
+        {
+            State = PlayerStateType.Idle,
+            ActiveSinceUtc = DateTimeOffset.UtcNow
+        });
+    }
+
+    private void OnPlaybackServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(PlaybackService.PlaybackState))
+        {
+            var currentPlayerState = _playbackService?.PlaybackState
+                ?? new PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+
+            if (MainThread.IsMainThread)
+            {
+                SetCurrentPlayState(currentPlayerState);
+            }
+            else
+            {
+                MainThread.BeginInvokeOnMainThread(() => SetCurrentPlayState(currentPlayerState));
+            }
+
+            return;
+        }
+
+        if (e.PropertyName != nameof(PlaybackService.CurrentQueueItem))
+        {
+            return;
+        }
+
+        OnCurrentTrackUpdated();
+    }
+
+    private void OnCurrentTrackUpdated()
+    {
+        if (_currentTrackMediaItem != null)
+        {
+            _currentTrackMediaItem.PropertyChanged -= OnCurrentTrackPropertyChanged;
+        }
+
+        _currentQueueItem = _playbackService?.CurrentQueueItem;
+        _currentTrackMediaItem = _currentQueueItem?.MediaItem;
+        var currentTrackUri = _currentTrackMediaItem?.Uri;
+
+        if (_currentTrackMediaItem != null)
+        {
+            _currentTrackMediaItem.PropertyChanged += OnCurrentTrackPropertyChanged;
+        }
+
+        if (MainThread.IsMainThread)
+        {
+            SetCurrentTrackUri(currentTrackUri);
+            UpdateFavoriteStateForVisibleItems();
+            return;
+        }
+
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            SetCurrentTrackUri(currentTrackUri);
+            UpdateFavoriteStateForVisibleItems();
+        });
+    }
+
+    private void OnCurrentTrackPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(MediaItem.Favorite))
+        {
+            return;
+        }
+
+        if (MainThread.IsMainThread)
+        {
+            UpdateFavoriteStateForVisibleItems();
+            return;
+        }
+
+        MainThread.BeginInvokeOnMainThread(UpdateFavoriteStateForVisibleItems);
+    }
+
+    private void UpdateFavoriteStateForVisibleItems()
+    {
+        var activeTrack = _currentTrackMediaItem;
+        if (activeTrack == null)
+        {
+            return;
+        }
+
+        foreach (var item in EnumerateSelectableItems())
+        {
+            if (!IsSameTrack(item, activeTrack) || item.Favorite == activeTrack.Favorite)
+            {
+                continue;
+            }
+
+            item.Favorite = activeTrack.Favorite;
+        }
+    }
+
+    private static bool IsSameTrack(MediaItem item, Track activeTrack)
+    {
+        if (!string.IsNullOrWhiteSpace(item.Uri)
+            && !string.IsNullOrWhiteSpace(activeTrack.Uri)
+            && string.Equals(item.Uri, activeTrack.Uri, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.ItemId)
+            && !string.IsNullOrWhiteSpace(activeTrack.ItemId)
+            && string.Equals(item.ItemId, activeTrack.ItemId, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private void SetCurrentTrackUri(string? uri)
+    {
+        if (string.Equals(CurrentTrackUri, uri, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        CurrentTrackUri = uri;
+    }
+
+    private void SetCurrentPlayState(PlayerState playerState)
+    {
+        if (CurrentPlayState.State == playerState.State)
+        {
+            return;
+        }
+
+        CurrentPlayState = playerState;
+    }
+
     private void UpdateHasMoreItems(bool hasMoreItems)
     {
         if (_hasMoreItems == hasMoreItems)
@@ -551,25 +803,54 @@ public partial class TableView : ContentView
         OnPropertyChanged(nameof(HasMoreItems));
     }
 
-    private static PlaybackService? ResolvePlaybackService()
+    private bool HasAnySelectedItems()
     {
-        var services = Application.Current?.Handler?.MauiContext?.Services;
-        if (services == null)
-        {
-            return null;
-        }
-
-        return services.GetService<PlaybackService>();
+        return EnumerateSelectableItems().Any(mediaItem => mediaItem.IsSelected);
     }
 
-    private bool HasAnySelectedItems()
+    private int? GetIndexOf(MediaItem target)
+    {
+        var index = 0;
+        foreach (var item in EnumerateSelectableItems())
+        {
+            if (ReferenceEquals(item, target))
+            {
+                return index;
+            }
+
+            index++;
+        }
+
+        return null;
+    }
+
+    private List<MediaItem> GetPlayableItemsFromIndex(int startIndex)
+    {
+        if (startIndex < 0)
+        {
+            return new List<MediaItem>();
+        }
+
+        return EnumerateSelectableItems()
+            .Skip(startIndex)
+            .ToList();
+    }
+
+    private IEnumerable<MediaItem> EnumerateSelectableItems()
     {
         if (ItemsSource == null)
         {
-            return false;
+            yield break;
         }
 
-        return ItemsSource.Select(ResolveMediaItem).Any(mediaItem => mediaItem?.IsSelected == true);
+        foreach (var sourceItem in ItemsSource)
+        {
+            var mediaItem = ResolveMediaItem(sourceItem);
+            if (mediaItem != null)
+            {
+                yield return mediaItem;
+            }
+        }
     }
 
     private static MediaItem? ResolveMediaItem(object? rowItem)
@@ -668,17 +949,6 @@ public partial class TableView : ContentView
         base.OnBindingContextChanged();
         RefreshVisibleItems();
         UpdateSelectionIndicator();
-    }
-
-    protected override void OnHandlerChanging(HandlerChangingEventArgs args)
-    {
-        if (args.NewHandler == null)
-        {
-            DetachSelectionObservers();
-            UpdateSelectionIndicator();
-        }
-
-        base.OnHandlerChanging(args);
     }
 
     #endregion

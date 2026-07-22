@@ -931,14 +931,16 @@ public partial class TableView : ContentView
             return;
         }
 
-        // otherwise, play the parent context and start at the clicked item
-        if (PlaybackContextItem is MediaItem parentItem)
+        // otherwise, play current and following items
+        if (itemIndex is >= 0)
         {
-            await playbackService.PlayMediaAsync(new List<MediaItem> { item });
-            return;
+            var playItems = GetPlayableItemsFromIndex(itemIndex.Value);
+            if (playItems.Count > 0)
+            {
+                await playbackService.PlayMediaAsync(playItems);
+                return;
+            }
         }
-
-        await playbackService.PlayMediaAsync(new List<MediaItem> { item });
     }
 
     private async void OnPlayOverlayClicked(object? sender, Microsoft.Maui.Controls.TappedEventArgs e)
@@ -968,11 +970,15 @@ public partial class TableView : ContentView
             return;
         }
 
-        // otherwise, play the parent context and start at the clicked item
-        if (PlaybackContextItem is MediaItem parentItem)
+        // otherwise, play current and following items
+        if (itemIndex is >= 0)
         {
-            await playbackService.PlayMediaAsync(new List<MediaItem> { item });
-            return;
+            var playItems = GetPlayableItemsFromIndex(itemIndex.Value);
+            if (playItems.Count > 0)
+            {
+                await playbackService.PlayMediaAsync(playItems);
+                return;
+            }
         }
 
         await playbackService.PlayMediaAsync(new List<MediaItem> { item });
@@ -1359,6 +1365,18 @@ public partial class TableView : ContentView
         }
 
         return null;
+    }
+
+    private List<MediaItem> GetPlayableItemsFromIndex(int startIndex)
+    {
+        if (startIndex < 0)
+        {
+            return new List<MediaItem>();
+        }
+
+        return EnumerateSelectableItems()
+            .Skip(startIndex)
+            .ToList();
     }
 
     private IEnumerable<MediaItem> EnumerateSelectableItems()
