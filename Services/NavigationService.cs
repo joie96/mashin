@@ -261,21 +261,29 @@ public class NavigationService : INavigationService
         page.BindingContext = null;
         page.Content = null;
 
-        // Dispose async to avoid blocking UI thread
-        _ = Task.Run(() =>
+        // Dispose view model on the UI thread because it may mutate UI-bound collections.
+        try
         {
-            try
+            if (bindingContext is IDisposable disposable)
             {
-                if (bindingContext is IDisposable disposable)
+                if (MainThread.IsMainThread)
                 {
                     disposable.Dispose();
                 }
+                else
+                {
+                    await MainThread.InvokeOnMainThreadAsync(disposable.Dispose);
+                }
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to dispose binding context for {PageName}", page.GetType().Name);
-            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to dispose binding context for {PageName}", page.GetType().Name);
+        }
 
+        // Dispose scope asynchronously to minimize navigation latency.
+        _ = Task.Run(() =>
+        {
             try
             {
                 scope?.Dispose();
