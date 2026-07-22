@@ -10,7 +10,6 @@ namespace mashin.Services;
 public interface IUserDataService
 {
     bool IsLoaded { get; }
-    AuthUser? CurrentUser { get; }
 
     Task<Dictionary<string, object>> GetPreferencesAsync(bool forceRefresh = false, CancellationToken cancellationToken = default);
     Task<T?> GetPreferenceAsync<T>(string key, CancellationToken cancellationToken = default);
@@ -32,11 +31,11 @@ public sealed class UserDataService : IUserDataService
     private readonly SettingsService _settings;
     private readonly ILogger<UserDataService> _logger;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private AuthUser? _currentUser;
 
     private Dictionary<string, object> _preferences = new(StringComparer.OrdinalIgnoreCase);
 
     public bool IsLoaded { get; private set; }
-    public AuthUser? CurrentUser { get; private set; }
 
     #endregion
 
@@ -66,27 +65,27 @@ public sealed class UserDataService : IUserDataService
             if (IsLoaded && !forceRefresh)
             {
                 if (string.IsNullOrWhiteSpace(configuredUsername)
-                    || string.Equals(CurrentUser?.Username, configuredUsername, StringComparison.OrdinalIgnoreCase))
+                    || string.Equals(_currentUser?.Username, configuredUsername, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }
 
                 _logger.LogInformation(
                     "Detected user switch from {CurrentUser} to {ConfiguredUser}, reloading user data",
-                    CurrentUser?.Username,
+                    _currentUser?.Username,
                     configuredUsername);
             }
 
             var user = await _musicAssistant.GetCurrentUserAsync();
             if (user == null)
             {
-                CurrentUser = null;
+                _currentUser = null;
                 _preferences = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
                 IsLoaded = false;
                 return false;
             }
 
-            CurrentUser = user;
+            _currentUser = user;
             _preferences = NormalizeDictionary(user.Preferences);
             IsLoaded = true;
             _logger.LogInformation("Loaded user data for {Username}", user.Username);
@@ -94,7 +93,7 @@ public sealed class UserDataService : IUserDataService
         }
         catch (Exception ex)
         {
-            CurrentUser = null;
+            _currentUser = null;
             _preferences = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             IsLoaded = false;
             _logger.LogWarning(ex, "Failed to load user data");
@@ -675,7 +674,7 @@ public sealed class UserDataService : IUserDataService
 
     private async Task<bool> SaveCoreAsync(CancellationToken cancellationToken)
     {
-        if (CurrentUser?.UserId == null)
+        if (_currentUser?.UserId == null)
         {
             return false;
         }
@@ -683,7 +682,7 @@ public sealed class UserDataService : IUserDataService
         try
         {
             var updatedUser = await _musicAssistant.UpdateUserAsync(
-                userId: CurrentUser.UserId,
+                userId: _currentUser.UserId,
                 preferences: CloneDictionary(_preferences));
 
             if (updatedUser == null)
@@ -691,7 +690,7 @@ public sealed class UserDataService : IUserDataService
                 return false;
             }
 
-            CurrentUser = updatedUser;
+            _currentUser = updatedUser;
             _preferences = NormalizeDictionary(updatedUser.Preferences);
             IsLoaded = true;
             return true;

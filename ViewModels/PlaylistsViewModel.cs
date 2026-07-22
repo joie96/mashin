@@ -16,7 +16,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
     #region Fields
 
     private readonly MusicAssistantService _musicAssistantService;
-    private readonly IUserDataService _userDataService;
+    private readonly SettingsService _settings;
     private readonly IOverlayService _overlayService;
     private readonly INavigationService _navigationService;
     private readonly IMediaItemActions _mediaActions;
@@ -39,7 +39,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
     public PlaylistsViewModel(
         MusicAssistantService musicAssistantService,
-        IUserDataService userDataService,
+        SettingsService settings,
         IOverlayService overlayService,
         INavigationService navigationService,
         IMediaItemActions mediaActions,
@@ -48,7 +48,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         ILogger<PlaylistsViewModel> logger)
     {
         _musicAssistantService = musicAssistantService;
-        _userDataService = userDataService;
+        _settings = settings;
         _overlayService = overlayService;
         _navigationService = navigationService;
         _mediaActions = mediaActions;
@@ -173,9 +173,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
         try
         {
-            await _userDataService.GetPreferencesAsync();
-
-            var username = _userDataService.CurrentUser?.Username;
+            var username = _settings.Username;
             var prefix = string.IsNullOrWhiteSpace(username)
                 ? null
                 : string.Concat(username, "--");
@@ -276,9 +274,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
             return;
         }
 
-        await _userDataService.GetPreferencesAsync();
-
-        var username = _userDataService.CurrentUser?.Username;
+        var username = _settings.Username;
         var prefix = string.IsNullOrWhiteSpace(username)
             ? null
             : string.Concat(username, "--");

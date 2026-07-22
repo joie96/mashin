@@ -23,7 +23,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     // Services
     private readonly SettingsService _settings;
     private readonly MusicAssistantService _musicAssistant;
-    private readonly IUserDataService _userDataService;
     private readonly INavigationService _navigationService;
     private readonly IOverlayService _overlayService;
     private readonly IContextMenuService _contextMenuService;
@@ -84,7 +83,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     public MainViewModel(
         SettingsService settings,
         MusicAssistantService musicAssistant,
-        IUserDataService userDataService,
         INavigationService navigationService,
         IOverlayService overlayService,
         IMediaItemActions mediaActions,
@@ -94,7 +92,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         _settings = settings;
         _musicAssistant = musicAssistant;
-        _userDataService = userDataService;
         _navigationService = navigationService;
         _overlayService = overlayService;
         _contextMenuService = contextMenuService;
@@ -722,7 +719,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             return;
         }
 
-        await _userDataService.GetPreferencesAsync();
         var prefix = GetUserPlaylistPrefix();
         if (!string.IsNullOrWhiteSpace(prefix)
             && !name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
@@ -1165,7 +1161,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         try
         {
-            await _userDataService.GetPreferencesAsync();
             var prefix = GetUserPlaylistPrefix();
             var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(
                 search: string.IsNullOrWhiteSpace(prefix) ? null : prefix,
@@ -1190,7 +1185,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private string? GetUserPlaylistPrefix()
     {
-        var username = _userDataService.CurrentUser?.Username;
+        var username = _settings.Username;
         if (string.IsNullOrWhiteSpace(username))
         {
             return null;

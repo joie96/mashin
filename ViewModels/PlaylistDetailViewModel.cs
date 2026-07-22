@@ -22,6 +22,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly IUserDataService _userDataService;
+    private readonly SettingsService _settings;
     private readonly IOverlayService _overlayService;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
@@ -159,6 +160,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     public PlaylistDetailViewModel(
         MusicAssistantService musicAssistant,
         IUserDataService userDataService,
+        SettingsService settings,
         IOverlayService overlayService,
         IMediaItemActions mediaActions,
         PlaybackService playbackService,
@@ -168,6 +170,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     {
         _musicAssistant = musicAssistant;
         _userDataService = userDataService;
+        _settings = settings;
         _overlayService = overlayService;
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
@@ -410,7 +413,6 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             return;
         }
 
-        await _userDataService.GetPreferencesAsync();
         var prefix = GetUserPlaylistPrefix();
         if (!string.IsNullOrWhiteSpace(prefix)
             && !updatedName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
@@ -751,7 +753,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     #region Helper Methods
     private string? GetUserPlaylistPrefix()
     {
-        var username = _userDataService.CurrentUser?.Username;
+        var username = _settings.Username;
         if (string.IsNullOrWhiteSpace(username))
         {
             return null;

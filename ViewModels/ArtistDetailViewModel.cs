@@ -28,6 +28,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly IUserDataService _userDataService;
+    private readonly SettingsService _settings;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
     private readonly ILogger<ArtistDetailViewModel> _logger;
@@ -224,6 +225,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     public ArtistDetailViewModel(
         MusicAssistantService musicAssistant,
         IUserDataService userDataService,
+        SettingsService settings,
         IMediaItemActions mediaActions,
         PlaybackService playbackService,
         IContextMenuService contextMenuService,
@@ -232,6 +234,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     {
         _musicAssistant = musicAssistant;
         _userDataService = userDataService;
+        _settings = settings;
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
         _logger = logger;
@@ -912,7 +915,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
     private string? GetUserPlaylistPrefix()
     {
-        var username = _userDataService.CurrentUser?.Username;
+        var username = _settings.Username;
         if (string.IsNullOrWhiteSpace(username))
         {
             return null;

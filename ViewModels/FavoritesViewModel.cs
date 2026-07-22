@@ -23,6 +23,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly IUserDataService _userDataService;
+    private readonly SettingsService _settings;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
     private readonly ILogger<FavoritesViewModel> _logger;
@@ -314,6 +315,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
     public FavoritesViewModel(
         MusicAssistantService musicAssistant,
         IUserDataService userDataService,
+        SettingsService settings,
         IMediaItemActions mediaActions,
         PlaybackService playbackService,
         IContextMenuService contextMenuService,
@@ -322,6 +324,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
     {
         _musicAssistant = musicAssistant;
         _userDataService = userDataService;
+        _settings = settings;
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
         _logger = logger;
@@ -1173,7 +1176,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
 
     private string? GetUserPlaylistPrefix()
     {
-        var username = _userDataService.CurrentUser?.Username;
+        var username = _settings.Username;
         if (string.IsNullOrWhiteSpace(username))
         {
             return null;

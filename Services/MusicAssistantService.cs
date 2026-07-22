@@ -470,7 +470,14 @@ public class MusicAssistantService
             provider_instance_id_or_domain = providerInstanceIdOrDomain
         };
 
-        return await SendCommandAsync<T>("music/get_library_item", args);
+        var item = await SendCommandAsync<T>("music/get_library_item", args);
+        if (item is Playlist playlist)
+        {
+            ResolveMediaItemImages(playlist);
+            _ = EnrichWithProviderInfoAsync(new List<Playlist> { playlist });
+        }
+
+        return item;
     }
 
     #endregion
@@ -983,6 +990,11 @@ public class MusicAssistantService
         {
             if (_libraryPlaylistsCache.TryGetValue(cacheKey, out var cachedPlaylists))
             {
+                foreach (var playlist in cachedPlaylists)
+                {
+                    ResolveMediaItemImages(playlist);
+                }
+
                 _logger.LogDebug("Returning cached library playlists for key: {CacheKey}", cacheKey);
                 return new List<Playlist>(cachedPlaylists);
             }
@@ -1005,6 +1017,11 @@ public class MusicAssistantService
 
         var result = await SendCommandAsync<List<Playlist>>("music/playlists/library_items", args);
         var playlists = result ?? new List<Playlist>();
+
+        foreach (var playlist in playlists)
+        {
+            ResolveMediaItemImages(playlist);
+        }
 
         _ = EnrichWithProviderInfoAsync(playlists);
 
@@ -1035,6 +1052,7 @@ public class MusicAssistantService
         var playlist = await SendCommandAsync<Playlist>("music/playlists/get", args);
         if (playlist != null)
         {
+            ResolveMediaItemImages(playlist);
             _ = EnrichWithProviderInfoAsync(new List<Playlist> { playlist });
         }
 
@@ -1349,6 +1367,8 @@ public class MusicAssistantService
 
         if (results != null)
         {
+            ResolveMediaItemImages(results.Playlists ?? new List<Playlist>());
+
             _ = EnrichWithProviderInfoAsync(results.Tracks ?? new List<Track>());
             _ = EnrichWithProviderInfoAsync(results.Albums ?? new List<Album>());
             _ = EnrichWithProviderInfoAsync(results.Artists ?? new List<Artist>());
@@ -1520,6 +1540,8 @@ public class MusicAssistantService
         var albums = items.OfType<Album>().ToList();
         var artists = items.OfType<Artist>().ToList();
         var playlists = items.OfType<Playlist>().ToList();
+
+        ResolveMediaItemImages(playlists);
 
         _ = EnrichWithProviderInfoAsync(tracks);
         _ = EnrichWithProviderInfoAsync(albums);
@@ -2345,40 +2367,22 @@ public class MusicAssistantService
         return path;
     }
 
-    private string ResolveImagePath(string? path, string? provider)
+    private string ResolveImagePath(string? path, string? proxyId = null, string? checksum = null)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
             return string.Empty;
         }
 
-        if (path.StartsWith("/collage", StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(proxyId))
         {
-            // The imageproxy endpoint expects the collage path to be URL-encoded twice.
-            var encodedPath = WebUtility.UrlEncode(WebUtility.UrlEncode(path));
-            var imageProxyUrl = string.Concat(
-                _settings.MusicAssistantUrl.TrimEnd('/'),
-                "/imageproxy?path=",
-                encodedPath);
-            return imageProxyUrl;
-        }
-
-        if (Uri.TryCreate(path, UriKind.Absolute, out var absoluteUri))
-        {
-            if (absoluteUri.AbsolutePath.StartsWith("/collage", StringComparison.OrdinalIgnoreCase))
+            var baseUrl = _settings.MusicAssistantUrl.TrimEnd('/');
+            if (!string.IsNullOrWhiteSpace(checksum))
             {
-                // Absolute collage URLs should also go through imageproxy.
-                var relativeCollagePath = absoluteUri.PathAndQuery;
-                var encodedPath = WebUtility.UrlEncode(WebUtility.UrlEncode(relativeCollagePath));
-                var imageProxyUrl = string.Concat(
-                    _settings.MusicAssistantUrl.TrimEnd('/'),
-                    "/imageproxy?path=",
-                    encodedPath);
-
-                return imageProxyUrl;
+                return string.Concat(baseUrl, "/imageproxy/", proxyId, "?checksum=", Uri.EscapeDataString(checksum));
             }
 
-            return path;
+            return string.Concat(baseUrl, "/imageproxy/", proxyId);
         }
 
         return path;
@@ -2397,6 +2401,19 @@ public class MusicAssistantService
         }
     }
 
+    private void ResolveMediaItemImages(IEnumerable<MediaItem> items)
+    {
+        foreach (var item in items)
+        {
+            if (item == null)
+            {
+                continue;
+            }
+
+            ResolveMediaItemImages(item);
+        }
+    }
+
     private void ResolveMetadataImages(MediaItemMetadata? metadata)
     {
         if (metadata?.Images == null || metadata.Images.Count == 0)
@@ -2411,7 +2428,7 @@ public class MusicAssistantService
                 continue;
             }
 
-            image.Path = ResolveImagePath(image.Path, image.Provider);
+            image.Path = ResolveImagePath(image.Path, image.ProxyId, metadata.CacheChecksum);
         }
     }
 

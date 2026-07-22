@@ -476,6 +476,9 @@ namespace mashin.Models
 
         [JsonPropertyName("release_date")]
         public DateTime? ReleaseDate { get; set; }
+
+        [JsonPropertyName("cache_checksum")]
+        public string? CacheChecksum { get; set; }
     }
 
     /// <summary>
@@ -494,6 +497,9 @@ namespace mashin.Models
 
         [JsonPropertyName("remotely_accessible")]
         public bool RemotelyAccessible { get; set; }
+
+        [JsonPropertyName("proxy_id")]
+        public string? ProxyId { get; set; }
 
     }
 
