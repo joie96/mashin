@@ -985,8 +985,13 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         return true;
     }
 
-    private static QueueItem CloneQueueItem(QueueItem source)
+    private static QueueItem CloneQueueItem(QueueItem? source)
     {
+        if (source == null)
+        {
+            return new QueueItem();
+        }
+
         return new QueueItem
         {
             QueueId = source.QueueId,
@@ -1129,7 +1134,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
                 return;
             }
 
-            _queue.Items.ReplaceRange(queueItems.Select(CloneQueueItem));
+            _queue.Items.ReplaceRange(queueItems.OfType<QueueItem>().Select(CloneQueueItem));
             _queue.ItemCount = Math.Max(_queue.ItemCount, _queue.Items.Count);
             QueueChanged?.Invoke(this, _queue);
         }
@@ -1954,7 +1959,7 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
                 return;
             }
 
-            _queue.Items.ReplaceRange(queueItems.Select(CloneQueueItem));
+            _queue.Items.ReplaceRange(queueItems.OfType<QueueItem>().Select(CloneQueueItem));
             _queue.ItemCount = Math.Max(_queue.ItemCount, _queue.Items.Count);
             QueueChanged?.Invoke(this, _queue);
         }
@@ -2042,8 +2047,13 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
         }
     }
 
-    private static QueueItem CloneQueueItem(QueueItem source)
+    private static QueueItem CloneQueueItem(QueueItem? source)
     {
+        if (source == null)
+        {
+            return new QueueItem();
+        }
+
         return new QueueItem
         {
             QueueId = source.QueueId,

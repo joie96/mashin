@@ -429,7 +429,7 @@ public sealed class PlaybackService
         var itemsChanged = !QueueItemsSequenceEquals(_playbackQueue.Items, queue.Items);
         if (itemsChanged)
         {
-            _playbackQueue.Items.ReplaceRange(queue.Items.Select(CloneQueueItem));
+            _playbackQueue.Items.ReplaceRange(queue.Items.OfType<QueueItem>().Select(CloneQueueItem));
             RaisePropertyChanged(nameof(CurrentQueueItems));
             RaisePropertyChanged(nameof(QueueItemCount));
             RaisePropertyChanged(nameof(CurrentQueueItem));
@@ -477,12 +477,17 @@ public sealed class PlaybackService
             DontStopTheMusicEnabled = source.DontStopTheMusicEnabled
         };
 
-        clone.Items.ReplaceRange(source.Items.Select(CloneQueueItem));
+        clone.Items.ReplaceRange(source.Items.OfType<QueueItem>().Select(CloneQueueItem));
         return clone;
     }
 
-    private static QueueItem CloneQueueItem(QueueItem source)
+    private static QueueItem CloneQueueItem(QueueItem? source)
     {
+        if (source == null)
+        {
+            return new QueueItem();
+        }
+
         return new QueueItem
         {
             QueueId = source.QueueId,
@@ -513,7 +518,20 @@ public sealed class PlaybackService
 
         for (var i = 0; i < currentItems.Count; i++)
         {
-            if (!QueueItemEquals(currentItems[i], nextItems[i]))
+            var current = currentItems[i];
+            var next = nextItems[i];
+
+            if (ReferenceEquals(current, next))
+            {
+                continue;
+            }
+
+            if (current == null || next == null)
+            {
+                return false;
+            }
+
+            if (!QueueItemEquals(current, next))
             {
                 return false;
             }
