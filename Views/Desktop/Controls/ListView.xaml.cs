@@ -31,8 +31,16 @@ public partial class ListView : ContentView
 
     #region Fields
 
+    private const int ColumnCount = 3;
+    private const int ResizeDebounceMilliseconds = 180;
+    private const double WidthSafetyOffset = 1d;
+
     private readonly ObservableRangeCollection<object> _visibleItems = new();
     private INotifyCollectionChanged? _itemsSourceCollection;
+    private CancellationTokenSource? _resizeDebounceCts;
+    private bool _isUnloaded;
+    private bool _hasMeasuredHostWidth;
+    private double _pendingItemsHostWidth = double.NaN;
 
     #endregion
 
@@ -60,6 +68,15 @@ public partial class ListView : ContentView
     {
         get => (int)GetValue(MaxItemsProperty);
         set => SetValue(MaxItemsProperty, value);
+    }
+
+    public static readonly BindableProperty ItemWidthProperty =
+        BindableProperty.Create(nameof(ItemWidth), typeof(double), typeof(ListView), 0d);
+
+    public double ItemWidth
+    {
+        get => (double)GetValue(ItemWidthProperty);
+        private set => SetValue(ItemWidthProperty, value);
     }
 
     #endregion
@@ -182,22 +199,139 @@ public partial class ListView : ContentView
 
     private void OnListViewSizeChanged(object? sender, EventArgs e)
     {
-        if (ItemsCollectionView.Width <= 0)
+        if (sender is not VisualElement element)
         {
             return;
         }
+
+        if (_isUnloaded || Handler == null)
+        {
+            return;
+        }
+
+        var width = element.Width;
+        if (double.IsNaN(width) || double.IsInfinity(width) || width <= 0)
+        {
+            return;
+        }
+
+        if (!IsVisible)
+        {
+            _resizeDebounceCts?.Cancel();
+            return;
+        }
+
+        if (element.Height <= 0 || Height <= 0)
+        {
+            _resizeDebounceCts?.Cancel();
+            return;
+        }
+
+        if (!_hasMeasuredHostWidth)
+        {
+            ApplyItemsHostWidth(width);
+            return;
+        }
+
+        _pendingItemsHostWidth = width;
+        DebounceItemsHostWidthApply();
+    }
+
+    private void DebounceItemsHostWidthApply()
+    {
+        _resizeDebounceCts?.Cancel();
+        _resizeDebounceCts?.Dispose();
+
+        _resizeDebounceCts = new CancellationTokenSource();
+        var token = _resizeDebounceCts.Token;
+
+        _ = ApplyItemsHostWidthAfterDelayAsync(token);
+    }
+
+    private async Task ApplyItemsHostWidthAfterDelayAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(ResizeDebounceMilliseconds, token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+
+        if (token.IsCancellationRequested || _isUnloaded || Handler == null || !IsVisible)
+        {
+            return;
+        }
+
+        if (ItemsCollectionView.Height <= 0 || Height <= 0)
+        {
+            return;
+        }
+
+        if (!MainThread.IsMainThread)
+        {
+            MainThread.BeginInvokeOnMainThread(() => ApplyItemsHostWidth(_pendingItemsHostWidth));
+            return;
+        }
+
+        ApplyItemsHostWidth(_pendingItemsHostWidth);
+    }
+
+    private void ApplyItemsHostWidth(double width)
+    {
+        if (double.IsNaN(width) || double.IsInfinity(width) || width <= 0)
+        {
+            return;
+        }
+
+        _hasMeasuredHostWidth = true;
 
         if (ItemsCollectionView.ItemsLayout is not GridItemsLayout gridLayout)
         {
             return;
         }
 
+        var horizontalSpacing = gridLayout.HorizontalItemSpacing;
+        // Keep item width slightly conservative and rounded down so all 3 columns always fit.
+        var safeWidth = Math.Max(1d, Math.Floor(width - WidthSafetyOffset));
+        var contentWidth = Math.Max(1d, safeWidth - horizontalSpacing * (ColumnCount - 1));
+        var targetItemWidth = Math.Max(1d, Math.Floor(contentWidth / ColumnCount));
+
+        if (Math.Abs(ItemWidth - targetItemWidth) > 0.25d)
+        {
+            ItemWidth = targetItemWidth;
+        }
+
+        if (Math.Abs(ItemsCollectionView.WidthRequest - safeWidth) > 0.25d)
+        {
+            ItemsCollectionView.WidthRequest = safeWidth;
+        }
+
         // Recreate layout to avoid stale item size cache at specific window widths.
-        ItemsCollectionView.ItemsLayout = new GridItemsLayout(3, gridLayout.Orientation)
+        ItemsCollectionView.ItemsLayout = new GridItemsLayout(ColumnCount, gridLayout.Orientation)
         {
             HorizontalItemSpacing = gridLayout.HorizontalItemSpacing,
             VerticalItemSpacing = gridLayout.VerticalItemSpacing
         };
+    }
+
+    protected override void OnHandlerChanging(HandlerChangingEventArgs args)
+    {
+        if (args.NewHandler == null)
+        {
+            _isUnloaded = true;
+            _resizeDebounceCts?.Cancel();
+            _resizeDebounceCts?.Dispose();
+            _resizeDebounceCts = null;
+            _pendingItemsHostWidth = double.NaN;
+        }
+        else
+        {
+            _isUnloaded = false;
+        }
+
+        base.OnHandlerChanging(args);
     }
 
     #endregion

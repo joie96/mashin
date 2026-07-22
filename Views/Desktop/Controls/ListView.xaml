@@ -13,6 +13,7 @@
         <DataTemplate x:Key="PlaylistTemplate" x:DataType="models:Playlist">
             <Border
                 HeightRequest="50"
+                WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}"
                 StrokeThickness="0"
                 BackgroundColor="{DynamicResource BackgroundSecondary}">
                 <Border.StrokeShape>
@@ -96,6 +97,7 @@
         <DataTemplate x:Key="SkeletonTemplate" x:DataType="models:ListViewSkeleton">
             <Border
                 HeightRequest="50"
+                WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}"
                 StrokeThickness="0"
                 BackgroundColor="{DynamicResource BackgroundSecondary}">
                 <Border.StrokeShape>
@@ -129,8 +131,8 @@
     <!--  Items Grid  -->
     <CollectionView x:Name="ItemsCollectionView"
         Margin="-6"
-        HorizontalOptions="Fill"
-        ItemSizingStrategy="MeasureAllItems"
+        HorizontalOptions="Start"
+        ItemSizingStrategy="MeasureFirstItem"
         SelectionMode="None"
         VerticalScrollBarVisibility="Never">
         <CollectionView.ItemsLayout>
