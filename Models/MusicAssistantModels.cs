@@ -914,9 +914,11 @@ namespace mashin.Models
     /// <summary>
     /// Music Assistant API QueueItem wrapper
     /// </summary>
-    public class QueueItem
+    public class QueueItem : INotifyPropertyChanged
     {
         private int _index;
+
+        public event PropertyChangedEventHandler? PropertyChanged;
 
         [JsonPropertyName("queue_id")]
         public string QueueId { get; set; } = string.Empty;
@@ -946,7 +948,7 @@ namespace mashin.Models
         public int Index
         {
             get => _index;
-            set => _index = value;
+            set => SetProperty(ref _index, value);
         }
 
         [JsonPropertyName("available")]
@@ -957,6 +959,18 @@ namespace mashin.Models
 
         [JsonIgnore]
         public TimeSpan? DurationTimeSpan => Duration.HasValue ? TimeSpan.FromSeconds(Duration.Value) : null;
+
+        private bool SetProperty<T>(ref T storage, T value, [CallerMemberName] string? propertyName = null)
+        {
+            if (EqualityComparer<T>.Default.Equals(storage, value))
+            {
+                return false;
+            }
+
+            storage = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+            return true;
+        }
     }
 
     /// <summary>

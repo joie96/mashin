@@ -5,7 +5,6 @@ using Microsoft.Maui.ApplicationModel;
 using System.Collections;
 using System.Collections.Specialized;
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Linq;
 using System.Windows.Input;
 
@@ -318,6 +317,11 @@ public partial class TableView : ContentView
     private static void OnItemsSourceChanged(BindableObject bindable, object oldValue, object newValue)
     {
         if (bindable is not TableView view)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(oldValue, newValue))
         {
             return;
         }

@@ -1184,6 +1184,7 @@
                         ItemTemplate="{StaticResource TableViewTemplateSelector}"
                         ItemSizingStrategy="MeasureFirstItem"
                         ItemsSource="{Binding VisibleItems, Source={x:Reference self}}"
+                ItemsUpdatingScrollMode="KeepScrollOffset"
                         SelectionMode="None">
         </CollectionView>
     </Grid>

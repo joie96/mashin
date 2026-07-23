@@ -1011,7 +1011,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private void OnCurrentQueueItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        OnPropertyChanged(nameof(CurrentQueueItems));
         OnPropertyChanged(nameof(CurrentQueueItem));
         OnPropertyChanged(nameof(CurrentQueueItemPrimaryArtist));
         OnPropertyChanged(nameof(QueueTrackCountText));

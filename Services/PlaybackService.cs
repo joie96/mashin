@@ -432,7 +432,6 @@ public sealed class PlaybackService
             var itemsChanged = ApplyQueueItemsUsingLcs(_playbackQueue.Items, queue.Items);
             if (itemsChanged)
             {
-                RaisePropertyChanged(nameof(CurrentQueueItems));
                 RaisePropertyChanged(nameof(QueueItemCount));
                 RaisePropertyChanged(nameof(CurrentQueueItem));
             }
@@ -510,45 +509,10 @@ public sealed class PlaybackService
         };
     }
 
-    private static bool QueueItemsSequenceEquals(IReadOnlyList<QueueItem> currentItems, IReadOnlyList<QueueItem> nextItems)
-    {
-        if (ReferenceEquals(currentItems, nextItems))
-        {
-            return true;
-        }
-
-        if (currentItems.Count != nextItems.Count)
-        {
-            return false;
-        }
-
-        for (var i = 0; i < currentItems.Count; i++)
-        {
-            var current = currentItems[i];
-            var next = nextItems[i];
-
-            if (ReferenceEquals(current, next))
-            {
-                continue;
-            }
-
-            if (current == null || next == null)
-            {
-                return false;
-            }
-
-            if (!QueueItemEquals(current, next))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
     private bool ApplyQueueItemsUsingLcs(ObservableRangeCollection<QueueItem> targetItems, IReadOnlyList<QueueItem> sourceItemsRaw)
     {
         var sourceItems = sourceItemsRaw.OfType<QueueItem>().ToList();
+        var targetItemsBefore = targetItems.ToList();
         var insertedCount = 0;
         var removedCount = 0;
 
@@ -572,44 +536,92 @@ public sealed class PlaybackService
         }
 
         var changed = false;
-        var iCursor = n;
-        var jCursor = m;
+        var operations = new List<(bool Insert, int Index, QueueItem Item)>();
+        var iCursor = 0;
+        var jCursor = 0;
 
-        // Apply diff from tail to head so index shifts cannot invalidate upcoming operations.
-        while (iCursor > 0 || jCursor > 0)
+        // Walk from head to tail using the suffix-LCS matrix.
+        // This yields a minimal edit script (n + m - 2 * LCS).
+        while (iCursor < n || jCursor < m)
         {
-            if (iCursor > 0 && jCursor > 0 && QueueItemEquals(targetItems[iCursor - 1], sourceItems[jCursor - 1]))
+            if (iCursor < n && jCursor < m && QueueItemEquals(targetItemsBefore[iCursor], sourceItems[jCursor]))
             {
-                iCursor--;
-                jCursor--;
+                iCursor++;
+                jCursor++;
                 continue;
             }
 
-            if (jCursor > 0 && (iCursor == 0 || dp[iCursor, jCursor - 1] >= dp[iCursor - 1, jCursor]))
+            if (jCursor < m && (iCursor == n || dp[iCursor, jCursor + 1] >= dp[iCursor + 1, jCursor]))
             {
-                targetItems.Insert(iCursor, CloneQueueItem(sourceItems[jCursor - 1]));
-                insertedCount++;
-                changed = true;
-                jCursor--;
+                operations.Add((true, iCursor, sourceItems[jCursor]));
+                jCursor++;
                 continue;
             }
 
-            if (iCursor > 0)
+            if (iCursor < n)
             {
-                targetItems.RemoveAt(iCursor - 1);
-                removedCount++;
-                changed = true;
-                iCursor--;
+                operations.Add((false, iCursor, targetItemsBefore[iCursor]));
+                iCursor++;
             }
         }
 
-        _logger.LogDebug(
-            "Queue-LCS-Diff abgeschlossen: Inserted={Inserted}, Removed={Removed}, Changed={Changed}, TargetCount={TargetCount}, SourceCount={SourceCount}",
-            insertedCount,
-            removedCount,
-            changed,
-            targetItems.Count,
-            sourceItems.Count);
+        var indexDelta = 0;
+
+        foreach (var operation in operations)
+        {
+            var applyIndex = operation.Index + indexDelta;
+
+            if (operation.Insert)
+            {
+                var insertedItem = CloneQueueItem(operation.Item);
+                applyIndex = Math.Clamp(applyIndex, 0, targetItems.Count);
+                targetItems.Insert(applyIndex, insertedItem);
+                insertedCount++;
+                indexDelta++;
+                changed = true;
+                continue;
+            }
+
+            if (applyIndex < 0 || applyIndex >= targetItems.Count)
+            {
+                _logger.LogWarning(
+                    "Queue-LCS-Diff remove index out of range. ApplyIndex={ApplyIndex}, TargetCount={TargetCount}, PlannedIndex={PlannedIndex}, Delta={Delta}",
+                    applyIndex,
+                    targetItems.Count,
+                    operation.Index,
+                    indexDelta);
+                continue;
+            }
+
+            targetItems.RemoveAt(applyIndex);
+            removedCount++;
+            indexDelta--;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            // Update indices (because index might have changed)
+            var overlapCount = Math.Min(targetItems.Count, sourceItems.Count);
+            for (var index = 0; index < overlapCount; index++)
+            {
+                if (!QueueItemEquals(targetItems[index], sourceItems[index]))
+                {
+                    continue;
+                }
+
+                targetItems[index].SortIndex = sourceItems[index].SortIndex;
+                targetItems[index].Index = sourceItems[index].Index;
+            }
+
+            _logger.LogDebug(
+                "Queue-LCS-Diff abgeschlossen: Inserted={Inserted}, Removed={Removed}, Changed={Changed}, TargetCount={TargetCount}, SourceCount={SourceCount}",
+                insertedCount,
+                removedCount,
+                changed,
+                targetItems.Count,
+                sourceItems.Count);
+        }
 
         return changed;
     }
