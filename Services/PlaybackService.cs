@@ -23,6 +23,7 @@ public sealed class PlaybackService
     private readonly Dictionary<PlaybackOutputMode, IPlayerService> _players;
 
     private readonly PlaybackQueue _playbackQueue = new();
+    private readonly object _playbackQueueSync = new();
 
     private PlaybackOutputMode _outputMode = PlaybackOutputMode.Sendspin;
     private IPlayerService _activePlayer;
@@ -376,92 +377,97 @@ public sealed class PlaybackService
 
     private void ApplyPlaybackQueue(PlaybackQueue queue)
     {
-        var queueIdChanged = !string.Equals(_playbackQueue.QueueId, Normalize(queue.QueueId), StringComparison.Ordinal);
-        if (queueIdChanged)
+        lock (_playbackQueueSync)
         {
-            _playbackQueue.QueueId = Normalize(queue.QueueId);
-        }
+            var queueIdChanged = !string.Equals(_playbackQueue.QueueId, Normalize(queue.QueueId), StringComparison.Ordinal);
+            if (queueIdChanged)
+            {
+                _playbackQueue.QueueId = Normalize(queue.QueueId);
+            }
 
-        var currentIndexChanged = _playbackQueue.CurrentIndex != queue.CurrentIndex;
-        if (currentIndexChanged)
-        {
-            _playbackQueue.CurrentIndex = queue.CurrentIndex;
-            RaisePropertyChanged(nameof(CurrentQueueIndex));
-            RaisePropertyChanged(nameof(CurrentQueueItem));
-        }
+            var currentIndexChanged = _playbackQueue.CurrentIndex != queue.CurrentIndex;
+            if (currentIndexChanged)
+            {
+                _playbackQueue.CurrentIndex = queue.CurrentIndex;
+                RaisePropertyChanged(nameof(CurrentQueueIndex));
+                RaisePropertyChanged(nameof(CurrentQueueItem));
+            }
 
-        var currentQueueItemIdChanged = !string.Equals(_playbackQueue.CurrentQueueItemId, Normalize(queue.CurrentQueueItemId), StringComparison.Ordinal);
-        if (currentQueueItemIdChanged)
-        {
-            _playbackQueue.CurrentQueueItemId = Normalize(queue.CurrentQueueItemId);
-            RaisePropertyChanged(nameof(CurrentQueueItem));
-        }
+            var currentQueueItemIdChanged = !string.Equals(_playbackQueue.CurrentQueueItemId, Normalize(queue.CurrentQueueItemId), StringComparison.Ordinal);
+            if (currentQueueItemIdChanged)
+            {
+                _playbackQueue.CurrentQueueItemId = Normalize(queue.CurrentQueueItemId);
+                RaisePropertyChanged(nameof(CurrentQueueItem));
+            }
 
-        var nextItemCount = Math.Max(0, queue.ItemCount);
-        var itemCountChanged = _playbackQueue.ItemCount != nextItemCount;
-        if (itemCountChanged)
-        {
-            _playbackQueue.ItemCount = nextItemCount;
-            RaisePropertyChanged(nameof(QueueItemCount));
-        }
+            var nextItemCount = Math.Max(0, queue.ItemCount);
+            var itemCountChanged = _playbackQueue.ItemCount != nextItemCount;
+            if (itemCountChanged)
+            {
+                _playbackQueue.ItemCount = nextItemCount;
+                RaisePropertyChanged(nameof(QueueItemCount));
+            }
 
-        var shuffleChanged = _playbackQueue.ShuffleEnabled != queue.ShuffleEnabled;
-        if (shuffleChanged)
-        {
-            _playbackQueue.ShuffleEnabled = queue.ShuffleEnabled;
-            RaisePropertyChanged(nameof(ShuffleEnabled));
-        }
+            var shuffleChanged = _playbackQueue.ShuffleEnabled != queue.ShuffleEnabled;
+            if (shuffleChanged)
+            {
+                _playbackQueue.ShuffleEnabled = queue.ShuffleEnabled;
+                RaisePropertyChanged(nameof(ShuffleEnabled));
+            }
 
-        var repeatChanged = _playbackQueue.RepeatMode != queue.RepeatMode;
-        if (repeatChanged)
-        {
-            _playbackQueue.RepeatMode = queue.RepeatMode;
-            RaisePropertyChanged(nameof(RepeatMode));
-        }
+            var repeatChanged = _playbackQueue.RepeatMode != queue.RepeatMode;
+            if (repeatChanged)
+            {
+                _playbackQueue.RepeatMode = queue.RepeatMode;
+                RaisePropertyChanged(nameof(RepeatMode));
+            }
 
-        var dontStopTheMusicChanged = _playbackQueue.DontStopTheMusicEnabled != queue.DontStopTheMusicEnabled;
-        if (dontStopTheMusicChanged)
-        {
-            _playbackQueue.DontStopTheMusicEnabled = queue.DontStopTheMusicEnabled;
-            RaisePropertyChanged(nameof(DontStopTheMusicEnabled));
-        }
+            var dontStopTheMusicChanged = _playbackQueue.DontStopTheMusicEnabled != queue.DontStopTheMusicEnabled;
+            if (dontStopTheMusicChanged)
+            {
+                _playbackQueue.DontStopTheMusicEnabled = queue.DontStopTheMusicEnabled;
+                RaisePropertyChanged(nameof(DontStopTheMusicEnabled));
+            }
 
-        var itemsChanged = !QueueItemsSequenceEquals(_playbackQueue.Items, queue.Items);
-        if (itemsChanged)
-        {
-            _playbackQueue.Items.ReplaceRange(queue.Items.OfType<QueueItem>().Select(CloneQueueItem));
-            RaisePropertyChanged(nameof(CurrentQueueItems));
-            RaisePropertyChanged(nameof(QueueItemCount));
-            RaisePropertyChanged(nameof(CurrentQueueItem));
-        }
+            var itemsChanged = ApplyQueueItemsUsingLcs(_playbackQueue.Items, queue.Items);
+            if (itemsChanged)
+            {
+                RaisePropertyChanged(nameof(CurrentQueueItems));
+                RaisePropertyChanged(nameof(QueueItemCount));
+                RaisePropertyChanged(nameof(CurrentQueueItem));
+            }
 
-        if (queueIdChanged)
-        {
-            // QueueId has no public projection property currently.
+            if (queueIdChanged)
+            {
+                // QueueId has no public projection property currently.
+            }
         }
     }
 
     private QueueItem? ResolveCurrentQueueItem()
     {
-        var currentItemId = Normalize(_playbackQueue.CurrentQueueItemId);
-        if (!string.IsNullOrWhiteSpace(currentItemId))
+        lock (_playbackQueueSync)
         {
-            var byId = _playbackQueue.Items.FirstOrDefault(item =>
-                string.Equals(Normalize(item.QueueItemId), currentItemId, StringComparison.Ordinal));
-            if (byId != null)
+            var currentItemId = Normalize(_playbackQueue.CurrentQueueItemId);
+            if (!string.IsNullOrWhiteSpace(currentItemId))
             {
-                return byId;
+                var byId = _playbackQueue.Items.FirstOrDefault(item =>
+                    string.Equals(Normalize(item.QueueItemId), currentItemId, StringComparison.Ordinal));
+                if (byId != null)
+                {
+                    return byId;
+                }
             }
-        }
 
-        if (_playbackQueue.CurrentIndex is int currentIndex
-            && currentIndex >= 0
-            && currentIndex < _playbackQueue.Items.Count)
-        {
-            return _playbackQueue.Items[currentIndex];
-        }
+            if (_playbackQueue.CurrentIndex is int currentIndex
+                && currentIndex >= 0
+                && currentIndex < _playbackQueue.Items.Count)
+            {
+                return _playbackQueue.Items[currentIndex];
+            }
 
-        return null;
+            return null;
+        }
     }
 
     private static PlaybackQueue CloneQueue(PlaybackQueue source)
@@ -540,29 +546,91 @@ public sealed class PlaybackService
         return true;
     }
 
+    private bool ApplyQueueItemsUsingLcs(ObservableRangeCollection<QueueItem> targetItems, IReadOnlyList<QueueItem> sourceItemsRaw)
+    {
+        var sourceItems = sourceItemsRaw.OfType<QueueItem>().ToList();
+        var insertedCount = 0;
+        var removedCount = 0;
+
+        var n = targetItems.Count;
+        var m = sourceItems.Count;
+        var dp = new int[n + 1, m + 1];
+
+        for (var i = n - 1; i >= 0; i--)
+        {
+            for (var j = m - 1; j >= 0; j--)
+            {
+                if (QueueItemEquals(targetItems[i], sourceItems[j]))
+                {
+                    dp[i, j] = dp[i + 1, j + 1] + 1;
+                }
+                else
+                {
+                    dp[i, j] = Math.Max(dp[i + 1, j], dp[i, j + 1]);
+                }
+            }
+        }
+
+        var changed = false;
+        var iCursor = n;
+        var jCursor = m;
+
+        // Apply diff from tail to head so index shifts cannot invalidate upcoming operations.
+        while (iCursor > 0 || jCursor > 0)
+        {
+            if (iCursor > 0 && jCursor > 0 && QueueItemEquals(targetItems[iCursor - 1], sourceItems[jCursor - 1]))
+            {
+                iCursor--;
+                jCursor--;
+                continue;
+            }
+
+            if (jCursor > 0 && (iCursor == 0 || dp[iCursor, jCursor - 1] >= dp[iCursor - 1, jCursor]))
+            {
+                targetItems.Insert(iCursor, CloneQueueItem(sourceItems[jCursor - 1]));
+                insertedCount++;
+                changed = true;
+                jCursor--;
+                continue;
+            }
+
+            if (iCursor > 0)
+            {
+                targetItems.RemoveAt(iCursor - 1);
+                removedCount++;
+                changed = true;
+                iCursor--;
+            }
+        }
+
+        _logger.LogDebug(
+            "Queue-LCS-Diff abgeschlossen: Inserted={Inserted}, Removed={Removed}, Changed={Changed}, TargetCount={TargetCount}, SourceCount={SourceCount}",
+            insertedCount,
+            removedCount,
+            changed,
+            targetItems.Count,
+            sourceItems.Count);
+
+        return changed;
+    }
+
     private static bool QueueItemEquals(QueueItem left, QueueItem right)
     {
-        if (!string.Equals(left.QueueItemId, right.QueueItemId, StringComparison.Ordinal)
-            || !string.Equals(left.QueueId, right.QueueId, StringComparison.Ordinal)
-            || !string.Equals(left.Name, right.Name, StringComparison.Ordinal)
-            || left.Duration != right.Duration
-            || left.SortIndex != right.SortIndex
-            || left.Index != right.Index
-            || left.Available != right.Available)
+        var leftQueueItemId = Normalize(left.QueueItemId);
+        var rightQueueItemId = Normalize(right.QueueItemId);
+        var leftQueueId = Normalize(left.QueueId);
+        var rightQueueId = Normalize(right.QueueId);
+
+        if (string.IsNullOrWhiteSpace(leftQueueItemId)
+            || string.IsNullOrWhiteSpace(rightQueueItemId)
+            || string.IsNullOrWhiteSpace(leftQueueId)
+            || string.IsNullOrWhiteSpace(rightQueueId))
         {
             return false;
         }
 
-        var leftTrack = left.MediaItem;
-        var rightTrack = right.MediaItem;
-        if (!string.Equals(leftTrack?.ItemId, rightTrack?.ItemId, StringComparison.Ordinal)
-            || !string.Equals(leftTrack?.Provider, rightTrack?.Provider, StringComparison.Ordinal)
-            || !string.Equals(leftTrack?.LocalPath, rightTrack?.LocalPath, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        return true;
+        return string.Equals(leftQueueItemId, rightQueueItemId, StringComparison.Ordinal)
+            && string.Equals(leftQueueId, rightQueueId, StringComparison.Ordinal);
     }
 
     #endregion
