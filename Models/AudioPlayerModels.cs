@@ -18,11 +18,25 @@ public enum PlayerStateType
 }
 
 /// <summary>
+/// Optional reason metadata for player state transitions.
+/// </summary>
+public enum PlayerStateReason
+{
+    PlayMedia,
+    Seek,
+    Reconnect,
+    UserAction,
+    System
+}
+
+/// <summary>
 /// Unified player state with transition timestamp.
 /// </summary>
 public sealed class PlayerState
 {
     public PlayerStateType State { get; set; } = PlayerStateType.Unknown;
+
+    public PlayerStateReason? Reason { get; set; }
 
     public DateTimeOffset ActiveSinceUtc { get; set; } = DateTimeOffset.UtcNow;
 }
