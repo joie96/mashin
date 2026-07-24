@@ -1162,7 +1162,9 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
 
         try
         {
-            var queueItems = await _musicAssistant.GetQueueItemsAsync(normalizedQueueId);
+            var queueItems = await _musicAssistant.GetQueueItemsAsync(
+                normalizedQueueId,
+                useSortIndexRankForDisplay: _queue.ShuffleEnabled == true);
             if (!string.Equals(normalizedQueueId, Normalize(_activeQueueId), StringComparison.Ordinal))
             {
                 return;
@@ -1986,7 +1988,9 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
 
         try
         {
-            var queueItems = await _musicAssistant.GetQueueItemsAsync(normalizedQueueId);
+            var queueItems = await _musicAssistant.GetQueueItemsAsync(
+                normalizedQueueId,
+                useSortIndexRankForDisplay: _queue.ShuffleEnabled == true);
             if (!string.Equals(normalizedQueueId, Normalize(_activeQueueId), StringComparison.Ordinal))
             {
                 return;

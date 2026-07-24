@@ -1723,7 +1723,11 @@ public class MusicAssistantService
     /// <summary>
     /// Return all QueueItems for given PlayerQueue.
     /// </summary>
-    public async Task<List<QueueItem>> GetQueueItemsAsync(string queueId, int? limit = null, int? offset = null)
+    public async Task<List<QueueItem>> GetQueueItemsAsync(
+        string queueId,
+        int? limit = null,
+        int? offset = null,
+        bool useSortIndexRankForDisplay = false)
     {
         _logger.LogInformation("Fetching queue items for: {QueueId}", queueId);
 
@@ -1738,24 +1742,38 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<QueueItem>>("player_queues/items", args);
         var queueItems = result ?? new List<QueueItem>();
 
-        var sortIndexRankMap = queueItems
-            .Where(item => item.SortIndex.HasValue)
-            .Select(item => item.SortIndex!.Value)
-            .Distinct()
-            .OrderBy(sortIndex => sortIndex)
-            .Select((sortIndex, rank) => new { sortIndex, rank })
-            .ToDictionary(entry => entry.sortIndex, entry => entry.rank);
-
-        var nextIndex = sortIndexRankMap.Count;
-        foreach (var item in queueItems)
+        Dictionary<int, int>? sortIndexRankMap = null;
+        if (useSortIndexRankForDisplay)
         {
-            if (item.SortIndex.HasValue && sortIndexRankMap.TryGetValue(item.SortIndex.Value, out var rank))
+            sortIndexRankMap = queueItems
+                .Where(item => item.SortIndex.HasValue)
+                .Select(item => item.SortIndex!.Value)
+                .Distinct()
+                .OrderBy(sortIndex => sortIndex)
+                .Select((sortIndex, rank) => new { sortIndex, rank })
+                .ToDictionary(entry => entry.sortIndex, entry => entry.rank);
+        }
+
+        for (var i = 0; i < queueItems.Count; i++)
+        {
+            var queueItem = queueItems[i];
+
+            if (useSortIndexRankForDisplay
+                && queueItem.SortIndex.HasValue
+                && sortIndexRankMap != null
+                && sortIndexRankMap.TryGetValue(queueItem.SortIndex.Value, out var rank))
             {
-                item.Index = rank;
+                queueItem.Index = rank;
             }
             else
             {
-                item.Index = nextIndex++;
+                queueItem.Index = i;
+            }
+
+            // Keep Track.Index positional for command flows that target play_index.
+            if (queueItem.MediaItem is Track track)
+            {
+                track.Index = i + 1;
             }
         }
 

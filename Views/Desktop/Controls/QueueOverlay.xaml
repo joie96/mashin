@@ -194,7 +194,7 @@
                         PageSize="0"
                         ItemsSource="{Binding CurrentQueueItems}"
                         MediaActions="{Binding MediaActions}"
-                        PlaybackContextItem="{Binding CurrentPlayerQueue}"
+                        PlaybackContextItem="{Binding CurrentQueueItems}"
                         PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"
                         SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
                         ShowContextMenuAtAnchorCommand="{Binding ShowQueueContextMenuAtAnchorCommand}"

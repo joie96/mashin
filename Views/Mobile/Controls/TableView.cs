@@ -444,9 +444,8 @@ public partial class TableView : ContentView
             {
                 var itemIndex = GetIndexOf(mediaItem);
 
-                
                 // if queue, play the queue index via playback service
-                if (PlaybackContextItem is PlayerQueue && itemIndex is >= 0)
+                if (PlaybackContextItem is IEnumerable<QueueItem> && itemIndex is >= 0)
                 {
                     await playbackService.PlayQueueIndexAsync(itemIndex.Value);
                     return;

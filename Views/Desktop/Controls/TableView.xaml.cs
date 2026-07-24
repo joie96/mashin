@@ -929,7 +929,7 @@ public partial class TableView : ContentView
         // if queue, play the queue index via playback service
         var itemIndex = GetIndexOf(item);
 
-        if (PlaybackContextItem is PlayerQueue && itemIndex is >= 0 && _playbackService != null)
+        if (PlaybackContextItem is IEnumerable<QueueItem> && itemIndex is >= 0 && _playbackService != null)
         {
             await playbackService.PlayQueueIndexAsync(itemIndex.Value);
             return;
@@ -968,7 +968,7 @@ public partial class TableView : ContentView
         // if queue, play the queue index via playback service
         var itemIndex = GetIndexOf(item);
 
-        if (PlaybackContextItem is PlayerQueue && itemIndex is >= 0 && _playbackService != null)
+        if (PlaybackContextItem is IEnumerable<QueueItem> && itemIndex is >= 0 && _playbackService != null)
         {
             await playbackService.PlayQueueIndexAsync(itemIndex.Value);
             return;
@@ -1460,7 +1460,7 @@ public sealed class TableViewHeaderTemplateSelector : DataTemplateSelector
             return TrackHeaderTemplate;
         }
 
-        if (item is PlayerQueue && QueueHeaderTemplate != null)
+        if (item is IEnumerable<QueueItem> && QueueHeaderTemplate != null)
         {
             return QueueHeaderTemplate;
         }    
