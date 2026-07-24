@@ -599,21 +599,27 @@ public sealed class PlaybackService
             changed = true;
         }
 
-        if (changed)
-        {
-            // Update indices (because index might have changed)
-            var overlapCount = Math.Min(targetItems.Count, sourceItems.Count);
-            for (var index = 0; index < overlapCount; index++)
-            {
-                if (!QueueItemEquals(targetItems[index], sourceItems[index]))
-                {
-                    continue;
-                }
+        var sourceItemsById = sourceItems
+            .Where(item => !string.IsNullOrWhiteSpace(Normalize(item.QueueItemId)))
+            .GroupBy(item => Normalize(item.QueueItemId)!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
 
-                targetItems[index].SortIndex = sourceItems[index].SortIndex;
-                targetItems[index].Index = sourceItems[index].Index;
+        // Update SortIndex and Index for items that exist in both source and target.
+        foreach (var targetItem in targetItems)
+        {
+            var targetQueueItemId = Normalize(targetItem.QueueItemId);
+            if (string.IsNullOrWhiteSpace(targetQueueItemId)
+                || !sourceItemsById.TryGetValue(targetQueueItemId, out var sourceItem))
+            {
+                continue;
             }
 
+            targetItem.SortIndex = sourceItem.SortIndex;
+            targetItem.Index = sourceItem.Index;
+        }
+
+        if (changed)
+        {
             _logger.LogDebug(
                 "Queue-LCS-Diff abgeschlossen: Inserted={Inserted}, Removed={Removed}, Changed={Changed}, TargetCount={TargetCount}, SourceCount={SourceCount}",
                 insertedCount,
