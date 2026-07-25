@@ -677,7 +677,7 @@
                 <!--  Right: Queue  -->
                 <Grid Grid.Column="2"
                     ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
-                    ColumnSpacing="12"
+                    ColumnSpacing="10"
                     HorizontalOptions="End"
                     IsClippedToBounds="True"
                     VerticalOptions="Center">
@@ -847,7 +847,8 @@
             Grid.RowSpan="3"
             Grid.Column="0"
             Grid.ColumnSpan="2"
-            IsVisible="{Binding IsDeviceSelectionFlyoutOpen}">
+            IsVisible="{Binding IsDeviceSelectionFlyoutOpen}"
+            ZIndex="127">
             <BoxView BackgroundColor="Transparent">
                 <BoxView.GestureRecognizers>
                     <TapGestureRecognizer Command="{Binding CloseDeviceSelectionFlyoutCommand}" />
@@ -925,7 +926,8 @@
             Grid.RowSpan="3"
             Grid.Column="0"
             Grid.ColumnSpan="2"
-            IsVisible="{Binding IsAudioOptionsFlyoutOpen}">
+            IsVisible="{Binding IsAudioOptionsFlyoutOpen}"
+            ZIndex="128">
             <BoxView BackgroundColor="Transparent">
                 <BoxView.GestureRecognizers>
                     <TapGestureRecognizer Command="{Binding CloseAudioOptionsFlyoutCommand}" />
