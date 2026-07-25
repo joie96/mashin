@@ -102,7 +102,7 @@ public class SettingsService
 
         // Persist only a single preferred codec and derive the advertised format list from it.
         _sendspinPreferredAudioCodec = LoadSendspinPreferredAudioCodec();
-        SendspinAudioFormats = SendspinSupportedAudioFormats;
+        SendspinAudioFormats = BuildOrderedAudioFormats(_sendspinPreferredAudioCodec);
 
         // Load initial player state for Sendspin handshake
         InitialVolume = Math.Clamp(Preferences.Get(InitialVolumeKey, DefaultInitialVolume), 0, 100);
@@ -147,6 +147,7 @@ public class SettingsService
     public ClientCapabilities GetSendspinClientCapabilities()
     {
         var clientName = GetSendspinClientName();
+        var orderedAudioFormats = BuildOrderedAudioFormats(_sendspinPreferredAudioCodec);
 
         return new ClientCapabilities
         {
@@ -163,7 +164,7 @@ public class SettingsService
             Manufacturer = "mashin",
             SoftwareVersion = "1.0",
             BufferCapacity = SendspinBufferCapacity,
-            AudioFormats = SendspinSupportedAudioFormats,
+            AudioFormats = orderedAudioFormats,
             InitialVolume = InitialVolume,
             InitialMuted = InitialMuted,
         };
@@ -244,7 +245,7 @@ public class SettingsService
 
         var changed = !string.Equals(_sendspinPreferredAudioCodec, normalizedCodec, StringComparison.OrdinalIgnoreCase);
         _sendspinPreferredAudioCodec = normalizedCodec;
-        SendspinAudioFormats = SendspinSupportedAudioFormats;
+        SendspinAudioFormats = BuildOrderedAudioFormats(_sendspinPreferredAudioCodec);
         Save();
         return changed;
     }
@@ -282,6 +283,34 @@ public class SettingsService
     private static void SaveSendspinPreferredAudioCodec(string codec)
     {
         Preferences.Set(SendspinPreferredAudioCodecKey, codec);
+    }
+
+    // Use preferred codec at first, then the other supported codecs 
+    private static List<AudioFormat> BuildOrderedAudioFormats(string preferredCodec)
+    {
+        var preferred = NormalizeCodec(preferredCodec) ?? DefaultPreferredCodec;
+
+        return preferred switch
+        {
+            "flac" => new List<AudioFormat>
+            {
+                SendspinFlacAudioFormat,
+                SendspinOpusAudioFormat,
+                SendspinPcmAudioFormat,
+            },
+            "pcm" => new List<AudioFormat>
+            {
+                SendspinPcmAudioFormat,
+                SendspinOpusAudioFormat,
+                SendspinFlacAudioFormat,
+            },
+            _ => new List<AudioFormat>
+            {
+                SendspinOpusAudioFormat,
+                SendspinFlacAudioFormat,
+                SendspinPcmAudioFormat,
+            },
+        };
     }
 
     #endregion

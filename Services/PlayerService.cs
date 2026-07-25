@@ -74,6 +74,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
     #region Fields
 
     private const int PositionTimerIntervalMs = 250;
+    private const int MaxBufferingHoldSeconds = 8;
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly IMusicAssistantEventHub _musicAssistantEventHub;
@@ -435,6 +436,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
             return;
         }
 
+        // Save Settings
         _settingsService.SetSendspinPreferredAudioCodec(normalizedCodec);
 
         if (_sendspinClient.ConnectionState != ConnectionState.Connected)
@@ -447,14 +449,94 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
 
         cancellationToken.ThrowIfCancellationRequested();
 
+        var wasPlaying = PlaybackState.State == PlayerStateType.Playing;
+
+        // Pause playback       
+        if (wasPlaying)
+        {
+            await _sendspinClient.SendCommandAsync(Commands.Pause);
+        }
+
+        // Set Buffering
+        PlaybackState = new Models.PlayerState
+        {
+            State = PlayerStateType.Buffering,
+            Reason = PlayerStateReason.Reconnect,
+            ActiveSinceUtc = DateTimeOffset.UtcNow
+        };
+        ResetProgressAnchor();
+
+        var codecRequestSucceeded = false;
+
+        // Set Sendspin codec
         try
         {
             await _sendspinClient.RequestPlayerFormatAsync(codec: normalizedCodec);
+            codecRequestSucceeded = true;
             _logger.LogInformation("Requested Sendspin player format change. Codec={Codec}", normalizedCodec);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to request Sendspin player format change. Codec={Codec}", normalizedCodec);
+        }
+
+        if (!wasPlaying)
+        {
+            return;
+        }
+
+        // Resume playback with retries
+        const int playRetryAttempts = 10;
+        const int playRetryDelayMs = 500;
+        var resumed = false;
+
+        for (var attempt = 1; attempt <= playRetryAttempts; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                await _sendspinClient.SendCommandAsync(Commands.Play);
+                _logger.LogInformation(
+                    "Sent play command after Sendspin codec change. Codec={Codec}, Attempt={Attempt}, CodecRequestSucceeded={CodecRequestSucceeded}",
+                    normalizedCodec,
+                    attempt,
+                    codecRequestSucceeded);
+            }
+            catch (Exception playEx)
+            {
+                _logger.LogWarning(
+                    playEx,
+                    "Play command after Sendspin codec change failed. Codec={Codec}, Attempt={Attempt}, CodecRequestSucceeded={CodecRequestSucceeded}",
+                    normalizedCodec,
+                    attempt,
+                    codecRequestSucceeded);
+            }
+
+            await Task.Delay(playRetryDelayMs, cancellationToken);
+
+            if (PlaybackState.State == PlayerStateType.Playing
+                || (PlaybackState.State == PlayerStateType.Buffering
+                    && PlaybackState.Reason != PlayerStateReason.Reconnect))
+            {
+                resumed = true;
+                break;
+            }
+        }
+
+        if (!resumed)
+        {
+            PlaybackState = new Models.PlayerState
+            {
+                State = PlayerStateType.Idle,
+                ActiveSinceUtc = DateTimeOffset.UtcNow
+            };
+
+            _logger.LogError(
+                "Failed to resume playback after Sendspin codec change. Codec={Codec}, Attempts={Attempts}, CodecRequestSucceeded={CodecRequestSucceeded}",
+                normalizedCodec,
+                playRetryAttempts,
+                codecRequestSucceeded);
         }
     }
 
@@ -832,20 +914,21 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
 
         var mappedState = NormalizeLocalAudioPlayerState(state);
 
-        var isPlayMediaBufferingHoldActive =
+        var isBufferingHoldActive =
             mappedState is PlayerStateType.Idle or PlayerStateType.Paused
             && PlaybackState.State == PlayerStateType.Buffering
-            && PlaybackState.Reason == PlayerStateReason.PlayMedia
-            && (DateTimeOffset.UtcNow - PlaybackState.ActiveSinceUtc) <= TimeSpan.FromSeconds(8);
+            && PlaybackState.Reason is PlayerStateReason.PlayMedia or PlayerStateReason.Reconnect
+            && (DateTimeOffset.UtcNow - PlaybackState.ActiveSinceUtc) <= TimeSpan.FromSeconds(MaxBufferingHoldSeconds);
 
-        if (isPlayMediaBufferingHoldActive)
+        if (isBufferingHoldActive)
         {
             _logger.LogDebug(
-                "Local audio renderer state ignored during PlayMedia buffering hold. SourceState={SourceState}, MappedState={MappedState}, PlayerId={PlayerId}, HoldSeconds={HoldSeconds}",
+                "Local audio renderer state ignored during buffering hold. SourceState={SourceState}, MappedState={MappedState}, PlayerId={PlayerId}, Reason={Reason}, HoldSeconds={HoldSeconds}",
                 state,
                 mappedState,
                 PlayerId,
-                TimeSpan.FromSeconds(8).TotalSeconds);
+                PlaybackState.Reason,
+                TimeSpan.FromSeconds(MaxBufferingHoldSeconds).TotalSeconds);
             return;
         }
 
