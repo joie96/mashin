@@ -421,15 +421,41 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         return _sendspinClient.SendCommandAsync(command, parameters);
     }
 
-    public Task SetPreferredAudioCodecAsync(string codec, CancellationToken cancellationToken = default)
+    public async Task SetPreferredAudioCodecAsync(string codec, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(codec))
+        var normalizedCodec = codec?.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalizedCodec))
         {
-            return Task.CompletedTask;
+            return;
         }
 
-        _settingsService.SetSendspinPreferredAudioCodec(codec);
-        return Task.CompletedTask;
+        if (normalizedCodec is not "opus" and not "flac" and not "pcm")
+        {
+            _logger.LogWarning("Ignored unsupported Sendspin codec request. Codec={Codec}", normalizedCodec);
+            return;
+        }
+
+        _settingsService.SetSendspinPreferredAudioCodec(normalizedCodec);
+
+        if (_sendspinClient.ConnectionState != ConnectionState.Connected)
+        {
+            _logger.LogDebug(
+                "Preferred Sendspin codec saved locally but not applied immediately because client is not connected. Codec={Codec}",
+                normalizedCodec);
+            return;
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        try
+        {
+            await _sendspinClient.RequestPlayerFormatAsync(codec: normalizedCodec);
+            _logger.LogInformation("Requested Sendspin player format change. Codec={Codec}", normalizedCodec);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to request Sendspin player format change. Codec={Codec}", normalizedCodec);
+        }
     }
 
     #endregion

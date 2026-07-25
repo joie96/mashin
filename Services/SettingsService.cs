@@ -20,11 +20,43 @@ public class SettingsService
     private const string UsernameKey = "username";
     private const string ThemeModeKey = "theme_mode";
     private const string SendspinBufferCapacityKey = "buffer_capacity";
-    private const string SendspinAudioFormatsKey = "audio_formats"; // JSON serialized
+    private const string SendspinPreferredAudioCodecKey = "sendspin_preferred_audio_codec";
     private const string InitialVolumeKey = "sendspin_initial_volume";
     private const string InitialMutedKey = "sendspin_initial_muted";
     private const int DefaultInitialVolume = 50;
     private const bool DefaultInitialMuted = false;
+    private const string DefaultPreferredCodec = "opus";
+
+    private static readonly AudioFormat SendspinOpusAudioFormat = new()
+    {
+        Codec = "opus",
+        SampleRate = 48000,
+        Channels = 2,
+        Bitrate = 256
+    };
+
+    private static readonly AudioFormat SendspinFlacAudioFormat = new()
+    {
+        Codec = "flac",
+        SampleRate = 48000,
+        Channels = 2
+    };
+
+    private static readonly AudioFormat SendspinPcmAudioFormat = new()
+    {
+        Codec = "pcm",
+        SampleRate = 48000,
+        Channels = 2,
+        BitDepth = 16
+    };
+
+    private static readonly List<AudioFormat> SendspinSupportedAudioFormats =
+        new()
+        {
+            SendspinOpusAudioFormat,
+            SendspinFlacAudioFormat,
+            SendspinPcmAudioFormat
+        };
 
     #endregion
 
@@ -44,6 +76,7 @@ public class SettingsService
     // Sendspin streaming settings
     public int SendspinBufferCapacity { get; set; }
     public List<AudioFormat> SendspinAudioFormats { get; set; }
+    private string _sendspinPreferredAudioCodec = DefaultPreferredCodec;
    
     public int InitialVolume { get; private set; }
     public bool InitialMuted { get; private set; }
@@ -67,29 +100,9 @@ public class SettingsService
         // Load Sendspin buffer capacity
         SendspinBufferCapacity = Preferences.Get(SendspinBufferCapacityKey, DefaultSendspinBufferCapacity);
 
-        // Load Sendspin audio formats (as JSON)
-        var sendspinFormatsJson = Preferences.Get(SendspinAudioFormatsKey, string.Empty);
-        if (!string.IsNullOrEmpty(sendspinFormatsJson))
-        {
-            try
-            {
-            SendspinAudioFormats = System.Text.Json.JsonSerializer.Deserialize<List<AudioFormat>>(sendspinFormatsJson)
-                                       ?? BuildSendspinPreferredAudioFormats("opus")!;
-            }
-            catch
-            {
-                SendspinAudioFormats = BuildSendspinPreferredAudioFormats("opus")!;
-            }
-        }
-        else
-        {
-            SendspinAudioFormats = BuildSendspinPreferredAudioFormats("opus")!;
-        }
-
-        // Keep a single preferred codec persisted in settings.
-        var normalizedCodec = SendspinAudioFormats.FirstOrDefault()?.Codec;
-        SendspinAudioFormats = BuildSendspinPreferredAudioFormats(normalizedCodec ?? "opus")
-            ?? BuildSendspinPreferredAudioFormats("opus")!;
+        // Persist only a single preferred codec and derive the advertised format list from it.
+        _sendspinPreferredAudioCodec = LoadSendspinPreferredAudioCodec();
+        SendspinAudioFormats = SendspinSupportedAudioFormats;
 
         // Load initial player state for Sendspin handshake
         InitialVolume = Math.Clamp(Preferences.Get(InitialVolumeKey, DefaultInitialVolume), 0, 100);
@@ -123,9 +136,8 @@ public class SettingsService
         // Sendspin buffer capacity
         Preferences.Set(SendspinBufferCapacityKey, SendspinBufferCapacity);
 
-        // Save Sendspin audio formats as JSON
-        var sendspinFormatsJson = System.Text.Json.JsonSerializer.Serialize(SendspinAudioFormats);
-        Preferences.Set(SendspinAudioFormatsKey, sendspinFormatsJson);
+        // Preferred codec
+        SaveSendspinPreferredAudioCodec(_sendspinPreferredAudioCodec);
 
         // Initial Volume
         Preferences.Set(InitialVolumeKey, InitialVolume);
@@ -135,12 +147,6 @@ public class SettingsService
     public ClientCapabilities GetSendspinClientCapabilities()
     {
         var clientName = GetSendspinClientName();
-        var configuredFormats = SendspinAudioFormats;
-
-        if (configuredFormats == null || configuredFormats.Count == 0)
-        {
-            configuredFormats = BuildSendspinPreferredAudioFormats("opus")!;
-        }
 
         return new ClientCapabilities
         {
@@ -157,7 +163,7 @@ public class SettingsService
             Manufacturer = "mashin",
             SoftwareVersion = "1.0",
             BufferCapacity = SendspinBufferCapacity,
-            AudioFormats = configuredFormats,
+            AudioFormats = SendspinSupportedAudioFormats,
             InitialVolume = InitialVolume,
             InitialMuted = InitialMuted,
         };
@@ -225,34 +231,20 @@ public class SettingsService
 
     public string GetSendspinPreferredAudioCodec()
     {
-        var codec = SendspinAudioFormats.FirstOrDefault()?.Codec?.Trim().ToLowerInvariant();
-        return codec switch
-        {
-            "opus" => "opus",
-            "flac" => "flac",
-            "pcm" => "pcm",
-            _ => "opus",
-        };
+        return _sendspinPreferredAudioCodec;
     }
 
     public bool SetSendspinPreferredAudioCodec(string codec)
     {
-        var normalizedCodec = codec?.Trim().ToLowerInvariant();
-        if (string.IsNullOrWhiteSpace(normalizedCodec))
+        var normalizedCodec = NormalizeCodec(codec);
+        if (normalizedCodec == null)
         {
             return false;
         }
 
-        var preferredFormats = BuildSendspinPreferredAudioFormats(normalizedCodec);
-        if (preferredFormats == null)
-        {
-            return false;
-        }
-
-        var changed = SendspinAudioFormats.Count != preferredFormats.Count
-            || SendspinAudioFormats.Count == 0
-            || !string.Equals(SendspinAudioFormats[0].Codec, preferredFormats[0].Codec, StringComparison.OrdinalIgnoreCase);
-        SendspinAudioFormats = preferredFormats;
+        var changed = !string.Equals(_sendspinPreferredAudioCodec, normalizedCodec, StringComparison.OrdinalIgnoreCase);
+        _sendspinPreferredAudioCodec = normalizedCodec;
+        SendspinAudioFormats = SendspinSupportedAudioFormats;
         Save();
         return changed;
     }
@@ -270,23 +262,26 @@ public class SettingsService
 
     #region Helpers
 
-    private static List<AudioFormat>? BuildSendspinPreferredAudioFormats(string codec)
+    private static string? NormalizeCodec(string? codec)
     {
-        var normalizedCodec = codec.Trim().ToLowerInvariant();
-        var preferred = normalizedCodec switch
+        return codec?.Trim().ToLowerInvariant() switch
         {
-            "opus" => new AudioFormat { Codec = "opus", SampleRate = 48000, Channels = 2, Bitrate = 256 },
-            "pcm" => new AudioFormat { Codec = "pcm", SampleRate = 48000, Channels = 2, BitDepth = 16 },
-            "flac" => new AudioFormat { Codec = "flac", SampleRate = 48000, Channels = 2 },
+            "opus" => "opus",
+            "flac" => "flac",
+            "pcm" => "pcm",
             _ => null,
         };
+    }
 
-        if (preferred == null)
-        {
-            return null;
-        }
+    private string LoadSendspinPreferredAudioCodec()
+    {
+        var storedCodec = Preferences.Get(SendspinPreferredAudioCodecKey, DefaultPreferredCodec);
+        return NormalizeCodec(storedCodec) ?? DefaultPreferredCodec;
+    }
 
-        return new List<AudioFormat> { preferred };
+    private static void SaveSendspinPreferredAudioCodec(string codec)
+    {
+        Preferences.Set(SendspinPreferredAudioCodecKey, codec);
     }
 
     #endregion
