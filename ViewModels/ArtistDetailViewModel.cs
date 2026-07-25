@@ -823,26 +823,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         {
             new()
             {
-                Text = "Als Nächstes spielen",
-                Icon = FluentIcons.ArrowForward16,
-                Command = new Command(async () =>
-                {
-                    var items = new List<MediaItem> { Artist! };
-                    await PlaybackService.PlayMediaNextAsync(items);
-                })
-            },
-            new()
-            {
-                Text = "Als Letztes spielen",
-                Icon = FluentIcons.ArrowNext12,
-                Command = new Command(async () =>
-                {
-                    var items = new List<MediaItem> { Artist! };
-                    await PlaybackService.PlayMediaLastAsync(items);
-                })
-            },
-            new()
-            {
                 Text = "Radio starten",
                 Icon = FluentIcons.Album20,
                 Command = new Command(async () =>
@@ -863,6 +843,26 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                     await PlaybackService.PlayMediaAsync(new List<MediaItem> { randomTopTrack });
 
                     await PlaybackService.PlayMediaRadioNextAsync(new List<MediaItem> { Artist });
+                })
+            },
+            new()
+            {
+                Text = "Als Nächstes spielen",
+                Icon = FluentIcons.ArrowForward16,
+                Command = new Command(async () =>
+                {
+                    var items = new List<MediaItem> { Artist! };
+                    await PlaybackService.PlayMediaNextAsync(items);
+                })
+            },
+            new()
+            {
+                Text = "Als Letztes spielen",
+                Icon = FluentIcons.ArrowNext12,
+                Command = new Command(async () =>
+                {
+                    var items = new List<MediaItem> { Artist! };
+                    await PlaybackService.PlayMediaLastAsync(items);
                 })
             },
             new() { IsSeparator = true }
