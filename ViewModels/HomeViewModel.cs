@@ -1006,7 +1006,8 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             {
                 Text = "Abspielen",
                 Icon = FluentIcons.Play12,
-                Command = new Command(async () => await PlaySelectedTracksWithModesAsync())
+                Command = new Command(async () =>
+                    await _playbackService.PlayMediaAsync(GetSelectedTracks().Cast<MediaItem>().ToList()))
             },
             new()
             {
@@ -1310,22 +1311,6 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             .Concat(SimilarArtistSections.SelectMany(section => section.Artists))
             .Where(artist => artist.IsSelected)
             .ToList();
-    }
-
-    private async Task PlaySelectedTracksWithModesAsync()
-    {
-        var selectedTracks = GetSelectedTracks().ToList();
-        if (selectedTracks.Count == 0)
-        {
-            return;
-        }
-
-        await _playbackService.PlayMediaAsync(new List<MediaItem> { selectedTracks[0] });
-
-        if (selectedTracks.Count > 1)
-        {
-            await _playbackService.PlayMediaNextAsync(selectedTracks.Skip(1).Cast<MediaItem>().ToList());
-        }
     }
 
     private async Task PlayArtistPlaylistsAsync()

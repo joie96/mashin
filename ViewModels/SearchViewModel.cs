@@ -350,13 +350,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 return;
             }
 
-            await PlaybackService.PlayMediaAsync(new List<MediaItem> { tracks[0] });
-
-            var remainingTracks = tracks.Skip(1).ToList();
-            if (remainingTracks.Count > 0)
-            {
-                await PlaybackService.PlayMediaNextAsync(remainingTracks.Cast<MediaItem>().ToList());
-            }
+            await PlaybackService.PlayMediaAsync(tracks.Cast<MediaItem>().ToList());
         });
 
         ShuffleTracksCommand = new Command(async () =>
@@ -723,7 +717,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 Text = "Abspielen",
                 Icon = FluentIcons.Play12,
                 Command = new Command(async () =>
-                    await PlaySelectedTracksWithModesAsync(Tracks))
+                    await PlaybackService.PlayMediaAsync(Tracks.Cast<MediaItem>().ToList()))
             },
             new()
             {
@@ -962,58 +956,6 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
         };
 
         return Task.CompletedTask;
-    }
-
-    private async Task PlaySelectedTracksWithModesAsync(IEnumerable<Track> tracks)
-    {
-        var trackList = tracks.ToList();
-        var selectedTracks = trackList.Where(t => t.IsSelected).ToList();
-        if (selectedTracks.Count == 0)
-        {
-            return;
-        }
-
-        // multiple tracks selected:  play the first one and queue the rest selected tracks
-        if (selectedTracks.Count > 1)
-        {
-            await PlaybackService.PlayMediaAsync(new List<MediaItem> { selectedTracks.First() });
-
-            var remainingTracks = selectedTracks.Skip(1).ToList();
-            if (remainingTracks.Count > 0)
-            {
-                await PlaybackService.PlayMediaNextAsync(remainingTracks.Cast<MediaItem>().ToList());
-            }
-
-            return;
-        }
-
-        // single track selected: play track and queue remaining tracks in cyclic order
-        var selectedTrack = selectedTracks.First();
-        await PlaybackService.PlayMediaAsync(new List<MediaItem> { selectedTrack });
-
-        var selectedIndex = trackList.IndexOf(selectedTrack);
-        if (selectedIndex < 0 || trackList.Count <= 1)
-        {
-            return;
-        }
-
-        var itemsToQueue = new List<Track>(trackList.Count - 1);
-        var trailingCount = trackList.Count - selectedIndex - 1;
-
-        if (trailingCount > 0)
-        {
-            itemsToQueue.AddRange(trackList.GetRange(selectedIndex + 1, trailingCount));
-        }
-
-        if (selectedIndex > 0)
-        {
-            itemsToQueue.AddRange(trackList.GetRange(0, selectedIndex));
-        }
-
-        if (itemsToQueue.Count > 0)
-        {
-            await PlaybackService.PlayMediaNextAsync(itemsToQueue.Cast<MediaItem>().ToList());
-        }
     }
 
     private IReadOnlyList<Artist> GetSelectedArtists()

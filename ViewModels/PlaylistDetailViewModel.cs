@@ -586,13 +586,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                         return;
                     }
 
-                    await PlaybackService.PlayMediaAsync(new List<MediaItem> { tracksForAction[0] });
-
-                    var remainingTracks = tracksForAction.Skip(1).ToList();
-                    if (remainingTracks.Count > 0)
-                    {
-                        await PlaybackService.PlayMediaNextAsync(remainingTracks.Cast<MediaItem>().ToList());
-                    }
+                    await PlaybackService.PlayMediaAsync(tracksForAction.Cast<MediaItem>().ToList());
                 })
             },
             new()

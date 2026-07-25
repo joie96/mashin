@@ -542,8 +542,9 @@ public sealed class OverlayService : IOverlayService
             var queueOverlayView = useMobileQueueOverlay ? (View)_mobileQueueOverlay : _desktopQueueOverlay;
             var bindingContextChanged = !ReferenceEquals(queueOverlayView.BindingContext, bindingContext);
 
-            var layoutMode = useMobileQueueOverlay ? FlyoutLayoutMode.FullHeight : FlyoutLayoutMode.Bottom;
-            var hostType = useMobileQueueOverlay ? FlyoutHostType.Queue : FlyoutHostType.Default;
+            // Queue overlay always uses the dedicated queue host and full-height layout.
+            var layoutMode = FlyoutLayoutMode.FullHeight;
+            var hostType = FlyoutHostType.Queue;
             await ShowFlyoutLayerAsync(queueOverlayView, () => _ = HideQueueOverlayAsync(), layoutMode, hostType);
 
             if (useMobileQueueOverlay)
@@ -678,7 +679,7 @@ public sealed class OverlayService : IOverlayService
             }
 
             // Keep queue content mounted so TableView does not run full unload cleanup.
-            await HideFlyoutLayerAsync(FlyoutHostType.Default, clearContent: false);
+            await HideFlyoutLayerAsync(FlyoutHostType.Queue, clearContent: false);
         });
     }
 

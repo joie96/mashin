@@ -304,13 +304,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                 return;
             }
 
-            await PlaybackService.PlayMediaAsync(new List<MediaItem> { topTracks[0] });
-
-            var remainingTracks = topTracks.Skip(1).ToList();
-            if (remainingTracks.Count > 0)
-            {
-                await PlaybackService.PlayMediaNextAsync(remainingTracks.Cast<MediaItem>().ToList());
-            }
+            await PlaybackService.PlayMediaAsync(topTracks.Cast<MediaItem>().ToList());
         });
 
         ShuffleArtistCommand = new Command(async () =>
