@@ -1064,7 +1064,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             },
             new()
             {
-                Text = "Als Nï¿½chstes spielen",
+                Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () => await MoveSelectedQueueItemsNextAsync())
             },
@@ -1083,7 +1083,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Wiedergabeliste hinzufï¿½gen",
+                Text = "Zu Wiedergabeliste hinzufügen",
                 Icon = FluentIcons.Add12,
                 SubItems = new ObservableCollection<ContextMenuItem>(
                     _playlists
@@ -1104,7 +1104,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Favoriten hinzufï¿½gen",
+                Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                         await MediaActions.AddToFavoritesAsync(
@@ -1250,7 +1250,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         if (selectedQueueItemIds.Count == 0)
         {
-            _logger.LogInformation("No queue items selected for 'Als Nï¿½chstes spielen'");
+            _logger.LogInformation("No queue items selected for 'Als Nächstes spielen'");
             return;
         }
 

@@ -96,7 +96,7 @@
             </Grid>
 
             <!--  Header Actions  -->
-            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto"
+            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
                 ColumnSpacing="14"
                 HorizontalOptions="Center">
 
@@ -148,8 +148,32 @@
                         VerticalOptions="Center" />
                 </Border>
 
-                <!--  Favorite Toggle  -->
+                <!--  Start Artist Radio  -->
                 <Border Grid.Column="2"
+                    BackgroundColor="{DynamicResource ActionButtonsBackground}"
+                    HeightRequest="44"
+                    StrokeThickness="0"
+                    WidthRequest="44">
+                    <Border.Behaviors>
+                        <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                            PressedAnimationDuration="250"
+                            PressedAnimationEasing="CubicOut" />
+                    </Border.Behaviors>
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding StartArtistRadioCommand}" />
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="22" />
+                    </Border.StrokeShape>
+                    <Label FontSize="18"
+                        HorizontalOptions="Center"
+                        Text="{mi:Fluent Icon=Album20, FontOverride=True}"
+                        TextColor="{DynamicResource IconPrimary}"
+                        VerticalOptions="Center" />
+                </Border>
+
+                <!--  Favorite Toggle  -->
+                <Border Grid.Column="3"
                     BackgroundColor="{DynamicResource ActionButtonsBackground}"
                     HeightRequest="44"
                     StrokeThickness="0"
@@ -184,7 +208,7 @@
 
                 <!--  Header Context Menu  -->
                 <Border x:Name="HeaderContextMenuButton"
-                    Grid.Column="3"
+                    Grid.Column="4"
                     BackgroundColor="{DynamicResource ActionButtonsBackground}"
                     HeightRequest="44"
                     StrokeThickness="0"

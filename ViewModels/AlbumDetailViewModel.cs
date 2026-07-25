@@ -684,7 +684,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
         {
             new()
             {
-                Text = "Als NÃ¤chstes spielen",
+                Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () => await PlaybackService.PlayMediaNextAsync(new List<MediaItem> { Album }))
             },
@@ -716,7 +716,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
         {
             menu.Add(new ContextMenuItem
             {
-                Text = "Zu Favoriten hinzufÃ¼gen",
+                Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                 {
@@ -747,7 +747,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
             },
             new()
             {
-                Text = "Als NÃ¤chstes spielen",
+                Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
                     await PlaybackService.PlayMediaNextAsync(Tracks.Where(t => t.IsSelected).Cast<MediaItem>().ToList()))
@@ -762,7 +762,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Wiedergabeliste hinzufÃ¼gen",
+                Text = "Zu Wiedergabeliste hinzufügen",
                 Icon = FluentIcons.Add12,
                 SubItems = new ObservableCollection<ContextMenuItem>(
                     playlists
@@ -780,7 +780,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Favoriten hinzufÃ¼gen",
+                Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                     await MediaActions.AddToFavoritesAsync(Tracks.Where(t => t.IsSelected)))
@@ -863,7 +863,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
             },
             new()
             {
-                Text = "Als NÃ¤chstes spielen",
+                Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
                     await PlaybackService.PlayMediaNextAsync(OtherAlbums.Where(a => a.IsSelected).Cast<MediaItem>().ToList()))
@@ -878,7 +878,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Favoriten hinzufÃ¼gen",
+                Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                     await MediaActions.AddToFavoritesAsync(OtherAlbums.Where(a => a.IsSelected)))
@@ -910,7 +910,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
             },
             new()
             {
-                Text = "Als NÃ¤chstes spielen",
+                Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
                     await PlaybackService.PlayMediaNextAsync(SimilarArtists.Where(a => a.IsSelected).Cast<MediaItem>().ToList()))
@@ -925,7 +925,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Favoriten hinzufÃ¼gen",
+                Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                     await MediaActions.AddToFavoritesAsync(SimilarArtists.Where(a => a.IsSelected)))

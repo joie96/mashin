@@ -46,6 +46,7 @@ public interface IPlayerService : INotifyPropertyChanged, IAsyncDisposable
     Task PlayMediaNextAsync(IReadOnlyList<MediaItem> items, CancellationToken cancellationToken = default) => Task.CompletedTask;
     Task PlayMediaReplaceNextAsync(IReadOnlyList<MediaItem> items, CancellationToken cancellationToken = default) => Task.CompletedTask;
     Task PlayMediaLastAsync(IReadOnlyList<MediaItem> items, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task PlayMediaRadioNextAsync(IReadOnlyList<MediaItem> items, CancellationToken cancellationToken = default) => Task.CompletedTask;
     Task ShufflePlayMediaAsync(IReadOnlyList<MediaItem> items, CancellationToken cancellationToken = default) => Task.CompletedTask;
     Task ClearQueueAsync(bool skipStop = false, CancellationToken cancellationToken = default) => Task.CompletedTask;
     Task PlayQueueIndexAsync(int index, CancellationToken cancellationToken = default) => Task.CompletedTask;
@@ -508,6 +509,28 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         }
 
         await _musicAssistant.PlayMediaAsync(queueId, resolvedItems, mashin.Models.QueueOption.Add);
+    }
+
+    public async Task PlayMediaRadioNextAsync(IReadOnlyList<MediaItem> items, CancellationToken cancellationToken = default)
+    {
+        var queueId = await ResolveQueueIdAsync();
+        if (string.IsNullOrWhiteSpace(queueId) || items.Count == 0)
+        {
+            return;
+        }
+
+        var resolvedItems = await ResolvePlayableMediaItemsAsync(items);
+        if (resolvedItems.Count == 0)
+        {
+            return;
+        }
+
+        await _musicAssistant.PlayMediaAsync(
+            queueId,
+            resolvedItems,
+            mashin.Models.QueueOption.Next,
+            radioMode: true,
+            startItem: resolvedItems[0]);
     }
 
 
@@ -1608,6 +1631,28 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
         await _musicAssistant.PlayMediaAsync(queueId, resolvedItems, mashin.Models.QueueOption.Add);
     }
 
+    public async Task PlayMediaRadioNextAsync(IReadOnlyList<MediaItem> items, CancellationToken cancellationToken = default)
+    {
+        var queueId = await ResolveQueueIdAsync();
+        if (string.IsNullOrWhiteSpace(queueId) || items.Count == 0)
+        {
+            return;
+        }
+
+        var resolvedItems = await ResolvePlayableMediaItemsAsync(items);
+        if (resolvedItems.Count == 0)
+        {
+            return;
+        }
+
+        await _musicAssistant.PlayMediaAsync(
+            queueId,
+            resolvedItems,
+            mashin.Models.QueueOption.Next,
+            radioMode: true,
+            startItem: resolvedItems[0]);
+    }
+
     public async Task ShufflePlayMediaAsync(IReadOnlyList<MediaItem> items, CancellationToken cancellationToken = default)
     {
         var queueId = await ResolveQueueIdAsync();
@@ -2377,6 +2422,12 @@ public sealed class LocalAudioPlayerService : IPlayerService, IAsyncDisposable
         PositionSeconds = 0;
         DurationSeconds = 0;
         PlaybackState = new Models.PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+    }
+
+    public Task PlayMediaRadioNextAsync(IReadOnlyList<MediaItem> items, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("PlayMediaRadioNextAsync is not supported in local playback mode.");
+        return Task.CompletedTask;
     }
 
     public async Task TogglePlayPauseAsync(CancellationToken cancellationToken = default)

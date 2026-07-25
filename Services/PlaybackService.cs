@@ -259,6 +259,9 @@ public sealed class PlaybackService
     public Task PlayMediaLastAsync(IReadOnlyList<MediaItem> items)
         => RouteOnActivePlayerAsync(player => player.PlayMediaLastAsync(items ?? Array.Empty<MediaItem>()));
 
+    public Task PlayMediaRadioNextAsync(IReadOnlyList<MediaItem> items, CancellationToken cancellationToken = default)
+        => RouteOnActivePlayerAsync(player => player.PlayMediaRadioNextAsync(items ?? Array.Empty<MediaItem>(), cancellationToken), cancellationToken);
+
     public Task ShufflePlayMediaAsync(IReadOnlyList<MediaItem> items)
         => RouteOnActivePlayerAsync(player => player.ShufflePlayMediaAsync(items ?? Array.Empty<MediaItem>()));
 

@@ -492,7 +492,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         {
             new()
             {
-                Text = "Als Nï¿½chstes spielen",
+                Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
                 {
@@ -532,7 +532,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         {
             menu.Add(new ContextMenuItem
             {
-                Text = "Zu Favoriten hinzufï¿½gen",
+                Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                 {
@@ -554,7 +554,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
         menu.Add(new ContextMenuItem
         {
-            Text = "Wiedergabeliste lï¿½schen",
+            Text = "Wiedergabeliste löschen",
             Icon = FluentIcons.Delete12,
             Command = new Command(async () => await DeletePlaylistAsync())
         });
@@ -597,7 +597,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             },
             new()
             {
-                Text = "Als Nï¿½chstes spielen",
+                Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
                 {
@@ -623,7 +623,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
             menu.Add(new ContextMenuItem
             {
-                Text = "Kï¿½nstler:inn ï¿½ffnen",
+                Text = "Künstler:inn öffnen",
                 Icon = FluentIcons.Person12,
                 Command = new Command(async () =>
                 {
@@ -642,7 +642,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
             menu.Add(new ContextMenuItem
             {
-                Text = "Album ï¿½ffnen",
+                Text = "Album öffnen",
                 Icon = FluentIcons.Open16,
                 Command = new Command(async () =>
                 {
@@ -664,7 +664,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
         menu.Add(new ContextMenuItem
         {
-            Text = "Zu Wiedergabeliste hinzufï¿½gen",
+            Text = "Zu Wiedergabeliste hinzufügen",
             Icon = FluentIcons.Add12,
             SubItems = new ObservableCollection<ContextMenuItem>(
                 playlists
@@ -718,7 +718,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             {
                 menu.Add(new ContextMenuItem
                 {
-                    Text = "Zu Favoriten hinzufï¿½gen",
+                    Text = "Zu Favoriten hinzufügen",
                     Icon = FluentIcons.Heart12,
                     Command = new Command(async () =>
                         await MediaActions.AddToFavoritesAsync(GetContextMenuTargetTracks()))
@@ -729,7 +729,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         {
             menu.Add(new ContextMenuItem
             {
-                Text = "Zu Favoriten hinzufï¿½gen",
+                Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                     await MediaActions.AddToFavoritesAsync(GetContextMenuTargetTracks()))

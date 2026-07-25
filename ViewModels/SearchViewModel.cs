@@ -727,7 +727,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
             },
             new()
             {
-                Text = "Als NÃ¤chstes spielen",
+                Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
                 {
@@ -748,14 +748,14 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Wiedergabeliste hinzufÃ¼gen",
+                Text = "Zu Wiedergabeliste hinzufügen",
                 Icon = FluentIcons.Add12,
                 SubItems = await GetPlaylistSubItemsAsync()
             },
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Favoriten hinzufÃ¼gen",
+                Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                     await MediaActions.AddToFavoritesAsync(Tracks.Where(t => t.IsSelected)))
@@ -789,7 +789,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
             },
             new()
             {
-                Text = "Als NÃ¤chstes spielen",
+                Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
                 {
@@ -810,7 +810,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Favoriten hinzufÃ¼gen",
+                Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                     await MediaActions.AddToFavoritesAsync(Albums.Where(a => a.IsSelected)))
@@ -844,7 +844,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
             },
             new()
             {
-                Text = "Als NÃ¤chstes spielen",
+                Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
                 {
@@ -865,7 +865,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Favoriten hinzufÃ¼gen",
+                Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                     await MediaActions.AddToFavoritesAsync(Playlists.Where(p => p.IsSelected)))
@@ -899,7 +899,33 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
             },
             new()
             {
-                Text = "Als NÃ¤chstes spielen",
+                Text = "Radio starten",
+                Icon = FluentIcons.Album20,
+                Command = new Command(async () =>
+                {
+                    var targetArtists = GetSelectedArtists();
+                    if (targetArtists.Count == 0)
+                    {
+                        _logger.LogInformation("Cannot start artist radio: no target artists available.");
+                        return;
+                    }
+
+                    var radioArtist = targetArtists[_shuffleRandom.Next(targetArtists.Count)];
+                    var topTracks = await _musicAssistant.GetArtistTopTracksAsync(radioArtist.ItemId, radioArtist.Provider);
+                    if (topTracks.Count == 0)
+                    {
+                        _logger.LogInformation("Cannot start artist radio: no top tracks available for selected artist {ArtistId}.", radioArtist.ItemId);
+                        return;
+                    }
+
+                    var randomTopTrack = topTracks[_shuffleRandom.Next(topTracks.Count)];
+                    await PlaybackService.PlayMediaAsync(new List<MediaItem> { randomTopTrack });
+                    await PlaybackService.PlayMediaRadioNextAsync(new List<MediaItem> { radioArtist });
+                })
+            },
+            new()
+            {
+                Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
                 {
@@ -913,17 +939,17 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 Icon = FluentIcons.ArrowNext12,
                 Command = new Command(async () =>
                 {
-                    var items = Artists.Where(a => a.IsSelected).Select(a => (MediaItem)a).ToList();
+                    var items = GetSelectedArtists().Select(a => (MediaItem)a).ToList();
                     await PlaybackService.PlayMediaLastAsync(items);
                 })
             },
             new() { IsSeparator = true },
             new()
             {
-                Text = "Zu Favoriten hinzufÃ¼gen",
+                Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
-                    await MediaActions.AddToFavoritesAsync(Artists.Where(a => a.IsSelected)))
+                    await MediaActions.AddToFavoritesAsync(GetSelectedArtists()))
             },
             new()
             {
@@ -931,7 +957,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 Icon = FluentFilledIcons.Heart12Filled,
                 IconIsFilled = true,
                 Command = new Command(async () =>
-                    await MediaActions.RemoveFromFavoritesAsync(Artists.Where(a => a.IsSelected)))
+                    await MediaActions.RemoveFromFavoritesAsync(GetSelectedArtists()))
             }
         };
 
@@ -988,6 +1014,11 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
         {
             await PlaybackService.PlayMediaNextAsync(itemsToQueue.Cast<MediaItem>().ToList());
         }
+    }
+
+    private IReadOnlyList<Artist> GetSelectedArtists()
+    {
+        return Artists.Where(artist => artist.IsSelected).ToList();
     }
 
     private async Task<ObservableRangeCollection<ContextMenuItem>> GetPlaylistSubItemsAsync()
