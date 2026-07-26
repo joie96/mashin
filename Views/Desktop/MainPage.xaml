@@ -677,7 +677,7 @@
                 <!--  Right: Queue  -->
                 <Grid Grid.Column="2"
                     ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
-                    ColumnSpacing="12"
+                    ColumnSpacing="10"
                     HorizontalOptions="End"
                     IsClippedToBounds="True"
                     VerticalOptions="Center">
@@ -710,7 +710,7 @@
                         BackgroundColor="Transparent"
                         HeightRequest="32"
                         StrokeThickness="0"
-                        ToolTipProperties.Text="Don't stop the music"
+                        ToolTipProperties.Text="Automatische Empfehlungen"
                         VerticalOptions="Center"
                         WidthRequest="32">
                         <Border.GestureRecognizers>
@@ -721,7 +721,7 @@
                         </Border.StrokeShape>
                         <Label FontSize="16"
                             HorizontalOptions="Center"
-                            Text="{mi:Fluent Icon=MusicNote216,
+                            Text="{mi:Fluent Icon=Communication16,
                                              FontOverride=True}"
                             TextColor="{DynamicResource IconSecondary}"
                             VerticalOptions="Center">
@@ -847,7 +847,8 @@
             Grid.RowSpan="3"
             Grid.Column="0"
             Grid.ColumnSpan="2"
-            IsVisible="{Binding IsDeviceSelectionFlyoutOpen}">
+            IsVisible="{Binding IsDeviceSelectionFlyoutOpen}"
+            ZIndex="127">
             <BoxView BackgroundColor="Transparent">
                 <BoxView.GestureRecognizers>
                     <TapGestureRecognizer Command="{Binding CloseDeviceSelectionFlyoutCommand}" />
@@ -925,7 +926,8 @@
             Grid.RowSpan="3"
             Grid.Column="0"
             Grid.ColumnSpan="2"
-            IsVisible="{Binding IsAudioOptionsFlyoutOpen}">
+            IsVisible="{Binding IsAudioOptionsFlyoutOpen}"
+            ZIndex="128">
             <BoxView BackgroundColor="Transparent">
                 <BoxView.GestureRecognizers>
                     <TapGestureRecognizer Command="{Binding CloseAudioOptionsFlyoutCommand}" />

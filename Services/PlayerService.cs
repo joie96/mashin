@@ -1231,8 +1231,16 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
                         break;
                     }
 
-                    var artistTracks = await _musicAssistant.GetArtistTracksAsync(artist.ItemId, provider);
-                    resolvedTracks.AddRange(artistTracks.Take(artistTopTracksLimit));
+                    var artistTopTracks = await _musicAssistant.GetArtistTopTracksAsync(artist.ItemId, provider);
+                    if (artistTopTracks.Count == 0)
+                    {
+                        _logger.LogWarning("No top tracks available for artist {ArtistId}. Falling back to artist tracks.", artist.ItemId);
+                        var artistTracks = await _musicAssistant.GetArtistTracksAsync(artist.ItemId, provider);
+                        resolvedTracks.AddRange(artistTracks.Take(artistTopTracksLimit));
+                        break;
+                    }
+
+                    resolvedTracks.AddRange(artistTopTracks.Take(artistTopTracksLimit));
                     break;
                 }
 
@@ -2312,8 +2320,16 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
                         break;
                     }
 
-                    var artistTracks = await _musicAssistant.GetArtistTracksAsync(artist.ItemId, provider);
-                    resolvedTracks.AddRange(artistTracks.Take(artistTopTracksLimit));
+                    var artistTopTracks = await _musicAssistant.GetArtistTopTracksAsync(artist.ItemId, provider);
+                    if (artistTopTracks.Count == 0)
+                    {
+                        _logger.LogWarning("No top tracks available for artist {ArtistId}. Falling back to artist tracks.", artist.ItemId);
+                        var artistTracks = await _musicAssistant.GetArtistTracksAsync(artist.ItemId, provider);
+                        resolvedTracks.AddRange(artistTracks.Take(artistTopTracksLimit));
+                        break;
+                    }
+
+                    resolvedTracks.AddRange(artistTopTracks.Take(artistTopTracksLimit));
                     break;
                 }
             }

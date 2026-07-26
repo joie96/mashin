@@ -1473,7 +1473,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         try
         {
-            await _playbackService.SetOutputModeAsync(_playbackService.OutputMode, playerId);
+            var sendspinPlayerId = _settings.GetSendspinMusicAssistantPlayerId();
+            var nextOutputMode = string.Equals(playerId.Trim(), sendspinPlayerId, StringComparison.Ordinal)
+                ? PlaybackOutputMode.Sendspin
+                : PlaybackOutputMode.MA_Remote;
+            await _playbackService.SetOutputModeAsync(nextOutputMode, playerId);
             OnPropertyChanged(nameof(IsDontStopTheMusicEnabled));
 
             var refreshedPlayer = selectedPlayer ?? await _musicAssistant.GetPlayerAsync(playerId, raiseUnavailable: true);
@@ -1505,18 +1509,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             if (!string.IsNullOrWhiteSpace(previousPlayerId))
             {
                 SetSelectedPlayerSilently(previousPlayerId);
-                await _playbackService.SetOutputModeAsync(_playbackService.OutputMode, previousPlayerId);
+                var sendspinPlayerId = _settings.GetSendspinMusicAssistantPlayerId();
+                var previousOutputMode = string.Equals(previousPlayerId.Trim(), sendspinPlayerId, StringComparison.Ordinal)
+                    ? PlaybackOutputMode.Sendspin
+                    : PlaybackOutputMode.MA_Remote;
+                await _playbackService.SetOutputModeAsync(previousOutputMode, previousPlayerId);
             }
         }
     }
 
     private void SetSelectedPlayerSilently(string playerId)
     {
-        if (string.Equals(_selectedPlayerId, playerId, StringComparison.Ordinal))
-        {
-            return;
-        }
-
         _suppressSelectedPlayerChange = true;
         try
         {
