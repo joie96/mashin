@@ -462,11 +462,20 @@
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="4"/>
                             </Border.StrokeShape>
-                            <ffimageloading:CachedImage Aspect="AspectFill"
-                                   HeightRequest="48"
-                                   Source="{Binding ImageUri}"
-                                   VerticalOptions="Center"
-                                   WidthRequest="48"/>
+                            <Grid>
+                                <ffimageloading:CachedImage Aspect="AspectFill"
+                                       HeightRequest="48"
+                                       IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
+                                       Source="{Binding ImageUri}"
+                                       VerticalOptions="Center"
+                                       WidthRequest="48"/>
+                                <Image Aspect="AspectFill"
+                                       HeightRequest="48"
+                                       IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
+                                       Source="{AppThemeBinding Light=placeholders/track_light.png, Dark=placeholders/track_dark.png}"
+                                       VerticalOptions="Center"
+                                       WidthRequest="48"/>
+                            </Grid>
                         </Border>
 
                         <!--  PlayOverlay  -->
@@ -843,11 +852,20 @@
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="4"/>
                             </Border.StrokeShape>
-                            <ffimageloading:CachedImage Aspect="AspectFill"
-                                   HeightRequest="48"
-                                   Source="{Binding MediaItem.ImageUri}"
-                                   VerticalOptions="Center"
-                                   WidthRequest="48"/>
+                            <Grid>
+                                <ffimageloading:CachedImage Aspect="AspectFill"
+                                       HeightRequest="48"
+                                       IsVisible="{Binding MediaItem.ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
+                                       Source="{Binding MediaItem.ImageUri}"
+                                       VerticalOptions="Center"
+                                       WidthRequest="48"/>
+                                <Image Aspect="AspectFill"
+                                       HeightRequest="48"
+                                       IsVisible="{Binding MediaItem.ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
+                                       Source="{AppThemeBinding Light=placeholders/track_light.png, Dark=placeholders/track_dark.png}"
+                                       VerticalOptions="Center"
+                                       WidthRequest="48"/>
+                            </Grid>
                         </Border>
 
                         <!--  PlayOverlay  -->

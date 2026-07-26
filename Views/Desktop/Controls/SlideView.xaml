@@ -48,8 +48,14 @@
                         </Grid.GestureRecognizers>
 
                         <!--  Track Cover  -->
-                        <ffimageloading:CachedImage Aspect="AspectFill"
-                            Source="{Binding ImageUri}" />
+                        <Grid>
+                            <ffimageloading:CachedImage Aspect="AspectFill"
+                                IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
+                                Source="{Binding ImageUri}" />
+                            <Image Aspect="AspectFill"
+                                IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
+                                Source="{AppThemeBinding Light=placeholders/track_light.png, Dark=placeholders/track_dark.png}" />
+                        </Grid>
 
                         <!--  Hover Overlay  -->
                         <Border x:Name="CoverHoverOverlay"

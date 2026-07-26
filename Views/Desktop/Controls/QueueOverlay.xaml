@@ -48,7 +48,14 @@
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="6" />
                         </Border.StrokeShape>
-                        <ffimageloading:CachedImage Aspect="AspectFill" Source="{Binding CurrentQueueItem.MediaItem.ImageUri}" />
+                        <Grid>
+                            <ffimageloading:CachedImage Aspect="AspectFill"
+                                IsVisible="{Binding CurrentQueueItem.MediaItem.ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
+                                Source="{Binding CurrentQueueItem.MediaItem.ImageUri}" />
+                            <Image Aspect="AspectFill"
+                                IsVisible="{Binding CurrentQueueItem.MediaItem.ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
+                                Source="{AppThemeBinding Light=placeholders/track_light.png, Dark=placeholders/track_dark.png}" />
+                        </Grid>
                     </Border>
 
                     <!--  Track Actions  -->

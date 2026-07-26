@@ -33,11 +33,32 @@ public class StringEqualsConverter : IMultiValueConverter
 }
 
 /// <summary>
+/// Returns true when the input string is null, empty, or whitespace.
+/// Pass converter parameter "invert" to invert the result.
+/// </summary>
+public class StringNullOrWhiteSpaceToBoolConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        var isNullOrWhiteSpace = string.IsNullOrWhiteSpace(value as string);
+        var invert = parameter is string text
+            && string.Equals(text, "invert", StringComparison.OrdinalIgnoreCase);
+
+        return invert ? !isNullOrWhiteSpace : isNullOrWhiteSpace;
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
+
+/// <summary>
 /// Builds the playlist secondary line text (track count and total duration) for list rows.
 /// </summary>
 public class PlaylistMetadataTextConverter : IValueConverter
 {
-    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
         if (value is not Playlist playlist)
         {
@@ -53,7 +74,7 @@ public class PlaylistMetadataTextConverter : IValueConverter
         return $"{titlesText} • {durationText}";
     }
 
-    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
         throw new NotImplementedException();
     }

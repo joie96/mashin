@@ -52,7 +52,15 @@
                         <ffimageloading:CachedImage Aspect="AspectFill"
                             HeightRequest="200"
                             HorizontalOptions="Center"
+                            IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
                             Source="{Binding ImageUri}"
+                            VerticalOptions="Center"
+                            WidthRequest="200" />
+                        <Image Aspect="AspectFill"
+                            HeightRequest="200"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
+                            Source="{AppThemeBinding Light=placeholders/album_light.png, Dark=placeholders/album_dark.png}"
                             VerticalOptions="Center"
                             WidthRequest="200" />
                     </Grid>

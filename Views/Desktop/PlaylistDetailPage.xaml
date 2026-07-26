@@ -55,7 +55,15 @@
                             <ffimageloading:CachedImage Aspect="AspectFill"
                                 HeightRequest="200"
                                 HorizontalOptions="Center"
+                                IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
                                 Source="{Binding ImageUri}"
+                                VerticalOptions="Center"
+                                WidthRequest="200" />
+                            <Image Aspect="AspectFill"
+                                HeightRequest="200"
+                                HorizontalOptions="Center"
+                                IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
+                                Source="{AppThemeBinding Light=placeholders/playlist_light.png, Dark=placeholders/playlist_dark.png}"
                                 VerticalOptions="Center"
                                 WidthRequest="200" />
                         </Grid>
@@ -251,12 +259,22 @@
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="4" />
                         </Border.StrokeShape>
-                        <ffimageloading:CachedImage Aspect="AspectFill"
-                            HeightRequest="48"
-                            HorizontalOptions="Center"
-                            Source="{Binding ImageUri}"
-                            VerticalOptions="Center"
-                            WidthRequest="48" />
+                        <Grid>
+                            <ffimageloading:CachedImage Aspect="AspectFill"
+                                HeightRequest="48"
+                                HorizontalOptions="Center"
+                                IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
+                                Source="{Binding ImageUri}"
+                                VerticalOptions="Center"
+                                WidthRequest="48" />
+                            <Image Aspect="AspectFill"
+                                HeightRequest="48"
+                                HorizontalOptions="Center"
+                                IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
+                                Source="{AppThemeBinding Light=placeholders/playlist_light.png, Dark=placeholders/playlist_dark.png}"
+                                VerticalOptions="Center"
+                                WidthRequest="48" />
+                        </Grid>
                     </Border>
 
                     <Label FontAttributes="Bold"

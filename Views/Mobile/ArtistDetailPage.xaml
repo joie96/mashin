@@ -35,7 +35,11 @@
                     </Border.StrokeShape>
                     <Grid>
                         <ffimageloading:CachedImage Aspect="AspectFill"
+                            IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
                             Source="{Binding ImageUri}" />
+                        <Image Aspect="AspectFill"
+                            IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
+                            Source="{AppThemeBinding Light=placeholders/artist_light.png, Dark=placeholders/artist_dark.png}" />
 
 
                         <!--  Fade image into page background at the bottom  -->

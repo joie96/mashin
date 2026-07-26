@@ -54,6 +54,7 @@
                         <ffimageloading:CachedImage Aspect="AspectFill"
                             HeightRequest="200"
                             HorizontalOptions="Center"
+                            IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
                             Source="{Binding ImageUri}"
                             VerticalOptions="Center"
                             WidthRequest="200">
@@ -61,6 +62,17 @@
                                 <RoundRectangleGeometry CornerRadius="100" Rect="0,0,200,200" />
                             </ffimageloading:CachedImage.Clip>
                         </ffimageloading:CachedImage>
+                        <Image Aspect="AspectFill"
+                            HeightRequest="200"
+                            HorizontalOptions="Center"
+                            IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
+                            Source="{AppThemeBinding Light=placeholders/artist_light.png, Dark=placeholders/artist_dark.png}"
+                            VerticalOptions="Center"
+                            WidthRequest="200">
+                            <Image.Clip>
+                                <RoundRectangleGeometry CornerRadius="100" Rect="0,0,200,200" />
+                            </Image.Clip>
+                        </Image>
                     </Grid>
                 </Border>
 
