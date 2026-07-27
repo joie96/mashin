@@ -984,6 +984,7 @@ public class MusicAssistantService
             ? null
             : userPrefix.Trim();
 
+        
         if (!string.IsNullOrWhiteSpace(normalizedUserPrefix)
             && string.IsNullOrWhiteSpace(search))
         {

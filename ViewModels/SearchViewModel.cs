@@ -650,17 +650,6 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
 
             case MediaType.Playlist:
                 var playlists = results.Playlists ?? new List<Playlist>();
-                var prefix = string.Concat(_settings.Username, "--");
-                playlists = playlists
-                    .Where(playlist => !string.IsNullOrWhiteSpace(playlist.Name)
-                        && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-
-                foreach (var playlist in playlists)
-                {
-                    playlist.DisplayName = playlist.Name[prefix.Length..];
-                }
-
                 Playlists = new ObservableRangeCollection<Playlist>(playlists);
                 IsLoadingPlaylists = false;
 
