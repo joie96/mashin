@@ -3,6 +3,12 @@ using mashin.ViewModels;
 using Microsoft.Extensions.Logging;
 using System.ComponentModel;
 
+#if ANDROID
+using Android.Content;
+using Android.Views.InputMethods;
+using Microsoft.Maui.ApplicationModel;
+#endif
+
 namespace mashin.Views.Mobile;
 
 public partial class MainPage : ContentPage
@@ -120,8 +126,31 @@ public partial class MainPage : ContentPage
     {
         MainThread.BeginInvokeOnMainThread(() =>
         {
-            _searchEntry?.Unfocus();
+            DismissSearchKeyboard();
         });
+    }
+
+    private void DismissSearchKeyboard()
+    {
+        _searchEntry?.Unfocus();
+
+#if ANDROID
+        try
+        {
+            var activity = Platform.CurrentActivity;
+            var token = activity?.CurrentFocus?.WindowToken ?? activity?.Window?.DecorView?.WindowToken;
+
+            if (activity?.GetSystemService(Context.InputMethodService) is InputMethodManager inputMethodManager
+                && token != null)
+            {
+                inputMethodManager.HideSoftInputFromWindow(token, HideSoftInputFlags.None);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not explicitly dismiss Android soft keyboard after search submit.");
+        }
+#endif
     }
 
     #endregion
