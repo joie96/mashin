@@ -207,9 +207,35 @@ public partial class MainPage : ContentPage
             return true;
         }
 
+        if (_viewModel.IsAudioOptionsFlyoutOpen)
+        {
+            _ = HandleAndroidBackAsync(
+                shouldCloseAudioOptionsOverlay: true,
+                shouldCloseDeviceSelectionOverlay: false,
+                shouldCloseOverlay: false,
+                shouldCloseSecondaryFlyout: false,
+                shouldClosePrimaryFlyout: false,
+                shouldNavigateBack: false);
+            return true;
+        }
+
+        if (_viewModel.IsDeviceSelectionFlyoutOpen)
+        {
+            _ = HandleAndroidBackAsync(
+                shouldCloseAudioOptionsOverlay: false,
+                shouldCloseDeviceSelectionOverlay: true,
+                shouldCloseOverlay: false,
+                shouldCloseSecondaryFlyout: false,
+                shouldClosePrimaryFlyout: false,
+                shouldNavigateBack: false);
+            return true;
+        }
+
         if (_overlayService.IsOverlayOpen)
         {
             _ = HandleAndroidBackAsync(
+                shouldCloseAudioOptionsOverlay: false,
+                shouldCloseDeviceSelectionOverlay: false,
                 shouldCloseOverlay: true,
                 shouldCloseSecondaryFlyout: false,
                 shouldClosePrimaryFlyout: false,
@@ -220,6 +246,8 @@ public partial class MainPage : ContentPage
         if (_overlayService.IsQueueOverlayOpen)
         {
             _ = HandleAndroidBackAsync(
+                shouldCloseAudioOptionsOverlay: false,
+                shouldCloseDeviceSelectionOverlay: false,
                 shouldCloseOverlay: false,
                 shouldCloseSecondaryFlyout: true,
                 shouldClosePrimaryFlyout: false,
@@ -230,6 +258,8 @@ public partial class MainPage : ContentPage
         if (_overlayService.IsFlyoutOpen)
         {
             _ = HandleAndroidBackAsync(
+                shouldCloseAudioOptionsOverlay: false,
+                shouldCloseDeviceSelectionOverlay: false,
                 shouldCloseOverlay: false,
                 shouldCloseSecondaryFlyout: false,
                 shouldClosePrimaryFlyout: true,
@@ -240,6 +270,8 @@ public partial class MainPage : ContentPage
         if (_navigationService.CanGoBack)
         {
             _ = HandleAndroidBackAsync(
+                shouldCloseAudioOptionsOverlay: false,
+                shouldCloseDeviceSelectionOverlay: false,
                 shouldCloseOverlay: false,
                 shouldCloseSecondaryFlyout: false,
                 shouldClosePrimaryFlyout: false,
@@ -251,6 +283,8 @@ public partial class MainPage : ContentPage
     }
 
     private async Task HandleAndroidBackAsync(
+        bool shouldCloseAudioOptionsOverlay,
+        bool shouldCloseDeviceSelectionOverlay,
         bool shouldCloseOverlay,
         bool shouldCloseSecondaryFlyout,
         bool shouldClosePrimaryFlyout,
@@ -264,6 +298,26 @@ public partial class MainPage : ContentPage
         _isHandlingBackNavigation = true;
         try
         {
+            if (shouldCloseAudioOptionsOverlay)
+            {
+                if (_viewModel.CloseAudioOptionsFlyoutCommand.CanExecute(null))
+                {
+                    _viewModel.CloseAudioOptionsFlyoutCommand.Execute(null);
+                }
+
+                return;
+            }
+
+            if (shouldCloseDeviceSelectionOverlay)
+            {
+                if (_viewModel.CloseDeviceSelectionFlyoutCommand.CanExecute(null))
+                {
+                    _viewModel.CloseDeviceSelectionFlyoutCommand.Execute(null);
+                }
+
+                return;
+            }
+
             if (shouldCloseOverlay)
             {
                 await _overlayService.CloseOverlayAsync();

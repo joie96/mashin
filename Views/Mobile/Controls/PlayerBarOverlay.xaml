@@ -7,11 +7,13 @@
     xmlns:converters="clr-namespace:mashin.Converters"
     xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
-    xmlns:models="clr-namespace:mashin.Models">
+    xmlns:models="clr-namespace:mashin.Models"
+    x:Name="self">
 
     <ContentView.Resources>
         <!--  Playback State Converter  -->
         <converters:PlayStateToBoolConverter x:Key="PlayStateToBoolConverter" />
+        <converters:StringEqualsConverter x:Key="StringEqualsConverter" />
     </ContentView.Resources>
 
     <Grid>
@@ -428,23 +430,26 @@
             </Grid>
         </Border>
 
-        <!--  Device Selection Flyout  -->
-        <Grid IsVisible="{Binding IsDeviceSelectionFlyoutOpen}">
-            <BoxView BackgroundColor="Transparent">
+        <!--  Device Selection Overlay  -->
+        <Grid IsVisible="{Binding IsDeviceSelectionFlyoutOpen}"
+            ZIndex="140">
+            <BoxView BackgroundColor="#80000000">
                 <BoxView.GestureRecognizers>
                     <TapGestureRecognizer Command="{Binding CloseDeviceSelectionFlyoutCommand}" />
                 </BoxView.GestureRecognizers>
             </BoxView>
 
-            <Border Margin="16,0,16,120"
-                Padding="12"
+            <Border
+                Padding="0"
                 BackgroundColor="{DynamicResource BackgroundSecondary}"
-                HorizontalOptions="Fill"
-                VerticalOptions="End"
+                HorizontalOptions="Center"
+                VerticalOptions="Center"
+                WidthRequest="340"
+                MaximumWidthRequest="360"
                 Stroke="{DynamicResource SeparatorColor}"
                 StrokeThickness="1">
                 <Border.StrokeShape>
-                    <RoundRectangle CornerRadius="12" />
+                    <RoundRectangle CornerRadius="14" />
                 </Border.StrokeShape>
                 <Border.Shadow>
                     <Shadow Brush="{DynamicResource ShadowColorStrong}"
@@ -453,49 +458,188 @@
                         Offset="0,8" />
                 </Border.Shadow>
 
-                <VerticalStackLayout Spacing="10">
+                <VerticalStackLayout Spacing="0">
                     <Label FontSize="14"
-                        Margin="0,0,0,8"
+                        FontFamily="PoppinsSemibold"
+                        Margin="16,14,16,10"
                         Text="Wiedergabegeraet"
                         TextColor="{DynamicResource TextPrimary}" />
 
-                    <ActivityIndicator Color="{DynamicResource AccentColor}"
-                        IsRunning="{Binding IsLoadingPlayers}"
-                        IsVisible="{Binding IsLoadingPlayers}" />
+                    <BoxView
+                        Margin="0,0,0,4"
+                        HeightRequest="1"
+                        BackgroundColor="{DynamicResource SeparatorColor}" />
 
-                    <Label FontSize="12"
-                        IsVisible="{Binding HasNoAvailablePlayers}"
-                        Text="Keine Music-Assistant-Geraete gefunden."
-                        TextColor="{DynamicResource TextSecondary}" />
+                    <VerticalStackLayout Padding="16,10,16,14"
+                        Spacing="10">
 
-                    <ScrollView MaximumHeightRequest="260">
-                        <VerticalStackLayout
-                            BindableLayout.ItemsSource="{Binding AvailablePlayers}"
-                            RadioButtonGroup.GroupName="MobileDeviceSelection"
-                            RadioButtonGroup.SelectedValue="{Binding SelectedPlayerId, Mode=TwoWay}"
-                            Spacing="8">
-                            <BindableLayout.ItemTemplate>
-                                <DataTemplate x:DataType="models:Player">
-                                    <Grid Padding="0,2"
-                                        ColumnDefinitions="*,Auto"
-                                        ColumnSpacing="10">
-                                        <VerticalStackLayout Grid.Column="0"
-                                            Spacing="0">
-                                            <Label FontSize="14"
-                                                Text="{Binding Name}"
-                                                TextColor="{DynamicResource TextPrimary}" />
-                                        </VerticalStackLayout>
+                        <ActivityIndicator Color="{DynamicResource AccentColor}"
+                            IsRunning="{Binding IsLoadingPlayers}"
+                            IsVisible="{Binding IsLoadingPlayers}" />
 
-                                        <RadioButton Grid.Column="1"
-                                            IsEnabled="{Binding Available}"
-                                            MinimumWidthRequest="0"
-                                            Value="{Binding PlayerId}"
-                                            VerticalOptions="Center" />
-                                    </Grid>
-                                </DataTemplate>
-                            </BindableLayout.ItemTemplate>
-                        </VerticalStackLayout>
-                    </ScrollView>
+                        <Label FontSize="12"
+                            IsVisible="{Binding HasNoAvailablePlayers}"
+                            Text="Keine Music-Assistant-Geraete gefunden."
+                            TextColor="{DynamicResource TextSecondary}" />
+
+                        <ScrollView MaximumHeightRequest="280">
+                            <VerticalStackLayout
+                                BindableLayout.ItemsSource="{Binding AvailablePlayers}"
+                                RadioButtonGroup.GroupName="MobileDeviceSelection"
+                                RadioButtonGroup.SelectedValue="{Binding SelectedPlayerId, Mode=TwoWay}"
+                                Spacing="8">
+                                <BindableLayout.ItemTemplate>
+                                    <DataTemplate x:DataType="models:Player">
+                                        <Border Padding="10,8"
+                                            BackgroundColor="Transparent"
+                                            StrokeThickness="0">
+                                            <Border.StrokeShape>
+                                                <RoundRectangle CornerRadius="10" />
+                                            </Border.StrokeShape>
+
+                                            <Grid Padding="0,2"
+                                                ColumnDefinitions="*,Auto"
+                                                ColumnSpacing="10">
+                                                <VerticalStackLayout Grid.Column="0"
+                                                    Spacing="0">
+                                                    <Label FontSize="14"
+                                                        Text="{Binding Name}"
+                                                        TextColor="{DynamicResource TextPrimary}" />
+                                                </VerticalStackLayout>
+
+                                                <RadioButton Grid.Column="1"
+                                                    IsEnabled="{Binding Available}"
+                                                    MinimumWidthRequest="0"
+                                                    Value="{Binding PlayerId}"
+                                                    VerticalOptions="Center">
+                                                    <RadioButton.IsChecked>
+                                                        <MultiBinding Mode="OneWay" Converter="{StaticResource StringEqualsConverter}">
+                                                            <Binding Path="PlayerId" />
+                                                            <Binding Path="BindingContext.SelectedPlayerId" Source="{x:Reference self}" />
+                                                        </MultiBinding>
+                                                    </RadioButton.IsChecked>
+                                                </RadioButton>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </BindableLayout.ItemTemplate>
+                            </VerticalStackLayout>
+                        </ScrollView>
+                    </VerticalStackLayout>
+                </VerticalStackLayout>
+            </Border>
+        </Grid>
+
+        <!--  Audio Options Overlay  -->
+        <Grid IsVisible="{Binding IsAudioOptionsFlyoutOpen}"
+            ZIndex="141">
+            <BoxView BackgroundColor="#80000000">
+                <BoxView.GestureRecognizers>
+                    <TapGestureRecognizer Command="{Binding CloseAudioOptionsFlyoutCommand}" />
+                </BoxView.GestureRecognizers>
+            </BoxView>
+
+            <Border
+                Padding="0"
+                BackgroundColor="{DynamicResource BackgroundSecondary}"
+                HorizontalOptions="Center"
+                VerticalOptions="Center"
+                WidthRequest="340"
+                MaximumWidthRequest="360"
+                Stroke="{DynamicResource SeparatorColor}"
+                StrokeThickness="1">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="14" />
+                </Border.StrokeShape>
+                <Border.Shadow>
+                    <Shadow Brush="{DynamicResource ShadowColorStrong}"
+                        Opacity="{DynamicResource ShadowOpacityStrong}"
+                        Radius="20"
+                        Offset="0,8" />
+                </Border.Shadow>
+
+                <VerticalStackLayout Spacing="0">
+                    <Label
+                        FontSize="14"
+                        FontFamily="PoppinsSemibold"
+                        Margin="16,14,16,10"
+                        Text="Klangqualitaet"
+                        TextColor="{DynamicResource TextPrimary}" />
+
+                    <BoxView
+                        Margin="0,0,0,4"
+                        HeightRequest="1"
+                        BackgroundColor="{DynamicResource SeparatorColor}" />
+
+                    <VerticalStackLayout Padding="16,10,16,14"
+                        Spacing="12">
+                        <Grid ColumnDefinitions="*,Auto"
+                            ColumnSpacing="10"
+                            RowDefinitions="Auto,Auto">
+                            <VerticalStackLayout Grid.Row="0"
+                                Grid.Column="0"
+                                Spacing="0">
+                                <Label FontSize="14"
+                                    Text="Standard"
+                                    TextColor="{DynamicResource TextPrimary}" />
+                                <Label FontSize="12"
+                                    Text="Opus 256 kb/s"
+                                    TextColor="{DynamicResource TextSecondary}" />
+                            </VerticalStackLayout>
+
+                            <RadioButton Grid.RowSpan="2"
+                                Grid.Column="1"
+                                GroupName="MobileAudioQuality"
+                                HorizontalOptions="End"
+                                IsChecked="{Binding IsAudioQualityOpus, Mode=TwoWay}"
+                                VerticalOptions="Center"
+                                MinimumWidthRequest="0" />
+                        </Grid>
+
+                        <Grid ColumnDefinitions="*,Auto"
+                            ColumnSpacing="10"
+                            RowDefinitions="Auto,Auto">
+                            <Label Grid.Row="0"
+                                Grid.Column="0"
+                                FontSize="14"
+                                Text="High Fidelity"
+                                TextColor="{DynamicResource TextPrimary}" />
+                            <Label Grid.Row="1"
+                                Grid.Column="0"
+                                FontSize="12"
+                                Text="FLAC"
+                                TextColor="{DynamicResource TextSecondary}" />
+                            <RadioButton Grid.RowSpan="2"
+                                Grid.Column="1"
+                                GroupName="MobileAudioQuality"
+                                HorizontalOptions="End"
+                                IsChecked="{Binding IsAudioQualityFlac, Mode=TwoWay}"
+                                VerticalOptions="Center"
+                                MinimumWidthRequest="0" />
+                        </Grid>
+
+                        <Grid ColumnDefinitions="*,Auto"
+                            ColumnSpacing="10"
+                            RowDefinitions="Auto,Auto">
+                            <Label Grid.Row="0"
+                                Grid.Column="0"
+                                FontSize="14"
+                                Text="Studio"
+                                TextColor="{DynamicResource TextPrimary}" />
+                            <Label Grid.Row="1"
+                                Grid.Column="0"
+                                FontSize="12"
+                                Text="PCM"
+                                TextColor="{DynamicResource TextSecondary}" />
+                            <RadioButton Grid.RowSpan="2"
+                                Grid.Column="1"
+                                GroupName="MobileAudioQuality"
+                                HorizontalOptions="End"
+                                IsChecked="{Binding IsAudioQualityPcm, Mode=TwoWay}"
+                                VerticalOptions="Center"
+                                MinimumWidthRequest="0" />
+                        </Grid>
+                    </VerticalStackLayout>
                 </VerticalStackLayout>
             </Border>
         </Grid>

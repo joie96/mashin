@@ -1,5 +1,6 @@
 using System.Globalization;
 using mashin.Models;
+using Microsoft.Maui.Controls;
 
 namespace mashin.Converters;
 
@@ -28,7 +29,14 @@ public class StringEqualsConverter : IMultiValueConverter
 
     public object[] ConvertBack(object value, Type[] targetTypes, object parameter, CultureInfo culture)
     {
-        throw new NotImplementedException();
+        if (targetTypes == null || targetTypes.Length == 0)
+        {
+            return Array.Empty<object>();
+        }
+
+        // This converter is used for display comparisons only.
+        // Ignore reverse flow and keep source bindings unchanged.
+        return targetTypes.Select(_ => Binding.DoNothing).ToArray();
     }
 }
 

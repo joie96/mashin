@@ -1404,10 +1404,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
             _availablePlayers.ReplaceRange(orderedPlayers);
 
-            if (string.IsNullOrWhiteSpace(SelectedPlayerId)
-                || orderedPlayers.All(player => !string.Equals(player.PlayerId, SelectedPlayerId, StringComparison.Ordinal)))
+            var activePlayerId = _playbackService.ActivePlayerId?.Trim();
+            var selectedPlayerId = SelectedPlayerId?.Trim();
+
+            var preferredPlayerId = orderedPlayers
+                .FirstOrDefault(player => string.Equals(player.PlayerId, activePlayerId, StringComparison.OrdinalIgnoreCase))?.PlayerId
+                ?? orderedPlayers.FirstOrDefault(player => string.Equals(player.PlayerId, selectedPlayerId, StringComparison.OrdinalIgnoreCase))?.PlayerId
+                ?? orderedPlayers.FirstOrDefault(player => string.Equals(player.PlayerId, preferredSendspinPlayerId, StringComparison.OrdinalIgnoreCase))?.PlayerId
+                ?? orderedPlayers.FirstOrDefault()?.PlayerId;
+
+            if (!string.IsNullOrWhiteSpace(preferredPlayerId))
             {
-                ApplyInitialSelectedPlayer();
+                SetSelectedPlayerSilently(preferredPlayerId);
             }
         }
         catch (Exception ex)
