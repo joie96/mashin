@@ -8,6 +8,7 @@
     xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
     xmlns:models="clr-namespace:mashin.Models"
+    xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
     x:Name="self">
 
     <ContentView.Resources>
@@ -141,10 +142,15 @@
                     HorizontalOptions="Center"
                     Spacing="18"
                     VerticalOptions="Center">
-                    <Border BackgroundColor="Transparent"
+                    <Border BackgroundColor="{DynamicResource ActionButtonsBackground}"
                         HeightRequest="44"
                         StrokeThickness="0"
                         WidthRequest="44">
+                        <Border.Behaviors>
+                            <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                                PressedAnimationDuration="250"
+                                PressedAnimationEasing="CubicOut" />
+                        </Border.Behaviors>
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding ToggleShuffleCommand}" />
                         </Border.GestureRecognizers>
@@ -166,10 +172,15 @@
                         </Label>
                     </Border>
 
-                    <Border BackgroundColor="Transparent"
+                    <Border BackgroundColor="{DynamicResource ActionButtonsBackground}"
                         HeightRequest="44"
                         StrokeThickness="0"
                         WidthRequest="44">
+                        <Border.Behaviors>
+                            <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                                PressedAnimationDuration="250"
+                                PressedAnimationEasing="CubicOut" />
+                        </Border.Behaviors>
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding PreviousTrackCommand}" />
                         </Border.GestureRecognizers>
@@ -188,6 +199,11 @@
                         Margin="4,0"
                         StrokeThickness="0"
                         WidthRequest="60">
+                        <Border.Behaviors>
+                            <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                                PressedAnimationDuration="250"
+                                PressedAnimationEasing="CubicOut" />
+                        </Border.Behaviors>
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding TogglePlayPauseCommand}" />
                         </Border.GestureRecognizers>
@@ -216,10 +232,15 @@
                         </Grid>
                     </Border>
 
-                    <Border BackgroundColor="Transparent"
+                    <Border BackgroundColor="{DynamicResource ActionButtonsBackground}"
                         HeightRequest="44"
                         StrokeThickness="0"
                         WidthRequest="44">
+                        <Border.Behaviors>
+                            <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                                PressedAnimationDuration="250"
+                                PressedAnimationEasing="CubicOut" />
+                        </Border.Behaviors>
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding NextTrackCommand}" />
                         </Border.GestureRecognizers>
@@ -233,10 +254,15 @@
                             VerticalOptions="Center" />
                     </Border>
 
-                    <Border BackgroundColor="Transparent"
+                    <Border BackgroundColor="{DynamicResource ActionButtonsBackground}"
                         HeightRequest="44"
                         StrokeThickness="0"
                         WidthRequest="44">
+                        <Border.Behaviors>
+                            <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                                PressedAnimationDuration="250"
+                                PressedAnimationEasing="CubicOut" />
+                        </Border.Behaviors>
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding ToggleRepeatModeCommand}" />
                         </Border.GestureRecognizers>
@@ -275,10 +301,15 @@
                     HorizontalOptions="Center"
                     Spacing="18">
                     <Border x:Name="CurrentTrackAddToPlaylistButton"
-                        BackgroundColor="Transparent"
+                        BackgroundColor="{DynamicResource ActionButtonsBackground}"
                         HeightRequest="44"
                         StrokeThickness="0"
                         WidthRequest="44">
+                        <Border.Behaviors>
+                            <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                                PressedAnimationDuration="250"
+                                PressedAnimationEasing="CubicOut" />
+                        </Border.Behaviors>
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding ShowCurrentTrackContextMenuCommand}"
                                 CommandParameter="{x:Reference CurrentTrackAddToPlaylistButton}" />
@@ -293,10 +324,15 @@
                             VerticalOptions="Center" />
                     </Border>
 
-                    <Border BackgroundColor="Transparent"
+                    <Border BackgroundColor="{DynamicResource ActionButtonsBackground}"
                         HeightRequest="44"
                         StrokeThickness="0"
                         WidthRequest="44">
+                        <Border.Behaviors>
+                            <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                                PressedAnimationDuration="250"
+                                PressedAnimationEasing="CubicOut" />
+                        </Border.Behaviors>
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding ToggleCurrentTrackFavoriteCommand}" />
                         </Border.GestureRecognizers>
@@ -335,10 +371,15 @@
                     </Border>
 
                     <Border x:Name="QueueButton"
-                        BackgroundColor="Transparent"
+                        BackgroundColor="{DynamicResource ActionButtonsBackground}"
                         HeightRequest="44"
                         StrokeThickness="0"
                         WidthRequest="44">
+                        <Border.Behaviors>
+                            <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                                PressedAnimationDuration="250"
+                                PressedAnimationEasing="CubicOut" />
+                        </Border.Behaviors>
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Tapped="OnQueueButtonTapped" />
                         </Border.GestureRecognizers>
@@ -352,10 +393,15 @@
                             VerticalOptions="Center" />
                     </Border>
 
-                    <Border BackgroundColor="Transparent"
+                    <Border BackgroundColor="{DynamicResource ActionButtonsBackground}"
                         HeightRequest="44"
                         StrokeThickness="0"
                         WidthRequest="44">
+                        <Border.Behaviors>
+                            <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                                PressedAnimationDuration="250"
+                                PressedAnimationEasing="CubicOut" />
+                        </Border.Behaviors>
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding ToggleDontStopTheMusicCommand}" />
                         </Border.GestureRecognizers>
@@ -377,10 +423,15 @@
                         </Label>
                     </Border>
 
-                    <Border BackgroundColor="Transparent"
+                    <Border BackgroundColor="{DynamicResource ActionButtonsBackground}"
                         HeightRequest="44"
                         StrokeThickness="0"
                         WidthRequest="44">
+                        <Border.Behaviors>
+                            <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                                PressedAnimationDuration="250"
+                                PressedAnimationEasing="CubicOut" />
+                        </Border.Behaviors>
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding ToggleDeviceSelectionFlyoutCommand}" />
                         </Border.GestureRecognizers>
@@ -402,10 +453,15 @@
                         </Label>
                     </Border>
 
-                    <Border BackgroundColor="Transparent"
+                    <Border BackgroundColor="{DynamicResource ActionButtonsBackground}"
                         HeightRequest="44"
                         StrokeThickness="0"
                         WidthRequest="44">
+                        <Border.Behaviors>
+                            <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                                PressedAnimationDuration="250"
+                                PressedAnimationEasing="CubicOut" />
+                        </Border.Behaviors>
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding ToggleAudioOptionsFlyoutCommand}" />
                         </Border.GestureRecognizers>
