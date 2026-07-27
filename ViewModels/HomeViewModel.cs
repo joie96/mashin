@@ -1051,7 +1051,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
                     var duplicateIndex = targetTracks.Count;
                     string? duplicateQueueItemId = null;
-                    for (var attempt = 0; attempt < 5; attempt++)
+                    for (var attempt = 0; attempt < 10; attempt++)
                     {
                         if (_playbackService.CurrentQueueItems.Count > duplicateIndex)
                         {
@@ -1062,7 +1062,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                             }
                         }
 
-                        await Task.Delay(150);
+                        await Task.Delay(500);
                     }
 
                     if (!string.IsNullOrWhiteSpace(duplicateQueueItemId))

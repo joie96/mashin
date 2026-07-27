@@ -933,7 +933,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
                     var duplicateIndex = targetTracks.Count;
                     string? duplicateQueueItemId = null;
-                    for (var attempt = 0; attempt < 5; attempt++)
+                    for (var attempt = 0; attempt < 10; attempt++)
                     {
                         if (PlaybackService.CurrentQueueItems.Count > duplicateIndex)
                         {
@@ -944,7 +944,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                             }
                         }
 
-                        await Task.Delay(150);
+                        await Task.Delay(500);
                     }
 
                     if (!string.IsNullOrWhiteSpace(duplicateQueueItemId))

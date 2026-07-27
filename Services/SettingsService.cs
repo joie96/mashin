@@ -256,6 +256,7 @@ public class SettingsService
 
     public static bool IsMobile()
     {
+        return true;
         return DeviceInfo.Idiom == DeviceIdiom.Phone || DeviceInfo.Idiom == DeviceIdiom.Tablet;
     }
 
