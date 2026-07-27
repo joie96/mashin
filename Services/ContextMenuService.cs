@@ -349,6 +349,7 @@ public sealed class DefaultContextMenuService : IContextMenuService
 {
     private readonly IOverlayService _overlayService;
     private readonly SemaphoreSlim _menuLock = new(1, 1);
+    private readonly SemaphoreSlim _menuTransitionLock = new(1, 1);
 
     private TaskCompletionSource<bool>? _currentMenuClosedTcs;
     private ContextMenu? _mainMenu;
@@ -422,16 +423,28 @@ public sealed class DefaultContextMenuService : IContextMenuService
             };
             _mainMenu.ItemInvoked += async (_, item) => await OnMainMenuItemInvokedAsync(item);
             _mainMenu.DismissRequested += async (_, _) => await CloseMenuCoreAsync();
+            _mainMenu.PrepareForOpen();
 
             _currentMenuClosedTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var mainMenu = _mainMenu;
+            var menuClosedTcs = _currentMenuClosedTcs;
 
-            await _overlayService.ShowContextMenuFlyoutAsync(_mainMenu, CloseMenu);
+            await _overlayService.ShowContextMenuFlyoutAsync(mainMenu, CloseMenu);
 
-            // Ensure first layout/frame before running the menu's own slide-in animation.
-            await Task.Yield();
-            await _mainMenu.AnimateInAsync();
+            await _menuTransitionLock.WaitAsync();
+            try
+            {
+                if (mainMenu != null && ReferenceEquals(_mainMenu, mainMenu))
+                {
+                    await mainMenu.AnimateInAsync();
+                }
+            }
+            finally
+            {
+                _menuTransitionLock.Release();
+            }
 
-            await _currentMenuClosedTcs.Task;
+            await menuClosedTcs.Task;
         }
         finally
         {
@@ -525,20 +538,28 @@ public sealed class DefaultContextMenuService : IContextMenuService
     // Closes the full mobile context menu flow.
     private async Task CloseMenuCoreAsync()
     {
-        if (_mainMenu == null)
+        await _menuTransitionLock.WaitAsync();
+        try
         {
-            return;
+            if (_mainMenu == null)
+            {
+                return;
+            }
+
+            await HideSubMenuCoreAsync();
+
+            await _mainMenu.AnimateOutAsync();
+            await _overlayService.HideContextMenuFlyoutAsync();
+
+            _mainMenu = null;
+
+            _currentMenuClosedTcs?.TrySetResult(true);
+            _currentMenuClosedTcs = null;
         }
-
-        await HideSubMenuCoreAsync();
-
-        await _mainMenu.AnimateOutAsync();
-        await _overlayService.HideContextMenuFlyoutAsync();
-
-        _mainMenu = null;
-
-        _currentMenuClosedTcs?.TrySetResult(true);
-        _currentMenuClosedTcs = null;
+        finally
+        {
+            _menuTransitionLock.Release();
+        }
     }
 
     // Calculates max main menu height as 75% of display height.

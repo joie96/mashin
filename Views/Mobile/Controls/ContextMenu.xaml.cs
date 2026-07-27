@@ -16,6 +16,10 @@ public partial class ContextMenu : ContentView
     private bool _dismissTriggered;
     private double _menuVerticalOffset;
 
+    public bool IsOpen { get; private set; }
+
+    public bool IsAnimating { get; private set; }
+
     public static readonly BindableProperty MenuItemsProperty =
         BindableProperty.Create(
             nameof(MenuItems),
@@ -50,23 +54,62 @@ public partial class ContextMenu : ContentView
         InitializeComponent();
     }
 
-    public async Task AnimateInAsync()
+    public void PrepareForOpen()
     {
         _dismissTriggered = false;
         _menuVerticalOffset = 0;
-
+        IsOpen = false;
         TranslationY = GetSlideDistance();
+    }
 
-        await this.TranslateToAsync(0, 0, InSlideDurationMs, Easing.SinOut);
+    public async Task AnimateInAsync()
+    {
+        if (IsOpen || IsAnimating)
+        {
+            return;
+        }
+
+        IsAnimating = true;
+        try
+        {
+            _dismissTriggered = false;
+            _menuVerticalOffset = 0;
+
+            if (TranslationY <= 0)
+            {
+                TranslationY = GetSlideDistance();
+            }
+
+            await this.TranslateToAsync(0, 0, InSlideDurationMs, Easing.SinOut);
+            IsOpen = true;
+        }
+        finally
+        {
+            IsAnimating = false;
+        }
     }
 
     public async Task AnimateOutAsync()
     {
-        _dismissTriggered = true;
+        if (!IsOpen || IsAnimating)
+        {
+            return;
+        }
 
-        await this.TranslateToAsync(0, GetSlideDistance(), OutSlideDurationMs, Easing.SinIn);
+        IsAnimating = true;
+        try
+        {
+            _dismissTriggered = true;
 
-        TranslationY = 0;
+            await this.TranslateToAsync(0, GetSlideDistance(), OutSlideDurationMs, Easing.SinIn);
+
+            TranslationY = 0;
+            IsOpen = false;
+        }
+        finally
+        {
+            IsAnimating = false;
+        }
     }
 
     private void OnMenuItemTapped(object? sender, TappedEventArgs e)
@@ -99,7 +142,7 @@ public partial class ContextMenu : ContentView
         switch (e.StatusType)
         {
             case GestureStatus.Started:
-                _canDismissForCurrentPan = IsScrollAtTop();
+                _canDismissForCurrentPan = IsOpen && !IsAnimating && IsScrollAtTop();
                 _isSheetDragging = _canDismissForCurrentPan;
 
                 break;
