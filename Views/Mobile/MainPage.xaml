@@ -62,7 +62,8 @@
                             Text="{mi:Fluent Icon=Search12, FontOverride=True}"
                             TextColor="{DynamicResource IconSecondary}"
                             VerticalOptions="Center" />
-                        <Entry Grid.Column="1"
+                        <Entry x:Name="SearchEntry"
+                            Grid.Column="1"
                             Margin="0,8,0,0"
                             BackgroundColor="Transparent"
                             ClearButtonVisibility="WhileEditing"

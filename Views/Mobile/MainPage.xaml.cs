@@ -1,6 +1,7 @@
 using mashin.Services;
 using mashin.ViewModels;
 using Microsoft.Extensions.Logging;
+using System.ComponentModel;
 
 namespace mashin.Views.Mobile;
 
@@ -20,6 +21,7 @@ public partial class MainPage : ContentPage
     private readonly INavigationService _navigationService;
     private readonly IOverlayService _overlayService;
     private readonly ILogger<MainPage> _logger;
+    private readonly Entry? _searchEntry;
     private bool _isHandlingBackNavigation;
     private Task? _initializeTask;
     private bool _playerBarDragStarted;
@@ -42,7 +44,10 @@ public partial class MainPage : ContentPage
         _navigationService = navigationService;
         _overlayService = overlayService;
         _logger = logger;
+        _searchEntry = this.FindByName<Entry>("SearchEntry");
         BindingContext = _viewModel;
+        _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        _viewModel.SearchSubmitted += OnSearchSubmitted;
 
         var selectionIndicatorHost = this.FindByName<Grid>("SelectionIndicatorHost");
         var selectionIndicatorContent = this.FindByName<ContentPresenter>("SelectionIndicatorContent");
@@ -90,6 +95,33 @@ public partial class MainPage : ContentPage
         {
             _logger.LogError(ex, "Failed to initialize main view model");
         }
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(MainViewModel.CurrentSection))
+        {
+            return;
+        }
+
+        if (_viewModel.CurrentSection != MainViewModel.NavigationSection.Search)
+        {
+            return;
+        }
+
+        MainThread.BeginInvokeOnMainThread(async () =>
+        {
+            await Task.Yield();
+            _searchEntry?.Focus();
+        });
+    }
+
+    private void OnSearchSubmitted(object? sender, EventArgs e)
+    {
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            _searchEntry?.Unfocus();
+        });
     }
 
     #endregion
@@ -340,6 +372,7 @@ public partial class MainPage : ContentPage
             {
                 await _navigationService.GoBackAsync();
             }
+
         }
         finally
         {

@@ -11,17 +11,42 @@
     <ScrollView>
         <VerticalStackLayout
             Padding="0,0,0,12"
-            IsVisible="{Binding HasSearchRequest}"
             Spacing="16">
 
             <!--  Header  -->
-            <VerticalStackLayout Padding="16,0,16,0"
+            <VerticalStackLayout Padding="16,14,16,0"
                 Spacing="6">
                 <Label FontFamily="PoppinsRegular"
                     FontSize="24"
                     Text="Suchergebnisse"
                     TextColor="{DynamicResource TextPrimary}" />
+
+                <Label FontFamily="PoppinsRegular"
+                    FontSize="13"
+                    IsVisible="True"
+                    Text="Starte eine Suche, um hier passende Titel, Alben, Playlists und Artists zu sehen."
+                    TextColor="{DynamicResource TextSecondary}">
+                    <Label.Triggers>
+                        <DataTrigger Binding="{Binding HasSearchRequest}"
+                            TargetType="Label"
+                            Value="True">
+                            <Setter Property="IsVisible"
+                                Value="False" />
+                        </DataTrigger>
+                    </Label.Triggers>
+                </Label>
             </VerticalStackLayout>
+
+            <VerticalStackLayout IsVisible="False"
+                Spacing="16">
+                <VerticalStackLayout.Triggers>
+                    <DataTrigger Binding="{Binding HasSearchRequest}"
+                        TargetType="VerticalStackLayout"
+                        Value="True">
+                        <Setter Property="IsVisible"
+                            Value="True" />
+                    </DataTrigger>
+                </VerticalStackLayout.Triggers>
 
             <!--  Tracks Section  -->
             <VerticalStackLayout Padding="16,0,16,0"
@@ -245,6 +270,7 @@
                     SecondaryInfoTappedCommand="{Binding ArtistTappedCommand}"
                     ShowContextMenuAtAnchorCommand="{Binding ShowArtistContextMenuAtAnchorCommand}"
                     ShowContextMenuAtPositionCommand="{Binding ShowArtistContextMenuAtPositionCommand}" />
+            </VerticalStackLayout>
             </VerticalStackLayout>
         </VerticalStackLayout>
     </ScrollView>

@@ -62,6 +62,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private bool _isLoginOverlayActive;
 
     public event Func<Task>? CloseQueueViewRequested;
+    public event EventHandler? SearchSubmitted;
 
     #endregion
 
@@ -572,6 +573,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             return;
         }
 
+        SearchSubmitted?.Invoke(this, EventArgs.Empty);
+
         try
         {
             _isSearching = true;
@@ -1015,6 +1018,28 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (e.PropertyName == nameof(INavigationService.IsNavigating))
         {
             IsNavigating = _navigationService.IsNavigating;
+            return;
+        }
+
+        if (e.PropertyName == nameof(INavigationService.CurrentPageType))
+        {
+            var currentPageType = _navigationService.CurrentPageType;
+            var isSearchPage = string.Equals(currentPageType?.Name, nameof(SearchPage), StringComparison.Ordinal);
+
+            if (isSearchPage)
+            {
+                if (CurrentSection != NavigationSection.Search)
+                {
+                    CurrentSection = NavigationSection.Search;
+                }
+
+                return;
+            }
+
+            if (CurrentSection == NavigationSection.Search)
+            {
+                CurrentSection = NavigationSection.None;
+            }
         }
     }
 

@@ -32,6 +32,7 @@ public interface INavigationService : INotifyPropertyChanged
 {
     bool IsNavigating { get; set; }
     bool CanGoBack { get; }
+    Type? CurrentPageType { get; }
     Task NavigateToAsync<TPage>() where TPage : ContentPage;
     Task NavigateToAsync<TPage>(object? parameter) where TPage : ContentPage;
     Task GoBackAsync();
@@ -70,6 +71,7 @@ public class NavigationService : INavigationService
     private readonly Stack<NavigationEntry> _navigationStack = new();
     private ContentPage? _currentPage;
     private IServiceScope? _currentScope;
+    private Type? _currentPageType;
 
     private sealed record NavigationEntry(Type PageType, object? Parameter);
 
@@ -87,6 +89,19 @@ public class NavigationService : INavigationService
     }
 
     public bool CanGoBack => _navigationStack.Count > 1;
+
+    public Type? CurrentPageType
+    {
+        get => _currentPageType;
+        private set
+        {
+            if (_currentPageType != value)
+            {
+                _currentPageType = value;
+                OnPropertyChanged();
+            }
+        }
+    }
 
     public NavigationService(
         IServiceScopeFactory scopeFactory,
@@ -189,6 +204,7 @@ public class NavigationService : INavigationService
     private async Task ShowPageAsync(NavigationEntry entry)
     {
         var targetPageType = ResolveTargetPageType(entry.PageType);
+        CurrentPageType = targetPageType;
         var scope = _scopeFactory.CreateScope();
         ContentPage newPage;
         try
