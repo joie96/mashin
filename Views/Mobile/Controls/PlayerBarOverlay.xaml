@@ -362,7 +362,7 @@
                         </Border.StrokeShape>
                         <Label FontSize="20"
                             HorizontalOptions="Center"
-                            Text="{mi:Fluent Icon=MusicNote216, FontOverride=True}"
+                            Text="{mi:Fluent Icon=Communication16, FontOverride=True}"
                             TextColor="{DynamicResource IconSecondary}"
                             VerticalOptions="Center">
                             <Label.Triggers>
