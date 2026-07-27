@@ -92,6 +92,7 @@ public static class MauiProgram
         // Services registrieren
         builder.Services.AddSingleton<SettingsService>();
         builder.Services.AddSingleton<MusicAssistantService>();
+        builder.Services.AddSingleton<IPlaylistService, PlaylistService>();
         builder.Services.AddSingleton<IMusicAssistantEventHub, MusicAssistantEventHub>();
         builder.Services.AddSingleton<IUserDataService, UserDataService>();
         builder.Services.AddSingleton<IMediaItemActions, MediaItemActions>();

@@ -28,7 +28,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly IUserDataService _userDataService;
-    private readonly SettingsService _settings;
+    private readonly IPlaylistService _playlistService;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
     private readonly ILogger<ArtistDetailViewModel> _logger;
@@ -227,7 +227,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     public ArtistDetailViewModel(
         MusicAssistantService musicAssistant,
         IUserDataService userDataService,
-        SettingsService settings,
+        IPlaylistService playlistService,
         IMediaItemActions mediaActions,
         PlaybackService playbackService,
         IContextMenuService contextMenuService,
@@ -236,7 +236,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     {
         _musicAssistant = musicAssistant;
         _userDataService = userDataService;
-        _settings = settings;
+        _playlistService = playlistService;
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
         _logger = logger;
@@ -896,11 +896,9 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         return Task.CompletedTask;
     }
 
-    private async Task BuildTrackContextMenuAsync()
+    private Task BuildTrackContextMenuAsync()
     {
-        var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(
-            orderBy: "sort_name",
-            userPrefix: string.Concat("--", _settings.Username));
+        var playlists = _playlistService.Playlists;
 
         var menu = new ObservableRangeCollection<ContextMenuItem>
         {
@@ -961,6 +959,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         };
 
         _trackContextMenuItems = menu;
+        return Task.CompletedTask;
     }
 
     private IReadOnlyList<Track> GetContextMenuTargetTracks()

@@ -38,10 +38,6 @@ public class MusicAssistantService
     private readonly Dictionary<string, ProviderManifest> _providerManifestCache = new();
     private readonly SemaphoreSlim _manifestCacheLock = new(1, 1);
 
-    // Library playlist cache
-    private readonly Dictionary<string, List<Playlist>> _libraryPlaylistsCache = new();
-    private readonly SemaphoreSlim _libraryPlaylistsCacheLock = new(1, 1);
-
     // JSON Serializer options with custom converters
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -995,27 +991,6 @@ public class MusicAssistantService
             search = normalizedUserPrefix;
         }
 
-        var cacheKey = BuildLibraryPlaylistsCacheKey(favorite, search, limit, offset, orderBy, libraryItemsOnly, normalizedUserPrefix);
-
-        await _libraryPlaylistsCacheLock.WaitAsync();
-        try
-        {
-            if (_libraryPlaylistsCache.TryGetValue(cacheKey, out var cachedPlaylists))
-            {
-                foreach (var playlist in cachedPlaylists)
-                {
-                    ResolveMediaItemImages(playlist);
-                }
-
-                _logger.LogDebug("Returning cached library playlists for key: {CacheKey}", cacheKey);
-                return new List<Playlist>(cachedPlaylists);
-            }
-        }
-        finally
-        {
-            _libraryPlaylistsCacheLock.Release();
-        }
-
         var args = new Dictionary<string, object>
         {
             ["library_items_only"] = libraryItemsOnly
@@ -1049,16 +1024,6 @@ public class MusicAssistantService
         }
 
         _ = EnrichWithProviderInfoAsync(playlists);
-
-        await _libraryPlaylistsCacheLock.WaitAsync();
-        try
-        {
-            _libraryPlaylistsCache[cacheKey] = new List<Playlist>(playlists);
-        }
-        finally
-        {
-            _libraryPlaylistsCacheLock.Release();
-        }
 
         return playlists;
     }
@@ -1118,11 +1083,7 @@ public class MusicAssistantService
             args["provider_instance_or_domain"] = providerInstanceOrDomain;
         }
 
-        var playlist = await SendCommandAsync<Playlist>("music/playlists/create_playlist", args);
-
-        // Creation impacts list membership/order/pagination, safest is a full invalidate.
-        await InvalidateLibraryPlaylistsCacheAsync();
-        return playlist;
+        return await SendCommandAsync<Playlist>("music/playlists/create_playlist", args);
     }
 
     /// <summary>
@@ -1137,14 +1098,6 @@ public class MusicAssistantService
         };
 
         await SendCommandAsync<object>("music/playlists/add_playlist_tracks", args);
-
-        if (uris.Count > 0)
-        {
-            _ = await UpdateCachedPlaylistByItemIdAsync(playlistId, playlist =>
-            {
-                playlist.TracksCount = Math.Max(0, playlist.TracksCount + uris.Count);
-            });
-        }
     }
 
     /// <summary>
@@ -1159,14 +1112,6 @@ public class MusicAssistantService
         };
 
         await SendCommandAsync<object>("music/playlists/remove_playlist_tracks", args);
-
-        if (positionsToRemove.Count > 0)
-        {
-            _ = await UpdateCachedPlaylistByItemIdAsync(playlistId, playlist =>
-            {
-                playlist.TracksCount = Math.Max(0, playlist.TracksCount - positionsToRemove.Count);
-            });
-        }
     }
 
     /// <summary>
@@ -1181,7 +1126,6 @@ public class MusicAssistantService
         };
 
         await SendCommandAsync<object>("music/playlists/remove", args);
-        _ = await RemoveCachedPlaylistByItemIdAsync(itemId);
     }
 
     /// <summary>
@@ -1218,17 +1162,7 @@ public class MusicAssistantService
             ["overwrite"] = overwrite
         };
 
-        var playlist = await SendCommandAsync<Playlist>("music/playlists/update", args);
-        if (playlist != null)
-        {
-            _ = await UpdateCachedPlaylistByItemIdAsync(itemId, cached => ApplyPlaylistSnapshot(cached, playlist));
-        }
-        else
-        {
-            _ = await UpdateCachedPlaylistByItemIdAsync(itemId, cached => ApplyPlaylistSnapshot(cached, update));
-        }
-
-        return playlist;
+        return await SendCommandAsync<Playlist>("music/playlists/update", args);
     }
 
     /// <summary>
@@ -1590,14 +1524,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task<object?> AddLibraryItemAsync(string uri, bool overwriteExisting = false)
     {
-        var result = await AddLibraryItemAsync((object)uri, overwriteExisting);
-
-        if (TryExtractPlaylistIdFromUri(uri, out _))
-        {
-            await InvalidateLibraryPlaylistsCacheAsync();
-        }
-
-        return result;
+        return await AddLibraryItemAsync((object)uri, overwriteExisting);
     }
 
     /// <summary>
@@ -1625,14 +1552,7 @@ public class MusicAssistantService
             }).ToList()
         };
 
-        var result = await AddLibraryItemAsync((object)itemPayload, overwriteExisting);
-
-        if (mediaItem.MediaType == MediaType.Playlist)
-        {
-            await InvalidateLibraryPlaylistsCacheAsync();
-        }
-
-        return result;
+        return await AddLibraryItemAsync((object)itemPayload, overwriteExisting);
     }
 
     /// <summary>
@@ -1662,11 +1582,6 @@ public class MusicAssistantService
         };
 
         await SendCommandAsync<object>("music/library/remove_item", args);
-
-        if (mediaType == MediaType.Playlist)
-        {
-            _ = await RemoveCachedPlaylistByItemIdAsync(libraryItemId);
-        }
     }
 
     /// <summary>
@@ -1676,11 +1591,6 @@ public class MusicAssistantService
     {
         var args = new { item = itemUri };
         await SendCommandAsync<object>("music/favorites/add_item", args);
-
-        if (TryExtractPlaylistIdFromUri(itemUri, out var playlistId))
-        {
-            _ = await UpdateCachedPlaylistByItemIdAsync(playlistId, playlist => playlist.Favorite = true);
-        }
     }
 
     /// <summary>
@@ -1695,11 +1605,6 @@ public class MusicAssistantService
         };
 
         await SendCommandAsync<object>("music/favorites/remove_item", args);
-
-        if (mediaType == MediaType.Playlist)
-        {
-            _ = await UpdateCachedPlaylistByItemIdAsync(libraryItemId, playlist => playlist.Favorite = false);
-        }
     }
 
     #endregion
@@ -2489,142 +2394,6 @@ public class MusicAssistantService
         }
 
         return Task.FromResult(item);
-    }
-
-    #endregion
-
-    #region Playlists Cache Helpers
-
-    private static string BuildLibraryPlaylistsCacheKey(
-        bool? favorite,
-        string? search,
-        int? limit,
-        int? offset,
-        string? orderBy,
-        bool libraryItemsOnly,
-        string? userPrefix)
-    {
-        return string.Join("|", new[]
-        {
-            favorite?.ToString() ?? "null",
-            search ?? string.Empty,
-            limit?.ToString() ?? "null",
-            offset?.ToString() ?? "null",
-            orderBy ?? string.Empty,
-            libraryItemsOnly.ToString(),
-            userPrefix ?? string.Empty
-        });
-    }
-
-    private async Task InvalidateLibraryPlaylistsCacheAsync()
-    {
-        await _libraryPlaylistsCacheLock.WaitAsync();
-        try
-        {
-            _libraryPlaylistsCache.Clear();
-        }
-        finally
-        {
-            _libraryPlaylistsCacheLock.Release();
-        }
-    }
-
-    private static void ApplyPlaylistSnapshot(Playlist target, Playlist source)
-    {
-        target.ItemId = source.ItemId;
-        target.Provider = source.Provider;
-        target.Name = source.Name;
-        target.SortName = source.SortName;
-        target.Uri = source.Uri;
-        target.ProviderMappings = source.ProviderMappings;
-        target.Metadata = source.Metadata;
-        target.Favorite = source.Favorite;
-        target.ExternalIds = source.ExternalIds;
-        target.Owner = source.Owner;
-        target.IsEditable = source.IsEditable;
-        target.TracksCount = source.TracksCount;
-        target.TotalDurationSeconds = source.TotalDurationSeconds;
-    }
-
-    private async Task<bool> UpdateCachedPlaylistByItemIdAsync(string playlistItemId, Action<Playlist> applyUpdate)
-    {
-        if (string.IsNullOrWhiteSpace(playlistItemId))
-        {
-            return false;
-        }
-
-        var updated = false;
-
-        await _libraryPlaylistsCacheLock.WaitAsync();
-        try
-        {
-            foreach (var playlists in _libraryPlaylistsCache.Values)
-            {
-                foreach (var playlist in playlists.Where(p => string.Equals(p.ItemId, playlistItemId, StringComparison.OrdinalIgnoreCase)))
-                {
-                    applyUpdate(playlist);
-                    updated = true;
-                }
-            }
-        }
-        finally
-        {
-            _libraryPlaylistsCacheLock.Release();
-        }
-
-        return updated;
-    }
-
-    private async Task<int> RemoveCachedPlaylistByItemIdAsync(string playlistItemId)
-    {
-        if (string.IsNullOrWhiteSpace(playlistItemId))
-        {
-            return 0;
-        }
-
-        var removedCount = 0;
-
-        await _libraryPlaylistsCacheLock.WaitAsync();
-        try
-        {
-            foreach (var playlists in _libraryPlaylistsCache.Values)
-            {
-                removedCount += playlists.RemoveAll(p => string.Equals(p.ItemId, playlistItemId, StringComparison.OrdinalIgnoreCase));
-            }
-        }
-        finally
-        {
-            _libraryPlaylistsCacheLock.Release();
-        }
-
-        return removedCount;
-    }
-
-    private static bool TryExtractPlaylistIdFromUri(string itemUri, out string playlistId)
-    {
-        playlistId = string.Empty;
-        if (string.IsNullOrWhiteSpace(itemUri))
-        {
-            return false;
-        }
-
-        var markerIndex = itemUri.IndexOf("playlist", StringComparison.OrdinalIgnoreCase);
-        if (markerIndex < 0)
-        {
-            return false;
-        }
-
-        var remainder = itemUri[(markerIndex + "playlist".Length)..].TrimStart(':', '/');
-        if (string.IsNullOrWhiteSpace(remainder))
-        {
-            return false;
-        }
-
-        playlistId = remainder
-            .Split(new[] { '/', '?', '#', '&' }, StringSplitOptions.RemoveEmptyEntries)
-            .FirstOrDefault() ?? string.Empty;
-
-        return !string.IsNullOrWhiteSpace(playlistId);
     }
 
     #endregion

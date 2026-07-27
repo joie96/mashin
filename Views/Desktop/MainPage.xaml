@@ -171,6 +171,7 @@
 
                     <!--  Playlists List  -->
                     <CollectionView Margin="0,0,0,10"
+                        ItemsUpdatingScrollMode="KeepScrollOffset"
                         ItemsSource="{Binding Playlists}"
                         SelectionMode="None">
                         <CollectionView.ItemTemplate>

@@ -31,7 +31,7 @@ public class MediaItemActions : IMediaItemActions
 {
     #region Fields
 
-    private readonly MusicAssistantService _musicAssistant;
+    private readonly IPlaylistService _playlistService;
     private readonly IUserDataService _userDataService;
     private readonly ILogger<MediaItemActions> _logger;
 
@@ -40,11 +40,11 @@ public class MediaItemActions : IMediaItemActions
     #region Constructor
 
     public MediaItemActions(
-        MusicAssistantService musicAssistant,
+        IPlaylistService playlistService,
         IUserDataService userDataService,
         ILogger<MediaItemActions> logger)
     {
-        _musicAssistant = musicAssistant;
+        _playlistService = playlistService;
         _userDataService = userDataService;
         _logger = logger;
     }
@@ -82,7 +82,7 @@ public class MediaItemActions : IMediaItemActions
                 return;
             }
 
-            await _musicAssistant.AddPlaylistTracksAsync(playlist.ItemId, uris);
+            await _playlistService.AddTracksAsync(playlist, uris);
 
             _logger.LogInformation("Successfully added {Count} items to playlist: {PlaylistName}",
                 uris.Count, playlist.Name);
@@ -125,7 +125,7 @@ public class MediaItemActions : IMediaItemActions
                 return;
             }
 
-            await _musicAssistant.RemovePlaylistTracksAsync(playlist.ItemId, positions);
+            await _playlistService.RemoveTracksAsync(playlist, positions);
 
             _logger.LogInformation("Successfully removed {Count} items from playlist: {PlaylistName}",
                 positions.Count, playlist.Name);
@@ -219,7 +219,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             _logger.LogInformation("Updating playlist: {PlaylistName}", playlist.Name);
-            await _musicAssistant.UpdatePlaylistAsync(playlist.ItemId, playlist, true);
+            await _playlistService.UpdatePlaylistAsync(playlist);
         }
         catch (Exception ex)
         {
@@ -241,7 +241,7 @@ public class MediaItemActions : IMediaItemActions
         try
         {
             _logger.LogInformation("Removing playlist: {PlaylistName}", playlist.Name);
-            await _musicAssistant.RemovePlaylistAsync(playlist.ItemId);
+            await _playlistService.RemovePlaylistAsync(playlist);
         }
         catch (Exception ex)
         {

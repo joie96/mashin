@@ -23,12 +23,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     // Services
     private readonly SettingsService _settings;
     private readonly MusicAssistantService _musicAssistant;
+    private readonly IPlaylistService _playlistService;
     private readonly INavigationService _navigationService;
     private readonly IOverlayService _overlayService;
     private readonly IContextMenuService _contextMenuService;
     private readonly PlaybackService _playbackService;
     private readonly ILogger<MainViewModel> _logger;
-    private readonly ObservableRangeCollection<Playlist> _playlists = new();
+    private readonly ObservableRangeCollection<Playlist> _playlists;
 
 
     // Player
@@ -83,6 +84,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     public MainViewModel(
         SettingsService settings,
         MusicAssistantService musicAssistant,
+        IPlaylistService playlistService,
         INavigationService navigationService,
         IOverlayService overlayService,
         IMediaItemActions mediaActions,
@@ -92,16 +94,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         _settings = settings;
         _musicAssistant = musicAssistant;
+        _playlistService = playlistService;
         _navigationService = navigationService;
         _overlayService = overlayService;
         _contextMenuService = contextMenuService;
         _playbackService = playbackService;
         _logger = logger;
+        _playlists = _playlistService.Playlists;
         MediaActions = mediaActions;
         _selectedAudioQuality = _settings.GetSendspinPreferredAudioCodec();
         _sliderPosition = _playbackService.PositionSeconds;
         _playbackService.CurrentQueueItems.CollectionChanged += OnCurrentQueueItemsCollectionChanged;
         _availablePlayers.CollectionChanged += OnAvailablePlayersCollectionChanged;
+        _playlists.CollectionChanged += OnPlaylistsCollectionChanged;
+        _playlistService.PropertyChanged += OnPlaylistServicePropertyChanged;
 
         // Navigation Commands
         NavigateToHomeCommand = new Command(async () => await NavigateToSectionAsync<HomePage>(NavigationSection.Home));
@@ -237,6 +243,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         // Subscribe to playback state events
         _playbackService.PropertyChanged += OnPlaybackServicePropertyChanged;
+
+        IsLoadingPlaylists = _playlistService.IsLoading;
 
         var activePlayerId = _playbackService.ActivePlayerId;
         if (!string.IsNullOrWhiteSpace(activePlayerId))
@@ -633,7 +641,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
 
         // Load playlists once and keep local list refreshed as needed.
-        await RefreshPlaylistsAsync();
+        await _playlistService.RefreshAsync();
 
         // Build Context Menus
         BuildUserMenuItems();
@@ -665,6 +673,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        _playlists.CollectionChanged -= OnPlaylistsCollectionChanged;
+        _playlistService.PropertyChanged -= OnPlaylistServicePropertyChanged;
         _playbackService.CurrentQueueItems.CollectionChanged -= OnCurrentQueueItemsCollectionChanged;
         _availablePlayers.CollectionChanged -= OnAvailablePlayersCollectionChanged;
 
@@ -728,8 +738,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         try
         {
-            await _musicAssistant.CreatePlaylistAsync(name);
-            await RefreshPlaylistsAsync();
+            await _playlistService.CreatePlaylistAsync(name);
         }
         catch (Exception ex)
         {
@@ -1023,6 +1032,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         OnPropertyChanged(nameof(HasNoAvailablePlayers));
     }
 
+    private void OnPlaylistsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        BuildQueueContextMenuItems();
+        BuildCurrentTrackContextMenuItems();
+        OnPropertyChanged(nameof(Playlists));
+    }
+
+    private void OnPlaylistServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(IPlaylistService.IsLoading))
+        {
+            IsLoadingPlaylists = _playlistService.IsLoading;
+        }
+    }
+
     #endregion
 
     #region User Menu
@@ -1150,91 +1174,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                         await MediaActions.AddToPlaylistAsync(currentTrack, playlist);
                     })
                 }));
-    }
-
-    #endregion
-
-    # region Playlist Loading
-    private async Task RefreshPlaylistsAsync()
-    {
-        IsLoadingPlaylists = true;
-
-        try
-        {
-            var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(
-                orderBy: "sort_name",
-                userPrefix: string.Concat("--", _settings.Username));
-
-            await LoadPlaylistsMetadataAsync(playlists);
-            _playlists.ReplaceRange(playlists);
-
-            BuildQueueContextMenuItems();
-            BuildCurrentTrackContextMenuItems();
-            OnPropertyChanged(nameof(Playlists));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to refresh playlists");
-        }
-        finally
-        {
-            IsLoadingPlaylists = false;
-        }
-    }
-
-    private async Task LoadPlaylistsMetadataAsync(IReadOnlyList<Playlist> playlists)
-    {
-        if (playlists.Count == 0)
-        {
-            return;
-        }
-
-        const int batchSize = 8;
-
-        foreach (var playlist in playlists)
-        {
-            if (!string.IsNullOrWhiteSpace(playlist.ItemId)
-                && !string.IsNullOrWhiteSpace(playlist.Provider))
-            {
-                continue;
-            }
-
-            playlist.TracksCount = 0;
-            playlist.TotalDurationSeconds = 0;
-        }
-
-        for (var index = 0; index < playlists.Count; index += batchSize)
-        {
-            var batch = playlists
-                .Skip(index)
-                .Take(batchSize)
-                .Where(playlist => !string.IsNullOrWhiteSpace(playlist.ItemId)
-                    && !string.IsNullOrWhiteSpace(playlist.Provider))
-                .ToList();
-
-            if (batch.Count == 0)
-            {
-                continue;
-            }
-
-            var tasks = batch.Select(async playlist =>
-            {
-                try
-                {
-                    var tracks = await _musicAssistant.GetPlaylistTracksAsync(playlist.ItemId, playlist.Provider);
-                    playlist.TracksCount = tracks.Count;
-                    playlist.TotalDurationSeconds = tracks.Sum(track => Math.Max(0, track.Duration));
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to load metadata for playlist {PlaylistId}.", playlist.ItemId);
-                    playlist.TracksCount = 0;
-                    playlist.TotalDurationSeconds = 0;
-                }
-            });
-
-            await Task.WhenAll(tasks);
-        }
     }
 
     #endregion

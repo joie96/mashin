@@ -35,6 +35,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
     #endregion
 
     private readonly MusicAssistantService _musicAssistant;
+    private readonly IPlaylistService _playlistService;
     private readonly SettingsService _settings;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
@@ -324,6 +325,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
 
     public SearchViewModel(
         MusicAssistantService musicAssistant,
+        IPlaylistService playlistService,
         SettingsService settings,
         IMediaItemActions mediaActions,
         PlaybackService playbackService,
@@ -332,6 +334,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
         ILogger<SearchViewModel> logger)
     {
         _musicAssistant = musicAssistant;
+        _playlistService = playlistService;
         _settings = settings;
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
@@ -647,7 +650,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
 
             case MediaType.Playlist:
                 var playlists = results.Playlists ?? new List<Playlist>();
-                var prefix = string.Concat("--", _settings.Username);
+                var prefix = string.Concat(_settings.Username, "--");
                 playlists = playlists
                     .Where(playlist => !string.IsNullOrWhiteSpace(playlist.Name)
                         && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
@@ -977,33 +980,22 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
         return Artists.Where(artist => artist.IsSelected).ToList();
     }
 
-    private async Task<ObservableRangeCollection<ContextMenuItem>> GetPlaylistSubItemsAsync()
+    private Task<ObservableRangeCollection<ContextMenuItem>> GetPlaylistSubItemsAsync()
     {
         var items = new ObservableRangeCollection<ContextMenuItem>();
 
-        try
+        foreach (var playlist in _playlistService.Playlists)
         {
-            var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(
-                orderBy: "sort_name",
-                userPrefix: string.Concat("--", _settings.Username));
-
-            foreach (var playlist in playlists)
+            items.Add(new ContextMenuItem
             {
-                items.Add(new ContextMenuItem
-                {
-                    Text = playlist.DisplayName,
-                    Icon = FluentIcons.TextBulletListLtr16,
-                    Command = new Command(async () =>
-                        await MediaActions.AddToPlaylistAsync(Tracks.Where(t => t.IsSelected), playlist))
-                });
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to build playlist subitems for search results");
+                Text = playlist.DisplayName,
+                Icon = FluentIcons.TextBulletListLtr16,
+                Command = new Command(async () =>
+                    await MediaActions.AddToPlaylistAsync(Tracks.Where(t => t.IsSelected), playlist))
+            });
         }
 
-        return items;
+        return Task.FromResult(items);
     }
 
     #endregion

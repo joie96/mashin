@@ -21,7 +21,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly IUserDataService _userDataService;
-    private readonly SettingsService _settings;
+    private readonly IPlaylistService _playlistService;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
     private readonly ILogger<AlbumDetailViewModel> _logger;
@@ -230,7 +230,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
     public AlbumDetailViewModel(
         MusicAssistantService musicAssistant,
         IUserDataService userDataService,
-        SettingsService settings,
+        IPlaylistService playlistService,
         IMediaItemActions mediaActions,
         PlaybackService playbackService,
         IContextMenuService contextMenuService,
@@ -239,7 +239,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
     {
         _musicAssistant = musicAssistant;
         _userDataService = userDataService;
-        _settings = settings;
+        _playlistService = playlistService;
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
         _logger = logger;
@@ -725,11 +725,9 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
         return Task.CompletedTask;
     }
 
-    private async Task BuildTrackContextMenuAsync()
+    private Task BuildTrackContextMenuAsync()
     {
-        var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(
-            orderBy: "sort_name",
-            userPrefix: string.Concat("--", _settings.Username));
+        var playlists = _playlistService.Playlists;
 
         var menu = new ObservableRangeCollection<ContextMenuItem>
         {
@@ -790,6 +788,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
         };
 
         _trackContextMenuItems = menu;
+        return Task.CompletedTask;
     }
 
     private Task BuildAlbumContextMenuAsync()

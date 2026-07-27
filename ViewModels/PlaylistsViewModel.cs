@@ -5,6 +5,7 @@ using MauiIcons.Fluent;
 using MauiIcons.Fluent.Filled;
 using Microsoft.Extensions.Logging;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
@@ -15,7 +16,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 {
     #region Fields
 
-    private readonly MusicAssistantService _musicAssistantService;
+    private readonly IPlaylistService _playlistService;
     private readonly SettingsService _settings;
     private readonly IOverlayService _overlayService;
     private readonly INavigationService _navigationService;
@@ -24,7 +25,6 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
     private readonly IContextMenuService _contextMenuService;
     private readonly ILogger<PlaylistsViewModel> _logger;
     private readonly ObservableCollection<ContextMenuItem> _playlistContextMenuItems = new();
-    private readonly ObservableCollection<Playlist> _playlists = new();
     private readonly IReadOnlyList<TableViewSkeleton> _playlistSkeletons = Enumerable.Range(0, 12)
         .Select(_ => new TableViewSkeleton())
         .ToList();
@@ -38,7 +38,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
     #region Construction
 
     public PlaylistsViewModel(
-        MusicAssistantService musicAssistantService,
+        IPlaylistService playlistService,
         SettingsService settings,
         IOverlayService overlayService,
         INavigationService navigationService,
@@ -47,7 +47,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         IContextMenuService contextMenuService,
         ILogger<PlaylistsViewModel> logger)
     {
-        _musicAssistantService = musicAssistantService;
+        _playlistService = playlistService;
         _settings = settings;
         _overlayService = overlayService;
         _navigationService = navigationService;
@@ -55,6 +55,9 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         _playbackService = playbackService;
         _contextMenuService = contextMenuService;
         _logger = logger;
+        _playlistService.PropertyChanged += OnPlaylistServicePropertyChanged;
+        _playlistService.Playlists.CollectionChanged += OnPlaylistsCollectionChanged;
+        IsLoading = _playlistService.IsLoading;
 
         // Navigation command
         PlaylistTappedCommand = new Command<Playlist>(async playlist =>
@@ -82,7 +85,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
             }
 
             _contextPlaylist = anchor.BindingContext as Playlist;
-            var hasSelection = _playlists.Any(playlist => playlist.IsSelected);
+            var hasSelection = _playlistService.Playlists.Any(playlist => playlist.IsSelected);
             if (_contextPlaylist == null && !hasSelection)
             {
                 return;
@@ -117,7 +120,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         }
     }
 
-    public bool HasPlaylists => _playlists.Count > 0;
+    public bool HasPlaylists => _playlistService.Playlists.Count > 0;
 
     public bool ShowPlaylistListView => IsLoading || HasPlaylists;
 
@@ -125,7 +128,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
     public IEnumerable<object> PlaylistItems => IsLoading
         ? _playlistSkeletons
-        : _playlists;
+        : _playlistService.Playlists;
 
     #endregion
 
@@ -145,7 +148,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
     public async Task OnNavigatedToAsync(object? parameter)
     {
-        await LoadPlaylistsAsync();
+        await _playlistService.RefreshAsync();
     }
 
     public Task OnNavigatedFromAsync()
@@ -160,91 +163,14 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
             return;
         }
 
+        _playlistService.PropertyChanged -= OnPlaylistServicePropertyChanged;
+        _playlistService.Playlists.CollectionChanged -= OnPlaylistsCollectionChanged;
         _disposed = true;
     }
 
     #endregion
 
     #region Loading
-
-    private async Task LoadPlaylistsAsync()
-    {
-        IsLoading = true;
-
-        try
-        {
-            var playlists = await _musicAssistantService.GetLibraryPlaylistsAsync(
-                orderBy: "sort_name",
-                userPrefix: string.Concat("--", _settings.Username));
-
-            await LoadPlaylistsMetadataAsync(playlists);
-
-            _playlists.Clear();
-
-            foreach (var playlist in playlists)
-            {
-                _playlists.Add(playlist);
-            }
-
-            OnPropertyChanged(nameof(HasPlaylists));
-            OnPropertyChanged(nameof(ShowPlaylistListView));
-            OnPropertyChanged(nameof(ShowNoPlaylistsMessage));
-            OnPropertyChanged(nameof(PlaylistItems));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to load playlists page.");
-        }
-        finally
-        {
-            IsLoading = false;
-        }
-    }
-
-    private async Task LoadPlaylistsMetadataAsync(IReadOnlyCollection<Playlist> playlists)
-    {
-        if (playlists.Count == 0)
-        {
-            return;
-        }
-
-        const int maxConcurrentRequests = 8;
-        using var throttler = new SemaphoreSlim(maxConcurrentRequests);
-
-        var metadataTasks = playlists.Select(async playlist =>
-        {
-            if (string.IsNullOrWhiteSpace(playlist.ItemId)
-                || string.IsNullOrWhiteSpace(playlist.Provider))
-            {
-                playlist.TracksCount = 0;
-                playlist.TotalDurationSeconds = 0;
-                return;
-            }
-
-            await throttler.WaitAsync();
-            try
-            {
-                var tracks = await _musicAssistantService.GetPlaylistTracksAsync(playlist.ItemId, playlist.Provider);
-                var tracksCount = tracks.Count;
-                var totalDurationSeconds = tracks.Sum(track => Math.Max(0, track.Duration));
-
-                playlist.TracksCount = tracksCount;
-                playlist.TotalDurationSeconds = totalDurationSeconds;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to load metadata for playlist {PlaylistId}.", playlist.ItemId);
-                playlist.TracksCount = 0;
-                playlist.TotalDurationSeconds = 0;
-            }
-            finally
-            {
-                throttler.Release();
-            }
-        });
-
-        await Task.WhenAll(metadataTasks);
-    }
 
     #endregion
 
@@ -271,8 +197,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
         try
         {
-            await _musicAssistantService.CreatePlaylistAsync(name);
-            await LoadPlaylistsAsync();
+            await _playlistService.CreatePlaylistAsync(name);
         }
         catch (Exception ex)
         {
@@ -336,13 +261,29 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
     private IReadOnlyList<Playlist> GetPlaylistsForAction()
     {
-        var selected = _playlists.Where(playlist => playlist.IsSelected).ToList();
+        var selected = _playlistService.Playlists.Where(playlist => playlist.IsSelected).ToList();
         if (selected.Count > 0)
         {
             return selected;
         }
 
         return _contextPlaylist == null ? Array.Empty<Playlist>() : new[] { _contextPlaylist };
+    }
+
+    private void OnPlaylistServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(IPlaylistService.IsLoading))
+        {
+            IsLoading = _playlistService.IsLoading;
+        }
+    }
+
+    private void OnPlaylistsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasPlaylists));
+        OnPropertyChanged(nameof(ShowPlaylistListView));
+        OnPropertyChanged(nameof(ShowNoPlaylistsMessage));
+        OnPropertyChanged(nameof(PlaylistItems));
     }
 
     #endregion

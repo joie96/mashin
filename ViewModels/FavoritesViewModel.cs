@@ -22,6 +22,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
     #region Fields
 
     private readonly MusicAssistantService _musicAssistant;
+    private readonly IPlaylistService _playlistService;
     private readonly IUserDataService _userDataService;
     private readonly SettingsService _settings;
     private readonly IContextMenuService _contextMenuService;
@@ -314,6 +315,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
 
     public FavoritesViewModel(
         MusicAssistantService musicAssistant,
+        IPlaylistService playlistService,
         IUserDataService userDataService,
         SettingsService settings,
         IMediaItemActions mediaActions,
@@ -323,6 +325,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
         ILogger<FavoritesViewModel> logger)
     {
         _musicAssistant = musicAssistant;
+        _playlistService = playlistService;
         _userDataService = userDataService;
         _settings = settings;
         _contextMenuService = contextMenuService;
@@ -609,7 +612,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
     {
         try
         {
-            var prefix = string.Concat("--", _settings.Username);
+            var prefix = string.Concat(_settings.Username, "--");
             var favoritePlaylists = snapshot.Playlists
                 .Select(BuildPlaylistFromSnapshot)
                 .Where(playlist => !string.IsNullOrWhiteSpace(playlist.Name)
@@ -928,33 +931,22 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
         return Artists.Where(artist => artist.IsSelected).ToList();
     }
 
-    private async Task<ObservableRangeCollection<ContextMenuItem>> GetPlaylistSubItemsAsync()
+    private Task<ObservableRangeCollection<ContextMenuItem>> GetPlaylistSubItemsAsync()
     {
         var items = new ObservableRangeCollection<ContextMenuItem>();
 
-        try
+        foreach (var playlist in _playlistService.Playlists)
         {
-            var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(
-                orderBy: "sort_name",
-                userPrefix: string.Concat("--", _settings.Username));
-
-            foreach (var playlist in playlists)
+            items.Add(new ContextMenuItem
             {
-                items.Add(new ContextMenuItem
-                {
-                    Text = playlist.DisplayName,
-                    Icon = FluentIcons.TextBulletListLtr16,
-                    Command = new Command(async () =>
-                        await MediaActions.AddToPlaylistAsync(Tracks.Where(t => t.IsSelected), playlist))
-                });
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to build playlist subitems for favorites");
+                Text = playlist.DisplayName,
+                Icon = FluentIcons.TextBulletListLtr16,
+                Command = new Command(async () =>
+                    await MediaActions.AddToPlaylistAsync(Tracks.Where(t => t.IsSelected), playlist))
+            });
         }
 
-        return items;
+        return Task.FromResult(items);
     }
 
     #endregion

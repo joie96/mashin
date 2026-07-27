@@ -21,6 +21,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     #region Fields
 
     private readonly MusicAssistantService _musicAssistant;
+    private readonly IPlaylistService _playlistService;
     private readonly IUserDataService _userDataService;
     private readonly SettingsService _settings;
     private readonly IOverlayService _overlayService;
@@ -159,6 +160,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
     public PlaylistDetailViewModel(
         MusicAssistantService musicAssistant,
+        IPlaylistService playlistService,
         IUserDataService userDataService,
         SettingsService settings,
         IOverlayService overlayService,
@@ -169,6 +171,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         ILogger<PlaylistDetailViewModel> logger)
     {
         _musicAssistant = musicAssistant;
+        _playlistService = playlistService;
         _userDataService = userDataService;
         _settings = settings;
         _overlayService = overlayService;
@@ -563,11 +566,9 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         return Task.CompletedTask;
     }
 
-    private async Task BuildContentContextMenuAsync()
+    private Task BuildContentContextMenuAsync()
     {
-        var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(
-            orderBy: "sort_name",
-            userPrefix: string.Concat("--", _settings.Username));
+        var playlists = _playlistService.Playlists;
 
         var targets = GetContextMenuTargetTracks().ToList();
         var isSingleTarget = targets.Count == 1;
@@ -740,6 +741,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         }
 
         _contentContextMenuItems = menu;
+        return Task.CompletedTask;
     }
 
     #endregion
