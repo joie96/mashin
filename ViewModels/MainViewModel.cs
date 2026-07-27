@@ -719,7 +719,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             return;
         }
 
-        var prefix = GetUserPlaylistPrefix();
+        var prefix = string.Concat(_settings.Username, "--");
         if (!string.IsNullOrWhiteSpace(prefix)
             && !name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
@@ -1087,7 +1087,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 Icon = FluentIcons.Add12,
                 SubItems = new ObservableCollection<ContextMenuItem>(
                     _playlists
-                        .Where(playlist => !playlist.Name.StartsWith("~", StringComparison.Ordinal))
                         .Select(playlist => new ContextMenuItem
                         {
                             Text = playlist.DisplayName,
@@ -1136,7 +1135,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         _currentTrackContextMenuItems = new ObservableRangeCollection<ContextMenuItem>(
             _playlists
-                .Where(playlist => !playlist.Name.StartsWith("~", StringComparison.Ordinal))
                 .Select(playlist => new ContextMenuItem
                 {
                     Text = playlist.DisplayName,
@@ -1154,18 +1152,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 }));
     }
 
+    #endregion
+
+    # region Playlist Loading
     private async Task RefreshPlaylistsAsync()
     {
         IsLoadingPlaylists = true;
 
         try
         {
-            var prefix = GetUserPlaylistPrefix();
             var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(
-                search: string.IsNullOrWhiteSpace(prefix) ? null : prefix,
-                orderBy: "sort_name");
+                orderBy: "sort_name",
+                userPrefix: string.Concat("--", _settings.Username));
 
-            ApplyPlaylistDisplayNames(playlists, prefix);
+            await LoadPlaylistsMetadataAsync(playlists);
             _playlists.ReplaceRange(playlists);
 
             BuildQueueContextMenuItems();
@@ -1182,29 +1182,58 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
     }
 
-    private string? GetUserPlaylistPrefix()
+    private async Task LoadPlaylistsMetadataAsync(IReadOnlyList<Playlist> playlists)
     {
-        var username = _settings.Username;
-        if (string.IsNullOrWhiteSpace(username))
+        if (playlists.Count == 0)
         {
-            return null;
+            return;
         }
 
-        return string.Concat(username, "--");
-    }
+        const int batchSize = 8;
 
-    private static void ApplyPlaylistDisplayNames(IEnumerable<Playlist> playlists, string? prefix)
-    {
         foreach (var playlist in playlists)
         {
-            playlist.DisplayName = playlist.Name;
-
-            if (!string.IsNullOrWhiteSpace(prefix)
-                && !string.IsNullOrWhiteSpace(playlist.Name)
-                && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrWhiteSpace(playlist.ItemId)
+                && !string.IsNullOrWhiteSpace(playlist.Provider))
             {
-                playlist.DisplayName = playlist.Name[prefix.Length..];
+                continue;
             }
+
+            playlist.TracksCount = 0;
+            playlist.TotalDurationSeconds = 0;
+        }
+
+        for (var index = 0; index < playlists.Count; index += batchSize)
+        {
+            var batch = playlists
+                .Skip(index)
+                .Take(batchSize)
+                .Where(playlist => !string.IsNullOrWhiteSpace(playlist.ItemId)
+                    && !string.IsNullOrWhiteSpace(playlist.Provider))
+                .ToList();
+
+            if (batch.Count == 0)
+            {
+                continue;
+            }
+
+            var tasks = batch.Select(async playlist =>
+            {
+                try
+                {
+                    var tracks = await _musicAssistant.GetPlaylistTracksAsync(playlist.ItemId, playlist.Provider);
+                    playlist.TracksCount = tracks.Count;
+                    playlist.TotalDurationSeconds = tracks.Sum(track => Math.Max(0, track.Duration));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to load metadata for playlist {PlaylistId}.", playlist.ItemId);
+                    playlist.TracksCount = 0;
+                    playlist.TotalDurationSeconds = 0;
+                }
+            });
+
+            await Task.WhenAll(tasks);
         }
     }
 

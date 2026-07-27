@@ -16,6 +16,7 @@
     <ContentPage.Resources>
         <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
         <converters:PlayStateToBoolConverter x:Key="PlayStateToBoolConverter" />
+        <converters:PlaylistMetadataTextConverter x:Key="PlaylistMetadataTextConverter" />
     </ContentPage.Resources>
 
     <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,*,90">
@@ -213,7 +214,7 @@
                                             <Label FontSize="11"
                                                 LineBreakMode="TailTruncation"
                                                 MaxLines="1"
-                                                Text="{Binding ProviderName}"
+                                                Text="{Binding ., Converter={StaticResource PlaylistMetadataTextConverter}}"
                                                 TextColor="{DynamicResource TextTertiary}" />
                                         </VerticalStackLayout>
                                     </Grid>

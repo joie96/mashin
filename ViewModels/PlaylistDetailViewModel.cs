@@ -338,7 +338,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
             if (playlist != null)
             {
-                var prefix = GetUserPlaylistPrefix();
+                var prefix = string.Concat(_settings.Username, "--");
                 playlist.DisplayName = playlist.Name;
 
                 if (!string.IsNullOrWhiteSpace(prefix)
@@ -413,7 +413,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             return;
         }
 
-        var prefix = GetUserPlaylistPrefix();
+        var prefix = string.Concat(_settings.Username, "--");
         if (!string.IsNullOrWhiteSpace(prefix)
             && !updatedName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
@@ -565,8 +565,9 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
     private async Task BuildContentContextMenuAsync()
     {
-        var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(orderBy: "sort_name");
-        ApplyPlaylistDisplayNames(playlists);
+        var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(
+            orderBy: "sort_name",
+            userPrefix: string.Concat("--", _settings.Username));
 
         var targets = GetContextMenuTargetTracks().ToList();
         var isSingleTarget = targets.Count == 1;
@@ -662,7 +663,6 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             Icon = FluentIcons.Add12,
             SubItems = new ObservableCollection<ContextMenuItem>(
                 playlists
-                    .Where(playlist => !playlist.Name.StartsWith("~"))
                     .Select(playlist => new ContextMenuItem
                     {
                         Text = playlist.DisplayName,
@@ -745,34 +745,6 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     #endregion
 
     #region Helper Methods
-    private string? GetUserPlaylistPrefix()
-    {
-        var username = _settings.Username;
-        if (string.IsNullOrWhiteSpace(username))
-        {
-            return null;
-        }
-
-        return string.Concat(username, "--");
-    }
-
-    private void ApplyPlaylistDisplayNames(IEnumerable<Playlist> playlists)
-    {
-        var prefix = GetUserPlaylistPrefix();
-
-        foreach (var playlist in playlists)
-        {
-            playlist.DisplayName = playlist.Name;
-
-            if (!string.IsNullOrWhiteSpace(prefix)
-                && !string.IsNullOrWhiteSpace(playlist.Name)
-                && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                playlist.DisplayName = playlist.Name[prefix.Length..];
-            }
-        }
-    }
-
     private IReadOnlyList<Track> GetContextMenuTargetTracks()
     {
         var selectedTracks = Tracks.Where(track => track.IsSelected).ToList();

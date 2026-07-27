@@ -979,11 +979,23 @@ public class MusicAssistantService
         int? limit = null,
         int? offset = null,
         string? orderBy = null,
-        bool libraryItemsOnly = true)
+        bool libraryItemsOnly = true,
+        string? userPrefix = null)
     {
         _logger.LogInformation("Fetching library playlists...");
 
-        var cacheKey = BuildLibraryPlaylistsCacheKey(favorite, search, limit, offset, orderBy, libraryItemsOnly);
+        var normalizedUserPrefix = string.IsNullOrWhiteSpace(userPrefix)
+            ? null
+            : userPrefix.Trim();
+
+        if (!string.IsNullOrWhiteSpace(normalizedUserPrefix)
+            && string.IsNullOrWhiteSpace(search))
+        {
+            // Hint backend search to reduce payload; local filtering below remains authoritative.
+            search = normalizedUserPrefix;
+        }
+
+        var cacheKey = BuildLibraryPlaylistsCacheKey(favorite, search, limit, offset, orderBy, libraryItemsOnly, normalizedUserPrefix);
 
         await _libraryPlaylistsCacheLock.WaitAsync();
         try
@@ -1021,6 +1033,19 @@ public class MusicAssistantService
         foreach (var playlist in playlists)
         {
             ResolveMediaItemImages(playlist);
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedUserPrefix))
+        {
+            playlists = playlists
+                .Where(playlist => !string.IsNullOrWhiteSpace(playlist.Name)
+                    && playlist.Name.StartsWith(normalizedUserPrefix, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            foreach (var playlist in playlists)
+            {
+                playlist.DisplayName = playlist.Name[normalizedUserPrefix.Length..];
+            }
         }
 
         _ = EnrichWithProviderInfoAsync(playlists);
@@ -2476,7 +2501,8 @@ public class MusicAssistantService
         int? limit,
         int? offset,
         string? orderBy,
-        bool libraryItemsOnly)
+        bool libraryItemsOnly,
+        string? userPrefix)
     {
         return string.Join("|", new[]
         {
@@ -2485,7 +2511,8 @@ public class MusicAssistantService
             limit?.ToString() ?? "null",
             offset?.ToString() ?? "null",
             orderBy ?? string.Empty,
-            libraryItemsOnly.ToString()
+            libraryItemsOnly.ToString(),
+            userPrefix ?? string.Empty
         });
     }
 

@@ -609,9 +609,17 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
     {
         try
         {
+            var prefix = string.Concat("--", _settings.Username);
             var favoritePlaylists = snapshot.Playlists
                 .Select(BuildPlaylistFromSnapshot)
+                .Where(playlist => !string.IsNullOrWhiteSpace(playlist.Name)
+                    && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                 .ToList();
+
+            foreach (var playlist in favoritePlaylists)
+            {
+                playlist.DisplayName = playlist.Name[prefix.Length..];
+            }
 
             if (favoritePlaylists.Count > 0)
             {
@@ -926,16 +934,12 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
 
         try
         {
-            var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(orderBy: "sort_name");
-            ApplyPlaylistDisplayNames(playlists);
+            var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(
+                orderBy: "sort_name",
+                userPrefix: string.Concat("--", _settings.Username));
 
             foreach (var playlist in playlists)
             {
-                if (playlist.Name.StartsWith("~", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
                 items.Add(new ContextMenuItem
                 {
                     Text = playlist.DisplayName,
@@ -956,23 +960,6 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
     #endregion
 
     #region Helpers
-
-    private void ApplyPlaylistDisplayNames(IEnumerable<Playlist> playlists)
-    {
-        var prefix = GetUserPlaylistPrefix();
-
-        foreach (var playlist in playlists)
-        {
-            playlist.DisplayName = playlist.Name;
-
-            if (!string.IsNullOrWhiteSpace(prefix)
-                && !string.IsNullOrWhiteSpace(playlist.Name)
-                && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                playlist.DisplayName = playlist.Name[prefix.Length..];
-            }
-        }
-    }
 
     private static Track BuildTrackFromSnapshot(FavoriteTrackSnapshot snapshot)
     {
@@ -1145,17 +1132,6 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                 Url = mapping.Url
             })
             .ToList();
-    }
-
-    private string? GetUserPlaylistPrefix()
-    {
-        var username = _settings.Username;
-        if (string.IsNullOrWhiteSpace(username))
-        {
-            return null;
-        }
-
-        return string.Concat(username, "--");
     }
 
     #endregion

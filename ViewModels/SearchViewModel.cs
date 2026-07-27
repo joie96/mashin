@@ -35,6 +35,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
     #endregion
 
     private readonly MusicAssistantService _musicAssistant;
+    private readonly SettingsService _settings;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
     private readonly ILogger<SearchViewModel> _logger;
@@ -323,6 +324,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
 
     public SearchViewModel(
         MusicAssistantService musicAssistant,
+        SettingsService settings,
         IMediaItemActions mediaActions,
         PlaybackService playbackService,
         IContextMenuService contextMenuService,
@@ -330,6 +332,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
         ILogger<SearchViewModel> logger)
     {
         _musicAssistant = musicAssistant;
+        _settings = settings;
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
         _logger = logger;
@@ -644,6 +647,17 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
 
             case MediaType.Playlist:
                 var playlists = results.Playlists ?? new List<Playlist>();
+                var prefix = string.Concat("--", _settings.Username);
+                playlists = playlists
+                    .Where(playlist => !string.IsNullOrWhiteSpace(playlist.Name)
+                        && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                foreach (var playlist in playlists)
+                {
+                    playlist.DisplayName = playlist.Name[prefix.Length..];
+                }
+
                 Playlists = new ObservableRangeCollection<Playlist>(playlists);
                 IsLoadingPlaylists = false;
 
@@ -969,15 +983,12 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
 
         try
         {
-            var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(orderBy: "sort_name");
+            var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(
+                orderBy: "sort_name",
+                userPrefix: string.Concat("--", _settings.Username));
 
             foreach (var playlist in playlists)
             {
-                if (playlist.Name.StartsWith("~", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
                 items.Add(new ContextMenuItem
                 {
                     Text = playlist.DisplayName,

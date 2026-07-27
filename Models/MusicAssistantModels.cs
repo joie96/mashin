@@ -270,6 +270,9 @@ namespace mashin.Models
     /// </summary>
     public class Playlist : MediaItem
     {
+        private int _tracksCount;
+        private int _totalDurationSeconds;
+
         public override MediaType MediaType { get; set; } = MediaType.Playlist;
 
         [JsonPropertyName("owner")]
@@ -279,10 +282,38 @@ namespace mashin.Models
         public bool IsEditable { get; set; }
 
         [JsonIgnore]
-        public int TracksCount { get; set; }
+        public int TracksCount
+        {
+            get => _tracksCount;
+            set
+            {
+                var normalized = Math.Max(0, value);
+                if (_tracksCount == normalized)
+                {
+                    return;
+                }
+
+                _tracksCount = normalized;
+                OnPropertyChanged();
+            }
+        }
 
         [JsonIgnore]
-        public int TotalDurationSeconds { get; set; }
+        public int TotalDurationSeconds
+        {
+            get => _totalDurationSeconds;
+            set
+            {
+                var normalized = Math.Max(0, value);
+                if (_totalDurationSeconds == normalized)
+                {
+                    return;
+                }
+
+                _totalDurationSeconds = normalized;
+                OnPropertyChanged();
+            }
+        }
     }
 
     /// <summary>

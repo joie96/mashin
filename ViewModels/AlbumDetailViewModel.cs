@@ -727,8 +727,9 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     private async Task BuildTrackContextMenuAsync()
     {
-        var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(orderBy: "sort_name");
-        ApplyPlaylistDisplayNames(playlists);
+        var playlists = await _musicAssistant.GetLibraryPlaylistsAsync(
+            orderBy: "sort_name",
+            userPrefix: string.Concat("--", _settings.Username));
 
         var menu = new ObservableRangeCollection<ContextMenuItem>
         {
@@ -760,7 +761,6 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 Icon = FluentIcons.Add12,
                 SubItems = new ObservableCollection<ContextMenuItem>(
                     playlists
-                        .Where(playlist => !playlist.Name.StartsWith("~"))
                         .Select(playlist => new ContextMenuItem
                         {
                             Text = playlist.DisplayName,
@@ -884,34 +884,6 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
 
         _artistContextMenuItems = menu;
         return Task.CompletedTask;
-    }
-
-    private void ApplyPlaylistDisplayNames(IEnumerable<Playlist> playlists)
-    {
-        var prefix = GetUserPlaylistPrefix();
-
-        foreach (var playlist in playlists)
-        {
-            playlist.DisplayName = playlist.Name;
-
-            if (!string.IsNullOrWhiteSpace(prefix)
-                && !string.IsNullOrWhiteSpace(playlist.Name)
-                && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                playlist.DisplayName = playlist.Name[prefix.Length..];
-            }
-        }
-    }
-
-    private string? GetUserPlaylistPrefix()
-    {
-        var username = _settings.Username;
-        if (string.IsNullOrWhiteSpace(username))
-        {
-            return null;
-        }
-
-        return string.Concat(username, "--");
     }
 
     #endregion

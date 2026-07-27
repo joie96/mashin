@@ -173,14 +173,9 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
         try
         {
-            var username = _settings.Username;
-            var prefix = string.IsNullOrWhiteSpace(username)
-                ? null
-                : string.Concat(username, "--");
-
             var playlists = await _musicAssistantService.GetLibraryPlaylistsAsync(
-                search: string.IsNullOrWhiteSpace(prefix) ? null : prefix,
-                orderBy: "sort_name");
+                orderBy: "sort_name",
+                userPrefix: string.Concat("--", _settings.Username));
 
             await LoadPlaylistsMetadataAsync(playlists);
 
@@ -188,17 +183,6 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
             foreach (var playlist in playlists)
             {
-                if (!string.IsNullOrWhiteSpace(prefix)
-                    && !string.IsNullOrWhiteSpace(playlist.Name)
-                    && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                {
-                    playlist.DisplayName = playlist.Name[prefix.Length..];
-                }
-                else
-                {
-                    playlist.DisplayName = playlist.Name;
-                }
-
                 _playlists.Add(playlist);
             }
 
