@@ -1029,6 +1029,54 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             },
             new()
             {
+                Text = "Radio starten",
+                Icon = FluentIcons.Album20,
+                Command = new Command(async () =>
+                {
+                    var targetTracks = GetSelectedTracks()
+                        .Where(track => !string.IsNullOrWhiteSpace(track.ItemId)
+                            && !string.IsNullOrWhiteSpace(track.Provider))
+                        .DistinctBy(track => string.Concat(track.Provider, "|", track.ItemId))
+                        .ToList();
+
+                    if (targetTracks.Count == 0)
+                    {
+                        _logger.LogInformation("Cannot start track radio: no target tracks available.");
+                        return;
+                    }
+
+                    var targetItems = targetTracks.Cast<MediaItem>().ToList();
+                    await _playbackService.PlayMediaAsync(targetItems);
+                    await _playbackService.PlayMediaRadioNextAsync(targetItems);
+
+                    var duplicateIndex = targetTracks.Count;
+                    string? duplicateQueueItemId = null;
+                    for (var attempt = 0; attempt < 5; attempt++)
+                    {
+                        if (_playbackService.CurrentQueueItems.Count > duplicateIndex)
+                        {
+                            duplicateQueueItemId = _playbackService.CurrentQueueItems[duplicateIndex].QueueItemId;
+                            if (!string.IsNullOrWhiteSpace(duplicateQueueItemId))
+                            {
+                                break;
+                            }
+                        }
+
+                        await Task.Delay(150);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(duplicateQueueItemId))
+                    {
+                        await _playbackService.DeleteQueueItemAsync(duplicateQueueItemId);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("Cannot remove queue index {QueueIndex} after starting track radio: no queue item id available.", duplicateIndex);
+                    }
+                })
+            },
+            new()
+            {
                 Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>

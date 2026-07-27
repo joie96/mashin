@@ -689,6 +689,55 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
             },
             new()
             {
+                Text = "Radio starten",
+                Icon = FluentIcons.Album20,
+                Command = new Command(async () =>
+                {
+                    var targetTracks = Tracks
+                        .Where(track => track.IsSelected
+                            && !string.IsNullOrWhiteSpace(track.ItemId)
+                            && !string.IsNullOrWhiteSpace(track.Provider))
+                        .DistinctBy(track => string.Concat(track.Provider, "|", track.ItemId))
+                        .ToList();
+
+                    if (targetTracks.Count == 0)
+                    {
+                        _logger.LogInformation("Cannot start track radio: no target tracks available.");
+                        return;
+                    }
+
+                    var targetItems = targetTracks.Cast<MediaItem>().ToList();
+                    await PlaybackService.PlayMediaAsync(targetItems);
+                    await PlaybackService.PlayMediaRadioNextAsync(targetItems);
+
+                    var duplicateIndex = targetTracks.Count;
+                    string? duplicateQueueItemId = null;
+                    for (var attempt = 0; attempt < 5; attempt++)
+                    {
+                        if (PlaybackService.CurrentQueueItems.Count > duplicateIndex)
+                        {
+                            duplicateQueueItemId = PlaybackService.CurrentQueueItems[duplicateIndex].QueueItemId;
+                            if (!string.IsNullOrWhiteSpace(duplicateQueueItemId))
+                            {
+                                break;
+                            }
+                        }
+
+                        await Task.Delay(150);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(duplicateQueueItemId))
+                    {
+                        await PlaybackService.DeleteQueueItemAsync(duplicateQueueItemId);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("Cannot remove queue index {QueueIndex} after starting track radio: no queue item id available.", duplicateIndex);
+                    }
+                })
+            },
+            new()
+            {
                 Text = "Als Nächstes spielen",
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
