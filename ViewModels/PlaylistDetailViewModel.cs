@@ -20,7 +20,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 {
     #region Fields
 
-        _logger.LogDebug("Navigated to playlist target: {ItemId} ({Provider})", item.ItemId, item.Provider);
+    private readonly MusicAssistantService _musicAssistant;
     private readonly IPlaylistService _playlistService;
     private readonly IUserDataService _userDataService;
     private readonly SettingsService _settings;
@@ -504,14 +504,14 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 })
             },
             new()
-                                _logger.LogDebug("Loaded playlist '{Name}' with {Count} tracks",
+            {
                 Text = "Als Letztes spielen",
                 Icon = FluentIcons.ArrowNext12,
                 Command = new Command(async () =>
                 {
                     var items = new List<MediaItem> { Playlist! };
                     await PlaybackService.PlayMediaLastAsync(items);
-                                        _logger.LogDebug("Cannot start track radio: no target tracks available.");
+                })
             },
             new() { IsSeparator = true }
         };
@@ -520,7 +520,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         {
             menu.Add(new ContextMenuItem
             {
-                _logger.LogDebug("Disposing PlaylistDetailViewModel for playlist: {PlaylistName}", PlaylistName);
+                Text = "Aus Favoriten entfernen",
                 Icon = FluentFilledIcons.Heart12Filled,
                 IconIsFilled = true,
                 Command = new Command(async () =>

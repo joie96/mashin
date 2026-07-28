@@ -86,7 +86,7 @@ public static class MauiProgram
         builder.Logging.AddProvider(new FileLoggerProvider(logFilePath));
 
         // Production Logging
-        builder.Logging.SetMinimumLevel(LogLevel.Information);
+        builder.Logging.SetMinimumLevel(LogLevel.Debug);
 #endif
 
         // Services registrieren
