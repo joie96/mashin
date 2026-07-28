@@ -15,6 +15,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
     {
         _filePath = filePath;
         InitializeWriter();
+        WriteSessionHeader();
     }
 
     public ILogger CreateLogger(string categoryName)
@@ -89,6 +90,24 @@ public sealed class FileLoggerProvider : ILoggerProvider
         {
             AutoFlush = true
         };
+    }
+
+    private void WriteSessionHeader()
+    {
+        lock (_writeLock)
+        {
+            if (_disposed || _writer == null)
+            {
+                return;
+            }
+
+            var timestamp = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss.fff zzz");
+            _writer.WriteLine();
+            _writer.WriteLine("================================================================");
+            _writer.WriteLine($"=== APP START {timestamp}");
+            _writer.WriteLine($"=== PID {Environment.ProcessId} | {Environment.OSVersion}");
+            _writer.WriteLine("================================================================");
+        }
     }
 
     private static string ToShortLevel(LogLevel level)

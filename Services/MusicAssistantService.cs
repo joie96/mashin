@@ -89,7 +89,7 @@ public class MusicAssistantService
             };
 
             var json = JsonSerializer.Serialize(payload, JsonOptions);
-            _logger.LogDebug("Sending command: {Command}", command);
+            _logger.LogTrace("Sending command: {Command}", command);
 
             var content = new StringContent(json, Encoding.UTF8, "application/json");
             using var response = await _httpClient.PostAsync("/api", content);
@@ -850,7 +850,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task<Track?> GetTrackAsync(string itemId, string providerInstanceIdOrDomain)
     {
-        _logger.LogDebug("Fetching track: {ItemId} from {Provider}", itemId, providerInstanceIdOrDomain);
+        _logger.LogTrace("Fetching track: {ItemId} from {Provider}", itemId, providerInstanceIdOrDomain);
 
         var args = new
         {
@@ -2192,13 +2192,13 @@ public class MusicAssistantService
             }
 
             // Fetch from API
-            _logger.LogDebug("Fetching provider manifest for: {Domain}", domain);
+            _logger.LogTrace("Fetching provider manifest for: {Domain}", domain);
             var manifest = await GetProviderManifestAsync(domain);
 
             if (manifest != null)
             {
                 _providerManifestCache[domain] = manifest;
-                _logger.LogDebug("Cached provider manifest: {Domain} - {Name}", domain, manifest.Name);
+                _logger.LogTrace("Cached provider manifest: {Domain} - {Name}", domain, manifest.Name);
             }
 
             return manifest;
@@ -2234,7 +2234,7 @@ public class MusicAssistantService
             .Distinct()
             .ToList();
 
-        _logger.LogDebug("Fetching {Count} unique provider manifests for {ItemCount} items",
+        _logger.LogTrace("Fetching {Count} unique provider manifests for {ItemCount} items",
             uniqueProviders.Count, materialized.Count);
 
         // Lade alle Manifeste parallel (nur einmal pro Provider dank Cache)
@@ -2280,7 +2280,7 @@ public class MusicAssistantService
     /// <param name="domain">The provider domain (e.g., "spotify", "qobuz", "ytmusic")</param>
     public async Task<ProviderManifest?> GetProviderManifestAsync(string domain)
     {
-        _logger.LogDebug("Fetching provider manifest for: {Domain}", domain);
+        _logger.LogTrace("Fetching provider manifest for: {Domain}", domain);
 
         var args = new { instance_id_or_domain = domain };
         return await SendCommandAsync<ProviderManifest>("providers/manifests/get", args);

@@ -89,6 +89,10 @@ public static class MauiProgram
         builder.Logging.SetMinimumLevel(LogLevel.Debug);
 #endif
 
+        // Reduce noisy transport/debug traces from Sendspin in all configurations.
+        builder.Logging.AddFilter("Sendspin", LogLevel.Information);
+        builder.Logging.AddFilter("Sendspin.SDK", LogLevel.Information);
+
         // Services registrieren
         builder.Services.AddSingleton<SettingsService>();
         builder.Services.AddSingleton<MusicAssistantService>();
