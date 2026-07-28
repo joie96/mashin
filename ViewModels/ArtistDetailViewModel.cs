@@ -333,7 +333,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             var topTracks = TopTracks.ToList();
             if (topTracks.Count == 0)
             {
-                _logger.LogInformation("Cannot start artist radio: no top tracks available for current artist.");
+                _logger.LogDebug("Cannot start artist radio: no top tracks available for current artist.");
                 return;
             }
 
@@ -453,7 +453,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     {
         if (parameter is MediaItem item)
         {
-            _logger.LogInformation("Navigated to artist target: {ItemId} ({Provider})", item.ItemId, item.Provider);
+            _logger.LogDebug("Navigated to artist target: {ItemId} ({Provider})", item.ItemId, item.Provider);
 
             _ = LoadArtistAsync(item.ItemId, item.Provider);
         }
@@ -829,7 +829,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                     var topTracks = TopTracks.ToList();
                     if (topTracks.Count == 0)
                     {
-                        _logger.LogInformation("Cannot start artist radio: no top tracks available for current artist.");
+                        _logger.LogDebug("Cannot start artist radio: no top tracks available for current artist.");
                         return;
                     }
 
@@ -923,7 +923,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
                     if (targetTracks.Count == 0)
                     {
-                        _logger.LogInformation("Cannot start track radio: no target tracks available.");
+                        _logger.LogDebug("Cannot start track radio: no target tracks available.");
                         return;
                     }
 
@@ -1115,7 +1115,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
                     if (targetArtists.Count == 0)
                     {
-                        _logger.LogInformation("Cannot start artist radio: no target artists available.");
+                        _logger.LogDebug("Cannot start artist radio: no target artists available.");
                         return;
                     }
 
@@ -1136,7 +1136,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
                     if (topTracks.Count == 0)
                     {
-                        _logger.LogInformation("Cannot start artist radio: no top tracks available for selected artist {ArtistId}.", radioArtist.ItemId);
+                        _logger.LogDebug("Cannot start artist radio: no top tracks available for selected artist {ArtistId}.", radioArtist.ItemId);
                         return;
                     }
 

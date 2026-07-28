@@ -457,7 +457,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task<T?> GetLibraryItemAsync<T>(MediaType mediaType, string itemId, string providerInstanceIdOrDomain = "library")
     {
-        _logger.LogInformation("Fetching library item: {ItemId} ({MediaType}) from {Provider}", itemId, mediaType, providerInstanceIdOrDomain);
+        _logger.LogDebug("Fetching library item: {ItemId} ({MediaType}) from {Provider}", itemId, mediaType, providerInstanceIdOrDomain);
 
         var args = new
         {
@@ -491,7 +491,7 @@ public class MusicAssistantService
         string? orderBy = null,
         bool libraryItemsOnly = true)
     {
-        _logger.LogInformation("Fetching library artists...");
+        _logger.LogDebug("Fetching library artists...");
 
         var args = new Dictionary<string, object>
         {
@@ -517,7 +517,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task<Artist?> GetArtistAsync(string itemId, string providerInstanceIdOrDomain)
     {
-        _logger.LogInformation("Fetching artist: {ItemId} from {Provider}", itemId, providerInstanceIdOrDomain);
+        _logger.LogDebug("Fetching artist: {ItemId} from {Provider}", itemId, providerInstanceIdOrDomain);
 
         var args = new
         {
@@ -539,7 +539,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task<List<Album>> GetArtistAlbumsAsync(string itemId, string providerInstanceIdOrDomain, bool inLibraryOnly = false)
     {
-        _logger.LogInformation("Fetching albums for artist: {ItemId}", itemId);
+        _logger.LogDebug("Fetching albums for artist: {ItemId}", itemId);
 
         var args = new
         {
@@ -560,7 +560,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task<List<Track>> GetArtistTracksAsync(string itemId, string providerInstanceIdOrDomain, bool inLibraryOnly = false)
     {
-        _logger.LogInformation("Fetching tracks for artist: {ItemId}", itemId);
+        _logger.LogDebug("Fetching tracks for artist: {ItemId}", itemId);
 
         var args = new Dictionary<string, object>
         {
@@ -587,7 +587,7 @@ public class MusicAssistantService
         string providerInstanceIdOrDomain,
         string? providerFilter = null)
     {
-        _logger.LogInformation(
+        _logger.LogDebug(
             "Fetching top tracks for artist: {ItemId} (provider_filter: {ProviderFilter})",
             itemId,
             providerFilter ?? "<none>");
@@ -620,7 +620,7 @@ public class MusicAssistantService
         string providerInstanceIdOrDomain,
         string? providerFilter = null)
     {
-        _logger.LogInformation(
+        _logger.LogDebug(
             "Fetching top albums for artist: {ItemId} (provider_filter: {ProviderFilter})",
             itemId,
             providerFilter ?? "<none>");
@@ -654,7 +654,7 @@ public class MusicAssistantService
         string? providerFilter = null,
         int? limit = null)
     {
-        _logger.LogInformation(
+        _logger.LogDebug(
             "Fetching similar artists for artist: {ItemId} (provider_filter: {ProviderFilter}, limit: {Limit})",
             itemId,
             providerFilter ?? "<none>",
@@ -708,7 +708,7 @@ public class MusicAssistantService
         bool libraryItemsOnly = true,
         AlbumType[]? albumTypes = null)
     {
-        _logger.LogInformation("Fetching library albums...");
+        _logger.LogDebug("Fetching library albums...");
 
         var args = new Dictionary<string, object>
         {
@@ -738,7 +738,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task<Album?> GetAlbumAsync(string itemId, string providerInstanceIdOrDomain)
     {
-        _logger.LogInformation("Fetching album: {ItemId} from {Provider}", itemId, providerInstanceIdOrDomain);
+        _logger.LogDebug("Fetching album: {ItemId} from {Provider}", itemId, providerInstanceIdOrDomain);
 
         var args = new
         {
@@ -760,7 +760,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task<List<Track>> GetAlbumTracksAsync(string itemId, string providerInstanceIdOrDomain, bool inLibraryOnly = false)
     {
-        _logger.LogInformation("Fetching tracks for album: {ItemId}", itemId);
+        _logger.LogDebug("Fetching tracks for album: {ItemId}", itemId);
 
         var args = new
         {
@@ -824,7 +824,7 @@ public class MusicAssistantService
         string? orderBy = null,
         bool libraryItemsOnly = true)
     {
-        _logger.LogInformation("Fetching library tracks...");
+        _logger.LogDebug("Fetching library tracks...");
 
         var args = new Dictionary<string, object>
         {
@@ -850,7 +850,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task<Track?> GetTrackAsync(string itemId, string providerInstanceIdOrDomain)
     {
-        _logger.LogInformation("Fetching track: {ItemId} from {Provider}", itemId, providerInstanceIdOrDomain);
+        _logger.LogDebug("Fetching track: {ItemId} from {Provider}", itemId, providerInstanceIdOrDomain);
 
         var args = new
         {
@@ -939,7 +939,7 @@ public class MusicAssistantService
         bool? allowLookup = null,
         List<string>? preferredProviderInstances = null)
     {
-        _logger.LogInformation("Fetching similar tracks for: {ItemId}", itemId);
+        _logger.LogDebug("Fetching similar tracks for: {ItemId}", itemId);
 
         var args = new Dictionary<string, object>
         {
@@ -978,7 +978,7 @@ public class MusicAssistantService
         bool libraryItemsOnly = true,
         string? userPrefix = null)
     {
-        _logger.LogInformation("Fetching library playlists...");
+        _logger.LogDebug("Fetching library playlists...");
 
         var normalizedUserPrefix = string.IsNullOrWhiteSpace(userPrefix)
             ? null
@@ -1309,7 +1309,7 @@ public class MusicAssistantService
         int? limit = null,
         bool libraryOnly = false)
     {
-        _logger.LogInformation("Searching for: {Query}", searchQuery);
+        _logger.LogDebug("Searching for: {Query}", searchQuery);
 
         var args = new Dictionary<string, object>
         {
@@ -1617,7 +1617,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task<List<PlayerQueue>> GetPlayerQueuesAsync()
     {
-        _logger.LogInformation("Fetching player queues...");
+        _logger.LogDebug("Fetching player queues...");
 
         var result = await SendCommandAsync<List<PlayerQueue>>("player_queues/all");
         return result ?? new List<PlayerQueue>();
@@ -1660,7 +1660,7 @@ public class MusicAssistantService
         int? offset = null,
         bool useSortIndexRankForDisplay = false)
     {
-        _logger.LogInformation("Fetching queue items for: {QueueId}", queueId);
+        _logger.LogDebug("Fetching queue items for: {QueueId}", queueId);
 
         var args = new Dictionary<string, object>
         {
@@ -1747,7 +1747,7 @@ public class MusicAssistantService
             throw new ArgumentException("No valid media items with item_id/provider found", nameof(mediaItems));
         }
 
-        _logger.LogInformation("Playing {Count} media item object(s) on queue: {QueueId}", mediaPayload.Count, queueId);
+        _logger.LogDebug("Playing {Count} media item object(s) on queue: {QueueId}", mediaPayload.Count, queueId);
 
         var args = new Dictionary<string, object>
         {
@@ -1893,7 +1893,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task PlayAsync(string queueId)
     {
-        _logger.LogInformation("Play on queue: {QueueId}", queueId);
+        _logger.LogDebug("Play on queue: {QueueId}", queueId);
         await SendCommandAsync<object>("player_queues/play", new { queue_id = queueId });
     }
 
@@ -1902,7 +1902,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task PauseAsync(string queueId)
     {
-        _logger.LogInformation("Pause on queue: {QueueId}", queueId);
+        _logger.LogDebug("Pause on queue: {QueueId}", queueId);
         await SendCommandAsync<object>("player_queues/pause", new { queue_id = queueId });
     }
 
@@ -1911,7 +1911,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task PlayPauseAsync(string queueId)
     {
-        _logger.LogInformation("Play/Pause on queue: {QueueId}", queueId);
+        _logger.LogDebug("Play/Pause on queue: {QueueId}", queueId);
         await SendCommandAsync<object>("player_queues/play_pause", new { queue_id = queueId });
     }
 
@@ -1920,7 +1920,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task StopAsync(string queueId)
     {
-        _logger.LogInformation("Stop on queue: {QueueId}", queueId);
+        _logger.LogDebug("Stop on queue: {QueueId}", queueId);
         await SendCommandAsync<object>("player_queues/stop", new { queue_id = queueId });
     }
 
@@ -1929,7 +1929,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task NextAsync(string queueId)
     {
-        _logger.LogInformation("Next on queue: {QueueId}", queueId);
+        _logger.LogDebug("Next on queue: {QueueId}", queueId);
         await SendCommandAsync<object>("player_queues/next", new { queue_id = queueId });
     }
 
@@ -1938,7 +1938,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task PreviousAsync(string queueId)
     {
-        _logger.LogInformation("Previous on queue: {QueueId}", queueId);
+        _logger.LogDebug("Previous on queue: {QueueId}", queueId);
         await SendCommandAsync<object>("player_queues/previous", new { queue_id = queueId });
     }
 
@@ -1947,7 +1947,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task SeekAsync(string queueId, int position)
     {
-        _logger.LogInformation("Seek on queue: {QueueId} to {Position}", queueId, position);
+        _logger.LogDebug("Seek on queue: {QueueId} to {Position}", queueId, position);
         await SendCommandAsync<object>("player_queues/seek", new { queue_id = queueId, position = position });
     }
 
@@ -2072,7 +2072,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task SetPlayerVolumeAsync(string playerId, int volumeLevel)
     {
-        _logger.LogInformation("Set volume on player: {PlayerId} to {Volume}", playerId, volumeLevel);
+        _logger.LogDebug("Set volume on player: {PlayerId} to {Volume}", playerId, volumeLevel);
         await SendCommandAsync<object>("players/cmd/volume_set", new { player_id = playerId, volume_level = volumeLevel });
     }
 
@@ -2105,7 +2105,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task PlayerPlayAsync(string playerId)
     {
-        _logger.LogInformation("Play on player: {PlayerId}", playerId);
+        _logger.LogDebug("Play on player: {PlayerId}", playerId);
         await SendCommandAsync<object>("players/cmd/play", new { player_id = playerId });
     }
 
@@ -2114,7 +2114,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task PlayerPauseAsync(string playerId)
     {
-        _logger.LogInformation("Pause on player: {PlayerId}", playerId);
+        _logger.LogDebug("Pause on player: {PlayerId}", playerId);
         await SendCommandAsync<object>("players/cmd/pause", new { player_id = playerId });
     }
 
@@ -2123,7 +2123,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task PlayerPlayPauseAsync(string playerId)
     {
-        _logger.LogInformation("Play/Pause on player: {PlayerId}", playerId);
+        _logger.LogDebug("Play/Pause on player: {PlayerId}", playerId);
         await SendCommandAsync<object>("players/cmd/play_pause", new { player_id = playerId });
     }
 
@@ -2132,7 +2132,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task PlayerNextAsync(string playerId)
     {
-        _logger.LogInformation("Next on player: {PlayerId}", playerId);
+        _logger.LogDebug("Next on player: {PlayerId}", playerId);
         await SendCommandAsync<object>("players/cmd/next", new { player_id = playerId });
     }
 
@@ -2141,7 +2141,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task PlayerPreviousAsync(string playerId)
     {
-        _logger.LogInformation("Previous on player: {PlayerId}", playerId);
+        _logger.LogDebug("Previous on player: {PlayerId}", playerId);
         await SendCommandAsync<object>("players/cmd/previous", new { player_id = playerId });
     }
 
@@ -2150,7 +2150,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task PlayerStopAsync(string playerId)
     {
-        _logger.LogInformation("Stop on player: {PlayerId}", playerId);
+        _logger.LogDebug("Stop on player: {PlayerId}", playerId);
         await SendCommandAsync<object>("players/cmd/stop", new { player_id = playerId });
     }
 
@@ -2159,7 +2159,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task PlayerSeekAsync(string playerId, int position)
     {
-        _logger.LogInformation("Seek on player: {PlayerId} to {Position}", playerId, position);
+        _logger.LogDebug("Seek on player: {PlayerId} to {Position}", playerId, position);
         await SendCommandAsync<object>("players/cmd/seek", new { player_id = playerId, position = position });
     }
 
@@ -2268,7 +2268,7 @@ public class MusicAssistantService
     /// </summary>
     public async Task<List<ProviderManifest>> GetProviderManifestsAsync()
     {
-        _logger.LogInformation("Fetching provider manifests...");
+        _logger.LogDebug("Fetching provider manifests...");
 
         var result = await SendCommandAsync<List<ProviderManifest>>("providers/manifests");
         return result ?? new List<ProviderManifest>();
@@ -2280,7 +2280,7 @@ public class MusicAssistantService
     /// <param name="domain">The provider domain (e.g., "spotify", "qobuz", "ytmusic")</param>
     public async Task<ProviderManifest?> GetProviderManifestAsync(string domain)
     {
-        _logger.LogInformation("Fetching provider manifest for: {Domain}", domain);
+        _logger.LogDebug("Fetching provider manifest for: {Domain}", domain);
 
         var args = new { instance_id_or_domain = domain };
         return await SendCommandAsync<ProviderManifest>("providers/manifests/get", args);

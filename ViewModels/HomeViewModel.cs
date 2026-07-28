@@ -624,7 +624,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     public Task OnNavigatedToAsync(object? parameter)
     {
-        _logger.LogInformation("Loading ListenBrainz recommendation folder for home");
+        _logger.LogDebug("Loading ListenBrainz recommendation folder for home");
         _ = LoadHomeAsync();
         return Task.CompletedTask;
     }
@@ -667,7 +667,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
         }
         catch (UnauthorizedAccessException ex)
         {
-            _logger.LogInformation(ex, "Home loading requires authentication. Triggering login flow.");
+            _logger.LogWarning(ex, "Home loading requires authentication. Triggering login flow.");
             ResetHomeSectionsAfterFailure();
         }
         catch (Exception ex)
@@ -728,7 +728,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             RecommendationTracks = new ObservableRangeCollection<Track>(recommendationTracks);
             await Task.Delay(50);
 
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "Home recommendation folder loaded: recommendationTracks={RecommendationTracks}",
                 recommendationTracks.Count);
         }
@@ -764,7 +764,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             TopTracks = new ObservableRangeCollection<Track>(topTracks);
             await Task.Delay(50);
 
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "Home top tracks loaded: topTracks={TopTracks}",
                 topTracks.Count);
         }
@@ -823,7 +823,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             RecentListens = new ObservableRangeCollection<Track>(recentTracks);
             await Task.Delay(50);
 
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "Home recent listens loaded: recentTracks={RecentTracks}, userId={UserId}",
                 recentTracks.Count,
                 currentUser?.UserId ?? string.Empty);
@@ -860,7 +860,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             TopArtists = new ObservableRangeCollection<Artist>(topArtists);
             await Task.Delay(50);
 
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "Home top artists loaded: topArtists={TopArtists}",
                 topArtists.Count);
         }
@@ -921,7 +921,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             SimilarArtistSections = new ObservableRangeCollection<SimilarArtistSection>(similarArtistSections);
             await Task.Delay(50);
 
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "Home similar artists sections loaded: similarArtistSections={SimilarArtistSections}",
                 similarArtistSections.Count);
         }
@@ -961,7 +961,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             GenrePlaylists = new ObservableRangeCollection<Playlist>(genrePlaylists);
             await Task.Delay(50);
 
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "Home genre playlists loaded: genrePlaylists={GenrePlaylists}",
                 genrePlaylists.Count);
         }
@@ -997,7 +997,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
             ArtistPlaylists = new ObservableRangeCollection<Playlist>(artistPlaylists);
             await Task.Delay(50);
 
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "Home artist playlists loaded: artistPlaylists={ArtistPlaylists}",
                 artistPlaylists.Count);
         }
@@ -1041,7 +1041,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
                     if (targetTracks.Count == 0)
                     {
-                        _logger.LogInformation("Cannot start track radio: no target tracks available.");
+                        _logger.LogDebug("Cannot start track radio: no target tracks available.");
                         return;
                     }
 
@@ -1174,7 +1174,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                     var targetArtists = GetSelectedArtists().ToList();
                     if (targetArtists.Count == 0)
                     {
-                        _logger.LogInformation("Cannot start artist radio: no target artists available.");
+                        _logger.LogDebug("Cannot start artist radio: no target artists available.");
                         return;
                     }
 
@@ -1182,7 +1182,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                     var topTracks = await _musicAssistant.GetArtistTopTracksAsync(radioArtist.ItemId, radioArtist.Provider);
                     if (topTracks.Count == 0)
                     {
-                        _logger.LogInformation("Cannot start artist radio: no top tracks available for selected artist {ArtistId}.", radioArtist.ItemId);
+                        _logger.LogDebug("Cannot start artist radio: no top tracks available for selected artist {ArtistId}.", radioArtist.ItemId);
                         return;
                     }
 

@@ -64,11 +64,11 @@ public class MediaItemActions : IMediaItemActions
 
             if (mediaItems.Count == 0)
             {
-                _logger.LogInformation("No items selected to add to playlist");
+                _logger.LogDebug("No items selected to add to playlist");
                 return;
             }
 
-            _logger.LogInformation("Adding {Count} items to playlist: {PlaylistName}",
+            _logger.LogDebug("Adding {Count} items to playlist: {PlaylistName}",
                 mediaItems.Count, playlist.Name);
 
             var uris = mediaItems
@@ -78,13 +78,13 @@ public class MediaItemActions : IMediaItemActions
 
             if (!uris.Any())
             {
-                _logger.LogWarning("No valid URIs found in selected items");
+                _logger.LogDebug("No valid URIs found in selected items");
                 return;
             }
 
             await _playlistService.AddTracksAsync(playlist, uris);
 
-            _logger.LogInformation("Successfully added {Count} items to playlist: {PlaylistName}",
+            _logger.LogDebug("Successfully added {Count} items to playlist: {PlaylistName}",
                 uris.Count, playlist.Name);
         }
         catch (Exception ex)
@@ -104,11 +104,11 @@ public class MediaItemActions : IMediaItemActions
 
             if (mediaItems.Count == 0)
             {
-                _logger.LogInformation("No items selected to remove from playlist");
+                _logger.LogDebug("No items selected to remove from playlist");
                 return;
             }
 
-            _logger.LogInformation("Removing {Count} items from playlist: {PlaylistName}",
+            _logger.LogDebug("Removing {Count} items from playlist: {PlaylistName}",
                 mediaItems.Count, playlist.Name);
 
             // Positionen extrahieren
@@ -121,13 +121,13 @@ public class MediaItemActions : IMediaItemActions
 
             if (!positions.Any())
             {
-                _logger.LogWarning("No valid positions found in selected items");
+                _logger.LogDebug("No valid positions found in selected items");
                 return;
             }
 
             await _playlistService.RemoveTracksAsync(playlist, positions);
 
-            _logger.LogInformation("Successfully removed {Count} items from playlist: {PlaylistName}",
+            _logger.LogDebug("Successfully removed {Count} items from playlist: {PlaylistName}",
                 positions.Count, playlist.Name);
         }
         catch (Exception ex)
@@ -144,11 +144,11 @@ public class MediaItemActions : IMediaItemActions
         var mediaItems = GetMediaItemsFromParameter(item);
         if (mediaItems.Count == 0)
         {
-            _logger.LogWarning("No items selected for favorites");
+            _logger.LogDebug("No items selected for favorites");
             return;
         }
 
-        _logger.LogInformation("Adding {Count} item(s) to favorites", mediaItems.Count);
+        _logger.LogDebug("Adding {Count} item(s) to favorites", mediaItems.Count);
 
         foreach (var mediaItem in mediaItems)
         {
@@ -180,11 +180,11 @@ public class MediaItemActions : IMediaItemActions
         var mediaItems = GetMediaItemsFromParameter(item);
         if (mediaItems.Count == 0)
         {
-            _logger.LogWarning("No items selected to remove from favorites");
+            _logger.LogDebug("No items selected to remove from favorites");
             return;
         }
 
-        _logger.LogInformation("Removing {Count} item(s) from favorites", mediaItems.Count);
+        _logger.LogDebug("Removing {Count} item(s) from favorites", mediaItems.Count);
 
         foreach (var mediaItem in mediaItems)
         {
@@ -218,7 +218,7 @@ public class MediaItemActions : IMediaItemActions
 
         try
         {
-            _logger.LogInformation("Updating playlist: {PlaylistName}", playlist.Name);
+            _logger.LogDebug("Updating playlist: {PlaylistName}", playlist.Name);
             await _playlistService.UpdatePlaylistAsync(playlist);
         }
         catch (Exception ex)
@@ -240,7 +240,7 @@ public class MediaItemActions : IMediaItemActions
 
         try
         {
-            _logger.LogInformation("Removing playlist: {PlaylistName}", playlist.Name);
+            _logger.LogDebug("Removing playlist: {PlaylistName}", playlist.Name);
             await _playlistService.RemovePlaylistAsync(playlist);
         }
         catch (Exception ex)

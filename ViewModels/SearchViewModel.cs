@@ -513,19 +513,19 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
         if (parameter is SearchRequest request)
         {
             HasSearchRequest = true;
-            _logger.LogInformation("Search started");
+            _logger.LogDebug("Search started");
             _ = SearchAsync(request);
         }
         else
         {
             if (TryRestoreFromCache())
             {
-                _logger.LogInformation("Restored cached search results");
+                _logger.LogDebug("Restored cached search results");
             }
             else
             {
                 HasSearchRequest = false;
-                _logger.LogWarning("NavigatedTo called without SearchRequest");
+                _logger.LogDebug("NavigatedTo called without SearchRequest");
             }
 
             _navigationService.IsNavigating = false;
@@ -578,7 +578,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
 
             CacheCurrentState();
 
-            _logger.LogInformation("Search completed");
+            _logger.LogDebug("Search completed");
         }
         catch (Exception ex)
         {
@@ -740,7 +740,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
 
                     if (targetTracks.Count == 0)
                     {
-                        _logger.LogInformation("Cannot start track radio: no target tracks available.");
+                        _logger.LogDebug("Cannot start track radio: no target tracks available.");
                         return;
                     }
 
@@ -955,7 +955,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                     var targetArtists = GetSelectedArtists();
                     if (targetArtists.Count == 0)
                     {
-                        _logger.LogInformation("Cannot start artist radio: no target artists available.");
+                        _logger.LogDebug("Cannot start artist radio: no target artists available.");
                         return;
                     }
 
@@ -963,7 +963,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                     var topTracks = await _musicAssistant.GetArtistTopTracksAsync(radioArtist.ItemId, radioArtist.Provider);
                     if (topTracks.Count == 0)
                     {
-                        _logger.LogInformation("Cannot start artist radio: no top tracks available for selected artist {ArtistId}.", radioArtist.ItemId);
+                        _logger.LogDebug("Cannot start artist radio: no top tracks available for selected artist {ArtistId}.", radioArtist.ItemId);
                         return;
                     }
 

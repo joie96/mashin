@@ -132,7 +132,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         Volume = 50;
         IsMuted = false;
 
-        _logger.LogInformation("Music Assistant position interpolation task starting for Sendspin player.");
+        _logger.LogDebug("Music Assistant position interpolation task starting for Sendspin player.");
 
         _progressInterpolationTask = Task.Run(async () =>
         {
@@ -501,7 +501,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
             try
             {
                 await _sendspinClient.SendCommandAsync(Commands.Play);
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "Sent play command after Sendspin codec change. Codec={Codec}, Attempt={Attempt}, CodecRequestSucceeded={CodecRequestSucceeded}",
                     normalizedCodec,
                     attempt,
@@ -1481,7 +1481,7 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
         _musicAssistantEventHub = musicAssistantEventHub;
         _logger = logger;
 
-        _logger.LogInformation("Music Assistant position interpolation task starting for Remote player.");
+        _logger.LogDebug("Music Assistant position interpolation task starting for Remote player.");
 
         _progressInterpolationTask = Task.Run(async () =>
         {
@@ -2555,7 +2555,7 @@ public sealed class LocalAudioPlayerService : IPlayerService, IAsyncDisposable
 
     public Task PlayMediaRadioNextAsync(IReadOnlyList<MediaItem> items, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("PlayMediaRadioNextAsync is not supported in local playback mode.");
+        _logger.LogDebug("PlayMediaRadioNextAsync is not supported in local playback mode.");
         return Task.CompletedTask;
     }
 

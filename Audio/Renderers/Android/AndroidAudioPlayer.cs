@@ -33,7 +33,7 @@ public sealed class AndroidAudioPlayer : IAudioRenderer
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         State = PlayerStateType.Uninitialized;
-        _logger.LogInformation("AndroidAudioPlayer instantiated");
+        _logger.LogDebug("AndroidAudioPlayer instantiated");
     }
 
     public PlayerStateType State { get; private set; }
@@ -66,7 +66,7 @@ public sealed class AndroidAudioPlayer : IAudioRenderer
 
                 if (_disposed)
                 {
-                    _logger.LogInformation("Re-initializing AndroidAudioPlayer after previous dispose");
+                    _logger.LogDebug("Re-initializing AndroidAudioPlayer after previous dispose");
                     _disposed = false;
                 }
 
@@ -104,7 +104,7 @@ public sealed class AndroidAudioPlayer : IAudioRenderer
                 OutputLatencyMs = (bufferSize * 1000) / (format.SampleRate * format.Channels * bytesPerSample);
                 SetState(PlayerStateType.Idle);
 
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "Android audio initialized: {SampleRate}Hz {Channels}ch, buffer={BufferSize}, latency≈{LatencyMs}ms",
                     format.SampleRate,
                     format.Channels,
@@ -125,7 +125,7 @@ public sealed class AndroidAudioPlayer : IAudioRenderer
     {
         ArgumentNullException.ThrowIfNull(source);
         _source = source;
-        _logger.LogInformation("Sample source configured: {SourceType}", source.GetType().FullName);
+        _logger.LogDebug("Sample source configured: {SourceType}", source.GetType().FullName);
     }
 
     public void Play()
@@ -156,7 +156,7 @@ public sealed class AndroidAudioPlayer : IAudioRenderer
         }
 
         SetState(PlayerStateType.Buffering);
-        _logger.LogInformation("Playback started, waiting for first audible audio before setting Playing state");
+        _logger.LogDebug("Playback started, waiting for first audible audio before setting Playing state");
     }
 
     public void Pause()
@@ -172,7 +172,7 @@ public sealed class AndroidAudioPlayer : IAudioRenderer
         _audioTrack?.Flush();
         JoinPlaybackThreadIfNeeded();
         SetState(PlayerStateType.Paused);
-        _logger.LogInformation("Playback paused");
+        _logger.LogDebug("Playback paused");
     }
 
     public void Stop()
@@ -189,7 +189,7 @@ public sealed class AndroidAudioPlayer : IAudioRenderer
         _audioTrack?.Stop();
         JoinPlaybackThreadIfNeeded();
         SetState(PlayerStateType.Idle);
-        _logger.LogInformation("Playback stopped");
+        _logger.LogDebug("Playback stopped");
     }
 
     private void PlaybackLoop()

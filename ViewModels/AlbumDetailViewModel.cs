@@ -443,7 +443,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
     {
         if (parameter is MediaItem item)
         {
-            _logger.LogInformation("Navigated to album target: {ItemId} ({Provider})", item.ItemId, item.Provider);
+            _logger.LogDebug("Navigated to album target: {ItemId} ({Provider})", item.ItemId, item.Provider);
             _ = LoadAlbumAsync(item.ItemId, item.Provider);
         }
         else
@@ -753,7 +753,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
 
                     if (targetTracks.Count == 0)
                     {
-                        _logger.LogInformation("Cannot start track radio: no target tracks available.");
+                        _logger.LogDebug("Cannot start track radio: no target tracks available.");
                         return;
                     }
 

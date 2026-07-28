@@ -20,7 +20,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 {
     #region Fields
 
-    private readonly MusicAssistantService _musicAssistant;
+        _logger.LogDebug("Navigated to playlist target: {ItemId} ({Provider})", item.ItemId, item.Provider);
     private readonly IPlaylistService _playlistService;
     private readonly IUserDataService _userDataService;
     private readonly SettingsService _settings;
@@ -290,7 +290,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     {
         if (parameter is MediaItem item)
         {
-            _logger.LogInformation("Navigated to playlist target: {ItemId} ({Provider})", item.ItemId, item.Provider);
+            _logger.LogDebug("Navigated to playlist target: {ItemId} ({Provider})", item.ItemId, item.Provider);
             
             // Load data
             _ = LoadPlaylistAsync(item.ItemId, item.Provider);
@@ -391,7 +391,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
             if (Playlist != null)
             {
-                _logger.LogInformation("Loaded playlist '{Name}' with {Count} tracks",
+                _logger.LogDebug("Loaded playlist '{Name}' with {Count} tracks",
                     Playlist.Name, Tracks.Count);
             }
         }
@@ -504,14 +504,14 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 })
             },
             new()
-            {
+                                _logger.LogDebug("Loaded playlist '{Name}' with {Count} tracks",
                 Text = "Als Letztes spielen",
                 Icon = FluentIcons.ArrowNext12,
                 Command = new Command(async () =>
                 {
                     var items = new List<MediaItem> { Playlist! };
                     await PlaybackService.PlayMediaLastAsync(items);
-                })
+                                        _logger.LogDebug("Cannot start track radio: no target tracks available.");
             },
             new() { IsSeparator = true }
         };
@@ -520,7 +520,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         {
             menu.Add(new ContextMenuItem
             {
-                Text = "Aus Favoriten entfernen",
+                _logger.LogDebug("Disposing PlaylistDetailViewModel for playlist: {PlaylistName}", PlaylistName);
                 Icon = FluentFilledIcons.Heart12Filled,
                 IconIsFilled = true,
                 Command = new Command(async () =>
@@ -611,7 +611,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
                     if (targetTracks.Count == 0)
                     {
-                        _logger.LogInformation("Cannot start track radio: no target tracks available.");
+                        _logger.LogDebug("Cannot start track radio: no target tracks available.");
                         return;
                     }
 
@@ -867,7 +867,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     {
         if (_disposed) return;
         
-        _logger.LogInformation("Disposing PlaylistDetailViewModel for playlist: {PlaylistName}", PlaylistName);
+        _logger.LogDebug("Disposing PlaylistDetailViewModel for playlist: {PlaylistName}", PlaylistName);
         
         _disposed = true;
 

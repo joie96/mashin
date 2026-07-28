@@ -42,6 +42,9 @@ public static class MauiProgram
     public static MauiApp CreateMauiApp()
     {
         var builder = MauiApp.CreateBuilder();
+        var logDirectory = Path.Combine(FileSystem.AppDataDirectory, "logs");
+        var logFilePath = Path.Combine(logDirectory, $"mashin-{DateTime.Now:yyyyMMdd}.log");
+
         builder
             .UseMauiApp<App>()
             .UseMauiCommunityToolkit()
@@ -66,14 +69,9 @@ public static class MauiProgram
             options.FormatterName = CustomConsoleFormatter.FormatterName;
         });
 
-        builder.Logging.SetMinimumLevel(LogLevel.Warning);
+        builder.Logging.AddProvider(new FileLoggerProvider(logFilePath));
 
-        builder.Logging.AddFilter("Sendspin.SDK", LogLevel.Warning);
-        builder.Logging.AddFilter("mashin", LogLevel.Warning);
-        builder.Logging.AddFilter("mashin.Services.PlaybackService", LogLevel.Debug);
-        builder.Logging.AddFilter("mashin.Services.SendspinPlayerService", LogLevel.Debug);
-        builder.Logging.AddFilter("mashin.Services.RemotePlayerService", LogLevel.Debug);
-        builder.Logging.AddFilter("mashin.Services.LocalAudioPlayerService", LogLevel.Debug);
+        builder.Logging.SetMinimumLevel(LogLevel.Debug);
 #else
         builder.Logging.AddConsoleFormatter<CustomConsoleFormatter, SimpleConsoleFormatterOptions>(options =>
         {
@@ -84,6 +82,8 @@ public static class MauiProgram
         {
             options.FormatterName = CustomConsoleFormatter.FormatterName;
         });
+
+        builder.Logging.AddProvider(new FileLoggerProvider(logFilePath));
 
         // Production Logging
         builder.Logging.SetMinimumLevel(LogLevel.Information);

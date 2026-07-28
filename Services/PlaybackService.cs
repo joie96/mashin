@@ -222,7 +222,7 @@ public sealed class PlaybackService
 
         SyncProjectedStateFromActivePlayer();
 
-        _logger.LogDebug("Output mode switched. Mode={Mode}, ActivePlayerId={ActivePlayerId}, PlayerType={PlayerType}",
+        _logger.LogInformation("Output mode switched. Mode={Mode}, ActivePlayerId={ActivePlayerId}, PlayerType={PlayerType}",
             OutputMode,
             ActivePlayerId,
             _activePlayer.GetType().Name);

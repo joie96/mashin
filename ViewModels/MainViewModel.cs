@@ -1216,7 +1216,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         if (selectedTracks.Count == 0)
         {
-            _logger.LogInformation("No queue items selected for play");
+            _logger.LogDebug("No queue items selected for play");
             return;
         }
 
@@ -1231,7 +1231,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         var queueItems = CurrentQueueItems.ToList();
         if (queueItems.Count == 0)
         {
-            _logger.LogInformation("Queue is empty, nothing to move");
+            _logger.LogDebug("Queue is empty, nothing to move");
             return;
         }
 
@@ -1243,7 +1243,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         if (selectedQueueItemIds.Count == 0)
         {
-            _logger.LogInformation("No queue items selected for 'Als Nächstes spielen'");
+            _logger.LogDebug("No queue items selected for 'Als Nächstes spielen'");
             return;
         }
 
@@ -1257,7 +1257,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         var currentIndex = _playbackService.CurrentQueueIndex;
         if (currentIndex is null)
         {
-            _logger.LogInformation("Current queue index is unknown, cannot move selected items next.");
+            _logger.LogDebug("Current queue index is unknown, cannot move selected items next.");
             return;
         }
 
@@ -1295,7 +1295,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         var queueItems = CurrentQueueItems.ToList();
         if (queueItems.Count == 0)
         {
-            _logger.LogInformation("Queue is empty, nothing to move");
+            _logger.LogDebug("Queue is empty, nothing to move");
             return;
         }
 
@@ -1307,7 +1307,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         if (selectedQueueItemIds.Count == 0)
         {
-            _logger.LogInformation("No queue items selected for 'Als Letztes spielen'");
+            _logger.LogDebug("No queue items selected for 'Als Letztes spielen'");
             return;
         }
 
@@ -1351,7 +1351,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         if (selectedQueueItemIds.Count == 0)
         {
-            _logger.LogInformation("No queue items selected for removal");
+            _logger.LogDebug("No queue items selected for removal");
             return;
         }
 
@@ -1463,7 +1463,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         var selectedPlayer = _availablePlayers.FirstOrDefault(player => string.Equals(player.PlayerId, playerId, StringComparison.Ordinal));
         if (selectedPlayer != null && !selectedPlayer.Available)
         {
-            _logger.LogInformation("Ignoring player switch to unavailable player: {PlayerId}", playerId);
+            _logger.LogDebug("Ignoring player switch to unavailable player: {PlayerId}", playerId);
             if (!string.IsNullOrWhiteSpace(previousPlayerId))
             {
                 SetSelectedPlayerSilently(previousPlayerId);
@@ -1539,7 +1539,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private Task ExecuteOpenSettingsAsync()
     {
-        _logger.LogInformation("Einstellungen ist noch nicht implementiert.");
+        _logger.LogDebug("Einstellungen ist noch nicht implementiert.");
         return Task.CompletedTask;
     }
 
@@ -1583,12 +1583,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         try
         {
-            _logger.LogInformation("Attempting login for user: {Username}", username);
+            _logger.LogDebug("Attempting login for user: {Username}", username);
             var success = await _musicAssistant.LoginAsync(username, password);
 
             if (success)
             {
-                _logger.LogInformation("Login successful for user: {Username}", username);
+                _logger.LogDebug("Login successful for user: {Username}", username);
                 return (true, null);
             }
 

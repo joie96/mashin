@@ -501,7 +501,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
 
     public Task OnNavigatedToAsync(object? parameter)
     {
-        _logger.LogInformation("Loading favorites");
+        _logger.LogDebug("Loading favorites");
         _ = LoadFavoritesAsync();
         return Task.CompletedTask;
     }
@@ -537,7 +537,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
 
             await Task.WhenAll(tasks);
 
-            _logger.LogInformation("Favorites loaded");
+            _logger.LogDebug("Favorites loaded");
         }
         catch (Exception ex)
         {
@@ -702,7 +702,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
 
                     if (targetTracks.Count == 0)
                     {
-                        _logger.LogInformation("Cannot start track radio: no target tracks available.");
+                        _logger.LogDebug("Cannot start track radio: no target tracks available.");
                         return;
                     }
 
@@ -917,7 +917,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                     var targetArtists = GetSelectedArtists();
                     if (targetArtists.Count == 0)
                     {
-                        _logger.LogInformation("Cannot start artist radio: no target artists available.");
+                        _logger.LogDebug("Cannot start artist radio: no target artists available.");
                         return;
                     }
 
@@ -925,7 +925,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                     var topTracks = await _musicAssistant.GetArtistTopTracksAsync(radioArtist.ItemId, radioArtist.Provider);
                     if (topTracks.Count == 0)
                     {
-                        _logger.LogInformation("Cannot start artist radio: no top tracks available for selected artist {ArtistId}.", radioArtist.ItemId);
+                        _logger.LogDebug("Cannot start artist radio: no top tracks available for selected artist {ArtistId}.", radioArtist.ItemId);
                         return;
                     }
 

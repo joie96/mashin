@@ -79,7 +79,7 @@ public sealed class WasapiAudioPlayer : IAudioRenderer
                     CreateOutputForCurrentDevice();
 
                     SetState(PlayerStateType.Idle);
-                    _logger.LogInformation(
+                    _logger.LogDebug(
                         "WASAPI renderer initialized: {SampleRate}Hz {Channels}ch, latency: {Latency}ms, device: {Device}",
                         format.SampleRate,
                         format.Channels,
@@ -135,7 +135,7 @@ public sealed class WasapiAudioPlayer : IAudioRenderer
         _sampleProvider.ResetAudibleSampleDetection();
         SetState(PlayerStateType.Buffering);
         _wasapiOut.Play();
-        _logger.LogInformation("Playback started, waiting for first audible audio before setting Playing state");
+        _logger.LogDebug("Playback started, waiting for first audible audio before setting Playing state");
     }
 
     public void Pause()
@@ -143,7 +143,7 @@ public sealed class WasapiAudioPlayer : IAudioRenderer
         Interlocked.Exchange(ref _awaitingAudiblePlayback, 0);
         _wasapiOut?.Pause();
         SetState(PlayerStateType.Paused);
-        _logger.LogInformation("Playback paused");
+        _logger.LogDebug("Playback paused");
     }
 
     public void Stop()
@@ -151,7 +151,7 @@ public sealed class WasapiAudioPlayer : IAudioRenderer
         Interlocked.Exchange(ref _awaitingAudiblePlayback, 0);
         _wasapiOut?.Stop();
         SetState(PlayerStateType.Idle);
-        _logger.LogInformation("Playback stopped");
+        _logger.LogDebug("Playback stopped");
     }
 
     public Task SwitchDeviceAsync(string? deviceId, CancellationToken cancellationToken = default)
@@ -189,7 +189,7 @@ public sealed class WasapiAudioPlayer : IAudioRenderer
                         var output = _wasapiOut ?? throw new InvalidOperationException("Audio output is not available for playback after device switch.");
                         SetState(PlayerStateType.Buffering);
                         output.Play();
-                        _logger.LogInformation("Playback resumed on new device");
+                        _logger.LogDebug("Playback resumed on new device");
                     }
 
                     _logger.LogInformation(
