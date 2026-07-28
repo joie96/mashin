@@ -114,6 +114,10 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
     private Task? _reconnectLoopTask;
     private bool _reconnectRecoveryPending;
     private bool _hasEstablishedConnection;
+    private PlaybackQueue? _reconnectRestoreQueue;
+    private int? _reconnectRestoreCurrentIndex;
+    private string? _reconnectRestoreCurrentQueueItemId;
+    private double _reconnectRestorePositionSeconds;
 
 
     #endregion
@@ -877,6 +881,15 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
 
     private void SetReconnectRecoveryPending()
     {
+        if (_reconnectRecoveryPending)
+        {
+            return;
+        }
+
+        _reconnectRestoreQueue = CloneQueue(_queue);
+        _reconnectRestoreCurrentIndex = _queue.CurrentIndex;
+        _reconnectRestoreCurrentQueueItemId = Normalize(_queue.CurrentQueueItemId);
+        _reconnectRestorePositionSeconds = PositionSeconds;
         _reconnectRecoveryPending = true;
         _logger.LogInformation("Sendspin reconnect recovery marked as pending.");
     }
@@ -973,33 +986,48 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
                 return;
             }
 
-            var restoreQueue = CloneQueue(_queue);
-            var restoreCurrentIndex = _queue.CurrentIndex;
-            var restoreCurrentQueueItemId = Normalize(_queue.CurrentQueueItemId);
-            var restorePositionSeconds = PositionSeconds;
+            var restoreQueue = _reconnectRestoreQueue != null
+                ? CloneQueue(_reconnectRestoreQueue)
+                : CloneQueue(_queue);
+            var restoreCurrentIndex = _reconnectRestoreCurrentIndex ?? _queue.CurrentIndex;
+            var restoreCurrentQueueItemId = Normalize(_reconnectRestoreCurrentQueueItemId) ?? Normalize(_queue.CurrentQueueItemId);
+            var restorePositionSeconds = _reconnectRestorePositionSeconds > 0
+                ? _reconnectRestorePositionSeconds
+                : PositionSeconds;
 
             var mediaItems = restoreQueue.Items
                 .Select(item => item.MediaItem)
                 .OfType<MediaItem>()
                 .ToList();
 
-            if (mediaItems.Count > 0)
+            var queueNeedsRestore = !QueueEquals(_queue, restoreQueue);
+
+            if (queueNeedsRestore && mediaItems.Count > 0)
             {
                 await PlayMediaReplaceNextAsync(mediaItems, cancellationToken);
             }
 
             var resumeIndex = ResolveResumeIndex(restoreQueue, restoreCurrentIndex, restoreCurrentQueueItemId, mediaItems.Count);
-            if (resumeIndex.HasValue)
+            var indexNeedsRestore = resumeIndex.HasValue
+                && (_queue.CurrentIndex != resumeIndex
+                    || !string.Equals(Normalize(_queue.CurrentQueueItemId), restoreCurrentQueueItemId, StringComparison.Ordinal));
+            if (indexNeedsRestore && resumeIndex is int resumeIndexValue)
             {
-                await PlayQueueIndexAsync(resumeIndex.Value, cancellationToken);
+                await PlayQueueIndexAsync(resumeIndexValue, cancellationToken);
             }
 
-            if (restorePositionSeconds > 0)
+            var seekNeedsRestore = restorePositionSeconds > 0
+                && Math.Abs(PositionSeconds - restorePositionSeconds) > 2;
+            if (seekNeedsRestore)
             {
                 await SeekAsync(restorePositionSeconds, cancellationToken);
             }
 
             _reconnectRecoveryPending = false;
+            _reconnectRestoreQueue = null;
+            _reconnectRestoreCurrentIndex = null;
+            _reconnectRestoreCurrentQueueItemId = null;
+            _reconnectRestorePositionSeconds = 0;
 
             _logger.LogInformation(
                 "Sendspin reconnect recovery applied. ResumeIndex={ResumeIndex}, PositionSeconds={PositionSeconds:F1}, QueueItems={QueueItems}",
@@ -1123,7 +1151,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
 
         if (!IsConnected)
         {
-            if (_hasEstablishedConnection)
+            if (_hasEstablishedConnection && e.OldState == ConnectionState.Connected)
             {
                 SetReconnectRecoveryPending();
             }
