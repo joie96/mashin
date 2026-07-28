@@ -42,7 +42,7 @@ public static class MauiProgram
     public static MauiApp CreateMauiApp()
     {
         var builder = MauiApp.CreateBuilder();
-        var logDirectory = Path.Combine(FileSystem.AppDataDirectory, "logs");
+        var logDirectory = ResolveLogDirectory();
         var logFilePath = Path.Combine(logDirectory, $"mashin-{DateTime.Now:yyyyMMdd}.log");
 
         builder
@@ -248,5 +248,54 @@ public static class MauiProgram
         var app = builder.Build();
 
         return app;
+    }
+
+    private static string ResolveLogDirectory()
+    {
+#if ANDROID
+        var externalFilesDir = Android.App.Application.Context.GetExternalFilesDir(null)?.AbsolutePath;
+        if (!string.IsNullOrWhiteSpace(externalFilesDir))
+        {
+            return Path.Combine(externalFilesDir, "logs");
+        }
+#endif
+
+#if WINDOWS
+        var programDirectory = AppContext.BaseDirectory;
+        if (!string.IsNullOrWhiteSpace(programDirectory))
+        {
+            var programLogs = Path.Combine(programDirectory, "logs");
+            try
+            {
+                Directory.CreateDirectory(programLogs);
+                var probePath = Path.Combine(programLogs, ".write-test");
+                File.WriteAllText(probePath, "ok");
+                File.Delete(probePath);
+                return programLogs;
+            }
+            catch
+            {
+            }
+        }
+
+        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        if (!string.IsNullOrWhiteSpace(documents))
+        {
+            var documentLogs = Path.Combine(documents, "mashin", "logs");
+            try
+            {
+                Directory.CreateDirectory(documentLogs);
+                var probePath = Path.Combine(documentLogs, ".write-test");
+                File.WriteAllText(probePath, "ok");
+                File.Delete(probePath);
+                return documentLogs;
+            }
+            catch
+            {
+            }
+        }
+#endif
+
+        return Path.Combine(FileSystem.AppDataDirectory, "logs");
     }
 }
