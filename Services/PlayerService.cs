@@ -280,7 +280,6 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         DurationSeconds = 0;
         ResetProgressAnchor();
         PlaybackState = new Models.PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
-        await DisconnectAsync();
         if (_eventHandlersSubscribed)
         {
             _sendspinClient.PlayerStateChanged -= OnSendspinPlayerStateChanged;
@@ -300,6 +299,11 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
             _audioPlayerStateFeed.StateChanged -= OnLocalAudioPlayerStateChanged;
             _musicAssistantEventHub.QueueEventReceived -= OnMusicAssistantQueueEventReceived;
             _eventHandlersSubscribed = false;
+        }
+
+        if (_isConnected)
+        {
+            await DisconnectAsync();
         }
 
         _disposeCts.Cancel();
