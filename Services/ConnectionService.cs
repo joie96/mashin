@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using System.Net.Sockets;
 
 namespace mashin.Services;
 
@@ -37,6 +38,7 @@ public sealed class ConnectionService : IConnectionService
 
     private readonly IMusicAssistantEventHub _eventHub;
     private readonly SendspinPlayerService _sendspinPlayer;
+    private readonly SettingsService _settingsService;
     private readonly ILogger<ConnectionService> _logger;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
 
@@ -51,10 +53,12 @@ public sealed class ConnectionService : IConnectionService
     public ConnectionService(
         IMusicAssistantEventHub eventHub,
         SendspinPlayerService sendspinPlayer,
+        SettingsService settingsService,
         ILogger<ConnectionService> logger)
     {
         _eventHub = eventHub;
         _sendspinPlayer = sendspinPlayer;
+        _settingsService = settingsService;
         _logger = logger;
         _connectionState = _eventHub.IsConnected && _sendspinPlayer.IsConnected
             ? CustomConnectionState.Online
@@ -166,7 +170,6 @@ public sealed class ConnectionService : IConnectionService
 
         await _eventHub.ConnectAsync(cancellationToken);
         await _sendspinPlayer.ConnectAsync(cancellationToken);
-        await _sendspinPlayer.ApplyReconnectRecoveryAsync(cancellationToken);
         RefreshConnectionState();
     }
 
@@ -189,23 +192,23 @@ public sealed class ConnectionService : IConnectionService
 
         while (!cancellationToken.IsCancellationRequested)
         {
-            if (_connectionState == CustomConnectionState.Offline)
+            if (_connectionState == CustomConnectionState.Offline
+                || (_eventHub.IsConnected && _sendspinPlayer.IsConnected))
             {
                 retryDelay = ReconnectInitialDelay;
-                await DelaySafeAsync(ReconnectInitialDelay, cancellationToken);
-                continue;
-            }
-
-            if (_eventHub.IsConnected && _sendspinPlayer.IsConnected)
-            {
-                retryDelay = ReconnectInitialDelay;
-                await _sendspinPlayer.ApplyReconnectRecoveryAsync(cancellationToken);
                 await DelaySafeAsync(ReconnectInitialDelay, cancellationToken);
                 continue;
             }
 
             try
             {
+                if (!await TestServerConnectionReachabilityAsync(cancellationToken))
+                {
+                    await DelaySafeAsync(retryDelay, cancellationToken);
+                    retryDelay = TimeSpan.FromSeconds(Math.Min(retryDelay.TotalSeconds * 2, ReconnectMaxDelay.TotalSeconds));
+                    continue;
+                }
+
                 if (!_eventHub.IsConnected)
                 {
                     await _eventHub.ConnectAsync(cancellationToken);
@@ -213,12 +216,7 @@ public sealed class ConnectionService : IConnectionService
 
                 if (!_sendspinPlayer.IsConnected)
                 {
-                    await _sendspinPlayer.ConnectAsync(cancellationToken);
-                }
-
-                if (_sendspinPlayer.IsConnected)
-                {
-                    await _sendspinPlayer.ApplyReconnectRecoveryAsync(cancellationToken);
+                    await _sendspinPlayer.ReconnectAsync(cancellationToken);
                 }
 
                 RefreshConnectionState();
@@ -309,6 +307,53 @@ public sealed class ConnectionService : IConnectionService
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // Expected on cancellation.
+        }
+    }
+
+    private async Task<bool> TestServerConnectionReachabilityAsync(CancellationToken cancellationToken)
+    {
+        if (!Uri.TryCreate(_settingsService.SendspinUrl, UriKind.Absolute, out var sendspinUri))
+        {
+            _logger.LogWarning("Reachability check skipped because configured URL is invalid. Url={SendspinUrl}", _settingsService.SendspinUrl);
+            return false;
+        }
+
+        var host = sendspinUri.Host;
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            _logger.LogWarning("Reachability check skipped because endpoint host is empty. Url={SendspinUrl}", _settingsService.SendspinUrl);
+            return false;
+        }
+
+        var port = sendspinUri.Port;
+        if (port <= 0)
+        {
+            port = string.Equals(sendspinUri.Scheme, "wss", StringComparison.OrdinalIgnoreCase) ? 443 : 80;
+        }
+
+        try
+        {
+            using var tcpClient = new TcpClient();
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(2));
+
+            await tcpClient.ConnectAsync(host, port, timeoutCts.Token);
+            _logger.LogInformation("Server is reachable. Host={Host}, Port={Port}", host, port);
+            return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogDebug("Server reachability check timed out. Host={Host}, Port={Port}", host, port);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug("Server is unreachable. Host={Host}, Port={Port}", host, port);
+            return false;
         }
     }
 

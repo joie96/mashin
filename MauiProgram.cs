@@ -92,6 +92,8 @@ public static class MauiProgram
         // Reduce noisy transport/debug traces from Sendspin in all configurations.
         builder.Logging.AddFilter("Sendspin", LogLevel.Information);
         builder.Logging.AddFilter("Sendspin.SDK", LogLevel.Information);
+        builder.Logging.AddFilter("Sendspin.SDK.Connection", LogLevel.None);
+        builder.Logging.AddFilter("Sendspin.SDK.Connection.SendspinConnection", LogLevel.None);
 
         // Services registrieren
         builder.Services.AddSingleton<SettingsService>();

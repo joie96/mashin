@@ -860,9 +860,10 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
 
     public async Task<bool> ConnectAsync(CancellationToken cancellationToken = default)
     {
+        _logger.LogInformation("Sendspin player connect requested.");
+
         if (IsConnected)
         {
-            await ApplyReconnectRecoveryAsync(cancellationToken);
             return true;
         }
 
@@ -886,15 +887,10 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
             await RefreshQueueAsync(cancellationToken);
 
             _logger.LogInformation(
-                "Sendspin client connected. Server={Server}, IsConnected={IsConnected}, PlayerId={PlayerId}",
+                "Sendspin player connected. Server={Server}, IsConnected={IsConnected}, PlayerId={PlayerId}",
                 _connectedServerName,
                 _isConnected,
                 PlayerId);
-
-            if (IsConnected)
-            {
-                await ApplyReconnectRecoveryAsync(cancellationToken);
-            }
 
             return IsConnected;
         }
@@ -902,11 +898,30 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            _logger.LogWarning("Sendspin connect attempt failed.");
+            _logger.LogWarning("Sendspin player connection ended. Error={Error}", ex.Message);
             return false;
         }
+    }
+
+    public async Task<bool> ReconnectAsync(CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Sendspin player reconnect requested.");
+
+        IsConnected = false;
+        _connectedServerName = null;
+        _activeQueueId = null;
+        ResetProgressAnchor();
+        PlaybackState = new Models.PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
+
+        var connected = await ConnectAsync(cancellationToken);
+        if (connected)
+        {
+            await ApplyReconnectRecoveryAsync(cancellationToken);
+        }
+
+        return connected;
     }
 
     public async Task DisconnectAsync(CancellationToken cancellationToken = default)
@@ -922,7 +937,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         _activeQueueId = null;
         ResetProgressAnchor();
         PlaybackState = new Models.PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
-        _logger.LogInformation("Sendspin client disconnected by client request.");
+        _logger.LogInformation("Sendspin player disconnected.");
     }
 
     public void SetReconnectSnapshot()
@@ -956,6 +971,9 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
                 return;
             }
 
+            // Pause playback
+            await _sendspinClient.SendCommandAsync(Commands.Pause);
+
             var restoreQueue = _reconnectRestoreQueue != null
                 ? CloneQueue(_reconnectRestoreQueue)
                 : CloneQueue(_queue);
@@ -972,11 +990,13 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
 
             var queueNeedsRestore = !QueueEquals(_queue, restoreQueue);
 
+            // Restore queue items
             if (queueNeedsRestore && mediaItems.Count > 0)
             {
                 await PlayMediaReplaceNextAsync(mediaItems, cancellationToken);
             }
 
+            // Restore queue index
             var resumeIndex = ResolveResumeIndex(restoreQueue, restoreCurrentIndex, restoreCurrentQueueItemId, mediaItems.Count);
             var indexNeedsRestore = resumeIndex.HasValue
                 && (_queue.CurrentIndex != resumeIndex
@@ -986,6 +1006,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
                 await PlayQueueIndexAsync(resumeIndexValue, cancellationToken);
             }
 
+            // Restore position (starts also playback))
             var seekNeedsRestore = restorePositionSeconds > 0
                 && Math.Abs(PositionSeconds - restorePositionSeconds) > 2;
             if (seekNeedsRestore)
