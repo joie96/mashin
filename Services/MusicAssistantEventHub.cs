@@ -26,6 +26,10 @@ public interface IMusicAssistantEventHub : IAsyncDisposable
 
     event EventHandler<MusicAssistantEvent>? EventReceived;
 
+    Task ConnectAsync(CancellationToken cancellationToken = default);
+
+    Task DisconnectAsync(CancellationToken cancellationToken = default);
+
     Task StartAsync(CancellationToken cancellationToken = default);
 
     Task StopAsync(CancellationToken cancellationToken = default);
@@ -82,8 +86,6 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
         }
     };
 
-    private static readonly TimeSpan ReconnectInitialDelay = TimeSpan.FromSeconds(1);
-    private static readonly TimeSpan ReconnectMaxDelay = TimeSpan.FromSeconds(5);
     #endregion
 
     #region Fields
@@ -117,7 +119,13 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
 
     public event EventHandler<MusicAssistantEvent>? EventReceived;
 
-    public async Task StartAsync(CancellationToken cancellationToken = default)
+    public Task StartAsync(CancellationToken cancellationToken = default)
+        => ConnectAsync(cancellationToken);
+
+    public Task StopAsync(CancellationToken cancellationToken = default)
+        => DisconnectAsync(cancellationToken);
+
+    public async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
         await _lifecycleGate.WaitAsync(cancellationToken);
         try
@@ -129,7 +137,7 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
 
             _runCts = new CancellationTokenSource();
             _runTask = Task.Run(() => RunAsync(_runCts.Token), CancellationToken.None);
-            _logger.LogInformation("Music Assistant event hub started.");
+            _logger.LogInformation("Music Assistant event hub connect requested.");
         }
         finally
         {
@@ -137,7 +145,7 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
         }
     }
 
-    public async Task StopAsync(CancellationToken cancellationToken = default)
+    public async Task DisconnectAsync(CancellationToken cancellationToken = default)
     {
         CancellationTokenSource? cts;
         Task? runTask;
@@ -184,7 +192,7 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
             }
         }
 
-        _logger.LogInformation("Music Assistant event hub stopped.");
+        _logger.LogInformation("Music Assistant event hub disconnected.");
     }
 
     public async ValueTask DisposeAsync()
@@ -466,62 +474,41 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
     #region WebSocket Transport
     private async Task RunAsync(CancellationToken cancellationToken)
     {
-        var retryDelay = ReconnectInitialDelay;
-
-        while (!cancellationToken.IsCancellationRequested)
+        try
         {
-            try
+            if (string.IsNullOrWhiteSpace(_settings.AuthToken))
             {
-                if (string.IsNullOrWhiteSpace(_settings.AuthToken))
-                {
-                    _logger.LogDebug("Event hub waiting for auth token.");
-                    await Task.Delay(retryDelay, cancellationToken);
-                    retryDelay = TimeSpan.FromSeconds(Math.Min(retryDelay.TotalSeconds * 2, ReconnectMaxDelay.TotalSeconds));
-                    continue;
-                }
-
-                using var socket = new ClientWebSocket();
-                socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
-                socket.Options.SetBuffer(16 * 1024, 16 * 1024);
-                _socket = socket;
-
-                var websocketUri = BuildWebSocketUri(_settings.MusicAssistantUrl);
-                await socket.ConnectAsync(websocketUri, cancellationToken);
-
-                await AuthenticateAsync(socket, _settings.AuthToken!, cancellationToken);
-
-                SetConnectionState(true);
-                retryDelay = ReconnectInitialDelay;
-                _logger.LogInformation("Connected to Music Assistant event stream: {Uri}", websocketUri);
-
-                await ReceiveLoopAsync(socket, cancellationToken);
+                _logger.LogDebug("Event hub connect skipped: missing auth token.");
+                return;
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(
-                    "Event hub connection lost. Reconnecting in {Delay}s. Error={Error}",
-                    retryDelay.TotalSeconds,
-                    ex.Message);
 
-                try
-                {
-                    await Task.Delay(retryDelay, cancellationToken);
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    break;
-                }
+            using var socket = new ClientWebSocket();
+            socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
+            socket.Options.SetBuffer(16 * 1024, 16 * 1024);
+            _socket = socket;
 
-                retryDelay = TimeSpan.FromSeconds(Math.Min(retryDelay.TotalSeconds * 2, ReconnectMaxDelay.TotalSeconds));
-            }
-            finally
-            {
-                SetConnectionState(false);
-            }
+            var websocketUri = BuildWebSocketUri(_settings.MusicAssistantUrl);
+            await socket.ConnectAsync(websocketUri, cancellationToken);
+
+            await AuthenticateAsync(socket, _settings.AuthToken!, cancellationToken);
+
+            SetConnectionState(true);
+            _logger.LogInformation("Connected to Music Assistant event stream: {Uri}", websocketUri);
+
+            await ReceiveLoopAsync(socket, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Expected on shutdown.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Event hub connection ended. Error={Error}", ex.Message);
+        }
+        finally
+        {
+            _socket = null;
+            SetConnectionState(false);
         }
     }
 

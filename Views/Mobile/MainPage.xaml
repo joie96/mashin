@@ -92,6 +92,44 @@
                     WidthRequest="48"
                     Color="{DynamicResource AccentColor}" />
             </Grid>
+
+            <!--  Connection Status  -->
+            <Border BackgroundColor="{DynamicResource BackgroundSecondary}"
+                IsVisible="{Binding ConnectionState, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
+                Margin="0,12,12,0"
+                Padding="10,6"
+                HorizontalOptions="End"
+                Stroke="{DynamicResource BorderPrimary}"
+                StrokeThickness="1"
+                VerticalOptions="Start"
+                ZIndex="30">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="14" />
+                </Border.StrokeShape>
+                <Grid ColumnDefinitions="Auto,Auto"
+                    ColumnSpacing="6">
+                    <Label Grid.Column="0"
+                        FontSize="14"
+                        Text="{Binding ConnectionState}"
+                        TextColor="{DynamicResource TextPrimary}"
+                        VerticalOptions="Center" />
+                    <ActivityIndicator Grid.Column="1"
+                        HeightRequest="14"
+                        IsRunning="False"
+                        IsVisible="False"
+                        WidthRequest="14"
+                        Color="{DynamicResource AccentColor}">
+                        <ActivityIndicator.Triggers>
+                            <DataTrigger Binding="{Binding ConnectionState}"
+                                TargetType="ActivityIndicator"
+                                Value="Reconnecting">
+                                <Setter Property="IsVisible" Value="True" />
+                                <Setter Property="IsRunning" Value="True" />
+                            </DataTrigger>
+                        </ActivityIndicator.Triggers>
+                    </ActivityIndicator>
+                </Grid>
+            </Border>
         </Grid>
 
         <!--  Bottom Player Bar  -->

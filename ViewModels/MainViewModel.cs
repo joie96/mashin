@@ -28,6 +28,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private readonly IOverlayService _overlayService;
     private readonly IContextMenuService _contextMenuService;
     private readonly PlaybackService _playbackService;
+    private readonly IConnectionService _connectionService;
     private readonly ILogger<MainViewModel> _logger;
     private readonly ObservableRangeCollection<Playlist> _playlists;
 
@@ -60,6 +61,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private bool _isNavigating;
     private NavigationSection _currentSection = NavigationSection.Home;
     private bool _isLoginOverlayActive;
+    private string _connectionState = string.Empty;
 
     public event Func<Task>? CloseQueueViewRequested;
     public event EventHandler? SearchSubmitted;
@@ -91,6 +93,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         IMediaItemActions mediaActions,
         IContextMenuService contextMenuService,
         PlaybackService playbackService,
+        IConnectionService connectionService,
         ILogger<MainViewModel> logger)
     {
         _settings = settings;
@@ -100,6 +103,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _overlayService = overlayService;
         _contextMenuService = contextMenuService;
         _playbackService = playbackService;
+        _connectionService = connectionService;
         _logger = logger;
         _playlists = _playlistService.Playlists;
         MediaActions = mediaActions;
@@ -242,6 +246,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         _musicAssistant.LoginRequired += OnLoginRequired;
 
+        _connectionService.ConnectionStateChanged += OnConnectionServiceStateChanged;
+        UpdateConnectionState(_connectionService.ConnectionState);
+
         // Subscribe to playback state events
         _playbackService.PropertyChanged += OnPlaybackServicePropertyChanged;
 
@@ -284,6 +291,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         get => _isNavigating;
         private set => SetProperty(ref _isNavigating, value);
+    }
+
+    public string ConnectionState
+    {
+        get => _connectionState;
+        private set => SetProperty(ref _connectionState, value);
     }
 
     #endregion
@@ -683,11 +696,47 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         _musicAssistant.LoginRequired -= OnLoginRequired;
 
+        _connectionService.ConnectionStateChanged -= OnConnectionServiceStateChanged;
+
         _playbackService.PropertyChanged -= OnPlaybackServicePropertyChanged;
 
         _navigationService.PropertyChanged -= OnNavigationServicePropertyChanged;
 
         await Task.CompletedTask;
+    }
+
+    #endregion
+
+    #region Connection State
+
+    private void OnConnectionServiceStateChanged(object? sender, CustomConnectionState state)
+    {
+        ExecuteOnMainThread(() =>
+        {
+            UpdateConnectionState(state);
+        });
+    }
+
+    private void UpdateConnectionState(CustomConnectionState state)
+    {
+        ConnectionState = state switch
+        {
+            CustomConnectionState.Offline => "Offline",
+            CustomConnectionState.Reconnecting => "Reconnecting",
+            CustomConnectionState.Online => "Connected",
+            _ => string.Empty
+        };
+    }
+
+    private static void ExecuteOnMainThread(Action action)
+    {
+        if (MainThread.IsMainThread)
+        {
+            action();
+            return;
+        }
+
+        MainThread.BeginInvokeOnMainThread(action);
     }
 
     #endregion

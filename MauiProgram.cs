@@ -98,6 +98,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<MusicAssistantService>();
         builder.Services.AddSingleton<IPlaylistService, PlaylistService>();
         builder.Services.AddSingleton<IMusicAssistantEventHub, MusicAssistantEventHub>();
+        builder.Services.AddSingleton<IConnectionService, ConnectionService>();
         builder.Services.AddSingleton<IUserDataService, UserDataService>();
         builder.Services.AddSingleton<IMediaItemActions, MediaItemActions>();
         builder.Services.AddSingleton<INavigationService, NavigationService>();
@@ -207,15 +208,16 @@ public static class MauiProgram
                 capabilities: sp.GetRequiredService<ClientCapabilities>(),
                 audioPipeline: sp.GetRequiredKeyedService<IAudioPipeline>("sendspin"));
         });
-        builder.Services.AddSingleton<IPlayerService, SendspinPlayerService>();
-            builder.Services.AddSingleton<IPlayerService>(sp =>
-            {
-                return new LocalAudioPlayerService(
-                sp.GetRequiredService<ILogger<LocalAudioPlayerService>>(),
-                sp.GetRequiredKeyedService<IAudioPipeline>("local"),
-                sp.GetRequiredService<IAudioRenderer>(),
-                sp.GetRequiredService<LocalAudioChunkSource>());
-            });
+        builder.Services.AddSingleton<SendspinPlayerService>();
+        builder.Services.AddSingleton<IPlayerService>(sp => sp.GetRequiredService<SendspinPlayerService>());
+        builder.Services.AddSingleton<IPlayerService>(sp =>
+        {
+            return new LocalAudioPlayerService(
+            sp.GetRequiredService<ILogger<LocalAudioPlayerService>>(),
+            sp.GetRequiredKeyedService<IAudioPipeline>("local"),
+            sp.GetRequiredService<IAudioRenderer>(),
+            sp.GetRequiredService<LocalAudioChunkSource>());
+        });
         builder.Services.AddSingleton<IPlayerService, RemotePlayerService>();
 
 
