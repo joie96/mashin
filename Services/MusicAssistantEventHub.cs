@@ -22,6 +22,8 @@ public interface IMusicAssistantEventHub : IAsyncDisposable
     #region Interface Core
     bool IsConnected { get; }
 
+    event EventHandler<bool>? ConnectionStateChanged;
+
     event EventHandler<MusicAssistantEvent>? EventReceived;
 
     Task StartAsync(CancellationToken cancellationToken = default);
@@ -79,6 +81,9 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
             new MediaItemJsonConverter()
         }
     };
+
+    private static readonly TimeSpan ReconnectInitialDelay = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan ReconnectMaxDelay = TimeSpan.FromSeconds(5);
     #endregion
 
     #region Fields
@@ -107,6 +112,8 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
 
     #region Core API
     public bool IsConnected { get; private set; }
+
+    public event EventHandler<bool>? ConnectionStateChanged;
 
     public event EventHandler<MusicAssistantEvent>? EventReceived;
 
@@ -146,7 +153,7 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
             _runCts = null;
             _runTask = null;
             _socket = null;
-            IsConnected = false;
+            SetConnectionState(false);
         }
         finally
         {
@@ -459,7 +466,7 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
     #region WebSocket Transport
     private async Task RunAsync(CancellationToken cancellationToken)
     {
-        var retryDelay = TimeSpan.FromSeconds(2);
+        var retryDelay = ReconnectInitialDelay;
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -468,7 +475,8 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
                 if (string.IsNullOrWhiteSpace(_settings.AuthToken))
                 {
                     _logger.LogDebug("Event hub waiting for auth token.");
-                    await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                    await Task.Delay(retryDelay, cancellationToken);
+                    retryDelay = TimeSpan.FromSeconds(Math.Min(retryDelay.TotalSeconds * 2, ReconnectMaxDelay.TotalSeconds));
                     continue;
                 }
 
@@ -482,8 +490,8 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
 
                 await AuthenticateAsync(socket, _settings.AuthToken!, cancellationToken);
 
-                IsConnected = true;
-                retryDelay = TimeSpan.FromSeconds(2);
+                SetConnectionState(true);
+                retryDelay = ReconnectInitialDelay;
                 _logger.LogInformation("Connected to Music Assistant event stream: {Uri}", websocketUri);
 
                 await ReceiveLoopAsync(socket, cancellationToken);
@@ -494,16 +502,38 @@ public sealed class MusicAssistantEventHub : IMusicAssistantEventHub
             }
             catch (Exception ex)
             {
-                IsConnected = false;
-                _logger.LogWarning(ex, "Event hub connection loop error. Retrying in {Delay}s", retryDelay.TotalSeconds);
-                await Task.Delay(retryDelay, cancellationToken);
-                retryDelay = TimeSpan.FromSeconds(Math.Min(retryDelay.TotalSeconds * 2, 15));
+                _logger.LogWarning(
+                    "Event hub connection lost. Reconnecting in {Delay}s. Error={Error}",
+                    retryDelay.TotalSeconds,
+                    ex.Message);
+
+                try
+                {
+                    await Task.Delay(retryDelay, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                retryDelay = TimeSpan.FromSeconds(Math.Min(retryDelay.TotalSeconds * 2, ReconnectMaxDelay.TotalSeconds));
             }
             finally
             {
-                IsConnected = false;
+                SetConnectionState(false);
             }
         }
+    }
+
+    private void SetConnectionState(bool connected)
+    {
+        if (IsConnected == connected)
+        {
+            return;
+        }
+
+        IsConnected = connected;
+        ConnectionStateChanged?.Invoke(this, connected);
     }
 
     private async Task AuthenticateAsync(ClientWebSocket socket, string token, CancellationToken cancellationToken)

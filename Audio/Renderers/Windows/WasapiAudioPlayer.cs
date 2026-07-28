@@ -1,5 +1,6 @@
 #if WINDOWS
 
+using System.Collections.Concurrent;
 using mashin.Audio.Renderers;
 using mashin.Audio.Renderers.Windows.Wasapi;
 using mashin.Models;
@@ -17,6 +18,8 @@ public sealed class WasapiAudioPlayer : IAudioRenderer
     private const int RequestedLatencyMs = 200;
 
     private readonly ILogger<WasapiAudioPlayer> _logger;
+    private readonly BlockingCollection<QueuedWorkItem> _audioWorkQueue = new();
+    private readonly Thread _audioThread;
     private string? _deviceId;
     private WasapiOut? _wasapiOut;
     private WasapiSampleProviderAdapter? _sampleProvider;
@@ -27,6 +30,7 @@ public sealed class WasapiAudioPlayer : IAudioRenderer
     private bool _isOutputInitialized;
     private string _currentDeviceDisplayName = "System Default";
     private int _awaitingAudiblePlayback;
+    private int _audioThreadId;
 
     public int OutputLatencyMs => _outputLatencyMs;
 
@@ -66,168 +70,199 @@ public sealed class WasapiAudioPlayer : IAudioRenderer
     {
         _logger = logger;
         _deviceId = deviceId;
+
+        _audioThread = new Thread(AudioThreadMain)
+        {
+            IsBackground = true,
+            Name = "WasapiAudioPlayer-Control"
+        };
+        _audioThread.Start();
     }
 
     public Task InitializeAsync(AudioFormatModel format, CancellationToken cancellationToken = default)
     {
-        return Task.Run(
+        return InvokeOnAudioThreadAsync(
             () =>
             {
-                try
-                {
-                    _format = format;
-                    CreateOutputForCurrentDevice();
+                _format = format;
+                CreateOutputForCurrentDevice();
 
-                    SetState(PlayerStateType.Idle);
-                    _logger.LogDebug(
-                        "WASAPI renderer initialized: {SampleRate}Hz {Channels}ch, latency: {Latency}ms, device: {Device}",
-                        format.SampleRate,
-                        format.Channels,
-                        _outputLatencyMs,
-                        _currentDeviceDisplayName);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to initialize WASAPI renderer");
-                    SetState(PlayerStateType.Error);
-                    ErrorOccurred?.Invoke(this, ex);
-                    throw;
-                }
+                SetState(PlayerStateType.Idle);
+                _logger.LogDebug(
+                    "WASAPI renderer initialized: {SampleRate}Hz {Channels}ch, latency: {Latency}ms, device: {Device}",
+                    format.SampleRate,
+                    format.Channels,
+                    _outputLatencyMs,
+                    _currentDeviceDisplayName);
             },
-            cancellationToken);
+            cancellationToken).ContinueWith(task =>
+            {
+                if (!task.IsFaulted)
+                {
+                    return task;
+                }
+
+                var ex = task.Exception?.GetBaseException() ?? new InvalidOperationException("Failed to initialize WASAPI renderer");
+                _logger.LogError(ex, "Failed to initialize WASAPI renderer");
+                SetState(PlayerStateType.Error);
+                ErrorOccurred?.Invoke(this, ex);
+                throw ex;
+            }, TaskScheduler.Default).Unwrap();
     }
 
     public void SetSampleSource(IAudioRendererSampleSource source)
     {
-        if (_wasapiOut == null || _format == null)
-        {
-            throw new InvalidOperationException("Renderer not initialized. Call InitializeAsync first.");
-        }
-
         ArgumentNullException.ThrowIfNull(source);
 
-        _sampleProvider = new WasapiSampleProviderAdapter(source, _format)
+        InvokeOnAudioThread(() =>
         {
-            Volume = _volume,
-            IsMuted = _isMuted
-        };
-        _sampleProvider.AudibleSamplesRendered += OnAudibleSamplesRendered;
+            if (_wasapiOut == null || _format == null)
+            {
+                throw new InvalidOperationException("Renderer not initialized. Call InitializeAsync first.");
+            }
 
-        if (_isOutputInitialized)
-        {
-            _logger.LogDebug("WASAPI output already initialized. Recreating output before setting new source.");
-            CreateOutputForCurrentDevice();
-        }
+            if (_sampleProvider != null)
+            {
+                _sampleProvider.AudibleSamplesRendered -= OnAudibleSamplesRendered;
+            }
 
-        _wasapiOut.Init(_sampleProvider);
-        _isOutputInitialized = true;
-        _logger.LogDebug("Sample source configured");
+            _sampleProvider = new WasapiSampleProviderAdapter(source, _format)
+            {
+                Volume = _volume,
+                IsMuted = _isMuted
+            };
+            _sampleProvider.AudibleSamplesRendered += OnAudibleSamplesRendered;
+
+            if (_isOutputInitialized)
+            {
+                _logger.LogDebug("WASAPI output already initialized. Recreating output before setting new source.");
+                CreateOutputForCurrentDevice();
+            }
+
+            _wasapiOut.Init(_sampleProvider);
+            _isOutputInitialized = true;
+            _logger.LogDebug("Sample source configured");
+        });
     }
 
     public void Play()
     {
-        if (_wasapiOut == null || _sampleProvider == null)
+        InvokeOnAudioThread(() =>
         {
-            throw new InvalidOperationException("Renderer not initialized or no sample source set.");
-        }
+            if (_wasapiOut == null || _sampleProvider == null)
+            {
+                throw new InvalidOperationException("Renderer not initialized or no sample source set.");
+            }
 
-        Interlocked.Exchange(ref _awaitingAudiblePlayback, 1);
-        _sampleProvider.ResetAudibleSampleDetection();
-        SetState(PlayerStateType.Buffering);
-        _wasapiOut.Play();
-        _logger.LogDebug("Playback started, waiting for first audible audio before setting Playing state");
+            Interlocked.Exchange(ref _awaitingAudiblePlayback, 1);
+            _sampleProvider.ResetAudibleSampleDetection();
+            SetState(PlayerStateType.Buffering);
+            _wasapiOut.Play();
+            _logger.LogDebug("Playback started, waiting for first audible audio before setting Playing state");
+        });
     }
 
     public void Pause()
     {
-        Interlocked.Exchange(ref _awaitingAudiblePlayback, 0);
-        _wasapiOut?.Pause();
-        SetState(PlayerStateType.Paused);
-        _logger.LogDebug("Playback paused");
+        InvokeOnAudioThread(() =>
+        {
+            Interlocked.Exchange(ref _awaitingAudiblePlayback, 0);
+            _wasapiOut?.Pause();
+            SetState(PlayerStateType.Paused);
+            _logger.LogDebug("Playback paused");
+        });
     }
 
     public void Stop()
     {
-        Interlocked.Exchange(ref _awaitingAudiblePlayback, 0);
-        _wasapiOut?.Stop();
-        SetState(PlayerStateType.Idle);
-        _logger.LogDebug("Playback stopped");
+        InvokeOnAudioThread(() =>
+        {
+            Interlocked.Exchange(ref _awaitingAudiblePlayback, 0);
+            _wasapiOut?.Stop();
+            SetState(PlayerStateType.Idle);
+            _logger.LogDebug("Playback stopped");
+        });
     }
 
     public Task SwitchDeviceAsync(string? deviceId, CancellationToken cancellationToken = default)
     {
-        return Task.Run(
+        return InvokeOnAudioThreadAsync(
             () =>
             {
-                try
+                var wasPlaying = State == PlayerStateType.Playing || State == PlayerStateType.Buffering;
+                var currentSampleProvider = _sampleProvider;
+
+                _logger.LogInformation(
+                    "Switching audio device from {OldDevice} to {NewDevice}",
+                    _deviceId ?? "System Default",
+                    deviceId ?? "System Default");
+
+                _deviceId = deviceId;
+                CreateOutputForCurrentDevice();
+
+                if (currentSampleProvider != null)
                 {
-                    var wasPlaying = State == PlayerStateType.Playing || State == PlayerStateType.Buffering;
-                    var currentSampleProvider = _sampleProvider;
-
-                    _logger.LogInformation(
-                        "Switching audio device from {OldDevice} to {NewDevice}",
-                        _deviceId ?? "System Default",
-                        deviceId ?? "System Default");
-
-                    _deviceId = deviceId;
-                    CreateOutputForCurrentDevice();
-
-                    if (currentSampleProvider != null)
-                    {
-                        var output = _wasapiOut ?? throw new InvalidOperationException("Audio output is not available after device switch.");
-                        output.Init(currentSampleProvider);
-                        _isOutputInitialized = true;
-                        _logger.LogDebug("Sample source re-attached to new device");
-                    }
-
-                    SetState(PlayerStateType.Idle);
-
-                    if (wasPlaying && currentSampleProvider != null)
-                    {
-                        Interlocked.Exchange(ref _awaitingAudiblePlayback, 1);
-                        currentSampleProvider.ResetAudibleSampleDetection();
-                        var output = _wasapiOut ?? throw new InvalidOperationException("Audio output is not available for playback after device switch.");
-                        SetState(PlayerStateType.Buffering);
-                        output.Play();
-                        _logger.LogDebug("Playback resumed on new device");
-                    }
-
-                    _logger.LogInformation(
-                        "Audio device switched successfully: {Device}, latency: {Latency}ms",
-                        _currentDeviceDisplayName,
-                        _outputLatencyMs);
+                    var output = _wasapiOut ?? throw new InvalidOperationException("Audio output is not available after device switch.");
+                    output.Init(currentSampleProvider);
+                    _isOutputInitialized = true;
+                    _logger.LogDebug("Sample source re-attached to new device");
                 }
-                catch (Exception ex)
+
+                SetState(PlayerStateType.Idle);
+
+                if (wasPlaying && currentSampleProvider != null)
                 {
-                    _logger.LogError(ex, "Failed to switch audio device");
-                    SetState(PlayerStateType.Error);
-                    ErrorOccurred?.Invoke(this, ex);
-                    throw;
+                    Interlocked.Exchange(ref _awaitingAudiblePlayback, 1);
+                    currentSampleProvider.ResetAudibleSampleDetection();
+                    var output = _wasapiOut ?? throw new InvalidOperationException("Audio output is not available for playback after device switch.");
+                    SetState(PlayerStateType.Buffering);
+                    output.Play();
+                    _logger.LogDebug("Playback resumed on new device");
                 }
+
+                _logger.LogInformation(
+                    "Audio device switched successfully: {Device}, latency: {Latency}ms",
+                    _currentDeviceDisplayName,
+                    _outputLatencyMs);
             },
-            cancellationToken);
+            cancellationToken).ContinueWith(task =>
+            {
+                if (!task.IsFaulted)
+                {
+                    return task;
+                }
+
+                var ex = task.Exception?.GetBaseException() ?? new InvalidOperationException("Failed to switch audio device");
+                _logger.LogError(ex, "Failed to switch audio device");
+                SetState(PlayerStateType.Error);
+                ErrorOccurred?.Invoke(this, ex);
+                throw ex;
+            }, TaskScheduler.Default).Unwrap();
     }
 
     public async ValueTask DisposeAsync()
     {
         Interlocked.Exchange(ref _awaitingAudiblePlayback, 0);
 
-        if (_wasapiOut != null)
+        await InvokeOnAudioThreadAsync(() =>
         {
-            _wasapiOut.PlaybackStopped -= OnPlaybackStopped;
-            _wasapiOut.Stop();
-            _wasapiOut.Dispose();
-            _wasapiOut = null;
-        }
+            if (_wasapiOut != null)
+            {
+                _wasapiOut.PlaybackStopped -= OnPlaybackStopped;
+                _wasapiOut.Stop();
+                _wasapiOut.Dispose();
+                _wasapiOut = null;
+            }
 
-        _isOutputInitialized = false;
-        if (_sampleProvider != null)
-        {
-            _sampleProvider.AudibleSamplesRendered -= OnAudibleSamplesRendered;
-        }
+            _isOutputInitialized = false;
+            if (_sampleProvider != null)
+            {
+                _sampleProvider.AudibleSamplesRendered -= OnAudibleSamplesRendered;
+            }
 
-        _sampleProvider = null;
-        SetState(PlayerStateType.Uninitialized);
+            _sampleProvider = null;
+            SetState(PlayerStateType.Uninitialized);
+        });
 
         await Task.CompletedTask;
     }
@@ -267,6 +302,52 @@ public sealed class WasapiAudioPlayer : IAudioRenderer
 
         SetState(PlayerStateType.Playing);
         _logger.LogDebug("First audible audio rendered; renderer state set to Playing");
+    }
+
+    private Task InvokeOnAudioThreadAsync(Action action, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (Environment.CurrentManagedThreadId == _audioThreadId)
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        var workItem = new QueuedWorkItem(action);
+        try
+        {
+            _audioWorkQueue.Add(workItem, cancellationToken);
+        }
+        catch (InvalidOperationException)
+        {
+            return Task.FromException(new ObjectDisposedException(nameof(WasapiAudioPlayer)));
+        }
+
+        return workItem.Completion.Task;
+    }
+
+    private void InvokeOnAudioThread(Action action)
+    {
+        InvokeOnAudioThreadAsync(action).GetAwaiter().GetResult();
+    }
+
+    private void AudioThreadMain()
+    {
+        _audioThreadId = Environment.CurrentManagedThreadId;
+
+        foreach (var workItem in _audioWorkQueue.GetConsumingEnumerable())
+        {
+            try
+            {
+                workItem.Action();
+                workItem.Completion.TrySetResult(null);
+            }
+            catch (Exception ex)
+            {
+                workItem.Completion.TrySetException(ex);
+            }
+        }
     }
 
     private void CreateOutputForCurrentDevice()
@@ -317,6 +398,18 @@ public sealed class WasapiAudioPlayer : IAudioRenderer
             _logger.LogWarning(ex, "Failed to get device {DeviceId}, falling back to default", _deviceId);
             return null;
         }
+    }
+
+    private sealed class QueuedWorkItem
+    {
+        public QueuedWorkItem(Action action)
+        {
+            Action = action;
+        }
+
+        public Action Action { get; }
+
+        public TaskCompletionSource<object?> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 }
 #endif

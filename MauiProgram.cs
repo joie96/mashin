@@ -187,7 +187,7 @@ public static class MauiProgram
         // Sendspin Client services
         builder.Services.AddSingleton<ConnectionOptions>(_ => new ConnectionOptions
         {
-            AutoReconnect = true
+            AutoReconnect = false
         });
 
         builder.Services.AddSingleton<ClientCapabilities>(sp =>

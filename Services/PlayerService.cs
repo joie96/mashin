@@ -21,6 +21,7 @@ public interface IPlayerService : INotifyPropertyChanged, IAsyncDisposable
 {
     PlaybackOutputMode OutputMode { get; }
     string? PlayerId => null;
+    bool IsConnected => true;
     Models.PlayerState PlaybackState { get; }
     PlaybackQueue? Queue => null;
     double PositionSeconds { get; }
@@ -29,6 +30,12 @@ public interface IPlayerService : INotifyPropertyChanged, IAsyncDisposable
     bool IsMuted { get; }
 
     event EventHandler<PlaybackQueue>? QueueChanged
+    {
+        add { }
+        remove { }
+    }
+
+    event EventHandler<bool>? ConnectionStateChanged
     {
         add { }
         remove { }
@@ -75,6 +82,8 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
 
     private const int PositionTimerIntervalMs = 250;
     private const int MaxBufferingHoldSeconds = 8;
+    private static readonly TimeSpan ReconnectInitialDelay = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan ReconnectMaxDelay = TimeSpan.FromSeconds(5);
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly IMusicAssistantEventHub _musicAssistantEventHub;
@@ -84,6 +93,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
     private readonly IAudioPlayerStateFeed _audioPlayerStateFeed;
     private readonly CancellationTokenSource _disposeCts = new();
     private readonly object _progressSync = new();
+    private readonly SemaphoreSlim _reconnectSync = new(1, 1);
 
     private string? _playerId;
     private Models.PlayerState _playbackState = default!;
@@ -100,6 +110,10 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
     private DateTimeOffset? _lastServerPositionUpdateUtc;
     private readonly Task _progressInterpolationTask;
     private bool _eventHandlersSubscribed;
+    private CancellationTokenSource? _reconnectLoopCts;
+    private Task? _reconnectLoopTask;
+    private bool _reconnectRecoveryPending;
+    private bool _hasEstablishedConnection;
 
 
     #endregion
@@ -183,6 +197,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public event EventHandler<PlaybackQueue>? QueueChanged;
+    public event EventHandler<bool>? ConnectionStateChanged;
 
     #endregion
 
@@ -232,6 +247,20 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         private set => SetProperty(ref _isMuted, value);
     }
 
+    public bool IsConnected
+    {
+        get => _isConnected;
+        private set
+        {
+            if (!SetProperty(ref _isConnected, value))
+            {
+                return;
+            }
+
+            ConnectionStateChanged?.Invoke(this, value);
+        }
+    }
+
     #endregion
 
     #region Lifecycle
@@ -275,6 +304,8 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
     public async Task DeactivateAsync()
     {
         _logger.LogDebug("Sendspin deactivate requested. PlayerId={PlayerId}", PlayerId);
+        StopReconnectLoop();
+        _reconnectRecoveryPending = false;
         _activeQueueId = null;
         PositionSeconds = 0;
         DurationSeconds = 0;
@@ -292,6 +323,8 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        StopReconnectLoop();
+
         if (_eventHandlersSubscribed)
         {
             _sendspinClient.PlayerStateChanged -= OnSendspinPlayerStateChanged;
@@ -317,6 +350,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         }
 
         _disposeCts.Dispose();
+        _reconnectSync.Dispose();
     }
 
 
@@ -841,11 +875,193 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
 
     #region Connection
 
+    private void SetReconnectRecoveryPending()
+    {
+        _reconnectRecoveryPending = true;
+        _logger.LogInformation("Sendspin reconnect recovery marked as pending.");
+    }
+
+    private void StartReconnectLoop()
+    {
+        if (_reconnectLoopTask is { IsCompleted: false })
+        {
+            return;
+        }
+
+        _reconnectLoopCts?.Cancel();
+        _reconnectLoopCts?.Dispose();
+        _reconnectLoopCts = new CancellationTokenSource();
+        _reconnectLoopTask = Task.Run(() => ReconnectLoopAsync(_reconnectLoopCts.Token));
+    }
+
+    private void StopReconnectLoop()
+    {
+        _reconnectLoopCts?.Cancel();
+        _reconnectLoopCts?.Dispose();
+        _reconnectLoopCts = null;
+        _reconnectLoopTask = null;
+    }
+
+    private async Task ReconnectLoopAsync(CancellationToken cancellationToken)
+    {
+        var retryDelay = ReconnectInitialDelay;
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            if (IsConnected)
+            {
+                await ApplyReconnectRecoveryAsync(cancellationToken);
+                return;
+            }
+
+            if (!Uri.TryCreate(_settingsService.SendspinUrl, UriKind.Absolute, out var configuredServerUri))
+            {
+                _logger.LogWarning("Sendspin reconnect skipped because configured URL is invalid. Url={SendspinUrl}", _settingsService.SendspinUrl);
+            }
+            else
+            {
+                try
+                {
+                    await ConnectAsync(configuredServerUri, cancellationToken);
+
+                    if (IsConnected)
+                    {
+                        _logger.LogInformation("Sendspin reconnect succeeded in player service.");
+                        retryDelay = ReconnectInitialDelay;
+                        await ApplyReconnectRecoveryAsync(cancellationToken);
+                        return;
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        "Sendspin reconnect failed in player service. Retrying in {Delay}s, Error={Error}",
+                        retryDelay.TotalSeconds,
+                        ex.Message);
+                }
+            }
+
+            try
+            {
+                await Task.Delay(retryDelay, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            retryDelay = TimeSpan.FromSeconds(Math.Min(retryDelay.TotalSeconds * 2, ReconnectMaxDelay.TotalSeconds));
+        }
+    }
+
+    private async Task ApplyReconnectRecoveryAsync(CancellationToken cancellationToken)
+    {
+        if (!_reconnectRecoveryPending || !IsConnected)
+        {
+            return;
+        }
+
+        await _reconnectSync.WaitAsync(cancellationToken);
+        try
+        {
+            if (!_reconnectRecoveryPending || !IsConnected)
+            {
+                return;
+            }
+
+            var restoreQueue = CloneQueue(_queue);
+            var restoreCurrentIndex = _queue.CurrentIndex;
+            var restoreCurrentQueueItemId = Normalize(_queue.CurrentQueueItemId);
+            var restorePositionSeconds = PositionSeconds;
+
+            var mediaItems = restoreQueue.Items
+                .Select(item => item.MediaItem)
+                .OfType<MediaItem>()
+                .ToList();
+
+            if (mediaItems.Count > 0)
+            {
+                await PlayMediaReplaceNextAsync(mediaItems, cancellationToken);
+            }
+
+            var resumeIndex = ResolveResumeIndex(restoreQueue, restoreCurrentIndex, restoreCurrentQueueItemId, mediaItems.Count);
+            if (resumeIndex.HasValue)
+            {
+                await PlayQueueIndexAsync(resumeIndex.Value, cancellationToken);
+            }
+
+            if (restorePositionSeconds > 0)
+            {
+                await SeekAsync(restorePositionSeconds, cancellationToken);
+            }
+
+            _reconnectRecoveryPending = false;
+
+            _logger.LogInformation(
+                "Sendspin reconnect recovery applied. ResumeIndex={ResumeIndex}, PositionSeconds={PositionSeconds:F1}, QueueItems={QueueItems}",
+                resumeIndex,
+                restorePositionSeconds,
+                mediaItems.Count);
+        }
+        finally
+        {
+            _reconnectSync.Release();
+        }
+    }
+
+    private static int? ResolveResumeIndex(PlaybackQueue queue, int? currentIndexCandidate, string? currentQueueItemIdCandidate, int queueItemCount)
+    {
+        if (queueItemCount <= 0)
+        {
+            return null;
+        }
+
+        if (currentIndexCandidate is int currentIndex
+            && currentIndex >= 0
+            && currentIndex < queueItemCount)
+        {
+            return currentIndex;
+        }
+
+        var currentQueueItemId = Normalize(currentQueueItemIdCandidate);
+        if (string.IsNullOrWhiteSpace(currentQueueItemId))
+        {
+            return null;
+        }
+
+        var idx = queue.Items
+            .ToList()
+            .FindIndex(item => string.Equals(Normalize(item.QueueItemId), currentQueueItemId, StringComparison.Ordinal));
+
+        return idx >= 0 ? idx : null;
+    }
+
+    private static PlaybackQueue CloneQueue(PlaybackQueue source)
+    {
+        var clone = new PlaybackQueue
+        {
+            QueueId = source.QueueId,
+            CurrentIndex = source.CurrentIndex,
+            CurrentQueueItemId = source.CurrentQueueItemId,
+            ItemCount = source.ItemCount,
+            ShuffleEnabled = source.ShuffleEnabled,
+            RepeatMode = source.RepeatMode,
+            DontStopTheMusicEnabled = source.DontStopTheMusicEnabled
+        };
+
+        clone.Items.ReplaceRange(source.Items.OfType<QueueItem>().Select(CloneQueueItem));
+        return clone;
+    }
+
     private async Task ConnectAsync(Uri serverUri, CancellationToken cancellationToken)
     {
         await _sendspinClient.ConnectAsync(serverUri, cancellationToken);
         _connectedServerName = _sendspinClient.ServerName ?? serverUri.Host;
-        _isConnected = _sendspinClient.ConnectionState == ConnectionState.Connected;
+        IsConnected = _sendspinClient.ConnectionState == ConnectionState.Connected;
         PlayerId ??= _settingsService.GetSendspinClientId();
 
         var currentPlayerState = _sendspinClient.CurrentPlayerState;
@@ -860,7 +1076,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
     private async Task DisconnectAsync()
     {
         await _sendspinClient.DisconnectAsync("client_disconnect");
-        _isConnected = false;
+        IsConnected = false;
         _connectedServerName = null;
         _activeQueueId = null;
         ResetProgressAnchor();
@@ -897,10 +1113,22 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
 
     private void OnSendspinConnectionStateChanged(object? sender, ConnectionStateChangedEventArgs e)
     {
-        _logger.LogInformation("Sendspin connection state changed. OldState={OldState}, NewState={NewState}, WasConnected={WasConnected}, PlayerId={PlayerId}, ActiveQueueId={ActiveQueueId}", e.OldState, e.NewState, _isConnected, PlayerId, _activeQueueId);
-        _isConnected = e.NewState == ConnectionState.Connected;
-        if (!_isConnected)
+        _logger.LogInformation("Sendspin connection state changed. OldState={OldState}, NewState={NewState}, WasConnected={WasConnected}, PlayerId={PlayerId}, ActiveQueueId={ActiveQueueId}", e.OldState, e.NewState, IsConnected, PlayerId, _activeQueueId);
+        IsConnected = e.NewState == ConnectionState.Connected;
+        if (IsConnected)
         {
+            _hasEstablishedConnection = true;
+            return;
+        }
+
+        if (!IsConnected)
+        {
+            if (_hasEstablishedConnection)
+            {
+                SetReconnectRecoveryPending();
+            }
+
+            StartReconnectLoop();
             _connectedServerName = null;
             _activeQueueId = null;
             ResetProgressAnchor();
