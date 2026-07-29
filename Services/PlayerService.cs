@@ -1102,6 +1102,10 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
             {
                 await SeekAsync(restorePositionSeconds, cancellationToken);
             }
+            else
+            {
+                await _sendspinClient.SendCommandAsync(Commands.Play);
+            }
 
             _reconnectPending = false;
             _reconnectRestoreQueue = null;
