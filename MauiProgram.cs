@@ -218,6 +218,7 @@ public static class MauiProgram
                 sp.GetRequiredService<ILogger<SendspinPlayerService>>(),
                 sp.GetRequiredService<SettingsService>(),
                 sp.GetRequiredService<ISendspinClient>(),
+                sp.GetRequiredService<IAudioRenderer>(),
                 sp.GetRequiredService<IAudioPlayerStateFeed>(),
                 sp.GetRequiredKeyedService<IAudioPipeline>("sendspin"));
         });

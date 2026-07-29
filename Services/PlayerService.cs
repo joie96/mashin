@@ -76,12 +76,16 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
 
     private const int PositionTimerIntervalMs = 250;
     private const int MaxBufferingHoldSeconds = 8;
+    private const int ReconnectPipelineStableSamples = 3;
+    private const int ReconnectPipelinePollIntervalMs = 150;
+    private const int ReconnectPipelineMaxWaitMs = 5000;
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly IMusicAssistantEventHub _musicAssistantEventHub;
     private readonly ILogger<SendspinPlayerService> _logger;
     private readonly SettingsService _settingsService;
     private readonly ISendspinClient _sendspinClient;
+    private readonly IAudioRenderer _audioRenderer;
     private readonly IAudioPlayerStateFeed _audioPlayerStateFeed;
     private readonly IAudioPipeline _sendspinAudioPipeline;
     private readonly CancellationTokenSource _disposeCts = new();
@@ -123,6 +127,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         ILogger<SendspinPlayerService> logger,
         SettingsService settingsService,
         ISendspinClient sendspinClient,
+        IAudioRenderer audioRenderer,
         IAudioPlayerStateFeed audioPlayerStateFeed,
         IAudioPipeline sendspinAudioPipeline)
     {
@@ -131,6 +136,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         _logger = logger;
         _settingsService = settingsService;
         _sendspinClient = sendspinClient;
+        _audioRenderer = audioRenderer;
         _audioPlayerStateFeed = audioPlayerStateFeed;
         _sendspinAudioPipeline = sendspinAudioPipeline;
 
@@ -163,7 +169,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
 
                 BufferedMilliseconds = _sendspinAudioPipeline.BufferStats?.BufferedMs ?? 0;
 
-                // Set Playing when buffer is filled
+                // Set playing state when buffer is filled
                 var rendererState = NormalizeLocalAudioPlayerState(_audioPlayerStateFeed.CurrentState);
                 if (PlaybackState.State == PlayerStateType.Buffering
                     && PlaybackState.Reason == PlayerStateReason.Reconnect
@@ -178,7 +184,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
                     UpdateProgressAnchor(PositionSeconds);
                 }
 
-                // Set Buffering when buffer is empty
+                // Set buffering state when buffer is empty 
                 if (BufferedMilliseconds <= 0 && PlaybackState.State == PlayerStateType.Playing)
                 {
                     PlaybackState = new Models.PlayerState
@@ -791,20 +797,34 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
 
     public async Task TogglePlayPauseAsync(CancellationToken cancellationToken = default)
     {
-        if (!_isConnected)
+        
+        if (PlaybackState.State == PlayerStateType.Playing)
         {
-            _logger.LogWarning("TogglePlayPause ignored: Sendspin client is not connected.");
+                    
+            PlaybackState = new Models.PlayerState { State = PlayerStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
+
+            _audioRenderer.Pause();
+
+            if (!_isConnected)
+            {
+                return;
+            }
+
+            _logger.LogInformation("Sendspin command dispatch. Command={Command}, PlayerId={PlayerId}, PlaybackState={PlaybackState}", Commands.Pause, PlayerId, PlaybackState.State);
+            await _sendspinClient.SendCommandAsync(Commands.Pause);
             return;
         }
 
-        var command = PlaybackState.State == PlayerStateType.Playing
-            ? Commands.Pause
-            : Commands.Play;
+        if (!_isConnected)
+        {
+            _logger.LogWarning("Play request ignored: Sendspin client is not connected.");
+            return;
+        }
 
         PlaybackState = new Models.PlayerState { State = PlayerStateType.Buffering, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
-        _logger.LogInformation("Sendspin command dispatch. Command={Command}, PlayerId={PlayerId}, PlaybackState={PlaybackState}", command, PlayerId, PlaybackState.State);
-        await _sendspinClient.SendCommandAsync(command);
+        _logger.LogInformation("Sendspin command dispatch. Command={Command}, PlayerId={PlayerId}, PlaybackState={PlaybackState}", Commands.Play, PlayerId, PlaybackState.State);
+        await _sendspinClient.SendCommandAsync(Commands.Play);
     }
 
     public async Task NextAsync(CancellationToken cancellationToken = default)
@@ -958,10 +978,41 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         var connected = await ConnectAsync(cancellationToken);
         if (connected)
         {
+            await WaitForPipelineStabilizationAsync(cancellationToken);
             await ApplyReconnectRecoveryAsync(cancellationToken);
         }
 
         return connected;
+    }
+
+    private async Task WaitForPipelineStabilizationAsync(CancellationToken cancellationToken)
+    {
+        var stableSamples = 0;
+        var waitedMs = 0;
+
+        while (waitedMs < ReconnectPipelineMaxWaitMs)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var state = _sendspinAudioPipeline.State;
+            var stableNow = state != AudioPipelineState.Starting
+                && state != AudioPipelineState.Stopping
+                && state != AudioPipelineState.Error;
+
+            stableSamples = stableNow ? stableSamples + 1 : 0;
+            if (stableSamples >= ReconnectPipelineStableSamples)
+            {
+                return;
+            }
+
+            await Task.Delay(ReconnectPipelinePollIntervalMs, cancellationToken);
+            waitedMs += ReconnectPipelinePollIntervalMs;
+        }
+
+        _logger.LogDebug(
+            "Sendspin reconnect proceeds without full pipeline stabilization. LastState={PipelineState}, WaitedMs={WaitedMs}",
+            _sendspinAudioPipeline.State,
+            waitedMs);
     }
 
     public async Task DisconnectAsync(CancellationToken cancellationToken = default)
