@@ -83,6 +83,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
     private readonly SettingsService _settingsService;
     private readonly ISendspinClient _sendspinClient;
     private readonly IAudioPlayerStateFeed _audioPlayerStateFeed;
+    private readonly IAudioPipeline _sendspinAudioPipeline;
     private readonly CancellationTokenSource _disposeCts = new();
     private readonly object _progressSync = new();
     private readonly SemaphoreSlim _reconnectSync = new(1, 1);
@@ -92,6 +93,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
     private PlaybackQueue _queue = new();
     private double _positionSeconds;
     private double _durationSeconds;
+    private double _bufferedMilliseconds;
     private int _volume;
     private bool _isMuted;
 
@@ -121,7 +123,8 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         ILogger<SendspinPlayerService> logger,
         SettingsService settingsService,
         ISendspinClient sendspinClient,
-        IAudioPlayerStateFeed audioPlayerStateFeed)
+        IAudioPlayerStateFeed audioPlayerStateFeed,
+        IAudioPipeline sendspinAudioPipeline)
     {
         _musicAssistant = musicAssistant;
         _musicAssistantEventHub = musicAssistantEventHub;
@@ -129,6 +132,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         _settingsService = settingsService;
         _sendspinClient = sendspinClient;
         _audioPlayerStateFeed = audioPlayerStateFeed;
+        _sendspinAudioPipeline = sendspinAudioPipeline;
 
         PlayerId = _settingsService.GetSendspinClientId();
         PlaybackState = new Models.PlayerState
@@ -138,6 +142,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         };
         PositionSeconds = 0;
         DurationSeconds = 0;
+        BufferedMilliseconds = 0;
         Volume = 50;
         IsMuted = false;
 
@@ -156,6 +161,37 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
                     break;
                 }
 
+                BufferedMilliseconds = _sendspinAudioPipeline.BufferStats?.BufferedMs ?? 0;
+
+                // Set Playing when buffer is filled
+                var rendererState = NormalizeLocalAudioPlayerState(_audioPlayerStateFeed.CurrentState);
+                if (PlaybackState.State == PlayerStateType.Buffering
+                    && PlaybackState.Reason == PlayerStateReason.Reconnect
+                    && BufferedMilliseconds > 0
+                    && rendererState == PlayerStateType.Playing)
+                {
+                    PlaybackState = new Models.PlayerState
+                    {
+                        State = PlayerStateType.Playing,
+                        ActiveSinceUtc = DateTimeOffset.UtcNow
+                    };
+                    UpdateProgressAnchor(PositionSeconds);
+                }
+
+                // Set Buffering when buffer is empty
+                if (BufferedMilliseconds <= 0 && PlaybackState.State == PlayerStateType.Playing)
+                {
+                    PlaybackState = new Models.PlayerState
+                    {
+                        State = PlayerStateType.Buffering,
+                        Reason = PlayerStateReason.Reconnect,
+                        ActiveSinceUtc = DateTimeOffset.UtcNow
+                    };
+                    ResetProgressAnchor();
+                    continue;
+                }
+
+                // Only interpolate position when playing
                 if (PlaybackState.State != PlayerStateType.Playing)
                 {
                     continue;
@@ -228,6 +264,12 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
     {
         get => _durationSeconds;
         private set => SetProperty(ref _durationSeconds, Math.Max(0, value));
+    }
+
+    public double BufferedMilliseconds
+    {
+        get => _bufferedMilliseconds;
+        private set => SetProperty(ref _bufferedMilliseconds, Math.Max(0, value));
     }
 
     public int Volume
@@ -912,8 +954,6 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         IsConnected = false;
         _connectedServerName = null;
         _activeQueueId = null;
-        ResetProgressAnchor();
-        PlaybackState = new Models.PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
 
         var connected = await ConnectAsync(cancellationToken);
         if (connected)
@@ -935,8 +975,6 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         IsConnected = false;
         _connectedServerName = null;
         _activeQueueId = null;
-        ResetProgressAnchor();
-        PlaybackState = new Models.PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
         _logger.LogInformation("Sendspin player disconnected.");
     }
 
@@ -1129,8 +1167,6 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         {
             _connectedServerName = null;
             _activeQueueId = null;
-            ResetProgressAnchor();
-            PlaybackState = new Models.PlayerState { State = PlayerStateType.Idle, ActiveSinceUtc = DateTimeOffset.UtcNow };
         }
     }
 
@@ -1579,17 +1615,6 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
                 var clamped = Math.Max(0, queue.ElapsedTime.Value);
                 PositionSeconds = clamped;
                 UpdateProgressAnchor(clamped);
-            }
-
-            PlaybackState = new Models.PlayerState
-            {
-                State = MapMusicAssistantPlaybackStateFromQueue(queue.State),
-                ActiveSinceUtc = DateTimeOffset.UtcNow
-            };
-
-            if (PlaybackState.State != PlayerStateType.Playing)
-            {
-                ResetProgressAnchor();
             }
 
             if (!string.IsNullOrWhiteSpace(_activeQueueId))

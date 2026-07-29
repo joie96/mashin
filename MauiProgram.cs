@@ -210,7 +210,17 @@ public static class MauiProgram
                 capabilities: sp.GetRequiredService<ClientCapabilities>(),
                 audioPipeline: sp.GetRequiredKeyedService<IAudioPipeline>("sendspin"));
         });
-        builder.Services.AddSingleton<SendspinPlayerService>();
+        builder.Services.AddSingleton<SendspinPlayerService>(sp =>
+        {
+            return new SendspinPlayerService(
+                sp.GetRequiredService<MusicAssistantService>(),
+                sp.GetRequiredService<IMusicAssistantEventHub>(),
+                sp.GetRequiredService<ILogger<SendspinPlayerService>>(),
+                sp.GetRequiredService<SettingsService>(),
+                sp.GetRequiredService<ISendspinClient>(),
+                sp.GetRequiredService<IAudioPlayerStateFeed>(),
+                sp.GetRequiredKeyedService<IAudioPipeline>("sendspin"));
+        });
         builder.Services.AddSingleton<IPlayerService>(sp => sp.GetRequiredService<SendspinPlayerService>());
         builder.Services.AddSingleton<IPlayerService>(sp =>
         {
