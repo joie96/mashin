@@ -1060,9 +1060,6 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
                 return;
             }
 
-            // Pause playback
-            await _sendspinClient.SendCommandAsync(Commands.Pause);
-
             var restoreQueue = _reconnectRestoreQueue != null
                 ? CloneQueue(_reconnectRestoreQueue)
                 : CloneQueue(_queue);
@@ -1077,34 +1074,79 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
                 .OfType<MediaItem>()
                 .ToList();
 
+            var queueRestored = false;
+            var indexRestored = false;
+            var seekRestored = false;
+            var resumedByPlayCommand = false;
+
+            // Check if restoring is needed
             var queueNeedsRestore = !QueueEquals(_queue, restoreQueue);
+
+            var resumeIndex = ResolveResumeIndex(restoreQueue, restoreCurrentIndex, restoreCurrentQueueItemId, mediaItems.Count);
+            var indexNeedsRestore = resumeIndex.HasValue
+                && (_queue.CurrentIndex != resumeIndex
+                    || !string.Equals(Normalize(_queue.CurrentQueueItemId), restoreCurrentQueueItemId, StringComparison.Ordinal));
+            var seekNeedsRestore = restorePositionSeconds > 0
+                && Math.Abs(PositionSeconds - restorePositionSeconds) > 2;
+            var restoreActionsRequired = queueNeedsRestore || indexNeedsRestore || seekNeedsRestore;
+
+            // Pause playback before mutating queue/index/position to avoid racey transport state.
+            if (restoreActionsRequired)
+            {
+                await _sendspinClient.SendCommandAsync(Commands.Pause);
+            }
 
             // Restore queue items
             if (queueNeedsRestore && mediaItems.Count > 0)
             {
                 await PlayMediaReplaceNextAsync(mediaItems, cancellationToken);
+                queueRestored = true;
             }
-
+            
             // Restore queue index
-            var resumeIndex = ResolveResumeIndex(restoreQueue, restoreCurrentIndex, restoreCurrentQueueItemId, mediaItems.Count);
-            var indexNeedsRestore = resumeIndex.HasValue
-                && (_queue.CurrentIndex != resumeIndex
-                    || !string.Equals(Normalize(_queue.CurrentQueueItemId), restoreCurrentQueueItemId, StringComparison.Ordinal));
             if (indexNeedsRestore && resumeIndex is int resumeIndexValue)
             {
                 await PlayQueueIndexAsync(resumeIndexValue, cancellationToken);
+                indexRestored = true;
             }
 
             // Restore position (starts also playback))
-            var seekNeedsRestore = restorePositionSeconds > 0
-                && Math.Abs(PositionSeconds - restorePositionSeconds) > 2;
             if (seekNeedsRestore)
             {
                 await SeekAsync(restorePositionSeconds, cancellationToken);
+                seekRestored = true;
+            }
+            else if (restoreActionsRequired)
+            {
+                await _sendspinClient.SendCommandAsync(Commands.Play);
+                resumedByPlayCommand = true;
+            }
+
+            var anyRestoreActionExecuted = queueRestored || indexRestored || seekRestored;
+            if (!restoreActionsRequired)
+            {
+                var resumeAnchorSeconds = restorePositionSeconds > 0
+                    ? restorePositionSeconds
+                    : PositionSeconds;
+                PositionSeconds = resumeAnchorSeconds;
+                UpdateProgressAnchor(resumeAnchorSeconds);
+
+                _logger.LogInformation(
+                    "Reconnect recovery executed no queue/index/seek restore actions. Skipped pause/play transport commands.");
+            }
+            else if (!anyRestoreActionExecuted && resumedByPlayCommand)
+            {
+                _logger.LogInformation(
+                    "Reconnect recovery had pending transport reset only. No queue/index/seek change applied; playback resumed via play command.");
             }
             else
             {
-                await _sendspinClient.SendCommandAsync(Commands.Play);
+                _logger.LogInformation(
+                    "Reconnect recovery actions. QueueRestored={QueueRestored}, IndexRestored={IndexRestored}, SeekRestored={SeekRestored}, ResumedByPlayCommand={ResumedByPlayCommand}",
+                    queueRestored,
+                    indexRestored,
+                    seekRestored,
+                    resumedByPlayCommand);
             }
 
             _reconnectPending = false;
