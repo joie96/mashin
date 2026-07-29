@@ -354,6 +354,53 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         }
     }
 
+    public async Task TerminateAsync(CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Sendspin terminate requested. PlayerId={PlayerId}", PlayerId);
+
+        try
+        {
+            var queueId = await ResolveQueueIdAsync();
+            if (!string.IsNullOrWhiteSpace(queueId))
+            {
+                await _musicAssistant.ClearQueueAsync(queueId, skipStop: false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to clear queue during Sendspin terminate.");
+        }
+
+        try
+        {
+            _audioRenderer.Stop();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to stop audio renderer during Sendspin terminate.");
+        }
+
+        try
+        {
+            await _sendspinAudioPipeline.StopAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to stop Sendspin audio pipeline during terminate.");
+        }
+
+        try
+        {
+            await DisconnectAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to disconnect Sendspin client during terminate.");
+        }
+
+        await DeactivateAsync();
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_eventHandlersSubscribed)

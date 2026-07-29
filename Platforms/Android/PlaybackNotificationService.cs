@@ -257,6 +257,18 @@ public sealed class PlaybackNotificationService : Service
 
         var playback = _playbackService;
 
+        if (playback != null)
+        {
+            try
+            {
+                await playback.TerminateForAppShutdownAsync();
+            }
+            catch
+            {
+                // Continue service shutdown even if playback teardown fails.
+            }
+        }
+
 
         if (_isForeground)
         {

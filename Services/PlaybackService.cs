@@ -320,6 +320,41 @@ public sealed class PlaybackService
         }
     }
 
+    public async Task TerminateForAppShutdownAsync(CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Playback shutdown requested for app termination.");
+
+        var players = _players.Values.Distinct().ToList();
+
+        foreach (var player in players)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                if (player is SendspinPlayerService sendspinPlayer)
+                {
+                    await sendspinPlayer.TerminateAsync(cancellationToken);
+                    continue;
+                }
+
+                await player.DeactivateAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Player shutdown failed during app termination. PlayerType={PlayerType}", player.GetType().Name);
+            }
+        }
+
+        PlaybackState = new PlayerState
+        {
+            State = PlayerStateType.Idle,
+            ActiveSinceUtc = DateTimeOffset.UtcNow
+        };
+        PositionSeconds = 0;
+        DurationSeconds = 0;
+    }
+
     public Task ToggleShuffleAsync(bool? currentShuffleEnabled, CancellationToken cancellationToken = default)
     {
         var next = !(currentShuffleEnabled ?? false);
