@@ -16,7 +16,7 @@
                 <Setter Property="DownsampleToViewSize" Value="True" />
                 <Setter Property="DownsampleUseDipUnits" Value="True" />
                 <Setter Property="BitmapOptimizations" Value="True" />
-                <Setter Property="FadeAnimationEnabled" Value="False" />
+                <Setter Property="FadeAnimationEnabled" Value="True" />
                 <Setter Property="LoadingDelay" Value="0" />
             </Style>
 

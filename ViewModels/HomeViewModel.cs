@@ -950,6 +950,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                     playlist.DisplayName = playlistName.StartsWith("Radio: ", StringComparison.OrdinalIgnoreCase)
                         ? playlistName[7..].TrimStart()
                         : playlistName;
+                    playlist.Owner = null;
                     return playlist;
                 })
                 .Take(9)
@@ -987,6 +988,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 .Select(playlist =>
                 {
                     playlist.DisplayName = NormalizePlaylistDisplayName(playlist.Name);
+                    playlist.Owner = null;
                     return playlist;
                 })
                 .ToList()

@@ -785,7 +785,7 @@
     <!--  Horizontal Items  -->
     <CollectionView x:Name="ItemsCollectionView"
         HorizontalScrollBarVisibility="Never"
-        ItemSizingStrategy="MeasureFirstItem"
+        ItemSizingStrategy="MeasureAllItems"
         ItemsSource="{Binding Source={x:Reference self}, Path=VisibleItems}"
         ItemsUpdatingScrollMode="KeepScrollOffset"
         SelectionMode="None"
