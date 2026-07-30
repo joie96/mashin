@@ -115,6 +115,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
     private int? _reconnectRestoreCurrentIndex;
     private string? _reconnectRestoreCurrentQueueItemId;
     private double _reconnectRestorePositionSeconds;
+    private bool _reconnectRestoreWasPlaying;
 
 
     #endregion
@@ -339,6 +340,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
     {
         _logger.LogDebug("Sendspin deactivate requested. PlayerId={PlayerId}", PlayerId);
         _reconnectPending = false;
+        _reconnectRestoreWasPlaying = false;
         _activeQueueId = null;
         PositionSeconds = 0;
         DurationSeconds = 0;
@@ -1087,8 +1089,11 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         _reconnectRestoreCurrentIndex = _queue.CurrentIndex;
         _reconnectRestoreCurrentQueueItemId = Normalize(_queue.CurrentQueueItemId);
         _reconnectRestorePositionSeconds = PositionSeconds;
+        _reconnectRestoreWasPlaying = PlaybackState.State == PlayerStateType.Playing;
         _reconnectPending = true;
-        _logger.LogInformation("Sendspin reconnect recovery marked as pending.");
+        _logger.LogInformation(
+            "Sendspin reconnect recovery marked as pending. WasPlayingAtDisconnect={WasPlayingAtDisconnect}",
+            _reconnectRestoreWasPlaying);
     }
 
     public async Task ApplyReconnectRecoveryAsync(CancellationToken cancellationToken = default)
@@ -1115,6 +1120,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
             var restorePositionSeconds = _reconnectRestorePositionSeconds > 0
                 ? _reconnectRestorePositionSeconds
                 : PositionSeconds;
+            var shouldResumePlayback = _reconnectRestoreWasPlaying;
 
             var mediaItems = restoreQueue.Items
                 .Select(item => item.MediaItem)
@@ -1133,7 +1139,8 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
             var indexNeedsRestore = resumeIndex.HasValue
                 && (_queue.CurrentIndex != resumeIndex
                     || !string.Equals(Normalize(_queue.CurrentQueueItemId), restoreCurrentQueueItemId, StringComparison.Ordinal));
-            var seekNeedsRestore = restorePositionSeconds > 0
+            var seekNeedsRestore = shouldResumePlayback
+                && restorePositionSeconds > 0
                 && Math.Abs(PositionSeconds - restorePositionSeconds) > 2;
             var restoreActionsRequired = queueNeedsRestore || indexNeedsRestore || seekNeedsRestore;
 
@@ -1163,7 +1170,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
                 await SeekAsync(restorePositionSeconds, cancellationToken);
                 seekRestored = true;
             }
-            else if (restoreActionsRequired)
+            else if (restoreActionsRequired && shouldResumePlayback)
             {
                 await _sendspinClient.SendCommandAsync(Commands.Play);
                 resumedByPlayCommand = true;
@@ -1201,6 +1208,7 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
             _reconnectRestoreCurrentIndex = null;
             _reconnectRestoreCurrentQueueItemId = null;
             _reconnectRestorePositionSeconds = 0;
+            _reconnectRestoreWasPlaying = false;
 
             _logger.LogInformation(
                 "Sendspin reconnect recovery applied. ResumeIndex={ResumeIndex}, PositionSeconds={PositionSeconds:F1}, QueueItems={QueueItems}",
