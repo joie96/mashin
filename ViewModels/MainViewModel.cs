@@ -10,6 +10,7 @@ using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Windows.Input;
 using mashin.Collections;
 using MauiIcons.Fluent.Filled;
@@ -61,6 +62,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private bool _isNavigating;
     private NavigationSection _currentSection = NavigationSection.Home;
     private bool _isLoginOverlayActive;
+    private int _connectionStateDisplayVersion;
     private string _connectionState = string.Empty;
 
     public event Func<Task>? CloseQueueViewRequested;
@@ -719,13 +721,47 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private void UpdateConnectionState(CustomConnectionState state)
     {
+        var displayVersion = Interlocked.Increment(ref _connectionStateDisplayVersion);
+
         ConnectionState = state switch
         {
             CustomConnectionState.Offline => "Offline",
-            CustomConnectionState.Reconnecting => "Reconnecting",
+            CustomConnectionState.Reconnecting => "Connecting",
             CustomConnectionState.Online => "Connected",
             _ => string.Empty
         };
+
+        if (state == CustomConnectionState.Online)
+        {
+            _ = HideConnectedStateAsync(displayVersion);
+        }
+    }
+
+    private async Task HideConnectedStateAsync(int displayVersion)
+    {
+        try
+        {
+            await Task.Delay(3000);
+
+            ExecuteOnMainThread(() =>
+            {
+                if (displayVersion != Volatile.Read(ref _connectionStateDisplayVersion))
+                {
+                    return;
+                }
+
+                if (_connectionService.ConnectionState != CustomConnectionState.Online)
+                {
+                    return;
+                }
+
+                ConnectionState = string.Empty;
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to hide transient connected state.");
+        }
     }
 
     private static void ExecuteOnMainThread(Action action)

@@ -118,11 +118,11 @@
                         IsRunning="False"
                         IsVisible="False"
                         WidthRequest="14"
-                        Color="{DynamicResource AccentColor}">
+                        Color="{DynamicResource IconPrimary}">
                         <ActivityIndicator.Triggers>
                             <DataTrigger Binding="{Binding ConnectionState}"
                                 TargetType="ActivityIndicator"
-                                Value="Reconnecting">
+                                Value="Connecting">
                                 <Setter Property="IsVisible" Value="True" />
                                 <Setter Property="IsRunning" Value="True" />
                             </DataTrigger>
