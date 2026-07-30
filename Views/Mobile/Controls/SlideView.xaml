@@ -50,7 +50,7 @@
                         <toolkit:TouchBehavior LongPressCompleted="OnRowLongPressCompleted"
                             LongPressDuration="420"
                             PressedAnimationDuration="250"
-                            PressedAnimationEasing="CubicOut"
+                            PressedAnimationEasing="SinOut"
                             PressedScale="0.78"
                             TouchGestureCompleted="OnRowTouchCompleted" />
                     </Border.Behaviors>
@@ -192,7 +192,7 @@
                     <Border.Behaviors>
                         <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
                             PressedAnimationDuration="250"
-                            PressedAnimationEasing="CubicOut" />
+                            PressedAnimationEasing="SinOut" />
                     </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Tapped="OnPlayOverlayClicked" />

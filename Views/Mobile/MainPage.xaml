@@ -232,7 +232,7 @@
                         <Border.Behaviors>
                             <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
                                 PressedAnimationDuration="250"
-                                PressedAnimationEasing="CubicOut" />
+                                PressedAnimationEasing="SinOut" />
                         </Border.Behaviors>
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding TogglePlayPauseCommand}" />
