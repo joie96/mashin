@@ -210,11 +210,14 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             if (SetProperty(ref _isDescriptionExpanded, value))
             {
                 OnPropertyChanged(nameof(DescriptionMaxLines));
+                OnPropertyChanged(nameof(MobileDescriptionMaxLines));
             }
         }
     }
 
     public int DescriptionMaxLines => IsDescriptionExpanded ? int.MaxValue : 4;
+
+    public int MobileDescriptionMaxLines => IsDescriptionExpanded ? int.MaxValue : 3;
 
     public IEnumerable<object> TopTrackItems => IsLoadingTracks ? _trackSkeletons : _topTracks;
     public IEnumerable<object> AlbumItems => IsLoadingAlbums ? _albumSkeletons : _albums;

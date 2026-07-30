@@ -13,6 +13,7 @@
 
     <ContentPage.Resources>
         <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
+        <converters:RemoveBlankLinesConverter x:Key="RemoveBlankLinesConverter" />
     </ContentPage.Resources>
 
     <!--  Page Scroll  -->
@@ -236,6 +237,26 @@
                         VerticalOptions="Center" />
                 </Border>
             </Grid>
+
+            <!--  Artist Info Text  -->
+            <VerticalStackLayout IsVisible="{Binding HasDescription}"
+                Margin="16,4,16,0"
+                Spacing="6">
+                <Label FontFamily="PoppinsRegular"
+                    FontSize="14"
+                    Text="{Binding ArtistName, StringFormat='Über {0}'}"
+                    TextColor="{DynamicResource TextPrimary}" />
+                <Label FontFamily="PoppinsRegular"
+                    FontSize="13"
+                    LineBreakMode="TailTruncation"
+                    MaxLines="{Binding MobileDescriptionMaxLines}"
+                    Text="{Binding Artist.Metadata.Description, Converter={StaticResource RemoveBlankLinesConverter}}"
+                    TextColor="{DynamicResource TextSecondary}">
+                    <Label.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding ToggleDescriptionCommand}" />
+                    </Label.GestureRecognizers>
+                </Label>
+            </VerticalStackLayout>
 
             <!--  Veröffentlichungen Section  -->
             <VerticalStackLayout Padding="16,0,16,0"
