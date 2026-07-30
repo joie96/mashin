@@ -160,10 +160,6 @@
                     </Border.StrokeShape>
                     <Grid>
                         <ffimageloading:CachedImage Aspect="AspectFill"
-                            DownsampleToViewSize="True"
-                            FadeAnimationEnabled="True"
-                            FadeAnimationForCachedImages="True"
-                            FadeAnimationDuration="180"
                             HeightRequest="64"
                             IsVisible="{Binding CurrentQueueItem.MediaItem.ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
                             Source="{Binding CurrentQueueItem.MediaItem.ImageUri}"

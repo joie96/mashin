@@ -763,12 +763,12 @@
                 <desktopControls:SkeletonLoader Grid.Row="1"
                     CornerRadius="8"
                     HeightRequest="14"
-                    HorizontalOptions="Start"
+                    HorizontalOptions="Center"
                     WidthRequest="110" />
                 <desktopControls:SkeletonLoader Grid.Row="2"
                     CornerRadius="8"
                     HeightRequest="12"
-                    HorizontalOptions="Start"
+                    HorizontalOptions="Center"
                     WidthRequest="90" />
             </Grid>
         </DataTemplate>

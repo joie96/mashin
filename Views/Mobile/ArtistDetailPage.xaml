@@ -256,11 +256,49 @@
                         <TapGestureRecognizer Command="{Binding ToggleDescriptionCommand}" />
                     </Label.GestureRecognizers>
                 </Label>
+
+                <Grid HeightRequest="40"
+                    Margin="0,0,0,0">
+                    <Border BackgroundColor="Transparent"
+                        HeightRequest="40"
+                        HorizontalOptions="Center"
+                        Padding="0"
+                        StrokeThickness="0"
+                        VerticalOptions="Center"
+                        WidthRequest="40">
+                        <Border.Behaviors>
+                            <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                                PressedAnimationDuration="100"
+                                PressedAnimationEasing="CubicOut"
+                                PressedScale="0.92" />
+                        </Border.Behaviors>
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding ToggleDescriptionCommand}" />
+                        </Border.GestureRecognizers>
+                        <Border.StrokeShape>
+                            <Ellipse />
+                        </Border.StrokeShape>
+                        <Grid>
+                            <Label FontSize="18"
+                                HorizontalOptions="Center"
+                                IsVisible="{Binding IsDescriptionExpanded, Converter={StaticResource InvertedBoolConverter}}"
+                                Text="{mi:Fluent Icon=ChevronDown16, FontOverride=True}"
+                                TextColor="{DynamicResource IconPrimary}"
+                                VerticalOptions="Center" />
+                            <Label FontSize="18"
+                                HorizontalOptions="Center"
+                                IsVisible="{Binding IsDescriptionExpanded}"
+                                Text="{mi:Fluent Icon=ChevronUp16, FontOverride=True}"
+                                TextColor="{DynamicResource IconPrimary}"
+                                VerticalOptions="Center" />
+                        </Grid>
+                    </Border>
+                </Grid>
             </VerticalStackLayout>
 
             <!--  Veröffentlichungen Section  -->
             <VerticalStackLayout Padding="{StaticResource MobileSectionPadding}"
-                Margin="{StaticResource MobileSectionTopMargin}"
+                Margin="0,-6,0,0"
                 Spacing="10">
                 <Grid ColumnDefinitions="Auto,Auto,*"
                     ColumnSpacing="10">

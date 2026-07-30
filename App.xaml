@@ -17,6 +17,8 @@
                 <Setter Property="DownsampleUseDipUnits" Value="True" />
                 <Setter Property="BitmapOptimizations" Value="True" />
                 <Setter Property="FadeAnimationEnabled" Value="True" />
+                <Setter Property="FadeAnimationForCachedImages" Value="True" />
+                <Setter Property="FadeAnimationDuration" Value="150" />
                 <Setter Property="LoadingDelay" Value="0" />
             </Style>
 

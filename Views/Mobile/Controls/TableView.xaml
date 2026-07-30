@@ -671,9 +671,11 @@
                     VerticalOptions="Center">
                     <desktopControls:SkeletonLoader CornerRadius="6"
                         HeightRequest="16"
+                        HorizontalOptions="Start"
                         WidthRequest="190" />
                     <desktopControls:SkeletonLoader CornerRadius="6"
                         HeightRequest="13"
+                        HorizontalOptions="Start"
                         WidthRequest="140" />
                 </VerticalStackLayout>
                 <desktopControls:SkeletonLoader Grid.Column="2"
@@ -719,8 +721,8 @@
         <CollectionView.Footer>
             <Grid HeightRequest="52"
                 IsVisible="{Binding Source={x:Reference self}, Path=HasMoreItems}"
-                Margin="0,8,0,0">
-                <Border BackgroundColor="{DynamicResource HoverBackground}"
+                Margin="0,0,0,0">
+                <Border BackgroundColor="Transparent"
                     HeightRequest="40"
                     HorizontalOptions="Center"
                     Padding="0"
@@ -730,7 +732,8 @@
                     <Border.Behaviors>
                         <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
                             PressedAnimationDuration="100"
-                            PressedAnimationEasing="CubicOut" />
+                            PressedAnimationEasing="CubicOut"
+                            PressedScale="0.92" />
                     </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Tapped="OnLoadMoreTapped" />
