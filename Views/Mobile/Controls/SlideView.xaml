@@ -189,6 +189,11 @@
                     VerticalOptions="End"
                     WidthRequest="28"
                     ZIndex="2">
+                    <Border.Behaviors>
+                        <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                            PressedAnimationDuration="250"
+                            PressedAnimationEasing="CubicOut" />
+                    </Border.Behaviors>
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer Tapped="OnPlayOverlayClicked" />
                     </Border.GestureRecognizers>

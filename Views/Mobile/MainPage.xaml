@@ -7,6 +7,7 @@
     xmlns:ffimageloading="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
     xmlns:vm="clr-namespace:mashin.ViewModels"
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
+    xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
     x:DataType="vm:MainViewModel"
     BackgroundColor="{DynamicResource BackgroundPrimary}">
 
@@ -228,6 +229,11 @@
                         StrokeThickness="0"
                         VerticalOptions="Center"
                         WidthRequest="38">
+                        <Border.Behaviors>
+                            <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                                PressedAnimationDuration="250"
+                                PressedAnimationEasing="CubicOut" />
+                        </Border.Behaviors>
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding TogglePlayPauseCommand}" />
                         </Border.GestureRecognizers>
