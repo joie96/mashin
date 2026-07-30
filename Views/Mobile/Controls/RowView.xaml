@@ -18,7 +18,6 @@
         <DataTemplate x:Key="AlbumTemplate" x:DataType="models:Album">
             <Grid RowDefinitions="Auto,Auto,Auto,6"
                 BackgroundColor="Transparent"
-                HeightRequest="{Binding Source={x:Reference self}, Path=ItemHeight}"
                 RowSpacing="6"
                 WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
                 <Border Grid.RowSpan="4"
@@ -194,6 +193,7 @@
                     FontSize="12"
                     HorizontalOptions="Fill"
                     HorizontalTextAlignment="Center"
+                    IsVisible="{Binding ArtistName, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
                     LineBreakMode="TailTruncation"
                     MaxLines="1"
                     Text="{Binding ArtistName}"
@@ -205,7 +205,6 @@
         <DataTemplate x:Key="TrackTemplate" x:DataType="models:Track">
             <Grid RowDefinitions="Auto,Auto,Auto,6"
                 BackgroundColor="Transparent"
-                HeightRequest="{Binding Source={x:Reference self}, Path=ItemHeight}"
                 RowSpacing="6"
                 WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
                 <Border Grid.RowSpan="4"
@@ -381,6 +380,7 @@
                     FontSize="12"
                     HorizontalOptions="Fill"
                     HorizontalTextAlignment="Center"
+                    IsVisible="{Binding ArtistName, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
                     LineBreakMode="TailTruncation"
                     MaxLines="1"
                     Text="{Binding ArtistName}"
@@ -392,7 +392,6 @@
         <DataTemplate x:Key="ArtistTemplate" x:DataType="models:Artist">
             <Grid RowDefinitions="Auto,Auto,6"
                 BackgroundColor="Transparent"
-                HeightRequest="{Binding Source={x:Reference self}, Path=ItemHeight}"
                 RowSpacing="6"
                 WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
                 <Border Grid.RowSpan="3"
@@ -568,7 +567,6 @@
         <DataTemplate x:Key="PlaylistTemplate" x:DataType="models:Playlist">
             <Grid RowDefinitions="Auto,Auto,Auto,6"
                 BackgroundColor="Transparent"
-                HeightRequest="{Binding Source={x:Reference self}, Path=ItemHeight}"
                 RowSpacing="6"
                 WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
                 <Border Grid.RowSpan="4"
@@ -744,6 +742,7 @@
                     FontSize="12"
                     HorizontalOptions="Fill"
                     HorizontalTextAlignment="Center"
+                    IsVisible="{Binding Owner, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
                     LineBreakMode="TailTruncation"
                     MaxLines="1"
                     Text="{Binding Owner}"
@@ -754,7 +753,6 @@
         <!--  DataTemplate for Skeletons  -->
         <DataTemplate x:Key="SkeletonTemplate" x:DataType="models:RowViewSkeleton">
             <Grid RowDefinitions="Auto,Auto,Auto"
-                HeightRequest="{Binding Source={x:Reference self}, Path=ItemHeight}"
                 RowSpacing="6"
                 WidthRequest="{Binding Source={x:Reference self}, Path=ItemWidth}">
                 <desktopControls:SkeletonLoader Grid.Row="0"
@@ -787,7 +785,6 @@
     <!--  Horizontal Items  -->
     <CollectionView x:Name="ItemsCollectionView"
         HorizontalScrollBarVisibility="Never"
-        HeightRequest="{Binding Source={x:Reference self}, Path=ItemHeight}"
         ItemSizingStrategy="MeasureFirstItem"
         ItemsSource="{Binding Source={x:Reference self}, Path=VisibleItems}"
         ItemsUpdatingScrollMode="KeepScrollOffset"
