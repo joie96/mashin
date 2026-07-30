@@ -15,8 +15,14 @@
     <x:Double x:Key="Spacing24">24</x:Double>
     <x:Double x:Key="Spacing36">36</x:Double>
 
-    <Thickness x:Key="PagePaddingDesktop">40,20,40,20</Thickness>
-    <Thickness x:Key="SectionTopMargin">0,32,0,0</Thickness>
+    <Thickness x:Key="DesktopPagePadding">40,20,40,20</Thickness>
+    <Thickness x:Key="DesktopSectionTopMargin">0,32,0,0</Thickness>
+
+    <Thickness x:Key="MobileHeaderPadding">16,0,16,0</Thickness>
+    <Thickness x:Key="MobileHeaderSearchPadding">16,14,16,0</Thickness>
+    <x:Double x:Key="MobileHeaderSpacing">6</x:Double>
+    <Thickness x:Key="MobileSectionPadding">16,0,16,0</Thickness>
+    <Thickness x:Key="MobileSectionTopMargin">0,18,0,0</Thickness>
 
     <!-- PAGE -->
     <Style TargetType="Page" ApplyToDerivedTypes="True">

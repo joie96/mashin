@@ -15,7 +15,7 @@
 
     <ScrollView x:Name="scrollView">
         <Grid
-            Padding="{StaticResource PagePaddingDesktop}"
+            Padding="{StaticResource DesktopPagePadding}"
             RowDefinitions="Auto,Auto,Auto,Auto,Auto"
             RowSpacing="0">
 
@@ -27,7 +27,7 @@
 
             <!--  Tracks  (incl. Skeletons)  -->
             <Grid Grid.Row="1"
-                Margin="{StaticResource SectionTopMargin}"
+                Margin="{StaticResource DesktopSectionTopMargin}"
                 RowDefinitions="Auto,Auto,Auto,Auto"
                 RowSpacing="0">
                 <Grid Grid.Row="0"
@@ -218,7 +218,7 @@
 
             <!--  Albums  (incl. Skeletons) -->
             <Grid Grid.Row="2"
-                Margin="{StaticResource SectionTopMargin}"
+                Margin="{StaticResource DesktopSectionTopMargin}"
                 RowDefinitions="Auto,Auto,Auto,Auto"
                 RowSpacing="0">
                 <Grid Grid.Row="0"
@@ -408,7 +408,7 @@
 
             <!--  Playlists  (incl. Skeletons) -->
             <Grid Grid.Row="3"
-                Margin="{StaticResource SectionTopMargin}"
+                Margin="{StaticResource DesktopSectionTopMargin}"
                 RowDefinitions="Auto,Auto,Auto,Auto"
                 RowSpacing="0">
                 <Grid Grid.Row="0"
@@ -597,7 +597,7 @@
 
             <!--  Artists  (incl. Skeletons) -->
             <Grid Grid.Row="4"
-                Margin="{StaticResource SectionTopMargin}"
+                Margin="{StaticResource DesktopSectionTopMargin}"
                 RowDefinitions="Auto,Auto,Auto,Auto"
                 RowSpacing="0">
                 <Grid Grid.Row="0"

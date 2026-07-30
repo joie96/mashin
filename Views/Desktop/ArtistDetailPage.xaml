@@ -18,7 +18,7 @@
     </ContentPage.Resources>
 
     <ScrollView>
-        <Grid Padding="{StaticResource PagePaddingDesktop}"
+            <Grid Padding="{StaticResource DesktopPagePadding}"
             RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
             RowSpacing="0">
 
@@ -239,7 +239,7 @@
 
             <!--  Description - Loading State  -->
             <Grid Grid.Row="1"
-                Margin="{StaticResource SectionTopMargin}"
+                Margin="{StaticResource DesktopSectionTopMargin}"
                 IsVisible="{Binding IsLoadingMetadata}"
                 RowDefinitions="Auto,Auto,Auto,Auto"
                 RowSpacing="0">
@@ -251,7 +251,7 @@
 
             <!--  Description - Actual  -->
             <Grid Grid.Row="2"
-                Margin="{StaticResource SectionTopMargin}"
+                Margin="{StaticResource DesktopSectionTopMargin}"
                 IsVisible="{Binding HasDescription}"
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
@@ -311,7 +311,7 @@
 
             <!--  Albums/Releases Section  -->
             <Grid Grid.Row="3"
-                Margin="{StaticResource SectionTopMargin}"
+                Margin="{StaticResource DesktopSectionTopMargin}"
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
                 <Grid Grid.Row="0"
@@ -511,7 +511,7 @@
 
             <!--  Similar Artists Section  -->
             <Grid Grid.Row="4"
-                Margin="{StaticResource SectionTopMargin}"
+                Margin="{StaticResource DesktopSectionTopMargin}"
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
                 <Grid Grid.Row="0"
@@ -711,7 +711,7 @@
 
             <!--  Top Tracks Section  -->
             <Grid Grid.Row="5"
-                Margin="{StaticResource SectionTopMargin}"
+                Margin="{StaticResource DesktopSectionTopMargin}"
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
                 <Grid Grid.Row="0"

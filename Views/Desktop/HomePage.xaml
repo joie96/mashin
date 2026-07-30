@@ -15,7 +15,7 @@
 
     <ScrollView x:Name="scrollView">
         <Grid
-            Padding="{StaticResource PagePaddingDesktop}"
+            Padding="{StaticResource DesktopPagePadding}"
             RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
             RowSpacing="0">
 
@@ -187,7 +187,7 @@
 
             <!--  Genre Playlists List (incl. Skeletons)  -->
             <Grid Grid.Row="2"
-                Margin="{StaticResource SectionTopMargin}"
+                Margin="{StaticResource DesktopSectionTopMargin}"
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
                 <Grid Grid.Row="0"
@@ -239,7 +239,7 @@
 
             <!--  Artist Playlists Row (incl. Skeletons, Actions, Paging)  -->
             <Grid Grid.Row="3"
-                Margin="{StaticResource SectionTopMargin}"
+                Margin="{StaticResource DesktopSectionTopMargin}"
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
                 <Grid Grid.Row="0"
@@ -403,7 +403,7 @@
 
             <!--  Top Tracks Row (incl. Skeletons, Paging)  -->
             <Grid Grid.Row="4"
-                Margin="{StaticResource SectionTopMargin}"
+                Margin="{StaticResource DesktopSectionTopMargin}"
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
                 <Grid Grid.Row="0"
@@ -567,7 +567,7 @@
 
             <!--  Top Artists Row (incl. Skeletons, Paging)  -->
             <Grid Grid.Row="5"
-                Margin="{StaticResource SectionTopMargin}"
+                Margin="{StaticResource DesktopSectionTopMargin}"
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
                 <Grid Grid.Row="0"
@@ -731,7 +731,7 @@
 
             <!--  Recent Listens Row (incl. Skeletons, Paging)  -->
             <Grid Grid.Row="6"
-                Margin="{StaticResource SectionTopMargin}"
+                Margin="{StaticResource DesktopSectionTopMargin}"
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
                 <Grid Grid.Row="0"
@@ -892,7 +892,7 @@
 
             <!--  Similar Artists Section 1  -->
             <Grid Grid.Row="7"
-                Margin="{StaticResource SectionTopMargin}"
+                Margin="{StaticResource DesktopSectionTopMargin}"
                 IsVisible="{Binding ShowSimilarArtistSectionContainer0}"
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
@@ -1050,7 +1050,7 @@
 
             <!--  Similar Artists Section 2  -->
             <Grid Grid.Row="8"
-                Margin="{StaticResource SectionTopMargin}"
+                Margin="{StaticResource DesktopSectionTopMargin}"
                 IsVisible="{Binding ShowSimilarArtistSectionContainer1}"
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
@@ -1208,7 +1208,7 @@
 
             <!--  Similar Artists Section 3  -->
             <Grid Grid.Row="9"
-                Margin="{StaticResource SectionTopMargin}"
+                Margin="{StaticResource DesktopSectionTopMargin}"
                 IsVisible="{Binding ShowSimilarArtistSectionContainer2}"
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
@@ -1366,7 +1366,7 @@
 
             <!--  Similar Artists Section 4  -->
             <Grid Grid.Row="10"
-                Margin="{StaticResource SectionTopMargin}"
+                Margin="{StaticResource DesktopSectionTopMargin}"
                 IsVisible="{Binding ShowSimilarArtistSectionContainer3}"
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">
@@ -1524,7 +1524,7 @@
 
             <!--  Similar Artists Section 5  -->
             <Grid Grid.Row="11"
-                Margin="{StaticResource SectionTopMargin}"
+                Margin="{StaticResource DesktopSectionTopMargin}"
                 IsVisible="{Binding ShowSimilarArtistSectionContainer4}"
                 RowDefinitions="Auto,Auto,Auto"
                 RowSpacing="0">

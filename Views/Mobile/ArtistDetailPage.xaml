@@ -259,8 +259,8 @@
             </VerticalStackLayout>
 
             <!--  Veröffentlichungen Section  -->
-            <VerticalStackLayout Padding="16,0,16,0"
-                Margin="0,12,0,0"
+            <VerticalStackLayout Padding="{StaticResource MobileSectionPadding}"
+                Margin="{StaticResource MobileSectionTopMargin}"
                 Spacing="10">
                 <Grid ColumnDefinitions="Auto,Auto,*"
                     ColumnSpacing="10">
@@ -309,8 +309,8 @@
             </VerticalStackLayout>
 
             <!--  Ähnliche Interpreten Section  -->
-            <VerticalStackLayout Padding="16,0,16,0"
-                Margin="0,12,0,0"
+            <VerticalStackLayout Padding="{StaticResource MobileSectionPadding}"
+                Margin="{StaticResource MobileSectionTopMargin}"
                 Spacing="10">
                 <Grid ColumnDefinitions="Auto,Auto,*"
                     ColumnSpacing="10">
@@ -359,8 +359,8 @@
             </VerticalStackLayout>
 
             <!--  Top Tracks Section  -->
-            <VerticalStackLayout Padding="16,0,16,0"
-                Margin="0,12,0,0"
+            <VerticalStackLayout Padding="{StaticResource MobileSectionPadding}"
+                Margin="{StaticResource MobileSectionTopMargin}"
                 Spacing="10">
                 <Grid ColumnDefinitions="Auto,Auto,*"
                     ColumnSpacing="10">
