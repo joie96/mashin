@@ -244,9 +244,12 @@
                         <VerticalStackLayout Grid.Column="1"
                             Spacing="1"
                             VerticalOptions="Center">
-                            <HorizontalStackLayout Spacing="6"
+                            <Grid ColumnDefinitions="Auto,*"
+                                ColumnSpacing="6"
+                                HorizontalOptions="Fill"
                                 VerticalOptions="Center">
                                 <Grid IsVisible="False"
+                                    Grid.Column="0"
                                     VerticalOptions="Center">
                                     <Grid.Triggers>
                                         <DataTrigger TargetType="Grid"
@@ -287,7 +290,9 @@
                                 </Grid>
 
                                 <Label FontFamily="PoppinsRegular"
+                                    Grid.Column="1"
                                     FontSize="14"
+                                    HorizontalOptions="Fill"
                                     LineBreakMode="TailTruncation"
                                     MaxLines="1"
                                     Text="{Binding DisplayName}"
@@ -307,7 +312,7 @@
                                         </DataTrigger>
                                     </Label.Triggers>
                                 </Label>
-                            </HorizontalStackLayout>
+                            </Grid>
                             <Label FontFamily="PoppinsRegular"
                                 FontSize="12"
                                 LineBreakMode="TailTruncation"
@@ -473,9 +478,12 @@
                         <VerticalStackLayout Grid.Column="1"
                             Spacing="1"
                             VerticalOptions="Center">
-                            <HorizontalStackLayout Spacing="6"
+                            <Grid ColumnDefinitions="Auto,*"
+                                ColumnSpacing="6"
+                                HorizontalOptions="Fill"
                                 VerticalOptions="Center">
                                 <Grid IsVisible="False"
+                                    Grid.Column="0"
                                     VerticalOptions="Center">
                                     <Grid.Triggers>
                                         <DataTrigger TargetType="Grid"
@@ -516,7 +524,9 @@
                                 </Grid>
 
                                 <Label FontFamily="PoppinsRegular"
+                                    Grid.Column="1"
                                     FontSize="14"
+                                    HorizontalOptions="Fill"
                                     LineBreakMode="TailTruncation"
                                     MaxLines="1"
                                     Text="{Binding MediaItem.DisplayName}"
@@ -536,7 +546,7 @@
                                         </DataTrigger>
                                     </Label.Triggers>
                                 </Label>
-                            </HorizontalStackLayout>
+                            </Grid>
                             <Label FontFamily="PoppinsRegular"
                                 FontSize="12"
                                 LineBreakMode="TailTruncation"

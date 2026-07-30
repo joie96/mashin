@@ -40,6 +40,19 @@
                         <Image Aspect="AspectFill"
                             IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
                             Source="{AppThemeBinding Light=placeholders/playlist_light.png, Dark=placeholders/playlist_dark.png}" />
+
+                        <!--  Fade image into page background at the bottom  -->
+                        <BoxView InputTransparent="True">
+                            <BoxView.Background>
+                                <LinearGradientBrush EndPoint="0,1"
+                                    StartPoint="0,0">
+                                    <GradientStop Color="#00FFFFFF"
+                                        Offset="0.44" />
+                                    <GradientStop Color="{DynamicResource BackgroundPrimary}"
+                                        Offset="1.0" />
+                                </LinearGradientBrush>
+                            </BoxView.Background>
+                        </BoxView>
                     </Grid>
                 </Border>
 
