@@ -660,8 +660,8 @@
         <DataTemplate x:Key="SkeletonTemplate" x:DataType="models:TableViewSkeleton">
             <Grid ColumnDefinitions="52,*,32,32"
                 ColumnSpacing="10"
-                HeightRequest="80"
-                Padding="8,4">
+                HeightRequest="64"
+                Padding="8,6">
                 <desktopControls:SkeletonLoader Grid.Column="0"
                     CornerRadius="8"
                     HeightRequest="52"

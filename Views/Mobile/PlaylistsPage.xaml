@@ -43,13 +43,13 @@
             </Grid>
 
             <Label Grid.Row="1"
-                Margin="{StaticResource MobileSectionTopMargin}"
+                Margin="0,0,0,0"
                 IsVisible="{Binding ShowNoPlaylistsMessage}"
                 Text="Keine Playlists verfuegbar."
                 TextColor="{DynamicResource TextSecondary}" />
 
             <controls:TableView Grid.Row="2"
-                Margin="{StaticResource MobileSectionTopMargin}"
+                Margin="0,0,0,0"
                 IsVisible="{Binding ShowPlaylistListView}"
                 ItemsSource="{Binding PlaylistItems}"
                 LongPressCommand="{Binding PlaylistLongPressedCommand}"
