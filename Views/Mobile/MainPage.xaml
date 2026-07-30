@@ -143,13 +143,6 @@
             <Border.StrokeShape>
                 <RoundRectangle CornerRadius="12" />
             </Border.StrokeShape>
-            <Border.Triggers>
-                <DataTrigger TargetType="Border"
-                    Binding="{Binding CurrentQueueItem}"
-                    Value="{x:Null}">
-                    <Setter Property="IsVisible" Value="False" />
-                </DataTrigger>
-            </Border.Triggers>
             <Grid ColumnDefinitions="Auto,*"
                 ColumnSpacing="0">
                 <Border Grid.Column="0"
