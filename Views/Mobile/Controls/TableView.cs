@@ -103,21 +103,13 @@ public partial class TableView : ContentView
     {
         DetachPlaybackStateSource();
         DetachSelectionObservers();
-
-        ShortPressCommand = null;
-        LongPressCommand = null;
-        ShowContextMenuAtAnchorCommand = null;
-        PlaybackContextItem = null;
-
+        
+        // Android may raise Unloaded for transient layout changes.
+        // Keep bindings/data intact to avoid empty list after a short flash.
         _suppressNextTap.Clear();
-        _visibleItems.Clear();
-        _loadedItemCount = 0;
-        UpdateHasMoreItems(false);
 
-        ItemsSource = null;
-        BindingContext = null;
-
-        UpdateSelectionIndicator();
+        // Hide selection indicator when this view is not active.
+        _ = ResolveOverlayService()?.HideSelectionIndicatorAsync(this);
     }
 
     #endregion
