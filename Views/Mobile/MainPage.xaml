@@ -19,6 +19,7 @@
 
         <Grid Grid.Row="0">
             <ContentView x:Name="ContentContainer"
+                BackgroundColor="{DynamicResource BackgroundPrimary}"
                 Margin="0">
                 <ContentView.Triggers>
                     <DataTrigger Binding="{Binding CurrentSection}"
@@ -134,143 +135,145 @@
         </Grid>
 
         <!--  Bottom Player Bar  -->
-        <Border x:Name="PlayerBarBorder"
-            Grid.Row="1"
-            HeightRequest="64"
-            Margin="10,6,10,4"
-            Padding="0"
-            BackgroundColor="{DynamicResource PlayerBarBackground}"
-            StrokeThickness="0">
-            <Border.StrokeShape>
-                <RoundRectangle CornerRadius="12" />
-            </Border.StrokeShape>
-            <Grid ColumnDefinitions="Auto,*"
-                ColumnSpacing="0">
-                <Border Grid.Column="0"
-                    HeightRequest="64"
-                    StrokeThickness="0"
-                    VerticalOptions="Fill"
-                    WidthRequest="64">
-                    <Border.GestureRecognizers>
-                        <PanGestureRecognizer PanUpdated="OnPlayerBarPanUpdated" />
-                        <TapGestureRecognizer Tapped="OnPlayerBarTapped" />
-                    </Border.GestureRecognizers>
-                    <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="12,0,12,0" />
-                    </Border.StrokeShape>
-                    <Grid>
-                        <ffimageloading:CachedImage Aspect="AspectFill"
-                            HeightRequest="64"
-                            IsVisible="{Binding CurrentQueueItem.MediaItem.ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
-                            Source="{Binding CurrentQueueItem.MediaItem.ImageUri}"
-                            WidthRequest="64" />
-                        <Image Aspect="AspectFill"
-                            HeightRequest="64"
-                            IsVisible="{Binding CurrentQueueItem.MediaItem.ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
-                            Source="{AppThemeBinding Light=placeholders/track_light.png, Dark=placeholders/track_dark.png}"
-                            WidthRequest="64" />
-                    </Grid>
-                </Border>
-
-                <Grid x:Name="PlayerBarProgressHost"
-                    Grid.Column="1"
-                    ColumnDefinitions="*,Auto"
-                    ColumnSpacing="10"
-                    IsClippedToBounds="True">
-                    <Border Grid.ColumnSpan="2"
-                        BackgroundColor="{DynamicResource PlayerBarForeground}"
-                        HeightRequest="{Binding Source={x:Reference PlayerBarProgressHost}, Path=Height}"
-                        HorizontalOptions="Fill"
-                        InputTransparent="True"
-                        ScaleX="{Binding PlayerBarProgress}"
+        <Grid Grid.Row="1"
+            BackgroundColor="{DynamicResource BackgroundPrimary}">
+            <Border x:Name="PlayerBarBorder"
+                HeightRequest="64"
+                Margin="10,6,10,4"
+                Padding="0"
+                BackgroundColor="{DynamicResource PlayerBarBackground}"
+                StrokeThickness="0">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="12" />
+                </Border.StrokeShape>
+                <Grid ColumnDefinitions="Auto,*"
+                    ColumnSpacing="0">
+                    <Border Grid.Column="0"
+                        HeightRequest="64"
                         StrokeThickness="0"
                         VerticalOptions="Fill"
-                        AnchorX="0"
-                        WidthRequest="{Binding Source={x:Reference PlayerBarProgressHost}, Path=Width}">
-                        <Border.StrokeShape>
-                            <RoundRectangle CornerRadius="0,12,0,12" />
-                        </Border.StrokeShape>
-                    </Border>
-
-                    <Grid Grid.Column="0"
-                        Margin="8,8,0,8"
-                        RowDefinitions="Auto,Auto"
-                        RowSpacing="1"
-                        VerticalOptions="Center">
-                        <Grid.GestureRecognizers>
+                        WidthRequest="64">
+                        <Border.GestureRecognizers>
                             <PanGestureRecognizer PanUpdated="OnPlayerBarPanUpdated" />
                             <TapGestureRecognizer Tapped="OnPlayerBarTapped" />
-                        </Grid.GestureRecognizers>
-                        <Label Grid.Row="0"
-                            FontAttributes="None"
-                            FontFamily="PoppinsRegular"
-                            FontSize="13"
-                            LineBreakMode="TailTruncation"
-                            MaxLines="1"
-                            Text="{Binding CurrentQueueItem.MediaItem.DisplayName}"
-                            TextColor="{DynamicResource TextPrimary}" />
-                        <Label Grid.Row="1"
-                            FontFamily="PoppinsRegular"
-                            FontSize="11"
-                            LineBreakMode="TailTruncation"
-                            MaxLines="1"
-                            Text="{Binding CurrentQueueItem.MediaItem.ArtistName}"
-                            TextColor="{DynamicResource TextSecondary}" />
-                    </Grid>
-
-                    <Border Grid.Column="1"
-                        Margin="0,8,12,8"
-                        BackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
-                        HeightRequest="38"
-                        Opacity="1"
-                        StrokeThickness="0"
-                        VerticalOptions="Center"
-                        WidthRequest="38">
-                        <Border.Behaviors>
-                            <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
-                                PressedAnimationDuration="250"
-                                PressedAnimationEasing="SinOut" />
-                        </Border.Behaviors>
-                        <Border.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding TogglePlayPauseCommand}" />
                         </Border.GestureRecognizers>
                         <Border.StrokeShape>
-                            <RoundRectangle CornerRadius="19" />
+                            <RoundRectangle CornerRadius="12,0,12,0" />
                         </Border.StrokeShape>
-                        <Border.Triggers>
-                            <DataTrigger Binding="{Binding CurrentQueueItem}"
-                                TargetType="Border"
-                                Value="{x:Null}">
-                                <Setter Property="IsEnabled" Value="False" />
-                                <Setter Property="Opacity" Value="0.45" />
-                            </DataTrigger>
-                        </Border.Triggers>
                         <Grid>
-                            <Label FontSize="20"
-                                HorizontalOptions="Center"
-                                IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=paused}"
-                                Text="{mi:FluentFilled Icon=Play48Filled, FontOverride=True}"
-                                TextColor="{DynamicResource OverlayPlayIconColor}"
-                                VerticalOptions="Center" />
-                            <Label FontSize="20"
-                                HorizontalOptions="Center"
-                                IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=playing}"
-                                Text="{mi:FluentFilled Icon=Pause48Filled, FontOverride=True}"
-                                TextColor="{DynamicResource OverlayPlayIconColor}"
-                                VerticalOptions="Center" />
-                            <ActivityIndicator HeightRequest="16"
-                                HorizontalOptions="Center"
-                                IsRunning="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
-                                IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
-                                Scale="1.5"
-                                VerticalOptions="Center"
-                                WidthRequest="16"
-                                Color="{DynamicResource OverlayPlayIconColor}" />
+                            <ffimageloading:CachedImage Aspect="AspectFill"
+                                HeightRequest="64"
+                                IsVisible="{Binding CurrentQueueItem.MediaItem.ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
+                                Source="{Binding CurrentQueueItem.MediaItem.ImageUri}"
+                                WidthRequest="64" />
+                            <Image Aspect="AspectFill"
+                                HeightRequest="64"
+                                IsVisible="{Binding CurrentQueueItem.MediaItem.ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
+                                Source="{AppThemeBinding Light=placeholders/track_light.png, Dark=placeholders/track_dark.png}"
+                                WidthRequest="64" />
                         </Grid>
                     </Border>
+
+                    <Grid x:Name="PlayerBarProgressHost"
+                        Grid.Column="1"
+                        ColumnDefinitions="*,Auto"
+                        ColumnSpacing="10"
+                        IsClippedToBounds="True">
+                        <Border Grid.ColumnSpan="2"
+                            BackgroundColor="{DynamicResource PlayerBarForeground}"
+                            HeightRequest="{Binding Source={x:Reference PlayerBarProgressHost}, Path=Height}"
+                            HorizontalOptions="Fill"
+                            InputTransparent="True"
+                            ScaleX="{Binding PlayerBarProgress}"
+                            StrokeThickness="0"
+                            VerticalOptions="Fill"
+                            AnchorX="0"
+                            WidthRequest="{Binding Source={x:Reference PlayerBarProgressHost}, Path=Width}">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="0,12,0,12" />
+                            </Border.StrokeShape>
+                        </Border>
+
+                        <Grid Grid.Column="0"
+                            Margin="8,8,0,8"
+                            RowDefinitions="Auto,Auto"
+                            RowSpacing="1"
+                            VerticalOptions="Center">
+                            <Grid.GestureRecognizers>
+                                <PanGestureRecognizer PanUpdated="OnPlayerBarPanUpdated" />
+                                <TapGestureRecognizer Tapped="OnPlayerBarTapped" />
+                            </Grid.GestureRecognizers>
+                            <Label Grid.Row="0"
+                                FontAttributes="None"
+                                FontFamily="PoppinsRegular"
+                                FontSize="13"
+                                LineBreakMode="TailTruncation"
+                                MaxLines="1"
+                                Text="{Binding CurrentQueueItem.MediaItem.DisplayName}"
+                                TextColor="{DynamicResource TextPrimary}" />
+                            <Label Grid.Row="1"
+                                FontFamily="PoppinsRegular"
+                                FontSize="11"
+                                LineBreakMode="TailTruncation"
+                                MaxLines="1"
+                                Text="{Binding CurrentQueueItem.MediaItem.ArtistName}"
+                                TextColor="{DynamicResource TextSecondary}" />
+                        </Grid>
+
+                        <Border Grid.Column="1"
+                            Margin="0,8,12,8"
+                            BackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
+                            HeightRequest="38"
+                            Opacity="1"
+                            StrokeThickness="0"
+                            VerticalOptions="Center"
+                            WidthRequest="38">
+                            <Border.Behaviors>
+                                <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                                    PressedAnimationDuration="250"
+                                    PressedAnimationEasing="SinOut" />
+                            </Border.Behaviors>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding TogglePlayPauseCommand}" />
+                            </Border.GestureRecognizers>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="19" />
+                            </Border.StrokeShape>
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding CurrentQueueItem}"
+                                    TargetType="Border"
+                                    Value="{x:Null}">
+                                    <Setter Property="IsEnabled" Value="False" />
+                                    <Setter Property="Opacity" Value="0.45" />
+                                </DataTrigger>
+                            </Border.Triggers>
+                            <Grid>
+                                <Label FontSize="20"
+                                    HorizontalOptions="Center"
+                                    IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=paused}"
+                                    Text="{mi:FluentFilled Icon=Play48Filled, FontOverride=True}"
+                                    TextColor="{DynamicResource OverlayPlayIconColor}"
+                                    VerticalOptions="Center" />
+                                <Label FontSize="20"
+                                    HorizontalOptions="Center"
+                                    IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=playing}"
+                                    Text="{mi:FluentFilled Icon=Pause48Filled, FontOverride=True}"
+                                    TextColor="{DynamicResource OverlayPlayIconColor}"
+                                    VerticalOptions="Center" />
+                                <ActivityIndicator HeightRequest="16"
+                                    HorizontalOptions="Center"
+                                    IsRunning="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
+                                    IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
+                                    Scale="1.5"
+                                    VerticalOptions="Center"
+                                    WidthRequest="16"
+                                    Color="{DynamicResource OverlayPlayIconColor}" />
+                            </Grid>
+                        </Border>
+                    </Grid>
                 </Grid>
-            </Grid>
-        </Border>
+            </Border>
+        </Grid>
 
         <!--  Bottom Navigation Bar  -->
         <Border Grid.Row="2"
