@@ -85,6 +85,11 @@ public sealed class OverlayService : IOverlayService
 {
     #region Fields
 
+    private const int QueueOverlayForegroundZIndex = 126;
+    private const int QueueOverlayBackgroundZIndex = -100;
+    private const int PlayerBarOverlayForegroundZIndex = 125;
+    private const int PlayerBarOverlayBackgroundZIndex = -101;
+
     private enum FlyoutLayoutMode
     {
         Bottom,
@@ -100,7 +105,6 @@ public sealed class OverlayService : IOverlayService
 
     private readonly ILogger<OverlayService> _logger;
     private readonly SemaphoreSlim _overlayLock = new(1, 1);
-    private int _queueWarmupRunId;
     private bool _isQueueInteractiveOpening;
     private bool _isPlayerBarInteractiveOpening;
 
@@ -191,6 +195,23 @@ public sealed class OverlayService : IOverlayService
         if (secondaryFlyoutHost != null && secondaryFlyoutContent != null)
         {
             RegisterFlyoutHost(FlyoutHostType.Queue, secondaryFlyoutHost, secondaryFlyoutContent);
+        }
+
+        if (TryGetQueueHostRegistration(out var queueRegistration)
+            && overlayHost.BindingContext is not null)
+        {
+            if (SettingsService.IsMobile())
+            {
+                BindMobileQueueOverlayContext(overlayHost.BindingContext);
+                MountMobileQueueOverlay(queueRegistration);
+            }
+            else
+            {
+                BindDesktopQueueOverlayContext(overlayHost.BindingContext);
+                MountDesktopQueueOverlay(queueRegistration);
+            }
+
+            MoveQueueHostToBackgroundState(queueRegistration);
         }
 
         _selectionIndicatorHost = selectionIndicatorHost;
@@ -287,70 +308,105 @@ public sealed class OverlayService : IOverlayService
 
     public bool IsOverlayOpen => _overlayHost?.IsVisible == true;
 
-    public bool IsFlyoutOpen => _flyoutHosts.Values.Any(registration => registration.Host.IsVisible);
+    public bool IsFlyoutOpen => _flyoutHosts.Any(entry =>
+    {
+        if (entry.Key == FlyoutHostType.Queue)
+        {
+            return IsQueueHostForeground(entry.Value);
+        }
+
+        if (entry.Key == FlyoutHostType.PlayerBar)
+        {
+            return IsPlayerBarHostForeground(entry.Value);
+        }
+
+        return entry.Value.Host.IsVisible;
+    });
 
     #endregion
 
     #region Player Bar Overlay
 
-    public async Task ShowPlayerBarOverlayAsync(object bindingContext)
+    public Task ShowPlayerBarOverlayAsync(object bindingContext)
     {
-        if (bindingContext == null)
+        if (!SettingsService.IsMobile() || bindingContext is null)
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        EnsureInitialized();
+        return MainThread.InvokeOnMainThreadAsync(async () =>
+        {
+            EnsureInitialized();
 
-        await MainThread.InvokeOnMainThreadAsync(async () =>
+            if (!_flyoutHosts.TryGetValue(FlyoutHostType.PlayerBar, out var registration))
+            {
+                return;
+            }
+
+            BindMobilePlayerBarOverlayContext(bindingContext);
+            MountMobilePlayerBarOverlay(registration);
+
+            _isPlayerBarInteractiveOpening = false;
+            MovePlayerBarHostToForegroundState(registration);
+            registration.CloseAction = () => _ = HidePlayerBarOverlayAsync();
+
+            await _playerBarOverlay.ShowAsync(PlayerBarOverlayForegroundZIndex);
+        });
+    }
+
+    public Task HidePlayerBarOverlayAsync()
+    {
+        if (!SettingsService.IsMobile())
+        {
+            return Task.CompletedTask;
+        }
+
+        return MainThread.InvokeOnMainThreadAsync(async () =>
         {
             _isPlayerBarInteractiveOpening = false;
 
-            if (!ReferenceEquals(_playerBarOverlay.BindingContext, bindingContext))
+            if (!_flyoutHosts.TryGetValue(FlyoutHostType.PlayerBar, out var registration))
             {
-                _playerBarOverlay.BindingContext = bindingContext;
+                return;
             }
 
-            var hostType = SettingsService.IsMobile() ? FlyoutHostType.PlayerBar : FlyoutHostType.Default;
-            await ShowFlyoutLayerAsync(_playerBarOverlay, () => _ = HidePlayerBarOverlayAsync(), FlyoutLayoutMode.FullHeight, hostType);
-            await _playerBarOverlay.AnimateInAsync();
+            await _playerBarOverlay.HideAsync(PlayerBarOverlayBackgroundZIndex);
 
-            if (SettingsService.IsMobile())
-            {
-                // Run queue preload after the player bar animation has fully settled.
-                _ = PreloadQueueOverlayAsync(bindingContext);
-            }
+            MovePlayerBarHostToBackgroundState(registration);
+            registration.Content.VerticalOptions = LayoutOptions.End;
+
+            ClearFlyoutCloseAction(FlyoutHostType.PlayerBar);
         });
     }
 
     public void BeginPlayerBarOverlayInteractiveOpen(object bindingContext)
     {
-        if (bindingContext == null)
+        if (!SettingsService.IsMobile() || bindingContext is null)
         {
             return;
         }
-
-        if (!SettingsService.IsMobile())
-        {
-            return;
-        }
-
-        EnsureInitialized();
 
         MainThread.BeginInvokeOnMainThread(() =>
         {
-            if (_playerBarOverlay.IsOpen || _playerBarOverlay.IsAnimating || _isPlayerBarInteractiveOpening)
+            EnsureInitialized();
+
+            if (!_flyoutHosts.TryGetValue(FlyoutHostType.PlayerBar, out var registration))
             {
                 return;
             }
 
-            if (!ReferenceEquals(_playerBarOverlay.BindingContext, bindingContext))
+            if (_playerBarOverlay.IsOpen || _playerBarOverlay.IsAnimating)
             {
-                _playerBarOverlay.BindingContext = bindingContext;
+                return;
             }
 
-            ShowFlyoutInternal(_playerBarOverlay, () => _ = HidePlayerBarOverlayAsync(), FlyoutLayoutMode.FullHeight, FlyoutHostType.PlayerBar);
-            _playerBarOverlay.BeginInteractiveOpen();
+            BindMobilePlayerBarOverlayContext(bindingContext);
+            MountMobilePlayerBarOverlay(registration);
+
+            MovePlayerBarHostToForegroundState(registration);
+            registration.CloseAction = () => _ = HidePlayerBarOverlayAsync();
+
+            _playerBarOverlay.BeginInteractiveOpen(PlayerBarOverlayForegroundZIndex);
             _isPlayerBarInteractiveOpening = true;
         });
     }
@@ -369,67 +425,46 @@ public sealed class OverlayService : IOverlayService
                 return;
             }
 
-            _playerBarOverlay.UpdateInteractiveOpen(Math.Max(0, upwardPullDistance));
+            _playerBarOverlay.UpdateInteractiveOpen(upwardPullDistance);
         });
     }
 
-    public async Task EndPlayerBarOverlayInteractiveOpenAsync(bool openPlayerBar)
+    public Task EndPlayerBarOverlayInteractiveOpenAsync(bool openPlayerBar)
     {
         if (!SettingsService.IsMobile())
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        EnsureInitialized();
-
-        await MainThread.InvokeOnMainThreadAsync(async () =>
+        return MainThread.InvokeOnMainThreadAsync(async () =>
         {
             if (!_isPlayerBarInteractiveOpening)
             {
                 return;
             }
 
-            if (openPlayerBar)
+            try
             {
-                await _playerBarOverlay.CompleteInteractiveOpenAsync();
-                _isPlayerBarInteractiveOpening = false;
-
-                if (_playerBarOverlay.BindingContext != null)
+                if (openPlayerBar)
                 {
-                    _ = PreloadQueueOverlayAsync(_playerBarOverlay.BindingContext);
+                    await _playerBarOverlay.CompleteInteractiveOpenAsync();
                 }
+                else
+                {
+                    await _playerBarOverlay.CancelInteractiveOpenAsync(PlayerBarOverlayBackgroundZIndex);
 
-                return;
+                    if (_flyoutHosts.TryGetValue(FlyoutHostType.PlayerBar, out var registration))
+                    {
+                        MovePlayerBarHostToBackgroundState(registration);
+                    }
+
+                    ClearFlyoutCloseAction(FlyoutHostType.PlayerBar);
+                }
             }
-
-            await _playerBarOverlay.CancelInteractiveOpenAsync();
-            _isPlayerBarInteractiveOpening = false;
-
-            if (_flyoutHosts.TryGetValue(FlyoutHostType.PlayerBar, out var registration))
+            finally
             {
-                registration.Host.IsVisible = false;
+                _isPlayerBarInteractiveOpening = false;
             }
-
-            ClearFlyoutCloseAction(FlyoutHostType.PlayerBar);
-        });
-    }
-
-    public async Task HidePlayerBarOverlayAsync()
-    {
-        EnsureInitialized();
-
-        await MainThread.InvokeOnMainThreadAsync(async () =>
-        {
-            _isPlayerBarInteractiveOpening = false;
-            await _playerBarOverlay.AnimateOutAsync();
-
-            var hostType = SettingsService.IsMobile() ? FlyoutHostType.PlayerBar : FlyoutHostType.Default;
-            if (_flyoutHosts.TryGetValue(hostType, out var registration))
-            {
-                registration.Host.IsVisible = false;
-            }
-
-            ClearFlyoutCloseAction(hostType);
         });
     }
 
@@ -437,37 +472,103 @@ public sealed class OverlayService : IOverlayService
 
     #region Queue Overlay
 
-    public void BeginQueueOverlayInteractiveOpen(object bindingContext)
+    public Task ShowQueueOverlayAsync(object bindingContext)
     {
-        if (bindingContext == null)
+        if (bindingContext is null)
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        if (!SettingsService.IsMobile())
+        return MainThread.InvokeOnMainThreadAsync(async () =>
         {
-            return;
-        }
+            EnsureInitialized();
 
-        EnsureInitialized();
-
-        MainThread.BeginInvokeOnMainThread(() =>
-        {
-            if (_mobileQueueOverlay.IsOpen || _mobileQueueOverlay.IsAnimating || _isQueueInteractiveOpening)
+            if (!TryGetQueueHostRegistration(out var queueRegistration))
             {
                 return;
             }
 
-            Interlocked.Increment(ref _queueWarmupRunId);
-            RestoreQueueHostVisualState();
-
-            if (!ReferenceEquals(_mobileQueueOverlay.BindingContext, bindingContext))
+            if (SettingsService.IsMobile())
             {
-                _mobileQueueOverlay.BindingContext = bindingContext;
+                BindMobileQueueOverlayContext(bindingContext);
+                MountMobileQueueOverlay(queueRegistration);
+                MoveQueueHostToForegroundState(queueRegistration);
+                queueRegistration.CloseAction = () => _ = HideQueueOverlayAsync();
+
+                _isQueueInteractiveOpening = false;
+                await _mobileQueueOverlay.ShowAsync(QueueOverlayForegroundZIndex);
+                return;
             }
 
-            ShowFlyoutInternal(_mobileQueueOverlay, () => _ = HideQueueOverlayAsync(), FlyoutLayoutMode.FullHeight, FlyoutHostType.Queue);
-            _mobileQueueOverlay.BeginInteractiveOpen();
+            var hostType = ResolveDesktopQueueHostType();
+
+            BindDesktopQueueOverlayContext(bindingContext);
+            MountDesktopQueueOverlay(queueRegistration);
+            MoveQueueHostToForegroundState(queueRegistration);
+            queueRegistration.CloseAction = () => _ = HideQueueOverlayAsync();
+
+            await _desktopQueueOverlay.ShowAsync(QueueOverlayForegroundZIndex);
+        });
+    }
+
+    public Task HideQueueOverlayAsync()
+    {
+        return MainThread.InvokeOnMainThreadAsync(async () =>
+        {
+            if (!TryGetQueueHostRegistration(out var queueRegistration))
+            {
+                return;
+            }
+
+            if (SettingsService.IsMobile())
+            {
+                _isQueueInteractiveOpening = false;
+
+                await _mobileQueueOverlay.HideAsync(QueueOverlayBackgroundZIndex);
+
+                MoveQueueHostToBackgroundState(queueRegistration);
+                ClearFlyoutCloseAction(FlyoutHostType.Queue);
+                return;
+            }
+
+            var hostType = ResolveDesktopQueueHostType();
+
+            await _desktopQueueOverlay.HideAsync(QueueOverlayBackgroundZIndex);
+
+            MoveQueueHostToBackgroundState(queueRegistration);
+
+            queueRegistration.Content.VerticalOptions = LayoutOptions.End;
+            ClearFlyoutCloseAction(hostType);
+        });
+    }
+
+    public void BeginQueueOverlayInteractiveOpen(object bindingContext)
+    {
+        if (!SettingsService.IsMobile() || bindingContext is null)
+        {
+            return;
+        }
+
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            EnsureInitialized();
+
+            if (!TryGetQueueHostRegistration(out var queueRegistration))
+            {
+                return;
+            }
+
+            if (_mobileQueueOverlay.IsOpen || _mobileQueueOverlay.IsAnimating)
+            {
+                return;
+            }
+
+            BindMobileQueueOverlayContext(bindingContext);
+            MountMobileQueueOverlay(queueRegistration);
+            MoveQueueHostToForegroundState(queueRegistration);
+            queueRegistration.CloseAction = () => _ = HideQueueOverlayAsync();
+
+            _mobileQueueOverlay.BeginInteractiveOpen(QueueOverlayForegroundZIndex);
             _isQueueInteractiveOpening = true;
         });
     }
@@ -486,202 +587,50 @@ public sealed class OverlayService : IOverlayService
                 return;
             }
 
-            _mobileQueueOverlay.UpdateInteractiveOpen(Math.Max(0, upwardPullDistance));
+            _mobileQueueOverlay.UpdateInteractiveOpen(upwardPullDistance);
         });
     }
 
-    public async Task EndQueueOverlayInteractiveOpenAsync(bool openQueue)
+    public Task EndQueueOverlayInteractiveOpenAsync(bool openQueue)
     {
         if (!SettingsService.IsMobile())
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        EnsureInitialized();
-
-        await MainThread.InvokeOnMainThreadAsync(async () =>
+        return MainThread.InvokeOnMainThreadAsync(async () =>
         {
             if (!_isQueueInteractiveOpening)
             {
                 return;
             }
 
-            if (openQueue)
+            try
             {
-                await _mobileQueueOverlay.CompleteInteractiveOpenAsync();
+                if (openQueue)
+                {
+                    await _mobileQueueOverlay.CompleteInteractiveOpenAsync();
+                }
+                else
+                {
+                    await _mobileQueueOverlay.CancelInteractiveOpenAsync(QueueOverlayBackgroundZIndex);
+
+                    if (TryGetQueueHostRegistration(out var queueRegistration))
+                    {
+                        MoveQueueHostToBackgroundState(queueRegistration);
+                    }
+
+                    ClearFlyoutCloseAction(FlyoutHostType.Queue);
+                }
+            }
+            finally
+            {
                 _isQueueInteractiveOpening = false;
-                return;
             }
-
-            await _mobileQueueOverlay.CancelInteractiveOpenAsync();
-            _isQueueInteractiveOpening = false;
-            await HideFlyoutLayerAsync(FlyoutHostType.Queue, clearContent: false);
-            RestoreQueueHostVisualState();
         });
     }
 
-    public async Task ShowQueueOverlayAsync(object bindingContext)
-    {
-        if (bindingContext == null)
-        {
-            return;
-        }
-
-        EnsureInitialized();
-
-        await MainThread.InvokeOnMainThreadAsync(async () =>
-        {
-            var useMobileQueueOverlay = SettingsService.IsMobile();
-
-            if (useMobileQueueOverlay)
-            {
-                Interlocked.Increment(ref _queueWarmupRunId);
-                RestoreQueueHostVisualState();
-            }
-
-            var queueOverlayView = useMobileQueueOverlay ? (View)_mobileQueueOverlay : _desktopQueueOverlay;
-            var bindingContextChanged = !ReferenceEquals(queueOverlayView.BindingContext, bindingContext);
-
-            // Queue overlay always uses the dedicated queue host and full-height layout.
-            var layoutMode = FlyoutLayoutMode.FullHeight;
-            var hostType = FlyoutHostType.Queue;
-            await ShowFlyoutLayerAsync(queueOverlayView, () => _ = HideQueueOverlayAsync(), layoutMode, hostType);
-
-            if (useMobileQueueOverlay)
-            {
-                if (bindingContextChanged)
-                {
-                    queueOverlayView.BindingContext = bindingContext;
-                }
-
-                await _mobileQueueOverlay.ShowAsync();
-                return;
-            }
-
-            if (bindingContextChanged)
-            {
-                queueOverlayView.BindingContext = bindingContext;
-            }
-
-            await _desktopQueueOverlay.ShowAsync();
-        });
-    }
-
-    private async Task PreloadQueueOverlayAsync(object bindingContext)
-    {
-        if (!SettingsService.IsMobile())
-        {
-            return;
-        }
-
-        // Give the UI pipeline a moment to present the completed player bar animation.
-        await Task.Yield();
-        await Task.Yield();
-
-        var canPreload = await MainThread.InvokeOnMainThreadAsync(() =>
-            _playerBarOverlay.IsOpen && !_playerBarOverlay.IsAnimating);
-
-        if (!canPreload)
-        {
-            return;
-        }
-
-        var warmupRunId = Interlocked.Increment(ref _queueWarmupRunId);
-
-        try
-        {
-            await MainThread.InvokeOnMainThreadAsync(() =>
-            {
-                if (warmupRunId != _queueWarmupRunId)
-                {
-                    return;
-                }
-
-                if (_mobileQueueOverlay.IsOpen || _mobileQueueOverlay.IsAnimating)
-                {
-                    return;
-                }
-
-                if (!_flyoutHosts.TryGetValue(FlyoutHostType.Queue, out var queueRegistration))
-                {
-                    return;
-                }
-
-                queueRegistration.Content.VerticalOptions = LayoutOptions.Fill;
-                _mobileQueueOverlay.VerticalOptions = LayoutOptions.Fill;
-                _mobileQueueOverlay.HeightRequest = -1;
-
-                if (!ReferenceEquals(queueRegistration.Content.Content, _mobileQueueOverlay))
-                {
-                    queueRegistration.Content.Content = _mobileQueueOverlay;
-                }
-
-                if (!ReferenceEquals(_mobileQueueOverlay.BindingContext, bindingContext))
-                {
-                    _mobileQueueOverlay.BindingContext = bindingContext;
-                }
-
-                // Keep warmup invisible and non-interactive while layout/realization runs.
-                queueRegistration.Host.InputTransparent = true;
-                queueRegistration.Host.Opacity = 0;
-                queueRegistration.Host.IsVisible = true;
-            });
-
-            await Task.Yield();
-            await Task.Yield();
-
-            await MainThread.InvokeOnMainThreadAsync(() =>
-            {
-                if (warmupRunId != _queueWarmupRunId)
-                {
-                    return;
-                }
-
-                if (!_flyoutHosts.TryGetValue(FlyoutHostType.Queue, out var queueRegistration))
-                {
-                    return;
-                }
-
-                queueRegistration.Host.IsVisible = false;
-                RestoreQueueHostVisualState();
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Queue warmup failed");
-        }
-    }
-
-    public async Task HideQueueOverlayAsync()
-    {
-        EnsureInitialized();
-
-        await MainThread.InvokeOnMainThreadAsync(async () =>
-        {
-            var useMobileQueueOverlay = SettingsService.IsMobile();
-            _isQueueInteractiveOpening = false;
-
-            if (_mobileQueueOverlay.IsOpen)
-            {
-                await _mobileQueueOverlay.HideAsync();
-            }
-
-            if (_desktopQueueOverlay.IsOpen)
-            {
-                await _desktopQueueOverlay.HideAsync();
-            }
-
-            if (useMobileQueueOverlay)
-            {
-                // Keep queue content mounted to avoid template rebuild on reopen.
-                await HideFlyoutLayerAsync(FlyoutHostType.Queue, clearContent: false);
-                return;
-            }
-
-            // Keep queue content mounted so TableView does not run full unload cleanup.
-            await HideFlyoutLayerAsync(FlyoutHostType.Queue, clearContent: false);
-        });
-    }
+    
 
     #endregion
 
@@ -1312,7 +1261,22 @@ public sealed class OverlayService : IOverlayService
 
     private bool IsFlyoutVisible(FlyoutHostType hostType)
     {
-        return _flyoutHosts.TryGetValue(hostType, out var registration) && registration.Host.IsVisible;
+        if (!_flyoutHosts.TryGetValue(hostType, out var registration))
+        {
+            return false;
+        }
+
+        if (hostType == FlyoutHostType.Queue)
+        {
+            return IsQueueHostForeground(registration);
+        }
+
+        if (hostType == FlyoutHostType.PlayerBar)
+        {
+            return IsPlayerBarHostForeground(registration);
+        }
+
+        return registration.Host.IsVisible;
     }
 
     private void ClearFlyoutCloseAction(FlyoutHostType hostType)
@@ -1323,13 +1287,123 @@ public sealed class OverlayService : IOverlayService
         }
     }
 
-    private void RestoreQueueHostVisualState()
+    private void MoveQueueHostToForegroundState(FlyoutHostRegistration registration)
     {
-        if (_flyoutHosts.TryGetValue(FlyoutHostType.Queue, out var queueRegistration))
+        registration.Host.IsVisible = true;
+        registration.Host.Opacity = 1;
+        registration.Host.InputTransparent = false;
+        registration.Host.ZIndex = QueueOverlayForegroundZIndex;
+    }
+
+    private void MoveQueueHostToBackgroundState(FlyoutHostRegistration registration)
+    {
+        registration.Host.IsVisible = true;
+        registration.Host.Opacity = 1;
+        registration.Host.InputTransparent = true;
+        registration.Host.ZIndex = QueueOverlayBackgroundZIndex;
+    }
+
+    private void MovePlayerBarHostToForegroundState(FlyoutHostRegistration registration)
+    {
+        registration.Host.IsVisible = true;
+        registration.Host.Opacity = 1;
+        registration.Host.InputTransparent = false;
+        registration.Host.ZIndex = PlayerBarOverlayForegroundZIndex;
+    }
+
+    private void MovePlayerBarHostToBackgroundState(FlyoutHostRegistration registration)
+    {
+        registration.Host.IsVisible = true;
+        registration.Host.Opacity = 1;
+        registration.Host.InputTransparent = true;
+        registration.Host.ZIndex = PlayerBarOverlayBackgroundZIndex;
+    }
+
+    private void BindMobileQueueOverlayContext(object bindingContext)
+    {
+        if (!ReferenceEquals(_mobileQueueOverlay.BindingContext, bindingContext))
         {
-            queueRegistration.Host.Opacity = 1;
-            queueRegistration.Host.InputTransparent = false;
+            _mobileQueueOverlay.BindingContext = bindingContext;
         }
+    }
+
+    private void BindDesktopQueueOverlayContext(object bindingContext)
+    {
+        if (!ReferenceEquals(_desktopQueueOverlay.BindingContext, bindingContext))
+        {
+            _desktopQueueOverlay.BindingContext = bindingContext;
+        }
+    }
+
+    private void BindMobilePlayerBarOverlayContext(object bindingContext)
+    {
+        if (!ReferenceEquals(_playerBarOverlay.BindingContext, bindingContext))
+        {
+            _playerBarOverlay.BindingContext = bindingContext;
+        }
+    }
+
+    private void MountMobileQueueOverlay(FlyoutHostRegistration queueRegistration)
+    {
+        queueRegistration.Content.VerticalOptions = LayoutOptions.Fill;
+        _mobileQueueOverlay.VerticalOptions = LayoutOptions.Fill;
+        _mobileQueueOverlay.HeightRequest = -1;
+
+        if (!ReferenceEquals(queueRegistration.Content.Content, _mobileQueueOverlay))
+        {
+            queueRegistration.Content.Content = _mobileQueueOverlay;
+        }
+    }
+
+    private void MountDesktopQueueOverlay(FlyoutHostRegistration registration)
+    {
+        registration.Content.VerticalOptions = LayoutOptions.Fill;
+        _desktopQueueOverlay.VerticalOptions = LayoutOptions.Fill;
+        _desktopQueueOverlay.HeightRequest = -1;
+
+        if (!ReferenceEquals(registration.Content.Content, _desktopQueueOverlay))
+        {
+            registration.Content.Content = _desktopQueueOverlay;
+        }
+    }
+
+
+    private static bool IsQueueHostForeground(FlyoutHostRegistration registration)
+    {
+        return registration.Host.IsVisible
+            && !registration.Host.InputTransparent
+            && registration.Host.ZIndex >= QueueOverlayForegroundZIndex;
+    }
+
+    private static bool IsPlayerBarHostForeground(FlyoutHostRegistration registration)
+    {
+        return registration.Host.IsVisible
+            && !registration.Host.InputTransparent
+            && registration.Host.ZIndex >= PlayerBarOverlayForegroundZIndex;
+    }
+
+    private void MountMobilePlayerBarOverlay(FlyoutHostRegistration registration)
+    {
+        registration.Content.VerticalOptions = LayoutOptions.Fill;
+        _playerBarOverlay.VerticalOptions = LayoutOptions.Fill;
+        _playerBarOverlay.HeightRequest = -1;
+
+        if (!ReferenceEquals(registration.Content.Content, _playerBarOverlay))
+        {
+            registration.Content.Content = _playerBarOverlay;
+        }
+    }
+
+    private bool TryGetQueueHostRegistration(out FlyoutHostRegistration queueRegistration)
+    {
+        return _flyoutHosts.TryGetValue(FlyoutHostType.Queue, out queueRegistration!);
+    }
+
+    private FlyoutHostType ResolveDesktopQueueHostType()
+    {
+        return _flyoutHosts.ContainsKey(FlyoutHostType.Queue)
+            ? FlyoutHostType.Queue
+            : FlyoutHostType.Default;
     }
 
     private void EnsureInitialized()

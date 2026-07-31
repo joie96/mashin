@@ -50,7 +50,7 @@ public partial class QueueOverlay : ContentView
 
     #region Public API
 
-    public async Task ShowAsync()
+    public async Task ShowAsync(int foregroundZIndex)
     {
         if (IsOpen || IsAnimating || _isInteractiveOpening)
         {
@@ -62,6 +62,7 @@ public partial class QueueOverlay : ContentView
         {
             _dismissTriggered = false;
             IsVisible = true;
+            ZIndex = foregroundZIndex;
             OverlaySheet.TranslationY = GetSlideDistance();
 
             // Let the view render one frame at its start position before animating in.
@@ -77,7 +78,7 @@ public partial class QueueOverlay : ContentView
         }
     }
 
-    public async Task HideAsync()
+    public async Task HideAsync(int backgroundZIndex)
     {
         if ((!IsOpen && !_isInteractiveOpening) || IsAnimating)
         {
@@ -90,7 +91,8 @@ public partial class QueueOverlay : ContentView
             _dismissTriggered = true;
             await OverlaySheet.TranslateToAsync(0, GetSlideDistance(), OutSlideDurationMs, Easing.SinIn);
 
-            IsVisible = false;
+            ZIndex = backgroundZIndex;
+            OverlaySheet.TranslationY = 0;
             IsOpen = false;
         }
         finally
@@ -99,7 +101,7 @@ public partial class QueueOverlay : ContentView
         }
     }
 
-    public void BeginInteractiveOpen()
+    public void BeginInteractiveOpen(int foregroundZIndex)
     {
         if (IsOpen || IsAnimating)
         {
@@ -109,6 +111,7 @@ public partial class QueueOverlay : ContentView
         _dismissTriggered = false;
         _isInteractiveOpening = true;
         IsVisible = true;
+        ZIndex = foregroundZIndex;
         OverlaySheet.TranslationY = GetSlideDistance();
     }
 
@@ -144,7 +147,7 @@ public partial class QueueOverlay : ContentView
         }
     }
 
-    public async Task CancelInteractiveOpenAsync()
+    public async Task CancelInteractiveOpenAsync(int backgroundZIndex)
     {
         if (!_isInteractiveOpening || IsAnimating)
         {
@@ -156,7 +159,8 @@ public partial class QueueOverlay : ContentView
         {
             _isInteractiveOpening = false;
             await OverlaySheet.TranslateToAsync(0, GetSlideDistance(), DragCancelSnapBackDurationMs, Easing.SinOut);
-            IsVisible = false;
+            ZIndex = backgroundZIndex;
+            OverlaySheet.TranslationY = 0;
             IsOpen = false;
         }
         finally

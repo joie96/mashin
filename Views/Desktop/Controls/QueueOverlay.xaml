@@ -13,7 +13,8 @@
     BackgroundColor="Transparent"
     InputTransparent="False"
     IsClippedToBounds="True"
-    IsVisible="False">
+    IsVisible="True"
+    ZIndex="-100">
 
     <ContentView.Resources>
         <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />

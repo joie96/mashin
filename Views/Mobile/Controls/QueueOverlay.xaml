@@ -3,7 +3,9 @@
     x:Class="mashin.Views.Mobile.Controls.QueueOverlay"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-    xmlns:controls="clr-namespace:mashin.Views.Mobile.Controls">
+    xmlns:controls="clr-namespace:mashin.Views.Mobile.Controls"
+    IsVisible="True"
+    ZIndex="-100">
 
     <Grid>
         <Border x:Name="OverlaySheet"

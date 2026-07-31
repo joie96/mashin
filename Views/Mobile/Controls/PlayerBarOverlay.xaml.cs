@@ -54,11 +54,11 @@ public partial class PlayerBarOverlay : ContentView
 
     #region Public API
 
-    public Task ShowAsync() => AnimateInAsync();
+    public Task ShowAsync(int foregroundZIndex) => AnimateInAsync(foregroundZIndex);
 
-    public Task HideAsync() => AnimateOutAsync();
+    public Task HideAsync(int backgroundZIndex) => AnimateOutAsync(backgroundZIndex);
 
-    public void BeginInteractiveOpen()
+    public void BeginInteractiveOpen(int foregroundZIndex)
     {
         if (IsOpen || IsAnimating)
         {
@@ -67,6 +67,7 @@ public partial class PlayerBarOverlay : ContentView
 
         _dismissTriggered = false;
         _isInteractiveOpening = true;
+        ZIndex = foregroundZIndex;
         Backdrop.Opacity = 0;
         OverlaySheet.TranslationY = GetSlideDistance();
     }
@@ -108,7 +109,7 @@ public partial class PlayerBarOverlay : ContentView
         }
     }
 
-    public async Task CancelInteractiveOpenAsync()
+    public async Task CancelInteractiveOpenAsync(int backgroundZIndex)
     {
         if (!_isInteractiveOpening || IsAnimating)
         {
@@ -125,6 +126,8 @@ public partial class PlayerBarOverlay : ContentView
                 Backdrop.FadeToAsync(0, DragCancelSnapBackDurationMs, Easing.SinOut),
                 OverlaySheet.TranslateToAsync(0, slideDistance, DragCancelSnapBackDurationMs, Easing.SinOut));
 
+            ZIndex = backgroundZIndex;
+            OverlaySheet.TranslationY = 0;
             IsOpen = false;
         }
         finally
@@ -137,7 +140,7 @@ public partial class PlayerBarOverlay : ContentView
 
     #region Overlay Animation
 
-    public async Task AnimateInAsync()
+    public async Task AnimateInAsync(int foregroundZIndex)
     {
         if (IsOpen || IsAnimating || _isInteractiveOpening)
         {
@@ -148,6 +151,7 @@ public partial class PlayerBarOverlay : ContentView
         try
         {
             _dismissTriggered = false;
+            ZIndex = foregroundZIndex;
             Backdrop.Opacity = 0;
             OverlaySheet.TranslationY = GetSlideDistance();
 
@@ -163,7 +167,7 @@ public partial class PlayerBarOverlay : ContentView
         }
     }
 
-    public async Task AnimateOutAsync()
+    public async Task AnimateOutAsync(int backgroundZIndex)
     {
         if ((!IsOpen && !_isInteractiveOpening) || IsAnimating)
         {
@@ -181,6 +185,8 @@ public partial class PlayerBarOverlay : ContentView
                 Backdrop.FadeToAsync(0, BackdropOutDurationMs, Easing.SinIn),
                 OverlaySheet.TranslateToAsync(0, slideDistance, OutSlideDurationMs, Easing.SinIn));
 
+            ZIndex = backgroundZIndex;
+            OverlaySheet.TranslationY = 0;
             IsOpen = false;
         }
         finally

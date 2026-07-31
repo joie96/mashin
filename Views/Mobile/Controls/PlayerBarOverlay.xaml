@@ -9,7 +9,9 @@
     xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
     xmlns:models="clr-namespace:mashin.Models"
     xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
-    x:Name="self">
+    x:Name="self"
+    IsVisible="True"
+    ZIndex="-101">
 
     <ContentView.Resources>
         <!--  Playback State Converter  -->

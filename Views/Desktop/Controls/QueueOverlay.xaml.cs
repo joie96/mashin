@@ -15,7 +15,7 @@ public partial class QueueOverlay : ContentView
 
     public bool IsAnimating => _isAnimating;
 
-    public async Task ShowAsync()
+    public async Task ShowAsync(int foregroundZIndex)
     {
         if (IsOpen || _isAnimating)
         {
@@ -27,6 +27,7 @@ public partial class QueueOverlay : ContentView
         try
         {
             IsVisible = true;
+            ZIndex = foregroundZIndex;
             OverlayBackdrop.Opacity = 0;
 
             var hostHeight = Height;
@@ -51,7 +52,7 @@ public partial class QueueOverlay : ContentView
         }
     }
 
-    public async Task HideAsync()
+    public async Task HideAsync(int backgroundZIndex)
     {
         if (!IsOpen || _isAnimating)
         {
@@ -74,7 +75,9 @@ public partial class QueueOverlay : ContentView
                 OverlayBackdrop.FadeToAsync(0, AnimationDuration, Easing.CubicOut),
                 OverlayPanel.TranslateToAsync(0, hostHeight, AnimationDuration, Easing.CubicIn));
 
-            IsVisible = false;
+            // Keep the overlay rendered for warm state, move it behind and reset panel position.
+            ZIndex = backgroundZIndex;
+            OverlayPanel.TranslationY = 0;
             IsOpen = false;
         }
         finally
