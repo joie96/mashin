@@ -267,7 +267,7 @@ public partial class ListView : ContentView
     {
         if (string.IsNullOrWhiteSpace(text))
         {
-            return Color.FromArgb("#5A8DFF");
+            return Color.FromArgb("#7CA8FF");
         }
 
         var normalized = text.Trim().ToLowerInvariant().Normalize(NormalizationForm.FormD);
@@ -284,13 +284,13 @@ public partial class ListView : ContentView
         var normalizedText = Regex.Replace(normalizedBuilder.ToString(), "\\s+", " ").Trim();
         if (string.IsNullOrWhiteSpace(normalizedText))
         {
-            return Color.FromArgb("#5A8DFF");
+            return Color.FromArgb("#7CA8FF");
         }
 
         var tokens = normalizedText.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (tokens.Length == 0)
         {
-            return Color.FromArgb("#5A8DFF");
+            return Color.FromArgb("#7CA8FF");
         }
 
         var anchors = new (string Token, float Hue)[]
@@ -321,10 +321,14 @@ public partial class ListView : ContentView
 
         var sumX = 0.0;
         var sumY = 0.0;
+        var weightedSaturation = 0.0;
+        var totalWeight = 0.0;
+
+        var textFallbackHue = GetStableHueFromToken(normalizedText);
         foreach (var token in tokens)
         {
             var bestScore = 0;
-            var bestHue = 0f;
+            var bestHue = textFallbackHue;
 
             foreach (var anchor in anchors)
             {
@@ -336,10 +340,22 @@ public partial class ListView : ContentView
                 }
             }
 
-            var weight = Math.Clamp(bestScore / 100.0, 0.2, 1.0);
-            var radians = bestHue * Math.PI / 180.0;
+            // For weak fuzzy matches, spread the color by stable token hash instead of drifting toward red.
+            var useAnchor = bestScore >= 58;
+            var tokenHue = useAnchor ? bestHue : GetStableHueFromToken(token);
+            var weight = useAnchor
+                ? Math.Clamp(bestScore / 100.0, 0.35, 1.0)
+                : 0.24;
+
+            var tokenSaturation = useAnchor
+                ? 0.52 + ((bestScore / 100.0) * 0.16)
+                : 0.46;
+
+            var radians = tokenHue * Math.PI / 180.0;
             sumX += Math.Cos(radians) * weight;
             sumY += Math.Sin(radians) * weight;
+            weightedSaturation += tokenSaturation * weight;
+            totalWeight += weight;
         }
 
         if (Math.Abs(sumX) < 0.0001 && Math.Abs(sumY) < 0.0001)
@@ -349,10 +365,25 @@ public partial class ListView : ContentView
         }
 
         var hue = (Math.Atan2(sumY, sumX) * 180.0 / Math.PI + 360.0) % 360.0;
-        var saturation = 0.66f;
-        var lightness = 0.52f;
+        var saturation = (float)Math.Clamp(
+            totalWeight > 0 ? weightedSaturation / totalWeight : 0.56,
+            0.50,
+            0.68);
+        var lightness = 0.60f;
 
         return Color.FromHsla(hue / 360.0, saturation, lightness);
+    }
+
+    private static float GetStableHueFromToken(string token)
+    {
+        var hash = 2166136261u;
+        foreach (var c in token)
+        {
+            hash ^= c;
+            hash *= 16777619;
+        }
+
+        return hash % 360;
     }
 
     #endregion
