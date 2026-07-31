@@ -221,9 +221,11 @@
                                 TextColor="{DynamicResource BackgroundPrimary}"
                                 VerticalOptions="Center" />
                             <ActivityIndicator HeightRequest="20"
+                                HorizontalOptions="Center"
                                 IsRunning="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
                                 IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
                                 Scale="1.5"
+                                VerticalOptions="Center"
                                 WidthRequest="20"
                                 Color="{DynamicResource BackgroundPrimary}" />
                         </Grid>

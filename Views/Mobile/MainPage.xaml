@@ -250,9 +250,11 @@
                                 TextColor="{DynamicResource OverlayPlayIconColor}"
                                 VerticalOptions="Center" />
                             <ActivityIndicator HeightRequest="16"
+                                HorizontalOptions="Center"
                                 IsRunning="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
                                 IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
                                 Scale="1.5"
+                                VerticalOptions="Center"
                                 WidthRequest="16"
                                 Color="{DynamicResource OverlayPlayIconColor}" />
                         </Grid>
