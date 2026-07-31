@@ -75,11 +75,20 @@
                         Margin="16,8,16,0"
                         Spacing="6">
                         <Slider Maximum="{Binding Duration}"
+                            IsEnabled="True"
                             MaximumTrackColor="{DynamicResource BackgroundTertiary}"
                             Minimum="0"
                             MinimumTrackColor="{DynamicResource IconSecondary}"
                             ThumbColor="{DynamicResource IconPrimary}"
                             Value="{Binding SliderPosition, Mode=TwoWay}">
+                            <Slider.Triggers>
+                                <DataTrigger Binding="{Binding CurrentQueueItem}"
+                                    TargetType="Slider"
+                                    Value="{x:Null}">
+                                    <Setter Property="IsEnabled" Value="False" />
+                                    <Setter Property="Opacity" Value="0.45" />
+                                </DataTrigger>
+                            </Slider.Triggers>
                             <Slider.Behaviors>
                                 <behaviors:SliderDragCompletedBehavior StartedCommand="{Binding BeginSeekCommand}" Command="{Binding SeekCommand}" />
                             </Slider.Behaviors>
@@ -141,6 +150,7 @@
                     VerticalOptions="Center">
                     <Border BackgroundColor="{DynamicResource ActionButtonsBackground}"
                         HeightRequest="44"
+                        Opacity="1"
                         StrokeThickness="0"
                         WidthRequest="44">
                         <Border.Behaviors>
@@ -184,6 +194,14 @@
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="22" />
                         </Border.StrokeShape>
+                        <Border.Triggers>
+                            <DataTrigger Binding="{Binding CurrentQueueItem}"
+                                TargetType="Border"
+                                Value="{x:Null}">
+                                <Setter Property="IsEnabled" Value="False" />
+                                <Setter Property="Opacity" Value="0.45" />
+                            </DataTrigger>
+                        </Border.Triggers>
                         <Label FontSize="22"
                             HorizontalOptions="Center"
                             Text="{mi:FluentFilled Icon=Previous48Filled, FontOverride=True}"
@@ -194,6 +212,7 @@
                     <Border BackgroundColor="{DynamicResource IconPrimary}"
                         HeightRequest="60"
                         Margin="4,0"
+                        Opacity="1"
                         StrokeThickness="0"
                         WidthRequest="60">
                         <Border.Behaviors>
@@ -207,6 +226,14 @@
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="30" />
                         </Border.StrokeShape>
+                        <Border.Triggers>
+                            <DataTrigger Binding="{Binding CurrentQueueItem}"
+                                TargetType="Border"
+                                Value="{x:Null}">
+                                <Setter Property="IsEnabled" Value="False" />
+                                <Setter Property="Opacity" Value="0.45" />
+                            </DataTrigger>
+                        </Border.Triggers>
                         <Grid>
                             <Label FontSize="26"
                                 HorizontalOptions="Center"
@@ -233,6 +260,7 @@
 
                     <Border BackgroundColor="{DynamicResource ActionButtonsBackground}"
                         HeightRequest="44"
+                        Opacity="1"
                         StrokeThickness="0"
                         WidthRequest="44">
                         <Border.Behaviors>
@@ -246,6 +274,14 @@
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="22" />
                         </Border.StrokeShape>
+                        <Border.Triggers>
+                            <DataTrigger Binding="{Binding CurrentQueueItem}"
+                                TargetType="Border"
+                                Value="{x:Null}">
+                                <Setter Property="IsEnabled" Value="False" />
+                                <Setter Property="Opacity" Value="0.45" />
+                            </DataTrigger>
+                        </Border.Triggers>
                         <Label FontSize="22"
                             HorizontalOptions="Center"
                             Text="{mi:FluentFilled Icon=Next48Filled, FontOverride=True}"

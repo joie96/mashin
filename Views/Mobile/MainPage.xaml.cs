@@ -189,21 +189,11 @@ public partial class MainPage : ContentPage
             return;
         }
 
-        if (_viewModel.CurrentQueueItem is null)
-        {
-            return;
-        }
-
         await _overlayService.ShowPlayerBarOverlayAsync(_viewModel);
     }
 
     private void OnPlayerBarPanUpdated(object? sender, PanUpdatedEventArgs e)
     {
-        if (_viewModel.CurrentQueueItem is null)
-        {
-            return;
-        }
-
         switch (e.StatusType)
         {
             case GestureStatus.Started:

@@ -222,6 +222,7 @@
                         Margin="0,8,12,8"
                         BackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
                         HeightRequest="38"
+                        Opacity="1"
                         StrokeThickness="0"
                         VerticalOptions="Center"
                         WidthRequest="38">
@@ -236,6 +237,14 @@
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="19" />
                         </Border.StrokeShape>
+                        <Border.Triggers>
+                            <DataTrigger Binding="{Binding CurrentQueueItem}"
+                                TargetType="Border"
+                                Value="{x:Null}">
+                                <Setter Property="IsEnabled" Value="False" />
+                                <Setter Property="Opacity" Value="0.45" />
+                            </DataTrigger>
+                        </Border.Triggers>
                         <Grid>
                             <Label FontSize="20"
                                 HorizontalOptions="Center"

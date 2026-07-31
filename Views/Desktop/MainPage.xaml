@@ -544,6 +544,7 @@
                         <Border behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="32"
+                            Opacity="1"
                             StrokeThickness="0"
                             VerticalOptions="Center"
                             WidthRequest="32">
@@ -553,6 +554,14 @@
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="16" />
                             </Border.StrokeShape>
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding CurrentQueueItem}"
+                                    TargetType="Border"
+                                    Value="{x:Null}">
+                                    <Setter Property="IsEnabled" Value="False" />
+                                    <Setter Property="Opacity" Value="0.45" />
+                                </DataTrigger>
+                            </Border.Triggers>
                             <Label FontSize="18"
                                 HorizontalOptions="Center"
                                 Text="{mi:FluentFilled Icon=Previous48Filled,
@@ -565,6 +574,7 @@
                         <Border behaviors:HoverBehavior.EnableScaleHover="True"
                             BackgroundColor="{DynamicResource IconPrimary}"
                             HeightRequest="36"
+                            Opacity="1"
                             StrokeThickness="0"
                             VerticalOptions="Center"
                             WidthRequest="36">
@@ -574,6 +584,14 @@
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="18" />
                             </Border.StrokeShape>
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding CurrentQueueItem}"
+                                    TargetType="Border"
+                                    Value="{x:Null}">
+                                    <Setter Property="IsEnabled" Value="False" />
+                                    <Setter Property="Opacity" Value="0.45" />
+                                </DataTrigger>
+                            </Border.Triggers>
                             <Grid>
                                 <Label FontSize="18"
                                     HorizontalOptions="Center"
@@ -590,9 +608,11 @@
                                     TextColor="{DynamicResource BackgroundPrimary}"
                                     VerticalOptions="Center" />
                                 <ActivityIndicator HeightRequest="16"
+                                    HorizontalOptions="Center"
                                     IsRunning="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
                                     IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
                                     Scale="1.5"
+                                    VerticalOptions="Center"
                                     WidthRequest="16"
                                     Color="{DynamicResource BackgroundPrimary}" />
                             </Grid>
@@ -602,6 +622,7 @@
                         <Border behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                             BackgroundColor="Transparent"
                             HeightRequest="32"
+                            Opacity="1"
                             StrokeThickness="0"
                             VerticalOptions="Center"
                             WidthRequest="32">
@@ -611,6 +632,14 @@
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="16" />
                             </Border.StrokeShape>
+                            <Border.Triggers>
+                                <DataTrigger Binding="{Binding CurrentQueueItem}"
+                                    TargetType="Border"
+                                    Value="{x:Null}">
+                                    <Setter Property="IsEnabled" Value="False" />
+                                    <Setter Property="Opacity" Value="0.45" />
+                                </DataTrigger>
+                            </Border.Triggers>
                             <Label FontSize="18"
                                 HorizontalOptions="Center"
                                 Text="{mi:FluentFilled Icon=Next48Filled,
@@ -671,6 +700,7 @@
                             VerticalOptions="Center" />
                         <Slider Grid.Column="1"
                             Maximum="{Binding Duration}"
+                            IsEnabled="True"
                             MaximumTrackColor="{DynamicResource BackgroundTertiary}"
                             Minimum="0"
                             MinimumTrackColor="{DynamicResource IconSecondary}"
@@ -678,6 +708,14 @@
                             ThumbColor="{DynamicResource IconPrimary}"
                             VerticalOptions="Center"
                             Value="{Binding SliderPosition, Mode=TwoWay}">
+                            <Slider.Triggers>
+                                <DataTrigger Binding="{Binding CurrentQueueItem}"
+                                    TargetType="Slider"
+                                    Value="{x:Null}">
+                                    <Setter Property="IsEnabled" Value="False" />
+                                    <Setter Property="Opacity" Value="0.45" />
+                                </DataTrigger>
+                            </Slider.Triggers>
                             <Slider.Behaviors>
                                 <behaviors:SliderDragCompletedBehavior StartedCommand="{Binding BeginSeekCommand}" Command="{Binding SeekCommand}" />
                             </Slider.Behaviors>
