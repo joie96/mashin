@@ -187,7 +187,10 @@ namespace mashin.Platforms.Android.AndroidAuto.Screens
         public void OnClick()
         {
             var screenManager = (ScreenManager)_carContext.GetCarService(CarContext.ScreenService);
-            screenManager.Push(new AndroidAutoPlaceholderScreen(_carContext, _screenTarget));
+            Screen screen = _screenTarget == ScreenTarget.Player
+                ? new AndroidAutoPlaybackScreen(_carContext)
+                : new AndroidAutoPlaceholderScreen(_carContext, _screenTarget);
+            screenManager.Push(screen);
         }
     }
 
