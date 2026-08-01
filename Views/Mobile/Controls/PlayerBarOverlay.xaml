@@ -249,13 +249,12 @@
                                 Text="{mi:FluentFilled Icon=Pause48Filled, FontOverride=True}"
                                 TextColor="{DynamicResource BackgroundPrimary}"
                                 VerticalOptions="Center" />
-                            <ActivityIndicator HeightRequest="20"
+                            <ActivityIndicator HeightRequest="30"
                                 HorizontalOptions="Center"
                                 IsRunning="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
                                 IsVisible="{Binding PlayState, Converter={StaticResource PlayStateToBoolConverter}, ConverterParameter=buffering}"
-                                Scale="1.5"
                                 VerticalOptions="Center"
-                                WidthRequest="20"
+                                WidthRequest="30"
                                 Color="{DynamicResource BackgroundPrimary}" />
                         </Grid>
                     </Border>
