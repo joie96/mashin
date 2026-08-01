@@ -244,7 +244,10 @@ public partial class MainPage : ContentPage
                 {
                     var shouldOpenOverlay = _playerBarDragDistance >= PlayerBarOpenReleaseThreshold;
                     _ = _overlayService.EndPlayerBarOverlayInteractiveOpenAsync(shouldOpenOverlay);
-                    _suppressNextPlayerBarTap = true;
+
+                    // Only suppress the immediate follow-up tap when the swipe-open was canceled.
+                    // After a successful swipe-open, the next user tap should open again in one tap.
+                    _suppressNextPlayerBarTap = !shouldOpenOverlay;
                 }
 
                 _playerBarDragStarted = false;
