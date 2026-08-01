@@ -921,28 +921,9 @@ public partial class TableView : ContentView
             nextItems.RemoveAt(nextItems.Count - 1);
         }
 
-        if (_visibleItems.Count == nextItems.Count)
-        {
-            var allEqualByReference = true;
-            for (var index = 0; index < nextItems.Count; index++)
-            {
-                if (!ReferenceEquals(_visibleItems[index], nextItems[index]))
-                {
-                    allEqualByReference = false;
-                    break;
-                }
-            }
+        ApplyVisibleItemsSnapshot(nextItems);
 
-            if (!allEqualByReference)
-            {
-                _visibleItems.ReplaceRange(nextItems);
-            }
-        }
-        else
-        {
-            _visibleItems.ReplaceRange(nextItems);
-        }
-
+        _loadedItemCount = nextItems.Count;
         UpdateHasMoreItems(hasMoreItems);
     }
 
@@ -953,8 +934,79 @@ public partial class TableView : ContentView
             return;
         }
 
-        _loadedItemCount = Math.Max(0, _loadedItemCount) + LoadMoreCount;
-        RefreshVisibleItems();
+        var currentCount = _visibleItems.Count;
+        var requestedCount = Math.Max(Math.Max(0, _loadedItemCount), currentCount) + LoadMoreCount;
+        var nextItems = TakePrefixItems(ItemsSource, requestedCount + 1);
+
+        if (nextItems.Count == 0)
+        {
+            if (_visibleItems.Count > 0)
+            {
+                _visibleItems.Clear();
+            }
+
+            _loadedItemCount = 0;
+            UpdateHasMoreItems(false);
+            return;
+        }
+
+        var hasMoreItems = nextItems.Count > requestedCount;
+        if (hasMoreItems)
+        {
+            nextItems.RemoveAt(nextItems.Count - 1);
+        }
+
+        ApplyVisibleItemsSnapshot(nextItems);
+
+        _loadedItemCount = nextItems.Count;
+        UpdateHasMoreItems(hasMoreItems);
+    }
+
+    private void ApplyVisibleItemsSnapshot(List<object> nextItems)
+    {
+        var currentCount = _visibleItems.Count;
+        var nextCount = nextItems.Count;
+
+        if (currentCount == nextCount)
+        {
+            for (var index = 0; index < nextCount; index++)
+            {
+                if (!ReferenceEquals(_visibleItems[index], nextItems[index]))
+                {
+                    _visibleItems.ReplaceRange(nextItems);
+                    return;
+                }
+            }
+
+            return;
+        }
+
+        if (currentCount < nextCount)
+        {
+            for (var index = 0; index < currentCount; index++)
+            {
+                if (!ReferenceEquals(_visibleItems[index], nextItems[index]))
+                {
+                    _visibleItems.ReplaceRange(nextItems);
+                    return;
+                }
+            }
+
+            var itemsToAppend = new List<object>(nextCount - currentCount);
+            for (var index = currentCount; index < nextCount; index++)
+            {
+                itemsToAppend.Add(nextItems[index]);
+            }
+
+            if (itemsToAppend.Count > 0)
+            {
+                _visibleItems.AddRange(itemsToAppend);
+            }
+
+            return;
+        }
+
+        _visibleItems.ReplaceRange(nextItems);
     }
 
     private static List<object> TakePrefixItems(IEnumerable<object> source, int maxCount)
