@@ -15,17 +15,21 @@ namespace mashin.Platforms.Android.AndroidAuto.Sessions
     public class AndroidAutoSession : Session
     {
         private PlaybackService? _playbackService;
+        private IConnectionService? _connectionService;
         private MediaSessionCompat? _mediaSessionCompat;
         private bool _mediaPlaybackTokenRegistered;
+        private bool _playbackInitStarted;
+        private bool _connectionConnectStarted;
 
         public override Screen OnCreateScreen(Intent intent)
         {
             EnsureMediaPlaybackInitialized();
-            return new AndroidAutoHomeScreen(CarContext);
+            return new AndroidAutoMainScreen(CarContext);
         }
 
         private void EnsureMediaPlaybackInitialized()
         {
+            EnsureConnectionServiceAttached();
             EnsurePlaybackServiceAttached();
             EnsureMediaSession();
             RegisterMediaPlaybackToken();
@@ -57,6 +61,50 @@ namespace mashin.Platforms.Android.AndroidAuto.Sessions
                     SyncMediaSession();
                 }
             };
+
+            if (!_playbackInitStarted)
+            {
+                _playbackInitStarted = true;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await playbackService.InitializeAsync();
+                        await playbackService.SetOutputModeAsync(PlaybackOutputMode.Sendspin);
+                    }
+                    catch
+                    {
+                        _playbackInitStarted = false;
+                    }
+                });
+            }
+        }
+
+        private void EnsureConnectionServiceAttached()
+        {
+            if (_connectionService != null)
+            {
+                return;
+            }
+
+            var services = IPlatformApplication.Current?.Services;
+            _connectionService = services?.GetService<IConnectionService>();
+
+            if (_connectionService != null && !_connectionConnectStarted)
+            {
+                _connectionConnectStarted = true;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _connectionService.ConnectAsync();
+                    }
+                    catch
+                    {
+                        _connectionConnectStarted = false;
+                    }
+                });
+            }
         }
 
         private void EnsureMediaSession()
