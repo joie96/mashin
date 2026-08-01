@@ -197,6 +197,7 @@ public sealed class OverlayService : IOverlayService
             RegisterFlyoutHost(FlyoutHostType.Queue, secondaryFlyoutHost, secondaryFlyoutContent);
         }
 
+        // Preload queue overlay
         if (TryGetQueueHostRegistration(out var queueRegistration)
             && overlayHost.BindingContext is not null)
         {
@@ -212,6 +213,16 @@ public sealed class OverlayService : IOverlayService
             }
 
             MoveQueueHostToBackgroundState(queueRegistration);
+        }
+
+        // Preload player bar overlay
+        if (_flyoutHosts.TryGetValue(FlyoutHostType.PlayerBar, out var playerBarRegistration)
+            && overlayHost.BindingContext is not null
+            && SettingsService.IsMobile())
+        {
+            BindMobilePlayerBarOverlayContext(overlayHost.BindingContext);
+            MountMobilePlayerBarOverlay(playerBarRegistration);
+            MovePlayerBarHostToBackgroundState(playerBarRegistration);
         }
 
         _selectionIndicatorHost = selectionIndicatorHost;
@@ -373,7 +384,6 @@ public sealed class OverlayService : IOverlayService
             await _playerBarOverlay.HideAsync(PlayerBarOverlayBackgroundZIndex);
 
             MovePlayerBarHostToBackgroundState(registration);
-            registration.Content.VerticalOptions = LayoutOptions.End;
 
             ClearFlyoutCloseAction(FlyoutHostType.PlayerBar);
         });

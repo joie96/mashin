@@ -177,6 +177,16 @@ public partial class MainPage : ContentPage
         _overlayService.OnQueueFlyoutBackdropTapped();
     }
 
+    private async void OnQueueTestTapped(object? sender, TappedEventArgs e)
+    {
+        if (_overlayService.IsQueueOverlayAnimating)
+        {
+            return;
+        }
+
+        await _overlayService.ShowQueueOverlayAsync(_viewModel);
+    }
+
     #endregion
 
     #region Player Bar Gestures

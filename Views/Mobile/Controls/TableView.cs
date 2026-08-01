@@ -22,6 +22,7 @@ public partial class TableView : ContentView
     private readonly HashSet<INotifyPropertyChanged> _observedItems = new();
     private readonly ObservableRangeCollection<object> _visibleItems = new();
     private INotifyCollectionChanged? _observedCollection;
+    private IEnumerable<object>? _observedItemsSource;
     private PlaybackService? _playbackService;
     private QueueItem? _currentQueueItem;
     private Track? _currentTrackMediaItem;
@@ -84,6 +85,17 @@ public partial class TableView : ContentView
         InitializeComponent();
     }
 
+    protected override void OnHandlerChanging(HandlerChangingEventArgs args)
+    {
+        if (args.NewHandler == null)
+        {
+            DetachPlaybackStateSource();
+            DetachSelectionObservers();
+        }
+
+        base.OnHandlerChanging(args);
+    }
+
     protected override void OnHandlerChanged()
     {
         base.OnHandlerChanged();
@@ -91,8 +103,7 @@ public partial class TableView : ContentView
 
     private void OnTableViewLoaded(object? sender, EventArgs e)
     {
-        DetachSelectionObservers();
-        AttachSelectionObservers(ItemsSource);
+        SyncSelectionObservers(ItemsSource);
         AttachPlaybackStateSource();
         RefreshVisibleItems();
         UpdateSelectionIndicator();
@@ -101,11 +112,8 @@ public partial class TableView : ContentView
 
     private void OnTableViewUnloaded(object? sender, EventArgs e)
     {
-        DetachPlaybackStateSource();
-        DetachSelectionObservers();
-        
         // Android may raise Unloaded for transient layout changes.
-        // Keep bindings/data intact to avoid empty list after a short flash.
+        // Keep observers/state intact; cleanup is done when handler is detached.
         _suppressNextTap.Clear();
 
         // Hide selection indicator when this view is not active.
@@ -224,6 +232,8 @@ public partial class TableView : ContentView
 
     private void AttachSelectionObservers(IEnumerable<object>? items)
     {
+        _observedItemsSource = items;
+
         if (items is INotifyCollectionChanged collectionChanged)
         {
             _observedCollection = collectionChanged;
@@ -240,6 +250,8 @@ public partial class TableView : ContentView
 
     private void DetachSelectionObservers()
     {
+        _observedItemsSource = null;
+
         if (_observedCollection != null)
         {
             _observedCollection.CollectionChanged -= OnItemsCollectionChanged;
@@ -252,6 +264,17 @@ public partial class TableView : ContentView
         }
 
         _observedItems.Clear();
+    }
+
+    private void SyncSelectionObservers(IEnumerable<object>? items)
+    {
+        if (ReferenceEquals(_observedItemsSource, items))
+        {
+            return;
+        }
+
+        DetachSelectionObservers();
+        AttachSelectionObservers(items);
     }
 
     private void OnItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -860,7 +883,11 @@ public partial class TableView : ContentView
     {
         if (ItemsSource == null)
         {
-            _visibleItems.Clear();
+            if (_visibleItems.Count > 0)
+            {
+                _visibleItems.Clear();
+            }
+
             _loadedItemCount = 0;
             UpdateHasMoreItems(false);
             return;
@@ -878,7 +905,11 @@ public partial class TableView : ContentView
 
         if (nextItems.Count == 0)
         {
-            _visibleItems.Clear();
+            if (_visibleItems.Count > 0)
+            {
+                _visibleItems.Clear();
+            }
+
             _loadedItemCount = 0;
             UpdateHasMoreItems(false);
             return;
@@ -890,7 +921,28 @@ public partial class TableView : ContentView
             nextItems.RemoveAt(nextItems.Count - 1);
         }
 
-        _visibleItems.ReplaceRange(nextItems);
+        if (_visibleItems.Count == nextItems.Count)
+        {
+            var allEqualByReference = true;
+            for (var index = 0; index < nextItems.Count; index++)
+            {
+                if (!ReferenceEquals(_visibleItems[index], nextItems[index]))
+                {
+                    allEqualByReference = false;
+                    break;
+                }
+            }
+
+            if (!allEqualByReference)
+            {
+                _visibleItems.ReplaceRange(nextItems);
+            }
+        }
+        else
+        {
+            _visibleItems.ReplaceRange(nextItems);
+        }
+
         UpdateHasMoreItems(hasMoreItems);
     }
 

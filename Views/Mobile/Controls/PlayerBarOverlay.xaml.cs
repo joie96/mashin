@@ -25,6 +25,8 @@ public partial class PlayerBarOverlay : ContentView
     private bool _isInteractiveOpening;
     private bool _queueDragStarted;
     private double _queueDragDistance;
+    private double _lastMeasuredOverlayWidth;
+    private double _lastMeasuredOverlayHeight;
 
     #endregion
 
@@ -363,13 +365,24 @@ public partial class PlayerBarOverlay : ContentView
 
     private void WireCoverHeightUpdates()
     {
-        SizeChanged += OnOverlaySizeChanged;
         OverlaySheet.SizeChanged += OnOverlaySizeChanged;
-        CoverArtBorder.SizeChanged += OnOverlaySizeChanged;
     }
 
     private void OnOverlaySizeChanged(object? sender, EventArgs e)
     {
+        if (OverlaySheet.Width <= 0 || OverlaySheet.Height <= 0)
+        {
+            return;
+        }
+
+        if (Math.Abs(_lastMeasuredOverlayWidth - OverlaySheet.Width) < 0.5
+            && Math.Abs(_lastMeasuredOverlayHeight - OverlaySheet.Height) < 0.5)
+        {
+            return;
+        }
+
+        _lastMeasuredOverlayWidth = OverlaySheet.Width;
+        _lastMeasuredOverlayHeight = OverlaySheet.Height;
         UpdateCoverHeight();
     }
 
