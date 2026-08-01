@@ -100,7 +100,7 @@
                 IsVisible="{Binding ConnectionState, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
                 Margin="0,12,12,0"
                 Opacity="1"
-                Padding="10"
+                Padding="10,6"
                 HorizontalOptions="End"
                 Stroke="{DynamicResource BorderPrimary}"
                 StrokeThickness="0.25"
