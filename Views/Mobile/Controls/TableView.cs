@@ -893,11 +893,15 @@ public partial class TableView : ContentView
             return;
         }
 
+        var configuredInitialLoadCount = GetConfiguredInitialLoadCount();
         if (_loadedItemCount <= 0)
         {
-            _loadedItemCount = InitialLoadCount > 0
-                ? InitialLoadCount
-                : DefaultInitialLoadCount;
+            _loadedItemCount = configuredInitialLoadCount;
+        }
+        else if (_loadedItemCount < configuredInitialLoadCount)
+        {
+            // Keep the paging target stable so temporary short lists do not shrink future refreshes.
+            _loadedItemCount = configuredInitialLoadCount;
         }
 
         var requestedCount = Math.Max(0, _loadedItemCount);
@@ -923,7 +927,7 @@ public partial class TableView : ContentView
 
         ApplyVisibleItemsSnapshot(nextItems);
 
-        _loadedItemCount = nextItems.Count;
+        _loadedItemCount = requestedCount;
         UpdateHasMoreItems(hasMoreItems);
     }
 
@@ -935,7 +939,8 @@ public partial class TableView : ContentView
         }
 
         var currentCount = _visibleItems.Count;
-        var requestedCount = Math.Max(Math.Max(0, _loadedItemCount), currentCount) + LoadMoreCount;
+        var configuredInitialLoadCount = GetConfiguredInitialLoadCount();
+        var requestedCount = Math.Max(Math.Max(configuredInitialLoadCount, _loadedItemCount), currentCount) + LoadMoreCount;
         var nextItems = TakePrefixItems(ItemsSource, requestedCount + 1);
 
         if (nextItems.Count == 0)
@@ -958,8 +963,15 @@ public partial class TableView : ContentView
 
         ApplyVisibleItemsSnapshot(nextItems);
 
-        _loadedItemCount = nextItems.Count;
+        _loadedItemCount = requestedCount;
         UpdateHasMoreItems(hasMoreItems);
+    }
+
+    private int GetConfiguredInitialLoadCount()
+    {
+        return InitialLoadCount > 0
+            ? InitialLoadCount
+            : DefaultInitialLoadCount;
     }
 
     private void ApplyVisibleItemsSnapshot(List<object> nextItems)
