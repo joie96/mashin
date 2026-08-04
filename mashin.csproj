@@ -51,6 +51,7 @@
 	<ItemGroup>
 		<Compile Remove="Services\*_old.cs" />
 		<Compile Remove="sendspin-dotnet-main\**\*.cs" />
+		<Compile Remove="android-libraries-main\**\*.cs" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -88,7 +89,7 @@
 	</ItemGroup>
 
 	<ItemGroup Condition="'$(TargetFramework)' == 'net10.0-android'">
-		<PackageReference Include="Xamarin.AndroidX.Car.App.App" Version="1.7.0.1" />
+		<PackageReference Include="Xamarin.AndroidX.Media" Version="1.7.0.12" />
 	</ItemGroup>
 	
 </Project>

@@ -5,6 +5,7 @@
 
 using Android.Media;
 using Android.OS;
+using Android.Content;
 using mashin.Audio;
 using mashin.Audio.Renderers;
 using mashin.Models;
@@ -25,6 +26,9 @@ public sealed class AndroidAudioPlayer : IAudioRenderer
     private volatile bool _isPlaying;
     private volatile bool _disposed;
     private int _awaitingAudiblePlayback;
+    private readonly AudioManager? _audioManager;
+    private readonly AudioFocusChangeListener _audioFocusChangeListener;
+    private volatile bool _hasAudioFocus;
 
     private float _volume = 1.0f;
     private bool _isMuted;
@@ -32,6 +36,8 @@ public sealed class AndroidAudioPlayer : IAudioRenderer
     public AndroidAudioPlayer(ILogger<AndroidAudioPlayer> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _audioManager = global::Android.App.Application.Context?.GetSystemService(Context.AudioService) as AudioManager;
+        _audioFocusChangeListener = new AudioFocusChangeListener(this);
         State = PlayerStateType.Uninitialized;
         _logger.LogDebug("AndroidAudioPlayer instantiated");
     }
@@ -135,6 +141,13 @@ public sealed class AndroidAudioPlayer : IAudioRenderer
             throw new InvalidOperationException("Not initialized");
         }
 
+        if (!TryAcquireAudioFocus())
+        {
+            _logger.LogWarning("Audio focus request failed. Skipping playback start.");
+            SetState(PlayerStateType.Paused);
+            return;
+        }
+
         lock (_playbackLock)
         {
             if (_isPlaying)
@@ -163,6 +176,7 @@ public sealed class AndroidAudioPlayer : IAudioRenderer
     {
         if (!_isPlaying)
         {
+            ReleaseAudioFocus();
             return;
         }
 
@@ -171,6 +185,7 @@ public sealed class AndroidAudioPlayer : IAudioRenderer
         _audioTrack?.Pause();
         _audioTrack?.Flush();
         JoinPlaybackThreadIfNeeded();
+        ReleaseAudioFocus();
         SetState(PlayerStateType.Paused);
         _logger.LogDebug("Playback paused");
     }
@@ -179,6 +194,7 @@ public sealed class AndroidAudioPlayer : IAudioRenderer
     {
         if (!_isPlaying)
         {
+            ReleaseAudioFocus();
             return;
         }
 
@@ -188,6 +204,7 @@ public sealed class AndroidAudioPlayer : IAudioRenderer
         _audioTrack?.Flush();
         _audioTrack?.Stop();
         JoinPlaybackThreadIfNeeded();
+        ReleaseAudioFocus();
         SetState(PlayerStateType.Idle);
         _logger.LogDebug("Playback stopped");
     }
@@ -324,9 +341,69 @@ public sealed class AndroidAudioPlayer : IAudioRenderer
         _audioTrack?.Release();
         _audioTrack?.Dispose();
         _audioTrack = null;
+        ReleaseAudioFocus();
 
         SetState(PlayerStateType.Uninitialized);
         return ValueTask.CompletedTask;
+    }
+
+    private bool TryAcquireAudioFocus()
+    {
+        if (_hasAudioFocus)
+        {
+            return true;
+        }
+
+        if (_audioManager == null)
+        {
+            _logger.LogDebug("Audio focus manager unavailable. Continuing without explicit focus request.");
+            return true;
+        }
+
+        var result = _audioManager.RequestAudioFocus(
+            _audioFocusChangeListener,
+            global::Android.Media.Stream.Music,
+            AudioFocus.Gain);
+
+        _hasAudioFocus = result == AudioFocusRequest.Granted;
+
+        if (_hasAudioFocus)
+        {
+            _logger.LogDebug("Audio focus granted.");
+        }
+        else
+        {
+            _logger.LogWarning("Audio focus not granted. Result={Result}", result);
+        }
+
+        return _hasAudioFocus;
+    }
+
+    private void ReleaseAudioFocus()
+    {
+        if (!_hasAudioFocus || _audioManager == null)
+        {
+            return;
+        }
+
+        _audioManager.AbandonAudioFocus(_audioFocusChangeListener);
+        _hasAudioFocus = false;
+        _logger.LogDebug("Audio focus released.");
+    }
+
+    private void OnAudioFocusChanged(AudioFocus focus)
+    {
+        if (focus == AudioFocus.Loss || focus == AudioFocus.LossTransient)
+        {
+            _logger.LogInformation("Audio focus lost ({Focus}). Pausing playback.", focus);
+            Pause();
+            return;
+        }
+
+        if (focus == AudioFocus.Gain)
+        {
+            _logger.LogDebug("Audio focus regained.");
+        }
     }
 
     private void JoinPlaybackThreadIfNeeded()
@@ -358,6 +435,21 @@ public sealed class AndroidAudioPlayer : IAudioRenderer
 
         State = newState;
         StateChanged?.Invoke(this, newState);
+    }
+
+    private sealed class AudioFocusChangeListener : Java.Lang.Object, AudioManager.IOnAudioFocusChangeListener
+    {
+        private readonly AndroidAudioPlayer _owner;
+
+        public AudioFocusChangeListener(AndroidAudioPlayer owner)
+        {
+            _owner = owner;
+        }
+
+        public void OnAudioFocusChange(AudioFocus focusChange)
+        {
+            _owner.OnAudioFocusChanged(focusChange);
+        }
     }
 }
 
