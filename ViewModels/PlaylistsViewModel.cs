@@ -20,7 +20,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
     private readonly SettingsService _settings;
     private readonly IOverlayService _overlayService;
     private readonly INavigationService _navigationService;
-    private readonly IMediaItemActions _mediaActions;
+    private readonly UserDataService _userDataService;
     private readonly PlaybackService _playbackService;
     private readonly IContextMenuService _contextMenuService;
     private readonly ILogger<PlaylistsViewModel> _logger;
@@ -42,7 +42,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         SettingsService settings,
         IOverlayService overlayService,
         INavigationService navigationService,
-        IMediaItemActions mediaActions,
+        UserDataService userDataService,
         PlaybackService playbackService,
         IContextMenuService contextMenuService,
         ILogger<PlaylistsViewModel> logger)
@@ -51,7 +51,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         _settings = settings;
         _overlayService = overlayService;
         _navigationService = navigationService;
-        _mediaActions = mediaActions;
+        _userDataService = userDataService;
         _playbackService = playbackService;
         _contextMenuService = contextMenuService;
         _logger = logger;
@@ -249,7 +249,11 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
                 Text = "Aus Favoriten entfernen",
                 Icon = FluentFilledIcons.Heart12Filled,
                 IconIsFilled = true,
-                Command = new Command(async () => await _mediaActions.RemoveFromFavoritesAsync(GetPlaylistsForAction()))
+                Command = new Command(async () =>
+                {
+                    var selectedMediaItems = GetPlaylistsForAction().Cast<MediaItem>().ToList();
+                    await _userDataService.SetFavoriteAsync(selectedMediaItems, false);
+                })
             });
             return;
         }
@@ -258,7 +262,11 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         {
             Text = "Zu Favoriten hinzufügen",
             Icon = FluentIcons.Heart12,
-            Command = new Command(async () => await _mediaActions.AddToFavoritesAsync(GetPlaylistsForAction()))
+            Command = new Command(async () =>
+            {
+                var selectedMediaItems = GetPlaylistsForAction().Cast<MediaItem>().ToList();
+                await _userDataService.SetFavoriteAsync(selectedMediaItems, true);
+            })
         });
     }
 

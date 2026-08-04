@@ -20,7 +20,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
     #region Fields
 
     private readonly MusicAssistantService _musicAssistant;
-    private readonly IUserDataService _userDataService;
+    private readonly UserDataService _userDataService;
     private readonly IPlaylistService _playlistService;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
@@ -139,7 +139,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
         }
     }
 
-    public IMediaItemActions MediaActions { get; }
+    public UserDataService UserDataService => _userDataService;
     public PlaybackService PlaybackService { get; }
 
     public ICommand AlbumTappedCommand { get; }
@@ -229,9 +229,8 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     public AlbumDetailViewModel(
         MusicAssistantService musicAssistant,
-        IUserDataService userDataService,
+        UserDataService userDataService,
         IPlaylistService playlistService,
-        IMediaItemActions mediaActions,
         PlaybackService playbackService,
         IContextMenuService contextMenuService,
         INavigationService navigationService,
@@ -244,7 +243,6 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
         _navigationService = navigationService;
         _logger = logger;
 
-        MediaActions = mediaActions;
         PlaybackService = playbackService;
 
         AlbumTappedCommand = new Command<object>(async parameter => await _navigationService.NavigateToAsync<AlbumDetailPage>(parameter));
@@ -355,14 +353,8 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 return;
             }
 
-            if (Album.Favorite)
-            {
-                await MediaActions.RemoveFromFavoritesAsync(Album);
-            }
-            else
-            {
-                await MediaActions.AddToFavoritesAsync(Album);
-            }
+            var targetFavoriteState = !Album.Favorite;
+            await _userDataService.SetFavoriteAsync(new[] { Album }, targetFavoriteState);
 
             OnPropertyChanged(nameof(IsAlbumFavorite));
             await BuildHeaderContextMenuAsync();
@@ -700,7 +692,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 IconIsFilled = true,
                 Command = new Command(async () =>
                 {
-                    await MediaActions.RemoveFromFavoritesAsync(Album);
+                    await _userDataService.SetFavoriteAsync(new[] { Album }, false);
                     OnPropertyChanged(nameof(IsAlbumFavorite));
                     await BuildHeaderContextMenuAsync();
                 })
@@ -714,7 +706,7 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                 {
-                    await MediaActions.AddToFavoritesAsync(Album);
+                    await _userDataService.SetFavoriteAsync(new[] { Album }, true);
                     OnPropertyChanged(nameof(IsAlbumFavorite));
                     await BuildHeaderContextMenuAsync();
                 })
@@ -824,7 +816,10 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
-                    await MediaActions.AddToFavoritesAsync(Tracks.Where(t => t.IsSelected)))
+                {
+                    var selectedMediaItems = Tracks.Where(t => t.IsSelected).Cast<MediaItem>().ToList();
+                    await _userDataService.SetFavoriteAsync(selectedMediaItems, true);
+                })
             },
             new()
             {
@@ -832,7 +827,10 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 Icon = FluentFilledIcons.Heart12Filled,
                 IconIsFilled = true,
                 Command = new Command(async () =>
-                    await MediaActions.RemoveFromFavoritesAsync(Tracks.Where(t => t.IsSelected)))
+                {
+                    var selectedMediaItems = Tracks.Where(t => t.IsSelected).Cast<MediaItem>().ToList();
+                    await _userDataService.SetFavoriteAsync(selectedMediaItems, false);
+                })
             }
         };
 
@@ -871,7 +869,10 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
-                    await MediaActions.AddToFavoritesAsync(OtherAlbums.Where(a => a.IsSelected)))
+                {
+                    var selectedMediaItems = OtherAlbums.Where(a => a.IsSelected).Cast<MediaItem>().ToList();
+                    await _userDataService.SetFavoriteAsync(selectedMediaItems, true);
+                })
             },
             new()
             {
@@ -879,7 +880,10 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 Icon = FluentFilledIcons.Heart12Filled,
                 IconIsFilled = true,
                 Command = new Command(async () =>
-                    await MediaActions.RemoveFromFavoritesAsync(OtherAlbums.Where(a => a.IsSelected)))
+                {
+                    var selectedMediaItems = OtherAlbums.Where(a => a.IsSelected).Cast<MediaItem>().ToList();
+                    await _userDataService.SetFavoriteAsync(selectedMediaItems, false);
+                })
             }
         };
 
@@ -918,7 +922,10 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
-                    await MediaActions.AddToFavoritesAsync(SimilarArtists.Where(a => a.IsSelected)))
+                {
+                    var selectedMediaItems = SimilarArtists.Where(a => a.IsSelected).Cast<MediaItem>().ToList();
+                    await _userDataService.SetFavoriteAsync(selectedMediaItems, true);
+                })
             },
             new()
             {
@@ -926,7 +933,10 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                 Icon = FluentFilledIcons.Heart12Filled,
                 IconIsFilled = true,
                 Command = new Command(async () =>
-                    await MediaActions.RemoveFromFavoritesAsync(SimilarArtists.Where(a => a.IsSelected)))
+                {
+                    var selectedMediaItems = SimilarArtists.Where(a => a.IsSelected).Cast<MediaItem>().ToList();
+                    await _userDataService.SetFavoriteAsync(selectedMediaItems, false);
+                })
             }
         };
 

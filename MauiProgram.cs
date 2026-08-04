@@ -101,8 +101,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<IPlaylistService, PlaylistService>();
         builder.Services.AddSingleton<IMusicAssistantEventHub, MusicAssistantEventHub>();
         builder.Services.AddSingleton<IConnectionService, ConnectionService>();
-        builder.Services.AddSingleton<IUserDataService, UserDataService>();
-        builder.Services.AddSingleton<IMediaItemActions, MediaItemActions>();
+        builder.Services.AddSingleton<UserDataService>();
         builder.Services.AddSingleton<INavigationService, NavigationService>();
         builder.Services.AddSingleton<IOverlayService, OverlayService>();
         builder.Services.AddSingleton<PlaybackService>();

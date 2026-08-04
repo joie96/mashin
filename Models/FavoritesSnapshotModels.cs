@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using mashin.Converters;
 
 namespace mashin.Models;
 
@@ -68,6 +69,7 @@ public sealed class FavoriteAlbumSnapshot
     public string? DisplayName { get; set; }
 
     [JsonPropertyName("year")]
+    [JsonConverter(typeof(FlexibleIntConverter))]
     public int? Year { get; set; }
 
     [JsonPropertyName("image_url")]
@@ -140,6 +142,7 @@ public sealed class FavoriteAlbumRef
     public string Name { get; set; } = string.Empty;
 
     [JsonPropertyName("year")]
+    [JsonConverter(typeof(FlexibleIntConverter))]
     public int? Year { get; set; }
 
     [JsonPropertyName("image_url")]

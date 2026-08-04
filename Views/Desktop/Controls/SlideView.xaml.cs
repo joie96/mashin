@@ -14,8 +14,8 @@ public partial class SlideView : ContentView
     public static readonly BindableProperty ItemsSourceProperty =
         BindableProperty.Create(nameof(ItemsSource), typeof(IEnumerable<object>), typeof(SlideView), propertyChanged: OnItemsSourceChanged);
 
-    public static readonly BindableProperty MediaActionsProperty =
-        BindableProperty.Create(nameof(MediaActions), typeof(IMediaItemActions), typeof(SlideView));
+    public static readonly BindableProperty UserDataServiceProperty =
+        BindableProperty.Create(nameof(UserDataService), typeof(UserDataService), typeof(SlideView));
 
     public static readonly BindableProperty PrimaryInfoTappedCommandProperty =
         BindableProperty.Create(nameof(PrimaryInfoTappedCommand), typeof(ICommand), typeof(SlideView));
@@ -86,10 +86,10 @@ public partial class SlideView : ContentView
         set => SetValue(ItemsSourceProperty, value);
     }
 
-    public IMediaItemActions? MediaActions
+    public UserDataService? UserDataService
     {
-        get => (IMediaItemActions?)GetValue(MediaActionsProperty);
-        set => SetValue(MediaActionsProperty, value);
+        get => (UserDataService?)GetValue(UserDataServiceProperty);
+        set => SetValue(UserDataServiceProperty, value);
     }
 
     public ICommand? PrimaryInfoTappedCommand
@@ -644,20 +644,35 @@ public partial class SlideView : ContentView
             return;
         }
 
-        if (MediaActions == null)
-        {
-            item.Favorite = !item.Favorite;
-            return;
-        }
-
         if (item.Favorite)
         {
-            await MediaActions.RemoveFromFavoritesAsync(item);
+            await RemoveFromFavoritesAsync(item);
         }
         else
         {
-            await MediaActions.AddToFavoritesAsync(item);
+            await AddToFavoritesAsync(item);
         }
+    }
+
+    private Task AddToFavoritesAsync(MediaItem item)
+    {
+        return SetFavoriteAsync(item, true);
+    }
+
+    private Task RemoveFromFavoritesAsync(MediaItem item)
+    {
+        return SetFavoriteAsync(item, false);
+    }
+
+    private async Task SetFavoriteAsync(MediaItem item, bool isFavorite)
+    {
+        var dataService = UserDataService;
+        if (dataService == null)
+        {
+            return;
+        }
+
+        await dataService.SetFavoriteAsync(new[] { item }, isFavorite);
     }
 
     private void OnMoreIconTapped(object? sender, TappedEventArgs e)

@@ -127,7 +127,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         }
     }
 
-    public IMediaItemActions MediaActions { get; }
+    public UserDataService UserDataService { get; }
     public PlaybackService PlaybackService { get; }
     public ICommand AlbumTappedCommand { get; }
     public ICommand ArtistTappedCommand { get; }
@@ -160,7 +160,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         IPlaylistService playlistService,
         SettingsService settings,
         IOverlayService overlayService,
-        IMediaItemActions mediaActions,
+        UserDataService userDataService,
         PlaybackService playbackService,
         IContextMenuService contextMenuService,
         INavigationService navigationService,
@@ -173,7 +173,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         _navigationService = navigationService;
         _logger = logger;
 
-        MediaActions = mediaActions;
+        UserDataService = userDataService;
         PlaybackService = playbackService;
 
         AlbumTappedCommand = new Command<object>(async parameter => 
@@ -257,14 +257,8 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 return;
             }
 
-            if (Playlist.Favorite)
-            {
-                await MediaActions.RemoveFromFavoritesAsync(Playlist);
-            }
-            else
-            {
-                await MediaActions.AddToFavoritesAsync(Playlist);
-            }
+            var targetFavoriteState = !Playlist.Favorite;
+            await UserDataService.SetFavoriteAsync(new[] { Playlist }, targetFavoriteState);
 
             OnPropertyChanged(nameof(IsPlaylistFavorite));
             _ = BuildHeaderContextMenuAsync();
@@ -543,7 +537,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 IconIsFilled = true,
                 Command = new Command(async () =>
                 {
-                    await MediaActions.RemoveFromFavoritesAsync(Playlist);
+                    await UserDataService.SetFavoriteAsync(new[] { Playlist }, false);
                     OnPropertyChanged(nameof(IsPlaylistFavorite));
                     _ = BuildHeaderContextMenuAsync();
                 })
@@ -557,7 +551,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                 {
-                    await MediaActions.AddToFavoritesAsync(Playlist);
+                    await UserDataService.SetFavoriteAsync(new[] { Playlist }, true);
                     OnPropertyChanged(nameof(IsPlaylistFavorite));
                     _ = BuildHeaderContextMenuAsync();
                 })
@@ -796,7 +790,10 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                     Icon = FluentFilledIcons.Heart12Filled,
                     IconIsFilled = true,
                     Command = new Command(async () =>
-                        await MediaActions.RemoveFromFavoritesAsync(GetContextMenuTargetTracks()))
+                    {
+                        var selectedMediaItems = GetContextMenuTargetTracks().Cast<MediaItem>().ToList();
+                        await UserDataService.SetFavoriteAsync(selectedMediaItems, false);
+                    })
                 });
             }
             else
@@ -806,7 +803,10 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                     Text = "Zu Favoriten hinzufügen",
                     Icon = FluentIcons.Heart12,
                     Command = new Command(async () =>
-                        await MediaActions.AddToFavoritesAsync(GetContextMenuTargetTracks()))
+                    {
+                        var selectedMediaItems = GetContextMenuTargetTracks().Cast<MediaItem>().ToList();
+                        await UserDataService.SetFavoriteAsync(selectedMediaItems, true);
+                    })
                 });
             }
         }
@@ -817,7 +817,10 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
-                    await MediaActions.AddToFavoritesAsync(GetContextMenuTargetTracks()))
+                {
+                    var selectedMediaItems = GetContextMenuTargetTracks().Cast<MediaItem>().ToList();
+                    await UserDataService.SetFavoriteAsync(selectedMediaItems, true);
+                })
             });
 
             menu.Add(new ContextMenuItem
@@ -826,7 +829,10 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 Icon = FluentFilledIcons.Heart12Filled,
                 IconIsFilled = true,
                 Command = new Command(async () =>
-                    await MediaActions.RemoveFromFavoritesAsync(GetContextMenuTargetTracks()))
+                {
+                    var selectedMediaItems = GetContextMenuTargetTracks().Cast<MediaItem>().ToList();
+                    await UserDataService.SetFavoriteAsync(selectedMediaItems, false);
+                })
             });
         }
 

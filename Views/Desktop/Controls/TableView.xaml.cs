@@ -32,8 +32,8 @@ public partial class TableView : ContentView
     public static readonly BindableProperty SecondaryInfoTappedCommandProperty =
         BindableProperty.Create(nameof(SecondaryInfoTappedCommand), typeof(ICommand), typeof(TableView));
 
-    public static readonly BindableProperty MediaActionsProperty =
-        BindableProperty.Create(nameof(MediaActions), typeof(IMediaItemActions), typeof(TableView));
+    public static readonly BindableProperty UserDataServiceProperty =
+        BindableProperty.Create(nameof(UserDataService), typeof(UserDataService), typeof(TableView));
 
     public static readonly BindableProperty ShowContextMenuAtAnchorCommandProperty =
         BindableProperty.Create(nameof(ShowContextMenuAtAnchorCommand), typeof(ICommand), typeof(TableView));
@@ -132,10 +132,10 @@ public partial class TableView : ContentView
         set => SetValue(SecondaryInfoTappedCommandProperty, value);
     }
 
-    public IMediaItemActions? MediaActions
+    public UserDataService? UserDataService
     {
-        get => (IMediaItemActions?)GetValue(MediaActionsProperty);
-        set => SetValue(MediaActionsProperty, value);
+        get => (UserDataService?)GetValue(UserDataServiceProperty);
+        set => SetValue(UserDataServiceProperty, value);
     }
 
     public ICommand? ShowContextMenuAtAnchorCommand
@@ -291,7 +291,7 @@ public partial class TableView : ContentView
         SecondaryInfoTappedCommand = null;
         ShowContextMenuAtAnchorCommand = null;
         ShowContextMenuAtPositionCommand = null;
-        MediaActions = null;
+        UserDataService = null;
         PlaybackContextItem = null;
 
         if (collectionView != null)
@@ -910,7 +910,7 @@ public partial class TableView : ContentView
 
     private async void OnRowDoubleTapped(object? sender, Microsoft.Maui.Controls.TappedEventArgs e)
     {
-        if (sender is not Border border || MediaActions == null || _playbackService == null)
+        if (sender is not Border border || _playbackService == null)
         {
             return;
         }
@@ -949,7 +949,7 @@ public partial class TableView : ContentView
 
     private async void OnPlayOverlayClicked(object? sender, Microsoft.Maui.Controls.TappedEventArgs e)
     {
-        if (sender is not Border playOverlay || MediaActions == null || _playbackService == null)
+        if (sender is not Border playOverlay || _playbackService == null)
         {
             return;
         }
@@ -990,7 +990,7 @@ public partial class TableView : ContentView
 
     private async void OnFavoriteIconTapped(object? sender, Microsoft.Maui.Controls.TappedEventArgs e)
     {
-        if (sender is not Label label || MediaActions == null)
+        if (sender is not Label label)
         {
             return;
         }
@@ -1003,11 +1003,11 @@ public partial class TableView : ContentView
 
         if (item.Favorite)
         {
-            await MediaActions.RemoveFromFavoritesAsync(item);
+            await RemoveFromFavoritesAsync(item);
         }
         else
         {
-            await MediaActions.AddToFavoritesAsync(item);
+            await AddToFavoritesAsync(item);
         }
 
         if (_currentTrackMediaItem != null && IsSameTrack(item, _currentTrackMediaItem) && _currentTrackMediaItem.Favorite != item.Favorite)
@@ -1016,6 +1016,27 @@ public partial class TableView : ContentView
         }
 
         UpdateFavoriteStateForVisibleItems();
+    }
+
+    private Task AddToFavoritesAsync(MediaItem item)
+    {
+        return SetFavoriteAsync(item, true);
+    }
+
+    private Task RemoveFromFavoritesAsync(MediaItem item)
+    {
+        return SetFavoriteAsync(item, false);
+    }
+
+    private async Task SetFavoriteAsync(MediaItem item, bool isFavorite)
+    {
+        var dataService = UserDataService;
+        if (dataService == null)
+        {
+            return;
+        }
+
+        await dataService.SetFavoriteAsync(new[] { item }, isFavorite);
     }
 
     #endregion

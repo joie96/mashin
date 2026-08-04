@@ -19,8 +19,8 @@ public partial class RowView : ContentView
     public static readonly BindableProperty ItemsSourceProperty =
         BindableProperty.Create(nameof(ItemsSource), typeof(IEnumerable<object>), typeof(RowView), propertyChanged: OnItemsSourceChanged);
 
-    public static readonly BindableProperty MediaActionsProperty =
-        BindableProperty.Create(nameof(MediaActions), typeof(IMediaItemActions), typeof(RowView));
+    public static readonly BindableProperty UserDataServiceProperty =
+        BindableProperty.Create(nameof(UserDataService), typeof(UserDataService), typeof(RowView));
 
     public static readonly BindableProperty CurrentTrackUriProperty =
         BindableProperty.Create(nameof(CurrentTrackUri), typeof(string), typeof(RowView));
@@ -127,10 +127,10 @@ public partial class RowView : ContentView
         set => SetValue(SecondaryInfoTappedCommandProperty, value);
     }
 
-    public IMediaItemActions? MediaActions
+    public UserDataService? UserDataService
     {
-        get => (IMediaItemActions?)GetValue(MediaActionsProperty);
-        set => SetValue(MediaActionsProperty, value);
+        get => (UserDataService?)GetValue(UserDataServiceProperty);
+        set => SetValue(UserDataServiceProperty, value);
     }
 
     public ICommand? ShowContextMenuAtAnchorCommand
@@ -317,7 +317,7 @@ public partial class RowView : ContentView
         SecondaryInfoTappedCommand = null;
         ShowContextMenuAtAnchorCommand = null;
         ShowContextMenuAtPositionCommand = null;
-        MediaActions = null;
+        UserDataService = null;
 
         BindableLayout.SetItemsSource(ItemsFlexPrimary, null);
         BindableLayout.SetItemsSource(ItemsFlexSecondary, null);
@@ -1037,7 +1037,7 @@ public partial class RowView : ContentView
 
     private async void OnGridItemDoubleTapped(object? sender, TappedEventArgs e)
     {
-        if (sender is not Border border || border.BindingContext is not MediaItem item || MediaActions == null || _playbackService == null)
+        if (sender is not Border border || border.BindingContext is not MediaItem item || _playbackService == null)
         {
             return;
         }
@@ -1052,7 +1052,7 @@ public partial class RowView : ContentView
 
     private async void OnPlayOverlayClicked(object? sender, TappedEventArgs e)
     {
-        if (sender is not Border playOverlay || MediaActions == null || _playbackService == null)
+        if (sender is not Border playOverlay || _playbackService == null)
         {
             return;
         }
@@ -1075,20 +1075,35 @@ public partial class RowView : ContentView
             return;
         }
 
-        if (MediaActions == null)
-        {
-            item.Favorite = !item.Favorite;
-            return;
-        }
-
         if (item.Favorite)
         {
-            await MediaActions.RemoveFromFavoritesAsync(item);
+            await RemoveFromFavoritesAsync(item);
         }
         else
         {
-            await MediaActions.AddToFavoritesAsync(item);
+            await AddToFavoritesAsync(item);
         }
+    }
+
+    private Task AddToFavoritesAsync(MediaItem item)
+    {
+        return SetFavoriteAsync(item, true);
+    }
+
+    private Task RemoveFromFavoritesAsync(MediaItem item)
+    {
+        return SetFavoriteAsync(item, false);
+    }
+
+    private async Task SetFavoriteAsync(MediaItem item, bool isFavorite)
+    {
+        var dataService = UserDataService;
+        if (dataService == null)
+        {
+            return;
+        }
+
+        await dataService.SetFavoriteAsync(new[] { item }, isFavorite);
     }
 
     private void OnMoreIconTapped(object? sender, TappedEventArgs e)

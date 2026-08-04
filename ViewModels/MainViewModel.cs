@@ -93,7 +93,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         IPlaylistService playlistService,
         INavigationService navigationService,
         IOverlayService overlayService,
-        IMediaItemActions mediaActions,
+        UserDataService userDataService,
         IContextMenuService contextMenuService,
         PlaybackService playbackService,
         IConnectionService connectionService,
@@ -109,7 +109,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _connectionService = connectionService;
         _logger = logger;
         _playlists = _playlistService.Playlists;
-        MediaActions = mediaActions;
+        UserDataService = userDataService;
         _selectedAudioQuality = _settings.GetSendspinPreferredAudioCodec();
         _sliderPosition = _playbackService.PositionSeconds;
         _playbackService.CurrentQueueItems.CollectionChanged += OnCurrentQueueItemsCollectionChanged;
@@ -231,14 +231,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 return;
             }
 
-            if (currentTrack.Favorite)
-            {
-                await MediaActions.RemoveFromFavoritesAsync(currentTrack);
-            }
-            else
-            {
-                await MediaActions.AddToFavoritesAsync(currentTrack);
-            }
+            var targetFavoriteState = !currentTrack.Favorite;
+            await UserDataService.SetFavoriteAsync(new[] { currentTrack }, targetFavoriteState);
         });
 
         // Theme Command
@@ -570,7 +564,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     public ICommand ShowQueueContextMenuAtPositionCommand { get; }
     public ICommand AlbumTappedCommand { get; }
     public ICommand ArtistTappedCommand { get; }
-    public IMediaItemActions MediaActions { get; }
+    public UserDataService UserDataService { get; }
 
     #endregion
 
@@ -635,6 +629,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             _logger.LogWarning("Startup initialization paused because user is not authenticated.");
             return;
         }
+
+        await UserDataService.LoadPreferencesAsync();
 
         CurrentSection = NavigationSection.Home;
         await _navigationService.NavigateToAsync<HomePage>();
@@ -1241,11 +1237,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
-                        await MediaActions.AddToFavoritesAsync(
-                            CurrentQueueItems
-                                .Select(item => item.MediaItem)
-                                .OfType<Track>()
-                                .Where(track => track.IsSelected)))
+                {
+                    var selectedMediaItems = CurrentQueueItems
+                        .Select(item => item.MediaItem)
+                        .OfType<Track>()
+                        .Where(track => track.IsSelected)
+                        .Cast<MediaItem>()
+                        .ToList();
+
+                    await UserDataService.SetFavoriteAsync(selectedMediaItems, true);
+                })
             },
             new()
             {
@@ -1253,11 +1254,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 Icon = FluentFilledIcons.Heart12Filled,
                 IconIsFilled = true,
                 Command = new Command(async () =>
-                        await MediaActions.RemoveFromFavoritesAsync(
-                            CurrentQueueItems
-                                .Select(item => item.MediaItem)
-                                .OfType<Track>()
-                                .Where(track => track.IsSelected)))
+                {
+                    var selectedMediaItems = CurrentQueueItems
+                        .Select(item => item.MediaItem)
+                        .OfType<Track>()
+                        .Where(track => track.IsSelected)
+                        .Cast<MediaItem>()
+                        .ToList();
+
+                    await UserDataService.SetFavoriteAsync(selectedMediaItems, false);
+                })
             }
         };
     }

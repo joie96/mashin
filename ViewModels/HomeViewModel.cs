@@ -16,11 +16,10 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
     #region Fields
 
     private readonly MusicAssistantService _musicAssistant;
-    private readonly IMediaItemActions _mediaActions;
+    private readonly UserDataService _userDataService;
     private readonly PlaybackService _playbackService;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
-    private readonly IUserDataService _userDataService;
     private readonly ILogger<HomeViewModel> _logger;
 
     private ObservableRangeCollection<Track> _recommendationTracks = new();
@@ -396,7 +395,7 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
         }
     }
 
-    public IMediaItemActions MediaActions => _mediaActions;
+    public UserDataService UserDataService => _userDataService;
 
     public ICommand AlbumTappedCommand { get; }
 
@@ -468,19 +467,17 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     public HomeViewModel(
         MusicAssistantService musicAssistant,
-        IMediaItemActions mediaActions,
+        UserDataService userDataService,
         PlaybackService playbackService,
         IContextMenuService contextMenuService,
         INavigationService navigationService,
-        IUserDataService userDataService,
         ILogger<HomeViewModel> logger)
     {
         _musicAssistant = musicAssistant;
-        _mediaActions = mediaActions;
+        _userDataService = userDataService;
         _playbackService = playbackService;
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
-        _userDataService = userDataService;
         _logger = logger;
 
         // Navigation commands
@@ -1097,7 +1094,10 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
-                    await _mediaActions.AddToFavoritesAsync(GetSelectedTracks()))
+                {
+                    var selectedMediaItems = GetSelectedTracks().Cast<MediaItem>().ToList();
+                    await _userDataService.SetFavoriteAsync(selectedMediaItems, true);
+                })
             },
             new()
             {
@@ -1105,7 +1105,10 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 Icon = FluentFilledIcons.Heart12Filled,
                 IconIsFilled = true,
                 Command = new Command(async () =>
-                    await _mediaActions.RemoveFromFavoritesAsync(GetSelectedTracks()))
+                {
+                    var selectedMediaItems = GetSelectedTracks().Cast<MediaItem>().ToList();
+                    await _userDataService.SetFavoriteAsync(selectedMediaItems, false);
+                })
             }
         };
 
@@ -1142,7 +1145,10 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
-                    await _mediaActions.AddToFavoritesAsync(GetSelectedPlaylists()))
+                {
+                    var selectedMediaItems = GetSelectedPlaylists().Cast<MediaItem>().ToList();
+                    await _userDataService.SetFavoriteAsync(selectedMediaItems, true);
+                })
             },
             new()
             {
@@ -1150,7 +1156,10 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 Icon = FluentFilledIcons.Heart12Filled,
                 IconIsFilled = true,
                 Command = new Command(async () =>
-                    await _mediaActions.RemoveFromFavoritesAsync(GetSelectedPlaylists()))
+                {
+                    var selectedMediaItems = GetSelectedPlaylists().Cast<MediaItem>().ToList();
+                    await _userDataService.SetFavoriteAsync(selectedMediaItems, false);
+                })
             }
         };
 
@@ -1213,7 +1222,10 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
-                    await _mediaActions.AddToFavoritesAsync(GetSelectedArtists()))
+                {
+                    var selectedMediaItems = GetSelectedArtists().Cast<MediaItem>().ToList();
+                    await _userDataService.SetFavoriteAsync(selectedMediaItems, true);
+                })
             },
             new()
             {
@@ -1221,7 +1233,10 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
                 Icon = FluentFilledIcons.Heart12Filled,
                 IconIsFilled = true,
                 Command = new Command(async () =>
-                    await _mediaActions.RemoveFromFavoritesAsync(GetSelectedArtists()))
+                {
+                    var selectedMediaItems = GetSelectedArtists().Cast<MediaItem>().ToList();
+                    await _userDataService.SetFavoriteAsync(selectedMediaItems, false);
+                })
             }
         };
 

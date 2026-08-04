@@ -70,7 +70,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     private PlaybackService? _playbackService;
     private IPlaylistService? _playlistService;
     private MusicAssistantService? _musicAssistantService;
-    private IUserDataService? _userDataService;
+    private UserDataService? _userDataService;
     private SettingsService? _settingsService;
     private MediaSessionCompat? _mediaSession;
 
@@ -86,7 +86,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
         _playbackService = services?.GetService<PlaybackService>();
         _playlistService = services?.GetService<IPlaylistService>();
         _musicAssistantService = services?.GetService<MusicAssistantService>();
-        _userDataService = services?.GetService<IUserDataService>();
+        _userDataService = services?.GetService<UserDataService>();
         _settingsService = services?.GetService<SettingsService>();
 
         EnsureMediaSession();
@@ -1486,8 +1486,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             return new FavoritesSnapshot();
         }
 
-        var snapshot = await userDataService.GetFavoritesSnapshotAsync();
-        return snapshot ?? new FavoritesSnapshot();
+        return await userDataService.GetFavoritesAsync();
     }
 
     private static Track BuildTrackFromSnapshot(FavoriteTrackSnapshot snapshot)
@@ -1957,7 +1956,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
 
         private static async Task ToggleCurrentTrackFavoriteAsync(
             PlaybackService playback,
-            IUserDataService? userDataService)
+            UserDataService? userDataService)
         {
             var currentTrack = playback.CurrentQueueItem?.MediaItem;
             if (currentTrack == null || userDataService == null || string.IsNullOrWhiteSpace(currentTrack.Uri))
@@ -1966,11 +1965,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             }
 
             var targetFavoriteState = !currentTrack.Favorite;
-            var success = await userDataService.SetFavoriteAsync(currentTrack, targetFavoriteState);
-            if (success)
-            {
-                currentTrack.Favorite = targetFavoriteState;
-            }
+            await userDataService.SetFavoriteAsync(new[] { currentTrack }, targetFavoriteState);
         }
 
         public override void OnPlayFromSearch(string? query, Bundle? extras)

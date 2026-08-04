@@ -256,7 +256,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
         private set => SetProperty(ref _hasSearchRequest, value);
     }
 
-    public IMediaItemActions MediaActions { get; }
+    public UserDataService UserDataService { get; }
     public PlaybackService PlaybackService { get; }
 
     public ICommand AlbumTappedCommand { get; }
@@ -327,7 +327,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
         MusicAssistantService musicAssistant,
         IPlaylistService playlistService,
         SettingsService settings,
-        IMediaItemActions mediaActions,
+        UserDataService userDataService,
         PlaybackService playbackService,
         IContextMenuService contextMenuService,
         INavigationService navigationService,
@@ -340,7 +340,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
         _navigationService = navigationService;
         _logger = logger;
 
-        MediaActions = mediaActions;
+        UserDataService = userDataService;
         PlaybackService = playbackService;
 
         AlbumTappedCommand = new Command<object>(async parameter => await _navigationService.NavigateToAsync<AlbumDetailPage>(parameter));
@@ -807,7 +807,10 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
-                    await MediaActions.AddToFavoritesAsync(Tracks.Where(t => t.IsSelected)))
+                {
+                    var selectedMediaItems = Tracks.Where(t => t.IsSelected).Cast<MediaItem>().ToList();
+                    await UserDataService.SetFavoriteAsync(selectedMediaItems, true);
+                })
             },
             new()
             {
@@ -815,7 +818,10 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 Icon = FluentFilledIcons.Heart12Filled,
                 IconIsFilled = true,
                 Command = new Command(async () =>
-                    await MediaActions.RemoveFromFavoritesAsync(Tracks.Where(t => t.IsSelected)))
+                {
+                    var selectedMediaItems = Tracks.Where(t => t.IsSelected).Cast<MediaItem>().ToList();
+                    await UserDataService.SetFavoriteAsync(selectedMediaItems, false);
+                })
             }
         };
 
@@ -862,7 +868,10 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
-                    await MediaActions.AddToFavoritesAsync(Albums.Where(a => a.IsSelected)))
+                {
+                    var selectedMediaItems = Albums.Where(a => a.IsSelected).Cast<MediaItem>().ToList();
+                    await UserDataService.SetFavoriteAsync(selectedMediaItems, true);
+                })
             },
             new()
             {
@@ -870,7 +879,10 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 Icon = FluentFilledIcons.Heart12Filled,
                 IconIsFilled = true,
                 Command = new Command(async () =>
-                    await MediaActions.RemoveFromFavoritesAsync(Albums.Where(a => a.IsSelected)))
+                {
+                    var selectedMediaItems = Albums.Where(a => a.IsSelected).Cast<MediaItem>().ToList();
+                    await UserDataService.SetFavoriteAsync(selectedMediaItems, false);
+                })
             }
         };
 
@@ -917,7 +929,10 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
-                    await MediaActions.AddToFavoritesAsync(Playlists.Where(p => p.IsSelected)))
+                {
+                    var selectedMediaItems = Playlists.Where(p => p.IsSelected).Cast<MediaItem>().ToList();
+                    await UserDataService.SetFavoriteAsync(selectedMediaItems, true);
+                })
             },
             new()
             {
@@ -925,7 +940,10 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 Icon = FluentFilledIcons.Heart12Filled,
                 IconIsFilled = true,
                 Command = new Command(async () =>
-                    await MediaActions.RemoveFromFavoritesAsync(Playlists.Where(p => p.IsSelected)))
+                {
+                    var selectedMediaItems = Playlists.Where(p => p.IsSelected).Cast<MediaItem>().ToList();
+                    await UserDataService.SetFavoriteAsync(selectedMediaItems, false);
+                })
             }
         };
 
@@ -998,7 +1016,10 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
-                    await MediaActions.AddToFavoritesAsync(GetSelectedArtists()))
+                {
+                    var selectedMediaItems = GetSelectedArtists().Cast<MediaItem>().ToList();
+                    await UserDataService.SetFavoriteAsync(selectedMediaItems, true);
+                })
             },
             new()
             {
@@ -1006,7 +1027,10 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 Icon = FluentFilledIcons.Heart12Filled,
                 IconIsFilled = true,
                 Command = new Command(async () =>
-                    await MediaActions.RemoveFromFavoritesAsync(GetSelectedArtists()))
+                {
+                    var selectedMediaItems = GetSelectedArtists().Cast<MediaItem>().ToList();
+                    await UserDataService.SetFavoriteAsync(selectedMediaItems, false);
+                })
             }
         };
 

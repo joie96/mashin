@@ -49,7 +49,7 @@ public sealed class PlaylistService : IPlaylistService
     #region Fields
 
     private readonly MusicAssistantService _musicAssistant;
-    private readonly IUserDataService _userDataService;
+    private readonly UserDataService _userDataService;
     private readonly SettingsService _settings;
     private readonly ILogger<PlaylistService> _logger;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
@@ -61,7 +61,7 @@ public sealed class PlaylistService : IPlaylistService
 
     public PlaylistService(
         MusicAssistantService musicAssistant,
-        IUserDataService userDataService,
+        UserDataService userDataService,
         SettingsService settings,
         ILogger<PlaylistService> logger)
     {

@@ -7,21 +7,7 @@ namespace mashin.Services;
 /// <summary>
 /// Stores and synchronizes user-specific data (preferences and favorites) via auth/me and auth/user/update in music assistant.
 /// </summary>
-public interface IUserDataService
-{
-    bool IsLoaded { get; }
-
-    Task<Dictionary<string, object>> GetPreferencesAsync(bool forceRefresh = false, CancellationToken cancellationToken = default);
-    Task<T?> GetPreferenceAsync<T>(string key, CancellationToken cancellationToken = default);
-    Task<bool> SetPreferenceAsync(string key, object? value, CancellationToken cancellationToken = default);
-
-    Task<bool> IsFavoriteAsync(MediaItem mediaItem, CancellationToken cancellationToken = default);
-    Task<FavoritesSnapshot?> GetFavoritesSnapshotAsync(CancellationToken cancellationToken = default);
-    Task<bool> SetFavoriteAsync(MediaItem mediaItem, bool isFavorite, CancellationToken cancellationToken = default);
-    Task<bool> SetFavoritesAsync(IEnumerable<MediaItem> mediaItems, bool isFavorite, CancellationToken cancellationToken = default);
-}
-
-public sealed class UserDataService : IUserDataService
+public sealed class UserDataService
 {
     #region Constants and fields
 
@@ -31,11 +17,8 @@ public sealed class UserDataService : IUserDataService
     private readonly SettingsService _settings;
     private readonly ILogger<UserDataService> _logger;
     private readonly SemaphoreSlim _lock = new(1, 1);
-    private AuthUser? _currentUser;
 
     private Dictionary<string, object> _preferences = new(StringComparer.OrdinalIgnoreCase);
-
-    public bool IsLoaded { get; private set; }
 
     #endregion
 
@@ -53,65 +36,31 @@ public sealed class UserDataService : IUserDataService
 
     #endregion
 
-    #region Load and preferences
+    #region Loadading and Pushing preferences
 
-    private async Task<bool> EnsureLoadedInternalAsync(bool forceRefresh = false, CancellationToken cancellationToken = default)
+    public async Task<Dictionary<string, object>> LoadPreferencesAsync(CancellationToken cancellationToken = default)
     {
         await _lock.WaitAsync(cancellationToken);
         try
         {
-            var configuredUsername = _settings.Username;
-
-            if (IsLoaded && !forceRefresh)
-            {
-                if (string.IsNullOrWhiteSpace(configuredUsername)
-                    || string.Equals(_currentUser?.Username, configuredUsername, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-
-                _logger.LogInformation(
-                    "Detected user switch from {CurrentUser} to {ConfiguredUser}, reloading user data",
-                    _currentUser?.Username,
-                    configuredUsername);
-            }
-
             var user = await _musicAssistant.GetCurrentUserAsync();
             if (user == null)
             {
-                _currentUser = null;
                 _preferences = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-                IsLoaded = false;
-                return false;
+                _ = LoadFavoritesSnapshot();
+                return CloneDictionary(_preferences);
             }
 
-            _currentUser = user;
             _preferences = NormalizeDictionary(user.Preferences);
-            IsLoaded = true;
+            _ = LoadFavoritesSnapshot();
             _logger.LogInformation("Loaded user data for {Username}", user.Username);
-            return true;
+            return CloneDictionary(_preferences);
         }
         catch (Exception ex)
         {
-            _currentUser = null;
             _preferences = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-            IsLoaded = false;
+            _ = LoadFavoritesSnapshot();
             _logger.LogWarning(ex, "Failed to load user data");
-            return false;
-        }
-        finally
-        {
-            _lock.Release();
-        }
-    }
-
-    public async Task<Dictionary<string, object>> GetPreferencesAsync(bool forceRefresh = false, CancellationToken cancellationToken = default)
-    {
-        await EnsureLoadedInternalAsync(forceRefresh, cancellationToken);
-
-        await _lock.WaitAsync(cancellationToken);
-        try
-        {
             return CloneDictionary(_preferences);
         }
         finally
@@ -120,72 +69,57 @@ public sealed class UserDataService : IUserDataService
         }
     }
 
-    public async Task<T?> GetPreferenceAsync<T>(string key, CancellationToken cancellationToken = default)
+    public async Task<bool> PushPreferencesAsync(CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            return default;
-        }
-
-        if (!await EnsureLoadedInternalAsync(false, cancellationToken))
-        {
-            return default;
-        }
-
         await _lock.WaitAsync(cancellationToken);
         try
         {
-            if (!_preferences.TryGetValue(key, out var value) || value is null)
+            var configuredUsername = _settings.Username;
+            if (string.IsNullOrWhiteSpace(configuredUsername))
             {
-                return default;
+                return false;
             }
 
-            if (value is T typedValue)
+            var preferencesToPush = CloneDictionary(_preferences);
+            if (preferencesToPush.TryGetValue(FavoritesRootKey, out var favoritesRootObj)
+                && favoritesRootObj is FavoritesSnapshot favoritesSnapshot)
             {
-                return typedValue;
+                try
+                {
+                    var favoritesJson = JsonSerializer.Serialize(favoritesSnapshot);
+                    var favoritesDictionary = JsonSerializer.Deserialize<Dictionary<string, object>>(favoritesJson);
+                    preferencesToPush[FavoritesRootKey] = NormalizeDictionary(favoritesDictionary);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to prepare favorites snapshot for push");
+                    return false;
+                }
             }
 
             try
             {
-                var json = JsonSerializer.Serialize(value);
-                return JsonSerializer.Deserialize<T>(json);
+                var updatedUser = await _musicAssistant.UpdateUserAsync(
+                    username: configuredUsername,
+                    preferences: preferencesToPush);
+
+                if (updatedUser == null)
+                {
+                    return false;
+                }
+
+                _preferences = NormalizeDictionary(updatedUser.Preferences);
+                return true;
             }
-            catch
+            catch (OperationCanceledException)
             {
-                return default;
+                throw;
             }
-        }
-        finally
-        {
-            _lock.Release();
-        }
-    }
-
-    public async Task<bool> SetPreferenceAsync(string key, object? value, CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            return false;
-        }
-
-        if (!await EnsureLoadedInternalAsync(false, cancellationToken))
-        {
-            return false;
-        }
-
-        await _lock.WaitAsync(cancellationToken);
-        try
-        {
-            if (value is null)
+            catch (Exception ex)
             {
-                _preferences.Remove(key);
+                _logger.LogError(ex, "Failed to save user preferences");
+                return false;
             }
-            else
-            {
-                _preferences[key] = NormalizeValue(value)!;
-            }
-
-            return await SaveCoreAsync(cancellationToken);
         }
         finally
         {
@@ -204,95 +138,116 @@ public sealed class UserDataService : IUserDataService
             return false;
         }
 
-        if (!await EnsureLoadedInternalAsync(false, cancellationToken))
+        var snapshot = LoadFavoritesSnapshot();
+
+        return mediaItem.MediaType switch
         {
-            return false;
+            MediaType.Track => snapshot.Tracks.Any(item => string.Equals(item.Uri, mediaItem.Uri, StringComparison.OrdinalIgnoreCase)),
+            MediaType.Album => snapshot.Albums.Any(item => string.Equals(item.Uri, mediaItem.Uri, StringComparison.OrdinalIgnoreCase)),
+            MediaType.Artist => snapshot.Artists.Any(item => string.Equals(item.Uri, mediaItem.Uri, StringComparison.OrdinalIgnoreCase)),
+            MediaType.Playlist => snapshot.Playlists.Any(item => string.Equals(item.Uri, mediaItem.Uri, StringComparison.OrdinalIgnoreCase)),
+            _ => false
+        };
+    }
+
+    public async Task<FavoritesSnapshot> GetFavoritesAsync(CancellationToken cancellationToken = default)
+    {
+        return LoadFavoritesSnapshot();
+    }
+
+    public async Task SetFavoriteAsync(IEnumerable<MediaItem> mediaItems, bool isFavorite, CancellationToken cancellationToken = default)
+    {
+        if (mediaItems == null)
+        {
+            _logger.LogWarning("Skipping favorite update because media items list is null.");
+            return;
         }
 
-        await _lock.WaitAsync(cancellationToken);
-        try
+        var snapshot = LoadFavoritesSnapshot();
+        var skippedInvalid = 0;
+        var skippedUnsupported = 0;
+
+        foreach (var mediaItem in mediaItems)
         {
-            var snapshot = LoadFavoritesSnapshot(createIfMissing: false);
-            if (snapshot == null)
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (mediaItem == null || string.IsNullOrWhiteSpace(mediaItem.Uri))
             {
-                return false;
+                skippedInvalid++;
+                continue;
             }
 
-            return IsSnapshotFavorite(snapshot, mediaItem.MediaType, mediaItem.Uri!);
-        }
-        finally
-        {
-            _lock.Release();
-        }
-    }
+            var uri = mediaItem.Uri;
 
-    public async Task<FavoritesSnapshot?> GetFavoritesSnapshotAsync(CancellationToken cancellationToken = default)
-    {
-        if (!await EnsureLoadedInternalAsync(false, cancellationToken))
-        {
-            return null;
-        }
-
-        await _lock.WaitAsync(cancellationToken);
-        try
-        {
-            return LoadFavoritesSnapshot(createIfMissing: false);
-        }
-        finally
-        {
-            _lock.Release();
-        }
-    }
-
-    public async Task<bool> SetFavoriteAsync(MediaItem mediaItem, bool isFavorite, CancellationToken cancellationToken = default)
-    {
-        if (mediaItem == null)
-        {
-            return false;
-        }
-
-        return await SetFavoritesAsync(new[] { mediaItem }, isFavorite, cancellationToken);
-    }
-
-    public async Task<bool> SetFavoritesAsync(IEnumerable<MediaItem> mediaItems, bool isFavorite, CancellationToken cancellationToken = default)
-    {
-        if (!await EnsureLoadedInternalAsync(false, cancellationToken))
-        {
-            return false;
-        }
-
-        await _lock.WaitAsync(cancellationToken);
-        try
-        {
-            var changed = false;
-
-            var snapshot = LoadFavoritesSnapshot(createIfMissing: true);
-            if (snapshot == null)
+            var updated = mediaItem.MediaType switch
             {
-                return false;
-            }
-
-            foreach (var item in mediaItems.Where(i => i != null && !string.IsNullOrWhiteSpace(i.Uri)))
-            {
-                var updated = UpdateSnapshot(snapshot, item, isFavorite);
-                if (updated)
+                MediaType.Track => UpdateSnapshotList(snapshot.Tracks, uri, isFavorite, () => CreateTrackSnapshot(mediaItem as Track ?? new Track
                 {
-                    changed = true;
-                }
+                    Uri = mediaItem.Uri ?? string.Empty,
+                    ItemId = mediaItem.ItemId,
+                    Provider = mediaItem.Provider,
+                    Name = mediaItem.Name,
+                    DisplayName = mediaItem.DisplayName,
+                    Duration = 0
+                })),
+                MediaType.Album => UpdateSnapshotList(snapshot.Albums, uri, isFavorite, () => CreateAlbumSnapshot(mediaItem as Album ?? new Album
+                {
+                    Uri = mediaItem.Uri ?? string.Empty,
+                    ItemId = mediaItem.ItemId,
+                    Provider = mediaItem.Provider,
+                    Name = mediaItem.Name,
+                    DisplayName = mediaItem.DisplayName
+                })),
+                MediaType.Artist => UpdateSnapshotList(snapshot.Artists, uri, isFavorite, () => CreateArtistSnapshot(mediaItem as Artist ?? new Artist
+                {
+                    Uri = mediaItem.Uri ?? string.Empty,
+                    ItemId = mediaItem.ItemId,
+                    Provider = mediaItem.Provider,
+                    Name = mediaItem.Name,
+                    DisplayName = mediaItem.DisplayName
+                })),
+                MediaType.Playlist => UpdateSnapshotList(snapshot.Playlists, uri, isFavorite, () => CreatePlaylistSnapshot(mediaItem as Playlist ?? new Playlist
+                {
+                    Uri = mediaItem.Uri ?? string.Empty,
+                    ItemId = mediaItem.ItemId,
+                    Provider = mediaItem.Provider,
+                    Name = mediaItem.Name,
+                    DisplayName = mediaItem.DisplayName
+                })),
+                _ => (bool?)null
+            };
 
-                item.Favorite = isFavorite;
-            }
-
-            if (!changed)
+            if (!updated.HasValue)
             {
-                return true;
+                skippedUnsupported++;
+                continue;
             }
 
-            return await SaveCoreAsync(cancellationToken);
+            if (!updated.Value)
+            {
+                _logger.LogDebug(
+                    "Favorite snapshot unchanged for media item {MediaUri} with target state {IsFavorite}.",
+                    uri,
+                    isFavorite);
+            }
+
+            mediaItem.Favorite = isFavorite;
         }
-        finally
+
+        if (skippedInvalid > 0)
         {
-            _lock.Release();
+            _logger.LogWarning("Skipped favorite updates for {Count} items because media item or uri was invalid.", skippedInvalid);
+        }
+
+        if (skippedUnsupported > 0)
+        {
+            _logger.LogWarning("Skipped favorite updates for {Count} items because media type was not supported.", skippedUnsupported);
+        }
+
+        var pushed = await PushPreferencesAsync(cancellationToken);
+        if (!pushed)
+        {
+            _logger.LogWarning("Failed to push updated favorites preferences to server.");
         }
     }
 
@@ -300,15 +255,10 @@ public sealed class UserDataService : IUserDataService
 
     #region Favorites snapshot helpers
 
-    private FavoritesSnapshot? LoadFavoritesSnapshot(bool createIfMissing)
+    private FavoritesSnapshot LoadFavoritesSnapshot()
     {
         if (!_preferences.TryGetValue(FavoritesRootKey, out var favRootObj) || favRootObj is null)
         {
-            if (!createIfMissing)
-            {
-                return null;
-            }
-
             var created = new FavoritesSnapshot();
             _preferences[FavoritesRootKey] = created;
             return created;
@@ -337,69 +287,9 @@ public sealed class UserDataService : IUserDataService
             }
         }
 
-        if (!createIfMissing)
-        {
-            return null;
-        }
-
         var createdSnapshot = new FavoritesSnapshot();
         _preferences[FavoritesRootKey] = createdSnapshot;
         return createdSnapshot;
-    }
-
-    private static bool IsSnapshotFavorite(FavoritesSnapshot snapshot, MediaType mediaType, string uri)
-    {
-        return mediaType switch
-        {
-            MediaType.Track => snapshot.Tracks.Any(item => string.Equals(item.Uri, uri, StringComparison.OrdinalIgnoreCase)),
-            MediaType.Album => snapshot.Albums.Any(item => string.Equals(item.Uri, uri, StringComparison.OrdinalIgnoreCase)),
-            MediaType.Artist => snapshot.Artists.Any(item => string.Equals(item.Uri, uri, StringComparison.OrdinalIgnoreCase)),
-            MediaType.Playlist => snapshot.Playlists.Any(item => string.Equals(item.Uri, uri, StringComparison.OrdinalIgnoreCase)),
-            _ => false
-        };
-    }
-
-    private static bool UpdateSnapshot(FavoritesSnapshot snapshot, MediaItem item, bool isFavorite)
-    {
-        var uri = item.Uri!;
-
-        return item.MediaType switch
-        {
-            MediaType.Track => UpdateSnapshotList(snapshot.Tracks, uri, isFavorite, () => CreateTrackSnapshot(item as Track ?? new Track
-            {
-                Uri = item.Uri ?? string.Empty,
-                ItemId = item.ItemId,
-                Provider = item.Provider,
-                Name = item.Name,
-                DisplayName = item.DisplayName,
-                Duration = 0
-            })),
-            MediaType.Album => UpdateSnapshotList(snapshot.Albums, uri, isFavorite, () => CreateAlbumSnapshot(item as Album ?? new Album
-            {
-                Uri = item.Uri ?? string.Empty,
-                ItemId = item.ItemId,
-                Provider = item.Provider,
-                Name = item.Name,
-                DisplayName = item.DisplayName
-            })),
-            MediaType.Artist => UpdateSnapshotList(snapshot.Artists, uri, isFavorite, () => CreateArtistSnapshot(item as Artist ?? new Artist
-            {
-                Uri = item.Uri ?? string.Empty,
-                ItemId = item.ItemId,
-                Provider = item.Provider,
-                Name = item.Name,
-                DisplayName = item.DisplayName
-            })),
-            MediaType.Playlist => UpdateSnapshotList(snapshot.Playlists, uri, isFavorite, () => CreatePlaylistSnapshot(item as Playlist ?? new Playlist
-            {
-                Uri = item.Uri ?? string.Empty,
-                ItemId = item.ItemId,
-                Provider = item.Provider,
-                Name = item.Name,
-                DisplayName = item.DisplayName
-            })),
-            _ => false
-        };
     }
 
     private static bool UpdateSnapshotList<T>(ICollection<T> list, string uri, bool isFavorite, Func<T> createSnapshot)
@@ -670,41 +560,4 @@ public sealed class UserDataService : IUserDataService
 
     #endregion
 
-    #region Persistence
-
-    private async Task<bool> SaveCoreAsync(CancellationToken cancellationToken)
-    {
-        if (_currentUser?.UserId == null)
-        {
-            return false;
-        }
-
-        try
-        {
-            var updatedUser = await _musicAssistant.UpdateUserAsync(
-                userId: _currentUser.UserId,
-                preferences: CloneDictionary(_preferences));
-
-            if (updatedUser == null)
-            {
-                return false;
-            }
-
-            _currentUser = updatedUser;
-            _preferences = NormalizeDictionary(updatedUser.Preferences);
-            IsLoaded = true;
-            return true;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to save user preferences");
-            return false;
-        }
-    }
-
-    #endregion
 }

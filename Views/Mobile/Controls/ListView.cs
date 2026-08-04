@@ -20,8 +20,8 @@ public partial class ListView : ContentView
     public static readonly BindableProperty ItemsSourceProperty =
         BindableProperty.Create(nameof(ItemsSource), typeof(IEnumerable<object>), typeof(ListView), propertyChanged: OnItemsSourceChanged);
 
-    public static readonly BindableProperty MediaActionsProperty =
-        BindableProperty.Create(nameof(MediaActions), typeof(IMediaItemActions), typeof(ListView));
+    public static readonly BindableProperty UserDataServiceProperty =
+        BindableProperty.Create(nameof(UserDataService), typeof(UserDataService), typeof(ListView));
 
     public static readonly BindableProperty PrimaryInfoTappedCommandProperty =
         BindableProperty.Create(nameof(PrimaryInfoTappedCommand), typeof(ICommand), typeof(ListView));
@@ -48,10 +48,10 @@ public partial class ListView : ContentView
         set => SetValue(ItemsSourceProperty, value);
     }
 
-    public IMediaItemActions? MediaActions
+    public UserDataService? UserDataService
     {
-        get => (IMediaItemActions?)GetValue(MediaActionsProperty);
-        set => SetValue(MediaActionsProperty, value);
+        get => (UserDataService?)GetValue(UserDataServiceProperty);
+        set => SetValue(UserDataServiceProperty, value);
     }
 
     public ICommand? PrimaryInfoTappedCommand
