@@ -986,9 +986,9 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                             Text = playlist.DisplayName,
                             Icon = FluentIcons.TextBulletListLtr16,
                             Command = new Command(async () =>
-                                await MediaActions.AddToPlaylistAsync(
-                                    GetContextMenuTargetTracks(),
-                                    playlist))
+                                await _playlistService.AddTracksAsync(
+                                    playlist,
+                                    GetContextMenuTargetTracks().ToList()))
                         }))
             },
             new() { IsSeparator = true },

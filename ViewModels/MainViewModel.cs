@@ -1147,7 +1147,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         BuildQueueContextMenuItems();
         BuildCurrentTrackContextMenuItems();
-        OnPropertyChanged(nameof(Playlists));
     }
 
     private void OnPlaylistServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -1227,12 +1226,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                             Text = playlist.DisplayName,
                             Icon = FluentIcons.TextBulletListLtr16,
                             Command = new Command(async () =>
-                                    await MediaActions.AddToPlaylistAsync(
+                                    await _playlistService.AddTracksAsync(
+                                        playlist,
                                         CurrentQueueItems
                                             .Select(item => item.MediaItem)
                                             .OfType<Track>()
-                                            .Where(track => track.IsSelected),
-                                        playlist))
+                                            .Where(track => track.IsSelected)
+                                            .ToList()))
                         }))
             },
             new() { IsSeparator = true },
@@ -1282,7 +1282,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                             return;
                         }
 
-                        await MediaActions.AddToPlaylistAsync(currentTrack, playlist);
+                        if (currentTrack is Track track)
+                        {
+                            await _playlistService.AddTracksAsync(playlist, new List<Track> { track });
+                        }
                     })
                 }));
     }

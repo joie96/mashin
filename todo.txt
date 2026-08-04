@@ -1,5 +1,0 @@
-- wechsel zwischen offline online vervollständigen
-- reconnect logik 
-
-- lokales playback für alle commands erweitern
-- lokales playback index management

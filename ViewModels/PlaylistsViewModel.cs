@@ -146,9 +146,11 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
     #region Lifecycle
 
-    public async Task OnNavigatedToAsync(object? parameter)
+    public Task OnNavigatedToAsync(object? parameter)
     {
-        await _playlistService.RefreshAsync();
+        // No loading here, as the PlaylistService is already loading in the background when the app starts.
+        _navigationService.IsNavigating = false;
+        return Task.CompletedTask;
     }
 
     public Task OnNavigatedFromAsync()
@@ -170,10 +172,6 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
     #endregion
 
-    #region Loading
-
-    #endregion
-
     #region Playlist Creation
 
     private async Task CreatePlaylistAsync()
@@ -184,14 +182,19 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
             return;
         }
 
+        name = name.Trim();
         var username = _settings.Username;
         var prefix = string.IsNullOrWhiteSpace(username)
             ? null
             : string.Concat(username, "--");
 
-        if (!string.IsNullOrWhiteSpace(prefix)
-            && !name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(prefix))
         {
+            while (name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                name = name[prefix.Length..].TrimStart();
+            }
+
             name = string.Concat(prefix, name);
         }
 

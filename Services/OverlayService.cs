@@ -70,6 +70,7 @@ public interface IOverlayService
     Task<string?> ShowCreatePlaylistAsync();
     Task<string?> ShowUpdatePlaylistAsync(Playlist playlist);
     Task<bool> ShowDeletePlaylistAsync(Playlist playlist);
+    Task<(string SortField, bool IsDescending)?> ShowSortContentOverlayAsync();
     Task<bool> ShowLoginAsync(
         string? initialUsername,
         Func<string, string, Task<(bool Success, string? ErrorMessage)>> authenticateAsync,
@@ -111,6 +112,7 @@ public sealed class OverlayService : IOverlayService
     private readonly CreatePlaylistOverlay _createPlaylistOverlay;
     private readonly UpdatePlaylistOverlay _updatePlaylistOverlay;
     private readonly DeletePlaylistOverlay _deletePlaylistOverlay;
+    private readonly SortContentOverlay _sortContentOverlay;
     private readonly LoginOverlay _loginOverlay;
     private readonly DesktopQueueOverlay _desktopQueueOverlay;
     private readonly MobileQueueOverlay _mobileQueueOverlay;
@@ -129,6 +131,7 @@ public sealed class OverlayService : IOverlayService
     private TaskCompletionSource<string?>? _createPlaylistTcs;
     private TaskCompletionSource<string?>? _updatePlaylistTcs;
     private TaskCompletionSource<bool>? _deletePlaylistTcs;
+    private TaskCompletionSource<(string SortField, bool IsDescending)?>? _sortContentOverlayTcs;
     private TaskCompletionSource<bool>? _loginTcs;
 
     private Func<string, string, Task<(bool Success, string? ErrorMessage)>>? _authenticateLoginAsync;
@@ -152,6 +155,10 @@ public sealed class OverlayService : IOverlayService
         _deletePlaylistOverlay = new DeletePlaylistOverlay();
         _deletePlaylistOverlay.CancelClicked += OnDeletePlaylistCancelled;
         _deletePlaylistOverlay.DeleteClicked += OnDeletePlaylistConfirmed;
+
+        _sortContentOverlay = new SortContentOverlay();
+        _sortContentOverlay.CancelClicked += OnSortContentOverlayCancelled;
+        _sortContentOverlay.SortClicked += OnSortContentOverlayConfirmed;
 
         _loginOverlay = new LoginOverlay();
         _loginOverlay.UsernameCompleted += OnLoginUsernameCompleted;
@@ -871,6 +878,36 @@ public sealed class OverlayService : IOverlayService
 
     #endregion
 
+    #region Sort Playlist Content Overlay API
+
+    public async Task<(string SortField, bool IsDescending)?> ShowSortContentOverlayAsync()
+    {
+        await _overlayLock.WaitAsync();
+
+        try
+        {
+            EnsureInitialized();
+
+            _sortContentOverlayTcs = new TaskCompletionSource<(string SortField, bool IsDescending)?>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                _sortContentOverlay.ResetSelection();
+                ShowCenteredOverlayInternal(_sortContentOverlay, () => _sortContentOverlayTcs.TrySetResult(null));
+            });
+
+            return await _sortContentOverlayTcs.Task;
+        }
+        finally
+        {
+            _sortContentOverlayTcs = null;
+            await HideCenteredOverlayInternalAsync();
+            _overlayLock.Release();
+        }
+    }
+
+    #endregion
+
     #region Login Overlay API
 
     public async Task<bool> ShowLoginAsync(
@@ -1033,6 +1070,30 @@ public sealed class OverlayService : IOverlayService
         _deletePlaylistOverlay.IsDeleteEnabled = false;
         _deletePlaylistTcs?.TrySetResult(true);
     }
+
+    #endregion
+
+    #region Sort Playlist Content Overlay Event Handlers
+
+    private void OnSortContentOverlayCancelled(object? sender, EventArgs e)
+    {
+        _sortContentOverlayTcs?.TrySetResult(null);
+    }
+
+    private void OnSortContentOverlayConfirmed(object? sender, EventArgs e)
+    {
+        _sortContentOverlay.IsSortEnabled = false;
+
+        var result = (
+            SortField: _sortContentOverlay.SelectedSortField,
+            IsDescending: _sortContentOverlay.IsSortDescending);
+
+        _sortContentOverlayTcs?.TrySetResult(result);
+    }
+
+    #endregion
+
+    #region Login Overlay Event Handlers
 
     private void OnLoginUsernameCompleted(object? sender, EventArgs e)
     {

@@ -644,11 +644,6 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             return new JavaList<MediaBrowserCompat.MediaItem>();
         }
 
-        if (playlists.Count == 0)
-        {
-            await _playlistService!.RefreshAsync();
-        }
-
         var items = new List<MediaBrowserCompat.MediaItem>();
         foreach (var playlist in _playlistService!.Playlists)
         {

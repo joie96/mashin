@@ -1029,7 +1029,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
                 Text = playlist.DisplayName,
                 Icon = FluentIcons.TextBulletListLtr16,
                 Command = new Command(async () =>
-                    await MediaActions.AddToPlaylistAsync(Tracks.Where(t => t.IsSelected), playlist))
+                    await _playlistService.AddTracksAsync(playlist, Tracks.Where(t => t.IsSelected).ToList()))
             });
         }
 

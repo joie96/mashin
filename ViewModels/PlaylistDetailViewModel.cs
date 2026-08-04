@@ -20,9 +20,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 {
     #region Fields
 
-    private readonly MusicAssistantService _musicAssistant;
     private readonly IPlaylistService _playlistService;
-    private readonly IUserDataService _userDataService;
     private readonly SettingsService _settings;
     private readonly IOverlayService _overlayService;
     private readonly IContextMenuService _contextMenuService;
@@ -159,9 +157,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     #region Construction
 
     public PlaylistDetailViewModel(
-        MusicAssistantService musicAssistant,
         IPlaylistService playlistService,
-        IUserDataService userDataService,
         SettingsService settings,
         IOverlayService overlayService,
         IMediaItemActions mediaActions,
@@ -170,9 +166,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         INavigationService navigationService,
         ILogger<PlaylistDetailViewModel> logger)
     {
-        _musicAssistant = musicAssistant;
         _playlistService = playlistService;
-        _userDataService = userDataService;
         _settings = settings;
         _overlayService = overlayService;
         _contextMenuService = contextMenuService;
@@ -319,84 +313,41 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         IsLoadingTracks = true;
         try
         {
-            await LoadPlaylistMetadataAsync(playlistId, providerInstanceOrDomain);
+            var playlist = ResolvePlaylistFromService(playlistId, providerInstanceOrDomain);
+            if (playlist == null)
+            {
+                Playlist = null;
+                Tracks = new ObservableRangeCollection<Track>();
+                _logger.LogWarning("Playlist not found in local playlist service state: {PlaylistId}", playlistId);
+                return;
+            }
 
-            await LoadPlaylistTracksAsync(playlistId, providerInstanceOrDomain);
+            Playlist = playlist;
+            OnPropertyChanged(nameof(IsPlaylistFavorite));
+
+            var tracks = playlist.Items
+                .OrderBy(track => track.SortName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(track => track.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            for (var i = 0; i < tracks.Count; i++)
+            {
+                tracks[i].Index = i;
+            }
+
+            Tracks = new ObservableRangeCollection<Track>(tracks);
+            await BuildHeaderContextMenuAsync();
+            await BuildContentContextMenuAsync();
+
+            _logger.LogDebug("Loaded local playlist '{Name}' with {Count} tracks", playlist.Name, tracks.Count);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to load playlist: {PlaylistId}", playlistId);
         }
-    }
-
-    private async Task LoadPlaylistMetadataAsync(string playlistId, string providerInstanceOrDomain)
-    {
-        try
-        {
-            var playlist = await _musicAssistant.GetPlaylistAsync(playlistId, providerInstanceOrDomain);
-            if (playlist != null)
-            {
-                playlist.Favorite = await _userDataService.IsFavoriteAsync(playlist);
-            }
-
-            if (playlist != null)
-            {
-                var prefix = string.Concat(_settings.Username, "--");
-                playlist.DisplayName = playlist.Name;
-
-                if (!string.IsNullOrWhiteSpace(prefix)
-                    && !string.IsNullOrWhiteSpace(playlist.Name)
-                    && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                {
-                    playlist.DisplayName = playlist.Name[prefix.Length..];
-                }
-            }
-
-            Playlist = playlist;
-
-            if (Playlist == null)
-            {
-                _logger.LogWarning("Playlist not found: {PlaylistId}", playlistId);
-                return;
-            }
-
-            _ = BuildHeaderContextMenuAsync();
-        }
         finally
         {
             IsLoadingMetadata = false;
-        }
-    }
-
-    private async Task LoadPlaylistTracksAsync(string playlistId, string providerInstanceOrDomain)
-    {
-        try
-        {
-            var tracks = await _musicAssistant.GetPlaylistTracksAsync(
-                playlistId,
-                providerInstanceOrDomain,
-                forceRefresh: true);
-
-            for (var i = 0; i < tracks.Count; i++)
-            {
-                tracks[i].Index = i;
-                tracks[i].Favorite = await _userDataService.IsFavoriteAsync(tracks[i]);
-            }
-
-            // Load tracks progressively
-            Tracks = new ObservableRangeCollection<Track>(tracks.ToList());
-            IsLoadingTracks = false;
-
-            _ = BuildContentContextMenuAsync();
-
-            if (Playlist != null)
-            {
-                _logger.LogDebug("Loaded playlist '{Name}' with {Count} tracks",
-                    Playlist.Name, Tracks.Count);
-            }
-        }
-        finally
-        {
             IsLoadingTracks = false;
         }
     }
@@ -416,10 +367,20 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             return;
         }
 
-        var prefix = string.Concat(_settings.Username, "--");
-        if (!string.IsNullOrWhiteSpace(prefix)
-            && !updatedName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        updatedName = updatedName.Trim();
+
+        var username = _settings.Username;
+        var prefix = string.IsNullOrWhiteSpace(username)
+            ? null
+            : string.Concat(username, "--");
+
+        if (!string.IsNullOrWhiteSpace(prefix))
         {
+            while (updatedName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                updatedName = updatedName[prefix.Length..].TrimStart();
+            }
+
             updatedName = string.Concat(prefix, updatedName);
         }
 
@@ -435,7 +396,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 ? updatedName[prefix.Length..]
                 : updatedName;
 
-            await MediaActions.UpdatePlaylistAsync(playlist);
+            await _playlistService.UpdatePlaylistAsync(playlist);
             renamed = true;
         }
         catch (Exception ex)
@@ -465,7 +426,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         var removed = false;
         try
         {
-            await MediaActions.RemovePlaylistAsync(playlist);
+            await _playlistService.RemovePlaylistAsync(playlist);
             removed = true;
         }
         catch (Exception ex)
@@ -477,6 +438,63 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         {
             await _navigationService.GoBackAsync();
         }
+    }
+
+    private async Task SortPlaylistContentAsync()
+    {
+        var playlist = Playlist;
+        if (playlist == null)
+        {
+            return;
+        }
+
+        var sortSelection = await _overlayService.ShowSortContentOverlayAsync();
+        if (sortSelection == null)
+        {
+            return;
+        }
+
+        var (sortField, isDescending) = sortSelection.Value;
+
+        IEnumerable<Track> sortedQuery = sortField switch
+        {
+            "Album" => Tracks
+                .OrderBy(track => track.AlbumName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(track => track.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(track => track.Index),
+            "Artist" => Tracks
+                .OrderBy(track => track.ArtistName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(track => track.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(track => track.Index),
+            _ => Tracks
+                .OrderBy(track => track.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(track => track.Index)
+        };
+
+        if (isDescending)
+        {
+            sortedQuery = sortedQuery.Reverse();
+        }
+
+        var sortedTracks = sortedQuery.ToList();
+        var padWidth = Math.Max(2, sortedTracks.Count.ToString().Length);
+
+        for (var i = 0; i < sortedTracks.Count; i++)
+        {
+            sortedTracks[i].SortName = (i + 1).ToString($"D{padWidth}");
+            sortedTracks[i].Index = i;
+        }
+
+        Tracks.ReplaceRange(sortedTracks);
+        playlist.Items = sortedTracks;
+
+        await _playlistService.UpdatePlaylistAsync(playlist);
+
+        _logger.LogDebug(
+            "Playlist sort requested for '{PlaylistName}': field={SortField}, descending={IsDescending}",
+            PlaylistName,
+            sortField,
+            isDescending);
     }
 
     #endregion
@@ -550,9 +568,16 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
         menu.Add(new ContextMenuItem
         {
-            Text = "Wiedergabeliste bearbeiten",
+            Text = "Wiedergabeliste umbenennen",
             Icon = FluentIcons.Edit16,
             Command = new Command(async () => await RenamePlaylistAsync())
+        });
+
+        menu.Add(new ContextMenuItem
+        {
+            Text = "Inhalt sortieren",
+            Icon = FluentIcons.TextBulletListLtr16,
+            Command = new Command(async () => await SortPlaylistContentAsync())
         });
 
         menu.Add(new ContextMenuItem
@@ -723,9 +748,9 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                         Text = playlist.DisplayName,
                         Icon = FluentIcons.TextBulletListLtr16,
                         Command = new Command(async () =>
-                            await MediaActions.AddToPlaylistAsync(
-                                GetContextMenuTargetTracks(),
-                                playlist))
+                            await _playlistService.AddTracksAsync(
+                                playlist,
+                                GetContextMenuTargetTracks().ToList()))
                     }))
         });
 
@@ -737,12 +762,23 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             {
                 if (Playlist != null)
                 {
-                    await MediaActions.RemoveFromPlaylistAsync(
-                        GetContextMenuTargetTracks(),
-                        Playlist);
+                    var tracksToRemove = GetContextMenuTargetTracks().OfType<Track>().ToList();
 
-                    // Playlist neu laden, um entfernte Tracks zu aktualisieren
-                    await LoadPlaylistAsync(Playlist.ItemId, Playlist.Provider);
+                    await _playlistService.RemoveTracksAsync(Playlist, tracksToRemove);
+
+                    // Apply a local delta update so the table does not need a full reset.
+                    if (tracksToRemove.Count > 0)
+                    {
+                        Tracks.RemoveRange(tracksToRemove, NotifyCollectionChangedAction.Remove);
+
+                        for (var i = 0; i < Tracks.Count; i++)
+                        {
+                            Tracks[i].Index = i;
+                        }
+
+                        Playlist.Items = Tracks.ToList();
+                        OnPropertyChanged(nameof(PlaylistTotalDurationText));
+                    }
                 }
             }),
             IsEnabled = true
@@ -801,6 +837,21 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     #endregion
 
     #region Helper Methods
+    private Playlist? ResolvePlaylistFromService(string playlistId, string providerInstanceOrDomain)
+    {
+        var byProviderAndId = _playlistService.Playlists.FirstOrDefault(playlist =>
+            string.Equals(playlist.ItemId, playlistId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(playlist.Provider, providerInstanceOrDomain, StringComparison.OrdinalIgnoreCase));
+
+        if (byProviderAndId != null)
+        {
+            return byProviderAndId;
+        }
+
+        return _playlistService.Playlists.FirstOrDefault(playlist =>
+            string.Equals(playlist.ItemId, playlistId, StringComparison.OrdinalIgnoreCase));
+    }
+
     private IReadOnlyList<Track> GetContextMenuTargetTracks()
     {
         var selectedTracks = Tracks.Where(track => track.IsSelected).ToList();

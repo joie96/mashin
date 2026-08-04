@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView x:Class="mashin.Views.Desktop.Controls.SortContentOverlay"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:behaviors="clr-namespace:mashin.Views.Desktop.Behaviors"
+    xmlns:mi="http://www.aathifmahir.com/dotnet/2022/maui/icons"
+    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+
+    <Border BackgroundColor="{DynamicResource BackgroundSecondary}"
+        Padding="24,20"
+        HorizontalOptions="Center"
+        VerticalOptions="Center"
+        WidthRequest="440">
+        <Border.StrokeShape>
+            <RoundRectangle CornerRadius="12" />
+        </Border.StrokeShape>
+
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="16">
+            <Grid Grid.Row="0" ColumnDefinitions="*,Auto" VerticalOptions="Center">
+                <Label FontAttributes="Bold"
+                    FontSize="18"
+                    Text="Inhalt sortieren"
+                    TextColor="{DynamicResource TextPrimary}" />
+                <Border Grid.Column="1"
+                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                    BackgroundColor="Transparent"
+                    HeightRequest="28"
+                    StrokeThickness="0"
+                    WidthRequest="28">
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnCancelTapped" />
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="14" />
+                    </Border.StrokeShape>
+                    <Label FontSize="12"
+                        HorizontalOptions="Center"
+                        Text="{mi:Fluent Icon=Dismiss24,
+                                         FontOverride=True}"
+                        TextColor="{DynamicResource IconSecondary}"
+                        VerticalOptions="Center" />
+                </Border>
+            </Grid>
+
+            <Label Grid.Row="1"
+                FontSize="13"
+                Text="Sortiert den Inhalt der Wiedergabeliste. Kann nicht rückgängig gemacht werden."
+                TextColor="{DynamicResource TextSecondary}" />
+
+            <Grid Grid.Row="2"
+                ColumnDefinitions="*,Auto"
+                ColumnSpacing="12"
+                VerticalOptions="Center">
+                <Picker x:Name="SortByPicker"
+                    Grid.Column="0"
+                    FontSize="14"
+                    HeightRequest="38"
+                    SelectedIndex="0"
+                    TextColor="{DynamicResource TextPrimary}">
+                    <Picker.ItemsSource>
+                        <x:Array Type="{x:Type sys:String}">
+                            <sys:String>Titel</sys:String>
+                            <sys:String>Album</sys:String>
+                            <sys:String>Artist</sys:String>
+                        </x:Array>
+                    </Picker.ItemsSource>
+                </Picker>
+
+                <Border Grid.Column="1"
+                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                    BackgroundColor="Transparent"
+                    HeightRequest="38"
+                    StrokeThickness="0"
+                    WidthRequest="38">
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnToggleSortDirectionTapped" />
+                    </Border.GestureRecognizers>
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="6" />
+                    </Border.StrokeShape>
+                    <Grid>
+                        <Label x:Name="DirectionUpIcon"
+                            FontSize="14"
+                            HorizontalOptions="Center"
+                            Text="{mi:Fluent Icon=ArrowUp24,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center" />
+                        <Label x:Name="DirectionDownIcon"
+                            FontSize="14"
+                            HorizontalOptions="Center"
+                            IsVisible="False"
+                            Text="{mi:Fluent Icon=ArrowDown24,
+                                             FontOverride=True}"
+                            TextColor="{DynamicResource IconSecondary}"
+                            VerticalOptions="Center" />
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <HorizontalStackLayout Grid.Row="3"
+                HorizontalOptions="End"
+                Spacing="12">
+                <Border WidthRequest="150"
+                    BackgroundColor="Transparent"
+                    StrokeThickness="0"
+                    behaviors:HoverBehavior.BaseBackgroundColor="Transparent"
+                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="6" />
+                    </Border.StrokeShape>
+                    <Button Text="Abbrechen"
+                        BackgroundColor="Transparent"
+                        Clicked="OnCancelClicked"
+                        TextColor="{DynamicResource TextSecondary}" />
+                </Border>
+                <Border WidthRequest="150"
+                    BackgroundColor="{DynamicResource AccentColor}"
+                    StrokeThickness="0"
+                    IsEnabled="{Binding Source={x:Reference SortPlaylistButton}, Path=IsEnabled}"
+                    behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource AccentColor}"
+                    behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource AccentHover}">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="6" />
+                    </Border.StrokeShape>
+                    <Button x:Name="SortPlaylistButton"
+                        Text="Sortieren"
+                        BackgroundColor="Transparent"
+                        Clicked="OnSortClicked"
+                        IsEnabled="True"
+                        TextColor="White" />
+                </Border>
+            </HorizontalStackLayout>
+        </Grid>
+    </Border>
+</ContentView>

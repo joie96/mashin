@@ -272,6 +272,7 @@ namespace mashin.Models
     {
         private int _tracksCount;
         private int _totalDurationSeconds;
+        private List<Track> _items = new();
 
         public override MediaType MediaType { get; set; } = MediaType.Playlist;
 
@@ -312,6 +313,21 @@ namespace mashin.Models
 
                 _totalDurationSeconds = normalized;
                 OnPropertyChanged();
+            }
+        }
+
+        [JsonIgnore]
+        public IReadOnlyList<Track> Items
+        {
+            get => _items;
+            set
+            {
+                var normalizedTracks = value?.ToList() ?? new List<Track>();
+                _items = normalizedTracks;
+                OnPropertyChanged();
+
+                TracksCount = normalizedTracks.Count;
+                TotalDurationSeconds = normalizedTracks.Sum(track => Math.Max(0, track.Duration));
             }
         }
     }

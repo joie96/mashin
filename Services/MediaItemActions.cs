@@ -14,12 +14,8 @@ namespace mashin.Services;
 /// </summary>
 public interface IMediaItemActions
 {
-    Task AddToPlaylistAsync(object item, Playlist playlist);
-    Task RemoveFromPlaylistAsync(object item, Playlist playlist);
     Task AddToFavoritesAsync(object item);
     Task RemoveFromFavoritesAsync(object item);
-    Task UpdatePlaylistAsync(Playlist playlist);
-    Task RemovePlaylistAsync(Playlist playlist);
 }
 
 #endregion
@@ -31,7 +27,6 @@ public class MediaItemActions : IMediaItemActions
 {
     #region Fields
 
-    private readonly IPlaylistService _playlistService;
     private readonly IUserDataService _userDataService;
     private readonly ILogger<MediaItemActions> _logger;
 
@@ -40,11 +35,9 @@ public class MediaItemActions : IMediaItemActions
     #region Constructor
 
     public MediaItemActions(
-        IPlaylistService playlistService,
         IUserDataService userDataService,
         ILogger<MediaItemActions> logger)
     {
-        _playlistService = playlistService;
         _userDataService = userDataService;
         _logger = logger;
     }
@@ -52,89 +45,6 @@ public class MediaItemActions : IMediaItemActions
     #endregion
 
     #region Media Item Actions
-
-    /// <summary>
-    /// Adds the currently selected items to the specified playlist.
-    /// </summary>
-    public async Task AddToPlaylistAsync(object item, Playlist playlist)
-    {
-        try
-        {
-            var mediaItems = GetMediaItemsFromParameter(item);
-
-            if (mediaItems.Count == 0)
-            {
-                _logger.LogDebug("No items selected to add to playlist");
-                return;
-            }
-
-            _logger.LogDebug("Adding {Count} items to playlist: {PlaylistName}",
-                mediaItems.Count, playlist.Name);
-
-            var uris = mediaItems
-                .Where(i => !string.IsNullOrEmpty(i.Uri))
-                .Select(i => i.Uri!)
-                .ToList();
-
-            if (!uris.Any())
-            {
-                _logger.LogDebug("No valid URIs found in selected items");
-                return;
-            }
-
-            await _playlistService.AddTracksAsync(playlist, uris);
-
-            _logger.LogDebug("Successfully added {Count} items to playlist: {PlaylistName}",
-                uris.Count, playlist.Name);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to add items to playlist");
-        }
-    }
-
-    /// <summary>
-    /// Removes the specified media item(s) from a playlist.
-    /// </summary>
-    public async Task RemoveFromPlaylistAsync(object item, Playlist playlist)
-    {
-        try
-        {
-            var mediaItems = GetMediaItemsFromParameter(item);
-
-            if (mediaItems.Count == 0)
-            {
-                _logger.LogDebug("No items selected to remove from playlist");
-                return;
-            }
-
-            _logger.LogDebug("Removing {Count} items from playlist: {PlaylistName}",
-                mediaItems.Count, playlist.Name);
-
-            // Positionen extrahieren
-            var positions = mediaItems
-                .Where(i => i is Track track && track.Index > 0)
-                .Cast<Track>()
-                .Select(t => t.Index)
-                .OrderByDescending(p => p)
-                .ToList();
-
-            if (!positions.Any())
-            {
-                _logger.LogDebug("No valid positions found in selected items");
-                return;
-            }
-
-            await _playlistService.RemoveTracksAsync(playlist, positions);
-
-            _logger.LogDebug("Successfully removed {Count} items from playlist: {PlaylistName}",
-                positions.Count, playlist.Name);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to remove items from playlist");
-        }
-    }
 
     /// <summary>
     /// Adds the specified media item(s) to favorites.
@@ -202,50 +112,6 @@ public class MediaItemActions : IMediaItemActions
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to remove items from favorites");
-        }
-    }
-
-    /// <summary>
-    /// Updates a playlist in the library.
-    /// </summary>
-    public async Task UpdatePlaylistAsync(Playlist playlist)
-    {
-        if (playlist == null)
-        {
-            _logger.LogWarning("No playlist provided for update");
-            return;
-        }
-
-        try
-        {
-            _logger.LogDebug("Updating playlist: {PlaylistName}", playlist.Name);
-            await _playlistService.UpdatePlaylistAsync(playlist);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to update playlist: {PlaylistName}", playlist.Name);
-        }
-    }
-
-    /// <summary>
-    /// Removes a playlist from the library.
-    /// </summary>
-    public async Task RemovePlaylistAsync(Playlist playlist)
-    {
-        if (playlist == null)
-        {
-            _logger.LogWarning("No playlist provided for removal");
-            return;
-        }
-
-        try
-        {
-            _logger.LogDebug("Removing playlist: {PlaylistName}", playlist.Name);
-            await _playlistService.RemovePlaylistAsync(playlist);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to remove playlist: {PlaylistName}", playlist.Name);
         }
     }
 
