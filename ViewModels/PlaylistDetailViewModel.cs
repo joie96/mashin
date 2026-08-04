@@ -638,16 +638,16 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
         menu.Add(new ContextMenuItem
         {
-            Text = "Wiedergabeliste umbenennen",
-            Icon = FluentIcons.Edit16,
-            Command = new Command(async () => await RenamePlaylistAsync())
+            Text = "Wiedergabeliste sortieren",
+            Icon = FluentIcons.ArrowSort16,
+            Command = new Command(async () => await SortPlaylistContentAsync())
         });
 
         menu.Add(new ContextMenuItem
         {
-            Text = "Inhalt sortieren",
-            Icon = FluentIcons.TextBulletListLtr16,
-            Command = new Command(async () => await SortPlaylistContentAsync())
+            Text = "Wiedergabeliste umbenennen",
+            Icon = FluentIcons.Rename16,
+            Command = new Command(async () => await RenamePlaylistAsync())
         });
 
         menu.Add(new ContextMenuItem
