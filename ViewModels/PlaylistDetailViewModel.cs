@@ -20,6 +20,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 {
     #region Fields
 
+    private readonly MusicAssistantService _musicAssistant;
     private readonly IPlaylistService _playlistService;
     private readonly SettingsService _settings;
     private readonly IOverlayService _overlayService;
@@ -157,6 +158,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     #region Construction
 
     public PlaylistDetailViewModel(
+        MusicAssistantService musicAssistant,
         IPlaylistService playlistService,
         SettingsService settings,
         IOverlayService overlayService,
@@ -166,6 +168,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         INavigationService navigationService,
         ILogger<PlaylistDetailViewModel> logger)
     {
+        _musicAssistant = musicAssistant;
         _playlistService = playlistService;
         _settings = settings;
         _overlayService = overlayService;
@@ -308,32 +311,14 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         try
         {
             var playlist = ResolvePlaylistFromService(playlistId, providerInstanceOrDomain);
-            if (playlist == null)
+            if (playlist != null)
             {
-                Playlist = null;
-                Tracks = new ObservableRangeCollection<Track>();
-                _logger.LogWarning("Playlist not found in local playlist service state: {PlaylistId}", playlistId);
+                await LoadLocalPlaylistAsync(playlist);
                 return;
             }
 
-            Playlist = playlist;
-            OnPropertyChanged(nameof(IsPlaylistFavorite));
-
-            var tracks = playlist.Items
-                .OrderBy(track => track.SortName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(track => track.DisplayName, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            for (var i = 0; i < tracks.Count; i++)
-            {
-                tracks[i].Index = i;
-            }
-
-            Tracks = new ObservableRangeCollection<Track>(tracks);
-            await BuildHeaderContextMenuAsync();
-            await BuildContentContextMenuAsync();
-
-            _logger.LogDebug("Loaded local playlist '{Name}' with {Count} tracks", playlist.Name, tracks.Count);
+            await LoadPlaylistMetadataAsync(playlistId, providerInstanceOrDomain);
+            await LoadPlaylistTracksAsync(playlistId, providerInstanceOrDomain);
         }
         catch (Exception ex)
         {
@@ -342,6 +327,97 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         finally
         {
             IsLoadingMetadata = false;
+            IsLoadingTracks = false;
+        }
+    }
+
+    private async Task LoadLocalPlaylistAsync(Playlist playlist)
+    {
+        Playlist = playlist;
+        OnPropertyChanged(nameof(IsPlaylistFavorite));
+
+        var tracks = playlist.Items
+            .OrderBy(track => track.SortName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(track => track.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        for (var i = 0; i < tracks.Count; i++)
+        {
+            tracks[i].Index = i;
+        }
+
+        Tracks = new ObservableRangeCollection<Track>(tracks);
+        await BuildHeaderContextMenuAsync();
+        await BuildContentContextMenuAsync();
+
+        _logger.LogDebug("Loaded local playlist '{Name}' with {Count} tracks", playlist.Name, tracks.Count);
+    }
+
+    private async Task LoadPlaylistMetadataAsync(string playlistId, string providerInstanceOrDomain)
+    {
+        try
+        {
+            var playlist = await _musicAssistant.GetPlaylistAsync(playlistId, providerInstanceOrDomain);
+            if (playlist != null)
+            {
+                playlist.Favorite = await UserDataService.IsFavoriteAsync(playlist);
+
+                var prefix = string.Concat(_settings.Username, "--");
+                playlist.DisplayName = playlist.Name;
+
+                if (!string.IsNullOrWhiteSpace(prefix)
+                    && !string.IsNullOrWhiteSpace(playlist.Name)
+                    && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    playlist.DisplayName = playlist.Name[prefix.Length..];
+                }
+            }
+
+            Playlist = playlist;
+            OnPropertyChanged(nameof(IsPlaylistFavorite));
+
+            if (Playlist == null)
+            {
+                Tracks = new ObservableRangeCollection<Track>();
+                _logger.LogWarning("Playlist not found: {PlaylistId}", playlistId);
+                return;
+            }
+
+            await BuildHeaderContextMenuAsync();
+        }
+        finally
+        {
+            IsLoadingMetadata = false;
+        }
+    }
+
+    private async Task LoadPlaylistTracksAsync(string playlistId, string providerInstanceOrDomain)
+    {
+        try
+        {
+            if (Playlist == null)
+            {
+                return;
+            }
+
+            var tracks = await _musicAssistant.GetPlaylistTracksAsync(
+                playlistId,
+                providerInstanceOrDomain,
+                forceRefresh: true);
+
+            for (var i = 0; i < tracks.Count; i++)
+            {
+                tracks[i].Index = i;
+                tracks[i].Favorite = await UserDataService.IsFavoriteAsync(tracks[i]);
+            }
+
+            Tracks = new ObservableRangeCollection<Track>(tracks);
+            await BuildContentContextMenuAsync();
+
+            _logger.LogDebug("Loaded online playlist '{Name}' with {Count} tracks", Playlist.Name, Tracks.Count);
+        }
+        finally
+        {
             IsLoadingTracks = false;
         }
     }
