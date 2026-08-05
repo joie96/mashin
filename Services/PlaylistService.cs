@@ -198,24 +198,35 @@ public sealed class PlaylistService : IPlaylistService
             await _musicAssistant.AddPlaylistTracksAsync(recreatedPlaylist.ItemId, tracksToRestore);
         }
 
-        ApplyPlaylistDisplayName(recreatedPlaylist);
+        // Keep the existing playlist instance in sync so open detail views keep a valid ID.
+        var newPlaylistItemId = recreatedPlaylist.ItemId;
+        playlist.ItemId = recreatedPlaylist.ItemId;
+        playlist.Provider = recreatedPlaylist.Provider;
+        playlist.SortName = recreatedPlaylist.SortName;
+        playlist.Uri = recreatedPlaylist.Uri;
+        playlist.ProviderMappings = recreatedPlaylist.ProviderMappings;
+        playlist.Metadata = recreatedPlaylist.Metadata;
+        playlist.Owner = recreatedPlaylist.Owner;
+        playlist.IsEditable = recreatedPlaylist.IsEditable;
+
+        ApplyPlaylistDisplayName(playlist);
         for (var i = 0; i < sourceTracks.Count; i++)
         {
             sourceTracks[i].Index = i;
         }
 
-        recreatedPlaylist.Items = sourceTracks;
-        recreatedPlaylist.Favorite = await _userDataService.IsFavoriteAsync(recreatedPlaylist);
+        playlist.Items = sourceTracks;
+        playlist.Favorite = await _userDataService.IsFavoriteAsync(playlist);
 
-        // Replace old Playlist with recreated Playlist locally
+        // Replace old playlist entry locally with the same playlist instance.
         var existingIndex = FindPlaylistIndexByItemId(oldPlaylistItemId);
         if (existingIndex >= 0)
         {
             Playlists.RemoveAt(existingIndex);
         }
 
-        AddLocalPlaylist(recreatedPlaylist);
-        Changed?.Invoke(this, new PlaylistServiceChangedEventArgs(PlaylistServiceChangeType.Updated, recreatedPlaylist.ItemId));
+        AddLocalPlaylist(playlist);
+        Changed?.Invoke(this, new PlaylistServiceChangedEventArgs(PlaylistServiceChangeType.Updated, newPlaylistItemId));
     }
 
     public async Task RemovePlaylistAsync(Playlist playlist)
