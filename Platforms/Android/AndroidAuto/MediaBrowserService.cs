@@ -56,6 +56,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
 
     private const string CustomActionToggleFavorite = "custom:toggle_favorite";
     private const string CustomActionToggleShuffle = "custom:toggle_shuffle";
+    private const string CustomActionToggleRepeatMode = "custom:toggle_repeat_mode";
     private const string ExtrasKeyCommandButtonIconCompat = "androidx.media3.session.EXTRAS_KEY_COMMAND_BUTTON_ICON_COMPAT";
     private const int CommandButtonIconHeartFilled = 1042557;
     private const int CommandButtonIconHeartUnfilled = 59517;
@@ -1117,7 +1118,28 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             ExtrasKeyCommandButtonIconCompat,
             isShuffleEnabled ? Resource.Drawable.shuffle_on : Resource.Drawable.shuffle);
 
+        var repeatMode = GetNormalizedRepeatMode(playback.RepeatMode);
+        var repeatActionExtras = new Bundle();
+        repeatActionExtras.PutInt(
+            ExtrasKeyCommandButtonIconCompat,
+            GetRepeatModeIconResource(repeatMode));
+
+        var repeatActionLabel = repeatMode switch
+        {
+            mashin.Models.RepeatMode.Off => "Repeat aktivieren",
+            mashin.Models.RepeatMode.All => "Repeat One aktivieren",
+            _ => "Repeat deaktivieren"
+        };
+
         playbackStateBuilder
+            .AddCustomAction(new PlaybackStateCompat.CustomAction.Builder(
+                CustomActionToggleFavorite,
+                new Java.Lang.String(track?.Favorite == true ? "Favorit entfernen" : "Zu Favoriten"),
+                track?.Favorite == true
+                    ? Resource.Drawable.favorite_filled
+                    : Resource.Drawable.favorite)
+                .SetExtras(favoriteActionExtras)
+                .Build())
             .AddCustomAction(new PlaybackStateCompat.CustomAction.Builder(
                 CustomActionToggleShuffle,
                 new Java.Lang.String(isShuffleEnabled ? "Shuffle deaktivieren" : "Shuffle aktivieren"),
@@ -1127,12 +1149,10 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
                 .SetExtras(shuffleActionExtras)
                 .Build())
             .AddCustomAction(new PlaybackStateCompat.CustomAction.Builder(
-                CustomActionToggleFavorite,
-                new Java.Lang.String(track?.Favorite == true ? "Favorit entfernen" : "Zu Favoriten"),
-                track?.Favorite == true
-                    ? Resource.Drawable.favorite_filled
-                    : Resource.Drawable.favorite)
-                .SetExtras(favoriteActionExtras)
+                CustomActionToggleRepeatMode,
+                new Java.Lang.String(repeatActionLabel),
+                GetRepeatModeIconResource(repeatMode))
+                .SetExtras(repeatActionExtras)
                 .Build());
 
         session.SetPlaybackState(playbackStateBuilder.Build());
@@ -1225,6 +1245,26 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             PlayerStateType.Error => PlaybackStateCompat.StateError,
             PlayerStateType.Idle => PlaybackStateCompat.StateStopped,
             _ => PlaybackStateCompat.StateNone
+        };
+    }
+
+    private static mashin.Models.RepeatMode GetNormalizedRepeatMode(string? repeatMode)
+    {
+        if (Enum.TryParse<mashin.Models.RepeatMode>(repeatMode, true, out var parsedMode))
+        {
+            return parsedMode;
+        }
+
+        return mashin.Models.RepeatMode.Off;
+    }
+
+    private static int GetRepeatModeIconResource(mashin.Models.RepeatMode repeatMode)
+    {
+        return repeatMode switch
+        {
+            mashin.Models.RepeatMode.All => Resource.Drawable.repeat_on,
+            mashin.Models.RepeatMode.One => Resource.Drawable.repeat_one_on,
+            _ => Resource.Drawable.repeat
         };
     }
 
@@ -1806,6 +1846,13 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
                     if (string.Equals(action, CustomActionToggleFavorite, StringComparison.Ordinal))
                     {
                         await ToggleCurrentTrackFavoriteAsync(playback, _service._userDataService);
+                        _service.SyncMediaSessionState();
+                        return;
+                    }
+
+                    if (string.Equals(action, CustomActionToggleRepeatMode, StringComparison.Ordinal))
+                    {
+                        await playback.ToggleRepeatModeAsync(playback.RepeatMode);
                         _service.SyncMediaSessionState();
                         return;
                     }
