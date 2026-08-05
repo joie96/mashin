@@ -343,7 +343,30 @@ public sealed class PlaylistService : IPlaylistService
 
     private void AddLocalPlaylist(Playlist playlist)
     {
-        var insertIndex = FindInsertIndex(playlist);
+        var insertIndex = Playlists.Count;
+
+        for (var i = 0; i < Playlists.Count; i++)
+        {
+            var current = Playlists[i];
+            var sortNameComparison = string.Compare(
+                playlist.SortName ?? string.Empty,
+                current.SortName ?? string.Empty,
+                StringComparison.OrdinalIgnoreCase);
+
+            if (sortNameComparison < 0)
+            {
+                insertIndex = i;
+                break;
+            }
+
+            if (sortNameComparison == 0
+                && string.Compare(playlist.Name, current.Name, StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                insertIndex = i;
+                break;
+            }
+        }
+
         Playlists.Insert(insertIndex, playlist);
     }
 
@@ -357,31 +380,6 @@ public sealed class PlaylistService : IPlaylistService
         }
 
         Playlists[existingIndex] = playlist;
-    }
-
-    private int FindInsertIndex(Playlist playlist)
-    {
-        for (var i = 0; i < Playlists.Count; i++)
-        {
-            var current = Playlists[i];
-            var sortNameComparison = string.Compare(
-                playlist.SortName ?? string.Empty,
-                current.SortName ?? string.Empty,
-                StringComparison.OrdinalIgnoreCase);
-
-            if (sortNameComparison < 0)
-            {
-                return i;
-            }
-
-            if (sortNameComparison == 0
-                && string.Compare(playlist.Name, current.Name, StringComparison.OrdinalIgnoreCase) < 0)
-            {
-                return i;
-            }
-        }
-
-        return Playlists.Count;
     }
 
     private void ApplyPlaylistDisplayName(Playlist playlist)

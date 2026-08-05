@@ -336,10 +336,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         Playlist = playlist;
         OnPropertyChanged(nameof(IsPlaylistFavorite));
 
-        var tracks = playlist.Items
-            .OrderBy(track => track.SortName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(track => track.DisplayName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var tracks = playlist.Items.ToList();
 
         for (var i = 0; i < tracks.Count; i++)
         {
