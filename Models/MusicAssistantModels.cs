@@ -44,6 +44,7 @@ namespace mashin.Models
         private bool _favorite;
         private ProviderManifest? _providerManifest;
         private string _name = string.Empty;
+        private string _displayName = string.Empty;
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -97,12 +98,25 @@ namespace mashin.Models
                 _name = value ?? string.Empty;
                 DisplayName = _name;
                 OnPropertyChanged();
-                OnPropertyChanged(nameof(DisplayName));
             }
         }
 
         [JsonIgnore]
-        public string DisplayName { get; set; } = string.Empty;
+        public string DisplayName
+        {
+            get => _displayName;
+            set
+            {
+                var normalized = value ?? string.Empty;
+                if (_displayName == normalized)
+                {
+                    return;
+                }
+
+                _displayName = normalized;
+                OnPropertyChanged();
+            }
+        }
 
         [JsonPropertyName("sort_name")]
         public string? SortName { get; set; }

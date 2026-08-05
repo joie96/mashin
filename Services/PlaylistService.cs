@@ -172,6 +172,8 @@ public sealed class PlaylistService : IPlaylistService
         // await _musicAssistant.UpdatePlaylistAsync(playlist.ItemId, playlist, true);
 
         var oldPlaylistItemId = playlist.ItemId;
+        var localPlaylist = Playlists.FirstOrDefault(existing =>
+            string.Equals(existing.ItemId, oldPlaylistItemId, StringComparison.OrdinalIgnoreCase));
         var sourceTracks = playlist.Items.ToList();
 
         // Remove old Playlist
@@ -182,7 +184,6 @@ public sealed class PlaylistService : IPlaylistService
         if (recreatedPlaylist == null)
         {
             _logger.LogWarning("Playlist {PlaylistId} was removed but could not be recreated.", oldPlaylistItemId);
-            await RefreshAsync();
             return;
         }
 
@@ -198,7 +199,7 @@ public sealed class PlaylistService : IPlaylistService
             await _musicAssistant.AddPlaylistTracksAsync(recreatedPlaylist.ItemId, tracksToRestore);
         }
 
-        // Keep the existing playlist instance in sync so open detail views keep a valid ID.
+        // Update opened playlist (playlistdetail view) in-place
         var newPlaylistItemId = recreatedPlaylist.ItemId;
         playlist.ItemId = recreatedPlaylist.ItemId;
         playlist.Provider = recreatedPlaylist.Provider;
@@ -208,8 +209,8 @@ public sealed class PlaylistService : IPlaylistService
         playlist.Metadata = recreatedPlaylist.Metadata;
         playlist.Owner = recreatedPlaylist.Owner;
         playlist.IsEditable = recreatedPlaylist.IsEditable;
-
         ApplyPlaylistDisplayName(playlist);
+        
         for (var i = 0; i < sourceTracks.Count; i++)
         {
             sourceTracks[i].Index = i;
@@ -218,14 +219,23 @@ public sealed class PlaylistService : IPlaylistService
         playlist.Items = sourceTracks;
         playlist.Favorite = await _userDataService.IsFavoriteAsync(playlist);
 
-        // Replace old playlist entry locally with the same playlist instance.
-        var existingIndex = FindPlaylistIndexByItemId(oldPlaylistItemId);
-        if (existingIndex >= 0)
+        // Update local playlist in-place
+        if (localPlaylist != null && !ReferenceEquals(localPlaylist, playlist))
         {
-            Playlists.RemoveAt(existingIndex);
+            localPlaylist.Name = playlist.Name;
+            localPlaylist.ItemId = playlist.ItemId;
+            localPlaylist.Provider = playlist.Provider;
+            localPlaylist.SortName = playlist.SortName;
+            localPlaylist.Uri = playlist.Uri;
+            localPlaylist.ProviderMappings = playlist.ProviderMappings;
+            localPlaylist.Metadata = playlist.Metadata;
+            localPlaylist.Owner = playlist.Owner;
+            localPlaylist.IsEditable = playlist.IsEditable;
+            localPlaylist.Items = sourceTracks;
+            localPlaylist.Favorite = playlist.Favorite;
+            ApplyPlaylistDisplayName(localPlaylist);
         }
 
-        AddLocalPlaylist(playlist);
         Changed?.Invoke(this, new PlaylistServiceChangedEventArgs(PlaylistServiceChangeType.Updated, newPlaylistItemId));
     }
 
