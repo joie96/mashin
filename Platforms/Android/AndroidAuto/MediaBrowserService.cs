@@ -55,6 +55,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     private const string PrefixArtistRadio = "artist_radio";
 
     private const string CustomActionToggleFavorite = "custom:toggle_favorite";
+    private const string CustomActionToggleShuffle = "custom:toggle_shuffle";
     private const string ExtrasKeyCommandButtonIconCompat = "androidx.media3.session.EXTRAS_KEY_COMMAND_BUTTON_ICON_COMPAT";
     private const int CommandButtonIconHeartFilled = 1042557;
     private const int CommandButtonIconHeartUnfilled = 59517;
@@ -1110,7 +1111,21 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             ExtrasKeyCommandButtonIconCompat,
             track?.Favorite == true ? CommandButtonIconHeartFilled : CommandButtonIconHeartUnfilled);
 
+        var isShuffleEnabled = playback.ShuffleEnabled == true;
+        var shuffleActionExtras = new Bundle();
+        shuffleActionExtras.PutInt(
+            ExtrasKeyCommandButtonIconCompat,
+            isShuffleEnabled ? Resource.Drawable.shuffle_on : Resource.Drawable.shuffle);
+
         playbackStateBuilder
+            .AddCustomAction(new PlaybackStateCompat.CustomAction.Builder(
+                CustomActionToggleShuffle,
+                new Java.Lang.String(isShuffleEnabled ? "Shuffle deaktivieren" : "Shuffle aktivieren"),
+                isShuffleEnabled
+                    ? Resource.Drawable.shuffle_on
+                    : Resource.Drawable.shuffle)
+                .SetExtras(shuffleActionExtras)
+                .Build())
             .AddCustomAction(new PlaybackStateCompat.CustomAction.Builder(
                 CustomActionToggleFavorite,
                 new Java.Lang.String(track?.Favorite == true ? "Favorit entfernen" : "Zu Favoriten"),
@@ -1781,6 +1796,13 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             {
                 try
                 {
+                    if (string.Equals(action, CustomActionToggleShuffle, StringComparison.Ordinal))
+                    {
+                        await playback.ToggleShuffleAsync(playback.ShuffleEnabled);
+                        _service.SyncMediaSessionState();
+                        return;
+                    }
+
                     if (string.Equals(action, CustomActionToggleFavorite, StringComparison.Ordinal))
                     {
                         await ToggleCurrentTrackFavoriteAsync(playback, _service._userDataService);
