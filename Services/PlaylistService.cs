@@ -169,8 +169,53 @@ public sealed class PlaylistService : IPlaylistService
 
     public async Task UpdatePlaylistAsync(Playlist playlist)
     {
-        await _musicAssistant.UpdatePlaylistAsync(playlist.ItemId, playlist, true);
-        Changed?.Invoke(this, new PlaylistServiceChangedEventArgs(PlaylistServiceChangeType.Updated, playlist.ItemId));
+        // await _musicAssistant.UpdatePlaylistAsync(playlist.ItemId, playlist, true);
+
+        var oldPlaylistItemId = playlist.ItemId;
+        var sourceTracks = playlist.Items.ToList();
+
+        // Remove old Playlist
+        await _musicAssistant.RemovePlaylistAsync(oldPlaylistItemId);
+
+        // Recreate Playlist
+        var recreatedPlaylist = await _musicAssistant.CreatePlaylistAsync(playlist.Name);
+        if (recreatedPlaylist == null)
+        {
+            _logger.LogWarning("Playlist {PlaylistId} was removed but could not be recreated.", oldPlaylistItemId);
+            await RefreshAsync();
+            return;
+        }
+
+        // Restore Tracks
+        var tracksToRestore = sourceTracks
+            .Where(track => !string.IsNullOrWhiteSpace(track.Uri))
+            .Select(track => track.Uri!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (tracksToRestore.Count > 0)
+        {
+            await _musicAssistant.AddPlaylistTracksAsync(recreatedPlaylist.ItemId, tracksToRestore);
+        }
+
+        ApplyPlaylistDisplayName(recreatedPlaylist);
+        for (var i = 0; i < sourceTracks.Count; i++)
+        {
+            sourceTracks[i].Index = i;
+        }
+
+        recreatedPlaylist.Items = sourceTracks;
+        recreatedPlaylist.Favorite = await _userDataService.IsFavoriteAsync(recreatedPlaylist);
+
+        // Replace old Playlist with recreated Playlist locally
+        var existingIndex = FindPlaylistIndexByItemId(oldPlaylistItemId);
+        if (existingIndex >= 0)
+        {
+            Playlists.RemoveAt(existingIndex);
+        }
+
+        AddLocalPlaylist(recreatedPlaylist);
+        Changed?.Invoke(this, new PlaylistServiceChangedEventArgs(PlaylistServiceChangeType.Updated, recreatedPlaylist.ItemId));
     }
 
     public async Task RemovePlaylistAsync(Playlist playlist)
