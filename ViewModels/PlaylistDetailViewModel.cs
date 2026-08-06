@@ -21,8 +21,6 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     #region Fields
 
     private readonly MusicAssistantService _musicAssistant;
-    private readonly IPlaylistService _playlistService;
-    private readonly SettingsService _settings;
     private readonly IOverlayService _overlayService;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
@@ -159,8 +157,6 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
     public PlaylistDetailViewModel(
         MusicAssistantService musicAssistant,
-        IPlaylistService playlistService,
-        SettingsService settings,
         IOverlayService overlayService,
         UserDataService userDataService,
         PlaybackService playbackService,
@@ -169,8 +165,6 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         ILogger<PlaylistDetailViewModel> logger)
     {
         _musicAssistant = musicAssistant;
-        _playlistService = playlistService;
-        _settings = settings;
         _overlayService = overlayService;
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
@@ -310,7 +304,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         IsLoadingTracks = true;
         try
         {
-            var playlist = ResolvePlaylistFromService(playlistId, providerInstanceOrDomain);
+            var playlist = await ResolvePlaylistFromServiceAsync(playlistId, providerInstanceOrDomain);
             if (playlist != null)
             {
                 await LoadLocalPlaylistAsync(playlist);
@@ -333,10 +327,17 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
     private async Task LoadLocalPlaylistAsync(Playlist playlist)
     {
+        await _musicAssistant.EnrichWithProviderInfoAsync(new List<Playlist> { playlist });
+
         Playlist = playlist;
         OnPropertyChanged(nameof(IsPlaylistFavorite));
 
         var tracks = playlist.Items.ToList();
+
+        if (tracks.Count > 0)
+        {
+            await _musicAssistant.EnrichWithProviderInfoAsync(tracks);
+        }
 
         for (var i = 0; i < tracks.Count; i++)
         {
@@ -358,16 +359,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             if (playlist != null)
             {
                 playlist.Favorite = await UserDataService.IsFavoriteAsync(playlist);
-
-                var prefix = string.Concat(_settings.Username, "--");
                 playlist.DisplayName = playlist.Name;
-
-                if (!string.IsNullOrWhiteSpace(prefix)
-                    && !string.IsNullOrWhiteSpace(playlist.Name)
-                    && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                {
-                    playlist.DisplayName = playlist.Name[prefix.Length..];
-                }
             }
 
             Playlist = playlist;
@@ -436,21 +428,6 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
         updatedName = updatedName.Trim();
 
-        var username = _settings.Username;
-        var prefix = string.IsNullOrWhiteSpace(username)
-            ? null
-            : string.Concat(username, "--");
-
-        if (!string.IsNullOrWhiteSpace(prefix))
-        {
-            while (updatedName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                updatedName = updatedName[prefix.Length..].TrimStart();
-            }
-
-            updatedName = string.Concat(prefix, updatedName);
-        }
-
         var originalName = playlist.Name;
         var originalDisplayName = playlist.DisplayName;
 
@@ -458,12 +435,9 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         try
         {
             playlist.Name = updatedName;
-            playlist.DisplayName = !string.IsNullOrWhiteSpace(prefix)
-                && updatedName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-                ? updatedName[prefix.Length..]
-                : updatedName;
+            playlist.DisplayName = updatedName;
 
-            await _playlistService.UpdatePlaylistAsync(playlist);
+            await UserDataService.UpdatePlaylistAsync(playlist);
             renamed = true;
         }
         catch (Exception ex)
@@ -493,7 +467,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         var removed = false;
         try
         {
-            await _playlistService.RemovePlaylistAsync(playlist);
+            await UserDataService.RemovePlaylistAsync(playlist);
             removed = true;
         }
         catch (Exception ex)
@@ -555,7 +529,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         Tracks.ReplaceRange(sortedTracks);
         playlist.Items = sortedTracks;
 
-        await _playlistService.UpdatePlaylistAsync(playlist);
+        await UserDataService.UpdatePlaylistAsync(playlist);
 
         _logger.LogDebug(
             "Playlist sort requested for '{PlaylistName}': field={SortField}, descending={IsDescending}",
@@ -658,9 +632,12 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         return Task.CompletedTask;
     }
 
-    private Task BuildContentContextMenuAsync()
+    private async Task BuildContentContextMenuAsync()
     {
-        var playlists = _playlistService.Playlists;
+        var snapshot = await UserDataService.GetPlaylistsAsync();
+        var playlists = snapshot.Playlists
+            .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist))
+            .ToList();
 
         var targets = GetContextMenuTargetTracks().ToList();
         var isSingleTarget = targets.Count == 1;
@@ -815,8 +792,8 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                         Text = playlist.DisplayName,
                         Icon = FluentIcons.TextBulletListLtr16,
                         Command = new Command(async () =>
-                            await _playlistService.AddTracksAsync(
-                                playlist,
+                            await UserDataService.AddPlaylistTracksAsync(
+                                playlist.ItemId,
                                 GetContextMenuTargetTracks().ToList()))
                     }))
         });
@@ -831,7 +808,10 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 {
                     var tracksToRemove = GetContextMenuTargetTracks().OfType<Track>().ToList();
 
-                    await _playlistService.RemoveTracksAsync(Playlist, tracksToRemove);
+                    if (!string.IsNullOrWhiteSpace(Playlist.ItemId) && tracksToRemove.Count > 0)
+                    {
+                        await UserDataService.RemovePlaylistTracksAsync(Playlist.ItemId, tracksToRemove);
+                    }
 
                     // Apply a local delta update so the table does not need a full reset.
                     if (tracksToRemove.Count > 0)
@@ -910,15 +890,19 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         }
 
         _contentContextMenuItems = menu;
-        return Task.CompletedTask;
     }
 
     #endregion
 
     #region Helper Methods
-    private Playlist? ResolvePlaylistFromService(string playlistId, string providerInstanceOrDomain)
+    private async Task<Playlist?> ResolvePlaylistFromServiceAsync(string playlistId, string providerInstanceOrDomain)
     {
-        var byProviderAndId = _playlistService.Playlists.FirstOrDefault(playlist =>
+        var snapshot = await UserDataService.GetPlaylistsAsync();
+        var playlists = snapshot.Playlists
+            .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist))
+            .ToList();
+
+        var byProviderAndId = playlists.FirstOrDefault(playlist =>
             string.Equals(playlist.ItemId, playlistId, StringComparison.OrdinalIgnoreCase)
             && string.Equals(playlist.Provider, providerInstanceOrDomain, StringComparison.OrdinalIgnoreCase));
 
@@ -927,7 +911,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             return byProviderAndId;
         }
 
-        return _playlistService.Playlists.FirstOrDefault(playlist =>
+        return playlists.FirstOrDefault(playlist =>
             string.Equals(playlist.ItemId, playlistId, StringComparison.OrdinalIgnoreCase));
     }
 

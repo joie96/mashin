@@ -28,7 +28,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly UserDataService _userDataService;
-    private readonly IPlaylistService _playlistService;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
     private readonly ILogger<ArtistDetailViewModel> _logger;
@@ -230,7 +229,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     public ArtistDetailViewModel(
         MusicAssistantService musicAssistant,
         UserDataService userDataService,
-        IPlaylistService playlistService,
         PlaybackService playbackService,
         IContextMenuService contextMenuService,
         INavigationService navigationService,
@@ -238,7 +236,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     {
         _musicAssistant = musicAssistant;
         _userDataService = userDataService;
-        _playlistService = playlistService;
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
         _logger = logger;
@@ -891,9 +888,12 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         return Task.CompletedTask;
     }
 
-    private Task BuildTrackContextMenuAsync()
+    private async Task BuildTrackContextMenuAsync()
     {
-        var playlists = _playlistService.Playlists;
+        var snapshot = await _userDataService.GetPlaylistsAsync();
+        var playlists = snapshot.Playlists
+            .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist))
+            .ToList();
 
         var menu = new ObservableRangeCollection<ContextMenuItem>
         {
@@ -978,9 +978,11 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                             Text = playlist.DisplayName,
                             Icon = FluentIcons.TextBulletListLtr16,
                             Command = new Command(async () =>
-                                await _playlistService.AddTracksAsync(
-                                    playlist,
-                                    GetContextMenuTargetTracks().ToList()))
+                            {
+                                await _userDataService.AddPlaylistTracksAsync(
+                                    playlist.ItemId,
+                                    GetContextMenuTargetTracks().ToList());
+                            })
                         }))
             },
             new() { IsSeparator = true },
@@ -1008,7 +1010,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
         };
 
         _trackContextMenuItems = menu;
-        return Task.CompletedTask;
     }
 
     private IReadOnlyList<Track> GetContextMenuTargetTracks()
@@ -1215,7 +1216,6 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
         return _contextMenuTargetArtist == null ? Array.Empty<Artist>() : new[] { _contextMenuTargetArtist };
     }
-
     #endregion
 
     #region INotifyPropertyChanged

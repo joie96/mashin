@@ -21,7 +21,6 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly UserDataService _userDataService;
-    private readonly IPlaylistService _playlistService;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
     private readonly ILogger<AlbumDetailViewModel> _logger;
@@ -230,7 +229,6 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
     public AlbumDetailViewModel(
         MusicAssistantService musicAssistant,
         UserDataService userDataService,
-        IPlaylistService playlistService,
         PlaybackService playbackService,
         IContextMenuService contextMenuService,
         INavigationService navigationService,
@@ -238,7 +236,6 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
     {
         _musicAssistant = musicAssistant;
         _userDataService = userDataService;
-        _playlistService = playlistService;
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
         _logger = logger;
@@ -717,9 +714,12 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
         return Task.CompletedTask;
     }
 
-    private Task BuildTrackContextMenuAsync()
+    private async Task BuildTrackContextMenuAsync()
     {
-        var playlists = _playlistService.Playlists;
+        var snapshot = await _userDataService.GetPlaylistsAsync();
+        var playlists = snapshot.Playlists
+            .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist))
+            .ToList();
 
         var menu = new ObservableRangeCollection<ContextMenuItem>
         {
@@ -805,9 +805,11 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
                             Text = playlist.DisplayName,
                             Icon = FluentIcons.TextBulletListLtr16,
                             Command = new Command(async () =>
-                                await _playlistService.AddTracksAsync(
-                                    playlist,
-                                    Tracks.Where(t => t.IsSelected).ToList()))
+                            {
+                                await _userDataService.AddPlaylistTracksAsync(
+                                    playlist.ItemId,
+                                    Tracks.Where(t => t.IsSelected).ToList());
+                            })
                         }))
             },
             new() { IsSeparator = true },
@@ -835,7 +837,6 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
         };
 
         _trackContextMenuItems = menu;
-        return Task.CompletedTask;
     }
 
     private Task BuildAlbumContextMenuAsync()
@@ -945,7 +946,6 @@ public class AlbumDetailViewModel : INotifyPropertyChanged, INavigationAware, ID
     }
 
     #endregion
-
     #region INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;

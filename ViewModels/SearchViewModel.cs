@@ -35,7 +35,6 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
     #endregion
 
     private readonly MusicAssistantService _musicAssistant;
-    private readonly IPlaylistService _playlistService;
     private readonly SettingsService _settings;
     private readonly IContextMenuService _contextMenuService;
     private readonly INavigationService _navigationService;
@@ -325,7 +324,6 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
 
     public SearchViewModel(
         MusicAssistantService musicAssistant,
-        IPlaylistService playlistService,
         SettingsService settings,
         UserDataService userDataService,
         PlaybackService playbackService,
@@ -334,7 +332,6 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
         ILogger<SearchViewModel> logger)
     {
         _musicAssistant = musicAssistant;
-        _playlistService = playlistService;
         _settings = settings;
         _contextMenuService = contextMenuService;
         _navigationService = navigationService;
@@ -1042,22 +1039,26 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
         return Artists.Where(artist => artist.IsSelected).ToList();
     }
 
-    private Task<ObservableRangeCollection<ContextMenuItem>> GetPlaylistSubItemsAsync()
+    private async Task<ObservableRangeCollection<ContextMenuItem>> GetPlaylistSubItemsAsync()
     {
         var items = new ObservableRangeCollection<ContextMenuItem>();
+        var snapshot = await UserDataService.GetPlaylistsAsync();
+        var playlists = snapshot.Playlists
+            .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist))
+            .ToList();
 
-        foreach (var playlist in _playlistService.Playlists)
+        foreach (var playlist in playlists)
         {
             items.Add(new ContextMenuItem
             {
                 Text = playlist.DisplayName,
                 Icon = FluentIcons.TextBulletListLtr16,
                 Command = new Command(async () =>
-                    await _playlistService.AddTracksAsync(playlist, Tracks.Where(t => t.IsSelected).ToList()))
+                    await UserDataService.AddPlaylistTracksAsync(playlist.ItemId, Tracks.Where(t => t.IsSelected).ToList()))
             });
         }
 
-        return Task.FromResult(items);
+        return items;
     }
 
     #endregion

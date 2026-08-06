@@ -926,22 +926,9 @@ public class MusicAssistantService
         int? limit = null,
         int? offset = null,
         string? orderBy = null,
-        bool libraryItemsOnly = true,
-        string? userPrefix = null)
+        bool libraryItemsOnly = true)
     {
         _logger.LogDebug("Fetching library playlists...");
-
-        var normalizedUserPrefix = string.IsNullOrWhiteSpace(userPrefix)
-            ? null
-            : userPrefix.Trim();
-
-        
-        if (!string.IsNullOrWhiteSpace(normalizedUserPrefix)
-            && string.IsNullOrWhiteSpace(search))
-        {
-            // Hint backend search to reduce payload; local filtering below remains authoritative.
-            search = normalizedUserPrefix;
-        }
 
         var args = new Dictionary<string, object>
         {
@@ -960,19 +947,6 @@ public class MusicAssistantService
         foreach (var playlist in playlists)
         {
             ResolveMediaItemImages(playlist);
-        }
-
-        if (!string.IsNullOrWhiteSpace(normalizedUserPrefix))
-        {
-            playlists = playlists
-                .Where(playlist => !string.IsNullOrWhiteSpace(playlist.Name)
-                    && playlist.Name.StartsWith(normalizedUserPrefix, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-
-            foreach (var playlist in playlists)
-            {
-                playlist.DisplayName = playlist.Name[normalizedUserPrefix.Length..];
-            }
         }
 
         _ = EnrichWithProviderInfoAsync(playlists);

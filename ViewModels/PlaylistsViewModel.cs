@@ -1,6 +1,7 @@
-﻿using mashin.Models;
+using mashin.Models;
 using mashin.Services;
 using mashin.Views.Desktop;
+using mashin.Collections;
 using MauiIcons.Fluent;
 using MauiIcons.Fluent.Filled;
 using Microsoft.Extensions.Logging;
@@ -16,8 +17,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 {
     #region Fields
 
-    private readonly IPlaylistService _playlistService;
-    private readonly SettingsService _settings;
+        private readonly SettingsService _settings;
     private readonly IOverlayService _overlayService;
     private readonly INavigationService _navigationService;
     private readonly UserDataService _userDataService;
@@ -25,6 +25,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
     private readonly IContextMenuService _contextMenuService;
     private readonly ILogger<PlaylistsViewModel> _logger;
     private readonly ObservableCollection<ContextMenuItem> _playlistContextMenuItems = new();
+    private readonly ObservableRangeCollection<Playlist> _playlists = new();
     private readonly IReadOnlyList<TableViewSkeleton> _playlistSkeletons = Enumerable.Range(0, 12)
         .Select(_ => new TableViewSkeleton())
         .ToList();
@@ -38,7 +39,6 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
     #region Construction
 
     public PlaylistsViewModel(
-        IPlaylistService playlistService,
         SettingsService settings,
         IOverlayService overlayService,
         INavigationService navigationService,
@@ -47,7 +47,6 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         IContextMenuService contextMenuService,
         ILogger<PlaylistsViewModel> logger)
     {
-        _playlistService = playlistService;
         _settings = settings;
         _overlayService = overlayService;
         _navigationService = navigationService;
@@ -55,17 +54,16 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         _playbackService = playbackService;
         _contextMenuService = contextMenuService;
         _logger = logger;
-        _playlistService.PropertyChanged += OnPlaylistServicePropertyChanged;
-        _playlistService.Playlists.CollectionChanged += OnPlaylistsCollectionChanged;
-        IsLoading = _playlistService.IsLoading;
 
-        // Navigation command
+        _userDataService.PropertyChanged += OnUserDataServicePropertyChanged;
+        _playlists.CollectionChanged += OnPlaylistsCollectionChanged;
+        IsLoading = _userDataService.IsLoadingPreferences;
+
         PlaylistTappedCommand = new Command<Playlist>(async playlist =>
             await _navigationService.NavigateToAsync<PlaylistDetailPage>(playlist));
 
         CreatePlaylistCommand = new Command(async () => await CreatePlaylistAsync());
 
-        // Long-press selection command
         PlaylistLongPressedCommand = new Command<Playlist>(playlist =>
         {
             if (playlist == null)
@@ -76,7 +74,6 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
             playlist.IsSelected = !playlist.IsSelected;
         });
 
-        // Context menu command
         ShowPlaylistContextMenuAtAnchorCommand = new Command<View>(async anchor =>
         {
             if (anchor == null)
@@ -85,7 +82,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
             }
 
             _contextPlaylist = anchor.BindingContext as Playlist;
-            var hasSelection = _playlistService.Playlists.Any(playlist => playlist.IsSelected);
+            var hasSelection = _playlists.Any(playlist => playlist.IsSelected);
             if (_contextPlaylist == null && !hasSelection)
             {
                 return;
@@ -120,7 +117,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         }
     }
 
-    public bool HasPlaylists => _playlistService.Playlists.Count > 0;
+    public bool HasPlaylists => _playlists.Count > 0;
 
     public bool ShowPlaylistListView => IsLoading || HasPlaylists;
 
@@ -128,7 +125,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
     public IEnumerable<object> PlaylistItems => IsLoading
         ? _playlistSkeletons
-        : _playlistService.Playlists;
+        : _playlists;
 
     #endregion
 
@@ -146,11 +143,17 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
     #region Lifecycle
 
-    public Task OnNavigatedToAsync(object? parameter)
+    public async Task OnNavigatedToAsync(object? parameter)
     {
-        // No loading here, as the PlaylistService is already loading in the background when the app starts.
+        var snapshot = await _userDataService.GetPlaylistsAsync();
+        var playlists = snapshot.Playlists
+            .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist))
+            .OrderBy(playlist => playlist.SortName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(playlist => playlist.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        _playlists.ReplaceRange(playlists);
         _navigationService.IsNavigating = false;
-        return Task.CompletedTask;
     }
 
     public Task OnNavigatedFromAsync()
@@ -165,8 +168,8 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
             return;
         }
 
-        _playlistService.PropertyChanged -= OnPlaylistServicePropertyChanged;
-        _playlistService.Playlists.CollectionChanged -= OnPlaylistsCollectionChanged;
+        _userDataService.PropertyChanged -= OnUserDataServicePropertyChanged;
+        _playlists.CollectionChanged -= OnPlaylistsCollectionChanged;
         _disposed = true;
     }
 
@@ -183,24 +186,33 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         }
 
         name = name.Trim();
-        var username = _settings.Username;
-        var prefix = string.IsNullOrWhiteSpace(username)
+
+        var ownerUsername = string.IsNullOrWhiteSpace(_settings.Username)
             ? null
-            : string.Concat(username, "--");
+            : _settings.Username;
 
-        if (!string.IsNullOrWhiteSpace(prefix))
+        var playlist = new Playlist
         {
-            while (name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                name = name[prefix.Length..].TrimStart();
-            }
-
-            name = string.Concat(prefix, name);
-        }
+            Name = name,
+            DisplayName = name,
+            Provider = "mashin",
+            Owner = ownerUsername,
+            IsEditable = true,
+            Items = Array.Empty<Track>()
+        };
 
         try
         {
-            await _playlistService.CreatePlaylistAsync(name);
+            await _userDataService.AddPlaylistAsync(playlist);
+
+            var snapshot = await _userDataService.GetPlaylistsAsync();
+            var playlists = snapshot.Playlists
+                .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist))
+                .OrderBy(playlist => playlist.SortName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(playlist => playlist.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            _playlists.ReplaceRange(playlists);
         }
         catch (Exception ex)
         {
@@ -272,7 +284,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
     private IReadOnlyList<Playlist> GetPlaylistsForAction()
     {
-        var selected = _playlistService.Playlists.Where(playlist => playlist.IsSelected).ToList();
+        var selected = _playlists.Where(playlist => playlist.IsSelected).ToList();
         if (selected.Count > 0)
         {
             return selected;
@@ -281,11 +293,11 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         return _contextPlaylist == null ? Array.Empty<Playlist>() : new[] { _contextPlaylist };
     }
 
-    private void OnPlaylistServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    private void OnUserDataServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(IPlaylistService.IsLoading))
+        if (e.PropertyName == nameof(UserDataService.IsLoadingPreferences))
         {
-            IsLoading = _playlistService.IsLoading;
+            IsLoading = _userDataService.IsLoadingPreferences;
         }
     }
 
@@ -327,4 +339,3 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
     #endregion
 }
-

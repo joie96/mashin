@@ -25,7 +25,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     // Services
     private readonly SettingsService _settings;
     private readonly MusicAssistantService _musicAssistant;
-    private readonly IPlaylistService _playlistService;
     private readonly INavigationService _navigationService;
     private readonly IOverlayService _overlayService;
     private readonly IContextMenuService _contextMenuService;
@@ -90,7 +89,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     public MainViewModel(
         SettingsService settings,
         MusicAssistantService musicAssistant,
-        IPlaylistService playlistService,
         INavigationService navigationService,
         IOverlayService overlayService,
         UserDataService userDataService,
@@ -101,21 +99,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         _settings = settings;
         _musicAssistant = musicAssistant;
-        _playlistService = playlistService;
         _navigationService = navigationService;
         _overlayService = overlayService;
         _contextMenuService = contextMenuService;
         _playbackService = playbackService;
         _connectionService = connectionService;
         _logger = logger;
-        _playlists = _playlistService.Playlists;
+        _playlists = new ObservableRangeCollection<Playlist>();
         UserDataService = userDataService;
         _selectedAudioQuality = _settings.GetSendspinPreferredAudioCodec();
         _sliderPosition = _playbackService.PositionSeconds;
         _playbackService.CurrentQueueItems.CollectionChanged += OnCurrentQueueItemsCollectionChanged;
         _availablePlayers.CollectionChanged += OnAvailablePlayersCollectionChanged;
         _playlists.CollectionChanged += OnPlaylistsCollectionChanged;
-        _playlistService.PropertyChanged += OnPlaylistServicePropertyChanged;
+        UserDataService.PropertyChanged += OnUserDataServicePropertyChanged;
 
         // Navigation Commands
         NavigateToHomeCommand = new Command(async () => await NavigateToSectionAsync<HomePage>(NavigationSection.Home));
@@ -247,7 +244,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         // Subscribe to playback state events
         _playbackService.PropertyChanged += OnPlaybackServicePropertyChanged;
 
-        IsLoadingPlaylists = _playlistService.IsLoading;
+        IsLoadingPlaylists = UserDataService.IsLoadingPreferences;
 
         var activePlayerId = _playbackService.ActivePlayerId;
         if (!string.IsNullOrWhiteSpace(activePlayerId))
@@ -643,8 +640,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         await _connectionService.ConnectAsync();
         await _connectionService.StartReconnectLoopAsync();
 
-        // Load userdata (favorites)
+        // Load userdata for favorites and playlists
         await UserDataService.LoadPreferencesAsync();
+        var playlistSnapshot = await UserDataService.GetPlaylistsAsync();
+        var playlists = playlistSnapshot.Playlists
+            .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist))
+            .OrderBy(playlist => playlist.SortName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(playlist => playlist.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        _playlists.ReplaceRange(playlists);
 
         CurrentSection = NavigationSection.Home;
         await _navigationService.NavigateToAsync<HomePage>();
@@ -670,8 +675,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             }
         }
 
-        // Load playlists once and keep local list refreshed as needed.
-        await _playlistService.RefreshAsync();
 
         // Build Context Menus
         BuildUserMenuItems();
@@ -850,7 +853,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _playlists.CollectionChanged -= OnPlaylistsCollectionChanged;
-        _playlistService.PropertyChanged -= OnPlaylistServicePropertyChanged;
+        UserDataService.PropertyChanged -= OnUserDataServicePropertyChanged;
         _playbackService.CurrentQueueItems.CollectionChanged -= OnCurrentQueueItemsCollectionChanged;
         _availablePlayers.CollectionChanged -= OnAvailablePlayersCollectionChanged;
 
@@ -946,16 +949,24 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             return;
         }
 
-        var prefix = string.Concat(_settings.Username, "--");
-        if (!string.IsNullOrWhiteSpace(prefix)
-            && !name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            name = string.Concat(prefix, name);
-        }
+        name = name.Trim();
+        var ownerUsername = string.IsNullOrWhiteSpace(_settings.Username)
+            ? null
+            : _settings.Username;
 
         try
         {
-            await _playlistService.CreatePlaylistAsync(name);
+            var playlist = new Playlist
+            {
+                Name = name,
+                DisplayName = name,
+                Provider = "mashin",
+                Owner = ownerUsername,
+                IsEditable = true,
+                Items = Array.Empty<Track>()
+            };
+
+            await UserDataService.AddPlaylistAsync(playlist);
         }
         catch (Exception ex)
         {
@@ -1277,11 +1288,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         BuildCurrentTrackContextMenuItems();
     }
 
-    private void OnPlaylistServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    private void OnUserDataServicePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(IPlaylistService.IsLoading))
+        if (e.PropertyName == nameof(UserDataService.IsLoadingPreferences))
         {
-            IsLoadingPlaylists = _playlistService.IsLoading;
+            IsLoadingPlaylists = UserDataService.IsLoadingPreferences;
         }
     }
 
@@ -1354,8 +1365,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                             Text = playlist.DisplayName,
                             Icon = FluentIcons.TextBulletListLtr16,
                             Command = new Command(async () =>
-                                    await _playlistService.AddTracksAsync(
-                                        playlist,
+                                    await UserDataService.AddPlaylistTracksAsync(
+                                        playlist.ItemId,
                                         CurrentQueueItems
                                             .Select(item => item.MediaItem)
                                             .OfType<Track>()
@@ -1422,7 +1433,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
                         if (currentTrack is Track track)
                         {
-                            await _playlistService.AddTracksAsync(playlist, new List<Track> { track });
+                            await UserDataService.AddPlaylistTracksAsync(playlist.ItemId, new List<Track> { track });
                         }
                     })
                 }));

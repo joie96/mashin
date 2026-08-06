@@ -70,7 +70,6 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     private readonly Dictionary<string, List<mashin.Models.MediaItem>> _trackListActionCache = new(StringComparer.Ordinal);
 
     private PlaybackService? _playbackService;
-    private IPlaylistService? _playlistService;
     private MusicAssistantService? _musicAssistantService;
     private UserDataService? _userDataService;
     private SettingsService? _settingsService;
@@ -86,7 +85,6 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
 
         var services = IPlatformApplication.Current?.Services;
         _playbackService = services?.GetService<PlaybackService>();
-        _playlistService = services?.GetService<IPlaylistService>();
         _musicAssistantService = services?.GetService<MusicAssistantService>();
         _userDataService = services?.GetService<UserDataService>();
         _settingsService = services?.GetService<SettingsService>();
@@ -528,7 +526,6 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             if (applyNameNormalization)
             {
                 playlist.DisplayName = NormalizePlaylistDisplayName(playlist.Name);
-                playlist.Owner = null;
             }
 
             var mediaId = BuildId(PrefixPlaylist, playlist.Provider, playlist.ItemId);
@@ -600,19 +597,8 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
         {
             var snapshot = await LoadFavoritesSnapshotAsync();
             var favoritePlaylists = snapshot.Playlists
-                .Select(BuildPlaylistFromSnapshot)
+                .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist, favorite: true))
                 .ToList();
-
-            var prefix = string.Concat(_settingsService?.Username, "--");
-            favoritePlaylists = favoritePlaylists
-                .Where(playlist => !string.IsNullOrWhiteSpace(playlist.Name)
-                    && playlist.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-
-            foreach (var playlist in favoritePlaylists)
-            {
-                playlist.DisplayName = playlist.Name[prefix.Length..];
-            }
 
             var musicAssistant = _musicAssistantService;
             if (musicAssistant != null && favoritePlaylists.Count > 0)
@@ -640,14 +626,19 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             return new JavaList<MediaBrowserCompat.MediaItem>(favoriteItems);
         }
 
-        var playlists = _playlistService?.Playlists;
-        if (playlists == null)
+        var userDataService = _userDataService;
+        if (userDataService == null)
         {
             return new JavaList<MediaBrowserCompat.MediaItem>();
         }
 
+        var playlistsSnapshot = await userDataService.GetPlaylistsAsync();
+        var playlists = playlistsSnapshot.Playlists
+            .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist))
+            .ToList();
+
         var items = new List<MediaBrowserCompat.MediaItem>();
-        foreach (var playlist in _playlistService!.Playlists)
+        foreach (var playlist in playlists)
         {
             var mediaId = BuildId(PrefixPlaylist, playlist.Provider, playlist.ItemId);
             CacheMediaItem(mediaId, playlist);
@@ -670,7 +661,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     {
         var snapshot = await LoadFavoritesSnapshotAsync();
         var tracks = snapshot.Tracks
-            .Select(BuildTrackFromSnapshot)
+            .Select(track => UserDataSnapshotMapper.ToTrack(track, favorite: true))
             .ToList();
 
         var musicAssistant = _musicAssistantService;
@@ -706,7 +697,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
         {
             var snapshot = await LoadFavoritesSnapshotAsync();
             var favoriteAlbums = snapshot.Albums
-                .Select(BuildAlbumFromSnapshot)
+                .Select(album => UserDataSnapshotMapper.ToAlbum(album, favorite: true))
                 .ToList();
 
             var favoriteMusicAssistant = _musicAssistantService;
@@ -773,7 +764,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
         {
             var snapshot = await LoadFavoritesSnapshotAsync();
             var favoriteArtists = snapshot.Artists
-                .Select(BuildArtistFromSnapshot)
+                .Select(artist => UserDataSnapshotMapper.ToArtist(artist, favorite: true))
                 .ToList();
 
             var favoriteMusicAssistant = _musicAssistantService;
@@ -1542,179 +1533,6 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
         }
 
         return await userDataService.GetFavoritesAsync();
-    }
-
-    private static Track BuildTrackFromSnapshot(FavoriteTrackSnapshot snapshot)
-    {
-        var track = new Track
-        {
-            Uri = snapshot.Uri,
-            ItemId = snapshot.ItemId,
-            Provider = snapshot.Provider,
-            Name = snapshot.Name,
-            Duration = snapshot.Duration,
-            Favorite = true,
-            ProviderMappings = GetProviderMappings(snapshot.ProviderMappings)
-        };
-
-        if (!string.IsNullOrWhiteSpace(snapshot.DisplayName))
-        {
-            track.DisplayName = snapshot.DisplayName;
-        }
-
-        track.Metadata = BuildMetadata(snapshot.ImagePath);
-
-        if (snapshot.Album != null)
-        {
-            var album = new Album
-            {
-                ItemId = snapshot.Album.ItemId,
-                Provider = snapshot.Album.Provider,
-                Name = snapshot.Album.Name,
-                Year = snapshot.Album.Year,
-                Favorite = false,
-                ProviderMappings = GetProviderMappings(snapshot.Album.ProviderMappings)
-            };
-
-            album.DisplayName = snapshot.Album.Name;
-            album.Metadata = BuildMetadata(snapshot.Album.ImagePath);
-            track.Album = album;
-        }
-
-        if (snapshot.Artists.Count > 0)
-        {
-            track.Artists = snapshot.Artists
-                .Select(BuildArtistFromRef)
-                .ToList();
-        }
-
-        return track;
-    }
-
-    private static Album BuildAlbumFromSnapshot(FavoriteAlbumSnapshot snapshot)
-    {
-        var album = new Album
-        {
-            Uri = snapshot.Uri,
-            ItemId = snapshot.ItemId,
-            Provider = snapshot.Provider,
-            Name = snapshot.Name,
-            Year = snapshot.Year,
-            Favorite = true,
-            ProviderMappings = GetProviderMappings(snapshot.ProviderMappings)
-        };
-
-        if (!string.IsNullOrWhiteSpace(snapshot.DisplayName))
-        {
-            album.DisplayName = snapshot.DisplayName;
-        }
-
-        album.Metadata = BuildMetadata(snapshot.ImagePath);
-
-        if (snapshot.Artists.Count > 0)
-        {
-            album.Artists = snapshot.Artists
-                .Select(BuildArtistFromRef)
-                .ToList();
-        }
-
-        return album;
-    }
-
-    private static Playlist BuildPlaylistFromSnapshot(FavoritePlaylistSnapshot snapshot)
-    {
-        var playlist = new Playlist
-        {
-            Uri = snapshot.Uri,
-            ItemId = snapshot.ItemId,
-            Provider = snapshot.Provider,
-            Name = snapshot.Name,
-            Favorite = true,
-            ProviderMappings = GetProviderMappings(snapshot.ProviderMappings)
-        };
-
-        if (!string.IsNullOrWhiteSpace(snapshot.DisplayName))
-        {
-            playlist.DisplayName = snapshot.DisplayName;
-        }
-
-        playlist.Metadata = BuildMetadata(snapshot.ImagePath);
-        return playlist;
-    }
-
-    private static Artist BuildArtistFromSnapshot(FavoriteArtistSnapshot snapshot)
-    {
-        var artist = new Artist
-        {
-            Uri = snapshot.Uri,
-            ItemId = snapshot.ItemId,
-            Provider = snapshot.Provider,
-            Name = snapshot.Name,
-            Favorite = true,
-            ProviderMappings = GetProviderMappings(snapshot.ProviderMappings)
-        };
-
-        if (!string.IsNullOrWhiteSpace(snapshot.DisplayName))
-        {
-            artist.DisplayName = snapshot.DisplayName;
-        }
-
-        artist.Metadata = BuildMetadata(snapshot.ImagePath);
-        return artist;
-    }
-
-    private static Artist BuildArtistFromRef(FavoriteArtistRef snapshot)
-    {
-        var artist = new Artist
-        {
-            ItemId = snapshot.ItemId,
-            Provider = snapshot.Provider,
-            Name = snapshot.Name,
-            ProviderMappings = GetProviderMappings(snapshot.ProviderMappings)
-        };
-
-        artist.DisplayName = snapshot.Name;
-        return artist;
-    }
-
-    private static MediaItemMetadata? BuildMetadata(string? imagePath)
-    {
-        if (string.IsNullOrWhiteSpace(imagePath))
-        {
-            return null;
-        }
-
-        return new MediaItemMetadata
-        {
-            Images = new List<MediaItemImage>
-            {
-                new()
-                {
-                    Path = imagePath,
-                    Provider = string.Empty,
-                    RemotelyAccessible = true
-                }
-            }
-        };
-    }
-
-    private static List<ProviderMapping> GetProviderMappings(List<ProviderMapping>? snapshotMappings)
-    {
-        if (snapshotMappings == null || snapshotMappings.Count == 0)
-        {
-            return new List<ProviderMapping>();
-        }
-
-        return snapshotMappings
-            .Select(mapping => new ProviderMapping
-            {
-                ItemId = mapping.ItemId,
-                ProviderDomain = mapping.ProviderDomain,
-                ProviderInstance = mapping.ProviderInstance,
-                Available = mapping.Available,
-                Url = mapping.Url
-            })
-            .ToList();
     }
 
     #endregion
