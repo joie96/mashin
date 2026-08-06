@@ -1,5 +1,9 @@
+using mashin.Collections;
 using mashin.Models;
 using Microsoft.Extensions.Logging;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.Processing;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -17,13 +21,22 @@ public sealed class UserDataService : INotifyPropertyChanged
     private const string FavoritesRootKey = "mashin.favorites";
     private const string PlaylistsRootKey = "mashin.playlists";
     private const string LocalPlaylistProvider = "mashin";
+    private const int PlaylistCollageSizePx = 500;
+    private const int PlaylistCollageTileCount = 4;
+    private const int PlaylistCollageJpegQuality = 85;
 
     private readonly MusicAssistantService _musicAssistant;
     private readonly SettingsService _settings;
     private readonly ILogger<UserDataService> _logger;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private static readonly HttpClient _httpClient = new();
 
     private Dictionary<string, object> _preferences = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ObservableRangeCollection<Track> _favoriteTracks = new();
+    private readonly ObservableRangeCollection<Album> _favoriteAlbums = new();
+    private readonly ObservableRangeCollection<Playlist> _favoritePlaylists = new();
+    private readonly ObservableRangeCollection<Artist> _favoriteArtists = new();
+    private readonly ObservableRangeCollection<Playlist> _playlists = new();
     private bool _isLoadingPreferences;
 
     #endregion
@@ -52,12 +65,23 @@ public sealed class UserDataService : INotifyPropertyChanged
         private set => SetProperty(ref _isLoadingPreferences, value);
     }
 
+    public ObservableRangeCollection<Track> FavoriteTracks => _favoriteTracks;
+
+    public ObservableRangeCollection<Album> FavoriteAlbums => _favoriteAlbums;
+
+    public ObservableRangeCollection<Playlist> FavoritePlaylists => _favoritePlaylists;
+
+    public ObservableRangeCollection<Artist> FavoriteArtists => _favoriteArtists;
+
+    public ObservableRangeCollection<Playlist> Playlists => _playlists;
+
     #endregion
 
     #region Loading and pushing preferences
 
     public async Task<Dictionary<string, object>> LoadPreferencesAsync(CancellationToken cancellationToken = default)
     {
+        IsLoadingPreferences = true;
         await _lock.WaitAsync(cancellationToken);
         try
         {
@@ -87,6 +111,7 @@ public sealed class UserDataService : INotifyPropertyChanged
         finally
         {
             _lock.Release();
+            IsLoadingPreferences = false;
         }
     }
 
@@ -100,6 +125,8 @@ public sealed class UserDataService : INotifyPropertyChanged
             {
                 return false;
             }
+
+            ConvertToSnapshot();
 
             var preferencesToPush = CloneDictionary(_preferences);
 
@@ -146,9 +173,6 @@ public sealed class UserDataService : INotifyPropertyChanged
                     return false;
                 }
 
-                _preferences = NormalizeDictionary(updatedUser.Preferences);
-                _ = LoadFavoritesSnapshot();
-                _ = LoadPlaylistsSnapshot();
                 return true;
             }
             catch (OperationCanceledException)
@@ -178,21 +202,14 @@ public sealed class UserDataService : INotifyPropertyChanged
             return false;
         }
 
-        var snapshot = LoadFavoritesSnapshot();
-
         return mediaItem.MediaType switch
         {
-            MediaType.Track => snapshot.Tracks.Any(item => string.Equals(item.Uri, mediaItem.Uri, StringComparison.OrdinalIgnoreCase)),
-            MediaType.Album => snapshot.Albums.Any(item => string.Equals(item.Uri, mediaItem.Uri, StringComparison.OrdinalIgnoreCase)),
-            MediaType.Artist => snapshot.Artists.Any(item => string.Equals(item.Uri, mediaItem.Uri, StringComparison.OrdinalIgnoreCase)),
-            MediaType.Playlist => snapshot.Playlists.Any(item => string.Equals(item.Uri, mediaItem.Uri, StringComparison.OrdinalIgnoreCase)),
+            MediaType.Track => _favoriteTracks.Any(item => string.Equals(item.Uri, mediaItem.Uri, StringComparison.OrdinalIgnoreCase)),
+            MediaType.Album => _favoriteAlbums.Any(item => string.Equals(item.Uri, mediaItem.Uri, StringComparison.OrdinalIgnoreCase)),
+            MediaType.Artist => _favoriteArtists.Any(item => string.Equals(item.Uri, mediaItem.Uri, StringComparison.OrdinalIgnoreCase)),
+            MediaType.Playlist => _favoritePlaylists.Any(item => string.Equals(item.Uri, mediaItem.Uri, StringComparison.OrdinalIgnoreCase)),
             _ => false
         };
-    }
-
-    public async Task<FavoritesSnapshot> GetFavoritesAsync(CancellationToken cancellationToken = default)
-    {
-        return LoadFavoritesSnapshot();
     }
 
     public async Task SetFavoriteAsync(IEnumerable<MediaItem> mediaItems, bool isFavorite, CancellationToken cancellationToken = default)
@@ -203,7 +220,6 @@ public sealed class UserDataService : INotifyPropertyChanged
             return;
         }
 
-        var snapshot = LoadFavoritesSnapshot();
         var skippedInvalid = 0;
         var skippedUnsupported = 0;
 
@@ -221,39 +237,55 @@ public sealed class UserDataService : INotifyPropertyChanged
 
             var updated = mediaItem.MediaType switch
             {
-                MediaType.Track => UpdateSnapshotList(snapshot.Tracks, uri, isFavorite, () => UserDataSnapshotMapper.ToTrackSnapshot(mediaItem as Track ?? new Track
-                {
-                    Uri = mediaItem.Uri ?? string.Empty,
-                    ItemId = mediaItem.ItemId,
-                    Provider = mediaItem.Provider,
-                    Name = mediaItem.Name,
-                    DisplayName = mediaItem.DisplayName,
-                    Duration = 0
-                })),
-                MediaType.Album => UpdateSnapshotList(snapshot.Albums, uri, isFavorite, () => UserDataSnapshotMapper.ToAlbumSnapshot(mediaItem as Album ?? new Album
-                {
-                    Uri = mediaItem.Uri ?? string.Empty,
-                    ItemId = mediaItem.ItemId,
-                    Provider = mediaItem.Provider,
-                    Name = mediaItem.Name,
-                    DisplayName = mediaItem.DisplayName
-                })),
-                MediaType.Artist => UpdateSnapshotList(snapshot.Artists, uri, isFavorite, () => UserDataSnapshotMapper.ToArtistSnapshot(mediaItem as Artist ?? new Artist
-                {
-                    Uri = mediaItem.Uri ?? string.Empty,
-                    ItemId = mediaItem.ItemId,
-                    Provider = mediaItem.Provider,
-                    Name = mediaItem.Name,
-                    DisplayName = mediaItem.DisplayName
-                })),
-                MediaType.Playlist => UpdateSnapshotList(snapshot.Playlists, uri, isFavorite, () => UserDataSnapshotMapper.ToPlaylistSnapshot(mediaItem as Playlist ?? new Playlist
-                {
-                    Uri = mediaItem.Uri ?? string.Empty,
-                    ItemId = mediaItem.ItemId,
-                    Provider = mediaItem.Provider,
-                    Name = mediaItem.Name,
-                    DisplayName = mediaItem.DisplayName
-                })),
+                MediaType.Track => UpdateFavoriteList(
+                    _favoriteTracks,
+                    uri,
+                    isFavorite,
+                    () => UserDataSnapshotMapper.ToTrack(UserDataSnapshotMapper.ToTrackSnapshot(mediaItem as Track ?? new Track
+                    {
+                        Uri = mediaItem.Uri ?? string.Empty,
+                        ItemId = mediaItem.ItemId,
+                        Provider = mediaItem.Provider,
+                        Name = mediaItem.Name,
+                        DisplayName = mediaItem.DisplayName,
+                        Duration = 0
+                    }), favorite: true)),
+                MediaType.Album => UpdateFavoriteList(
+                    _favoriteAlbums,
+                    uri,
+                    isFavorite,
+                    () => UserDataSnapshotMapper.ToAlbum(UserDataSnapshotMapper.ToAlbumSnapshot(mediaItem as Album ?? new Album
+                    {
+                        Uri = mediaItem.Uri ?? string.Empty,
+                        ItemId = mediaItem.ItemId,
+                        Provider = mediaItem.Provider,
+                        Name = mediaItem.Name,
+                        DisplayName = mediaItem.DisplayName
+                    }), favorite: true)),
+                MediaType.Artist => UpdateFavoriteList(
+                    _favoriteArtists,
+                    uri,
+                    isFavorite,
+                    () => UserDataSnapshotMapper.ToArtist(UserDataSnapshotMapper.ToArtistSnapshot(mediaItem as Artist ?? new Artist
+                    {
+                        Uri = mediaItem.Uri ?? string.Empty,
+                        ItemId = mediaItem.ItemId,
+                        Provider = mediaItem.Provider,
+                        Name = mediaItem.Name,
+                        DisplayName = mediaItem.DisplayName
+                    }), favorite: true)),
+                MediaType.Playlist => UpdateFavoriteList(
+                    _favoritePlaylists,
+                    uri,
+                    isFavorite,
+                    () => UserDataSnapshotMapper.ToPlaylist(UserDataSnapshotMapper.ToPlaylistSnapshot(mediaItem as Playlist ?? new Playlist
+                    {
+                        Uri = mediaItem.Uri ?? string.Empty,
+                        ItemId = mediaItem.ItemId,
+                        Provider = mediaItem.Provider,
+                        Name = mediaItem.Name,
+                        DisplayName = mediaItem.DisplayName
+                    }), favorite: true)),
                 _ => (bool?)null
             };
 
@@ -295,11 +327,6 @@ public sealed class UserDataService : INotifyPropertyChanged
 
     #region Playlists
 
-    public Task<PlaylistsSnapshot> GetPlaylistsAsync(CancellationToken cancellationToken = default)
-    {
-        return Task.FromResult(LoadPlaylistsSnapshot());
-    }
-
     public async Task<Playlist> AddPlaylistAsync(Playlist playlist, CancellationToken cancellationToken = default)
     {
         if (playlist == null)
@@ -307,11 +334,9 @@ public sealed class UserDataService : INotifyPropertyChanged
             throw new ArgumentNullException(nameof(playlist));
         }
 
-        var snapshot = LoadPlaylistsSnapshot();
-
         if (string.IsNullOrWhiteSpace(playlist.ItemId))
         {
-            playlist.ItemId = GenerateNextLocalPlaylistId(snapshot);
+            playlist.ItemId = GenerateNextLocalPlaylistId(_playlists);
         }
 
         if (string.IsNullOrWhiteSpace(playlist.Provider))
@@ -319,8 +344,36 @@ public sealed class UserDataService : INotifyPropertyChanged
             playlist.Provider = LocalPlaylistProvider;
         }
 
-        var playlistSnapshot = UserDataSnapshotMapper.ToPlaylistSnapshot(playlist);
-        snapshot.Playlists.Add(playlistSnapshot);
+        var storedPlaylist = UserDataSnapshotMapper.ToPlaylist(UserDataSnapshotMapper.ToPlaylistSnapshot(playlist));
+        var insertIndex = 0;
+        for (; insertIndex < _playlists.Count; insertIndex++)
+        {
+            var existing = _playlists[insertIndex];
+            var sortNameCompare = string.Compare(
+                storedPlaylist.SortName ?? string.Empty,
+                existing.SortName ?? string.Empty,
+                StringComparison.OrdinalIgnoreCase);
+
+            if (sortNameCompare < 0)
+            {
+                break;
+            }
+
+            if (sortNameCompare == 0)
+            {
+                var nameCompare = string.Compare(
+                    storedPlaylist.Name ?? string.Empty,
+                    existing.Name ?? string.Empty,
+                    StringComparison.OrdinalIgnoreCase);
+
+                if (nameCompare < 0)
+                {
+                    break;
+                }
+            }
+        }
+
+        _playlists.Insert(insertIndex, storedPlaylist);
 
         var pushed = await PushPreferencesAsync(cancellationToken);
         if (!pushed)
@@ -328,7 +381,7 @@ public sealed class UserDataService : INotifyPropertyChanged
             _logger.LogWarning("Failed to push playlist add operation for {PlaylistName}.", playlist.Name);
         }
 
-        return UserDataSnapshotMapper.ToPlaylist(playlistSnapshot);
+        return UserDataSnapshotMapper.ToPlaylist(UserDataSnapshotMapper.ToPlaylistSnapshot(storedPlaylist));
     }
 
     public async Task<bool> UpdatePlaylistAsync(Playlist playlist, CancellationToken cancellationToken = default)
@@ -338,22 +391,27 @@ public sealed class UserDataService : INotifyPropertyChanged
             return false;
         }
 
-        var snapshot = LoadPlaylistsSnapshot();
+        var existing = _playlists.FirstOrDefault(candidate =>
+            string.Equals(candidate.ItemId, playlist.ItemId, StringComparison.OrdinalIgnoreCase));
 
-        var index = snapshot.Playlists.FindIndex(existing =>
-            string.Equals(existing.ItemId, playlist.ItemId, StringComparison.OrdinalIgnoreCase));
-
-        if (index < 0)
+        if (existing == null)
         {
             return false;
         }
 
-        var replacement = UserDataSnapshotMapper.ToPlaylistSnapshot(playlist);
+        var index = _playlists.IndexOf(existing);
+
+        var replacement = UserDataSnapshotMapper.ToPlaylist(UserDataSnapshotMapper.ToPlaylistSnapshot(playlist));
         replacement.Provider = string.IsNullOrWhiteSpace(replacement.Provider)
             ? LocalPlaylistProvider
             : replacement.Provider;
 
-        snapshot.Playlists[index] = replacement;
+        _playlists[index] = replacement;
+        var sortedPlaylists = _playlists
+            .OrderBy(candidate => candidate.SortName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(candidate => candidate.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        _playlists.ReplaceRange(sortedPlaylists);
 
         var pushed = await PushPreferencesAsync(cancellationToken);
         if (!pushed)
@@ -371,15 +429,16 @@ public sealed class UserDataService : INotifyPropertyChanged
             return false;
         }
 
-        var snapshot = LoadPlaylistsSnapshot();
+        var playlistsToRemove = _playlists.Where(existing =>
+            string.Equals(existing.ItemId, playlist.ItemId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
-        var removed = snapshot.Playlists.RemoveAll(existing =>
-            string.Equals(existing.ItemId, playlist.ItemId, StringComparison.OrdinalIgnoreCase));
-
-        if (removed == 0)
+        if (playlistsToRemove.Count == 0)
         {
             return false;
         }
+
+        _playlists.RemoveRange(playlistsToRemove);
 
         var pushed = await PushPreferencesAsync(cancellationToken);
         if (!pushed)
@@ -406,22 +465,34 @@ public sealed class UserDataService : INotifyPropertyChanged
             return false;
         }
 
-        var snapshot = LoadPlaylistsSnapshot();
-        var playlistSnapshot = snapshot.Playlists.FirstOrDefault(existing =>
+        var playlistModel = _playlists.FirstOrDefault(existing =>
             string.Equals(existing.ItemId, playlistId, StringComparison.OrdinalIgnoreCase));
 
-        if (playlistSnapshot == null)
+        if (playlistModel == null)
         {
             return false;
         }
 
-        var localTracks = playlistSnapshot.Items?.ToList() ?? new List<TrackSnapshot>();
+        var localTracks = playlistModel.Items.ToList();
         foreach (var track in tracksToAdd)
         {
-            localTracks.Add(UserDataSnapshotMapper.ToTrackSnapshot(track));
+            localTracks.Add(UserDataSnapshotMapper.ToTrack(UserDataSnapshotMapper.ToTrackSnapshot(track), favorite: false));
         }
 
-        playlistSnapshot.Items = localTracks;
+        playlistModel.Items = localTracks;
+
+        try
+        {
+            var generatedImageDataUri = await BuildPlaylistCollageDataUriAsync(localTracks, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(generatedImageDataUri))
+            {
+                playlistModel.Metadata = UserDataSnapshotMapper.BuildMetadata(generatedImageDataUri);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to generate playlist collage image for playlist {PlaylistId}", playlistId);
+        }
 
         var pushed = await PushPreferencesAsync(cancellationToken);
         if (!pushed)
@@ -449,16 +520,15 @@ public sealed class UserDataService : INotifyPropertyChanged
             return false;
         }
 
-        var snapshot = LoadPlaylistsSnapshot();
-        var playlistSnapshot = snapshot.Playlists.FirstOrDefault(existing =>
+        var playlistModel = _playlists.FirstOrDefault(existing =>
             string.Equals(existing.ItemId, playlistId, StringComparison.OrdinalIgnoreCase));
 
-        if (playlistSnapshot == null)
+        if (playlistModel == null)
         {
             return false;
         }
 
-        var localTracks = playlistSnapshot.Items?.ToList() ?? new List<TrackSnapshot>();
+        var localTracks = playlistModel.Items.ToList();
         var removed = localTracks.RemoveAll(track => !string.IsNullOrWhiteSpace(track.Uri)
             && urisToRemove.Contains(track.Uri));
 
@@ -467,7 +537,17 @@ public sealed class UserDataService : INotifyPropertyChanged
             return false;
         }
 
-        playlistSnapshot.Items = localTracks;
+        playlistModel.Items = localTracks;
+
+        try
+        {
+            var generatedImageDataUri = await BuildPlaylistCollageDataUriAsync(localTracks, cancellationToken);
+            playlistModel.Metadata = UserDataSnapshotMapper.BuildMetadata(generatedImageDataUri);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to generate playlist collage image for playlist {PlaylistId}", playlistId);
+        }
 
         var pushed = await PushPreferencesAsync(cancellationToken);
         if (!pushed)
@@ -480,7 +560,7 @@ public sealed class UserDataService : INotifyPropertyChanged
 
     #endregion
 
-    #region Favorites snapshot helpers
+    #region Helpers
 
     private FavoritesSnapshot LoadFavoritesSnapshot()
     {
@@ -488,11 +568,23 @@ public sealed class UserDataService : INotifyPropertyChanged
         {
             var created = new FavoritesSnapshot();
             _preferences[FavoritesRootKey] = created;
+            _favoriteTracks.ReplaceRange(Array.Empty<Track>());
+            _favoriteAlbums.ReplaceRange(Array.Empty<Album>());
+            _favoritePlaylists.ReplaceRange(Array.Empty<Playlist>());
+            _favoriteArtists.ReplaceRange(Array.Empty<Artist>());
             return created;
         }
 
         if (favRootObj is FavoritesSnapshot snapshot)
         {
+            _favoriteTracks.ReplaceRange(snapshot.Tracks
+                .Select(track => UserDataSnapshotMapper.ToTrack(track, favorite: true)));
+            _favoriteAlbums.ReplaceRange(snapshot.Albums
+                .Select(album => UserDataSnapshotMapper.ToAlbum(album, favorite: true)));
+            _favoritePlaylists.ReplaceRange(snapshot.Playlists
+                .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist, favorite: true)));
+            _favoriteArtists.ReplaceRange(snapshot.Artists
+                .Select(artist => UserDataSnapshotMapper.ToArtist(artist, favorite: true)));
             return snapshot;
         }
 
@@ -505,6 +597,14 @@ public sealed class UserDataService : INotifyPropertyChanged
                 if (deserializedSnapshot is FavoritesSnapshot parsedSnapshot)
                 {
                     _preferences[FavoritesRootKey] = parsedSnapshot;
+                    _favoriteTracks.ReplaceRange(parsedSnapshot.Tracks
+                        .Select(track => UserDataSnapshotMapper.ToTrack(track, favorite: true)));
+                    _favoriteAlbums.ReplaceRange(parsedSnapshot.Albums
+                        .Select(album => UserDataSnapshotMapper.ToAlbum(album, favorite: true)));
+                    _favoritePlaylists.ReplaceRange(parsedSnapshot.Playlists
+                        .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist, favorite: true)));
+                    _favoriteArtists.ReplaceRange(parsedSnapshot.Artists
+                        .Select(artist => UserDataSnapshotMapper.ToArtist(artist, favorite: true)));
                     return parsedSnapshot;
                 }
             }
@@ -516,23 +616,17 @@ public sealed class UserDataService : INotifyPropertyChanged
 
         var createdSnapshot = new FavoritesSnapshot();
         _preferences[FavoritesRootKey] = createdSnapshot;
+        _favoriteTracks.ReplaceRange(Array.Empty<Track>());
+        _favoriteAlbums.ReplaceRange(Array.Empty<Album>());
+        _favoritePlaylists.ReplaceRange(Array.Empty<Playlist>());
+        _favoriteArtists.ReplaceRange(Array.Empty<Artist>());
         return createdSnapshot;
     }
 
-    private static bool UpdateSnapshotList<T>(ICollection<T> list, string uri, bool isFavorite, Func<T> createSnapshot)
-        where T : class
+    private static bool UpdateFavoriteList<T>(ICollection<T> list, string uri, bool isFavorite, Func<T> createItem)
+        where T : MediaItem
     {
-        var existing = list.FirstOrDefault(item => string.Equals(
-            item switch
-            {
-                TrackSnapshot track => track.Uri,
-                AlbumSnapshot album => album.Uri,
-                ArtistSnapshot artist => artist.Uri,
-                PlaylistSnapshot playlist => playlist.Uri,
-                _ => null
-            },
-            uri,
-            StringComparison.OrdinalIgnoreCase));
+        var existing = list.FirstOrDefault(item => string.Equals(item.Uri, uri, StringComparison.OrdinalIgnoreCase));
 
         if (isFavorite)
         {
@@ -541,7 +635,7 @@ public sealed class UserDataService : INotifyPropertyChanged
                 return false;
             }
 
-            list.Add(createSnapshot());
+            list.Add(createItem());
             return true;
         }
 
@@ -553,21 +647,22 @@ public sealed class UserDataService : INotifyPropertyChanged
         return list.Remove(existing);
     }
 
-    #endregion
-
-    #region Playlists snapshot helpers
-
     private PlaylistsSnapshot LoadPlaylistsSnapshot()
     {
         if (!_preferences.TryGetValue(PlaylistsRootKey, out var playlistsRootObj) || playlistsRootObj is null)
         {
             var created = new PlaylistsSnapshot();
             _preferences[PlaylistsRootKey] = created;
+            _playlists.ReplaceRange(Array.Empty<Playlist>());
             return created;
         }
 
         if (playlistsRootObj is PlaylistsSnapshot snapshot)
         {
+            _playlists.ReplaceRange(snapshot.Playlists
+                .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist))
+                .OrderBy(playlist => playlist.SortName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(playlist => playlist.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase));
             return snapshot;
         }
 
@@ -580,6 +675,10 @@ public sealed class UserDataService : INotifyPropertyChanged
                 if (deserializedSnapshot is PlaylistsSnapshot parsedSnapshot)
                 {
                     _preferences[PlaylistsRootKey] = parsedSnapshot;
+                    _playlists.ReplaceRange(parsedSnapshot.Playlists
+                        .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist))
+                        .OrderBy(playlist => playlist.SortName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                        .ThenBy(playlist => playlist.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase));
                     return parsedSnapshot;
                 }
             }
@@ -591,6 +690,7 @@ public sealed class UserDataService : INotifyPropertyChanged
 
         var createdSnapshot = new PlaylistsSnapshot();
         _preferences[PlaylistsRootKey] = createdSnapshot;
+        _playlists.ReplaceRange(Array.Empty<Playlist>());
         return createdSnapshot;
     }
 
@@ -606,9 +706,9 @@ public sealed class UserDataService : INotifyPropertyChanged
             : 0;
     }
 
-    private static string GenerateNextLocalPlaylistId(PlaylistsSnapshot snapshot)
+    private static string GenerateNextLocalPlaylistId(IEnumerable<Playlist> playlists)
     {
-        var id = snapshot.Playlists
+        var id = playlists
             .Select(playlist => ParseLocalPlaylistId(playlist.ItemId))
             .Where(parsedId => parsedId > 0)
             .DefaultIfEmpty(0)
@@ -617,9 +717,173 @@ public sealed class UserDataService : INotifyPropertyChanged
         return id.ToString();
     }
 
-    #endregion
+    private static string? GetTrackImagePath(Track track)
+    {
+        if (track == null)
+        {
+            return null;
+        }
 
-    #region Preferences normalization
+        if (!string.IsNullOrWhiteSpace(track.Album?.PrimaryImage?.Path))
+        {
+            return track.Album.PrimaryImage?.Path;
+        }
+
+        if (!string.IsNullOrWhiteSpace(track.PrimaryImage?.Path))
+        {
+            return track.PrimaryImage?.Path;
+        }
+
+        return null;
+    }
+
+    private async Task<string?> BuildPlaylistCollageDataUriAsync(
+        List<Track> tracks,
+        CancellationToken cancellationToken)
+    {
+        var sourcePaths = tracks
+            .Select(GetTrackImagePath)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path!)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(_ => Random.Shared.Next())
+            .Take(PlaylistCollageTileCount)
+            .ToList();
+
+        if (sourcePaths.Count == 0)
+        {
+            return null;
+        }
+
+        var decodedImages = new List<SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>>();
+        try
+        {
+            foreach (var sourcePath in sourcePaths)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var imageBytes = await LoadImageBytesAsync(sourcePath, cancellationToken);
+                if (imageBytes == null || imageBytes.Length == 0)
+                {
+                    continue;
+                }
+
+                var image = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Rgba32>(imageBytes);
+                decodedImages.Add(image);
+            }
+
+            if (decodedImages.Count == 0)
+            {
+                return null;
+            }
+
+            while (decodedImages.Count < PlaylistCollageTileCount)
+            {
+                decodedImages.Add(decodedImages[decodedImages.Count % Math.Max(1, decodedImages.Count)].Clone());
+            }
+
+            var tileSize = PlaylistCollageSizePx / 2;
+            using var collage = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(
+                PlaylistCollageSizePx,
+                PlaylistCollageSizePx,
+                SixLabors.ImageSharp.Color.Black);
+
+            for (var i = 0; i < PlaylistCollageTileCount; i++)
+            {
+                using var tile = decodedImages[i].Clone(ctx => ctx.Resize(new SixLabors.ImageSharp.Processing.ResizeOptions
+                {
+                    Size = new SixLabors.ImageSharp.Size(tileSize, tileSize),
+                    Mode = SixLabors.ImageSharp.Processing.ResizeMode.Crop,
+                    Position = SixLabors.ImageSharp.Processing.AnchorPositionMode.Center
+                }));
+
+                var x = (i % 2) * tileSize;
+                var y = (i / 2) * tileSize;
+
+                collage.Mutate(ctx => ctx.DrawImage(tile, new SixLabors.ImageSharp.Point(x, y), 1f));
+            }
+
+            using var output = new MemoryStream();
+            await collage.SaveAsJpegAsync(output, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder
+            {
+                Quality = PlaylistCollageJpegQuality
+            }, cancellationToken);
+
+            var base64 = Convert.ToBase64String(output.ToArray());
+            return string.Concat("data:image/jpeg;base64,", base64);
+        }
+        finally
+        {
+            foreach (var image in decodedImages)
+            {
+                image.Dispose();
+            }
+        }
+    }
+
+    private void ConvertToSnapshot()
+    {
+        var favoritesSnapshot = new FavoritesSnapshot
+        {
+            Tracks = _favoriteTracks
+                .Select(track => UserDataSnapshotMapper.ToTrackSnapshot(track))
+                .ToList(),
+            Albums = _favoriteAlbums
+                .Select(album => UserDataSnapshotMapper.ToAlbumSnapshot(album))
+                .ToList(),
+            Playlists = _favoritePlaylists
+                .Select(playlist => UserDataSnapshotMapper.ToPlaylistSnapshot(playlist))
+                .ToList(),
+            Artists = _favoriteArtists
+                .Select(artist => UserDataSnapshotMapper.ToArtistSnapshot(artist))
+                .ToList()
+        };
+
+        var playlistsSnapshot = new PlaylistsSnapshot
+        {
+            Playlists = _playlists
+                .Select(playlist => UserDataSnapshotMapper.ToPlaylistSnapshot(playlist))
+                .ToList()
+        };
+
+        _preferences[FavoritesRootKey] = favoritesSnapshot;
+        _preferences[PlaylistsRootKey] = playlistsSnapshot;
+    }
+
+    private static async Task<byte[]?> LoadImageBytesAsync(string sourcePath, CancellationToken cancellationToken)
+    {
+        if (sourcePath.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            var commaIndex = sourcePath.IndexOf(',', StringComparison.Ordinal);
+            if (commaIndex <= 0 || commaIndex >= sourcePath.Length - 1)
+            {
+                return null;
+            }
+
+            var header = sourcePath[..commaIndex];
+            var payload = sourcePath[(commaIndex + 1)..];
+            if (header.Contains(";base64", StringComparison.OrdinalIgnoreCase))
+            {
+                return Convert.FromBase64String(payload);
+            }
+
+            var text = Uri.UnescapeDataString(payload);
+            return System.Text.Encoding.UTF8.GetBytes(text);
+        }
+
+        if (!Uri.TryCreate(sourcePath, UriKind.Absolute, out var uri))
+        {
+            return null;
+        }
+
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return await _httpClient.GetByteArrayAsync(uri, cancellationToken);
+    }
 
     private static Dictionary<string, object> NormalizeDictionary(Dictionary<string, object>? source)
     {
@@ -689,10 +953,6 @@ public sealed class UserDataService : INotifyPropertyChanged
         };
     }
 
-    #endregion
-
-    #region Clone helpers
-
     private static Dictionary<string, object> CloneDictionary(Dictionary<string, object> source)
     {
         var clone = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
@@ -719,10 +979,6 @@ public sealed class UserDataService : INotifyPropertyChanged
             _ => value
         };
     }
-
-    #endregion
-
-    #region Utility
 
     private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {

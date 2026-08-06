@@ -595,10 +595,13 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     {
         if (favoriteOnly)
         {
-            var snapshot = await LoadFavoritesSnapshotAsync();
-            var favoritePlaylists = snapshot.Playlists
-                .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist, favorite: true))
-                .ToList();
+            var userDataService = _userDataService;
+            if (userDataService == null)
+            {
+                return new JavaList<MediaBrowserCompat.MediaItem>();
+            }
+
+            var favoritePlaylists = userDataService.FavoritePlaylists.ToList();
 
             var musicAssistant = _musicAssistantService;
             if (musicAssistant != null && favoritePlaylists.Count > 0)
@@ -632,10 +635,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             return new JavaList<MediaBrowserCompat.MediaItem>();
         }
 
-        var playlistsSnapshot = await userDataService.GetPlaylistsAsync();
-        var playlists = playlistsSnapshot.Playlists
-            .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist))
-            .ToList();
+        var playlists = userDataService.Playlists;
 
         var items = new List<MediaBrowserCompat.MediaItem>();
         foreach (var playlist in playlists)
@@ -659,10 +659,13 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
 
     private async Task<JavaList<MediaBrowserCompat.MediaItem>> LoadFavoriteTracksAsync()
     {
-        var snapshot = await LoadFavoritesSnapshotAsync();
-        var tracks = snapshot.Tracks
-            .Select(track => UserDataSnapshotMapper.ToTrack(track, favorite: true))
-            .ToList();
+        var userDataService = _userDataService;
+        if (userDataService == null)
+        {
+            return new JavaList<MediaBrowserCompat.MediaItem>();
+        }
+
+        var tracks = userDataService.FavoriteTracks.ToList();
 
         var musicAssistant = _musicAssistantService;
         if (musicAssistant != null && tracks.Count > 0)
@@ -695,10 +698,13 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     {
         if (favoriteOnly)
         {
-            var snapshot = await LoadFavoritesSnapshotAsync();
-            var favoriteAlbums = snapshot.Albums
-                .Select(album => UserDataSnapshotMapper.ToAlbum(album, favorite: true))
-                .ToList();
+            var userDataService = _userDataService;
+            if (userDataService == null)
+            {
+                return new JavaList<MediaBrowserCompat.MediaItem>();
+            }
+
+            var favoriteAlbums = userDataService.FavoriteAlbums.ToList();
 
             var favoriteMusicAssistant = _musicAssistantService;
             if (favoriteMusicAssistant != null && favoriteAlbums.Count > 0)
@@ -762,10 +768,13 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     {
         if (favoriteOnly)
         {
-            var snapshot = await LoadFavoritesSnapshotAsync();
-            var favoriteArtists = snapshot.Artists
-                .Select(artist => UserDataSnapshotMapper.ToArtist(artist, favorite: true))
-                .ToList();
+            var userDataService = _userDataService;
+            if (userDataService == null)
+            {
+                return new JavaList<MediaBrowserCompat.MediaItem>();
+            }
+
+            var favoriteArtists = userDataService.FavoriteArtists.ToList();
 
             var favoriteMusicAssistant = _musicAssistantService;
             if (favoriteMusicAssistant != null && favoriteArtists.Count > 0)
@@ -1395,6 +1404,11 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             return MediaArtworkContentProvider.BuildContentUri(imagePath);
         }
 
+        if (string.Equals(parsedUri.Scheme, Uri.UriSchemeData, StringComparison.OrdinalIgnoreCase))
+        {
+            return MediaArtworkContentProvider.BuildContentUri(imagePath);
+        }
+
         return null;
     }
 
@@ -1522,17 +1536,6 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
         return normalizedPlaylistName.StartsWith("Radio: ", StringComparison.OrdinalIgnoreCase)
             ? normalizedPlaylistName[7..].TrimStart()
             : normalizedPlaylistName;
-    }
-
-    private async Task<FavoritesSnapshot> LoadFavoritesSnapshotAsync()
-    {
-        var userDataService = _userDataService;
-        if (userDataService == null)
-        {
-            return new FavoritesSnapshot();
-        }
-
-        return await userDataService.GetFavoritesAsync();
     }
 
     #endregion

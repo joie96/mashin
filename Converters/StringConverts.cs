@@ -1,5 +1,4 @@
 using System.Globalization;
-using mashin.Models;
 using Microsoft.Maui.Controls;
 
 namespace mashin.Converters;
@@ -58,50 +57,5 @@ public class StringNullOrWhiteSpaceToBoolConverter : IValueConverter
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
         throw new NotImplementedException();
-    }
-}
-
-/// <summary>
-/// Builds the playlist secondary line text (track count and total duration) for list rows.
-/// </summary>
-public class PlaylistMetadataTextConverter : IValueConverter
-{
-    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
-    {
-        if (value is not Playlist playlist)
-        {
-            return string.Empty;
-        }
-
-        var tracksCount = Math.Max(0, playlist.TracksCount);
-        var totalDurationSeconds = Math.Max(0, playlist.TotalDurationSeconds);
-
-        var titlesText = tracksCount == 1 ? "1 Titel" : $"{tracksCount} Titel";
-        var durationText = FormatTotalDuration(totalDurationSeconds);
-
-        return $"{titlesText} • {durationText}";
-    }
-
-    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
-    {
-        throw new NotImplementedException();
-    }
-
-    private static string FormatTotalDuration(int totalSeconds)
-    {
-        if (totalSeconds <= 0)
-        {
-            return "0m";
-        }
-
-        var timeSpan = TimeSpan.FromSeconds(totalSeconds);
-        var totalHours = (int)timeSpan.TotalHours;
-
-        if (totalHours > 0)
-        {
-            return $"{totalHours}h {timeSpan.Minutes}m";
-        }
-
-        return $"{Math.Max(1, timeSpan.Minutes)}m";
     }
 }

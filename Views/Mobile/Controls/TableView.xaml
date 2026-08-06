@@ -14,7 +14,6 @@
     Unloaded="OnTableViewUnloaded">
 
     <ContentView.Resources>
-        <converters:PlaylistMetadataTextConverter x:Key="PlaylistMetadataTextConverter" />
         <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
         <converters:MediaItemLoadingPriorityConverter x:Key="MediaItemLoadingPriorityConverter" />
         <converters:PlayStateToBoolConverter x:Key="PlayStateToBoolConverter" />
@@ -85,7 +84,7 @@
                                 FontSize="12"
                                 LineBreakMode="TailTruncation"
                                 MaxLines="1"
-                                Text="{Binding ., Converter={StaticResource PlaylistMetadataTextConverter}}"
+                                Text="{Binding MetadataText}"
                                 TextColor="{DynamicResource TextSecondary}" />
                         </VerticalStackLayout>
                     </Grid>

@@ -890,10 +890,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
     private async Task BuildTrackContextMenuAsync()
     {
-        var snapshot = await _userDataService.GetPlaylistsAsync();
-        var playlists = snapshot.Playlists
-            .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist))
-            .ToList();
+        var playlists = _userDataService.Playlists;
 
         var menu = new ObservableRangeCollection<ContextMenuItem>
         {

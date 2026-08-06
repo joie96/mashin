@@ -118,11 +118,11 @@
                             Margin="0,0,0,16"
                             Spacing="8">
                             <Label Style="{StaticResource LabelSecondary}"
-                                Text="{Binding Tracks.Count, StringFormat='{0} Titel'}" />
+                                Text="{Binding Playlist.TracksCountText}" />
                             <Label Style="{StaticResource LabelSecondary}"
                                 Text="•" />
                             <Label Style="{StaticResource LabelSecondary}"
-                                Text="{Binding PlaylistTotalDurationText}" />
+                                Text="{Binding Playlist.TotalDurationText}" />
                         </HorizontalStackLayout>
 
                         <Grid Grid.Row="4"
@@ -292,13 +292,13 @@
                             Text="•" />
                         <Label Style="{StaticResource LabelSecondary}"
                             VerticalOptions="Center"
-                            Text="{Binding Tracks.Count, StringFormat='{0} Titel'}" />
+                            Text="{Binding Playlist.TracksCountText}" />
                         <Label Style="{StaticResource LabelSecondary}"
                             VerticalOptions="Center"
                             Text="•" />
                         <Label Style="{StaticResource LabelSecondary}"
                             VerticalOptions="Center"
-                            Text="{Binding PlaylistTotalDurationText}" />
+                            Text="{Binding Playlist.TotalDurationText}" />
                     </HorizontalStackLayout>
 
                     <Grid ColumnDefinitions="Auto,Auto,Auto,Auto"

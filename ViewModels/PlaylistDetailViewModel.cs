@@ -79,7 +79,6 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             OnPropertyChanged(nameof(HasTracks));
             OnPropertyChanged(nameof(ShowTrackTable));
             OnPropertyChanged(nameof(TrackItems));
-            OnPropertyChanged(nameof(PlaylistTotalDurationText));
         }
     }
 
@@ -117,15 +116,6 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
     public IEnumerable<object> TrackItems => IsLoadingTracks ? _trackSkeletons : _tracks;
 
-    public string PlaylistTotalDurationText
-    {
-        get
-        {
-            var totalSeconds = _tracks.Sum(track => Math.Max(0, track.Duration));
-            return FormatTotalDuration(totalSeconds);
-        }
-    }
-
     public UserDataService UserDataService { get; }
     public PlaybackService PlaybackService { get; }
     public ICommand AlbumTappedCommand { get; }
@@ -146,7 +136,6 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     private void OnTracksCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         OnPropertyChanged(nameof(HasTracks));
-        OnPropertyChanged(nameof(PlaylistTotalDurationText));
         OnPropertyChanged(nameof(ShowTrackTable));
         OnPropertyChanged(nameof(TrackItems));
     }
@@ -401,6 +390,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             }
 
             Tracks = new ObservableRangeCollection<Track>(tracks);
+            Playlist.Items = tracks;
             await BuildContentContextMenuAsync();
 
             _logger.LogDebug("Loaded online playlist '{Name}' with {Count} tracks", Playlist.Name, Tracks.Count);
@@ -634,10 +624,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
     private async Task BuildContentContextMenuAsync()
     {
-        var snapshot = await UserDataService.GetPlaylistsAsync();
-        var playlists = snapshot.Playlists
-            .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist))
-            .ToList();
+        var playlists = UserDataService.Playlists;
 
         var targets = GetContextMenuTargetTracks().ToList();
         var isSingleTarget = targets.Count == 1;
@@ -824,7 +811,6 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                         }
 
                         Playlist.Items = Tracks.ToList();
-                        OnPropertyChanged(nameof(PlaylistTotalDurationText));
                     }
                 }
             }),
@@ -897,10 +883,7 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     #region Helper Methods
     private async Task<Playlist?> ResolvePlaylistFromServiceAsync(string playlistId, string providerInstanceOrDomain)
     {
-        var snapshot = await UserDataService.GetPlaylistsAsync();
-        var playlists = snapshot.Playlists
-            .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist))
-            .ToList();
+        var playlists = UserDataService.Playlists;
 
         var byProviderAndId = playlists.FirstOrDefault(playlist =>
             string.Equals(playlist.ItemId, playlistId, StringComparison.OrdinalIgnoreCase)
@@ -924,24 +907,6 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
         }
 
         return _contextMenuTargetTrack == null ? Array.Empty<Track>() : new[] { _contextMenuTargetTrack };
-    }
-
-    private static string FormatTotalDuration(int totalSeconds)
-    {
-        if (totalSeconds <= 0)
-        {
-            return "0m";
-        }
-
-        var ts = TimeSpan.FromSeconds(totalSeconds);
-        var totalHours = (int)ts.TotalHours;
-
-        if (totalHours > 0)
-        {
-            return $"{totalHours}h {ts.Minutes}m";
-        }
-
-        return $"{Math.Max(1, ts.Minutes)}m";
     }
 
     #endregion

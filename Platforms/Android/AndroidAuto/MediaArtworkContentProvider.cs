@@ -58,8 +58,7 @@ public sealed class MediaArtworkContentProvider : ContentProvider
             }
 
             var sourceUrl = AndroidUri.Decode(sourceParam);
-            if (!SystemUri.TryCreate(sourceUrl, System.UriKind.Absolute, out var source)
-                || (source.Scheme != SystemUri.UriSchemeHttp && source.Scheme != SystemUri.UriSchemeHttps))
+            if (!SystemUri.TryCreate(sourceUrl, System.UriKind.Absolute, out var source))
             {
                 return null;
             }
@@ -70,7 +69,7 @@ public sealed class MediaArtworkContentProvider : ContentProvider
                 cacheDir.Create();
             }
 
-            var extension = System.IO.Path.GetExtension(source.AbsolutePath);
+            var extension = ResolveExtension(sourceUrl, source);
             if (string.IsNullOrWhiteSpace(extension) || extension.Length > 8)
             {
                 extension = ".img";
@@ -82,7 +81,19 @@ public sealed class MediaArtworkContentProvider : ContentProvider
             if (!System.IO.File.Exists(localPath)
                 || new System.IO.FileInfo(localPath).Length == 0)
             {
-                DownloadToFile(source, localPath);
+                if (string.Equals(source.Scheme, SystemUri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(source.Scheme, SystemUri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+                {
+                    DownloadToFile(source, localPath);
+                }
+                else if (string.Equals(source.Scheme, SystemUri.UriSchemeData, StringComparison.OrdinalIgnoreCase))
+                {
+                    WriteDataUriToFile(sourceUrl, localPath);
+                }
+                else
+                {
+                    return null;
+                }
             }
 
             if (!System.IO.File.Exists(localPath))
@@ -110,6 +121,70 @@ public sealed class MediaArtworkContentProvider : ContentProvider
         {
             sourceStream.CopyTo(targetStream);
         }
+
+        if (System.IO.File.Exists(targetPath))
+        {
+            System.IO.File.Delete(targetPath);
+        }
+
+        System.IO.File.Move(tempPath, targetPath);
+    }
+
+    private static string ResolveExtension(string sourceUrl, SystemUri source)
+    {
+        if (string.Equals(source.Scheme, SystemUri.UriSchemeData, StringComparison.OrdinalIgnoreCase))
+        {
+            var commaIndex = sourceUrl.IndexOf(',', StringComparison.Ordinal);
+            var header = commaIndex > 0 ? sourceUrl[..commaIndex] : string.Empty;
+
+            if (header.Contains("image/jpeg", StringComparison.OrdinalIgnoreCase)
+                || header.Contains("image/jpg", StringComparison.OrdinalIgnoreCase))
+            {
+                return ".jpg";
+            }
+
+            if (header.Contains("image/png", StringComparison.OrdinalIgnoreCase))
+            {
+                return ".png";
+            }
+
+            if (header.Contains("image/webp", StringComparison.OrdinalIgnoreCase))
+            {
+                return ".webp";
+            }
+
+            return ".img";
+        }
+
+        var extension = System.IO.Path.GetExtension(source.AbsolutePath);
+        return string.IsNullOrWhiteSpace(extension) ? ".img" : extension;
+    }
+
+    private static void WriteDataUriToFile(string sourceUrl, string targetPath)
+    {
+        var commaIndex = sourceUrl.IndexOf(',', StringComparison.Ordinal);
+        if (commaIndex <= 0 || commaIndex >= sourceUrl.Length - 1)
+        {
+            return;
+        }
+
+        var header = sourceUrl[..commaIndex];
+        var payload = sourceUrl[(commaIndex + 1)..];
+        var isBase64 = header.Contains(";base64", StringComparison.OrdinalIgnoreCase);
+
+        byte[] bytes;
+        if (isBase64)
+        {
+            bytes = System.Convert.FromBase64String(payload);
+        }
+        else
+        {
+            var unescaped = Uri.UnescapeDataString(payload);
+            bytes = Encoding.UTF8.GetBytes(unescaped);
+        }
+
+        var tempPath = targetPath + ".tmp";
+        System.IO.File.WriteAllBytes(tempPath, bytes);
 
         if (System.IO.File.Exists(targetPath))
         {

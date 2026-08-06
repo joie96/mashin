@@ -1042,10 +1042,7 @@ public class SearchViewModel : INotifyPropertyChanged, INavigationAware, IDispos
     private async Task<ObservableRangeCollection<ContextMenuItem>> GetPlaylistSubItemsAsync()
     {
         var items = new ObservableRangeCollection<ContextMenuItem>();
-        var snapshot = await UserDataService.GetPlaylistsAsync();
-        var playlists = snapshot.Playlists
-            .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist))
-            .ToList();
+        var playlists = UserDataService.Playlists;
 
         foreach (var playlist in playlists)
         {

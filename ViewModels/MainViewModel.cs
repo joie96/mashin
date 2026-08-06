@@ -31,7 +31,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private readonly PlaybackService _playbackService;
     private readonly IConnectionService _connectionService;
     private readonly ILogger<MainViewModel> _logger;
-    private readonly ObservableRangeCollection<Playlist> _playlists;
 
 
     // Player
@@ -105,13 +104,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _playbackService = playbackService;
         _connectionService = connectionService;
         _logger = logger;
-        _playlists = new ObservableRangeCollection<Playlist>();
         UserDataService = userDataService;
         _selectedAudioQuality = _settings.GetSendspinPreferredAudioCodec();
         _sliderPosition = _playbackService.PositionSeconds;
         _playbackService.CurrentQueueItems.CollectionChanged += OnCurrentQueueItemsCollectionChanged;
         _availablePlayers.CollectionChanged += OnAvailablePlayersCollectionChanged;
-        _playlists.CollectionChanged += OnPlaylistsCollectionChanged;
+        UserDataService.Playlists.CollectionChanged += OnPlaylistsCollectionChanged;
         UserDataService.PropertyChanged += OnUserDataServicePropertyChanged;
 
         // Navigation Commands
@@ -313,7 +311,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public ObservableRangeCollection<Playlist> Playlists
     {
-        get => _playlists;
+        get => UserDataService.Playlists;
     }
 
     public bool IsLoadingPlaylists
@@ -642,14 +640,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         // Load userdata for favorites and playlists
         await UserDataService.LoadPreferencesAsync();
-        var playlistSnapshot = await UserDataService.GetPlaylistsAsync();
-        var playlists = playlistSnapshot.Playlists
-            .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist))
-            .OrderBy(playlist => playlist.SortName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(playlist => playlist.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        _playlists.ReplaceRange(playlists);
 
         CurrentSection = NavigationSection.Home;
         await _navigationService.NavigateToAsync<HomePage>();
@@ -832,7 +822,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 CurrentSection = NavigationSection.None;
 
                 _availablePlayers.Clear();
-                _playlists.Clear();
 
                 _selectedPlayerId = null;
                 OnPropertyChanged(nameof(SelectedPlayerId));
@@ -852,7 +841,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        _playlists.CollectionChanged -= OnPlaylistsCollectionChanged;
+        UserDataService.Playlists.CollectionChanged -= OnPlaylistsCollectionChanged;
         UserDataService.PropertyChanged -= OnUserDataServicePropertyChanged;
         _playbackService.CurrentQueueItems.CollectionChanged -= OnCurrentQueueItemsCollectionChanged;
         _availablePlayers.CollectionChanged -= OnAvailablePlayersCollectionChanged;
@@ -1359,7 +1348,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 Text = "Zu Wiedergabeliste hinzufügen",
                 Icon = FluentIcons.Add12,
                 SubItems = new ObservableCollection<ContextMenuItem>(
-                    _playlists
+                    Playlists
                         .Select(playlist => new ContextMenuItem
                         {
                             Text = playlist.DisplayName,
@@ -1418,7 +1407,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private void BuildCurrentTrackContextMenuItems()
     {
         _currentTrackContextMenuItems = new ObservableRangeCollection<ContextMenuItem>(
-            _playlists
+            Playlists
                 .Select(playlist => new ContextMenuItem
                 {
                     Text = playlist.DisplayName,

@@ -45,6 +45,7 @@ namespace mashin.Models
         private ProviderManifest? _providerManifest;
         private string _name = string.Empty;
         private string _displayName = string.Empty;
+        private MediaItemMetadata? _metadata;
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -131,7 +132,22 @@ namespace mashin.Models
         public List<ProviderMapping> ProviderMappings { get; set; } = new();
 
         [JsonPropertyName("metadata")]
-        public MediaItemMetadata? Metadata { get; set; }
+        public MediaItemMetadata? Metadata
+        {
+            get => _metadata;
+            set
+            {
+                if (ReferenceEquals(_metadata, value))
+                {
+                    return;
+                }
+
+                _metadata = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(PrimaryImage));
+                OnPropertyChanged(nameof(ImageUri));
+            }
+        }
 
         [JsonPropertyName("favorite")]
         public bool Favorite
@@ -310,6 +326,8 @@ namespace mashin.Models
 
                 _tracksCount = normalized;
                 OnPropertyChanged();
+            OnPropertyChanged(nameof(TracksCountText));
+            OnPropertyChanged(nameof(MetadataText));
             }
         }
 
@@ -327,8 +345,19 @@ namespace mashin.Models
 
                 _totalDurationSeconds = normalized;
                 OnPropertyChanged();
+            OnPropertyChanged(nameof(TotalDurationText));
+            OnPropertyChanged(nameof(MetadataText));
             }
         }
+
+    [JsonIgnore]
+    public string TracksCountText => TracksCount == 1 ? "1 Titel" : $"{TracksCount} Titel";
+
+    [JsonIgnore]
+    public string TotalDurationText => FormatTotalDuration(TotalDurationSeconds);
+
+    [JsonIgnore]
+    public string MetadataText => $"{TracksCountText} • {TotalDurationText}";
 
         [JsonIgnore]
         public IReadOnlyList<Track> Items
@@ -343,6 +372,24 @@ namespace mashin.Models
                 TracksCount = normalizedTracks.Count;
                 TotalDurationSeconds = normalizedTracks.Sum(track => Math.Max(0, track.Duration));
             }
+        }
+
+        private static string FormatTotalDuration(int totalSeconds)
+        {
+            if (totalSeconds <= 0)
+            {
+                return "0m";
+            }
+
+            var ts = TimeSpan.FromSeconds(totalSeconds);
+            var totalHours = (int)ts.TotalHours;
+
+            if (totalHours > 0)
+            {
+                return $"{totalHours}h {ts.Minutes}m";
+            }
+
+            return $"{Math.Max(1, ts.Minutes)}m";
         }
     }
 

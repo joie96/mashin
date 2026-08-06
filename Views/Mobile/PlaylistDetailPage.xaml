@@ -73,7 +73,7 @@
                     Spacing="8">
                     <Label FontFamily="PoppinsRegular"
                         FontSize="12"
-                        Text="{Binding Tracks.Count, StringFormat='{0} Titel'}"
+                        Text="{Binding Playlist.TracksCountText}"
                         TextColor="{DynamicResource TextSecondary}" />
                     <Label FontFamily="PoppinsRegular"
                         FontSize="12"
@@ -81,7 +81,7 @@
                         TextColor="{DynamicResource TextSecondary}" />
                     <Label FontFamily="PoppinsRegular"
                         FontSize="12"
-                        Text="{Binding PlaylistTotalDurationText}"
+                        Text="{Binding Playlist.TotalDurationText}"
                         TextColor="{DynamicResource TextSecondary}" />
                 </HorizontalStackLayout>
             </Grid>

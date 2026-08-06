@@ -25,7 +25,6 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
     private readonly IContextMenuService _contextMenuService;
     private readonly ILogger<PlaylistsViewModel> _logger;
     private readonly ObservableCollection<ContextMenuItem> _playlistContextMenuItems = new();
-    private readonly ObservableRangeCollection<Playlist> _playlists = new();
     private readonly IReadOnlyList<TableViewSkeleton> _playlistSkeletons = Enumerable.Range(0, 12)
         .Select(_ => new TableViewSkeleton())
         .ToList();
@@ -56,7 +55,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         _logger = logger;
 
         _userDataService.PropertyChanged += OnUserDataServicePropertyChanged;
-        _playlists.CollectionChanged += OnPlaylistsCollectionChanged;
+        _userDataService.Playlists.CollectionChanged += OnPlaylistsCollectionChanged;
         IsLoading = _userDataService.IsLoadingPreferences;
 
         PlaylistTappedCommand = new Command<Playlist>(async playlist =>
@@ -82,7 +81,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
             }
 
             _contextPlaylist = anchor.BindingContext as Playlist;
-            var hasSelection = _playlists.Any(playlist => playlist.IsSelected);
+            var hasSelection = _userDataService.Playlists.Any(playlist => playlist.IsSelected);
             if (_contextPlaylist == null && !hasSelection)
             {
                 return;
@@ -117,7 +116,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         }
     }
 
-    public bool HasPlaylists => _playlists.Count > 0;
+    public bool HasPlaylists => _userDataService.Playlists.Count > 0;
 
     public bool ShowPlaylistListView => IsLoading || HasPlaylists;
 
@@ -125,7 +124,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
     public IEnumerable<object> PlaylistItems => IsLoading
         ? _playlistSkeletons
-        : _playlists;
+        : _userDataService.Playlists;
 
     #endregion
 
@@ -145,15 +144,8 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
     public async Task OnNavigatedToAsync(object? parameter)
     {
-        var snapshot = await _userDataService.GetPlaylistsAsync();
-        var playlists = snapshot.Playlists
-            .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist))
-            .OrderBy(playlist => playlist.SortName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(playlist => playlist.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        _playlists.ReplaceRange(playlists);
         _navigationService.IsNavigating = false;
+        await Task.CompletedTask;
     }
 
     public Task OnNavigatedFromAsync()
@@ -169,7 +161,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         }
 
         _userDataService.PropertyChanged -= OnUserDataServicePropertyChanged;
-        _playlists.CollectionChanged -= OnPlaylistsCollectionChanged;
+        _userDataService.Playlists.CollectionChanged -= OnPlaylistsCollectionChanged;
         _disposed = true;
     }
 
@@ -204,15 +196,6 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
         try
         {
             await _userDataService.AddPlaylistAsync(playlist);
-
-            var snapshot = await _userDataService.GetPlaylistsAsync();
-            var playlists = snapshot.Playlists
-                .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist))
-                .OrderBy(playlist => playlist.SortName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(playlist => playlist.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            _playlists.ReplaceRange(playlists);
         }
         catch (Exception ex)
         {
@@ -284,7 +267,7 @@ public sealed class PlaylistsViewModel : INotifyPropertyChanged, INavigationAwar
 
     private IReadOnlyList<Playlist> GetPlaylistsForAction()
     {
-        var selected = _playlists.Where(playlist => playlist.IsSelected).ToList();
+        var selected = _userDataService.Playlists.Where(playlist => playlist.IsSelected).ToList();
         if (selected.Count > 0)
         {
             return selected;

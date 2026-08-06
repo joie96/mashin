@@ -520,14 +520,12 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
 
         try
         {
-            var snapshot = await _userDataService.GetFavoritesAsync();
-
             var tasks = new Task[]
             {
-                LoadTracksAsync(snapshot),
-                LoadAlbumsAsync(snapshot),
-                LoadPlaylistsAsync(snapshot),
-                LoadArtistsAsync(snapshot)
+                LoadTracksAsync(),
+                LoadAlbumsAsync(),
+                LoadPlaylistsAsync(),
+                LoadArtistsAsync()
             };
 
             await Task.WhenAll(tasks);
@@ -540,13 +538,11 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
         }
     }
 
-    private async Task LoadTracksAsync(FavoritesSnapshot snapshot)
+    private async Task LoadTracksAsync()
     {
         try
         {
-            var tracks = snapshot.Tracks
-                .Select(track => UserDataSnapshotMapper.ToTrack(track, favorite: true))
-                .ToList();
+            var tracks = _userDataService.FavoriteTracks.ToList();
 
             if (tracks.Count > 0)
             {
@@ -575,13 +571,11 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
         }
     }
 
-    private async Task LoadAlbumsAsync(FavoritesSnapshot snapshot)
+    private async Task LoadAlbumsAsync()
     {
         try
         {
-            var favoriteAlbums = snapshot.Albums
-                .Select(album => UserDataSnapshotMapper.ToAlbum(album, favorite: true))
-                .ToList();
+            var favoriteAlbums = _userDataService.FavoriteAlbums.ToList();
 
             if (favoriteAlbums.Count > 0)
             {
@@ -603,13 +597,11 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
         }
     }
 
-    private async Task LoadPlaylistsAsync(FavoritesSnapshot snapshot)
+    private async Task LoadPlaylistsAsync()
     {
         try
         {
-            var favoritePlaylists = snapshot.Playlists
-                .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist, favorite: true))
-                .ToList();
+            var favoritePlaylists = _userDataService.FavoritePlaylists.ToList();
 
             if (favoritePlaylists.Count > 0)
             {
@@ -631,13 +623,11 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
         }
     }
 
-    private async Task LoadArtistsAsync(FavoritesSnapshot snapshot)
+    private async Task LoadArtistsAsync()
     {
         try
         {
-            var favoriteArtists = snapshot.Artists
-                .Select(artist => UserDataSnapshotMapper.ToArtist(artist, favorite: true))
-                .ToList();
+            var favoriteArtists = _userDataService.FavoriteArtists.ToList();
 
             if (favoriteArtists.Count > 0)
             {
@@ -994,10 +984,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
     private async Task<ObservableRangeCollection<ContextMenuItem>> GetPlaylistSubItemsAsync()
     {
         var items = new ObservableRangeCollection<ContextMenuItem>();
-        var snapshot = await _userDataService.GetPlaylistsAsync();
-        var playlists = snapshot.Playlists
-            .Select(playlist => UserDataSnapshotMapper.ToPlaylist(playlist))
-            .ToList();
+        var playlists = _userDataService.Playlists;
 
         foreach (var playlist in playlists)
         {
