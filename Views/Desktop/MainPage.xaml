@@ -238,7 +238,7 @@
             RowDefinitions="Auto,1">
             <Grid Grid.Row="0"
                 Padding="24,16,24,20"
-                ColumnDefinitions="*,Auto,Auto">
+                ColumnDefinitions="*,Auto,Auto,Auto">
                 <HorizontalStackLayout HorizontalOptions="Start" Spacing="12">
 
                     <!--  Back Button  -->
@@ -295,8 +295,38 @@
                     </Border>
                 </HorizontalStackLayout>
 
-                <!--  Theme Toggle Button  -->
+                <!--  Connection Status  -->
                 <Border Grid.Column="1"
+                    BackgroundColor="{DynamicResource BackgroundSecondary}"
+                    IsVisible="{Binding IsStatusMessageVisible}"
+                    Margin="12,0,0,0"
+                    Opacity="1"
+                    Padding="10,6"
+                    HorizontalOptions="End"
+                    Stroke="{DynamicResource BorderPrimary}"
+                    StrokeThickness="0.25"
+                    VerticalOptions="Center">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="12" />
+                    </Border.StrokeShape>
+                    <Grid ColumnDefinitions="Auto,Auto"
+                        ColumnSpacing="4">
+                        <Label Grid.Column="0"
+                            FontSize="12"
+                            Text="{Binding StatusMessageText}"
+                            TextColor="{DynamicResource TextSecondary}"
+                            VerticalOptions="Center" />
+                        <ActivityIndicator Grid.Column="1"
+                            HeightRequest="12"
+                            IsRunning="{Binding IsStatusMessageLoading}"
+                            IsVisible="{Binding IsStatusMessageLoading}"
+                            WidthRequest="12"
+                            Color="{DynamicResource IconSecondary}" />
+                    </Grid>
+                </Border>
+
+                <!--  Theme Toggle Button  -->
+                <Border Grid.Column="2"
                     Margin="12,0,0,0"
                     behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                     BackgroundColor="Transparent"
@@ -332,7 +362,7 @@
 
                 <!--!-  User Profile Button  -->
                 <Border x:Name="UserProfileButton"
-                    Grid.Column="2"
+                    Grid.Column="3"
                     Margin="12,0,0,0"
                     behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                     BackgroundColor="Transparent"

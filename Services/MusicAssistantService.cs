@@ -30,10 +30,6 @@ public class MusicAssistantService
     private readonly SettingsService _settings;
     private readonly HttpClient _httpClient;
 
-    // Authentication state
-    private string? _authToken;
-    private bool _isAuthenticated;
-
     // Provider Manifest Cache
     private readonly Dictionary<string, ProviderManifest> _providerManifestCache = new();
     private readonly SemaphoreSlim _manifestCacheLock = new(1, 1);
@@ -60,51 +56,70 @@ public class MusicAssistantService
 
         _httpClient = new HttpClient(SharedHttpHandler, disposeHandler: false)
         {
-            Timeout = TimeSpan.FromSeconds(60),
-            BaseAddress = new Uri(settings.MusicAssistantUrl),
+            Timeout = TimeSpan.FromSeconds(30),
             DefaultRequestVersion = HttpVersion.Version20,
             DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower
         };
 
-        _authToken = _settings.AuthToken;
-        _isAuthenticated = !string.IsNullOrWhiteSpace(_authToken);
     }
 
-    public bool IsAuthenticated => _isAuthenticated;
-
-    public string? AuthToken => _authToken;
-
-    public event EventHandler? LoginRequired;
-
-    private async Task<T?> SendCommandAsync<T>(string command, object? args = null)
+    private async Task<T?> SendCommandAsync<T>(
+        string command,
+        object? args = null,
+        CancellationToken cancellationToken = default)
     {
-        SetAuthHeader();
-
         try
         {
+            _logger.LogTrace("Sending command: {Command}", command);
+
             var payload = new
             {
-                command = command,
+                command,
                 args = args ?? new { }
             };
 
             var json = JsonSerializer.Serialize(payload, JsonOptions);
-            _logger.LogTrace("Sending command: {Command}", command);
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                string.Concat(_settings.MusicAssistantUrl.TrimEnd('/'), "/api"))
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            };
 
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            using var response = await _httpClient.PostAsync("/api", content);
+            var shouldIncludeAuthHeader =
+                !string.Equals(command, "auth/login", StringComparison.OrdinalIgnoreCase);
+
+            if (shouldIncludeAuthHeader)
+            {
+                var token = _settings.AuthToken;
+                if (!string.IsNullOrWhiteSpace(token))
+                {
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                }
+            }
+
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
 
             if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
             {
                 _logger.LogWarning("Unauthorized - token may have expired");
-                Logout();
-                RequestLogin();
-                throw new UnauthorizedAccessException("Authentication token expired or invalid");
+                if (shouldIncludeAuthHeader)
+                {
+                    _settings.AuthToken = null;
+                    _settings.Save();
+                }
+                throw new UnauthorizedAccessException("Authentication Error: Your session has expired or token was revoked. Please login again.");
             }
 
-            response.EnsureSuccessStatusCode();
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException(
+                    $"Server antwortet mit Fehlerstatus {(int)response.StatusCode}.",
+                    null,
+                    response.StatusCode);
+            }
 
-            var responseJson = await response.Content.ReadAsStringAsync();
+            var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
             _logger.LogTrace("Response: {Response}", responseJson);
 
             return JsonSerializer.Deserialize<T>(responseJson, JsonOptions);
@@ -124,111 +139,6 @@ public class MusicAssistantService
     #region Authentication
 
     /// <summary>
-    /// Authenticate user with credentials via WebSocket. This command allows clients to authenticate over the WebSocket connection using username/password or other provider-specific credentials.
-    /// </summary>
-    public async Task<bool> AutoLoginAsync(bool raiseLoginRequest = true)
-    {
-        if (!string.IsNullOrWhiteSpace(_settings.AuthToken))
-        {
-            _logger.LogInformation("Attempting auto-login with saved token...");
-            SetAuthSession(_settings.AuthToken!, _settings.Username);
-
-            try
-            {
-                using var request = new HttpRequestMessage(HttpMethod.Post, "/api");
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _settings.AuthToken!);
-
-                var payload = JsonSerializer.Serialize(new
-                {
-                    command = "info",
-                    args = new { }
-                });
-
-                request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
-
-                using var response = await _httpClient.SendAsync(request);
-                response.EnsureSuccessStatusCode();
-
-                _logger.LogInformation("Auto-login successful");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Saved token invalid, clearing...");
-                Logout();
-            }
-        }
-
-        _logger.LogInformation("No valid auth token available, login required");
-        if (raiseLoginRequest)
-        {
-            RequestLogin();
-        }
-
-        return false;
-    }
-
-    public async Task<bool> LoginAsync(string username, string password, string? deviceName = null)
-    {
-        try
-        {
-            _logger.LogInformation("Authenticating with Music Assistant...");
-
-            var args = new Dictionary<string, object>
-            {
-                ["username"] = username,
-                ["password"] = password,
-                ["provider_id"] = "builtin"
-            };
-
-            if (!string.IsNullOrEmpty(deviceName))
-            {
-                args["device_name"] = deviceName;
-            }
-
-            var response = await SendCommandAsync<AuthResponse>("auth/login", args);
-
-            if (response?.Success == true && !string.IsNullOrEmpty(response.Token))
-            {
-                SetAuthSession(response.Token, response.User?.Username ?? username);
-
-                _logger.LogInformation("Successfully authenticated as: {Username}", response.User?.Username ?? username);
-
-                return true;
-            }
-
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Login failed");
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Logout current user by revoking the current token.
-    /// </summary>
-    public async Task LogoutAsync()
-    {
-        try
-        {
-            if (IsAuthenticated)
-            {
-                await SendCommandAsync<object>("auth/logout");
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Logout command failed, clearing local credentials anyway");
-        }
-        finally
-        {
-            Logout();
-        }
-    }
-
-    /// <summary>
     /// Get current authenticated user information.
     /// </summary>
     public async Task<AuthUser?> GetCurrentUserAsync()
@@ -242,6 +152,67 @@ public class MusicAssistantService
     public async Task<List<object>?> GetAuthProvidersAsync()
     {
         return await SendCommandAsync<List<object>>("auth/providers");
+    }
+
+    public async Task LoginAsync(
+        string username,
+        string password,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await SendCommandAsync<JsonElement>(
+            "auth/login",
+            new
+            {
+                username,
+                password,
+                provider_id = "builtin"
+            },
+            cancellationToken: cancellationToken);
+
+        if (response.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException("Login response hat ein ungueltiges Format.");
+        }
+
+        if (response.TryGetProperty("success", out var successProperty)
+            && successProperty.ValueKind == JsonValueKind.False)
+        {
+            throw new UnauthorizedAccessException("Authentication required");
+        }
+
+        var token = TryGetString(response, "token") ?? TryGetString(response, "access_token");
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            throw new InvalidOperationException("Login response enthaelt kein Token.");
+        }
+
+        _settings.AuthToken = token;
+        _settings.Save();
+    }
+
+    public async Task LogoutAsync(CancellationToken cancellationToken = default)
+    {
+        var token = _settings.AuthToken;
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return;
+        }
+
+        try
+        {
+            _ = await SendCommandAsync<object>(
+                "auth/logout",
+                new { },
+                cancellationToken: cancellationToken);
+        }
+        catch
+        {
+        }
+        finally
+        {
+            _settings.AuthToken = null;
+            _settings.Save();
+        }
     }
 
     /// <summary>
@@ -344,73 +315,41 @@ public class MusicAssistantService
         return await SendCommandAsync<AuthUser>("auth/user/update", args);
     }
 
-    /// <summary>
-    /// Logout (internal use)
-    /// </summary>
-    private void Logout()
-    {
-        ClearAuthSession();
-        _httpClient.DefaultRequestHeaders.Authorization = null;
-    }
-
-    private void SetAuthHeader()
-    {
-        if (!IsAuthenticated || string.IsNullOrWhiteSpace(AuthToken))
-        {
-            _httpClient.DefaultRequestHeaders.Authorization = null;
-            return;
-        }
-
-        var token = AuthToken;
-        var current = _httpClient.DefaultRequestHeaders.Authorization;
-
-        if (current?.Scheme == "Bearer" && current.Parameter == token)
-        {
-            return;
-        }
-
-        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-    }
-
-    public void SetAuthSession(string token, string? username = null)
-    {
-        if (!string.IsNullOrWhiteSpace(token))
-        {
-            _authToken = token;
-            _isAuthenticated = true;
-        }
-
-        if (!string.IsNullOrWhiteSpace(username))
-        {
-            _settings.Username = username;
-        }
-
-        _settings.AuthToken = token;
-        _settings.Save();
-
-        _logger.LogInformation("Authentication session updated");
-    }
-
-    public void ClearAuthSession()
-    {
-        _authToken = null;
-        _isAuthenticated = false;
-
-        _settings.Username = null;
-        _settings.AuthToken = null;
-        _settings.Save();
-
-        _logger.LogInformation("Logged out");
-    }
-
-    public void RequestLogin()
-    {
-        LoginRequired?.Invoke(this, EventArgs.Empty);
-    }
-
     #endregion
 
     #region General
+
+    public async Task<bool> TestAuthentificatonAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _ = await SendCommandAsync<JsonElement>(
+                "info",
+                new { },
+                cancellationToken: cancellationToken);
+            return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (HttpRequestException)
+        {
+            return false;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
 
     /// <summary>
     /// Return Info of this server.
@@ -418,6 +357,18 @@ public class MusicAssistantService
     public async Task<ServerInfoMessage?> GetServerInfoAsync()
     {
         return await SendCommandAsync<ServerInfoMessage>("info");
+    }
+
+    private static string? TryGetString(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var propertyValue))
+        {
+            return null;
+        }
+
+        return propertyValue.ValueKind == JsonValueKind.String
+            ? propertyValue.GetString()
+            : null;
     }
 
     /// <summary>

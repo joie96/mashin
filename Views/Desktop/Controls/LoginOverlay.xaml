@@ -51,6 +51,25 @@
 
             <VerticalStackLayout Spacing="16">
                 <VerticalStackLayout Spacing="6">
+                    <Label Text="Server URI"
+                        FontSize="13"
+                        TextColor="{DynamicResource TextSecondary}" />
+                    <Border BackgroundColor="{DynamicResource BackgroundTertiary}"
+                        Stroke="{DynamicResource SeparatorColor}"
+                        StrokeThickness="0"
+                        StrokeShape="RoundRectangle 6"
+                        Padding="-1,-1,-1,-1">
+                        <Entry x:Name="LoginServerUriEntry"
+                            Placeholder="http://server:8095"
+                            PlaceholderColor="{DynamicResource TextTertiary}"
+                            TextColor="{DynamicResource TextPrimary}"
+                            BackgroundColor="Transparent"
+                            FontSize="15"
+                            HeightRequest="44" />
+                    </Border>
+                </VerticalStackLayout>
+
+                <VerticalStackLayout Spacing="6">
                     <Label Text="Benutzername"
                         FontSize="13"
                         TextColor="{DynamicResource TextSecondary}" />

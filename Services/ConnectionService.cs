@@ -16,13 +16,17 @@ public interface IConnectionService : IAsyncDisposable
 
     event EventHandler<CustomConnectionState>? ConnectionStateChanged;
 
-    Task StartAsync(CancellationToken cancellationToken = default);
+    Task StartReconnectLoopAsync(CancellationToken cancellationToken = default);
 
-    Task StopAsync(CancellationToken cancellationToken = default);
+    Task StopReconnectLoopAsync(CancellationToken cancellationToken = default);
 
     Task SetOfflineModeAsync(bool offlineMode, CancellationToken cancellationToken = default);
 
     Task ConnectAsync(CancellationToken cancellationToken = default);
+
+    Task DisconnectAsync(CancellationToken cancellationToken = default);
+
+    Task<bool> TestServerReachabilityAsync(CancellationToken cancellationToken = default);
 }
 
 public sealed class ConnectionService : IConnectionService
@@ -31,6 +35,7 @@ public sealed class ConnectionService : IConnectionService
 
     private static readonly TimeSpan ReconnectInitialDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan ReconnectMaxDelay = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan ProbeConnectTimeout = TimeSpan.FromSeconds(3);
 
     #endregion
 
@@ -84,7 +89,7 @@ public sealed class ConnectionService : IConnectionService
 
     #region Lifecycle
 
-    public async Task StartAsync(CancellationToken cancellationToken = default)
+    public async Task StartReconnectLoopAsync(CancellationToken cancellationToken = default)
     {
         await _lifecycleGate.WaitAsync(cancellationToken);
         try
@@ -96,6 +101,7 @@ public sealed class ConnectionService : IConnectionService
 
             _loopCts = new CancellationTokenSource();
             _reconnectLoopTask = Task.Run(() => RunReconnectLoopAsync(_loopCts.Token), CancellationToken.None);
+            RefreshConnectionState();
             _logger.LogInformation("Connection service started.");
         }
         finally
@@ -104,7 +110,7 @@ public sealed class ConnectionService : IConnectionService
         }
     }
 
-    public async Task StopAsync(CancellationToken cancellationToken = default)
+    public async Task StopReconnectLoopAsync(CancellationToken cancellationToken = default)
     {
         CancellationTokenSource? loopCts;
         Task? reconnectLoopTask;
@@ -131,6 +137,8 @@ public sealed class ConnectionService : IConnectionService
 
         await AwaitLoopTaskAsync(reconnectLoopTask);
 
+        RefreshConnectionState();
+
         _logger.LogInformation("Connection service stopped.");
     }
 
@@ -138,26 +146,25 @@ public sealed class ConnectionService : IConnectionService
     {
         if (offlineMode)
         {
-            if (_connectionState == CustomConnectionState.Offline)
+            if (!IsReconnectLoopRunning() && !_eventHub.IsConnected && !_sendspinPlayer.IsConnected)
             {
                 return;
             }
 
-            SetConnectionState(CustomConnectionState.Offline);
-            await _sendspinPlayer.DisconnectAsync(cancellationToken);
-            await _eventHub.DisconnectAsync(cancellationToken);
+            await StopReconnectLoopAsync(cancellationToken);
+            await DisconnectAsync(cancellationToken);
             _logger.LogInformation("Connection service switched to offline mode.");
             return;
         }
 
-        if (_connectionState != CustomConnectionState.Offline)
+        if (IsReconnectLoopRunning())
         {
             return;
         }
 
         _logger.LogInformation("Connection service switched to online mode.");
-        SetConnectionState(CustomConnectionState.Reconnecting);
         await ConnectAsync(cancellationToken);
+        await StartReconnectLoopAsync(cancellationToken);
     }
 
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
@@ -168,9 +175,65 @@ public sealed class ConnectionService : IConnectionService
             return;
         }
 
+        var isOnline = await TestServerReachabilityAsync(cancellationToken);
+        if (!isOnline)
+        {
+            _logger.LogInformation("Manual connect ignored because server is offline.");
+            return;
+        }
+
         await _eventHub.ConnectAsync(cancellationToken);
         await _sendspinPlayer.ConnectAsync(cancellationToken);
         RefreshConnectionState();
+    }
+
+    public async Task DisconnectAsync(CancellationToken cancellationToken = default)
+    {
+        await _sendspinPlayer.DisconnectAsync(cancellationToken);
+        await _eventHub.DisconnectAsync(cancellationToken);
+        RefreshConnectionState();
+    }
+
+    public async Task<bool> TestServerReachabilityAsync(CancellationToken cancellationToken = default)
+    {
+        if (!Uri.TryCreate(_settingsService.MusicAssistantUrl?.Trim(), UriKind.Absolute, out var serverUri))
+        {
+            return false;
+        }
+
+        var port = serverUri.IsDefaultPort
+            ? (string.Equals(serverUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ? 443 : 80)
+            : serverUri.Port;
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(ProbeConnectTimeout);
+
+        try
+        {
+            using var tcpClient = new TcpClient();
+            await tcpClient.ConnectAsync(serverUri.Host, port, timeoutCts.Token);
+            return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (TaskCanceledException)
+        {
+            return false;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (SocketException)
+        {
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -178,7 +241,7 @@ public sealed class ConnectionService : IConnectionService
         _eventHub.ConnectionStateChanged -= OnUnderlyingConnectionStateChanged;
         _sendspinPlayer.ConnectionStateChanged -= OnUnderlyingConnectionStateChanged;
 
-        await StopAsync();
+        await StopReconnectLoopAsync();
         _lifecycleGate.Dispose();
     }
 
@@ -202,7 +265,8 @@ public sealed class ConnectionService : IConnectionService
 
             try
             {
-                if (!await TestServerConnectionReachabilityAsync(cancellationToken))
+                var isOnline = await TestServerReachabilityAsync(cancellationToken);
+                if (!isOnline)
                 {
                     await DelaySafeAsync(retryDelay, cancellationToken);
                     retryDelay = TimeSpan.FromSeconds(Math.Min(retryDelay.TotalSeconds * 2, ReconnectMaxDelay.TotalSeconds));
@@ -256,14 +320,19 @@ public sealed class ConnectionService : IConnectionService
 
     private void RefreshConnectionState()
     {
-        if (_connectionState == CustomConnectionState.Offline)
+        if (_eventHub.IsConnected && _sendspinPlayer.IsConnected)
         {
+            SetConnectionState(CustomConnectionState.Online);
             return;
         }
 
-        SetConnectionState(_eventHub.IsConnected && _sendspinPlayer.IsConnected
-            ? CustomConnectionState.Online
-            : CustomConnectionState.Reconnecting);
+        if (IsReconnectLoopRunning())
+        {
+            SetConnectionState(CustomConnectionState.Reconnecting);
+            return;
+        }
+
+        SetConnectionState(CustomConnectionState.Offline);
     }
 
     private void SetConnectionState(CustomConnectionState nextState)
@@ -298,6 +367,13 @@ public sealed class ConnectionService : IConnectionService
         }
     }
 
+    private bool IsReconnectLoopRunning()
+    {
+        return _loopCts != null
+            && _reconnectLoopTask != null
+            && !_reconnectLoopTask.IsCompleted;
+    }
+
     private static async Task DelaySafeAsync(TimeSpan delay, CancellationToken cancellationToken)
     {
         try
@@ -309,53 +385,5 @@ public sealed class ConnectionService : IConnectionService
             // Expected on cancellation.
         }
     }
-
-    private async Task<bool> TestServerConnectionReachabilityAsync(CancellationToken cancellationToken)
-    {
-        if (!Uri.TryCreate(_settingsService.SendspinUrl, UriKind.Absolute, out var sendspinUri))
-        {
-            _logger.LogWarning("Reachability check skipped because configured URL is invalid. Url={SendspinUrl}", _settingsService.SendspinUrl);
-            return false;
-        }
-
-        var host = sendspinUri.Host;
-        if (string.IsNullOrWhiteSpace(host))
-        {
-            _logger.LogWarning("Reachability check skipped because endpoint host is empty. Url={SendspinUrl}", _settingsService.SendspinUrl);
-            return false;
-        }
-
-        var port = sendspinUri.Port;
-        if (port <= 0)
-        {
-            port = string.Equals(sendspinUri.Scheme, "wss", StringComparison.OrdinalIgnoreCase) ? 443 : 80;
-        }
-
-        try
-        {
-            using var tcpClient = new TcpClient();
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(2));
-
-            await tcpClient.ConnectAsync(host, port, timeoutCts.Token);
-            _logger.LogInformation("Server is reachable. Host={Host}, Port={Port}", host, port);
-            return true;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (OperationCanceledException)
-        {
-            _logger.LogDebug("Server reachability check timed out. Host={Host}, Port={Port}", host, port);
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug("Server is unreachable. Host={Host}, Port={Port}", host, port);
-            return false;
-        }
-    }
-
     #endregion
 }

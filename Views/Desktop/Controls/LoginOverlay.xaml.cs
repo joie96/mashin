@@ -17,6 +17,12 @@ public partial class LoginOverlay : ContentView
         set => LoginUsernameEntry.Text = value;
     }
 
+    public string ServerUri
+    {
+        get => LoginServerUriEntry.Text ?? string.Empty;
+        set => LoginServerUriEntry.Text = value;
+    }
+
     public string Password
     {
         get => LoginPasswordEntry.Text ?? string.Empty;
@@ -35,6 +41,7 @@ public partial class LoginOverlay : ContentView
         LoginButton.Text = isLoading ? "Anmelden..." : "Anmelden";
         LoginLoadingIndicator.IsVisible = isLoading;
         LoginLoadingIndicator.IsRunning = isLoading;
+        LoginServerUriEntry.IsEnabled = !isLoading;
         LoginUsernameEntry.IsEnabled = !isLoading;
         LoginPasswordEntry.IsEnabled = !isLoading;
     }

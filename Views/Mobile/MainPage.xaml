@@ -97,7 +97,7 @@
 
             <!--  Connection Status  -->
             <Border BackgroundColor="{DynamicResource BackgroundSecondary}"
-                IsVisible="{Binding ConnectionState, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
+                IsVisible="{Binding IsStatusMessageVisible}"
                 Margin="0,12,12,0"
                 Opacity="1"
                 Padding="10,6"
@@ -113,24 +113,15 @@
                     ColumnSpacing="4">
                     <Label Grid.Column="0"
                         FontSize="12"
-                        Text="{Binding ConnectionState}"
+                        Text="{Binding StatusMessageText}"
                         TextColor="{DynamicResource TextSecondary}"
                         VerticalOptions="Center" />
                     <ActivityIndicator Grid.Column="1"
                         HeightRequest="12"
-                        IsRunning="False"
-                        IsVisible="False"
+                        IsRunning="{Binding IsStatusMessageLoading}"
+                        IsVisible="{Binding IsStatusMessageLoading}"
                         WidthRequest="12"
-                        Color="{DynamicResource IconSecondary}">
-                        <ActivityIndicator.Triggers>
-                            <DataTrigger Binding="{Binding ConnectionState}"
-                                TargetType="ActivityIndicator"
-                                Value="Connecting">
-                                <Setter Property="IsVisible" Value="True" />
-                                <Setter Property="IsRunning" Value="True" />
-                            </DataTrigger>
-                        </ActivityIndicator.Triggers>
-                    </ActivityIndicator>
+                        Color="{DynamicResource IconSecondary}" />
                 </Grid>
             </Border>
         </Grid>

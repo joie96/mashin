@@ -163,7 +163,7 @@ public sealed class PlaybackService
                 : PlaybackOutputMode.MA_Remote;
 
         await SetOutputModeAsync(defaultMode, cancellationToken: cancellationToken);
-        await _connectionService.StartAsync(cancellationToken);
+        await _connectionService.StartReconnectLoopAsync(cancellationToken);
 
         _initialized = true;
     }

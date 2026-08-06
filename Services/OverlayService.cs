@@ -71,11 +71,13 @@ public interface IOverlayService
     Task<string?> ShowUpdatePlaylistAsync(Playlist playlist);
     Task<bool> ShowDeletePlaylistAsync(Playlist playlist);
     Task<(string SortField, bool IsDescending)?> ShowSortContentOverlayAsync();
-    Task<bool> ShowLoginAsync(
+    Task<(string Username, string Password, string ServerUri)> ShowLoginAsync(
         string? initialUsername,
-        Func<string, string, Task<(bool Success, string? ErrorMessage)>> authenticateAsync,
-        Func<Task<(bool Success, string? ErrorMessage)>>? tryAutoLoginAsync = null,
-        string? autoLoginStatusMessage = null);
+        string? initialServerUri,
+        string? initialErrorMessage = null);
+    Task SetLoginLoadingStateAsync(bool isLoading);
+    Task ShowLoginErrorAsync(string message);
+    Task HideLoginErrorAsync();
 }
 
 /// <summary>
@@ -132,9 +134,7 @@ public sealed class OverlayService : IOverlayService
     private TaskCompletionSource<string?>? _updatePlaylistTcs;
     private TaskCompletionSource<bool>? _deletePlaylistTcs;
     private TaskCompletionSource<(string SortField, bool IsDescending)?>? _sortContentOverlayTcs;
-    private TaskCompletionSource<bool>? _loginTcs;
-
-    private Func<string, string, Task<(bool Success, string? ErrorMessage)>>? _authenticateLoginAsync;
+    private TaskCompletionSource<(string Username, string Password, string ServerUri)>? _loginTcs;
 
     #endregion
 
@@ -910,118 +910,89 @@ public sealed class OverlayService : IOverlayService
 
     #region Login Overlay API
 
-    public async Task<bool> ShowLoginAsync(
+    public async Task<(string Username, string Password, string ServerUri)> ShowLoginAsync(
         string? initialUsername,
-        Func<string, string, Task<(bool Success, string? ErrorMessage)>> authenticateAsync,
-        Func<Task<(bool Success, string? ErrorMessage)>>? tryAutoLoginAsync = null,
-        string? autoLoginStatusMessage = null)
+        string? initialServerUri,
+        string? initialErrorMessage = null)
     {
-        if (authenticateAsync is null)
-        {
-            return false;
-        }
-
         await _overlayLock.WaitAsync();
 
         try
         {
             EnsureInitialized();
 
-            _authenticateLoginAsync = authenticateAsync;
-            _loginTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _loginTcs = new TaskCompletionSource<(string Username, string Password, string ServerUri)>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             await MainThread.InvokeOnMainThreadAsync(() =>
             {
-                _loginOverlay.Username = initialUsername ?? string.Empty;
-                _loginOverlay.Password = string.Empty;
-                _loginOverlay.HideError();
-                _loginOverlay.SetStatusMessage(string.Empty);
-                _loginOverlay.SetLoadingState(false);
-                ShowCenteredOverlayInternal(_loginOverlay, null);
+                var isLoginOverlayAlreadyOpen = _overlayHost?.IsVisible == true
+                    && ReferenceEquals(_overlayContent?.Content, _loginOverlay);
 
-                if (string.IsNullOrWhiteSpace(_loginOverlay.Username))
+                if (!isLoginOverlayAlreadyOpen)
                 {
-                    _loginOverlay.FocusUsername();
-                }
-                else
-                {
-                    _loginOverlay.FocusPassword();
-                }
-            });
+                    _loginOverlay.Username = initialUsername ?? string.Empty;
+                    _loginOverlay.ServerUri = initialServerUri ?? string.Empty;
+                    _loginOverlay.Password = string.Empty;
+                    _loginOverlay.HideError();
+                    _loginOverlay.SetStatusMessage(string.Empty);
+                    _loginOverlay.SetLoadingState(false);
 
-            if (tryAutoLoginAsync is not null)
-            {
-                await MainThread.InvokeOnMainThreadAsync(() =>
-                {
-                    _loginOverlay.SetStatusMessage(autoLoginStatusMessage ?? "Verbindung wird getestet...");
-                    _loginOverlay.SetLoadingState(true);
-                });
-
-                try
-                {
-                    var (success, errorMessage) = await tryAutoLoginAsync();
-                    if (success)
+                    if (!string.IsNullOrWhiteSpace(initialErrorMessage))
                     {
-                        _loginTcs.TrySetResult(true);
+                        _loginOverlay.ShowError(initialErrorMessage);
+                    }
+
+                    ShowCenteredOverlayInternal(_loginOverlay, null);
+
+                    if (string.IsNullOrWhiteSpace(_loginOverlay.Username))
+                    {
+                        _loginOverlay.FocusUsername();
                     }
                     else
                     {
-                        await MainThread.InvokeOnMainThreadAsync(() =>
-                        {
-                            _loginOverlay.SetLoadingState(false);
-                            _loginOverlay.SetStatusMessage(string.Empty);
-
-                            if (!string.IsNullOrWhiteSpace(errorMessage))
-                            {
-                                _loginOverlay.ShowError(errorMessage);
-                            }
-
-                            if (string.IsNullOrWhiteSpace(_loginOverlay.Username))
-                            {
-                                _loginOverlay.FocusUsername();
-                            }
-                            else
-                            {
-                                _loginOverlay.FocusPassword();
-                            }
-                        });
+                        _loginOverlay.FocusPassword();
                     }
                 }
-                catch (Exception ex)
+                else
                 {
-                    _logger.LogWarning(ex, "Auto login failed in overlay service");
-                    await MainThread.InvokeOnMainThreadAsync(() =>
-                    {
-                        _loginOverlay.SetLoadingState(false);
-                        _loginOverlay.SetStatusMessage(string.Empty);
-                        _loginOverlay.ShowError($"Verbindungsfehler: {ex.Message}");
-
-                        if (string.IsNullOrWhiteSpace(_loginOverlay.Username))
-                        {
-                            _loginOverlay.FocusUsername();
-                        }
-                        else
-                        {
-                            _loginOverlay.FocusPassword();
-                        }
-                    });
+                    _loginOverlay.SetLoadingState(false);
+                    _loginOverlay.FocusPassword();
                 }
-            }
+            });
 
             return await _loginTcs.Task;
         }
         finally
         {
-            _authenticateLoginAsync = null;
             _loginTcs = null;
-            await MainThread.InvokeOnMainThreadAsync(() =>
-            {
-                _loginOverlay.ClearPassword();
-                _loginOverlay.SetStatusMessage(string.Empty);
-            });
-            await HideCenteredOverlayInternalAsync();
             _overlayLock.Release();
         }
+    }
+
+    public Task SetLoginLoadingStateAsync(bool isLoading)
+    {
+        return MainThread.InvokeOnMainThreadAsync(() =>
+        {
+            _loginOverlay.SetLoadingState(isLoading);
+        });
+    }
+
+    public Task ShowLoginErrorAsync(string message)
+    {
+        return MainThread.InvokeOnMainThreadAsync(() =>
+        {
+            _loginOverlay.SetLoadingState(false);
+            _loginOverlay.ShowError(message);
+            _loginOverlay.FocusPassword();
+        });
+    }
+
+    public Task HideLoginErrorAsync()
+    {
+        return MainThread.InvokeOnMainThreadAsync(() =>
+        {
+            _loginOverlay.HideError();
+        });
     }
 
     #endregion
@@ -1102,12 +1073,12 @@ public sealed class OverlayService : IOverlayService
 
     private async void OnLoginPasswordCompleted(object? sender, EventArgs e)
     {
-        await TryAuthenticateLoginAsync();
+        await TrySubmitLoginAsync();
     }
 
     private async void OnLoginClicked(object? sender, EventArgs e)
     {
-        await TryAuthenticateLoginAsync();
+        await TrySubmitLoginAsync();
     }
 
     private void OnSelectionIndicatorSelectAllTapped(object? sender, EventArgs e)
@@ -1174,16 +1145,22 @@ public sealed class OverlayService : IOverlayService
 
     #region Login Flow
 
-    private async Task TryAuthenticateLoginAsync()
+    private async Task TrySubmitLoginAsync()
     {
-        var authenticate = _authenticateLoginAsync;
-        if (authenticate is null || _loginTcs is null)
+        if (_loginTcs is null)
         {
             return;
         }
 
         var username = _loginOverlay.Username.Trim();
+        var serverUri = _loginOverlay.ServerUri.Trim();
         var password = _loginOverlay.Password;
+
+        if (string.IsNullOrWhiteSpace(serverUri))
+        {
+            _loginOverlay.ShowError("Bitte geben Sie eine Server-URI ein.");
+            return;
+        }
 
         if (string.IsNullOrWhiteSpace(username))
         {
@@ -1201,31 +1178,10 @@ public sealed class OverlayService : IOverlayService
 
         _loginOverlay.HideError();
         _loginOverlay.SetLoadingState(true);
-
-        try
+        await MainThread.InvokeOnMainThreadAsync(() =>
         {
-            var (success, errorMessage) = await authenticate(username, password);
-            if (success)
-            {
-                _loginTcs.TrySetResult(true);
-                return;
-            }
-
-            _loginOverlay.ShowError(errorMessage ?? "Anmeldung fehlgeschlagen. Bitte überprüfen Sie Ihre Anmeldedaten.");
-            _loginOverlay.ClearPassword();
-            _loginOverlay.FocusPassword();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Login handling failed in overlay service");
-            _loginOverlay.ShowError($"Verbindungsfehler: {ex.Message}");
-            _loginOverlay.ClearPassword();
-            _loginOverlay.FocusPassword();
-        }
-        finally
-        {
-            _loginOverlay.SetLoadingState(false);
-        }
+            _loginTcs.TrySetResult((username, password, serverUri));
+        });
     }
 
     #endregion

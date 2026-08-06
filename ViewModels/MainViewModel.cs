@@ -62,9 +62,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     // Navigation
     private bool _isNavigating;
     private NavigationSection _currentSection = NavigationSection.Home;
-    private bool _isLoginOverlayActive;
-    private int _connectionStateDisplayVersion;
-    private string _connectionState = string.Empty;
+    private int _statusMessageDisplayVersion;
+    private string _statusMessageText = string.Empty;
+    private bool _isStatusMessageLoading;
 
     public event Func<Task>? CloseQueueViewRequested;
     public event EventHandler? SearchSubmitted;
@@ -241,10 +241,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _navigationService.PropertyChanged += OnNavigationServicePropertyChanged;
         IsNavigating = _navigationService.IsNavigating;
 
-        _musicAssistant.LoginRequired += OnLoginRequired;
-
         _connectionService.ConnectionStateChanged += OnConnectionServiceStateChanged;
-        UpdateConnectionState(_connectionService.ConnectionState);
+        OnConnectionServiceStateChanged(this, _connectionService.ConnectionState);
 
         // Subscribe to playback state events
         _playbackService.PropertyChanged += OnPlaybackServicePropertyChanged;
@@ -290,11 +288,27 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         private set => SetProperty(ref _isNavigating, value);
     }
 
-    public string ConnectionState
+    public string StatusMessageText
     {
-        get => _connectionState;
-        private set => SetProperty(ref _connectionState, value);
+        get => _statusMessageText;
+        private set
+        {
+            if (!SetProperty(ref _statusMessageText, value))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(IsStatusMessageVisible));
+        }
     }
+
+    public bool IsStatusMessageLoading
+    {
+        get => _isStatusMessageLoading;
+        private set => SetProperty(ref _isStatusMessageLoading, value);
+    }
+
+    public bool IsStatusMessageVisible => !string.IsNullOrWhiteSpace(StatusMessageText);
 
     #endregion
 
@@ -623,18 +637,19 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public async Task InitializeAsync()
     {
-        var autoLoginSucceeded = await _musicAssistant.AutoLoginAsync(raiseLoginRequest: true);
-        if (!autoLoginSucceeded)
-        {
-            _logger.LogWarning("Startup initialization paused because user is not authenticated.");
-            return;
-        }
+        await LoginAsync();
 
+        // Connect the Eventhub and Sendpsinplayer
+        await _connectionService.ConnectAsync();
+        await _connectionService.StartReconnectLoopAsync();
+
+        // Load userdata (favorites)
         await UserDataService.LoadPreferencesAsync();
 
         CurrentSection = NavigationSection.Home;
         await _navigationService.NavigateToAsync<HomePage>();
 
+        // Set sendspin as initial player and start playback service
         await RefreshAvailablePlayersAsync();
         ApplyInitialSelectedPlayer();
         try
@@ -683,7 +698,153 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         OnPropertyChanged(nameof(CurrentQueueItemPrimaryArtist));
         OnPropertyChanged(nameof(QueueTrackCountText));
         OnPropertyChanged(nameof(QueueTotalDurationText));
+    }
 
+    private async Task LoginAsync()
+    {
+        ShowStatusMessage(StatusMessage.Connecting);
+
+        // Initial check: if server is reachable and already authenticated, finish directly.
+        var isServerReachable = await _connectionService.TestServerReachabilityAsync();
+        var isAuthenticated = false;
+        if (isServerReachable)
+        {
+            ShowStatusMessage(StatusMessage.Connected);
+            isAuthenticated = await _musicAssistant.TestAuthentificatonAsync();
+        }
+
+        if (isServerReachable && isAuthenticated)
+        {
+            ShowStatusMessage(StatusMessage.LoginSuccessful);
+            return;
+        }
+
+        ShowStatusMessage(StatusMessage.Login);
+
+        var initialErrorMessage = !isServerReachable
+            ? "Server nicht erreichbar. Bitte URI überprüfen."
+            : null;
+
+        var loginSuccessful = false;
+        while (!loginSuccessful)
+        {
+            var (username, password, serverUri) = await _overlayService.ShowLoginAsync(
+                _settings.Username,
+                _settings.MusicAssistantUrl,
+                initialErrorMessage);
+
+            await _overlayService.SetLoginLoadingStateAsync(true);
+
+            string? errorMessage;
+            try
+            {
+                if (!Uri.TryCreate(serverUri.Trim(), UriKind.Absolute, out var parsedServerUri))
+                {
+                    errorMessage = "Ungültige Server-URI.";
+                }
+                else
+                {
+                    // Save server URI and username
+                    _settings.MusicAssistantUrl = parsedServerUri.ToString().TrimEnd('/');
+                    _settings.Username = username;
+                    _settings.Save();
+
+                    _logger.LogDebug("Attempting login for user: {Username}", username);
+                    await _musicAssistant.LoginAsync(username, password);
+
+                    _logger.LogDebug("Login successful for user: {Username}", username);
+                    loginSuccessful = true;
+                    errorMessage = null;
+                }
+            }
+            catch (UnauthorizedAccessException)
+            {
+                _logger.LogWarning("Login failed for user: {Username}", username);
+                errorMessage = "Anmeldung fehlgeschlagen. Bitte überprüfen Sie Ihre Anmeldedaten.";
+            }
+            catch (TaskCanceledException)
+            {
+                _logger.LogWarning("Login timeout for user: {Username}", username);
+                errorMessage = "Server nicht erreichbar. Bitte URI überprüfen.";
+            }
+            catch (HttpRequestException ex) when (ex.StatusCode.HasValue)
+            {
+                _logger.LogWarning(ex, "Server returned status code {StatusCode} during login for user: {Username}", (int)ex.StatusCode.Value, username);
+                errorMessage = (int)ex.StatusCode.Value is 401 or 403
+                    ? "Authentifizierung fehlgeschlagen. Bitte Benutzerdaten prüfen."
+                    : $"Server nicht erreichbar oder fehlerhaft. Bitte URI überprüfen (HTTP {(int)ex.StatusCode.Value}).";
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogWarning(ex, "Server unreachable during login for user: {Username}", username);
+                errorMessage = "Server nicht erreichbar. Bitte URI überprüfen.";
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Invalid login response for user: {Username}", username);
+                errorMessage = "Serverantwort ungültig. Bitte URI überprüfen.";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Login error for user: {Username}", username);
+                errorMessage = $"Verbindungsfehler: {ex.Message}";
+            }
+
+            if (loginSuccessful)
+            {
+                await _overlayService.SetLoginLoadingStateAsync(false);
+                await _overlayService.CloseOverlayAsync();
+                ShowStatusMessage(StatusMessage.LoginSuccessful);
+                return;
+            }
+
+            initialErrorMessage = errorMessage;
+            await _overlayService.ShowLoginErrorAsync(errorMessage ?? "Anmeldung fehlgeschlagen. Bitte Eingaben prüfen.");
+        }
+    }
+
+    private async Task LogoutAsync()
+    {
+        try
+        {
+            await _musicAssistant.LogoutAsync();
+        }
+        catch (Exception ex) when (ex.Message.Contains("No token in context", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogInformation(ex, "Logout skipped because no token was available in context.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Logout failed");
+        }
+        finally
+        {
+            try
+            {
+                await _overlayService.CloseFlyoutAsync();
+                await _overlayService.CloseOverlayAsync();
+
+                IsAudioOptionsFlyoutOpen = false;
+                IsDeviceSelectionFlyoutOpen = false;
+                CurrentSection = NavigationSection.None;
+
+                _availablePlayers.Clear();
+                _playlists.Clear();
+
+                _selectedPlayerId = null;
+                OnPropertyChanged(nameof(SelectedPlayerId));
+
+                // Stop background reconnect and active connections before restarting login flow.
+                await _connectionService.StopReconnectLoopAsync();
+                await _connectionService.DisconnectAsync();
+
+                await InitializeAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to restart app flow after logout.");
+            }
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -692,8 +853,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _playlistService.PropertyChanged -= OnPlaylistServicePropertyChanged;
         _playbackService.CurrentQueueItems.CollectionChanged -= OnCurrentQueueItemsCollectionChanged;
         _availablePlayers.CollectionChanged -= OnAvailablePlayersCollectionChanged;
-
-        _musicAssistant.LoginRequired -= OnLoginRequired;
 
         _connectionService.ConnectionStateChanged -= OnConnectionServiceStateChanged;
 
@@ -712,52 +871,55 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         ExecuteOnMainThread(() =>
         {
-            UpdateConnectionState(state);
+            switch (state)
+            {
+                case CustomConnectionState.Offline:
+                    ShowStatusMessage(StatusMessage.Offline);
+                    break;
+                case CustomConnectionState.Reconnecting:
+                    ShowStatusMessage(StatusMessage.Connecting);
+                    break;
+                case CustomConnectionState.Online:
+                    ShowStatusMessage(StatusMessage.Connected);
+                    break;
+                default:
+                    ShowStatusMessage(StatusMessage.None);
+                    break;
+            }
         });
     }
 
-    private void UpdateConnectionState(CustomConnectionState state)
+    private void ShowStatusMessage(StatusMessage statusMessage)
     {
-        var displayVersion = Interlocked.Increment(ref _connectionStateDisplayVersion);
+        var displayVersion = Interlocked.Increment(ref _statusMessageDisplayVersion);
+        StatusMessageText = statusMessage.Text;
+        IsStatusMessageLoading = statusMessage.IsLoading;
 
-        ConnectionState = state switch
+        if (statusMessage.Duration.HasValue && !string.IsNullOrWhiteSpace(statusMessage.Text))
         {
-            CustomConnectionState.Offline => "Offline",
-            CustomConnectionState.Reconnecting => "Connecting",
-            CustomConnectionState.Online => "Connected",
-            _ => string.Empty
-        };
-
-        if (state == CustomConnectionState.Online)
-        {
-            _ = HideConnectedStateAsync(displayVersion);
+            _ = HideStatusMessageAsync(displayVersion, statusMessage.Duration.Value);
         }
     }
 
-    private async Task HideConnectedStateAsync(int displayVersion)
+    private async Task HideStatusMessageAsync(int displayVersion, TimeSpan duration)
     {
         try
         {
-            await Task.Delay(3000);
+            await Task.Delay(duration);
 
             ExecuteOnMainThread(() =>
             {
-                if (displayVersion != Volatile.Read(ref _connectionStateDisplayVersion))
+                if (displayVersion != Volatile.Read(ref _statusMessageDisplayVersion))
                 {
                     return;
                 }
 
-                if (_connectionService.ConnectionState != CustomConnectionState.Online)
-                {
-                    return;
-                }
-
-                ConnectionState = string.Empty;
+                ShowStatusMessage(StatusMessage.None);
             });
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Failed to hide transient connected state.");
+            _logger.LogDebug(ex, "Failed to hide transient status message.");
         }
     }
 
@@ -770,36 +932,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
 
         MainThread.BeginInvokeOnMainThread(action);
-    }
-
-    #endregion
-
-    #region Login Event Handler & Overlay
-
-    private async void OnLoginRequired(object? sender, EventArgs e)
-    {
-        if (_isLoginOverlayActive)
-        {
-            return;
-        }
-
-        _isLoginOverlayActive = true;
-        bool loginSucceeded;
-        try
-        {
-            loginSucceeded = await _overlayService.ShowLoginAsync(
-                _settings.Username,
-                ExecuteLogin);
-        }
-        finally
-        {
-            _isLoginOverlayActive = false;
-        }
-
-        if (loginSucceeded)
-        {
-            await InitializeAsync();
-        }
     }
 
     #endregion
@@ -1174,7 +1306,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         {
             Text = "Abmelden",
             Icon = FluentIcons.SignOut24,
-            Command = new Command(async () => await ExecuteLogoutAsync())
+            Command = new Command(async () => await LogoutAsync())
         });
     }
 
@@ -1655,46 +1787,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
 
         IsDarkTheme = nextTheme == AppTheme.Dark;
-    }
-
-    #endregion
-
-    #region Helper - Authentication
-
-    private async Task ExecuteLogoutAsync()
-    {
-        try
-        {
-            await _musicAssistant.LogoutAsync();
-            _musicAssistant.RequestLogin();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Logout failed");
-        }
-    }
-
-    private async Task<(bool Success, string? ErrorMessage)> ExecuteLogin(string username, string password)
-    {
-        try
-        {
-            _logger.LogDebug("Attempting login for user: {Username}", username);
-            var success = await _musicAssistant.LoginAsync(username, password);
-
-            if (success)
-            {
-                _logger.LogDebug("Login successful for user: {Username}", username);
-                return (true, null);
-            }
-
-            _logger.LogWarning("Login failed for user: {Username}", username);
-            return (false, "Anmeldung fehlgeschlagen. Bitte ueberpruefen Sie Ihre Anmeldedaten.");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Login error for user: {Username}", username);
-            return (false, $"Verbindungsfehler: {ex.Message}");
-        }
     }
 
     #endregion
