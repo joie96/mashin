@@ -86,7 +86,7 @@ public sealed class MediaArtworkContentProvider : ContentProvider
                 {
                     DownloadToFile(source, localPath);
                 }
-                else if (string.Equals(source.Scheme, SystemUri.UriSchemeData, StringComparison.OrdinalIgnoreCase))
+                else if (string.Equals(source.Scheme, "data", StringComparison.OrdinalIgnoreCase))
                 {
                     WriteDataUriToFile(sourceUrl, localPath);
                 }
@@ -132,7 +132,7 @@ public sealed class MediaArtworkContentProvider : ContentProvider
 
     private static string ResolveExtension(string sourceUrl, SystemUri source)
     {
-        if (string.Equals(source.Scheme, SystemUri.UriSchemeData, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(source.Scheme, "data", StringComparison.OrdinalIgnoreCase))
         {
             var commaIndex = sourceUrl.IndexOf(',', StringComparison.Ordinal);
             var header = commaIndex > 0 ? sourceUrl[..commaIndex] : string.Empty;
@@ -179,7 +179,7 @@ public sealed class MediaArtworkContentProvider : ContentProvider
         }
         else
         {
-            var unescaped = Uri.UnescapeDataString(payload);
+            var unescaped = SystemUri.UnescapeDataString(payload);
             bytes = Encoding.UTF8.GetBytes(unescaped);
         }
 

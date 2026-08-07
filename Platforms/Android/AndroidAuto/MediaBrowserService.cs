@@ -23,6 +23,9 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     private const string LogTag = "mashin.MediaBrowserService";
 
     private const string RootId = "root";
+    private const string NodeAuthRequired = "node:auth_required";
+    private const string NodeOffline = "node:offline";
+    private const string NodeInitializing = "node:initializing";
 
     private const string NodeHome = "node:home";
     private const string NodeDiscover = "node:discover";
@@ -63,17 +66,34 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
 
     #endregion
 
+    #region Types
+
+    private enum StartupGateState
+    {
+        Unknown,
+        Ready,
+        Offline,
+        Unauthorized,
+        Error
+    }
+
+    #endregion
+
     #region Fields
 
     private readonly object _cacheLock = new();
     private readonly Dictionary<string, mashin.Models.MediaItem> _mediaItemCache = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<mashin.Models.MediaItem>> _trackListActionCache = new(StringComparer.Ordinal);
+    private readonly SemaphoreSlim _startupGate = new(1, 1);
 
+    private IConnectionService? _connectionService;
     private PlaybackService? _playbackService;
     private MusicAssistantService? _musicAssistantService;
     private UserDataService? _userDataService;
     private SettingsService? _settingsService;
     private MediaSessionCompat? _mediaSession;
+    private Task? _startupInitializationTask;
+    private volatile StartupGateState _startupGateState = StartupGateState.Unknown;
 
     #endregion
 
@@ -84,13 +104,14 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
         base.OnCreate();
 
         var services = IPlatformApplication.Current?.Services;
+        _connectionService = services?.GetService<IConnectionService>();
         _playbackService = services?.GetService<PlaybackService>();
         _musicAssistantService = services?.GetService<MusicAssistantService>();
         _userDataService = services?.GetService<UserDataService>();
         _settingsService = services?.GetService<SettingsService>();
 
         EnsureMediaSession();
-        EnsurePlaybackInitialized();
+        _ = EnsureStartupInitializedAsync();
 
         if (_playbackService != null)
         {
@@ -151,6 +172,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
 
         if (string.Equals(parentId, RootId, StringComparison.Ordinal))
         {
+            _ = EnsureStartupInitializedAsync();
             result.SendResult(BuildRootItems());
             return;
         }
@@ -177,6 +199,11 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
 
     private JavaList<MediaBrowserCompat.MediaItem> BuildRootItems()
     {
+        if (_startupGateState != StartupGateState.Ready)
+        {
+            return BuildStartupGateRootItems();
+        }
+
         var items = new List<MediaBrowserCompat.MediaItem>
         {
             CreateBrowsableItem(NodeHome, "Home", "Sektionen", Resource.Drawable.home),
@@ -191,6 +218,48 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
                     MediaConstants.DescriptionExtrasValueContentStyleListItem)),
             CreateBrowsableItem(NodeFavorites, "Favoriten", "Titel, Alben, Playlists, Artists", Resource.Drawable.favorite)
         };
+
+        return new JavaList<MediaBrowserCompat.MediaItem>(items);
+    }
+
+    private JavaList<MediaBrowserCompat.MediaItem> BuildStartupGateRootItems()
+    {
+        var items = new List<MediaBrowserCompat.MediaItem>();
+
+        switch (_startupGateState)
+        {
+            case StartupGateState.Unauthorized:
+                items.Add(CreateBrowsableItem(
+                    NodeAuthRequired,
+                    "Nicht eingeloggt",
+                    "Bitte auf dem Smartphone einloggen.",
+                    Resource.Drawable.favorite));
+                break;
+
+            case StartupGateState.Offline:
+                items.Add(CreateBrowsableItem(
+                    NodeOffline,
+                    "Server nicht erreichbar",
+                    "Bitte Netzwerk und Server-URI auf dem Smartphone prüfen.",
+                    Resource.Drawable.explore));
+                break;
+
+            case StartupGateState.Error:
+                items.Add(CreateBrowsableItem(
+                    NodeOffline,
+                    "Android Auto nicht bereit",
+                    "Bitte mashin auf dem Smartphone öffnen und erneut versuchen.",
+                    Resource.Drawable.explore));
+                break;
+
+            default:
+                items.Add(CreateBrowsableItem(
+                    NodeInitializing,
+                    "Initialisiere…",
+                    "Verbindung wird geprüft.",
+                    Resource.Drawable.explore));
+                break;
+        }
 
         return new JavaList<MediaBrowserCompat.MediaItem>(items);
     }
@@ -300,6 +369,20 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
 
     private async Task<JavaList<MediaBrowserCompat.MediaItem>> LoadChildrenAsync(string parentId)
     {
+        await EnsureStartupInitializedAsync();
+
+        if (_startupGateState != StartupGateState.Ready)
+        {
+            return new JavaList<MediaBrowserCompat.MediaItem>();
+        }
+
+        if (string.Equals(parentId, NodeAuthRequired, StringComparison.Ordinal)
+            || string.Equals(parentId, NodeOffline, StringComparison.Ordinal)
+            || string.Equals(parentId, NodeInitializing, StringComparison.Ordinal))
+        {
+            return new JavaList<MediaBrowserCompat.MediaItem>();
+        }
+
         if (string.Equals(parentId, NodeHome, StringComparison.Ordinal))
         {
             return BuildHomeSectionItems();
@@ -595,13 +678,13 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     {
         if (favoriteOnly)
         {
-            var userDataService = _userDataService;
-            if (userDataService == null)
+            var favoriteUserDataService = _userDataService;
+            if (favoriteUserDataService == null)
             {
                 return new JavaList<MediaBrowserCompat.MediaItem>();
             }
 
-            var favoritePlaylists = userDataService.FavoritePlaylists.ToList();
+            var favoritePlaylists = favoriteUserDataService.FavoritePlaylists.ToList();
 
             var musicAssistant = _musicAssistantService;
             if (musicAssistant != null && favoritePlaylists.Count > 0)
@@ -698,13 +781,13 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     {
         if (favoriteOnly)
         {
-            var userDataService = _userDataService;
-            if (userDataService == null)
+            var favoriteUserDataService = _userDataService;
+            if (favoriteUserDataService == null)
             {
                 return new JavaList<MediaBrowserCompat.MediaItem>();
             }
 
-            var favoriteAlbums = userDataService.FavoriteAlbums.ToList();
+            var favoriteAlbums = favoriteUserDataService.FavoriteAlbums.ToList();
 
             var favoriteMusicAssistant = _musicAssistantService;
             if (favoriteMusicAssistant != null && favoriteAlbums.Count > 0)
@@ -768,13 +851,13 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     {
         if (favoriteOnly)
         {
-            var userDataService = _userDataService;
-            if (userDataService == null)
+            var favoriteUserDataService = _userDataService;
+            if (favoriteUserDataService == null)
             {
                 return new JavaList<MediaBrowserCompat.MediaItem>();
             }
 
-            var favoriteArtists = userDataService.FavoriteArtists.ToList();
+            var favoriteArtists = favoriteUserDataService.FavoriteArtists.ToList();
 
             var favoriteMusicAssistant = _musicAssistantService;
             if (favoriteMusicAssistant != null && favoriteArtists.Count > 0)
@@ -1019,6 +1102,76 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     #endregion
 
     #region Session And Playback Sync
+
+    private async Task EnsureStartupInitializedAsync()
+    {
+        Task initializationTask;
+
+        await _startupGate.WaitAsync();
+        try
+        {
+            _startupInitializationTask ??= InitializeStartupAsync();
+            initializationTask = _startupInitializationTask;
+        }
+        finally
+        {
+            _startupGate.Release();
+        }
+
+        await initializationTask;
+    }
+
+    private async Task InitializeStartupAsync()
+    {
+        var connectionService = _connectionService;
+        var musicAssistantService = _musicAssistantService;
+
+        if (connectionService == null || musicAssistantService == null)
+        {
+            _startupGateState = StartupGateState.Error;
+            NotifyChildrenChanged(RootId);
+            global::Android.Util.Log.Warn(LogTag, "Startup initialization failed: missing required services.");
+            return;
+        }
+
+        try
+        {
+            var isServerReachable = await connectionService.TestServerReachabilityAsync();
+            if (!isServerReachable)
+            {
+                _startupGateState = StartupGateState.Offline;
+                NotifyChildrenChanged(RootId);
+                return;
+            }
+
+            var isAuthenticated = await musicAssistantService.TestAuthentificatonAsync();
+            if (!isAuthenticated)
+            {
+                _startupGateState = StartupGateState.Unauthorized;
+                NotifyChildrenChanged(RootId);
+                return;
+            }
+
+            await connectionService.ConnectAsync();
+            await connectionService.StartReconnectLoopAsync();
+
+            if (_userDataService != null)
+            {
+                await _userDataService.LoadPreferencesAsync();
+            }
+
+            EnsurePlaybackInitialized();
+            _startupGateState = StartupGateState.Ready;
+            NotifyChildrenChanged(RootId);
+            SyncMediaSessionState();
+        }
+        catch (Exception ex)
+        {
+            _startupGateState = StartupGateState.Error;
+            NotifyChildrenChanged(RootId);
+            global::Android.Util.Log.Warn(LogTag, $"Startup initialization failed: {ex.Message}");
+        }
+    }
 
     private void EnsureMediaSession()
     {
@@ -1404,7 +1557,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             return MediaArtworkContentProvider.BuildContentUri(imagePath);
         }
 
-        if (string.Equals(parsedUri.Scheme, Uri.UriSchemeData, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(parsedUri.Scheme, "data", StringComparison.OrdinalIgnoreCase))
         {
             return MediaArtworkContentProvider.BuildContentUri(imagePath);
         }
