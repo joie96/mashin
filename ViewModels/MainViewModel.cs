@@ -56,6 +56,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private ObservableCollection<ContextMenuItem> _userMenuItems = new();
     private ObservableRangeCollection<ContextMenuItem> _queueContextMenuItems = new();
     private ObservableRangeCollection<ContextMenuItem> _currentTrackContextMenuItems = new();
+    private readonly ObservableCollection<ContextMenuItem> _sidebarPlaylistContextMenuItems = new();
+    private Playlist? _sidebarContextPlaylist;
 
     // Navigation
     private bool _isNavigating;
@@ -173,6 +175,37 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             }
 
             await _contextMenuService.ShowContextMenuAsync(_currentTrackContextMenuItems, anchor);
+        });
+
+        ShowSidebarPlaylistContextMenuCommand = new Command<View>(async anchor =>
+        {
+            if (anchor == null)
+            {
+                return;
+            }
+
+            _sidebarContextPlaylist = anchor.BindingContext as Playlist;
+            if (_sidebarContextPlaylist == null)
+            {
+                var parent = anchor.Parent;
+                while (parent != null && _sidebarContextPlaylist == null)
+                {
+                    _sidebarContextPlaylist = parent.BindingContext as Playlist;
+                    parent = parent.Parent;
+                }
+            }
+
+            if (_sidebarContextPlaylist == null)
+            {
+                _logger.LogDebug("Sidebar context menu opened without playlist binding context.");
+                return;
+            }
+
+            BuildSidebarPlaylistContextMenuItems();
+            if (_sidebarPlaylistContextMenuItems.Count > 0)
+            {
+                await _contextMenuService.ShowContextMenuAsync(_sidebarPlaylistContextMenuItems, anchor);
+            }
         });
 
         // LinkLabel Commands
@@ -561,6 +594,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     public ICommand CloseDeviceSelectionFlyoutCommand { get; }
     public ICommand ToggleCurrentTrackFavoriteCommand { get; }
     public ICommand ShowCurrentTrackContextMenuCommand { get; }
+    public ICommand ShowSidebarPlaylistContextMenuCommand { get; }
     public ICommand BeginSeekCommand { get; }
     public ICommand SeekCommand { get; }
 
@@ -983,8 +1017,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         try
         {
+            var playlistItems = playlist.Items?.Cast<MediaItem>().ToList() ?? new List<MediaItem>();
+            if (playlistItems.Count == 0)
+            {
+                _logger.LogDebug("Playlist {Name} has no items to play.", playlist.Name);
+                return;
+            }
+
             _logger.LogInformation("Play playlist: {Name}", playlist.Name);
-            await _playbackService.PlayMediaAsync(new List<MediaItem> { playlist });
+            await _playbackService.PlayMediaAsync(playlistItems);
         }
         catch (Exception ex)
         {
@@ -1599,6 +1640,122 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         {
             _logger.LogWarning(ex, "Failed to set dont-stop-the-music state to {Enabled}", dontStopTheMusicEnabled);
         }
+    }
+
+    #endregion
+
+    #region Sidebar Playlist Context Menu
+
+    public async Task ShowSidebarPlaylistContextMenuAtPositionAsync(Playlist playlist, Point? position)
+    {
+        if (playlist == null || !position.HasValue)
+        {
+            return;
+        }
+
+        _sidebarContextPlaylist = playlist;
+        BuildSidebarPlaylistContextMenuItems();
+
+        if (_sidebarPlaylistContextMenuItems.Count > 0)
+        {
+            await _contextMenuService.ShowContextMenuAsync(_sidebarPlaylistContextMenuItems, position.Value);
+        }
+    }
+
+    private void BuildSidebarPlaylistContextMenuItems()
+    {
+        _sidebarPlaylistContextMenuItems.Clear();
+
+        _sidebarPlaylistContextMenuItems.Add(new ContextMenuItem
+        {
+            Text = "Abspielen",
+            Icon = FluentIcons.Play12,
+            Command = new Command(async () =>
+            {
+                var playlistItems = _sidebarContextPlaylist?.Items?.Cast<MediaItem>().ToList() ?? new List<MediaItem>();
+                if (playlistItems.Count == 0)
+                {
+                    return;
+                }
+
+                await _playbackService.PlayMediaAsync(playlistItems);
+            })
+        });
+
+        _sidebarPlaylistContextMenuItems.Add(new ContextMenuItem
+        {
+            Text = "Als Nächstes spielen",
+            Icon = FluentIcons.ArrowForward16,
+            Command = new Command(async () =>
+            {
+                var playlistItems = _sidebarContextPlaylist?.Items?.Cast<MediaItem>().ToList() ?? new List<MediaItem>();
+                if (playlistItems.Count == 0)
+                {
+                    return;
+                }
+
+                await _playbackService.PlayMediaNextAsync(playlistItems);
+            })
+        });
+
+        _sidebarPlaylistContextMenuItems.Add(new ContextMenuItem
+        {
+            Text = "Als Letztes spielen",
+            Icon = FluentIcons.ArrowNext12,
+            Command = new Command(async () =>
+            {
+                var playlistItems = _sidebarContextPlaylist?.Items?.Cast<MediaItem>().ToList() ?? new List<MediaItem>();
+                if (playlistItems.Count == 0)
+                {
+                    return;
+                }
+
+                await _playbackService.PlayMediaLastAsync(playlistItems);
+            })
+        });
+
+        _sidebarPlaylistContextMenuItems.Add(new ContextMenuItem { IsSeparator = true });
+
+        var favoriteTargets = _sidebarContextPlaylist == null ? Array.Empty<Playlist>() : new[] { _sidebarContextPlaylist };
+        var shouldShowRemoveFromFavorites = favoriteTargets.Length > 0 && favoriteTargets.All(playlist => playlist.Favorite);
+
+        if (shouldShowRemoveFromFavorites)
+        {
+            _sidebarPlaylistContextMenuItems.Add(new ContextMenuItem
+            {
+                Text = "Aus Favoriten entfernen",
+                Icon = FluentFilledIcons.Heart12Filled,
+                IconIsFilled = true,
+                Command = new Command(async () =>
+                {
+                    var targets = _sidebarContextPlaylist == null ? Array.Empty<Playlist>() : new[] { _sidebarContextPlaylist };
+                    if (targets.Length == 0)
+                    {
+                        return;
+                    }
+
+                    await UserDataService.SetFavoriteAsync(targets.Cast<MediaItem>().ToList(), false);
+                })
+            });
+
+            return;
+        }
+
+        _sidebarPlaylistContextMenuItems.Add(new ContextMenuItem
+        {
+            Text = "Zu Favoriten hinzufügen",
+            Icon = FluentIcons.Heart12,
+            Command = new Command(async () =>
+            {
+                var targets = _sidebarContextPlaylist == null ? Array.Empty<Playlist>() : new[] { _sidebarContextPlaylist };
+                if (targets.Length == 0)
+                {
+                    return;
+                }
+
+                await UserDataService.SetFavoriteAsync(targets.Cast<MediaItem>().ToList(), true);
+            })
+        });
     }
 
     #endregion

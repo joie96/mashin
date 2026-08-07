@@ -175,33 +175,70 @@
                         SelectionMode="None">
                         <CollectionView.ItemTemplate>
                             <DataTemplate x:DataType="models:Playlist">
-                                <Border Margin="4,2"
+                                <Border x:Name="SidebarPlaylistRowBorder"
+                                    Margin="4,2"
                                     Padding="8,4"
                                     behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
                                     BackgroundColor="Transparent"
                                     HeightRequest="60">
                                     <Border.GestureRecognizers>
                                         <TapGestureRecognizer Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}}, Path=BindingContext.NavigateToPlaylistCommand}" CommandParameter="{Binding .}" />
+                                        <TapGestureRecognizer NumberOfTapsRequired="2"
+                                                              Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}}, Path=BindingContext.PlayPlaylistCommand}"
+                                                              CommandParameter="{Binding .}" />
+                                        <PointerGestureRecognizer PointerEntered="OnSidebarPlaylistRowPointerEntered"
+                                                                  PointerExited="OnSidebarPlaylistRowPointerExited" />
+                                        <PointerGestureRecognizer Buttons="Secondary"
+                                                                  PointerPressed="OnSidebarPlaylistRowSecondaryPointerPressed" />
                                     </Border.GestureRecognizers>
 
-                                    <Grid ColumnDefinitions="40,*" ColumnSpacing="10">
-                                        <Border Grid.Column="0"
-                                            BackgroundColor="{DynamicResource BackgroundTertiary}"
+                                    <Grid ColumnDefinitions="40,*,Auto" ColumnSpacing="10">
+                                        <Grid Grid.Column="0"
+                                            behaviors:HoverBehavior.ShowOnHoverTarget="{x:Reference SidebarPlaylistPlayOverlay}"
                                             HeightRequest="40"
-                                            StrokeThickness="0"
                                             WidthRequest="40">
-                                            <Border.StrokeShape>
-                                                <RoundRectangle CornerRadius="2" />
-                                            </Border.StrokeShape>
-                                            <Grid>
-                                                <ffimageloading:CachedImage Aspect="AspectFill"
-                                                    IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
-                                                    Source="{Binding ImageUri}" />
-                                                <Image Aspect="AspectFill"
-                                                    IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
-                                                    Source="{AppThemeBinding Light=placeholders/playlist_light.png, Dark=placeholders/playlist_dark.png}" />
-                                            </Grid>
-                                        </Border>
+                                            <Border BackgroundColor="{DynamicResource BackgroundTertiary}"
+                                                HeightRequest="40"
+                                                StrokeThickness="0"
+                                                WidthRequest="40">
+                                                <Border.StrokeShape>
+                                                    <RoundRectangle CornerRadius="2" />
+                                                </Border.StrokeShape>
+                                                <Grid>
+                                                    <ffimageloading:CachedImage Aspect="AspectFill"
+                                                        IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
+                                                        Source="{Binding ImageUri}" />
+                                                    <Image Aspect="AspectFill"
+                                                        IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
+                                                        Source="{AppThemeBinding Light=placeholders/playlist_light.png, Dark=placeholders/playlist_dark.png}" />
+                                                </Grid>
+                                            </Border>
+
+                                            <Border x:Name="SidebarPlaylistPlayOverlay"
+                                                behaviors:HoverBehavior.BaseBackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
+                                                behaviors:HoverBehavior.EnableScaleHover="True"
+                                                behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource OverlayPlayButtonHoverBackground}"
+                                                BackgroundColor="{DynamicResource OverlayPlayButtonBackground}"
+                                                HeightRequest="31"
+                                                HorizontalOptions="Center"
+                                                Opacity="0"
+                                                StrokeThickness="0"
+                                                VerticalOptions="Center"
+                                                WidthRequest="31">
+                                                <Border.GestureRecognizers>
+                                                    <TapGestureRecognizer Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}}, Path=BindingContext.PlayPlaylistCommand}"
+                                                                          CommandParameter="{Binding Source={x:Reference SidebarPlaylistRowBorder}, Path=BindingContext}" />
+                                                </Border.GestureRecognizers>
+                                                <Border.StrokeShape>
+                                                    <RoundRectangle CornerRadius="15.5" />
+                                                </Border.StrokeShape>
+                                                <Label FontSize="15"
+                                                    HorizontalOptions="Center"
+                                                    Text="{mi:FluentFilled Icon=Play16Filled, FontOverride=True}"
+                                                    TextColor="{DynamicResource OverlayPlayIconColor}"
+                                                    VerticalOptions="Center" />
+                                            </Border>
+                                        </Grid>
 
                                         <VerticalStackLayout Grid.Column="1"
                                             Spacing="4"
@@ -217,6 +254,31 @@
                                                 Text="{Binding MetadataText}"
                                                 TextColor="{DynamicResource TextTertiary}" />
                                         </VerticalStackLayout>
+
+                                        <Border x:Name="SidebarPlaylistMenuButton"
+                                            Grid.Column="2"
+                                            Margin="0,0,2,0"
+                                            behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
+                                            BackgroundColor="Transparent"
+                                            HeightRequest="24"
+                                            HorizontalOptions="End"
+                                            IsVisible="False"
+                                            StrokeThickness="0"
+                                            VerticalOptions="Center"
+                                            WidthRequest="24">
+                                            <Border.StrokeShape>
+                                                <RoundRectangle CornerRadius="12" />
+                                            </Border.StrokeShape>
+                                            <Border.GestureRecognizers>
+                                                <TapGestureRecognizer Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}}, Path=BindingContext.ShowSidebarPlaylistContextMenuCommand}"
+                                                                      CommandParameter="{x:Reference SidebarPlaylistMenuButton}" />
+                                            </Border.GestureRecognizers>
+                                            <Label FontSize="14"
+                                                HorizontalOptions="Center"
+                                                Text="{mi:Fluent Icon=MoreHorizontal24, FontOverride=True}"
+                                                TextColor="{DynamicResource IconSecondary}"
+                                                VerticalOptions="Center" />
+                                        </Border>
                                     </Grid>
                                 </Border>
                             </DataTemplate>

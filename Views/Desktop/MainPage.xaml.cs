@@ -90,6 +90,45 @@ public partial class MainPage : ContentPage
         _logger.LogInformation("Navigate to playlists page not implemented yet.");
     }
 
+    private void OnSidebarPlaylistRowPointerEntered(object? sender, PointerEventArgs e)
+    {
+        if (sender is not Border row)
+        {
+            return;
+        }
+
+        var menuButton = row.FindByName<Border>("SidebarPlaylistMenuButton");
+        if (menuButton != null)
+        {
+            menuButton.IsVisible = true;
+        }
+    }
+
+    private void OnSidebarPlaylistRowPointerExited(object? sender, PointerEventArgs e)
+    {
+        if (sender is not Border row)
+        {
+            return;
+        }
+
+        var menuButton = row.FindByName<Border>("SidebarPlaylistMenuButton");
+        if (menuButton != null)
+        {
+            menuButton.IsVisible = false;
+        }
+    }
+
+    private async void OnSidebarPlaylistRowSecondaryPointerPressed(object? sender, PointerEventArgs e)
+    {
+        if (sender is not Border row || row.BindingContext is not mashin.Models.Playlist playlist)
+        {
+            return;
+        }
+
+        var position = e.GetPosition(null);
+        await _viewModel.ShowSidebarPlaylistContextMenuAtPositionAsync(playlist, position);
+    }
+
     #endregion
 
     #region Queue Overlay
