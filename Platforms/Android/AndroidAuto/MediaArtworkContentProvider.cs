@@ -6,6 +6,7 @@ using Java.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
+using System.Collections.Concurrent;
 using AndroidUri = Android.Net.Uri;
 using SystemUri = System.Uri;
 
@@ -24,7 +25,10 @@ public sealed class MediaArtworkContentProvider : ContentProvider
     public const string Name = "com.companyname.mashin.MediaArtworkContentProvider";
 
     private const string QuerySource = "src";
+    private const string QuerySourceToken = "src_token";
+    private const int MaxInlineSourceLength = 2048;
     private static readonly HttpClient HttpClient = new();
+    private static readonly ConcurrentDictionary<string, string> SourceTokenCache = new(StringComparer.Ordinal);
 
     public override bool OnCreate() => true;
 
@@ -32,11 +36,29 @@ public sealed class MediaArtworkContentProvider : ContentProvider
 
     public static AndroidUri BuildContentUri(string sourceUrl)
     {
-        var encodedSource = AndroidUri.Encode(sourceUrl);
-        return new AndroidUri.Builder()
+        var builder = new AndroidUri.Builder()
             .Scheme(ContentResolver.SchemeContent)
             .Authority(Authority)
-            .AppendPath("art")
+            .AppendPath("art");
+
+        if (string.IsNullOrWhiteSpace(sourceUrl))
+        {
+            return builder.Build();
+        }
+
+        // Avoid extremely long Binder payloads by tokenizing large or data: sources.
+        if (sourceUrl.Length > MaxInlineSourceLength
+            || sourceUrl.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            var token = ComputeSha256(sourceUrl);
+            SourceTokenCache[token] = sourceUrl;
+            return builder
+                .AppendQueryParameter(QuerySourceToken, token)
+                .Build();
+        }
+
+        var encodedSource = AndroidUri.Encode(sourceUrl);
+        return builder
             .AppendQueryParameter(QuerySource, encodedSource)
             .Build();
     }
@@ -52,12 +74,25 @@ public sealed class MediaArtworkContentProvider : ContentProvider
             }
 
             var sourceParam = uri.GetQueryParameter(QuerySource);
-            if (string.IsNullOrWhiteSpace(sourceParam))
+            var sourceToken = uri.GetQueryParameter(QuerySourceToken);
+
+            string? sourceUrl = null;
+            if (!string.IsNullOrWhiteSpace(sourceParam))
+            {
+                sourceUrl = AndroidUri.Decode(sourceParam);
+            }
+            else if (!string.IsNullOrWhiteSpace(sourceToken)
+                && SourceTokenCache.TryGetValue(sourceToken, out var cachedSourceUrl)
+                && !string.IsNullOrWhiteSpace(cachedSourceUrl))
+            {
+                sourceUrl = cachedSourceUrl;
+            }
+
+            if (string.IsNullOrWhiteSpace(sourceUrl))
             {
                 return null;
             }
 
-            var sourceUrl = AndroidUri.Decode(sourceParam);
             if (!SystemUri.TryCreate(sourceUrl, System.UriKind.Absolute, out var source))
             {
                 return null;

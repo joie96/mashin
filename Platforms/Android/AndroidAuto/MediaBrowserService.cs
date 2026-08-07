@@ -23,9 +23,6 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     private const string LogTag = "mashin.MediaBrowserService";
 
     private const string RootId = "root";
-    private const string NodeAuthRequired = "node:auth_required";
-    private const string NodeOffline = "node:offline";
-    private const string NodeInitializing = "node:initializing";
 
     private const string NodeHome = "node:home";
     private const string NodeDiscover = "node:discover";
@@ -45,6 +42,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     private const string NodeFavoritesArtists = "node:favorites:artists";
 
     private const string PrefixPlaylist = "playlist";
+    private const string LocalPlaylistProvider = "mashin";
     private const string PrefixTrack = "track";
     private const string PrefixAlbum = "album";
     private const string PrefixArtist = "artist";
@@ -66,19 +64,6 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
 
     #endregion
 
-    #region Types
-
-    private enum StartupGateState
-    {
-        Unknown,
-        Ready,
-        Offline,
-        Unauthorized,
-        Error
-    }
-
-    #endregion
-
     #region Fields
 
     private readonly object _cacheLock = new();
@@ -93,7 +78,6 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     private SettingsService? _settingsService;
     private MediaSessionCompat? _mediaSession;
     private Task? _startupInitializationTask;
-    private volatile StartupGateState _startupGateState = StartupGateState.Unknown;
 
     #endregion
 
@@ -199,11 +183,6 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
 
     private JavaList<MediaBrowserCompat.MediaItem> BuildRootItems()
     {
-        if (_startupGateState != StartupGateState.Ready)
-        {
-            return BuildStartupGateRootItems();
-        }
-
         var items = new List<MediaBrowserCompat.MediaItem>
         {
             CreateBrowsableItem(NodeHome, "Home", "Sektionen", Resource.Drawable.home),
@@ -218,48 +197,6 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
                     MediaConstants.DescriptionExtrasValueContentStyleListItem)),
             CreateBrowsableItem(NodeFavorites, "Favoriten", "Titel, Alben, Playlists, Artists", Resource.Drawable.favorite)
         };
-
-        return new JavaList<MediaBrowserCompat.MediaItem>(items);
-    }
-
-    private JavaList<MediaBrowserCompat.MediaItem> BuildStartupGateRootItems()
-    {
-        var items = new List<MediaBrowserCompat.MediaItem>();
-
-        switch (_startupGateState)
-        {
-            case StartupGateState.Unauthorized:
-                items.Add(CreateBrowsableItem(
-                    NodeAuthRequired,
-                    "Nicht eingeloggt",
-                    "Bitte auf dem Smartphone einloggen.",
-                    Resource.Drawable.favorite));
-                break;
-
-            case StartupGateState.Offline:
-                items.Add(CreateBrowsableItem(
-                    NodeOffline,
-                    "Server nicht erreichbar",
-                    "Bitte Netzwerk und Server-URI auf dem Smartphone prüfen.",
-                    Resource.Drawable.explore));
-                break;
-
-            case StartupGateState.Error:
-                items.Add(CreateBrowsableItem(
-                    NodeOffline,
-                    "Android Auto nicht bereit",
-                    "Bitte mashin auf dem Smartphone öffnen und erneut versuchen.",
-                    Resource.Drawable.explore));
-                break;
-
-            default:
-                items.Add(CreateBrowsableItem(
-                    NodeInitializing,
-                    "Initialisiere…",
-                    "Verbindung wird geprüft.",
-                    Resource.Drawable.explore));
-                break;
-        }
 
         return new JavaList<MediaBrowserCompat.MediaItem>(items);
     }
@@ -293,7 +230,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             CreateBrowsableItem(
                 NodeFavoritesTracks,
                 "Tracks",
-                "Favorisierte Tracks",
+                string.Empty,
                 Resource.Drawable.music_note,
                 BuildContentStyleExtras(
                     MediaConstants.DescriptionExtrasValueContentStyleListItem,
@@ -301,7 +238,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             CreateBrowsableItem(
                 NodeFavoritesAlbums,
                 "Alben",
-                "Favorisierte Alben",
+                string.Empty,
                 Resource.Drawable.album,
                 BuildContentStyleExtras(
                     MediaConstants.DescriptionExtrasValueContentStyleGridItem,
@@ -309,7 +246,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             CreateBrowsableItem(
                 NodeFavoritesPlaylists,
                 "Playlists",
-                "Favorisierte Playlists",
+                string.Empty,
                 Resource.Drawable.playlist_play,
                 BuildContentStyleExtras(
                     MediaConstants.DescriptionExtrasValueContentStyleGridItem,
@@ -317,7 +254,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             CreateBrowsableItem(
                 NodeFavoritesArtists,
                 "Artists",
-                "Favorisierte Artists",
+                string.Empty,
                 Resource.Drawable.artist,
                 BuildContentStyleExtras(
                     MediaConstants.DescriptionExtrasValueContentStyleGridItem,
@@ -370,18 +307,6 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     private async Task<JavaList<MediaBrowserCompat.MediaItem>> LoadChildrenAsync(string parentId)
     {
         await EnsureStartupInitializedAsync();
-
-        if (_startupGateState != StartupGateState.Ready)
-        {
-            return new JavaList<MediaBrowserCompat.MediaItem>();
-        }
-
-        if (string.Equals(parentId, NodeAuthRequired, StringComparison.Ordinal)
-            || string.Equals(parentId, NodeOffline, StringComparison.Ordinal)
-            || string.Equals(parentId, NodeInitializing, StringComparison.Ordinal))
-        {
-            return new JavaList<MediaBrowserCompat.MediaItem>();
-        }
 
         if (string.Equals(parentId, NodeHome, StringComparison.Ordinal))
         {
@@ -451,6 +376,12 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
         if (string.Equals(parentId, NodeHomeTopArtists, StringComparison.Ordinal))
         {
             return await LoadTopArtistsAsync();
+        }
+
+        if (TryGetCachedMediaItem(parentId, out var cachedMediaItem)
+            && cachedMediaItem is Playlist cachedPlaylist)
+        {
+            return await LoadCachedPlaylistTracksAsync(parentId, cachedPlaylist);
         }
 
         if (TryParseId(parentId, out var type, out var provider, out var itemId))
@@ -718,23 +649,60 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             return new JavaList<MediaBrowserCompat.MediaItem>();
         }
 
-        var playlists = userDataService.Playlists;
+        var playlists = userDataService.Playlists
+            .Where(playlist => playlist != null)
+            .ToList();
+
+        var playlistMusicAssistant = _musicAssistantService;
+        if (playlistMusicAssistant != null && playlists.Count > 0)
+        {
+            try
+            {
+                await playlistMusicAssistant.EnrichWithProviderInfoAsync(playlists);
+            }
+            catch (Exception ex)
+            {
+                global::Android.Util.Log.Warn(LogTag, $"Failed to enrich playlists for Android Auto: {ex.Message}");
+            }
+        }
 
         var items = new List<MediaBrowserCompat.MediaItem>();
-        foreach (var playlist in playlists)
+        for (var playlistIndex = 0; playlistIndex < playlists.Count; playlistIndex++)
         {
-            var mediaId = BuildId(PrefixPlaylist, playlist.Provider, playlist.ItemId);
+            var playlist = playlists[playlistIndex];
+            if (playlist == null)
+            {
+                continue;
+            }
+
+            var provider = string.IsNullOrWhiteSpace(playlist.Provider)
+                ? LocalPlaylistProvider
+                : playlist.Provider;
+            var itemId = string.IsNullOrWhiteSpace(playlist.ItemId)
+                ? $"local-{playlistIndex + 1}"
+                : playlist.ItemId;
+
+            var mediaId = BuildId(PrefixPlaylist, provider, itemId);
             CacheMediaItem(mediaId, playlist);
 
-            items.Add(CreateBrowsableItem(
-                mediaId,
-                SelectDisplayName(playlist, "Playlist"),
-                $"{Math.Max(0, playlist.TracksCount)} Titel",
-                Resource.Drawable.playlist_play,
-                BuildContentStyleExtras(
-                    MediaConstants.DescriptionExtrasValueContentStyleListItem,
-                    MediaConstants.DescriptionExtrasValueContentStyleListItem),
-                ResolveArtworkUri(playlist, Resource.Drawable.playlist_play)));
+            try
+            {
+                items.Add(CreateBrowsableItem(
+                    mediaId,
+                    SelectDisplayName(playlist, "Playlist"),
+                    $"{Math.Max(0, playlist.TracksCount)} Titel",
+                    Resource.Drawable.playlist_play,
+                    BuildContentStyleExtras(
+                        MediaConstants.DescriptionExtrasValueContentStyleListItem,
+                        MediaConstants.DescriptionExtrasValueContentStyleListItem),
+                    ResolveArtworkUri(playlist, Resource.Drawable.playlist_play)));
+            }
+            catch (Exception ex)
+            {
+                global::Android.Util.Log.Warn(
+                    LogTag,
+                    $"Skipping playlist item at index {playlistIndex} for Android Auto: {ex.Message}");
+            }
         }
 
         return new JavaList<MediaBrowserCompat.MediaItem>(items);
@@ -767,6 +735,30 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
 
     private async Task<JavaList<MediaBrowserCompat.MediaItem>> LoadPlaylistTracksAsync(string provider, string itemId)
     {
+        if (string.Equals(provider, LocalPlaylistProvider, StringComparison.OrdinalIgnoreCase))
+        {
+            var userDataService = _userDataService;
+            if (userDataService != null)
+            {
+                var localPlaylists = userDataService.Playlists.ToList();
+                var localPlaylist = localPlaylists.FirstOrDefault(playlist =>
+                    string.Equals(playlist.ItemId, itemId, StringComparison.OrdinalIgnoreCase));
+
+                if (localPlaylist == null
+                    && TryParseSyntheticLocalPlaylistIndex(itemId, out var playlistIndex)
+                    && playlistIndex >= 0
+                    && playlistIndex < localPlaylists.Count)
+                {
+                    localPlaylist = localPlaylists[playlistIndex];
+                }
+
+                if (localPlaylist != null)
+                {
+                    return await LoadCachedPlaylistTracksAsync(BuildId(PrefixPlaylist, provider, itemId), localPlaylist);
+                }
+            }
+        }
+
         var musicAssistant = _musicAssistantService;
         if (musicAssistant == null)
         {
@@ -775,6 +767,79 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
 
         var tracks = await musicAssistant.GetPlaylistTracksAsync(itemId, provider);
         return BuildTrackItems(BuildId(PrefixPlaylist, provider, itemId), tracks);
+    }
+
+    private async Task<JavaList<MediaBrowserCompat.MediaItem>> LoadCachedPlaylistTracksAsync(
+        string mediaId,
+        Playlist playlist)
+    {
+        if (playlist.Items.Count > 0)
+        {
+            var localTracks = playlist.Items.ToList();
+
+            if (localTracks.Any(track => string.IsNullOrWhiteSpace(track.ItemId) || string.IsNullOrWhiteSpace(track.Provider)))
+            {
+                var musicAssistant = _musicAssistantService;
+                if (musicAssistant != null)
+                {
+                    try
+                    {
+                        await musicAssistant.EnrichWithProviderInfoAsync(localTracks);
+                    }
+                    catch (Exception ex)
+                    {
+                        global::Android.Util.Log.Warn(LogTag, $"Failed to enrich local playlist tracks: {ex.Message}");
+                    }
+                }
+            }
+
+            localTracks = localTracks
+                .Where(track => !string.IsNullOrWhiteSpace(track.ItemId) && !string.IsNullOrWhiteSpace(track.Provider))
+                .ToList();
+
+            if (localTracks.Count > 0)
+            {
+                return BuildTrackItems(mediaId, localTracks);
+            }
+
+            global::Android.Util.Log.Warn(
+                LogTag,
+                $"Playlist '{SelectDisplayName(playlist, "Playlist")}' has tracks, but none could be resolved to provider/item_id for Android Auto.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(playlist.Provider)
+            && !string.IsNullOrWhiteSpace(playlist.ItemId)
+            && !string.Equals(playlist.Provider, LocalPlaylistProvider, StringComparison.OrdinalIgnoreCase))
+        {
+            var musicAssistant = _musicAssistantService;
+            if (musicAssistant != null)
+            {
+                var remoteTracks = await musicAssistant.GetPlaylistTracksAsync(playlist.ItemId, playlist.Provider);
+                return BuildTrackItems(mediaId, remoteTracks);
+            }
+        }
+
+        return new JavaList<MediaBrowserCompat.MediaItem>();
+    }
+
+    private static bool TryParseSyntheticLocalPlaylistIndex(string itemId, out int index)
+    {
+        index = -1;
+
+        const string prefix = "local-";
+        if (!itemId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var numericPart = itemId[prefix.Length..];
+        if (!int.TryParse(numericPart, out var oneBasedIndex) || oneBasedIndex <= 0)
+        {
+            return false;
+        }
+
+        index = oneBasedIndex - 1;
+        return true;
     }
 
     private async Task<JavaList<MediaBrowserCompat.MediaItem>> LoadAlbumItemsAsync(bool favoriteOnly)
@@ -1124,34 +1189,15 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     private async Task InitializeStartupAsync()
     {
         var connectionService = _connectionService;
-        var musicAssistantService = _musicAssistantService;
 
-        if (connectionService == null || musicAssistantService == null)
+        if (connectionService == null)
         {
-            _startupGateState = StartupGateState.Error;
-            NotifyChildrenChanged(RootId);
-            global::Android.Util.Log.Warn(LogTag, "Startup initialization failed: missing required services.");
+            global::Android.Util.Log.Warn(LogTag, "Startup initialization failed: ConnectionService is missing.");
             return;
         }
 
         try
         {
-            var isServerReachable = await connectionService.TestServerReachabilityAsync();
-            if (!isServerReachable)
-            {
-                _startupGateState = StartupGateState.Offline;
-                NotifyChildrenChanged(RootId);
-                return;
-            }
-
-            var isAuthenticated = await musicAssistantService.TestAuthentificatonAsync();
-            if (!isAuthenticated)
-            {
-                _startupGateState = StartupGateState.Unauthorized;
-                NotifyChildrenChanged(RootId);
-                return;
-            }
-
             await connectionService.ConnectAsync();
             await connectionService.StartReconnectLoopAsync();
 
@@ -1161,14 +1207,11 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             }
 
             EnsurePlaybackInitialized();
-            _startupGateState = StartupGateState.Ready;
             NotifyChildrenChanged(RootId);
             SyncMediaSessionState();
         }
         catch (Exception ex)
         {
-            _startupGateState = StartupGateState.Error;
-            NotifyChildrenChanged(RootId);
             global::Android.Util.Log.Warn(LogTag, $"Startup initialization failed: {ex.Message}");
         }
     }
@@ -1294,18 +1337,18 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
                 .SetExtras(favoriteActionExtras)
                 .Build())
             .AddCustomAction(new PlaybackStateCompat.CustomAction.Builder(
+                CustomActionToggleRepeatMode,
+                new Java.Lang.String(repeatActionLabel),
+                GetRepeatModeIconResource(repeatMode))
+                .SetExtras(repeatActionExtras)
+                .Build())
+            .AddCustomAction(new PlaybackStateCompat.CustomAction.Builder(
                 CustomActionToggleShuffle,
                 new Java.Lang.String(isShuffleEnabled ? "Shuffle deaktivieren" : "Shuffle aktivieren"),
                 isShuffleEnabled
                     ? Resource.Drawable.shuffle_on
                     : Resource.Drawable.shuffle)
                 .SetExtras(shuffleActionExtras)
-                .Build())
-            .AddCustomAction(new PlaybackStateCompat.CustomAction.Builder(
-                CustomActionToggleRepeatMode,
-                new Java.Lang.String(repeatActionLabel),
-                GetRepeatModeIconResource(repeatMode))
-                .SetExtras(repeatActionExtras)
                 .Build());
 
         session.SetPlaybackState(playbackStateBuilder.Build());
