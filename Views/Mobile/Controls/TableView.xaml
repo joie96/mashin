@@ -171,6 +171,12 @@
                         IsVisible="{Binding Source={x:Reference self}, Path=HasSelection, Converter={StaticResource InvertedBoolConverter}}"
                         BackgroundColor="Transparent"
                         StrokeThickness="0">
+                        <Border.Behaviors>
+                            <toolkit:TouchBehavior
+                                PressedBackgroundColor="{StaticResource SelectionBackground}"
+                                PressedAnimationDuration="250"
+                                PressedAnimationEasing="CubicOut" />
+                        </Border.Behaviors>
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="20" />
                         </Border.StrokeShape>
