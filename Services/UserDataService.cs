@@ -29,6 +29,7 @@ public sealed class UserDataService : INotifyPropertyChanged
     private readonly SettingsService _settings;
     private readonly ILogger<UserDataService> _logger;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly object _pushQueueGate = new();
     private static readonly HttpClient _httpClient = new();
 
     private Dictionary<string, object> _preferences = new(StringComparer.OrdinalIgnoreCase);
@@ -38,6 +39,9 @@ public sealed class UserDataService : INotifyPropertyChanged
     private readonly ObservableRangeCollection<Artist> _favoriteArtists = new();
     private readonly ObservableRangeCollection<Playlist> _playlists = new();
     private bool _isLoadingPreferences;
+    private bool _isPushInProgress;
+    // Single-slot queue: newer pending snapshot replaces older pending snapshot.
+    private Dictionary<string, object>? _pendingPushPreferences;
 
     #endregion
 
@@ -117,18 +121,20 @@ public sealed class UserDataService : INotifyPropertyChanged
 
     public async Task<bool> PushPreferencesAsync(CancellationToken cancellationToken = default)
     {
+        var configuredUsername = _settings.Username;
+        if (string.IsNullOrWhiteSpace(configuredUsername))
+        {
+            return false;
+        }
+
+        Dictionary<string, object> preferencesToPush;
+
         await _lock.WaitAsync(cancellationToken);
         try
         {
-            var configuredUsername = _settings.Username;
-            if (string.IsNullOrWhiteSpace(configuredUsername))
-            {
-                return false;
-            }
-
             ConvertToSnapshot();
 
-            var preferencesToPush = CloneDictionary(_preferences);
+            preferencesToPush = CloneDictionary(_preferences);
 
             if (preferencesToPush.TryGetValue(FavoritesRootKey, out var favoritesRootObj)
                 && favoritesRootObj is FavoritesSnapshot favoritesSnapshot)
@@ -161,33 +167,70 @@ public sealed class UserDataService : INotifyPropertyChanged
                     return false;
                 }
             }
-
-            try
-            {
-                var updatedUser = await _musicAssistant.UpdateUserAsync(
-                    username: configuredUsername,
-                    preferences: preferencesToPush);
-
-                if (updatedUser == null)
-                {
-                    return false;
-                }
-
-                return true;
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to save user preferences");
-                return false;
-            }
         }
         finally
         {
             _lock.Release();
+        }
+
+        lock (_pushQueueGate)
+        {
+            if (_isPushInProgress)
+            {
+                // Coalesce pending pushes into the latest snapshot only.
+                _pendingPushPreferences = preferencesToPush;
+                return true;
+            }
+
+            _isPushInProgress = true;
+        }
+
+        var lastPushResult = true;
+
+        try
+        {
+            var currentPreferencesToPush = preferencesToPush;
+
+            while (true)
+            {
+                try
+                {
+                    var updatedUser = await _musicAssistant.UpdateUserAsync(
+                        username: configuredUsername,
+                        preferences: currentPreferencesToPush);
+
+                    lastPushResult = updatedUser != null;
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to save user preferences");
+                    lastPushResult = false;
+                }
+
+                lock (_pushQueueGate)
+                {
+                    if (_pendingPushPreferences == null)
+                    {
+                        _isPushInProgress = false;
+                        return lastPushResult;
+                    }
+
+                    // Drain the newest queued snapshot after the current push completes.
+                    currentPreferencesToPush = _pendingPushPreferences;
+                    _pendingPushPreferences = null;
+                }
+            }
+        }
+        finally
+        {
+            lock (_pushQueueGate)
+            {
+                _isPushInProgress = false;
+            }
         }
     }
 
