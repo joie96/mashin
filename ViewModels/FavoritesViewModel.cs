@@ -55,6 +55,9 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
     private bool _isLoadingAlbums;
     private bool _isLoadingPlaylists;
     private bool _isLoadingArtists;
+    private Track? _contextMenuTargetTrack;
+    private Album? _contextMenuTargetAlbum;
+    private Artist? _contextMenuTargetArtist;
     private bool _disposed;
 
     #endregion
@@ -427,7 +430,15 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
 
         ShowTrackContextMenuAtAnchorCommand = new Command<View>(async anchor =>
         {
-            if (_trackContextMenuItems.Count > 0 && anchor != null)
+            if (anchor == null)
+            {
+                return;
+            }
+
+            _contextMenuTargetTrack = anchor.BindingContext as Track;
+            await BuildTrackContextMenuAsync();
+
+            if (_trackContextMenuItems.Count > 0)
             {
                 await _contextMenuService.ShowContextMenuAsync(_trackContextMenuItems, anchor);
             }
@@ -435,6 +446,8 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
 
         ShowTrackContextMenuAtPositionCommand = new Command<Point>(async position =>
         {
+            await BuildTrackContextMenuAsync();
+
             if (_trackContextMenuItems.Count > 0)
             {
                 await _contextMenuService.ShowContextMenuAsync(_trackContextMenuItems, position);
@@ -443,7 +456,15 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
 
         ShowAlbumContextMenuAtAnchorCommand = new Command<View>(async anchor =>
         {
-            if (_albumContextMenuItems.Count > 0 && anchor != null)
+            if (anchor == null)
+            {
+                return;
+            }
+
+            _contextMenuTargetAlbum = anchor.BindingContext as Album;
+            await BuildAlbumContextMenuAsync();
+
+            if (_albumContextMenuItems.Count > 0)
             {
                 await _contextMenuService.ShowContextMenuAsync(_albumContextMenuItems, anchor);
             }
@@ -451,6 +472,8 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
 
         ShowAlbumContextMenuAtPositionCommand = new Command<Point>(async position =>
         {
+            await BuildAlbumContextMenuAsync();
+
             if (_albumContextMenuItems.Count > 0)
             {
                 await _contextMenuService.ShowContextMenuAsync(_albumContextMenuItems, position);
@@ -475,7 +498,15 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
 
         ShowArtistContextMenuAtAnchorCommand = new Command<View>(async anchor =>
         {
-            if (_artistContextMenuItems.Count > 0 && anchor != null)
+            if (anchor == null)
+            {
+                return;
+            }
+
+            _contextMenuTargetArtist = anchor.BindingContext as Artist;
+            await BuildArtistContextMenuAsync();
+
+            if (_artistContextMenuItems.Count > 0)
             {
                 await _contextMenuService.ShowContextMenuAsync(_artistContextMenuItems, anchor);
             }
@@ -483,6 +514,8 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
 
         ShowArtistContextMenuAtPositionCommand = new Command<Point>(async position =>
         {
+            await BuildArtistContextMenuAsync();
+
             if (_artistContextMenuItems.Count > 0)
             {
                 await _contextMenuService.ShowContextMenuAsync(_artistContextMenuItems, position);
@@ -655,6 +688,10 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
 
     private async Task BuildTrackContextMenuAsync()
     {
+        var targets = GetContextMenuTargetTracks().ToList();
+        var isSingleTarget = targets.Count == 1;
+        var singleTarget = isSingleTarget ? targets[0] : null;
+
         var menu = new ObservableRangeCollection<ContextMenuItem>
         {
             new()
@@ -732,16 +769,58 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                     var items = Tracks.Where(t => t.IsSelected).Select(t => (MediaItem)t).ToList();
                     await PlaybackService.PlayMediaLastAsync(items);
                 })
-            },
-            new() { IsSeparator = true },
-            new()
+            }
+        };
+
+        if (isSingleTarget)
+        {
+            menu.Add(new ContextMenuItem { IsSeparator = true });
+
+            menu.Add(new ContextMenuItem
+            {
+                Text = "Künstler:inn öffnen",
+                Icon = FluentIcons.Person12,
+                Command = new Command(async () =>
+                {
+                    var selectedArtist = singleTarget?.Artists?.FirstOrDefault();
+                    if (selectedArtist == null)
+                    {
+                        return;
+                    }
+
+                    await _navigationService.NavigateToAsync<ArtistDetailPage>(selectedArtist);
+                })
+            });
+
+            menu.Add(new ContextMenuItem
+            {
+                Text = "Album öffnen",
+                Icon = FluentIcons.Open16,
+                Command = new Command(async () =>
+                {
+                    var selectedAlbum = singleTarget?.Album;
+                    if (selectedAlbum == null)
+                    {
+                        return;
+                    }
+
+                    await _navigationService.NavigateToAsync<AlbumDetailPage>(selectedAlbum);
+                })
+            });
+        }
+
+        menu.Add(new ContextMenuItem { IsSeparator = true });
+
+        menu.AddRange(new ContextMenuItem[]
+        {
+            new ContextMenuItem()
             {
                 Text = "Zu Wiedergabeliste hinzufügen",
                 Icon = FluentIcons.Add12,
                 SubItems = await GetPlaylistSubItemsAsync()
             },
-            new() { IsSeparator = true },
-            new()
+            new ContextMenuItem() { IsSeparator = true },
+            new ContextMenuItem()
             {
                 Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
@@ -751,7 +830,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                     await UserDataService.SetFavoriteAsync(selectedMediaItems, true);
                 })
             },
-            new()
+            new ContextMenuItem()
             {
                 Text = "Aus Favoriten entfernen",
                 Icon = FluentFilledIcons.Heart12Filled,
@@ -762,14 +841,18 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                     await UserDataService.SetFavoriteAsync(selectedMediaItems, false);
                 })
             }
-        };
+        });
 
         _trackContextMenuItems = menu;
     }
 
     private Task BuildAlbumContextMenuAsync()
     {
-        _albumContextMenuItems = new ObservableRangeCollection<ContextMenuItem>
+        var targets = GetContextMenuTargetAlbums().ToList();
+        var isSingleTarget = targets.Count == 1;
+        var singleTarget = isSingleTarget ? targets[0] : null;
+
+        var menu = new ObservableRangeCollection<ContextMenuItem>
         {
             new()
             {
@@ -800,9 +883,50 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                     var items = Albums.Where(a => a.IsSelected).Select(a => (MediaItem)a).ToList();
                     await PlaybackService.PlayMediaLastAsync(items);
                 })
-            },
-            new() { IsSeparator = true },
-            new()
+            }
+        };
+
+        if (isSingleTarget)
+        {
+            menu.Add(new ContextMenuItem { IsSeparator = true });
+
+            menu.Add(new ContextMenuItem
+            {
+                Text = "Künstler:inn öffnen",
+                Icon = FluentIcons.Person12,
+                Command = new Command(async () =>
+                {
+                    var selectedArtist = singleTarget?.Artists?.FirstOrDefault();
+                    if (selectedArtist == null)
+                    {
+                        return;
+                    }
+
+                    await _navigationService.NavigateToAsync<ArtistDetailPage>(selectedArtist);
+                })
+            });
+
+            menu.Add(new ContextMenuItem
+            {
+                Text = "Album öffnen",
+                Icon = FluentIcons.Open16,
+                Command = new Command(async () =>
+                {
+                    if (singleTarget == null)
+                    {
+                        return;
+                    }
+
+                    await _navigationService.NavigateToAsync<AlbumDetailPage>(singleTarget);
+                })
+            });
+        }
+
+        menu.Add(new ContextMenuItem { IsSeparator = true });
+
+        menu.AddRange(new ContextMenuItem[]
+        {
+            new ContextMenuItem()
             {
                 Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
@@ -812,7 +936,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                     await UserDataService.SetFavoriteAsync(selectedMediaItems, true);
                 })
             },
-            new()
+            new ContextMenuItem()
             {
                 Text = "Aus Favoriten entfernen",
                 Icon = FluentFilledIcons.Heart12Filled,
@@ -823,7 +947,9 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                     await UserDataService.SetFavoriteAsync(selectedMediaItems, false);
                 })
             }
-        };
+        });
+
+        _albumContextMenuItems = menu;
 
         return Task.CompletedTask;
     }
@@ -891,7 +1017,11 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
 
     private Task BuildArtistContextMenuAsync()
     {
-        _artistContextMenuItems = new ObservableRangeCollection<ContextMenuItem>
+        var targets = GetContextMenuTargetArtists().ToList();
+        var isSingleTarget = targets.Count == 1;
+        var singleTarget = isSingleTarget ? targets[0] : null;
+
+        var menu = new ObservableRangeCollection<ContextMenuItem>
         {
             new()
             {
@@ -899,7 +1029,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                 Icon = FluentIcons.Play12,
                 Command = new Command(async () =>
                 {
-                    var items = Artists.Where(a => a.IsSelected).Select(a => (MediaItem)a).ToList();
+                    var items = GetContextMenuTargetArtists().Select(a => (MediaItem)a).ToList();
                     await PlaybackService.PlayMediaAsync(items);
                 })
             },
@@ -909,7 +1039,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                 Icon = FluentIcons.Album20,
                 Command = new Command(async () =>
                 {
-                    var targetArtists = GetSelectedArtists();
+                    var targetArtists = GetContextMenuTargetArtists();
                     if (targetArtists.Count == 0)
                     {
                         _logger.LogDebug("Cannot start artist radio: no target artists available.");
@@ -935,7 +1065,7 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                 Icon = FluentIcons.ArrowForward16,
                 Command = new Command(async () =>
                 {
-                    var items = Artists.Where(a => a.IsSelected).Select(a => (MediaItem)a).ToList();
+                    var items = GetContextMenuTargetArtists().Select(a => (MediaItem)a).ToList();
                     await PlaybackService.PlayMediaNextAsync(items);
                 })
             },
@@ -945,18 +1075,43 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                 Icon = FluentIcons.ArrowNext12,
                 Command = new Command(async () =>
                 {
-                    var items = GetSelectedArtists().Select(a => (MediaItem)a).ToList();
+                    var items = GetContextMenuTargetArtists().Select(a => (MediaItem)a).ToList();
                     await PlaybackService.PlayMediaLastAsync(items);
                 })
-            },
-            new() { IsSeparator = true },
+            }
+        };
+
+        if (isSingleTarget)
+        {
+            menu.Add(new ContextMenuItem { IsSeparator = true });
+
+            menu.Add(new ContextMenuItem
+            {
+                Text = "Künstler:inn öffnen",
+                Icon = FluentIcons.Person12,
+                Command = new Command(async () =>
+                {
+                    if (singleTarget == null)
+                    {
+                        return;
+                    }
+
+                    await _navigationService.NavigateToAsync<ArtistDetailPage>(singleTarget);
+                })
+            });
+        }
+
+        menu.Add(new ContextMenuItem { IsSeparator = true });
+
+        menu.AddRange(new ContextMenuItem[]
+        {
             new()
             {
                 Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                 {
-                    var selectedMediaItems = GetSelectedArtists().Cast<MediaItem>().ToList();
+                    var selectedMediaItems = GetContextMenuTargetArtists().Cast<MediaItem>().ToList();
                     await UserDataService.SetFavoriteAsync(selectedMediaItems, true);
                 })
             },
@@ -967,11 +1122,13 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
                 IconIsFilled = true,
                 Command = new Command(async () =>
                 {
-                    var selectedMediaItems = GetSelectedArtists().Cast<MediaItem>().ToList();
+                    var selectedMediaItems = GetContextMenuTargetArtists().Cast<MediaItem>().ToList();
                     await UserDataService.SetFavoriteAsync(selectedMediaItems, false);
                 })
             }
-        };
+        });
+
+        _artistContextMenuItems = menu;
 
         return Task.CompletedTask;
     }
@@ -979,6 +1136,39 @@ public sealed class FavoritesViewModel : INotifyPropertyChanged, INavigationAwar
     private IReadOnlyList<Artist> GetSelectedArtists()
     {
         return Artists.Where(artist => artist.IsSelected).ToList();
+    }
+
+    private IReadOnlyList<Artist> GetContextMenuTargetArtists()
+    {
+        var selectedArtists = Artists.Where(artist => artist.IsSelected).ToList();
+        if (selectedArtists.Count > 0)
+        {
+            return selectedArtists;
+        }
+
+        return _contextMenuTargetArtist == null ? Array.Empty<Artist>() : new[] { _contextMenuTargetArtist };
+    }
+
+    private IReadOnlyList<Track> GetContextMenuTargetTracks()
+    {
+        var selectedTracks = Tracks.Where(track => track.IsSelected).ToList();
+        if (selectedTracks.Count > 0)
+        {
+            return selectedTracks;
+        }
+
+        return _contextMenuTargetTrack == null ? Array.Empty<Track>() : new[] { _contextMenuTargetTrack };
+    }
+
+    private IReadOnlyList<Album> GetContextMenuTargetAlbums()
+    {
+        var selectedAlbums = Albums.Where(album => album.IsSelected).ToList();
+        if (selectedAlbums.Count > 0)
+        {
+            return selectedAlbums;
+        }
+
+        return _contextMenuTargetAlbum == null ? Array.Empty<Album>() : new[] { _contextMenuTargetAlbum };
     }
 
     private async Task<ObservableRangeCollection<ContextMenuItem>> GetPlaylistSubItemsAsync()

@@ -58,6 +58,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private ObservableRangeCollection<ContextMenuItem> _currentTrackContextMenuItems = new();
     private readonly ObservableCollection<ContextMenuItem> _sidebarPlaylistContextMenuItems = new();
     private Playlist? _sidebarContextPlaylist;
+    private Track? _contextMenuTargetQueueTrack;
 
     // Navigation
     private bool _isNavigating;
@@ -143,6 +144,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             {
                 return;
             }
+
+            _contextMenuTargetQueueTrack = anchor.BindingContext switch
+            {
+                QueueItem queueItem => queueItem.MediaItem,
+                Track track => track,
+                _ => null
+            };
 
             BuildQueueContextMenuItems();
 
@@ -1357,7 +1365,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private void BuildQueueContextMenuItems()
     {
-        _queueContextMenuItems = new ObservableRangeCollection<ContextMenuItem>
+        var selectedTracks = GetContextMenuTargetQueueTracks().ToList();
+        var isSingleTarget = selectedTracks.Count == 1;
+        var singleTarget = isSingleTarget ? selectedTracks[0] : null;
+
+        var menu = new ObservableRangeCollection<ContextMenuItem>
         {
             new()
             {
@@ -1382,9 +1394,51 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 Text = "Aus Queue entfernen",
                 Icon = FluentIcons.Dismiss12,
                 Command = new Command(async () => await RemoveSelectedQueueItemsAsync())
-            },
-            new() { IsSeparator = true },
-            new()
+            }
+        };
+
+        if (isSingleTarget)
+        {
+            menu.Add(new ContextMenuItem { IsSeparator = true });
+
+            menu.Add(new ContextMenuItem
+            {
+                Text = "Künstler:inn öffnen",
+                Icon = FluentIcons.Person12,
+                Command = new Command(async () =>
+                {
+                    var selectedArtist = singleTarget?.Artists?.FirstOrDefault();
+                    if (selectedArtist == null)
+                    {
+                        return;
+                    }
+
+                    await _navigationService.NavigateToAsync<ArtistDetailPage>(selectedArtist);
+                })
+            });
+
+            menu.Add(new ContextMenuItem
+            {
+                Text = "Album öffnen",
+                Icon = FluentIcons.Open16,
+                Command = new Command(async () =>
+                {
+                    var selectedAlbum = singleTarget?.Album;
+                    if (selectedAlbum == null)
+                    {
+                        return;
+                    }
+
+                    await _navigationService.NavigateToAsync<AlbumDetailPage>(selectedAlbum);
+                })
+            });
+        }
+
+        menu.Add(new ContextMenuItem { IsSeparator = true });
+
+        menu.AddRange(new ContextMenuItem[]
+        {
+            new ContextMenuItem()
             {
                 Text = "Zu Wiedergabeliste hinzufügen",
                 Icon = FluentIcons.Add12,
@@ -1397,48 +1451,58 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                             Command = new Command(async () =>
                                     await UserDataService.AddPlaylistTracksAsync(
                                         playlist.ItemId,
-                                        CurrentQueueItems
-                                            .Select(item => item.MediaItem)
-                                            .OfType<Track>()
-                                            .Where(track => track.IsSelected)
-                                            .ToList()))
+                                        GetContextMenuTargetQueueTracks().ToList()))
                         }))
             },
-            new() { IsSeparator = true },
-            new()
+            new ContextMenuItem() { IsSeparator = true },
+            new ContextMenuItem()
             {
                 Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
                 Command = new Command(async () =>
                 {
-                    var selectedMediaItems = CurrentQueueItems
-                        .Select(item => item.MediaItem)
-                        .OfType<Track>()
-                        .Where(track => track.IsSelected)
+                    var selectedMediaItems = GetContextMenuTargetQueueTracks()
                         .Cast<MediaItem>()
                         .ToList();
 
                     await UserDataService.SetFavoriteAsync(selectedMediaItems, true);
                 })
             },
-            new()
+            new ContextMenuItem()
             {
                 Text = "Aus Favoriten entfernen",
                 Icon = FluentFilledIcons.Heart12Filled,
                 IconIsFilled = true,
                 Command = new Command(async () =>
                 {
-                    var selectedMediaItems = CurrentQueueItems
-                        .Select(item => item.MediaItem)
-                        .OfType<Track>()
-                        .Where(track => track.IsSelected)
+                    var selectedMediaItems = GetContextMenuTargetQueueTracks()
                         .Cast<MediaItem>()
                         .ToList();
 
                     await UserDataService.SetFavoriteAsync(selectedMediaItems, false);
                 })
             }
-        };
+        });
+
+        _queueContextMenuItems = menu;
+    }
+
+    private IReadOnlyList<Track> GetContextMenuTargetQueueTracks()
+    {
+        var selectedTracks = CurrentQueueItems
+            .Select(item => item.MediaItem)
+            .OfType<Track>()
+            .Where(track => track.IsSelected)
+            .ToList();
+
+        if (selectedTracks.Count > 0)
+        {
+            return selectedTracks;
+        }
+
+        return _contextMenuTargetQueueTrack == null
+            ? Array.Empty<Track>()
+            : new[] { _contextMenuTargetQueueTrack };
     }
 
     #endregion

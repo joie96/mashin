@@ -65,6 +65,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     private bool _isDescriptionExpanded;
     private bool _disposed;
     private Track? _contextMenuTargetTrack;
+    private Album? _contextMenuTargetAlbum;
     private Artist? _contextMenuTargetArtist;
     #endregion
 
@@ -383,6 +384,8 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             }
 
             _contextMenuTargetTrack = anchor.BindingContext as Track;
+            await BuildTrackContextMenuAsync();
+
             if (_trackContextMenuItems.Count > 0)
             {
                 await _contextMenuService.ShowContextMenuAsync(_trackContextMenuItems, anchor);
@@ -391,6 +394,8 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
         ShowTrackContextMenuAtPositionCommand = new Command<Point>(async (position) =>
         {
+            await BuildTrackContextMenuAsync();
+
             if (_trackContextMenuItems.Count > 0)
             {
                 await _contextMenuService.ShowContextMenuAsync(_trackContextMenuItems, position);
@@ -399,7 +404,15 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
         ShowAlbumContextMenuAtAnchorCommand = new Command<View>(async (anchor) =>
         {
-            if (_albumContextMenuItems.Count > 0 && anchor != null)
+            if (anchor == null)
+            {
+                return;
+            }
+
+            _contextMenuTargetAlbum = anchor.BindingContext as Album;
+            await BuildAlbumContextMenuAsync();
+
+            if (_albumContextMenuItems.Count > 0)
             {
                 await _contextMenuService.ShowContextMenuAsync(_albumContextMenuItems, anchor);
             }
@@ -407,6 +420,8 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
         ShowAlbumContextMenuAtPositionCommand = new Command<Point>(async (position) =>
         {
+            await BuildAlbumContextMenuAsync();
+
             if (_albumContextMenuItems.Count > 0)
             {
                 await _contextMenuService.ShowContextMenuAsync(_albumContextMenuItems, position);
@@ -421,6 +436,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
             }
 
             _contextMenuTargetArtist = anchor.BindingContext as Artist;
+            await BuildArtistContextMenuAsync();
 
             if (_artistContextMenuItems.Count > 0)
             {
@@ -430,6 +446,8 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
         ShowArtistContextMenuAtPositionCommand = new Command<Point>(async (position) =>
         {
+            await BuildArtistContextMenuAsync();
+
             if (_artistContextMenuItems.Count > 0)
             {
                 await _contextMenuService.ShowContextMenuAsync(_artistContextMenuItems, position);
@@ -891,6 +909,9 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
     private async Task BuildTrackContextMenuAsync()
     {
         var playlists = _userDataService.Playlists;
+        var targets = GetContextMenuTargetTracks().ToList();
+        var isSingleTarget = targets.Count == 1;
+        var singleTarget = isSingleTarget ? targets[0] : null;
 
         var menu = new ObservableRangeCollection<ContextMenuItem>
         {
@@ -962,9 +983,51 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                 Icon = FluentIcons.ArrowNext12,
                 Command = new Command(async () =>
                     await PlaybackService.PlayMediaLastAsync(GetContextMenuTargetTracks().Cast<MediaItem>().ToList()))
-            },
-            new() { IsSeparator = true },
-            new()
+            }
+        };
+
+        if (isSingleTarget)
+        {
+            menu.Add(new ContextMenuItem { IsSeparator = true });
+
+            menu.Add(new ContextMenuItem
+            {
+                Text = "Künstler:inn öffnen",
+                Icon = FluentIcons.Person12,
+                Command = new Command(async () =>
+                {
+                    var selectedArtist = singleTarget?.Artists?.FirstOrDefault();
+                    if (selectedArtist == null)
+                    {
+                        return;
+                    }
+
+                    await _navigationService.NavigateToAsync<ArtistDetailPage>(selectedArtist);
+                })
+            });
+
+            menu.Add(new ContextMenuItem
+            {
+                Text = "Album öffnen",
+                Icon = FluentIcons.Open16,
+                Command = new Command(async () =>
+                {
+                    var selectedAlbum = singleTarget?.Album;
+                    if (selectedAlbum == null)
+                    {
+                        return;
+                    }
+
+                    await _navigationService.NavigateToAsync<AlbumDetailPage>(selectedAlbum);
+                })
+            });
+        }
+
+        menu.Add(new ContextMenuItem { IsSeparator = true });
+
+        menu.AddRange(new ContextMenuItem[]
+        {
+            new ContextMenuItem()
             {
                 Text = "Zu Wiedergabeliste hinzufügen",
                 Icon = FluentIcons.Add12,
@@ -982,8 +1045,8 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                             })
                         }))
             },
-            new() { IsSeparator = true },
-            new()
+            new ContextMenuItem() { IsSeparator = true },
+            new ContextMenuItem()
             {
                 Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
@@ -993,7 +1056,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                     await _userDataService.SetFavoriteAsync(selectedMediaItems, true);
                 })
             },
-            new()
+            new ContextMenuItem()
             {
                 Text = "Aus Favoriten entfernen",
                 Icon = FluentFilledIcons.Heart12Filled,
@@ -1004,7 +1067,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                     await _userDataService.SetFavoriteAsync(selectedMediaItems, false);
                 })
             }
-        };
+        });
 
         _trackContextMenuItems = menu;
     }
@@ -1022,6 +1085,10 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
 
     private Task BuildAlbumContextMenuAsync()
     {
+        var targets = GetContextMenuTargetAlbums().ToList();
+        var isSingleTarget = targets.Count == 1;
+        var singleTarget = isSingleTarget ? targets[0] : null;
+
         var menu = new ObservableRangeCollection<ContextMenuItem>
         {
             new()
@@ -1062,9 +1129,50 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                         .ToList();
                     await PlaybackService.PlayMediaLastAsync(items);
                 })
-            },
-            new() { IsSeparator = true },
-            new()
+            }
+        };
+
+        if (isSingleTarget)
+        {
+            menu.Add(new ContextMenuItem { IsSeparator = true });
+
+            menu.Add(new ContextMenuItem
+            {
+                Text = "Künstler:inn öffnen",
+                Icon = FluentIcons.Person12,
+                Command = new Command(async () =>
+                {
+                    var selectedArtist = singleTarget?.Artists?.FirstOrDefault();
+                    if (selectedArtist == null)
+                    {
+                        return;
+                    }
+
+                    await _navigationService.NavigateToAsync<ArtistDetailPage>(selectedArtist);
+                })
+            });
+
+            menu.Add(new ContextMenuItem
+            {
+                Text = "Album öffnen",
+                Icon = FluentIcons.Open16,
+                Command = new Command(async () =>
+                {
+                    if (singleTarget == null)
+                    {
+                        return;
+                    }
+
+                    await _navigationService.NavigateToAsync<AlbumDetailPage>(singleTarget);
+                })
+            });
+        }
+
+        menu.Add(new ContextMenuItem { IsSeparator = true });
+
+        menu.AddRange(new ContextMenuItem[]
+        {
+            new ContextMenuItem()
             {
                 Text = "Zu Favoriten hinzufügen",
                 Icon = FluentIcons.Heart12,
@@ -1074,7 +1182,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                     await _userDataService.SetFavoriteAsync(selectedMediaItems, true);
                 })
             },
-            new()
+            new ContextMenuItem()
             {
                 Text = "Aus Favoriten entfernen",
                 Icon = FluentFilledIcons.Heart12Filled,
@@ -1085,14 +1193,29 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                     await _userDataService.SetFavoriteAsync(selectedMediaItems, false);
                 })
             }
-        };
+        });
 
         _albumContextMenuItems = menu;
         return Task.CompletedTask;
     }
 
+    private IReadOnlyList<Album> GetContextMenuTargetAlbums()
+    {
+        var selectedAlbums = Albums.Where(album => album.IsSelected).ToList();
+        if (selectedAlbums.Count > 0)
+        {
+            return selectedAlbums;
+        }
+
+        return _contextMenuTargetAlbum == null ? Array.Empty<Album>() : new[] { _contextMenuTargetAlbum };
+    }
+
     private Task BuildArtistContextMenuAsync()
     {
+        var targets = GetContextMenuTargetArtists().ToList();
+        var isSingleTarget = targets.Count == 1;
+        var singleTarget = isSingleTarget ? targets[0] : null;
+
         var menu = new ObservableRangeCollection<ContextMenuItem>
         {
             new()
@@ -1174,8 +1297,33 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                         .ToList();
                     await PlaybackService.PlayMediaLastAsync(items);
                 })
-            },
-            new() { IsSeparator = true },
+            }
+        };
+
+        if (isSingleTarget)
+        {
+            menu.Add(new ContextMenuItem { IsSeparator = true });
+
+            menu.Add(new ContextMenuItem
+            {
+                Text = "Künstler:inn öffnen",
+                Icon = FluentIcons.Person12,
+                Command = new Command(async () =>
+                {
+                    if (singleTarget == null)
+                    {
+                        return;
+                    }
+
+                    await _navigationService.NavigateToAsync<ArtistDetailPage>(singleTarget);
+                })
+            });
+        }
+
+        menu.Add(new ContextMenuItem { IsSeparator = true });
+
+        menu.AddRange(new ContextMenuItem[]
+        {
             new()
             {
                 Text = "Zu Favoriten hinzufügen",
@@ -1197,7 +1345,7 @@ public class ArtistDetailViewModel : INotifyPropertyChanged, INavigationAware, I
                     await _userDataService.SetFavoriteAsync(selectedMediaItems, false);
                 })
             }
-        };
+        });
 
         _artistContextMenuItems = menu;
         return Task.CompletedTask;
