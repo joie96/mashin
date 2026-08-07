@@ -589,17 +589,19 @@
                                                 <RoundRectangle CornerRadius="10" />
                                             </Border.StrokeShape>
 
-                                            <Grid Padding="0,2"
-                                                ColumnDefinitions="*,Auto"
+                                            <Grid ColumnDefinitions="*,Auto"
                                                 ColumnSpacing="10">
-                                                <VerticalStackLayout Grid.Column="0"
-                                                    Spacing="0">
-                                                    <Label FontSize="14"
-                                                        Text="{Binding Name}"
-                                                        TextColor="{DynamicResource TextPrimary}" />
-                                                </VerticalStackLayout>
+                                                <Label Grid.Column="0"
+                                                    FontFamily="PoppinsRegular"
+                                                    FontSize="14"
+                                                    LineBreakMode="TailTruncation"
+                                                    MaxLines="1"
+                                                    Text="{Binding Name}"
+                                                    TextColor="{DynamicResource TextPrimary}"
+                                                    VerticalOptions="Center" />
 
                                                 <RadioButton Grid.Column="1"
+                                                    HorizontalOptions="End"
                                                     IsEnabled="{Binding Available}"
                                                     MinimumWidthRequest="0"
                                                     Value="{Binding PlayerId}"
