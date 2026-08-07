@@ -405,7 +405,7 @@ public sealed class PlaybackService
             return;
         }
 
-        ApplyPlaybackQueue(queue);
+        ApplyPlaybackQueue(CloneQueue(queue));
     }
 
     #endregion
@@ -702,7 +702,7 @@ public sealed class PlaybackService
 
         if (_activePlayer.Queue != null)
         {
-            ApplyPlaybackQueue(_activePlayer.Queue);
+            ApplyPlaybackQueue(CloneQueue(_activePlayer.Queue));
         }
     }
 
