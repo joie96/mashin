@@ -78,6 +78,10 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     private SettingsService? _settingsService;
     private MediaSessionCompat? _mediaSession;
     private Task? _startupInitializationTask;
+    private string? _lastPlaybackStateSignature;
+    private string? _lastMetadataSignature;
+    private string? _lastQueueSignature;
+    private string? _lastQueueTitle;
 
     #endregion
 
@@ -1254,25 +1258,32 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
 
     private void OnPlaybackPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(PlaybackService.PlaybackState)
-            || e.PropertyName == nameof(PlaybackService.CurrentQueueItem)
-            || e.PropertyName == nameof(PlaybackService.PositionSeconds)
-            || e.PropertyName == nameof(PlaybackService.DurationSeconds)
-            || e.PropertyName == nameof(PlaybackService.ShuffleEnabled)
-            || e.PropertyName == nameof(PlaybackService.RepeatMode)
-            || e.PropertyName == nameof(PlaybackService.CurrentQueueItems)
-            || e.PropertyName == nameof(PlaybackService.CurrentQueueIndex))
+        var propertyName = e.PropertyName;
+        if (propertyName == nameof(PlaybackService.PositionSeconds))
         {
-            SyncMediaSessionState();
+            // Keep progress smooth without re-sending metadata/queue every tick.
+            SyncMediaSessionState(refreshStaticData: false);
+            return;
+        }
 
-            if (e.PropertyName == nameof(PlaybackService.CurrentQueueItem))
+        if (propertyName == nameof(PlaybackService.PlaybackState)
+            || propertyName == nameof(PlaybackService.CurrentQueueItem)
+            || propertyName == nameof(PlaybackService.DurationSeconds)
+            || propertyName == nameof(PlaybackService.ShuffleEnabled)
+            || propertyName == nameof(PlaybackService.RepeatMode)
+            || propertyName == nameof(PlaybackService.CurrentQueueItems)
+            || propertyName == nameof(PlaybackService.CurrentQueueIndex))
+        {
+            SyncMediaSessionState(refreshStaticData: true);
+
+            if (propertyName == nameof(PlaybackService.CurrentQueueItem))
             {
                 _ = RefreshCurrentTrackFavoriteStateAsync();
             }
         }
     }
 
-    private void SyncMediaSessionState()
+    private void SyncMediaSessionState(bool refreshStaticData = true)
     {
         var session = _mediaSession;
         var playback = _playbackService;
@@ -1292,6 +1303,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
                 | PlaybackStateCompat.ActionPause
                 | PlaybackStateCompat.ActionPlayFromMediaId
                 | PlaybackStateCompat.ActionPlayFromSearch
+                | PlaybackStateCompat.ActionSeekTo
                 | PlaybackStateCompat.ActionSkipToNext
                 | PlaybackStateCompat.ActionSkipToPrevious
                 | PlaybackStateCompat.ActionSkipToQueueItem
@@ -1327,6 +1339,29 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             _ => "Repeat deaktivieren"
         };
 
+        var mappedState = MapPlaybackState(state);
+        var playbackPositionMs = (long)(positionSeconds * 1000d);
+        var playbackSpeed = state == PlayerStateType.Playing ? 1f : 0f;
+        var activeQueueItemId = playback.CurrentQueueIndex is int queueIndex && queueIndex >= 0
+            ? queueIndex
+            : -1;
+        var playbackStateSignature = string.Concat(
+            mappedState,
+            "|",
+            activeQueueItemId,
+            "|",
+            playbackPositionMs,
+            "|",
+            playbackSpeed,
+            "|",
+            track?.Favorite == true ? "fav:1" : "fav:0",
+            "|",
+            isShuffleEnabled ? "shuffle:1" : "shuffle:0",
+            "|",
+            repeatMode,
+            "|",
+            repeatActionLabel);
+
         playbackStateBuilder
             .AddCustomAction(new PlaybackStateCompat.CustomAction.Builder(
                 CustomActionToggleFavorite,
@@ -1351,28 +1386,68 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
                 .SetExtras(shuffleActionExtras)
                 .Build());
 
-        session.SetPlaybackState(playbackStateBuilder.Build());
-
-        var metadataBuilder = new MediaMetadataCompat.Builder()
-            .PutString(MediaMetadataCompat.MetadataKeyTitle, track?.DisplayName ?? track?.Name ?? string.Empty)
-            .PutString(MediaMetadataCompat.MetadataKeyArtist, track?.ArtistName ?? string.Empty)
-            .PutString(MediaMetadataCompat.MetadataKeyAlbum, track?.AlbumName ?? string.Empty)
-            .PutLong(MediaMetadataCompat.MetadataKeyDuration, (long)(durationSeconds * 1000d));
-
-        var artworkMetadataUri = ResolveArtworkUriString(track);
-        if (!string.IsNullOrWhiteSpace(artworkMetadataUri))
+        if (!string.Equals(_lastPlaybackStateSignature, playbackStateSignature, StringComparison.Ordinal))
         {
-            metadataBuilder
-                .PutString(MediaMetadataCompat.MetadataKeyDisplayIconUri, artworkMetadataUri)
-                .PutString(MediaMetadataCompat.MetadataKeyArtUri, artworkMetadataUri)
-                .PutString(MediaMetadataCompat.MetadataKeyAlbumArtUri, artworkMetadataUri);
+            session.SetPlaybackState(playbackStateBuilder.Build());
+            _lastPlaybackStateSignature = playbackStateSignature;
         }
 
-        session.SetMetadata(metadataBuilder.Build());
+        if (refreshStaticData)
+        {
+            var metadataTitle = track?.DisplayName ?? track?.Name ?? string.Empty;
+            var metadataArtist = track?.ArtistName ?? string.Empty;
+            var metadataAlbum = track?.AlbumName ?? string.Empty;
+            var metadataDurationMs = (long)(durationSeconds * 1000d);
 
-        var queue = BuildSessionQueue(playback.CurrentQueueItems);
-        session.SetQueue(queue);
-        session.SetQueueTitle("Wiedergabeliste");
+            var artworkMetadataUri = ResolveArtworkUriString(track);
+
+            var metadataSignature = string.Concat(
+                metadataTitle,
+                "|",
+                metadataArtist,
+                "|",
+                metadataAlbum,
+                "|",
+                metadataDurationMs,
+                "|",
+                artworkMetadataUri ?? string.Empty);
+
+            if (!string.Equals(_lastMetadataSignature, metadataSignature, StringComparison.Ordinal))
+            {
+                var metadataBuilder = new MediaMetadataCompat.Builder()
+                    .PutString(MediaMetadataCompat.MetadataKeyTitle, metadataTitle)
+                    .PutString(MediaMetadataCompat.MetadataKeyArtist, metadataArtist)
+                    .PutString(MediaMetadataCompat.MetadataKeyAlbum, metadataAlbum)
+                    .PutLong(MediaMetadataCompat.MetadataKeyDuration, metadataDurationMs);
+
+                if (!string.IsNullOrWhiteSpace(artworkMetadataUri))
+                {
+                    metadataBuilder
+                        .PutString(MediaMetadataCompat.MetadataKeyDisplayIconUri, artworkMetadataUri)
+                        .PutString(MediaMetadataCompat.MetadataKeyArtUri, artworkMetadataUri)
+                        .PutString(MediaMetadataCompat.MetadataKeyAlbumArtUri, artworkMetadataUri);
+                }
+
+                session.SetMetadata(metadataBuilder.Build());
+                _lastMetadataSignature = metadataSignature;
+            }
+
+            var queueItems = playback.CurrentQueueItems.ToList();
+            var queueSignature = BuildQueueSignature(queueItems);
+            if (!string.Equals(_lastQueueSignature, queueSignature, StringComparison.Ordinal))
+            {
+                var queue = BuildSessionQueue(queueItems);
+                session.SetQueue(queue);
+                _lastQueueSignature = queueSignature;
+            }
+
+            const string queueTitle = "Wiedergabeliste";
+            if (!string.Equals(_lastQueueTitle, queueTitle, StringComparison.Ordinal))
+            {
+                session.SetQueueTitle(queueTitle);
+                _lastQueueTitle = queueTitle;
+            }
+        }
     }
 
     private async Task RefreshCurrentTrackFavoriteStateAsync()
@@ -1428,6 +1503,33 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
         }
 
         return new JavaList<MediaSessionCompat.QueueItem>(items);
+    }
+
+    private static string BuildQueueSignature(IEnumerable<QueueItem> queueItems)
+    {
+        var parts = new List<string>();
+
+        foreach (var queueItem in queueItems)
+        {
+            var mediaItem = queueItem.MediaItem;
+            if (mediaItem == null)
+            {
+                continue;
+            }
+
+            parts.Add(string.Concat(
+                queueItem.QueueItemId,
+                "|",
+                mediaItem.Provider ?? string.Empty,
+                "|",
+                mediaItem.ItemId ?? string.Empty,
+                "|",
+                SelectDisplayName(mediaItem, "Titel"),
+                "|",
+                mediaItem.ArtistName ?? string.Empty));
+        }
+
+        return string.Join("||", parts);
     }
 
     private static int MapPlaybackState(PlayerStateType state)
@@ -1834,6 +1936,28 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             }
 
             _ = playback.PlayQueueIndexAsync((int)id).ContinueWith(_ => { }, TaskContinuationOptions.OnlyOnFaulted);
+        }
+
+        public override void OnSeekTo(long pos)
+        {
+            var playback = _service._playbackService;
+            if (playback == null)
+            {
+                return;
+            }
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var targetSeconds = Math.Max(0d, pos / 1000d);
+                    var durationSeconds = Math.Max(playback.DurationSeconds, targetSeconds);
+                    await playback.SeekAsync(targetSeconds, durationSeconds);
+                }
+                catch
+                {
+                }
+            });
         }
 
         public override void OnCustomAction(string? action, Bundle? extras)
