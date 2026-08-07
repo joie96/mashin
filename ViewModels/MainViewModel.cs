@@ -1684,6 +1684,22 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         _sidebarPlaylistContextMenuItems.Add(new ContextMenuItem
         {
+            Text = "Zufällig abspielen",
+            Icon = FluentIcons.ArrowShuffle16,
+            Command = new Command(async () =>
+            {
+                var playlistItems = _sidebarContextPlaylist?.Items?.Cast<MediaItem>().ToList() ?? new List<MediaItem>();
+                if (playlistItems.Count == 0)
+                {
+                    return;
+                }
+
+                await _playbackService.ShufflePlayMediaAsync(playlistItems);
+            })
+        });
+
+        _sidebarPlaylistContextMenuItems.Add(new ContextMenuItem
+        {
             Text = "Als Nächstes spielen",
             Icon = FluentIcons.ArrowForward16,
             Command = new Command(async () =>
@@ -1711,49 +1727,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 }
 
                 await _playbackService.PlayMediaLastAsync(playlistItems);
-            })
-        });
-
-        _sidebarPlaylistContextMenuItems.Add(new ContextMenuItem { IsSeparator = true });
-
-        var favoriteTargets = _sidebarContextPlaylist == null ? Array.Empty<Playlist>() : new[] { _sidebarContextPlaylist };
-        var shouldShowRemoveFromFavorites = favoriteTargets.Length > 0 && favoriteTargets.All(playlist => playlist.Favorite);
-
-        if (shouldShowRemoveFromFavorites)
-        {
-            _sidebarPlaylistContextMenuItems.Add(new ContextMenuItem
-            {
-                Text = "Aus Favoriten entfernen",
-                Icon = FluentFilledIcons.Heart12Filled,
-                IconIsFilled = true,
-                Command = new Command(async () =>
-                {
-                    var targets = _sidebarContextPlaylist == null ? Array.Empty<Playlist>() : new[] { _sidebarContextPlaylist };
-                    if (targets.Length == 0)
-                    {
-                        return;
-                    }
-
-                    await UserDataService.SetFavoriteAsync(targets.Cast<MediaItem>().ToList(), false);
-                })
-            });
-
-            return;
-        }
-
-        _sidebarPlaylistContextMenuItems.Add(new ContextMenuItem
-        {
-            Text = "Zu Favoriten hinzufügen",
-            Icon = FluentIcons.Heart12,
-            Command = new Command(async () =>
-            {
-                var targets = _sidebarContextPlaylist == null ? Array.Empty<Playlist>() : new[] { _sidebarContextPlaylist };
-                if (targets.Length == 0)
-                {
-                    return;
-                }
-
-                await UserDataService.SetFavoriteAsync(targets.Cast<MediaItem>().ToList(), true);
             })
         });
     }

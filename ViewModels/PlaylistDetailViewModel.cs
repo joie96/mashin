@@ -53,6 +53,9 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
                 OnPropertyChanged(nameof(PlaylistName));
                 OnPropertyChanged(nameof(ImageUri));
                 OnPropertyChanged(nameof(IsPlaylistFavorite));
+                OnPropertyChanged(nameof(ShowFavoriteButton));
+                OnPropertyChanged(nameof(ShowAddFavoriteButton));
+                OnPropertyChanged(nameof(ShowRemoveFavoriteButton));
             }
         }
     }
@@ -113,6 +116,12 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
     public bool ShowTrackTable => IsLoadingTracks || HasTracks;
 
     public bool IsPlaylistFavorite => Playlist?.Favorite ?? false;
+
+    public bool ShowFavoriteButton => !string.Equals(Playlist?.Provider, "mashin", StringComparison.OrdinalIgnoreCase);
+
+    public bool ShowAddFavoriteButton => ShowFavoriteButton && !IsPlaylistFavorite;
+
+    public bool ShowRemoveFavoriteButton => ShowFavoriteButton && IsPlaylistFavorite;
 
     public IEnumerable<object> TrackItems => IsLoadingTracks ? _trackSkeletons : _tracks;
 
@@ -247,6 +256,8 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             await UserDataService.SetFavoriteAsync(new[] { Playlist }, targetFavoriteState);
 
             OnPropertyChanged(nameof(IsPlaylistFavorite));
+            OnPropertyChanged(nameof(ShowAddFavoriteButton));
+            OnPropertyChanged(nameof(ShowRemoveFavoriteButton));
             _ = BuildHeaderContextMenuAsync();
         });
 
@@ -565,37 +576,41 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             new() { IsSeparator = true }
         };
 
-        if (Playlist.Favorite)
+        var showFavoriteActions = !string.Equals(Playlist.Provider, "mashin", StringComparison.OrdinalIgnoreCase);
+        if (showFavoriteActions)
         {
-            menu.Add(new ContextMenuItem
+            if (Playlist.Favorite)
             {
-                Text = "Aus Favoriten entfernen",
-                Icon = FluentFilledIcons.Heart12Filled,
-                IconIsFilled = true,
-                Command = new Command(async () =>
+                menu.Add(new ContextMenuItem
                 {
-                    await UserDataService.SetFavoriteAsync(new[] { Playlist }, false);
-                    OnPropertyChanged(nameof(IsPlaylistFavorite));
-                    _ = BuildHeaderContextMenuAsync();
-                })
-            });
-        }
-        else
-        {
-            menu.Add(new ContextMenuItem
+                    Text = "Aus Favoriten entfernen",
+                    Icon = FluentFilledIcons.Heart12Filled,
+                    IconIsFilled = true,
+                    Command = new Command(async () =>
+                    {
+                        await UserDataService.SetFavoriteAsync(new[] { Playlist }, false);
+                        OnPropertyChanged(nameof(IsPlaylistFavorite));
+                        _ = BuildHeaderContextMenuAsync();
+                    })
+                });
+            }
+            else
             {
-                Text = "Zu Favoriten hinzufügen",
-                Icon = FluentIcons.Heart12,
-                Command = new Command(async () =>
+                menu.Add(new ContextMenuItem
                 {
-                    await UserDataService.SetFavoriteAsync(new[] { Playlist }, true);
-                    OnPropertyChanged(nameof(IsPlaylistFavorite));
-                    _ = BuildHeaderContextMenuAsync();
-                })
-            });
-        }
+                    Text = "Zu Favoriten hinzufügen",
+                    Icon = FluentIcons.Heart12,
+                    Command = new Command(async () =>
+                    {
+                        await UserDataService.SetFavoriteAsync(new[] { Playlist }, true);
+                        OnPropertyChanged(nameof(IsPlaylistFavorite));
+                        _ = BuildHeaderContextMenuAsync();
+                    })
+                });
+            }
 
-        menu.Add(new ContextMenuItem { IsSeparator = true });
+            menu.Add(new ContextMenuItem { IsSeparator = true });
+        }
 
         menu.Add(new ContextMenuItem
         {

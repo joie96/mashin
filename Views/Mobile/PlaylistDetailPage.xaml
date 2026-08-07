@@ -143,6 +143,7 @@
             <Border Grid.Column="2"
                 BackgroundColor="{DynamicResource ActionButtonsBackground}"
                 HeightRequest="44"
+                IsVisible="{Binding ShowFavoriteButton}"
                 StrokeThickness="0"
                 WidthRequest="44">
                 <Border.Behaviors>
@@ -159,14 +160,14 @@
                 <Grid>
                     <Label FontSize="18"
                         HorizontalOptions="Center"
-                        IsVisible="{Binding IsPlaylistFavorite, Converter={StaticResource InvertedBoolConverter}}"
+                        IsVisible="{Binding ShowAddFavoriteButton}"
                         Text="{mi:Fluent Icon=Heart48, FontOverride=True}"
                         TextColor="{DynamicResource IconPrimary}"
                         VerticalOptions="Center" />
 
                     <Label FontSize="18"
                         HorizontalOptions="Center"
-                        IsVisible="{Binding IsPlaylistFavorite}"
+                        IsVisible="{Binding ShowRemoveFavoriteButton}"
                         Text="{mi:FluentFilled Icon=Heart48Filled, FontOverride=True}"
                         TextColor="{DynamicResource IconPrimary}"
                         VerticalOptions="Center" />
