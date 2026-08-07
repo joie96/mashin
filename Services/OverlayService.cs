@@ -1038,7 +1038,6 @@ public sealed class OverlayService : IOverlayService
 
     private void OnDeletePlaylistConfirmed(object? sender, EventArgs e)
     {
-        _deletePlaylistOverlay.IsDeleteEnabled = false;
         _deletePlaylistTcs?.TrySetResult(true);
     }
 
@@ -1053,8 +1052,6 @@ public sealed class OverlayService : IOverlayService
 
     private void OnSortContentOverlayConfirmed(object? sender, EventArgs e)
     {
-        _sortContentOverlay.IsSortEnabled = false;
-
         var result = (
             SortField: _sortContentOverlay.SelectedSortField,
             IsDescending: _sortContentOverlay.IsSortDescending);
