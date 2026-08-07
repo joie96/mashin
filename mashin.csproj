@@ -29,7 +29,7 @@
 		<MauiEnableXamlCBindingWithSourceCompilation>true</MauiEnableXamlCBindingWithSourceCompilation>
 
 		<!-- Display name -->
-		<ApplicationTitle>mashin</ApplicationTitle>
+		<ApplicationTitle>Mashin</ApplicationTitle>
 
 		<!-- App Identifier -->
 		<ApplicationId>com.companyname.mashin</ApplicationId>

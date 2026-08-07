@@ -80,7 +80,10 @@ public partial class App : Application
             mainPage = services.GetRequiredService<DesktopMainPage>();
         }
         
-        var window = new Window(mainPage);
+        var window = new Window(mainPage)
+        {
+            Title = "Mashin"
+        };
 
         return window;
     }
