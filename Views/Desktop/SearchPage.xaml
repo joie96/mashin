@@ -27,7 +27,7 @@
 
             <!--  Tracks  (incl. Skeletons)  -->
             <Grid Grid.Row="1"
-                Margin="{StaticResource DesktopSectionTopMargin}"
+                Margin="0,8,0,0"
                 RowDefinitions="Auto,Auto,Auto,Auto"
                 RowSpacing="0">
                 <Grid Grid.Row="0"

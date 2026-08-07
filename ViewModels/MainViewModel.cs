@@ -1698,6 +1698,23 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         try
         {
+            if (dontStopTheMusicEnabled)
+            {
+                var currentQueueItemId = CurrentQueueItem?.QueueItemId;
+
+                var queueItemIdsToDelete = CurrentQueueItems
+                    .Select(item => item.QueueItemId)
+                    .Where(id => !string.IsNullOrWhiteSpace(id)
+                        && !string.Equals(id, currentQueueItemId, StringComparison.Ordinal))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+
+                foreach (var queueItemId in queueItemIdsToDelete)
+                {
+                    await _playbackService.DeleteQueueItemAsync(queueItemId);
+                }
+            }
+
             await _playbackService.SetDontStopTheMusicAsync(dontStopTheMusicEnabled);
         }
         catch (Exception ex)
