@@ -54,6 +54,10 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     private const string PrefixArtistSimilar = "artist_similar";
     private const string PrefixArtistTopTracks = "artist_top_tracks";
     private const string PrefixArtistRadio = "artist_radio";
+    private const string PrefixSearchTracks = "search_tracks";
+    private const string PrefixSearchAlbums = "search_albums";
+    private const string PrefixSearchPlaylists = "search_playlists";
+    private const string PrefixSearchArtists = "search_artists";
 
     private const string CustomActionToggleFavorite = "custom:toggle_favorite";
     private const string CustomActionToggleShuffle = "custom:toggle_shuffle";
@@ -146,8 +150,39 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
         var extras = BuildContentStyleExtras(
             MediaConstants.DescriptionExtrasValueContentStyleListItem,
             MediaConstants.DescriptionExtrasValueContentStyleListItem);
+        extras.PutBoolean(MediaConstants.BrowserServiceExtrasKeySearchSupported, true);
 
         return new BrowserRoot(RootId, extras);
+    }
+
+    public override void OnSearch(string? query, Bundle? extras, Result? result)
+    {
+        if (result == null)
+        {
+            return;
+        }
+
+        var textQuery = query?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(textQuery))
+        {
+            result.SendResult(new JavaList<MediaBrowserCompat.MediaItem>());
+            return;
+        }
+
+        result.Detach();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var items = await BuildBrowsableSearchSectionsAsync(textQuery);
+                result.SendResult(items);
+            }
+            catch (Exception ex)
+            {
+                global::Android.Util.Log.Warn(LogTag, $"onSearch failed for query='{textQuery}': {ex.Message}");
+                result.SendResult(new JavaList<MediaBrowserCompat.MediaItem>());
+            }
+        });
     }
 
     public override void OnLoadChildren(string? parentId, Result? result)
@@ -423,6 +458,26 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
             if (string.Equals(type, PrefixArtistTopTracks, StringComparison.Ordinal))
             {
                 return await LoadArtistTopTracksAsync(provider, itemId);
+            }
+
+            if (string.Equals(type, PrefixSearchTracks, StringComparison.Ordinal))
+            {
+                return await LoadSearchTracksByQueryAsync(itemId);
+            }
+
+            if (string.Equals(type, PrefixSearchAlbums, StringComparison.Ordinal))
+            {
+                return await LoadSearchAlbumsByQueryAsync(itemId);
+            }
+
+            if (string.Equals(type, PrefixSearchPlaylists, StringComparison.Ordinal))
+            {
+                return await LoadSearchPlaylistsByQueryAsync(itemId);
+            }
+
+            if (string.Equals(type, PrefixSearchArtists, StringComparison.Ordinal))
+            {
+                return await LoadSearchArtistsByQueryAsync(itemId);
             }
         }
 
@@ -735,6 +790,237 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
         }
 
         return BuildTrackItems(NodeFavoritesTracks, tracks);
+    }
+
+    private async Task<JavaList<MediaBrowserCompat.MediaItem>> BuildBrowsableSearchSectionsAsync(string query)
+    {
+        var musicAssistant = _musicAssistantService;
+        if (musicAssistant == null)
+        {
+            return new JavaList<MediaBrowserCompat.MediaItem>();
+        }
+
+        var result = await musicAssistant.SearchAsync(
+            searchQuery: query,
+            mediaTypes: new[] { MediaType.Track, MediaType.Playlist, MediaType.Album, MediaType.Artist },
+            limit: 50,
+            libraryOnly: false);
+
+        var trackCount = result?.Tracks?.Count ?? 0;
+        var albumCount = result?.Albums?.Count ?? 0;
+        var playlistCount = result?.Playlists?.Count ?? 0;
+        var artistCount = result?.Artists?.Count ?? 0;
+
+        var items = new List<MediaBrowserCompat.MediaItem>();
+
+        if (trackCount > 0)
+        {
+            items.Add(CreateBrowsableItem(
+                BuildId(PrefixSearchTracks, LocalPlaylistProvider, query),
+                "Tracks",
+                $"{trackCount} Treffer",
+                Resource.Drawable.music_note,
+                BuildContentStyleExtras(
+                    MediaConstants.DescriptionExtrasValueContentStyleListItem,
+                    MediaConstants.DescriptionExtrasValueContentStyleListItem)));
+        }
+
+        if (albumCount > 0)
+        {
+            items.Add(CreateBrowsableItem(
+                BuildId(PrefixSearchAlbums, LocalPlaylistProvider, query),
+                "Alben",
+                $"{albumCount} Treffer",
+                Resource.Drawable.album,
+                BuildContentStyleExtras(
+                    MediaConstants.DescriptionExtrasValueContentStyleGridItem,
+                    MediaConstants.DescriptionExtrasValueContentStyleListItem)));
+        }
+
+        if (playlistCount > 0)
+        {
+            items.Add(CreateBrowsableItem(
+                BuildId(PrefixSearchPlaylists, LocalPlaylistProvider, query),
+                "Playlists",
+                $"{playlistCount} Treffer",
+                Resource.Drawable.playlist_play,
+                BuildContentStyleExtras(
+                    MediaConstants.DescriptionExtrasValueContentStyleGridItem,
+                    MediaConstants.DescriptionExtrasValueContentStyleListItem)));
+        }
+
+        if (artistCount > 0)
+        {
+            items.Add(CreateBrowsableItem(
+                BuildId(PrefixSearchArtists, LocalPlaylistProvider, query),
+                "Artists",
+                $"{artistCount} Treffer",
+                Resource.Drawable.artist,
+                BuildContentStyleExtras(
+                    MediaConstants.DescriptionExtrasValueContentStyleGridItem,
+                    MediaConstants.DescriptionExtrasValueContentStyleListItem)));
+        }
+
+        return new JavaList<MediaBrowserCompat.MediaItem>(items);
+    }
+
+    private async Task<JavaList<MediaBrowserCompat.MediaItem>> LoadSearchTracksByQueryAsync(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return new JavaList<MediaBrowserCompat.MediaItem>();
+        }
+
+        var musicAssistant = _musicAssistantService;
+        if (musicAssistant == null)
+        {
+            return new JavaList<MediaBrowserCompat.MediaItem>();
+        }
+
+        var result = await musicAssistant.SearchAsync(
+            searchQuery: query,
+            mediaTypes: new[] { MediaType.Track },
+            limit: 50,
+            libraryOnly: false);
+
+        var tracks = result?.Tracks?
+            .Where(track => !string.IsNullOrWhiteSpace(track.ItemId) && !string.IsNullOrWhiteSpace(track.Provider))
+            .ToList()
+            ?? new List<Track>();
+
+        return BuildTrackItems($"search:{query}", tracks);
+    }
+
+    private async Task<JavaList<MediaBrowserCompat.MediaItem>> LoadSearchAlbumsByQueryAsync(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return new JavaList<MediaBrowserCompat.MediaItem>();
+        }
+
+        var musicAssistant = _musicAssistantService;
+        if (musicAssistant == null)
+        {
+            return new JavaList<MediaBrowserCompat.MediaItem>();
+        }
+
+        var result = await musicAssistant.SearchAsync(
+            searchQuery: query,
+            mediaTypes: new[] { MediaType.Album },
+            limit: 50,
+            libraryOnly: false);
+
+        var albums = result?.Albums?
+            .Where(album => !string.IsNullOrWhiteSpace(album.ItemId) && !string.IsNullOrWhiteSpace(album.Provider))
+            .ToList()
+            ?? new List<Album>();
+
+        var items = new List<MediaBrowserCompat.MediaItem>();
+        foreach (var album in albums)
+        {
+            var mediaId = BuildId(PrefixAlbum, album.Provider, album.ItemId);
+            CacheMediaItem(mediaId, album);
+
+            items.Add(CreateBrowsableItem(
+                mediaId,
+                SelectDisplayName(album, "Album"),
+                album.ArtistName,
+                Resource.Drawable.album,
+                BuildContentStyleExtras(
+                    MediaConstants.DescriptionExtrasValueContentStyleListItem,
+                    MediaConstants.DescriptionExtrasValueContentStyleListItem),
+                ResolveArtworkUri(album, Resource.Drawable.album)));
+        }
+
+        return new JavaList<MediaBrowserCompat.MediaItem>(items);
+    }
+
+    private async Task<JavaList<MediaBrowserCompat.MediaItem>> LoadSearchPlaylistsByQueryAsync(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return new JavaList<MediaBrowserCompat.MediaItem>();
+        }
+
+        var musicAssistant = _musicAssistantService;
+        if (musicAssistant == null)
+        {
+            return new JavaList<MediaBrowserCompat.MediaItem>();
+        }
+
+        var result = await musicAssistant.SearchAsync(
+            searchQuery: query,
+            mediaTypes: new[] { MediaType.Playlist },
+            limit: 50,
+            libraryOnly: false);
+
+        var playlists = result?.Playlists?
+            .Where(playlist => !string.IsNullOrWhiteSpace(playlist.ItemId) && !string.IsNullOrWhiteSpace(playlist.Provider))
+            .ToList()
+            ?? new List<Playlist>();
+
+        var items = new List<MediaBrowserCompat.MediaItem>();
+        foreach (var playlist in playlists)
+        {
+            var mediaId = BuildId(PrefixPlaylist, playlist.Provider, playlist.ItemId);
+            CacheMediaItem(mediaId, playlist);
+
+            items.Add(CreateBrowsableItem(
+                mediaId,
+                SelectDisplayName(playlist, "Playlist"),
+                string.Empty,
+                Resource.Drawable.playlist_play,
+                BuildContentStyleExtras(
+                    MediaConstants.DescriptionExtrasValueContentStyleGridItem,
+                    MediaConstants.DescriptionExtrasValueContentStyleListItem),
+                ResolveArtworkUri(playlist, Resource.Drawable.playlist_play)));
+        }
+
+        return new JavaList<MediaBrowserCompat.MediaItem>(items);
+    }
+
+    private async Task<JavaList<MediaBrowserCompat.MediaItem>> LoadSearchArtistsByQueryAsync(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return new JavaList<MediaBrowserCompat.MediaItem>();
+        }
+
+        var musicAssistant = _musicAssistantService;
+        if (musicAssistant == null)
+        {
+            return new JavaList<MediaBrowserCompat.MediaItem>();
+        }
+
+        var result = await musicAssistant.SearchAsync(
+            searchQuery: query,
+            mediaTypes: new[] { MediaType.Artist },
+            limit: 50,
+            libraryOnly: false);
+
+        var artists = result?.Artists?
+            .Where(artist => !string.IsNullOrWhiteSpace(artist.ItemId) && !string.IsNullOrWhiteSpace(artist.Provider))
+            .ToList()
+            ?? new List<Artist>();
+
+        var items = new List<MediaBrowserCompat.MediaItem>();
+        foreach (var artist in artists)
+        {
+            var mediaId = BuildId(PrefixArtist, artist.Provider, artist.ItemId);
+            CacheMediaItem(mediaId, artist);
+
+            items.Add(CreateBrowsableItem(
+                mediaId,
+                SelectDisplayName(artist, "Artist"),
+                string.Empty,
+                Resource.Drawable.artist,
+                BuildContentStyleExtras(
+                    MediaConstants.DescriptionExtrasValueContentStyleGridItem,
+                    MediaConstants.DescriptionExtrasValueContentStyleListItem),
+                ResolveArtworkUri(artist, Resource.Drawable.artist)));
+        }
+
+        return new JavaList<MediaBrowserCompat.MediaItem>(items);
     }
 
     private async Task<JavaList<MediaBrowserCompat.MediaItem>> LoadPlaylistTracksAsync(string provider, string itemId)
@@ -2180,57 +2466,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
 
         public override void OnPlayFromSearch(string? query, Bundle? extras)
         {
-            var playback = _service._playbackService;
-            var musicAssistant = _service._musicAssistantService;
-            if (playback == null || musicAssistant == null)
-            {
-                return;
-            }
-
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    var textQuery = query?.Trim() ?? string.Empty;
-                    if (string.IsNullOrWhiteSpace(textQuery))
-                    {
-                        var fallback = await musicAssistant.GetLibraryTracksAsync(limit: 1, orderBy: "sort_name");
-                        var firstFallback = fallback.FirstOrDefault();
-                        if (firstFallback != null)
-                        {
-                            await playback.PlayMediaAsync(new List<mashin.Models.MediaItem> { firstFallback });
-                        }
-
-                        return;
-                    }
-
-                    var result = await musicAssistant.SearchAsync(
-                        searchQuery: textQuery,
-                        mediaTypes: new[] { MediaType.Track, MediaType.Playlist, MediaType.Album },
-                        limit: 25,
-                        libraryOnly: false);
-
-                    var firstTrack = result?.Tracks?.FirstOrDefault();
-                    if (firstTrack != null)
-                    {
-                        await playback.PlayMediaAsync(new List<mashin.Models.MediaItem> { firstTrack });
-                        return;
-                    }
-
-                    var firstPlaylist = result?.Playlists?.FirstOrDefault();
-                    if (firstPlaylist != null)
-                    {
-                        var tracks = await musicAssistant.GetPlaylistTracksAsync(firstPlaylist.ItemId, firstPlaylist.Provider);
-                        if (tracks.Count > 0)
-                        {
-                            await playback.PlayMediaAsync(tracks.Cast<mashin.Models.MediaItem>().ToList());
-                        }
-                    }
-                }
-                catch
-                {
-                }
-            });
+            // Browsable Search wird über OnSearch abgebildet; hier wird nichts direkt abgespielt.
         }
     }
 
