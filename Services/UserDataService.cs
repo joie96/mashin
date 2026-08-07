@@ -193,6 +193,16 @@ public sealed class UserDataService : INotifyPropertyChanged
 
             while (true)
             {
+                bool hasPendingPush;
+                lock (_pushQueueGate)
+                {
+                    hasPendingPush = _pendingPushPreferences != null;
+                }
+
+                _logger.LogDebug(
+                    "Pushing user preferences (queued after this push: {PendingPushCount}).",
+                    hasPendingPush ? 1 : 0);
+
                 try
                 {
                     var updatedUser = await _musicAssistant.UpdateUserAsync(
