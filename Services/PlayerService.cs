@@ -1615,23 +1615,6 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         };
     }
 
-    private static PlaybackQueue CloneQueue(PlaybackQueue source)
-    {
-        var clone = new PlaybackQueue
-        {
-            QueueId = source.QueueId,
-            CurrentIndex = source.CurrentIndex,
-            CurrentQueueItemId = source.CurrentQueueItemId,
-            ItemCount = source.ItemCount,
-            ShuffleEnabled = source.ShuffleEnabled,
-            RepeatMode = source.RepeatMode,
-            DontStopTheMusicEnabled = source.DontStopTheMusicEnabled
-        };
-
-        clone.Items.ReplaceRange(source.Items.Select(CloneQueueItem));
-        return clone;
-    }
-
     private async Task<List<MediaItem>> ResolvePlayableMediaItemsAsync(IReadOnlyList<MediaItem> items)
     {
         const int artistTopTracksLimit = 25;
@@ -1780,13 +1763,11 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
         await _queueSync.WaitAsync(cancellationToken);
         try
         {
-        if (string.IsNullOrWhiteSpace(PlayerId))
-        {
-            return;
-        }
+            if (string.IsNullOrWhiteSpace(PlayerId))
+            {
+                return;
+            }
 
-        try
-        {
             var queue = await _musicAssistant.GetActiveQueueForPlayerAsync(PlayerId);
             if (queue == null)
             {
@@ -2645,13 +2626,11 @@ public sealed class RemotePlayerService : IPlayerService, IAsyncDisposable
         await _queueSync.WaitAsync(cancellationToken);
         try
         {
-        if (string.IsNullOrWhiteSpace(_playerId))
-        {
-            return;
-        }
+            if (string.IsNullOrWhiteSpace(_playerId))
+            {
+                return;
+            }
 
-        try
-        {
             var player = await _musicAssistant.GetPlayerAsync(_playerId);
             if (player != null)
             {
