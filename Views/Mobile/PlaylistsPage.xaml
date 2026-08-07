@@ -9,7 +9,7 @@
     BackgroundColor="{DynamicResource BackgroundPrimary}">
 
     <ScrollView>
-        <Grid Padding="16,16,16,8"
+        <Grid Padding="18,20,18,8"
             RowDefinitions="Auto,Auto,*"
             RowSpacing="0">
             <Grid Grid.Row="0"
@@ -49,7 +49,7 @@
                 TextColor="{DynamicResource TextSecondary}" />
 
             <controls:TableView Grid.Row="2"
-                Margin="0,0,0,0"
+                Margin="0,14,0,0"
                 IsVisible="{Binding ShowPlaylistListView}"
                 ItemsSource="{Binding PlaylistItems}"
                 LongPressCommand="{Binding PlaylistLongPressedCommand}"
