@@ -430,7 +430,7 @@ public sealed class PlaybackNotificationService : Service
 
 #pragma warning disable CS0618
 #pragma warning disable CA1422
-        builder.AddAction(Android.Resource.Drawable.IcMediaPrevious, "Zurueck", previousIntent);
+        builder.AddAction(Android.Resource.Drawable.IcMediaPrevious, "Zurück", previousIntent);
         builder.AddAction(playPauseIcon, playPauseLabel, playPauseIntent);
         builder.AddAction(Android.Resource.Drawable.IcMediaNext, "Weiter", nextIntent);
 #pragma warning restore CA1422

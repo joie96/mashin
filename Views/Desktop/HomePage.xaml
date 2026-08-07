@@ -169,7 +169,7 @@
                     Margin="0,16,0,0"
                     IsVisible="{Binding ShowNoRecommendationFolderMessage}"
                     Style="{StaticResource LabelTertiary}"
-                    Text="Keine ListenBrainz-Recommendation-Folder verfuegbar." />
+                    Text="Keine ListenBrainz-Recommendation-Folder verfügbar." />
 
                 <controls:SlideView x:Name="RecommendationFolderSlideView"
                     Grid.Row="2"
@@ -226,7 +226,7 @@
                     Margin="0,16,0,0"
                     IsVisible="{Binding ShowNoGenrePlaylistsMessage}"
                     Style="{StaticResource LabelTertiary}"
-                    Text="Keine Genre-Playlists verfuegbar." />
+                    Text="Keine Genre-Playlists verfügbar." />
 
                 <controls:ListView Grid.Row="2"
                     Margin="0,16,0,0"
@@ -386,7 +386,7 @@
                     Margin="0,16,0,0"
                     IsVisible="{Binding ShowNoArtistPlaylistsMessage}"
                     Style="{StaticResource LabelTertiary}"
-                    Text="Keine Artist-Playlists verfuegbar." />
+                    Text="Keine Artist-Playlists verfügbar." />
 
                 <controls:RowView x:Name="ArtistPlaylistsRowView"
                     Grid.Row="2"
@@ -550,7 +550,7 @@
                     Margin="0,16,0,0"
                     IsVisible="{Binding ShowNoTopTracksMessage}"
                     Style="{StaticResource LabelTertiary}"
-                    Text="Keine Top-Tracks verfuegbar." />
+                    Text="Keine Top-Tracks verfügbar." />
 
                 <controls:RowView x:Name="TopTracksRowView"
                     Grid.Row="2"
@@ -714,7 +714,7 @@
                     Margin="0,16,0,0"
                     IsVisible="{Binding ShowNoTopArtistsMessage}"
                     Style="{StaticResource LabelTertiary}"
-                    Text="Keine Top-Artists verfuegbar." />
+                    Text="Keine Top-Artists verfügbar." />
 
                 <controls:RowView x:Name="TopArtistsRowView"
                     Grid.Row="2"
@@ -875,7 +875,7 @@
                     Margin="0,16,0,0"
                     IsVisible="{Binding ShowNoRecentListensMessage}"
                     Style="{StaticResource LabelTertiary}"
-                    Text="Keine kuerzlich gehoerten Tracks verfuegbar." />
+                    Text="Keine kürzlich gehörten Tracks verfügbar." />
 
                 <controls:RowView x:Name="RecentListensRowView"
                     Grid.Row="2"
@@ -1034,7 +1034,7 @@
                     Margin="0,16,0,0"
                     IsVisible="{Binding ShowNoSimilarArtistSectionMessage0}"
                     Style="{StaticResource LabelTertiary}"
-                    Text="Keine Artists verfuegbar." />
+                    Text="Keine Artists verfügbar." />
                 <controls:RowView x:Name="SimilarArtistsRowView0"
                     Grid.Row="2"
                     Margin="0,16,0,0"
@@ -1192,7 +1192,7 @@
                     Margin="0,16,0,0"
                     IsVisible="{Binding ShowNoSimilarArtistSectionMessage1}"
                     Style="{StaticResource LabelTertiary}"
-                    Text="Keine Artists verfuegbar." />
+                    Text="Keine Artists verfügbar." />
                 <controls:RowView x:Name="SimilarArtistsRowView1"
                     Grid.Row="2"
                     Margin="0,16,0,0"
@@ -1350,7 +1350,7 @@
                     Margin="0,16,0,0"
                     IsVisible="{Binding ShowNoSimilarArtistSectionMessage2}"
                     Style="{StaticResource LabelTertiary}"
-                    Text="Keine Artists verfuegbar." />
+                    Text="Keine Artists verfügbar." />
                 <controls:RowView x:Name="SimilarArtistsRowView2"
                     Grid.Row="2"
                     Margin="0,16,0,0"
@@ -1508,7 +1508,7 @@
                     Margin="0,16,0,0"
                     IsVisible="{Binding ShowNoSimilarArtistSectionMessage3}"
                     Style="{StaticResource LabelTertiary}"
-                    Text="Keine Artists verfuegbar." />
+                    Text="Keine Artists verfügbar." />
                 <controls:RowView x:Name="SimilarArtistsRowView3"
                     Grid.Row="2"
                     Margin="0,16,0,0"
@@ -1666,7 +1666,7 @@
                     Margin="0,16,0,0"
                     IsVisible="{Binding ShowNoSimilarArtistSectionMessage4}"
                     Style="{StaticResource LabelTertiary}"
-                    Text="Keine Artists verfuegbar." />
+                    Text="Keine Artists verfügbar." />
                 <controls:RowView x:Name="SimilarArtistsRowView4"
                     Grid.Row="2"
                     Margin="0,16,0,0"

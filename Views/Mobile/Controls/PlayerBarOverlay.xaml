@@ -554,7 +554,7 @@
                     <Label FontSize="14"
                         FontFamily="PoppinsSemibold"
                         Margin="16,14,16,10"
-                        Text="Wiedergabegeraet"
+                        Text="Wiedergabegerät"
                         TextColor="{DynamicResource TextPrimary}" />
 
                     <BoxView
@@ -571,7 +571,7 @@
 
                         <Label FontSize="12"
                             IsVisible="{Binding HasNoAvailablePlayers}"
-                            Text="Keine Music-Assistant-Geraete gefunden."
+                            Text="Keine Music-Assistant-Geräte gefunden."
                             TextColor="{DynamicResource TextSecondary}" />
 
                         <ScrollView MaximumHeightRequest="280">
@@ -655,7 +655,7 @@
                         FontSize="14"
                         FontFamily="PoppinsSemibold"
                         Margin="16,14,16,10"
-                        Text="Klangqualitaet"
+                        Text="Klangqualität"
                         TextColor="{DynamicResource TextPrimary}" />
 
                     <BoxView

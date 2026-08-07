@@ -180,7 +180,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
         var items = new List<MediaBrowserCompat.MediaItem>
         {
             CreateBrowsableItem(NodeHome, "Home", "Sektionen", Resource.Drawable.home),
-            CreateBrowsableItem(NodeDiscover, "Entdecken", "Demnaechst", Resource.Drawable.explore),
+            CreateBrowsableItem(NodeDiscover, "Entdecken", "Demnächst", Resource.Drawable.explore),
             CreateBrowsableItem(
                 NodePlaylists,
                 "Playlists",

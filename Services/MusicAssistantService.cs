@@ -171,7 +171,7 @@ public class MusicAssistantService
 
         if (response.ValueKind != JsonValueKind.Object)
         {
-            throw new InvalidOperationException("Login response hat ein ungueltiges Format.");
+            throw new InvalidOperationException("Login response hat ein ungültiges Format.");
         }
 
         if (response.TryGetProperty("success", out var successProperty)
@@ -183,7 +183,7 @@ public class MusicAssistantService
         var token = TryGetString(response, "token") ?? TryGetString(response, "access_token");
         if (string.IsNullOrWhiteSpace(token))
         {
-            throw new InvalidOperationException("Login response enthaelt kein Token.");
+            throw new InvalidOperationException("Login response enthält kein Token.");
         }
 
         _settings.AuthToken = token;

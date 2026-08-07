@@ -19,7 +19,7 @@
         <Label Grid.Row="1"
             Margin="0,16,0,0"
             IsVisible="{Binding ShowNoPlaylistsMessage}"
-            Text="Keine Playlists verfuegbar."
+            Text="Keine Playlists verfügbar."
             TextColor="{DynamicResource TextSecondary}" />
 
         <controls:ListView Grid.Row="2"
