@@ -1810,6 +1810,149 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 await _playbackService.PlayMediaLastAsync(playlistItems);
             })
         });
+
+        _sidebarPlaylistContextMenuItems.Add(new ContextMenuItem { IsSeparator = true });
+
+        _sidebarPlaylistContextMenuItems.Add(new ContextMenuItem
+        {
+            Text = "Wiedergabeliste sortieren",
+            Icon = FluentIcons.ArrowSort16,
+            Command = new Command(async () => await SortSidebarContextPlaylistAsync())
+        });
+
+        _sidebarPlaylistContextMenuItems.Add(new ContextMenuItem
+        {
+            Text = "Wiedergabeliste umbenennen",
+            Icon = FluentIcons.Rename16,
+            Command = new Command(async () => await RenameSidebarContextPlaylistAsync())
+        });
+
+        _sidebarPlaylistContextMenuItems.Add(new ContextMenuItem
+        {
+            Text = "Wiedergabeliste löschen",
+            Icon = FluentIcons.Delete12,
+            Command = new Command(async () => await DeleteSidebarContextPlaylistAsync())
+        });
+    }
+
+    private async Task SortSidebarContextPlaylistAsync()
+    {
+        var playlist = _sidebarContextPlaylist;
+        if (playlist == null)
+        {
+            return;
+        }
+
+        var sortSelection = await _overlayService.ShowSortContentOverlayAsync();
+        if (sortSelection == null)
+        {
+            return;
+        }
+
+        var (sortField, isDescending) = sortSelection.Value;
+        var sourceTracks = playlist.Items?.ToList() ?? new List<Track>();
+        if (sourceTracks.Count == 0)
+        {
+            return;
+        }
+
+        IEnumerable<Track> sortedQuery = sortField switch
+        {
+            "Album" => sourceTracks
+                .OrderBy(track => track.AlbumName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(track => track.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(track => track.Index),
+            "Artist" => sourceTracks
+                .OrderBy(track => track.ArtistName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(track => track.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(track => track.Index),
+            _ => sourceTracks
+                .OrderBy(track => track.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(track => track.Index)
+        };
+
+        if (isDescending)
+        {
+            sortedQuery = sortedQuery.Reverse();
+        }
+
+        var sortedTracks = sortedQuery.ToList();
+        var padWidth = Math.Max(2, sortedTracks.Count.ToString().Length);
+
+        for (var i = 0; i < sortedTracks.Count; i++)
+        {
+            sortedTracks[i].SortName = (i + 1).ToString($"D{padWidth}");
+            sortedTracks[i].Index = i;
+        }
+
+        playlist.Items = sortedTracks;
+
+        try
+        {
+            await UserDataService.UpdatePlaylistAsync(playlist);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to sort playlist: {PlaylistName}", playlist.Name);
+        }
+    }
+
+    private async Task RenameSidebarContextPlaylistAsync()
+    {
+        var playlist = _sidebarContextPlaylist;
+        if (playlist == null)
+        {
+            return;
+        }
+
+        var updatedName = await _overlayService.ShowUpdatePlaylistAsync(playlist);
+        if (string.IsNullOrWhiteSpace(updatedName))
+        {
+            return;
+        }
+
+        updatedName = updatedName.Trim();
+
+        var originalName = playlist.Name;
+        var originalDisplayName = playlist.DisplayName;
+
+        try
+        {
+            playlist.Name = updatedName;
+            playlist.DisplayName = updatedName;
+
+            await UserDataService.UpdatePlaylistAsync(playlist);
+        }
+        catch (Exception ex)
+        {
+            playlist.Name = originalName;
+            playlist.DisplayName = originalDisplayName;
+            _logger.LogError(ex, "Failed to rename playlist: {PlaylistName}", originalName);
+        }
+    }
+
+    private async Task DeleteSidebarContextPlaylistAsync()
+    {
+        var playlist = _sidebarContextPlaylist;
+        if (playlist == null)
+        {
+            return;
+        }
+
+        var confirmed = await _overlayService.ShowDeletePlaylistAsync(playlist);
+        if (!confirmed)
+        {
+            return;
+        }
+
+        try
+        {
+            await UserDataService.RemovePlaylistAsync(playlist);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete playlist: {PlaylistName}", playlist.Name);
+        }
     }
 
     #endregion
