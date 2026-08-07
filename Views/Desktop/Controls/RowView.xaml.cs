@@ -151,6 +151,8 @@ public partial class RowView : ContentView
         private set => SetValue(IsAllSelectedProperty, value);
     }
 
+    public bool HasSelection => _selectedItems.Count > 0;
+
     public float ItemCornerRadius
     {
         get => (float)GetValue(ItemCornerRadiusProperty);
@@ -974,7 +976,7 @@ public partial class RowView : ContentView
             return;
         }
 
-        Services.FocusManager.SetFocus(this);
+        EnsureSelectionOwnership();
 
         _isCheckboxClick = true;
         ToggleSelection(item);
@@ -994,7 +996,7 @@ public partial class RowView : ContentView
             return;
         }
 
-        Services.FocusManager.SetFocus(this);
+        EnsureSelectionOwnership();
 
         var isCtrl = _keyboardService?.IsControlPressed ?? false;
         var isShift = _keyboardService?.IsShiftPressed ?? false;
@@ -1022,7 +1024,7 @@ public partial class RowView : ContentView
             return;
         }
 
-        Services.FocusManager.SetFocus(this);
+        EnsureSelectionOwnership();
 
         if (!item.IsSelected)
         {
@@ -1041,6 +1043,8 @@ public partial class RowView : ContentView
         {
             return;
         }
+
+        EnsureSelectionOwnership();
 
         // Select the item
         SelectSingle(item);
@@ -1061,6 +1065,8 @@ public partial class RowView : ContentView
         {
             return;
         }
+
+        EnsureSelectionOwnership();
 
         SelectSingle(item);
         SyncSelectionState();
@@ -1115,6 +1121,7 @@ public partial class RowView : ContentView
 
         if (label.BindingContext is MediaItem selectable)
         {
+            EnsureSelectionOwnership();
             SelectSingle(selectable);
             SyncSelectionState();
         }
@@ -1187,6 +1194,8 @@ public partial class RowView : ContentView
 
     private void SelectAll()
     {
+        EnsureSelectionOwnership();
+
         foreach (var item in EnumerateSelectableItems())
         {
             item.IsSelected = true;
@@ -1194,6 +1203,32 @@ public partial class RowView : ContentView
 
         _anchorIndex = 0;
         SyncSelectionState();
+    }
+
+    public void ClearSelection()
+    {
+        ClearAllSelections();
+        SyncSelectionState();
+    }
+
+    private void EnsureSelectionOwnership()
+    {
+        if (Services.FocusManager.GetFocusedControl<RowView>(out var focusedRow)
+            && focusedRow != null
+            && !ReferenceEquals(focusedRow, this)
+            && focusedRow.HasSelection)
+        {
+            focusedRow.ClearSelection();
+        }
+
+        if (Services.FocusManager.GetFocusedControl<TableView>(out var focusedTable)
+            && focusedTable != null
+            && focusedTable.HasSelection)
+        {
+            focusedTable.ClearSelection();
+        }
+
+        Services.FocusManager.SetFocus(this);
     }
 
     #endregion

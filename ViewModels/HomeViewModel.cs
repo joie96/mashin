@@ -590,9 +590,27 @@ public sealed class HomeViewModel : INotifyPropertyChanged, INavigationAware, ID
 
         ShuffleTopArtistsCommand = new Command(async () => await PlayCollectionRandomAsync(TopArtists));
 
-        PlayRecentListensCommand = new Command(async () => await PlayCollectionFirstAsync(RecentListens));
+        PlayRecentListensCommand = new Command(async () =>
+        {
+            var tracks = RecentListens.ToList();
+            if (tracks.Count == 0)
+            {
+                return;
+            }
 
-        ShuffleRecentListensCommand = new Command(async () => await PlayCollectionRandomAsync(RecentListens));
+            await _playbackService.PlayMediaAsync(tracks.Cast<MediaItem>().ToList());
+        });
+
+        ShuffleRecentListensCommand = new Command(async () =>
+        {
+            var tracks = RecentListens.ToList();
+            if (tracks.Count == 0)
+            {
+                return;
+            }
+
+            await _playbackService.ShufflePlayMediaAsync(tracks.Cast<MediaItem>().ToList());
+        });
 
         PlaySimilarArtistSection0Command = new Command(async () => await PlaySimilarArtistSectionByIndexAsync(0));
 

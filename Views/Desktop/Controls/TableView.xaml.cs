@@ -120,6 +120,8 @@ public partial class TableView : ContentView
         private set => SetValue(IsAllSelectedProperty, value);
     }
 
+    public bool HasSelection => _selectedItems.Count > 0;
+
     public ICommand? PrimaryInfoTappedCommand
     {
         get => (ICommand?)GetValue(PrimaryInfoTappedCommandProperty);
@@ -822,7 +824,7 @@ public partial class TableView : ContentView
             return;
         }
 
-        Services.FocusManager.SetFocus(this);
+        EnsureSelectionOwnership();
 
         _isCheckboxClick = true;
         ToggleSelection(item);
@@ -831,6 +833,8 @@ public partial class TableView : ContentView
 
     private void OnHeaderCustomCheckBoxPointerPressed(object? sender, PointerEventArgs e)
     {
+        EnsureSelectionOwnership();
+
         var targetState = !IsAllSelected;
 
         foreach (var item in EnumerateSelectableItems())
@@ -862,7 +866,7 @@ public partial class TableView : ContentView
             return;
         }
 
-        Services.FocusManager.SetFocus(this);
+        EnsureSelectionOwnership();
 
         var isCtrl = _keyboardService?.IsControlPressed ?? false;
         var isShift = _keyboardService?.IsShiftPressed ?? false;
@@ -896,7 +900,7 @@ public partial class TableView : ContentView
             return;
         }
 
-        Services.FocusManager.SetFocus(this);
+        EnsureSelectionOwnership();
 
         if (!item.IsSelected)
         {
@@ -922,6 +926,8 @@ public partial class TableView : ContentView
         {
             return;
         }
+
+        EnsureSelectionOwnership();
 
         SelectSingle(item);
         SyncSelectionAndHeaderState(item);
@@ -961,6 +967,8 @@ public partial class TableView : ContentView
         {
             return;
         }
+
+        EnsureSelectionOwnership();
 
         SelectSingle(item);
         SyncSelectionAndHeaderState(item);
@@ -1053,6 +1061,7 @@ public partial class TableView : ContentView
         var selectable = GetMediaItem(label.BindingContext);
         if (selectable != null)
         {
+            EnsureSelectionOwnership();
             SelectSingle(selectable);
             SyncSelectionAndHeaderState(selectable);
         }
@@ -1135,6 +1144,8 @@ public partial class TableView : ContentView
 
     private void SelectAll()
     {
+        EnsureSelectionOwnership();
+
         foreach (var item in EnumerateSelectableItems())
         {
             item.IsSelected = true;
@@ -1142,6 +1153,32 @@ public partial class TableView : ContentView
 
         _anchorIndex = 0;
         SyncSelectionAndHeaderState(clickedItem: null);
+    }
+
+    public void ClearSelection()
+    {
+        ClearAllSelections();
+        SyncSelectionAndHeaderState(clickedItem: null);
+    }
+
+    private void EnsureSelectionOwnership()
+    {
+        if (Services.FocusManager.GetFocusedControl<TableView>(out var focusedTable)
+            && focusedTable != null
+            && !ReferenceEquals(focusedTable, this)
+            && focusedTable.HasSelection)
+        {
+            focusedTable.ClearSelection();
+        }
+
+        if (Services.FocusManager.GetFocusedControl<RowView>(out var focusedRow)
+            && focusedRow != null
+            && focusedRow.HasSelection)
+        {
+            focusedRow.ClearSelection();
+        }
+
+        Services.FocusManager.SetFocus(this);
     }
 
     #endregion

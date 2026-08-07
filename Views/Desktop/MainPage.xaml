@@ -141,25 +141,6 @@
                                     VerticalOptions="Center" />
                             </Border>
 
-                            <Border behaviors:HoverBehavior.HoverBackgroundColor="{DynamicResource HoverBackground}"
-                                BackgroundColor="Transparent"
-                                HeightRequest="24"
-                                StrokeThickness="0"
-                                WidthRequest="24">
-                                <Border.GestureRecognizers>
-                                    <TapGestureRecognizer Tapped="OnNavigatePlaylistsTapped" />
-                                </Border.GestureRecognizers>
-                                <Border.StrokeShape>
-                                    <RoundRectangle CornerRadius="12" />
-                                </Border.StrokeShape>
-                                <Label FontSize="12"
-                                    HorizontalOptions="Center"
-                                    Text="{mi:Fluent Icon=TextBulletListLtr24,
-                                                     FontOverride=True}"
-                                    TextColor="{DynamicResource IconSecondary}"
-                                    VerticalOptions="Center" />
-                            </Border>
-
                             <ActivityIndicator HeightRequest="16"
                                 IsRunning="{Binding IsLoadingPlaylists}"
                                 IsVisible="{Binding IsLoadingPlaylists}"
