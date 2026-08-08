@@ -223,10 +223,18 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
 
         PlayPlaylistCommand = new Command(async () =>
         {
-            if (Playlist != null)
+            var playlist = Playlist;
+            if (playlist == null)
             {
-                await PlaybackService.PlayMediaAsync(new List<MediaItem> { Playlist });
+                return;
             }
+
+            if (Tracks.Count == 0)
+            {
+                return;
+            }
+
+            await PlaybackService.PlayMediaAsync(Tracks.Cast<MediaItem>().ToList());
         });
 
         ShufflePlaylistCommand = new Command(async () =>
