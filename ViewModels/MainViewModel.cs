@@ -674,6 +674,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public async Task InitializeAsync()
     {
+        _logger.LogInformation("MainViewModel InitializeAsync gestartet. SelectedPlayerId={SelectedPlayerId}, ActivePlayerId={ActivePlayerId}, IsDeviceSelectionFlyoutOpen={IsDeviceSelectionFlyoutOpen}", _selectedPlayerId, _playbackService.ActivePlayerId, IsDeviceSelectionFlyoutOpen);
+
         await LoginAsync();
 
         // Connect the Eventhub and Sendpsinplayer

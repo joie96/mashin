@@ -145,6 +145,8 @@ public sealed class PlaybackService
 
     public ObservableRangeCollection<QueueItem> CurrentQueueItems => _playbackQueue.Items;
 
+    public bool IsInitialized => _initialized;
+
     #endregion
 
     #region Lifecycle

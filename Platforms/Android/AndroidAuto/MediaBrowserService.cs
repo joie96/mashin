@@ -86,6 +86,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     private string? _lastMetadataSignature;
     private string? _lastQueueSignature;
     private string? _lastQueueTitle;
+    private bool _startupUserDataLoaded;
 
     #endregion
 
@@ -1479,6 +1480,7 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     private async Task InitializeStartupAsync()
     {
         var connectionService = _connectionService;
+        var playbackService = _playbackService;
 
         if (connectionService == null)
         {
@@ -1488,15 +1490,27 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
 
         try
         {
-            await connectionService.ConnectAsync();
-            await connectionService.StartReconnectLoopAsync();
-
-            if (_userDataService != null)
+            // Connection
+            if (connectionService.ConnectionState != CustomConnectionState.Online)
             {
-                await _userDataService.LoadPreferencesAsync();
+                await connectionService.ConnectAsync();
             }
 
-            EnsurePlaybackInitialized();
+            await connectionService.StartReconnectLoopAsync(); // Guarded internal to ensure only one loop is running.
+
+            // UserData (Favorites, Playlists))
+            if (_userDataService != null && !_startupUserDataLoaded)
+            {
+                await _userDataService.LoadPreferencesAsync();
+                _startupUserDataLoaded = true;
+            }
+
+            // Playback
+            if (playbackService != null && !playbackService.IsInitialized)
+            {
+                await EnsurePlaybackInitializedAsync(playbackService);
+            }
+
             NotifyChildrenChanged(RootId);
             SyncMediaSessionState();
         }
@@ -1520,26 +1534,21 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
         SessionToken = _mediaSession.SessionToken;
     }
 
-    private void EnsurePlaybackInitialized()
+    private static async Task EnsurePlaybackInitializedAsync(PlaybackService playback)
     {
-        var playback = _playbackService;
-        if (playback == null)
+        if (playback.IsInitialized)
         {
             return;
         }
 
-        _ = Task.Run(async () =>
+        try
         {
-            try
-            {
-                await playback.InitializeAsync();
-                await playback.SetOutputModeAsync(PlaybackOutputMode.Sendspin);
-            }
-            catch (Exception ex)
-            {
-                global::Android.Util.Log.Warn(LogTag, $"Playback initialization failed: {ex.Message}");
-            }
-        });
+            await playback.InitializeAsync();
+        }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn(LogTag, $"Playback initialization failed: {ex.Message}");
+        }
     }
 
     private void OnPlaybackPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
