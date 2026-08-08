@@ -294,6 +294,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         OnPropertyChanged(nameof(PlayState));
         OnPropertyChanged(nameof(Volume));
         OnPropertyChanged(nameof(IsMuted));
+        OnPropertyChanged(nameof(IsAndroidRemoteVolumeControlVisible));
         OnPropertyChanged(nameof(ShuffleEnabled));
         OnPropertyChanged(nameof(RepeatMode));
         OnPropertyChanged(nameof(Duration));
@@ -419,9 +420,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public double Volume
     {
-        get => _playbackService.Volume;
+        get => IsAndroidLocalSendspinActive ? 100 : _playbackService.Volume;
         set
         {
+            if (IsAndroidLocalSendspinActive)
+            {
+                return;
+            }
+
             var clamped = (int)Math.Round(Math.Max(0, Math.Min(100, value)));
             if (clamped == _playbackService.Volume)
             {
@@ -430,6 +436,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             _ = SetVolumeAsync(clamped);
         }
     }
+
+    public bool IsAndroidRemoteVolumeControlVisible => IsAndroidRemotePlayerActive;
 
     public QueueItem? CurrentQueueItem => _playbackService.CurrentQueueItem;
 
@@ -727,6 +735,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         OnPropertyChanged(nameof(PlayState));
         OnPropertyChanged(nameof(Volume));
         OnPropertyChanged(nameof(IsMuted));
+        OnPropertyChanged(nameof(IsAndroidRemoteVolumeControlVisible));
         OnPropertyChanged(nameof(ShuffleEnabled));
         OnPropertyChanged(nameof(RepeatMode));
         OnPropertyChanged(nameof(Duration));
@@ -1142,6 +1151,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _isSeeking = true;
     }
 
+    private bool IsAndroidRemotePlayerActive
+        => OperatingSystem.IsAndroid() && _playbackService.OutputMode == PlaybackOutputMode.MA_Remote;
+
+    private bool IsAndroidLocalSendspinActive
+        => OperatingSystem.IsAndroid() && _playbackService.OutputMode == PlaybackOutputMode.Sendspin;
+
     private async Task SetVolumeAsync(int volume)
     {
         try
@@ -1198,6 +1213,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         {
             _settings.SetInitialMuted(_playbackService.IsMuted);
             OnPropertyChanged(nameof(IsMuted));
+            return;
+        }
+
+        if (e.PropertyName == nameof(PlaybackService.OutputMode))
+        {
+            OnPropertyChanged(nameof(IsAndroidRemoteVolumeControlVisible));
+            OnPropertyChanged(nameof(Volume));
             return;
         }
 
@@ -1275,6 +1297,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             {
                 SetSelectedPlayerSilently(activePlayerId);
             }
+
+            OnPropertyChanged(nameof(IsAndroidRemoteVolumeControlVisible));
+            OnPropertyChanged(nameof(Volume));
         }
     }
 
@@ -2063,6 +2088,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 : PlaybackOutputMode.MA_Remote;
             await _playbackService.SetOutputModeAsync(nextOutputMode, playerId);
             OnPropertyChanged(nameof(IsDontStopTheMusicEnabled));
+            OnPropertyChanged(nameof(IsAndroidRemoteVolumeControlVisible));
 
             var refreshedPlayer = selectedPlayer ?? await _musicAssistant.GetPlayerAsync(playerId, raiseUnavailable: true);
             if (refreshedPlayer != null)

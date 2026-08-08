@@ -16,6 +16,7 @@
     <ContentView.Resources>
         <!--  Playback State Converter  -->
         <converters:PlayStateToBoolConverter x:Key="PlayStateToBoolConverter" />
+        <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
         <converters:StringEqualsConverter x:Key="StringEqualsConverter" />
     </ContentView.Resources>
 
@@ -43,7 +44,7 @@
                 <RoundRectangle CornerRadius="0" />
             </Border.StrokeShape>
 
-            <Grid RowDefinitions="Auto,*,Auto"
+            <Grid RowDefinitions="Auto,*,Auto,Auto"
                 RowSpacing="0">
 
                 <VerticalStackLayout Grid.Row="0"
@@ -331,9 +332,55 @@
                     </Border>
                 </HorizontalStackLayout>
 
+                <HorizontalStackLayout Grid.Row="2"
+                    HorizontalOptions="Center"
+                    IsVisible="{Binding IsAndroidRemoteVolumeControlVisible}"
+                    Margin="20,12,20,0"
+                    Spacing="12">
+                    <Border BackgroundColor="{DynamicResource ActionButtonsBackground}"
+                        HeightRequest="44"
+                        StrokeThickness="0"
+                        WidthRequest="44">
+                        <Border.Behaviors>
+                            <toolkit:TouchBehavior PressedBackgroundColor="{StaticResource SelectionBackground}"
+                                PressedAnimationDuration="250"
+                                PressedAnimationEasing="CubicOut" />
+                        </Border.Behaviors>
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding ToggleMuteCommand}" />
+                        </Border.GestureRecognizers>
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="22" />
+                        </Border.StrokeShape>
+                        <Grid>
+                            <Label FontSize="20"
+                                HorizontalOptions="Center"
+                                IsVisible="{Binding IsMuted}"
+                                Text="{mi:Fluent Icon=SpeakerMute24, FontOverride=True}"
+                                TextColor="{DynamicResource AccentColor}"
+                                VerticalOptions="Center" />
+                            <Label FontSize="20"
+                                HorizontalOptions="Center"
+                                IsVisible="{Binding IsMuted, Converter={StaticResource InvertedBoolConverter}}"
+                                Text="{mi:Fluent Icon=Speaker224, FontOverride=True}"
+                                TextColor="{DynamicResource IconSecondary}"
+                                VerticalOptions="Center" />
+                        </Grid>
+                    </Border>
+
+                    <Slider Maximum="100"
+                        MaximumTrackColor="{DynamicResource BackgroundTertiary}"
+                        Minimum="0"
+                        MinimumTrackColor="{DynamicResource IconSecondary}"
+                        ThumbColor="{DynamicResource IconPrimary}"
+                        VerticalOptions="Center"
+                        WidthRequest="220"
+                        Value="{Binding Volume, Mode=TwoWay}" />
+                </HorizontalStackLayout>
+
                 <!--  Secondary action controls  -->
                 <HorizontalStackLayout x:Name="SecondaryControlsRow"
-                    Grid.Row="2"
+                    Grid.Row="3"
                     HorizontalOptions="Center"
                     Spacing="18">
                     <Border x:Name="CurrentTrackAddToPlaylistButton"

@@ -1002,7 +1002,19 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
             PlayerId ??= _settingsService.GetSendspinClientId();
 
             var currentPlayerState = _sendspinClient.CurrentPlayerState;
-            Volume = currentPlayerState.Volume;
+
+            if (OperatingSystem.IsAndroid())
+            {
+                const int androidInitialVolume = 100;
+                Volume = androidInitialVolume;
+                _settingsService.SetInitialVolume(androidInitialVolume);
+                await _sendspinClient.SetVolumeAsync(androidInitialVolume);
+            }
+            else
+            {
+                Volume = currentPlayerState.Volume;
+            }
+
             IsMuted = currentPlayerState.Muted;
 
             await RefreshQueueAsync(cancellationToken);
