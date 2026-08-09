@@ -13,8 +13,8 @@ public partial class RowView : ContentView
 {
     #region Fields
 
-    private const int DefaultInitialLoadCount = 20;
-    private const int DefaultLoadMoreCount = 15;
+    private const int DefaultInitialLoadCount = 15;
+    private const int DefaultLoadMoreCount = 25;
 
     private readonly HashSet<MediaItem> _suppressNextTap = new();
     private readonly HashSet<INotifyPropertyChanged> _observedItems = new();

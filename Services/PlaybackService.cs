@@ -173,6 +173,8 @@ public sealed class PlaybackService
             throw new InvalidOperationException($"No player registered for output mode '{mode}'.");
         }
 
+        var previousOutputMode = _activePlayer.OutputMode;
+
         var resolvedTargetPlayerId = mode switch
         {
             PlaybackOutputMode.Local => null,
@@ -207,10 +209,14 @@ public sealed class PlaybackService
                 ApplyPlaybackQueue(remoteQueue);
             }
         }
-        // if local or sendspin: push queue (full-copy)
+        // if local or sendspin: push queue (full-copy), except when switching away from remote
         else
         {
-            await nextPlayer.SetQueueAsync(CloneQueue(_playbackQueue), cancellationToken);
+            var shouldPushQueueToTarget = previousOutputMode != PlaybackOutputMode.MA_Remote;
+            if (shouldPushQueueToTarget)
+            {
+                await nextPlayer.SetQueueAsync(CloneQueue(_playbackQueue), cancellationToken);
+            }
         }
 
         _activePlayer = nextPlayer;
