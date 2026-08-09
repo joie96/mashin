@@ -15,8 +15,8 @@ public partial class TableView : ContentView
 {
     #region Fields
 
-    private const int DefaultInitialLoadCount = 15;
-    private const int LoadMoreCount = 30;
+    private const int DefaultInitialLoadCount = 20;
+    private const int DefaultLoadMoreCount = 15;
 
     private readonly HashSet<MediaItem> _suppressNextTap = new();
     private readonly HashSet<INotifyPropertyChanged> _observedItems = new();
@@ -75,6 +75,13 @@ public partial class TableView : ContentView
             typeof(TableView),
             DefaultInitialLoadCount,
             propertyChanged: OnInitialLoadCountChanged);
+
+    public static readonly BindableProperty LoadMoreCountProperty =
+        BindableProperty.Create(
+            nameof(LoadMoreCount),
+            typeof(int),
+            typeof(TableView),
+            DefaultLoadMoreCount);
 
     #endregion
 
@@ -170,6 +177,12 @@ public partial class TableView : ContentView
     {
         get => (int)GetValue(InitialLoadCountProperty);
         set => SetValue(InitialLoadCountProperty, value);
+    }
+
+    public int LoadMoreCount
+    {
+        get => (int)GetValue(LoadMoreCountProperty);
+        set => SetValue(LoadMoreCountProperty, value);
     }
 
     public bool HasMoreItems => _hasMoreItems;
@@ -548,6 +561,12 @@ public partial class TableView : ContentView
         }
 
         UpdateSelectionIndicator();
+    }
+
+    public void ResetVisibleItemsToInitialCount()
+    {
+        _loadedItemCount = GetConfiguredInitialLoadCount();
+        RefreshVisibleItems();
     }
 
     public void OpenContextMenuForSelection(View anchor)
@@ -940,7 +959,7 @@ public partial class TableView : ContentView
 
         var currentCount = _visibleItems.Count;
         var configuredInitialLoadCount = GetConfiguredInitialLoadCount();
-        var requestedCount = Math.Max(Math.Max(configuredInitialLoadCount, _loadedItemCount), currentCount) + LoadMoreCount;
+        var requestedCount = Math.Max(Math.Max(configuredInitialLoadCount, _loadedItemCount), currentCount) + GetConfiguredLoadMoreCount();
         var nextItems = TakePrefixItems(ItemsSource, requestedCount + 1);
 
         if (nextItems.Count == 0)
@@ -972,6 +991,13 @@ public partial class TableView : ContentView
         return InitialLoadCount > 0
             ? InitialLoadCount
             : DefaultInitialLoadCount;
+    }
+
+    private int GetConfiguredLoadMoreCount()
+    {
+        return LoadMoreCount > 0
+            ? LoadMoreCount
+            : DefaultLoadMoreCount;
     }
 
     private void ApplyVisibleItemsSnapshot(List<object> nextItems)

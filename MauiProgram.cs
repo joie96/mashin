@@ -34,6 +34,10 @@ using Sendspin.SDK.Client;
 using Sendspin.SDK.Connection;
 using Sendspin.SDK.Models;
 using Sendspin.SDK.Synchronization;
+#if ANDROID
+using AndroidX.RecyclerView.Widget;
+using Microsoft.Maui.Controls.Handlers.Items;
+#endif
 
 namespace mashin;
 
@@ -44,6 +48,35 @@ public static class MauiProgram
         var builder = MauiApp.CreateBuilder();
         var logDirectory = ResolveLogDirectory();
         var logFilePath = Path.Combine(logDirectory, $"mashin-{DateTime.Now:yyyyMMdd}.log");
+
+#if ANDROID
+        // CollectView tuning for Android to reduce rebind churn while scrolling.
+        CollectionViewHandler.Mapper.AppendToMapping("AndroidRecyclerTuning", (handler, view) =>
+        {
+            if (handler.PlatformView is not RecyclerView recyclerView)
+            {
+                return;
+            }
+
+            // Keep more realized items around to reduce rebind churn while scrolling.
+            recyclerView.SetItemViewCacheSize(48);
+            recyclerView.HasFixedSize = true;
+
+            if (recyclerView.GetLayoutManager() is GridLayoutManager gridLayoutManager)
+            {
+                gridLayoutManager.InitialPrefetchItemCount = Math.Max(gridLayoutManager.InitialPrefetchItemCount, 24);
+                gridLayoutManager.ItemPrefetchEnabled = true;
+            }
+            else if (recyclerView.GetLayoutManager() is LinearLayoutManager linearLayoutManager)
+            {
+                linearLayoutManager.InitialPrefetchItemCount = Math.Max(linearLayoutManager.InitialPrefetchItemCount, 24);
+                linearLayoutManager.ItemPrefetchEnabled = true;
+            }
+
+            var pool = recyclerView.GetRecycledViewPool();
+            pool.SetMaxRecycledViews(0, 96);
+        });
+#endif
 
         builder
             .UseMauiApp<App>()

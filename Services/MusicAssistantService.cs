@@ -61,6 +61,8 @@ public class MusicAssistantService
             DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower
         };
 
+        MediaItemImage.ConfigureProxyBaseUrl(_settings.MusicAssistantUrl);
+
     }
 
     private async Task<T?> SendCommandAsync<T>(
@@ -71,6 +73,7 @@ public class MusicAssistantService
         try
         {
             _logger.LogTrace("Sending command: {Command}", command);
+            MediaItemImage.ConfigureProxyBaseUrl(_settings.MusicAssistantUrl);
 
             var payload = new
             {
@@ -420,7 +423,6 @@ public class MusicAssistantService
         var item = await SendCommandAsync<T>("music/get_library_item", args);
         if (item is Playlist playlist)
         {
-            ResolveMediaItemImages(playlist);
             _ = EnrichWithProviderInfoAsync(new List<Playlist> { playlist });
         }
 
@@ -944,11 +946,6 @@ public class MusicAssistantService
         var result = await SendCommandAsync<List<Playlist>>("music/playlists/library_items", args);
         var playlists = result ?? new List<Playlist>();
 
-        foreach (var playlist in playlists)
-        {
-            ResolveMediaItemImages(playlist);
-        }
-
         _ = EnrichWithProviderInfoAsync(playlists);
 
         return playlists;
@@ -968,7 +965,6 @@ public class MusicAssistantService
         var playlist = await SendCommandAsync<Playlist>("music/playlists/get", args);
         if (playlist != null)
         {
-            ResolveMediaItemImages(playlist);
             _ = EnrichWithProviderInfoAsync(new List<Playlist> { playlist });
         }
 
@@ -1060,10 +1056,6 @@ public class MusicAssistantService
     public async Task<Playlist?> UpdatePlaylistAsync(string itemId, Playlist update, bool overwrite = false)
     {
         var updateImage = update.Metadata?.Images?.FirstOrDefault();
-        if (updateImage != null)
-        {
-            updateImage.Path = RestoreImagePath(updateImage.Path, _settings.MusicAssistantUrl);
-        }
 
         var updatePayload = new Dictionary<string, object?>
         {
@@ -1252,8 +1244,6 @@ public class MusicAssistantService
 
         if (results != null)
         {
-            ResolveMediaItemImages(results.Playlists ?? new List<Playlist>());
-
             _ = EnrichWithProviderInfoAsync(results.Tracks ?? new List<Track>());
             _ = EnrichWithProviderInfoAsync(results.Albums ?? new List<Album>());
             _ = EnrichWithProviderInfoAsync(results.Artists ?? new List<Artist>());
@@ -1279,19 +1269,6 @@ public class MusicAssistantService
     {
         var result = await SendCommandAsync<List<RecommendationFolder>>("music/recommendations");
         var folders = result ?? new List<RecommendationFolder>();
-
-        foreach (var folder in folders)
-        {
-            if (folder.Image != null)
-            {
-                folder.Image.Path = ResolveImagePath(folder.Image.Path, folder.Image.Provider);
-            }
-
-            if (folder.Items != null && folder.Items.Count > 0)
-            {
-                ResolveMediaItemImages(folder.Items);
-            }
-        }
 
         var items = folders
             .SelectMany(folder => folder.Items ?? Enumerable.Empty<MediaItem>())
@@ -1430,8 +1407,6 @@ public class MusicAssistantService
         var albums = items.OfType<Album>().ToList();
         var artists = items.OfType<Artist>().ToList();
         var playlists = items.OfType<Playlist>().ToList();
-
-        ResolveMediaItemImages(playlists);
 
         _ = EnrichWithProviderInfoAsync(tracks);
         _ = EnrichWithProviderInfoAsync(albums);
@@ -2177,8 +2152,6 @@ public class MusicAssistantService
         // Setze das Manifest für jedes Item
         foreach (var item in materialized)
         {
-            ResolveMediaItemImages(item);
-
             var providerDomain = item.ProviderMappings.FirstOrDefault()?.ProviderDomain;
             if (!string.IsNullOrEmpty(providerDomain) &&
                 manifestByDomain.TryGetValue(providerDomain, out var manifest))
@@ -2214,102 +2187,6 @@ public class MusicAssistantService
     #endregion
 
     #region Image Helpers
-
-    private static string RestoreImagePath(string? path, string baseUrl)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return string.Empty;
-        }
-
-        if (!Uri.TryCreate(path, UriKind.Absolute, out var uri))
-        {
-            return path;
-        }
-
-        var proxyPath = $"{baseUrl.TrimEnd('/')}/imageproxy";
-        if (!path.StartsWith(proxyPath, StringComparison.OrdinalIgnoreCase))
-        {
-            return path;
-        }
-
-        var query = uri.Query.TrimStart('?');
-        foreach (var part in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var kvp = part.Split('=', 2);
-            if (kvp.Length == 2 && kvp[0] == "path")
-            {
-                return WebUtility.UrlDecode(kvp[1]);
-            }
-        }
-
-        return path;
-    }
-
-    private string ResolveImagePath(string? path, string? proxyId = null, string? checksum = null)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return string.Empty;
-        }
-
-        if (!string.IsNullOrWhiteSpace(proxyId))
-        {
-            var baseUrl = _settings.MusicAssistantUrl.TrimEnd('/');
-            if (!string.IsNullOrWhiteSpace(checksum))
-            {
-                return string.Concat(baseUrl, "/imageproxy/", proxyId, "?checksum=", Uri.EscapeDataString(checksum));
-            }
-
-            return string.Concat(baseUrl, "/imageproxy/", proxyId);
-        }
-
-        return path;
-    }
-
-    private void ResolveMediaItemImages(MediaItem item)
-    {
-        ResolveMetadataImages(item.Metadata);
-
-        if (item is Track track)
-        {
-            if (track.Album != null)
-            {
-                ResolveMediaItemImages(track.Album);
-            }
-        }
-    }
-
-    private void ResolveMediaItemImages(IEnumerable<MediaItem> items)
-    {
-        foreach (var item in items)
-        {
-            if (item == null)
-            {
-                continue;
-            }
-
-            ResolveMediaItemImages(item);
-        }
-    }
-
-    private void ResolveMetadataImages(MediaItemMetadata? metadata)
-    {
-        if (metadata?.Images == null || metadata.Images.Count == 0)
-        {
-            return;
-        }
-
-        foreach (var image in metadata.Images)
-        {
-            if (image == null)
-            {
-                continue;
-            }
-
-            image.Path = ResolveImagePath(image.Path, image.ProxyId, metadata.CacheChecksum);
-        }
-    }
 
     private Task<T?> DeserializeMediaItemAsync<T>(JsonElement element) where T : MediaItem
     {

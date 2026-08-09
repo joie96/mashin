@@ -94,6 +94,7 @@ public partial class QueueOverlay : ContentView
             ZIndex = backgroundZIndex;
             OverlaySheet.TranslationY = 0;
             IsOpen = false;
+            QueueItemsTable.ResetVisibleItemsToInitialCount();
         }
         finally
         {

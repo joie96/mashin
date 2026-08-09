@@ -215,6 +215,8 @@
 
                     <!--  Tracks TableView  -->
                     <controls:TableView ItemsSource="{Binding TrackItems}"
+                        InitialLoadCount="50"
+                        LoadMoreCount="25"
                         PlaybackContextItem="{Binding Playlist}"
                         ShowContextMenuAtAnchorCommand="{Binding ShowContentContextMenuAtAnchorCommand}" />
                 </Border>

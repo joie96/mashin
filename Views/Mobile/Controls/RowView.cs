@@ -13,13 +13,14 @@ public partial class RowView : ContentView
 {
     #region Fields
 
-    private const int PageSize = 10;
+    private const int DefaultInitialLoadCount = 20;
+    private const int DefaultLoadMoreCount = 15;
 
     private readonly HashSet<MediaItem> _suppressNextTap = new();
     private readonly HashSet<INotifyPropertyChanged> _observedItems = new();
     private readonly ObservableRangeCollection<object> _visibleItems = new();
     private INotifyCollectionChanged? _observedCollection;
-    private int _loadedItemCount = PageSize;
+    private int _loadedItemCount = DefaultInitialLoadCount;
     private bool _hasMoreItems;
     private bool _hasSelection;
 
@@ -153,7 +154,7 @@ public partial class RowView : ContentView
 
         if (!ReferenceEquals(oldValue, newValue))
         {
-            rowView._loadedItemCount = PageSize;
+            rowView._loadedItemCount = DefaultInitialLoadCount;
         }
 
         rowView.DetachSelectionObservers();
@@ -533,7 +534,7 @@ public partial class RowView : ContentView
         }
 
         var currentCount = _visibleItems.Count;
-        var nextCount = Math.Min(currentCount + PageSize, totalCount);
+        var nextCount = Math.Min(currentCount + DefaultLoadMoreCount, totalCount);
         if (nextCount > currentCount)
         {
             _visibleItems.AddRange(sourceItems.Skip(currentCount).Take(nextCount - currentCount));

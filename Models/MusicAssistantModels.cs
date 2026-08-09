@@ -146,6 +146,12 @@ namespace mashin.Models
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(PrimaryImage));
                 OnPropertyChanged(nameof(ImageUri));
+                OnPropertyChanged(nameof(ImageUri0));
+                OnPropertyChanged(nameof(ImageUri80));
+                OnPropertyChanged(nameof(ImageUri160));
+                OnPropertyChanged(nameof(ImageUri256));
+                OnPropertyChanged(nameof(ImageUri512));
+                OnPropertyChanged(nameof(ImageUri1024));
             }
         }
 
@@ -177,14 +183,27 @@ namespace mashin.Models
             get
             {
                 var image = PrimaryImage;
-                if (string.IsNullOrWhiteSpace(image?.Path))
-                {
-                    return null;
-                }
-
-                return image.Path;
+                return image?.GetProxyPath(checksum: Metadata?.CacheChecksum);
             }
         }
+
+        [JsonIgnore]
+        public string? ImageUri0 => PrimaryImage?.GetProxyPath(0, Metadata?.CacheChecksum);
+
+        [JsonIgnore]
+        public string? ImageUri80 => PrimaryImage?.GetProxyPath(80, Metadata?.CacheChecksum);
+
+        [JsonIgnore]
+        public string? ImageUri160 => PrimaryImage?.GetProxyPath(160, Metadata?.CacheChecksum);
+
+        [JsonIgnore]
+        public string? ImageUri256 => PrimaryImage?.GetProxyPath(256, Metadata?.CacheChecksum);
+
+        [JsonIgnore]
+        public string? ImageUri512 => PrimaryImage?.GetProxyPath(512, Metadata?.CacheChecksum);
+
+        [JsonIgnore]
+        public string? ImageUri1024 => PrimaryImage?.GetProxyPath(1024, Metadata?.CacheChecksum);
 
         [JsonIgnore]
         public bool IsSelected
@@ -594,6 +613,9 @@ namespace mashin.Models
     /// </summary>
     public class MediaItemImage
     {
+        private static string _proxyBaseUrl = string.Empty;
+        private static readonly int[] AllowedSizes = { 0, 80, 160, 256, 512, 1024 };
+
         [JsonPropertyName("type")]
         public string Type { get; set; } = "thumb";
 
@@ -608,6 +630,73 @@ namespace mashin.Models
 
         [JsonPropertyName("proxy_id")]
         public string? ProxyId { get; set; }
+
+        [JsonIgnore]
+        public string? ProxyPath0 => GetProxyPath(0);
+
+        [JsonIgnore]
+        public string? ProxyPath80 => GetProxyPath(80);
+
+        [JsonIgnore]
+        public string? ProxyPath160 => GetProxyPath(160);
+
+        [JsonIgnore]
+        public string? ProxyPath256 => GetProxyPath(256);
+
+        [JsonIgnore]
+        public string? ProxyPath512 => GetProxyPath(512);
+
+        [JsonIgnore]
+        public string? ProxyPath1024 => GetProxyPath(1024);
+
+        public static void ConfigureProxyBaseUrl(string? baseUrl)
+        {
+            _proxyBaseUrl = (baseUrl ?? string.Empty).TrimEnd('/');
+        }
+
+        public static int MapToAllowedSize(int requestedSize)
+        {
+            if (requestedSize <= 0)
+            {
+                return 0;
+            }
+
+            foreach (var allowedSize in AllowedSizes)
+            {
+                if (allowedSize > 0 && requestedSize <= allowedSize)
+                {
+                    return allowedSize;
+                }
+            }
+
+            return AllowedSizes[^1];
+        }
+
+        public string? GetProxyPath(int? requestedSize = null, string? checksum = null)
+        {
+            if (string.IsNullOrWhiteSpace(ProxyId) || string.IsNullOrWhiteSpace(_proxyBaseUrl))
+            {
+                return string.IsNullOrWhiteSpace(Path) ? null : Path;
+            }
+
+            var url = string.Concat(_proxyBaseUrl, "/imageproxy/", ProxyId);
+            var hasQuery = false;
+
+            if (requestedSize.HasValue)
+            {
+                var size = MapToAllowedSize(requestedSize.Value);
+                url = string.Concat(url, "?size=", size.ToString());
+                hasQuery = true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(checksum))
+            {
+                var separator = hasQuery ? "&" : "?";
+                url = string.Concat(url, separator, "checksum=", Uri.EscapeDataString(checksum));
+            }
+
+            return url;
+        }
 
     }
 
