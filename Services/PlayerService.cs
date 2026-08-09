@@ -363,19 +363,6 @@ public sealed class SendspinPlayerService : IPlayerService, IAsyncDisposable
 
         try
         {
-            var queueId = await ResolveQueueIdAsync();
-            if (!string.IsNullOrWhiteSpace(queueId))
-            {
-                await _musicAssistant.ClearQueueAsync(queueId, skipStop: false);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to clear queue during Sendspin terminate.");
-        }
-
-        try
-        {
             _audioRenderer.Stop();
         }
         catch (Exception ex)
