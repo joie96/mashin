@@ -41,6 +41,7 @@ public sealed class PlaybackNotificationService : Service
 
 #region Service State
 
+    private AppRuntimeCoordinator? _runtimeCoordinator;
     private PlaybackService? _playbackService;
     private MediaSession? _mediaSession;
     private NotificationManager? _notificationManager;
@@ -117,7 +118,7 @@ public sealed class PlaybackNotificationService : Service
     private async Task HandleIntentAsync(Intent? intent)
     {
         TryAttachPlaybackService();
-        var playback = _playbackService;
+
         var action = intent?.Action;
 
         if (string.Equals(action, ActionTerminate, StringComparison.Ordinal))
@@ -125,6 +126,21 @@ public sealed class PlaybackNotificationService : Service
             await StopServiceForAppTerminationAsync();
             return;
         }
+
+        if (_runtimeCoordinator != null)
+        {
+            try
+            {
+                await _runtimeCoordinator.EnsureStartedAsync(AppRuntimeCoordinator.StartupReason.TransportNotification);
+            }
+            catch
+            {
+                // Keep service resilient when runtime startup fails transiently.
+            }
+        }
+
+        TryAttachPlaybackService();
+        var playback = _playbackService;
 
         if (playback == null)
         {
@@ -255,17 +271,30 @@ public sealed class PlaybackNotificationService : Service
         CancelBackgroundIdleShutdown();
         TryAttachPlaybackService();
 
-        var playback = _playbackService;
-
-        if (playback != null)
+        if (_runtimeCoordinator != null)
         {
             try
             {
-                await playback.TerminateForAppShutdownAsync();
+                await _runtimeCoordinator.StopAsync(AppRuntimeCoordinator.ShutdownReason.AppTermination);
             }
             catch
             {
-                // Continue service shutdown even if playback teardown fails.
+                // Continue service shutdown even if runtime teardown fails.
+            }
+        }
+        else
+        {
+            var playback = _playbackService;
+            if (playback != null)
+            {
+                try
+                {
+                    await playback.TerminateForAppShutdownAsync();
+                }
+                catch
+                {
+                    // Continue service shutdown even if playback teardown fails.
+                }
             }
         }
 
@@ -553,12 +582,14 @@ public sealed class PlaybackNotificationService : Service
 
     private void TryAttachPlaybackService()
     {
-        if (_playbackService != null)
+        if (_runtimeCoordinator != null && _playbackService != null)
         {
             return;
         }
 
         var services = IPlatformApplication.Current?.Services;
+        _runtimeCoordinator ??= services?.GetService<AppRuntimeCoordinator>();
+
         var playbackService = services?.GetService<PlaybackService>();
         if (playbackService == null)
         {

@@ -30,6 +30,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     private readonly IContextMenuService _contextMenuService;
     private readonly PlaybackService _playbackService;
     private readonly IConnectionService _connectionService;
+    private readonly AppRuntimeCoordinator _runtimeCoordinator;
     private readonly ILogger<MainViewModel> _logger;
 
 
@@ -97,6 +98,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         IContextMenuService contextMenuService,
         PlaybackService playbackService,
         IConnectionService connectionService,
+        AppRuntimeCoordinator runtimeCoordinator,
         ILogger<MainViewModel> logger)
     {
         _settings = settings;
@@ -106,6 +108,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _contextMenuService = contextMenuService;
         _playbackService = playbackService;
         _connectionService = connectionService;
+        _runtimeCoordinator = runtimeCoordinator;
         _logger = logger;
         UserDataService = userDataService;
         _selectedAudioQuality = _settings.GetSendspinPreferredAudioCodec();
@@ -686,37 +689,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         await LoginAsync();
 
-        // Connect the Eventhub and Sendpsinplayer
-        await _connectionService.ConnectAsync();
-        await _connectionService.StartReconnectLoopAsync();
-
-        // Load userdata for favorites and playlists
-        await UserDataService.LoadPreferencesAsync();
-
         CurrentSection = NavigationSection.Home;
         await _navigationService.NavigateToAsync<HomePage>();
 
-        // Set sendspin as initial player and start playback service
+        // Runtime startup, connection and playback activation are handled by AppRuntimeCoordinator.
         await RefreshAvailablePlayersAsync();
         ApplyInitialSelectedPlayer();
-        try
-        {
-            await _playbackService.InitializeAsync();
-        }
-        catch (Exception ex) when (ex is TimeoutException or TaskCanceledException)
-        {
-            _logger.LogWarning(ex, "Playback initialization failed for Sendspin. Falling back to Local mode.");
-
-            try
-            {
-                await _playbackService.SetOutputModeAsync(PlaybackOutputMode.Local);
-            }
-            catch (Exception fallbackEx)
-            {
-                _logger.LogWarning(fallbackEx, "Failed to switch playback output to Local after initialization error.");
-            }
-        }
-
 
         // Build Context Menus
         BuildUserMenuItems();
@@ -750,24 +728,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         ShowStatusMessage(StatusMessage.Connecting);
 
-        // Initial check: if server is reachable and already authenticated, finish directly.
-        var isServerReachable = await _connectionService.TestServerReachabilityAsync();
-        var isAuthenticated = false;
-        if (isServerReachable)
+        await _runtimeCoordinator.EnsureStartedAsync(AppRuntimeCoordinator.StartupReason.UiForeground);
+
+        if (_runtimeCoordinator.State == AppRuntimeCoordinator.RuntimeState.Running)
         {
             ShowStatusMessage(StatusMessage.Connected);
-            isAuthenticated = await _musicAssistant.TestAuthentificatonAsync();
-        }
-
-        if (isServerReachable && isAuthenticated)
-        {
             ShowStatusMessage(StatusMessage.LoginSuccessful);
             return;
         }
 
         ShowStatusMessage(StatusMessage.Login);
 
-        var initialErrorMessage = !isServerReachable
+        var initialErrorMessage = _runtimeCoordinator.State == AppRuntimeCoordinator.RuntimeState.DegradedOffline
             ? "Server nicht erreichbar. Bitte URI überprüfen."
             : null;
 
@@ -784,24 +756,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             string? errorMessage;
             try
             {
-                if (!Uri.TryCreate(serverUri.Trim(), UriKind.Absolute, out var parsedServerUri))
-                {
-                    errorMessage = "Ungültige Server-URI.";
-                }
-                else
-                {
-                    // Save server URI and username
-                    _settings.MusicAssistantUrl = parsedServerUri.ToString().TrimEnd('/');
-                    _settings.Username = username;
-                    _settings.Save();
+                _logger.LogDebug("Attempting login for user: {Username}", username);
+                await _runtimeCoordinator.SubmitCredentialsAsync(username, password, serverUri);
 
-                    _logger.LogDebug("Attempting login for user: {Username}", username);
-                    await _musicAssistant.LoginAsync(username, password);
-
-                    _logger.LogDebug("Login successful for user: {Username}", username);
-                    loginSuccessful = true;
-                    errorMessage = null;
-                }
+                loginSuccessful = _runtimeCoordinator.State == AppRuntimeCoordinator.RuntimeState.Running;
+                errorMessage = loginSuccessful ? null : "Initialisierung nicht abgeschlossen. Bitte erneut versuchen.";
             }
             catch (UnauthorizedAccessException)
             {
@@ -844,6 +803,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
                 return;
             }
 
+            await _overlayService.SetLoginLoadingStateAsync(false);
+
             initialErrorMessage = errorMessage;
             await _overlayService.ShowLoginErrorAsync(errorMessage ?? "Anmeldung fehlgeschlagen. Bitte Eingaben prüfen.");
         }
@@ -853,11 +814,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         try
         {
-            await _musicAssistant.LogoutAsync();
-        }
-        catch (Exception ex) when (ex.Message.Contains("No token in context", StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogInformation(ex, "Logout skipped because no token was available in context.");
+            await _runtimeCoordinator.LogoutAsync();
         }
         catch (Exception ex)
         {
@@ -878,10 +835,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
                 _selectedPlayerId = null;
                 OnPropertyChanged(nameof(SelectedPlayerId));
-
-                // Stop background reconnect and active connections before restarting login flow.
-                await _connectionService.StopReconnectLoopAsync();
-                await _connectionService.DisconnectAsync();
 
                 await InitializeAsync();
             }

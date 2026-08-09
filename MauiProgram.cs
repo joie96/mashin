@@ -100,6 +100,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<MusicAssistantService>();
         builder.Services.AddSingleton<IMusicAssistantEventHub, MusicAssistantEventHub>();
         builder.Services.AddSingleton<IConnectionService, ConnectionService>();
+        builder.Services.AddSingleton<AppRuntimeCoordinator>();
         builder.Services.AddSingleton<UserDataService>();
         builder.Services.AddSingleton<INavigationService, NavigationService>();
         builder.Services.AddSingleton<IOverlayService, OverlayService>();

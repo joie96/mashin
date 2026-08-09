@@ -75,18 +75,16 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
     private readonly Dictionary<string, List<mashin.Models.MediaItem>> _trackListActionCache = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _startupGate = new(1, 1);
 
-    private IConnectionService? _connectionService;
+    private AppRuntimeCoordinator? _runtimeCoordinator;
     private PlaybackService? _playbackService;
     private MusicAssistantService? _musicAssistantService;
     private UserDataService? _userDataService;
-    private SettingsService? _settingsService;
     private MediaSessionCompat? _mediaSession;
     private Task? _startupInitializationTask;
     private string? _lastPlaybackStateSignature;
     private string? _lastMetadataSignature;
     private string? _lastQueueSignature;
     private string? _lastQueueTitle;
-    private bool _startupUserDataLoaded;
 
     #endregion
 
@@ -97,11 +95,10 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
         base.OnCreate();
 
         var services = IPlatformApplication.Current?.Services;
-        _connectionService = services?.GetService<IConnectionService>();
+        _runtimeCoordinator = services?.GetService<AppRuntimeCoordinator>();
         _playbackService = services?.GetService<PlaybackService>();
         _musicAssistantService = services?.GetService<MusicAssistantService>();
         _userDataService = services?.GetService<UserDataService>();
-        _settingsService = services?.GetService<SettingsService>();
 
         EnsureMediaSession();
         _ = EnsureStartupInitializedAsync();
@@ -1479,37 +1476,17 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
 
     private async Task InitializeStartupAsync()
     {
-        var connectionService = _connectionService;
-        var playbackService = _playbackService;
+        var runtimeCoordinator = _runtimeCoordinator;
 
-        if (connectionService == null)
+        if (runtimeCoordinator == null)
         {
-            global::Android.Util.Log.Warn(LogTag, "Startup initialization failed: ConnectionService is missing.");
+            global::Android.Util.Log.Warn(LogTag, "Startup initialization failed: AppRuntimeCoordinator is missing.");
             return;
         }
 
         try
         {
-            // Connection
-            if (connectionService.ConnectionState != CustomConnectionState.Online)
-            {
-                await connectionService.ConnectAsync();
-            }
-
-            await connectionService.StartReconnectLoopAsync(); // Guarded internal to ensure only one loop is running.
-
-            // UserData (Favorites, Playlists))
-            if (_userDataService != null && !_startupUserDataLoaded)
-            {
-                await _userDataService.LoadPreferencesAsync();
-                _startupUserDataLoaded = true;
-            }
-
-            // Playback
-            if (playbackService != null && !playbackService.IsInitialized)
-            {
-                await EnsurePlaybackInitializedAsync(playbackService);
-            }
+            await runtimeCoordinator.EnsureStartedAsync(AppRuntimeCoordinator.StartupReason.AndroidAutoBrowse);
 
             NotifyChildrenChanged(RootId);
             SyncMediaSessionState();
@@ -1532,23 +1509,6 @@ public sealed class MediaBrowserService : MediaBrowserServiceCompat
         _mediaSession.Active = true;
 
         SessionToken = _mediaSession.SessionToken;
-    }
-
-    private static async Task EnsurePlaybackInitializedAsync(PlaybackService playback)
-    {
-        if (playback.IsInitialized)
-        {
-            return;
-        }
-
-        try
-        {
-            await playback.InitializeAsync();
-        }
-        catch (Exception ex)
-        {
-            global::Android.Util.Log.Warn(LogTag, $"Playback initialization failed: {ex.Message}");
-        }
     }
 
     private void OnPlaybackPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
