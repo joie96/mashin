@@ -59,7 +59,7 @@ public partial class TableView : ContentView
             });
 
     public static readonly BindableProperty PageSizeProperty =
-        BindableProperty.Create(nameof(PageSize), typeof(int), typeof(TableView), defaultValue: 10, propertyChanged: OnPageSizeChanged);
+        BindableProperty.Create(nameof(PageSize), typeof(int), typeof(TableView), defaultValue: 15, propertyChanged: OnPageSizeChanged);
 
     public static readonly BindableProperty CanGoPrevProperty =
         BindableProperty.Create(nameof(CanGoPrev), typeof(bool), typeof(TableView), false);

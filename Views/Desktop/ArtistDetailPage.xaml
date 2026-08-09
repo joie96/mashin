@@ -864,7 +864,7 @@
                 <controls:TableView x:Name="TopTracksTableView"
                     Grid.Row="1"
                     Margin="0,16,0,0"
-                    PageSize="10"
+                    PageSize="15"
                     ItemsSource="{Binding TopTrackItems}"
                     UserDataService="{Binding UserDataService}"
                     PrimaryInfoTappedCommand="{Binding AlbumTappedCommand}"

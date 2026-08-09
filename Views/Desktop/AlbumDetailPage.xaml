@@ -449,7 +449,7 @@
                 <controls:TableView x:Name="TracksTableView"
                     Grid.Row="1"
                     Margin="0,16,0,0"
-                    PageSize="10"
+                    PageSize="15"
                     ItemsSource="{Binding TrackItems}"
                     UserDataService="{Binding UserDataService}"
                     PlaybackContextItem="{Binding Album}"

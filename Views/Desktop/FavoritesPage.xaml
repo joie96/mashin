@@ -172,7 +172,7 @@
                 <controls:TableView x:Name="FavoritesTracksTableView"
                     Grid.Row="2"
                     Margin="0,16,0,0"
-                    PageSize="10"
+                    PageSize="15"
                     IsVisible="{Binding ShowTrackTable}"
                     ItemsSource="{Binding TrackItems}"
                     UserDataService="{Binding UserDataService}"

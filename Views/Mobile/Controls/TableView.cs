@@ -16,7 +16,7 @@ public partial class TableView : ContentView
     #region Fields
 
     private const int DefaultInitialLoadCount = 15;
-    private const int LoadMoreCount = 10;
+    private const int LoadMoreCount = 30;
 
     private readonly HashSet<MediaItem> _suppressNextTap = new();
     private readonly HashSet<INotifyPropertyChanged> _observedItems = new();

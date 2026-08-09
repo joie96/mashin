@@ -75,7 +75,7 @@
 
                 <controls:TableView x:Name="QueueItemsTable"
                     Grid.Row="1"
-                    InitialLoadCount="10"
+                    InitialLoadCount="15"
                     Margin="0"
                     ItemsSource="{Binding CurrentQueueItems}"
                     PlaybackContextItem="{Binding CurrentQueueItems}"
