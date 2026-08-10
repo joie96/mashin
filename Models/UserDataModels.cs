@@ -36,6 +36,9 @@ public sealed class AlbumRef
     [JsonPropertyName("image_url")]
     public string? ImagePath { get; set; }
 
+    [JsonPropertyName("image_proxy_id")]
+    public string? ImageProxyId { get; set; }
+
     [JsonPropertyName("provider_mappings")]
     public List<ProviderMapping> ProviderMappings { get; set; } = new();
 }
@@ -59,6 +62,9 @@ public sealed class TrackSnapshot
 
     [JsonPropertyName("image_url")]
     public string? ImagePath { get; set; }
+
+    [JsonPropertyName("image_proxy_id")]
+    public string? ImageProxyId { get; set; }
 
     [JsonPropertyName("provider_mappings")]
     public List<ProviderMapping> ProviderMappings { get; set; } = new();
@@ -96,6 +102,9 @@ public sealed class AlbumSnapshot
     [JsonPropertyName("image_url")]
     public string? ImagePath { get; set; }
 
+    [JsonPropertyName("image_proxy_id")]
+    public string? ImageProxyId { get; set; }
+
     [JsonPropertyName("provider_mappings")]
     public List<ProviderMapping> ProviderMappings { get; set; } = new();
 
@@ -126,6 +135,9 @@ public sealed class PlaylistSnapshot
 
     [JsonPropertyName("image_url")]
     public string? ImagePath { get; set; }
+
+    [JsonPropertyName("image_proxy_id")]
+    public string? ImageProxyId { get; set; }
 
     [JsonPropertyName("provider_mappings")]
     public List<ProviderMapping> ProviderMappings { get; set; } = new();
@@ -162,6 +174,9 @@ public sealed class ArtistSnapshot
 
     [JsonPropertyName("image_url")]
     public string? ImagePath { get; set; }
+
+    [JsonPropertyName("image_proxy_id")]
+    public string? ImageProxyId { get; set; }
 
     [JsonPropertyName("provider_mappings")]
     public List<ProviderMapping> ProviderMappings { get; set; } = new();
@@ -202,6 +217,7 @@ public static class UserDataSnapshotMapper
             Duration = track.Duration,
             Index = indexOverride ?? track.Index,
             ImagePath = track.PrimaryImage?.Path,
+            ImageProxyId = track.PrimaryImage?.ProxyId,
             ProviderMappings = CloneProviderMappings(track.ProviderMappings)
         };
 
@@ -232,6 +248,7 @@ public static class UserDataSnapshotMapper
             DisplayName = album.DisplayName,
             Year = album.Year,
             ImagePath = album.PrimaryImage?.Path,
+            ImageProxyId = album.PrimaryImage?.ProxyId,
             ProviderMappings = CloneProviderMappings(album.ProviderMappings)
         };
 
@@ -256,6 +273,7 @@ public static class UserDataSnapshotMapper
             Name = artist.Name,
             DisplayName = artist.DisplayName,
             ImagePath = artist.PrimaryImage?.Path,
+            ImageProxyId = artist.PrimaryImage?.ProxyId,
             ProviderMappings = CloneProviderMappings(artist.ProviderMappings)
         };
     }
@@ -273,6 +291,7 @@ public static class UserDataSnapshotMapper
             Owner = playlist.Owner,
             IsEditable = playlist.IsEditable,
             ImagePath = playlist.PrimaryImage?.Path,
+            ImageProxyId = playlist.PrimaryImage?.ProxyId,
             ProviderMappings = CloneProviderMappings(playlist.ProviderMappings)
         };
 
@@ -295,6 +314,7 @@ public static class UserDataSnapshotMapper
             Name = album.Name,
             Year = album.Year,
             ImagePath = album.PrimaryImage?.Path,
+            ImageProxyId = album.PrimaryImage?.ProxyId,
             ProviderMappings = CloneProviderMappings(album.ProviderMappings)
         };
     }
@@ -333,7 +353,7 @@ public static class UserDataSnapshotMapper
             track.DisplayName = snapshot.DisplayName;
         }
 
-        track.Metadata = BuildMetadata(snapshot.ImagePath);
+        track.Metadata = BuildMetadata(snapshot.ImagePath, snapshot.ImageProxyId);
 
         if (snapshot.Album != null)
         {
@@ -348,7 +368,7 @@ public static class UserDataSnapshotMapper
             };
 
             album.DisplayName = snapshot.Album.Name;
-            album.Metadata = BuildMetadata(snapshot.Album.ImagePath);
+            album.Metadata = BuildMetadata(snapshot.Album.ImagePath, snapshot.Album.ImageProxyId);
             track.Album = album;
         }
 
@@ -380,7 +400,7 @@ public static class UserDataSnapshotMapper
             album.DisplayName = snapshot.DisplayName;
         }
 
-        album.Metadata = BuildMetadata(snapshot.ImagePath);
+        album.Metadata = BuildMetadata(snapshot.ImagePath, snapshot.ImageProxyId);
 
         if (snapshot.Artists.Count > 0)
         {
@@ -412,7 +432,7 @@ public static class UserDataSnapshotMapper
             playlist.DisplayName = snapshot.DisplayName;
         }
 
-        playlist.Metadata = BuildMetadata(snapshot.ImagePath);
+        playlist.Metadata = BuildMetadata(snapshot.ImagePath, snapshot.ImageProxyId);
 
         var tracks = snapshot.Items
             .OrderBy(track => track.Index ?? int.MaxValue)
@@ -445,7 +465,7 @@ public static class UserDataSnapshotMapper
             artist.DisplayName = snapshot.DisplayName;
         }
 
-        artist.Metadata = BuildMetadata(snapshot.ImagePath);
+        artist.Metadata = BuildMetadata(snapshot.ImagePath, snapshot.ImageProxyId);
         return artist;
     }
 
@@ -487,7 +507,7 @@ public static class UserDataSnapshotMapper
         };
     }
 
-    public static MediaItemMetadata? BuildMetadata(string? imagePath)
+    public static MediaItemMetadata? BuildMetadata(string? imagePath, string? imageProxyId = null)
     {
         if (string.IsNullOrWhiteSpace(imagePath))
         {
@@ -501,6 +521,7 @@ public static class UserDataSnapshotMapper
                 new()
                 {
                     Path = imagePath,
+                    ProxyId = imageProxyId,
                     Provider = string.Empty,
                     RemotelyAccessible = true
                 }

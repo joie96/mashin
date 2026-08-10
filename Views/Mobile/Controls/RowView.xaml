@@ -72,7 +72,7 @@
                         <ffimageloading:CachedImage Aspect="AspectFill"
                             LoadingPriority="{Binding ., Converter={StaticResource MediaItemLoadingPriorityConverter}}"
                             IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
-                            Source="{Binding ImageUri, Converter={StaticResource ImageUriSizeConverter}, ConverterParameter=160}" />
+                            Source="{Binding ImageUri, Converter={StaticResource ImageUriSizeConverter}, ConverterParameter=256}" />
                         <Image Aspect="AspectFill"
                             IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
                             Source="{AppThemeBinding Light=placeholders/album_light.png, Dark=placeholders/album_dark.png}" />
@@ -259,7 +259,7 @@
                         <ffimageloading:CachedImage Aspect="AspectFill"
                             LoadingPriority="{Binding ., Converter={StaticResource MediaItemLoadingPriorityConverter}}"
                             IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
-                            Source="{Binding ImageUri, Converter={StaticResource ImageUriSizeConverter}, ConverterParameter=160}" />
+                            Source="{Binding ImageUri, Converter={StaticResource ImageUriSizeConverter}, ConverterParameter=256}" />
                         <Image Aspect="AspectFill"
                             IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
                             Source="{AppThemeBinding Light=placeholders/track_light.png, Dark=placeholders/track_dark.png}" />
@@ -446,7 +446,7 @@
                         <ffimageloading:CachedImage Aspect="AspectFill"
                             LoadingPriority="{Binding ., Converter={StaticResource MediaItemLoadingPriorityConverter}}"
                             IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
-                            Source="{Binding ImageUri, Converter={StaticResource ImageUriSizeConverter}, ConverterParameter=160}" />
+                            Source="{Binding ImageUri, Converter={StaticResource ImageUriSizeConverter}, ConverterParameter=256}" />
                         <Image Aspect="AspectFill"
                             IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
                             Source="{AppThemeBinding Light=placeholders/artist_light.png, Dark=placeholders/artist_dark.png}" />
@@ -621,7 +621,7 @@
                         <ffimageloading:CachedImage Aspect="AspectFill"
                             LoadingPriority="{Binding ., Converter={StaticResource MediaItemLoadingPriorityConverter}}"
                             IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
-                            Source="{Binding ImageUri, Converter={StaticResource ImageUriSizeConverter}, ConverterParameter=160}" />
+                            Source="{Binding ImageUri, Converter={StaticResource ImageUriSizeConverter}, ConverterParameter=256}" />
                         <Image Aspect="AspectFill"
                             IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
                             Source="{AppThemeBinding Light=placeholders/playlist_light.png, Dark=placeholders/playlist_dark.png}" />
