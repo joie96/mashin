@@ -315,8 +315,15 @@ public class PlaylistDetailViewModel : INotifyPropertyChanged, INavigationAware,
             var playlist = await ResolvePlaylistFromServiceAsync(playlistId, providerInstanceOrDomain);
             if (playlist != null)
             {
-                await LoadLocalPlaylistAsync(playlist);
-                return;
+                var isLocalUserPlaylist = string.Equals(playlist.Provider, "mashin", StringComparison.OrdinalIgnoreCase);
+                var hasStoredItems = playlist.Items.Count > 0;
+
+                // Favorite playlists are persisted without items; those need a normal online track load.
+                if (isLocalUserPlaylist || hasStoredItems)
+                {
+                    await LoadLocalPlaylistAsync(playlist);
+                    return;
+                }
             }
 
             await LoadPlaylistMetadataAsync(playlistId, providerInstanceOrDomain);

@@ -360,7 +360,7 @@ public sealed class UserDataService : INotifyPropertyChanged
                             Provider = mediaItem.Provider,
                             Name = mediaItem.Name,
                             DisplayName = mediaItem.DisplayName
-                        }), favorite: true)),
+                        }, includeItems: false), favorite: true)),
                     _ => (bool?)null
                 };
 
@@ -929,7 +929,7 @@ public sealed class UserDataService : INotifyPropertyChanged
                 .Select(album => UserDataSnapshotMapper.ToAlbumSnapshot(album))
                 .ToList(),
             Playlists = _favoritePlaylists
-                .Select(playlist => UserDataSnapshotMapper.ToPlaylistSnapshot(playlist))
+                .Select(playlist => UserDataSnapshotMapper.ToPlaylistSnapshot(playlist, includeItems: false))
                 .ToList(),
             Artists = _favoriteArtists
                 .Select(artist => UserDataSnapshotMapper.ToArtistSnapshot(artist))

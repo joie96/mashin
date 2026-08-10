@@ -260,9 +260,9 @@ public static class UserDataSnapshotMapper
         };
     }
 
-    public static PlaylistSnapshot ToPlaylistSnapshot(Playlist playlist)
+    public static PlaylistSnapshot ToPlaylistSnapshot(Playlist playlist, bool includeItems = true)
     {
-        return new PlaylistSnapshot
+        var snapshot = new PlaylistSnapshot
         {
             Uri = playlist.Uri ?? string.Empty,
             ItemId = playlist.ItemId,
@@ -273,11 +273,17 @@ public static class UserDataSnapshotMapper
             Owner = playlist.Owner,
             IsEditable = playlist.IsEditable,
             ImagePath = playlist.PrimaryImage?.Path,
-            ProviderMappings = CloneProviderMappings(playlist.ProviderMappings),
-            Items = playlist.Items
-                .Select((track, index) => ToTrackSnapshot(track, index))
-                .ToList()
+            ProviderMappings = CloneProviderMappings(playlist.ProviderMappings)
         };
+
+        if (includeItems)
+        {
+            snapshot.Items = playlist.Items
+                .Select((track, index) => ToTrackSnapshot(track, index))
+                .ToList();
+        }
+
+        return snapshot;
     }
 
     public static AlbumRef ToAlbumRef(Album album)
