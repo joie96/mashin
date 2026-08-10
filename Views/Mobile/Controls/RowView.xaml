@@ -12,8 +12,6 @@
     x:Name="self">
 
     <ContentView.Resources>
-        <converters:MediaItemLoadingPriorityConverter x:Key="MediaItemLoadingPriorityConverter" />
-
         <!--  DataTemplate for Albums  -->
         <DataTemplate x:Key="AlbumTemplate" x:DataType="models:Album">
             <Grid RowDefinitions="Auto,Auto,Auto,6"
@@ -70,7 +68,6 @@
                     </Border.StrokeShape>
                     <Grid>
                         <ffimageloading:CachedImage Aspect="AspectFill"
-                            LoadingPriority="{Binding ., Converter={StaticResource MediaItemLoadingPriorityConverter}}"
                             IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
                             Source="{Binding ImageUri, Converter={StaticResource ImageUriSizeConverter}, ConverterParameter=256}" />
                         <Image Aspect="AspectFill"
@@ -257,7 +254,6 @@
                     </Border.StrokeShape>
                     <Grid>
                         <ffimageloading:CachedImage Aspect="AspectFill"
-                            LoadingPriority="{Binding ., Converter={StaticResource MediaItemLoadingPriorityConverter}}"
                             IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
                             Source="{Binding ImageUri, Converter={StaticResource ImageUriSizeConverter}, ConverterParameter=256}" />
                         <Image Aspect="AspectFill"
@@ -444,7 +440,6 @@
                     </Border.StrokeShape>
                     <Grid>
                         <ffimageloading:CachedImage Aspect="AspectFill"
-                            LoadingPriority="{Binding ., Converter={StaticResource MediaItemLoadingPriorityConverter}}"
                             IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
                             Source="{Binding ImageUri, Converter={StaticResource ImageUriSizeConverter}, ConverterParameter=256}" />
                         <Image Aspect="AspectFill"
@@ -619,7 +614,6 @@
                     </Border.StrokeShape>
                     <Grid>
                         <ffimageloading:CachedImage Aspect="AspectFill"
-                            LoadingPriority="{Binding ., Converter={StaticResource MediaItemLoadingPriorityConverter}}"
                             IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
                             Source="{Binding ImageUri, Converter={StaticResource ImageUriSizeConverter}, ConverterParameter=256}" />
                         <Image Aspect="AspectFill"

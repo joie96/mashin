@@ -15,7 +15,6 @@
 
     <ContentView.Resources>
         <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
-        <converters:MediaItemLoadingPriorityConverter x:Key="MediaItemLoadingPriorityConverter" />
         <converters:PlayStateToBoolConverter x:Key="PlayStateToBoolConverter" />
         <converters:StringEqualsConverter x:Key="StringEqualsConverter" />
 
@@ -61,7 +60,6 @@
                             </Border.StrokeShape>
                             <Grid>
                                 <ffimageloading:CachedImage Aspect="AspectFill"
-                                    LoadingPriority="{Binding ., Converter={StaticResource MediaItemLoadingPriorityConverter}}"
                                     IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
                                     Source="{Binding ImageUri, Converter={StaticResource ImageUriSizeConverter}, ConverterParameter=80}" />
                                 <Image Aspect="AspectFill"
@@ -236,7 +234,6 @@
                             </Border.StrokeShape>
                             <Grid>
                                 <ffimageloading:CachedImage Aspect="AspectFill"
-                                    LoadingPriority="{Binding ., Converter={StaticResource MediaItemLoadingPriorityConverter}}"
                                     IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
                                     Source="{Binding ImageUri, Converter={StaticResource ImageUriSizeConverter}, ConverterParameter=80}" />
                                 <Image Aspect="AspectFill"
@@ -471,7 +468,6 @@
                             </Border.StrokeShape>
                             <Grid>
                                 <ffimageloading:CachedImage Aspect="AspectFill"
-                                    LoadingPriority="{Binding MediaItem, Converter={StaticResource MediaItemLoadingPriorityConverter}}"
                                     IsVisible="{Binding MediaItem.ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
                                     Source="{Binding MediaItem.ImageUri, Converter={StaticResource ImageUriSizeConverter}, ConverterParameter=80}" />
                                 <Image Aspect="AspectFill"
