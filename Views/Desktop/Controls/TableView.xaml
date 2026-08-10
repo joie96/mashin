@@ -465,13 +465,13 @@
                             <Grid>
                                 <ffimageloading:CachedImage Aspect="AspectFill"
                                        HeightRequest="48"
-                                        IsVisible="{Binding ImageUri80, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
-                                        Source="{Binding ImageUri80}"
+                                     IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
+                                     Source="{Binding ImageUri, Converter={StaticResource ImageUriSizeConverter}, ConverterParameter=80}"
                                        VerticalOptions="Center"
                                        WidthRequest="48"/>
                                 <Image Aspect="AspectFill"
                                        HeightRequest="48"
-                                        IsVisible="{Binding ImageUri80, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
+                                     IsVisible="{Binding ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
                                        Source="{AppThemeBinding Light=placeholders/track_light.png, Dark=placeholders/track_dark.png}"
                                        VerticalOptions="Center"
                                        WidthRequest="48"/>
@@ -855,13 +855,13 @@
                             <Grid>
                                 <ffimageloading:CachedImage Aspect="AspectFill"
                                        HeightRequest="48"
-                                        IsVisible="{Binding MediaItem.ImageUri80, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
-                                        Source="{Binding MediaItem.ImageUri80}"
+                                     IsVisible="{Binding MediaItem.ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}, ConverterParameter=invert}"
+                                     Source="{Binding MediaItem.ImageUri, Converter={StaticResource ImageUriSizeConverter}, ConverterParameter=80}"
                                        VerticalOptions="Center"
                                        WidthRequest="48"/>
                                 <Image Aspect="AspectFill"
                                        HeightRequest="48"
-                                        IsVisible="{Binding MediaItem.ImageUri80, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
+                                     IsVisible="{Binding MediaItem.ImageUri, Converter={StaticResource StringNullOrWhiteSpaceToBoolConverter}}"
                                        Source="{AppThemeBinding Light=placeholders/track_light.png, Dark=placeholders/track_dark.png}"
                                        VerticalOptions="Center"
                                        WidthRequest="48"/>

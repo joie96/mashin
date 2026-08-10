@@ -1044,7 +1044,20 @@ public partial class TableView : ContentView
             return;
         }
 
-        _visibleItems.ReplaceRange(nextItems);
+        for (var index = 0; index < nextCount; index++)
+        {
+            if (!ReferenceEquals(_visibleItems[index], nextItems[index]))
+            {
+                _visibleItems.ReplaceRange(nextItems);
+                return;
+            }
+        }
+
+        // Shrink by removing tail items only to avoid a full list rebind/reset.
+        for (var index = currentCount - 1; index >= nextCount; index--)
+        {
+            _visibleItems.RemoveAt(index);
+        }
     }
 
     private static List<object> TakePrefixItems(IEnumerable<object> source, int maxCount)

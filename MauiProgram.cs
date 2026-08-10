@@ -51,6 +51,7 @@ public static class MauiProgram
 
 #if ANDROID
         // CollectView tuning for Android to reduce rebind churn while scrolling.
+        /*
         CollectionViewHandler.Mapper.AppendToMapping("AndroidRecyclerTuning", (handler, view) =>
         {
             if (handler.PlatformView is not RecyclerView recyclerView)
@@ -76,6 +77,7 @@ public static class MauiProgram
             var pool = recyclerView.GetRecycledViewPool();
             pool.SetMaxRecycledViews(0, 96);
         });
+        */
 #endif
 
         builder

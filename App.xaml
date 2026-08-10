@@ -10,6 +10,7 @@
     <Application.Resources>
         <ResourceDictionary>
             <converters:StringNullOrWhiteSpaceToBoolConverter x:Key="StringNullOrWhiteSpaceToBoolConverter" />
+            <converters:ImageUriSizeConverter x:Key="ImageUriSizeConverter" />
 
             <Style TargetType="ffimageloading:CachedImage"
                    ApplyToDerivedTypes="True">

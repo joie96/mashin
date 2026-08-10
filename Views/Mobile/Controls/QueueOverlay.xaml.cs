@@ -85,6 +85,8 @@ public partial class QueueOverlay : ContentView
             return;
         }
 
+        var shouldResetVisibleItems = false;
+
         IsAnimating = true;
         try
         {
@@ -94,11 +96,16 @@ public partial class QueueOverlay : ContentView
             ZIndex = backgroundZIndex;
             OverlaySheet.TranslationY = 0;
             IsOpen = false;
-            QueueItemsTable.ResetVisibleItemsToInitialCount();
+            shouldResetVisibleItems = true;
         }
         finally
         {
             IsAnimating = false;
+        }
+
+        if (shouldResetVisibleItems && !IsOpen && ZIndex == backgroundZIndex)
+        {
+            QueueItemsTable.ResetVisibleItemsToInitialCount();
         }
     }
 
