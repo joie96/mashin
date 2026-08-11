@@ -7,24 +7,19 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:mashin_flutter/main.dart';
+import 'package:mashin_flutter/app/shell/app_shell.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('shows login screen when no session exists', (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    await tester.pumpWidget(const MashinApp());
+    await tester.pumpAndSettle();
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(find.text('Bei Music Assistant anmelden'), findsOneWidget);
+    expect(find.byType(TextFormField), findsNWidgets(3));
+    expect(find.widgetWithText(FilledButton, 'Anmelden'), findsOneWidget);
   });
 }
