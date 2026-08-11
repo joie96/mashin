@@ -1,0 +1,26 @@
+{
+    // Verwendet IntelliSense zum Ermitteln möglicher Attribute.
+    // Zeigen Sie auf vorhandene Attribute, um die zugehörigen Beschreibungen anzuzeigen.
+    // Weitere Informationen finden Sie unter https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug",
+            "type": "maui",
+            "request": "launch",
+            "preLaunchTask": "maui: Build"
+        },
+        {
+            "name": "Build Windows",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "dotnet build -t:Build -p:Configuration=Release -f net10.0-windows10.0.19041.0 -p:WindowsPackageType=None mashin.csproj"
+        },
+        {
+            "name": "Build Android",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "if (Test-Path bin) { Remove-Item -Recurse -Force bin }; if (Test-Path obj) { Remove-Item -Recurse -Force obj }; dotnet build -t:Build -p:Configuration=Release -f net10.0-android mashin.csproj"
+        }
+    ]
+}
