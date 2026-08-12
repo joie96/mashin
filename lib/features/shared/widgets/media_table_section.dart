@@ -6,7 +6,7 @@ import '../../../data/music_assistant/ma_models.dart';
 
 // #region Core Section
 
-class MediaTableSection<T> extends StatelessWidget {
+class MediaTableSection<T> extends StatefulWidget {
   final String title;
   final List<T> items;
   final bool isLoading;
@@ -15,6 +15,9 @@ class MediaTableSection<T> extends StatelessWidget {
   final List<DesktopTableColumn<T>>? desktopColumns;
   final int skeletonRowCount;
   final double desktopBreakpoint;
+  final bool enableSelection;
+  final ValueChanged<List<T>>? onSelectionChanged;
+  final VoidCallback? onSelectionMenuTap;
 
   const MediaTableSection({
     super.key,
@@ -26,7 +29,123 @@ class MediaTableSection<T> extends StatelessWidget {
     this.desktopColumns,
     this.skeletonRowCount = 8,
     this.desktopBreakpoint = 920,
+    this.enableSelection = true,
+    this.onSelectionChanged,
+    this.onSelectionMenuTap,
   });
+
+  @override
+  State<MediaTableSection<T>> createState() => _MediaTableSectionState<T>();
+}
+
+class _MediaTableSectionState<T> extends State<MediaTableSection<T>> {
+  final Set<int> _selectedIndexes = <int>{};
+  bool _isMobileSelectionMode = false;
+
+  @override
+  void didUpdateWidget(covariant MediaTableSection<T> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // Keep selection stable while preventing out-of-range indices when data updates.
+    _selectedIndexes.removeWhere((int index) => index < 0 || index >= widget.items.length);
+
+    if (_selectedIndexes.isEmpty) {
+      _isMobileSelectionMode = false;
+    }
+  }
+
+  // #region Selection State
+
+  bool get _isAllSelected => widget.items.isNotEmpty && _selectedIndexes.length == widget.items.length;
+
+  void _emitSelectionChanged() {
+    if (widget.onSelectionChanged == null) {
+      return;
+    }
+
+    final List<T> selected = _selectedIndexes
+        .where((int index) => index >= 0 && index < widget.items.length)
+        .map((int index) => widget.items[index])
+        .toList(growable: false);
+    widget.onSelectionChanged!(selected);
+  }
+
+  void _toggleDesktopSelectedIndex(int index) {
+    if (!widget.enableSelection) {
+      return;
+    }
+
+    setState(() {
+      if (_selectedIndexes.contains(index)) {
+        _selectedIndexes.remove(index);
+      } else {
+        _selectedIndexes.add(index);
+      }
+    });
+    _emitSelectionChanged();
+  }
+
+  void _toggleAllSelectedIndexes() {
+    if (!widget.enableSelection || widget.items.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      if (_isAllSelected) {
+        _selectedIndexes.clear();
+      } else {
+        _selectedIndexes
+          ..clear()
+          ..addAll(List<int>.generate(widget.items.length, (int index) => index));
+      }
+    });
+    _emitSelectionChanged();
+  }
+
+  void _toggleDesktopSelectAll() {
+    _toggleAllSelectedIndexes();
+  }
+
+  void _enterMobileSelectionMode(int index) {
+    if (!widget.enableSelection || index < 0 || index >= widget.items.length) {
+      return;
+    }
+
+    setState(() {
+      _isMobileSelectionMode = true;
+      _selectedIndexes.add(index);
+    });
+    _emitSelectionChanged();
+  }
+
+  void _toggleMobileSelectedIndex(int index) {
+    if (!widget.enableSelection || !_isMobileSelectionMode || index < 0 || index >= widget.items.length) {
+      return;
+    }
+
+    setState(() {
+      if (_selectedIndexes.contains(index)) {
+        _selectedIndexes.remove(index);
+      } else {
+        _selectedIndexes.add(index);
+      }
+
+      if (_selectedIndexes.isEmpty) {
+        _isMobileSelectionMode = false;
+      }
+    });
+    _emitSelectionChanged();
+  }
+
+  void _clearMobileSelectionMode() {
+    setState(() {
+      _selectedIndexes.clear();
+      _isMobileSelectionMode = false;
+    });
+    _emitSelectionChanged();
+  }
+
+  // #endregion
 
   @override
   Widget build(BuildContext context) {
@@ -34,20 +153,18 @@ class MediaTableSection<T> extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
-        final isDesktop = constraints.maxWidth >= desktopBreakpoint && desktopColumns != null && desktopColumns!.isNotEmpty;
+        final isDesktop =
+            constraints.maxWidth >= widget.desktopBreakpoint && widget.desktopColumns != null && widget.desktopColumns!.isNotEmpty;
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              title,
+              widget.title,
               style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 10),
-            Container(
-              color: colors.bgSecondary,
-              child: isDesktop ? _buildDesktop(context, colors) : _buildMobile(context),
-            ),
+            isDesktop ? _buildDesktop(context, colors) : _buildMobile(context),
           ],
         );
       },
@@ -55,23 +172,23 @@ class MediaTableSection<T> extends StatelessWidget {
   }
 
   Widget _buildMobile(BuildContext context) {
-    if (isLoading) {
+    if (widget.isLoading) {
       return Column(
         children: List<Widget>.generate(
-          skeletonRowCount,
+          widget.skeletonRowCount,
           (int index) => _MobileTableRowSkeleton(isFirst: index == 0),
         ),
       );
     }
 
-    if (items.isEmpty) {
+    if (widget.items.isEmpty) {
       final colors = context.mashinColors;
       return Padding(
         padding: const EdgeInsets.all(16),
         child: Align(
           alignment: Alignment.centerLeft,
           child: Text(
-            emptyText,
+            widget.emptyText,
             style: TextStyle(
               color: colors.textSecondary,
               fontFamily: 'PoppinsRegular',
@@ -82,48 +199,86 @@ class MediaTableSection<T> extends StatelessWidget {
       );
     }
 
-    return Column(
-      children: items
-          .asMap()
-          .entries
-          .map(
-            (entry) => _MobileTableRow(
-              data: rowMapper(entry.value, entry.key),
-              isFirst: entry.key == 0,
+    return Stack(
+      children: <Widget>[
+        Column(
+          children: <Widget>[
+            ...widget.items
+                .asMap()
+                .entries
+                .map(
+                  (entry) => _MobileTableRow(
+                    data: widget.rowMapper(entry.value, entry.key),
+                    isFirst: entry.key == 0,
+                    isSelected: _selectedIndexes.contains(entry.key),
+                    selectionModeActive: _isMobileSelectionMode,
+                    selectionEnabled: widget.enableSelection,
+                    onToggleSelected: () => _toggleMobileSelectedIndex(entry.key),
+                    onLongPressSelect: () => _enterMobileSelectionMode(entry.key),
+                  ),
+                )
+                .toList(),
+            if (_isMobileSelectionMode) const SizedBox(height: 76),
+          ],
+        ),
+        if (_isMobileSelectionMode)
+          Positioned(
+            right: 8,
+            bottom: 8,
+            child: _MobileSelectionOverlay(
+              allSelected: _isAllSelected,
+              onToggleAll: _toggleMobileSelectAll,
+              onMenuTap: widget.onSelectionMenuTap,
+              onClose: _clearMobileSelectionMode,
             ),
-          )
-          .toList(),
+          ),
+      ],
     );
   }
 
-  Widget _buildDesktop(BuildContext context, MashinColors colors) {
-    final columns = desktopColumns!;
+  void _toggleMobileSelectAll() {
+    _toggleAllSelectedIndexes();
+  }
 
-    if (isLoading) {
+  Widget _buildDesktop(BuildContext context, MashinColors colors) {
+    final columns = widget.desktopColumns!;
+
+    if (widget.isLoading) {
       return Column(
         children: <Widget>[
-          _DesktopTableHeader<T>(columns: columns),
+          _DesktopTableHeader<T>(
+            columns: columns,
+            showSelection: widget.enableSelection,
+            isAllSelected: _isAllSelected,
+            onToggleSelectAll: _toggleDesktopSelectAll,
+          ),
           ...List<Widget>.generate(
-            skeletonRowCount,
+            widget.skeletonRowCount,
             (int index) => _DesktopTableRowSkeleton<T>(
               columns: columns,
               isFirst: index == 0,
+              showSelection: widget.enableSelection,
             ),
           ),
         ],
       );
     }
 
-    if (items.isEmpty) {
+    if (widget.items.isEmpty) {
       return Column(
         children: <Widget>[
-          _DesktopTableHeader<T>(columns: columns),
+          _DesktopTableHeader<T>(
+            columns: columns,
+            showSelection: widget.enableSelection,
+            isAllSelected: false,
+            onToggleSelectAll: _toggleDesktopSelectAll,
+          ),
           Padding(
             padding: const EdgeInsets.all(16),
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                emptyText,
+                widget.emptyText,
                 style: TextStyle(
                   color: colors.textSecondary,
                   fontFamily: 'PoppinsRegular',
@@ -138,13 +293,21 @@ class MediaTableSection<T> extends StatelessWidget {
 
     return Column(
       children: <Widget>[
-        _DesktopTableHeader<T>(columns: columns),
-        ...items.asMap().entries.map(
+        _DesktopTableHeader<T>(
+          columns: columns,
+          showSelection: widget.enableSelection,
+          isAllSelected: _isAllSelected,
+          onToggleSelectAll: _toggleDesktopSelectAll,
+        ),
+        ...widget.items.asMap().entries.map(
               (entry) => _DesktopTableRow<T>(
                 columns: columns,
                 item: entry.value,
                 index: entry.key,
                 isFirst: entry.key == 0,
+                isSelected: _selectedIndexes.contains(entry.key),
+                selectionEnabled: widget.enableSelection,
+                onToggleSelected: () => _toggleDesktopSelectedIndex(entry.key),
               ),
             ),
       ],
@@ -221,53 +384,94 @@ class MediaTableRowData {
 
 // #region Mobile Rendering
 
-class _MobileTableRow extends StatelessWidget {
+class _MobileTableRow extends StatefulWidget {
   final MediaTableRowData data;
   final bool isFirst;
+  final bool isSelected;
+  final bool selectionModeActive;
+  final bool selectionEnabled;
+  final VoidCallback onToggleSelected;
+  final VoidCallback onLongPressSelect;
 
   const _MobileTableRow({
     required this.data,
     required this.isFirst,
+    required this.isSelected,
+    required this.selectionModeActive,
+    required this.selectionEnabled,
+    required this.onToggleSelected,
+    required this.onLongPressSelect,
   });
+
+  @override
+  State<_MobileTableRow> createState() => _MobileTableRowState();
+}
+
+class _MobileTableRowState extends State<_MobileTableRow> {
+  bool _isHovered = false;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
 
-    return Container(
-      constraints: const BoxConstraints(minHeight: 64),
-      decoration: BoxDecoration(
-        color: Colors.transparent,
-        border: isFirst ? null : Border(top: BorderSide(color: colors.border)),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      child: Row(
-        children: <Widget>[
-          _TableCover(
-            coverUrl: data.coverUrl,
-            fallbackIcon: data.fallbackIcon,
-            size: 52,
-            radius: 8,
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onLongPress: widget.selectionEnabled ? widget.onLongPressSelect : null,
+        onTap: widget.selectionModeActive ? widget.onToggleSelected : null,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 64),
+          decoration: BoxDecoration(
+            color: widget.isSelected ? colors.hover : (_isHovered ? colors.hover : Colors.transparent),
+            border: widget.isFirst ? null : Border(top: BorderSide(color: colors.border)),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: <Widget>[
-                Text(
-                  data.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontFamily: 'PoppinsRegular',
-                        fontSize: 14,
-                        color: colors.textPrimary,
-                      ),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Row(
+            children: <Widget>[
+              _TableCover(
+                coverUrl: widget.data.coverUrl,
+                fallbackIcon: widget.data.fallbackIcon,
+                size: 52,
+                radius: 8,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    Text(
+                      widget.data.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            fontFamily: 'PoppinsRegular',
+                            fontSize: 14,
+                            color: colors.textPrimary,
+                          ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      widget.data.subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            fontFamily: 'PoppinsRegular',
+                            fontSize: 12,
+                            color: colors.textSecondary,
+                          ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 1),
-                Text(
-                  data.subtitle,
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 52,
+                child: Text(
+                  widget.data.trailing,
+                  textAlign: TextAlign.right,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -276,46 +480,44 @@ class _MobileTableRow extends StatelessWidget {
                         color: colors.textSecondary,
                       ),
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 52,
-            child: Text(
-              data.trailing,
-              textAlign: TextAlign.right,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    fontFamily: 'PoppinsRegular',
-                    fontSize: 12,
-                    color: colors.textSecondary,
-                  ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 20,
-            child: _ProviderIcon(
-              providerLabel: data.providerLabel,
-              iconSvg: data.providerIconSvg,
-              size: 16,
-            ),
-          ),
-          const SizedBox(width: 4),
-          SizedBox(
-            width: 40,
-            height: 40,
-            child: Center(
-              child: Icon(
-                Icons.more_vert_rounded,
-                size: 18,
-                color: colors.textSecondary,
               ),
-            ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 20,
+                child: _ProviderIcon(
+                  providerLabel: widget.data.providerLabel,
+                  iconSvg: widget.data.providerIconSvg,
+                  size: 16,
+                ),
+              ),
+              SizedBox(width: widget.selectionEnabled && widget.selectionModeActive ? 10 : 4),
+              if (widget.selectionEnabled && widget.selectionModeActive)
+                SizedBox(
+                  width: 24,
+                  child: Align(
+                    alignment: Alignment.center,
+                    child: _MobileSelectionCheckBox(
+                      isChecked: widget.isSelected,
+                      isVisible: true,
+                      onTap: widget.onToggleSelected,
+                    ),
+                  ),
+                )
+              else
+                SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: Center(
+                    child: Icon(
+                      Icons.more_vert_rounded,
+                      size: 18,
+                      color: colors.textSecondary,
+                    ),
+                  ),
+                ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -380,8 +582,16 @@ class _MobileTableRowSkeleton extends StatelessWidget {
 
 class _DesktopTableHeader<T> extends StatelessWidget {
   final List<DesktopTableColumn<T>> columns;
+  final bool showSelection;
+  final bool isAllSelected;
+  final VoidCallback onToggleSelectAll;
 
-  const _DesktopTableHeader({required this.columns});
+  const _DesktopTableHeader({
+    required this.columns,
+    required this.showSelection,
+    required this.isAllSelected,
+    required this.onToggleSelectAll,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -396,7 +606,8 @@ class _DesktopTableHeader<T> extends StatelessWidget {
       ),
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
-        children: columns
+        children: <Widget>[
+          ...columns
             .map(
               (column) => _desktopCellWidget(
                 flex: column.flex,
@@ -419,6 +630,18 @@ class _DesktopTableHeader<T> extends StatelessWidget {
               ),
             )
             .toList(),
+          if (showSelection)
+            SizedBox(
+              width: 40,
+              child: Center(
+                child: _DesktopSelectionCheckBox(
+                  isChecked: isAllSelected,
+                  isVisible: true,
+                  onTap: onToggleSelectAll,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -435,54 +658,84 @@ Color _desktopToneColor(MashinColors colors, DesktopTextTone tone) {
   }
 }
 
-class _DesktopTableRow<T> extends StatelessWidget {
+class _DesktopTableRow<T> extends StatefulWidget {
   final List<DesktopTableColumn<T>> columns;
   final T item;
   final int index;
   final bool isFirst;
+  final bool isSelected;
+  final bool selectionEnabled;
+  final VoidCallback onToggleSelected;
 
   const _DesktopTableRow({
     required this.columns,
     required this.item,
     required this.index,
     required this.isFirst,
+    required this.isSelected,
+    required this.selectionEnabled,
+    required this.onToggleSelected,
   });
+
+  @override
+  State<_DesktopTableRow<T>> createState() => _DesktopTableRowState<T>();
+}
+
+class _DesktopTableRowState<T> extends State<_DesktopTableRow<T>> {
+  bool _isHovered = false;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
 
-    return Container(
-      height: 64,
-      decoration: BoxDecoration(
-        color: Colors.transparent,
-        border: isFirst ? null : Border(top: BorderSide(color: colors.border)),
-      ),
-      child: Row(
-        children: columns
-            .map(
-              (column) => _desktopCellWidget(
-                flex: column.flex,
-                width: column.width,
-                child: Padding(
-                  padding: column.padding,
-                  child: column.childBuilder != null
-                      ? column.childBuilder!(context, item, index)
-                      : Text(
-                          column.valueBuilder!(item, index),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: column.textAlign,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                fontFamily: 'PoppinsRegular',
-                                color: _desktopToneColor(colors, column.textTone),
-                                fontSize: column.fontSize ?? 13,
-                              ),
-                        ),
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: Container(
+        height: 64,
+        decoration: BoxDecoration(
+          color: widget.isSelected ? colors.hover : (_isHovered ? colors.hover : Colors.transparent),
+          border: widget.isFirst ? null : Border(top: BorderSide(color: colors.border)),
+        ),
+        child: Row(
+          children: <Widget>[
+            ...widget.columns
+              .map(
+                (column) => _desktopCellWidget(
+                  flex: column.flex,
+                  width: column.width,
+                  child: Padding(
+                    padding: column.padding,
+                    child: column.childBuilder != null
+                        ? column.childBuilder!(context, widget.item, widget.index)
+                        : Text(
+                            column.valueBuilder!(widget.item, widget.index),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: column.textAlign,
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  fontFamily: 'PoppinsRegular',
+                                  color: _desktopToneColor(colors, column.textTone),
+                                  fontSize: column.fontSize ?? 13,
+                                ),
+                          ),
+                  ),
+                ),
+              )
+              .toList(),
+            if (widget.selectionEnabled)
+              SizedBox(
+                width: 40,
+                child: Center(
+                  child: _DesktopSelectionCheckBox(
+                    isChecked: widget.isSelected,
+                    isVisible: _isHovered || widget.isSelected,
+                    onTap: widget.onToggleSelected,
+                  ),
                 ),
               ),
-            )
-            .toList(),
+          ],
+        ),
       ),
     );
   }
@@ -491,10 +744,12 @@ class _DesktopTableRow<T> extends StatelessWidget {
 class _DesktopTableRowSkeleton<T> extends StatelessWidget {
   final List<DesktopTableColumn<T>> columns;
   final bool isFirst;
+  final bool showSelection;
 
   const _DesktopTableRowSkeleton({
     required this.columns,
     required this.isFirst,
+    required this.showSelection,
   });
 
   @override
@@ -540,7 +795,8 @@ class _DesktopTableRowSkeleton<T> extends StatelessWidget {
         border: isFirst ? null : Border(top: BorderSide(color: colors.border)),
       ),
       child: Row(
-        children: columns
+        children: <Widget>[
+          ...columns
             .asMap()
             .entries
             .map(
@@ -554,6 +810,177 @@ class _DesktopTableRowSkeleton<T> extends StatelessWidget {
               ),
             )
             .toList(),
+          if (showSelection)
+            const SizedBox(
+              width: 40,
+              child: Center(
+                child: _DesktopSelectionCheckBox(
+                  isChecked: false,
+                  isVisible: false,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// #endregion
+
+// #region Selection Controls
+
+class _DesktopSelectionCheckBox extends StatelessWidget {
+  final bool isChecked;
+  final bool isVisible;
+  final VoidCallback? onTap;
+
+  const _DesktopSelectionCheckBox({
+    required this.isChecked,
+    required this.isVisible,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+
+    return IgnorePointer(
+      ignoring: !isVisible,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Opacity(
+          opacity: isVisible ? 1 : 0,
+          child: Container(
+            width: 20,
+            height: 20,
+            decoration: BoxDecoration(
+              color: isChecked ? colors.accent : Colors.transparent,
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(
+                color: isChecked ? colors.accent : colors.textSecondary,
+                width: 0.9,
+              ),
+            ),
+            child: isChecked
+                ? Icon(
+                    Icons.check,
+                    size: 14,
+                    color: Theme.of(context).colorScheme.onPrimary,
+                  )
+                : null,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileSelectionCheckBox extends StatelessWidget {
+  final bool isChecked;
+  final bool isVisible;
+  final VoidCallback? onTap;
+
+  const _MobileSelectionCheckBox({
+    required this.isChecked,
+    required this.isVisible,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+
+    return IgnorePointer(
+      ignoring: !isVisible,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Opacity(
+          opacity: isVisible ? 1 : 0,
+          child: Container(
+            width: 20,
+            height: 20,
+            decoration: BoxDecoration(
+              color: isChecked ? colors.accent : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: isChecked ? colors.accent : colors.textSecondary,
+                width: 0.9,
+              ),
+            ),
+            child: isChecked
+                ? Icon(
+                    Icons.check,
+                    size: 14,
+                    color: Theme.of(context).colorScheme.onPrimary,
+                  )
+                : null,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileSelectionOverlay extends StatelessWidget {
+  final bool allSelected;
+  final VoidCallback onToggleAll;
+  final VoidCallback? onMenuTap;
+  final VoidCallback onClose;
+
+  const _MobileSelectionOverlay({
+    required this.allSelected,
+    required this.onToggleAll,
+    required this.onMenuTap,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+
+    Widget actionButton({required IconData icon, required VoidCallback? onTap}) {
+      return Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: colors.border),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: onTap,
+          child: Icon(icon, size: 18, color: colors.textPrimary),
+        ),
+      );
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: colors.bgSecondary,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: colors.border),
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.15),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            actionButton(icon: allSelected ? Icons.deselect_rounded : Icons.select_all_rounded, onTap: onToggleAll),
+            const SizedBox(width: 6),
+            actionButton(icon: Icons.more_vert_rounded, onTap: onMenuTap),
+            const SizedBox(width: 6),
+            actionButton(icon: Icons.close_rounded, onTap: onClose),
+          ],
+        ),
       ),
     );
   }
@@ -592,7 +1019,7 @@ class _TableCover extends StatelessWidget {
             : Image.network(
                 resolved,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Icon(fallbackIcon, size: size * 0.45, color: colors.accent),
+                errorBuilder: (_, _, _) => Icon(fallbackIcon, size: size * 0.45, color: colors.accent),
               ),
       ),
     );
@@ -812,7 +1239,7 @@ class TrackTableSection extends StatelessWidget {
           header: 'FAV',
           width: 40,
           textAlign: TextAlign.center,
-          childBuilder: (BuildContext context, MaTrack _, int __) {
+          childBuilder: (BuildContext context, MaTrack _, int _) {
             final colors = context.mashinColors;
             return Icon(Icons.favorite_border_rounded, size: 16, color: colors.textTertiary);
           },
@@ -821,7 +1248,7 @@ class TrackTableSection extends StatelessWidget {
           header: '',
           width: 40,
           textAlign: TextAlign.center,
-          childBuilder: (BuildContext context, MaTrack _, int __) {
+          childBuilder: (BuildContext context, MaTrack _, int _) {
             final colors = context.mashinColors;
             return Icon(Icons.more_horiz_rounded, size: 18, color: colors.textTertiary);
           },
@@ -923,7 +1350,7 @@ class AlbumTableSection extends StatelessWidget {
           header: '',
           width: 40,
           textAlign: TextAlign.center,
-          childBuilder: (BuildContext context, MaAlbum _, int __) {
+          childBuilder: (BuildContext context, MaAlbum _, int _) {
             final colors = context.mashinColors;
             return Icon(Icons.more_horiz_rounded, size: 18, color: colors.textTertiary);
           },
@@ -1018,7 +1445,7 @@ class PlaylistTableSection extends StatelessWidget {
           header: '',
           width: 40,
           textAlign: TextAlign.center,
-          childBuilder: (BuildContext context, MaPlaylist _, int __) {
+          childBuilder: (BuildContext context, MaPlaylist _, int _) {
             final colors = context.mashinColors;
             return Icon(Icons.more_horiz_rounded, size: 18, color: colors.textTertiary);
           },
@@ -1098,7 +1525,7 @@ class ArtistTableSection extends StatelessWidget {
           header: '',
           width: 40,
           textAlign: TextAlign.center,
-          childBuilder: (BuildContext context, MaArtist _, int __) {
+          childBuilder: (BuildContext context, MaArtist _, int _) {
             final colors = context.mashinColors;
             return Icon(Icons.more_horiz_rounded, size: 18, color: colors.textTertiary);
           },

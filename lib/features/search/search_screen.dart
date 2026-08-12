@@ -286,28 +286,26 @@ class _SearchScreenState extends State<SearchScreen> {
         }
       });
     } finally {
-      if (!mounted || requestId != _requestId) {
-        return;
+      if (mounted && requestId == _requestId) {
+        setState(() {
+          switch (mediaType) {
+            case MaMediaType.track:
+              _isLoadingTracks = false;
+              break;
+            case MaMediaType.album:
+              _isLoadingAlbums = false;
+              break;
+            case MaMediaType.playlist:
+              _isLoadingPlaylists = false;
+              break;
+            case MaMediaType.artist:
+              _isLoadingArtists = false;
+              break;
+            default:
+              break;
+          }
+        });
       }
-
-      setState(() {
-        switch (mediaType) {
-          case MaMediaType.track:
-            _isLoadingTracks = false;
-            break;
-          case MaMediaType.album:
-            _isLoadingAlbums = false;
-            break;
-          case MaMediaType.playlist:
-            _isLoadingPlaylists = false;
-            break;
-          case MaMediaType.artist:
-            _isLoadingArtists = false;
-            break;
-          default:
-            break;
-        }
-      });
     }
   }
 

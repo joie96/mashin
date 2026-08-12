@@ -67,8 +67,8 @@ class MediaRowSection<T> extends StatelessWidget {
               ? ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: skeletonCount,
-                  separatorBuilder: (_, __) => SizedBox(width: itemSpacing),
-                  itemBuilder: (_, __) => RowCardSkeleton(
+                      separatorBuilder: (_, _) => SizedBox(width: itemSpacing),
+                      itemBuilder: (_, _) => RowCardSkeleton(
                     itemWidth: itemWidth,
                     coverSize: coverSize,
                   ),
@@ -93,7 +93,7 @@ class MediaRowSection<T> extends StatelessWidget {
                   : ListView.separated(
                       scrollDirection: Axis.horizontal,
                       itemCount: items.length > maxVisibleItems ? maxVisibleItems : items.length,
-                      separatorBuilder: (_, __) => SizedBox(width: itemSpacing),
+                      separatorBuilder: (_, _) => SizedBox(width: itemSpacing),
                       itemBuilder: (BuildContext context, int index) {
                         final data = cardMapper(items[index]);
                         return BaseMediaRowCard(
@@ -159,7 +159,7 @@ class BaseMediaRowCard extends StatelessWidget {
                       ? Image.network(
                           coverUrl!,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Icon(icon, color: colors.accent, size: 34),
+                              errorBuilder: (_, _, _) => Icon(icon, color: colors.accent, size: 34),
                         )
                       : Icon(icon, color: colors.accent, size: 34),
                 ),
