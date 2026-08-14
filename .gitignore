@@ -47,4 +47,14 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Generated Flutter plugin registrants
+**/flutter/generated_plugin_registrant.*
+**/flutter/generated_plugins.cmake
+**/GeneratedPluginRegistrant.swift
+**/GeneratedPluginRegistrant.h
+**/GeneratedPluginRegistrant.m
+
+# Native Windows artifact
+/windows/native/mashin_sendspin_bridge.dll
+
 mashin-maui
