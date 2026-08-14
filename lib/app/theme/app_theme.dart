@@ -3,23 +3,25 @@ import 'package:flutter/material.dart';
 class AppTheme {
   const AppTheme._();
 
-  static const Color _darkBgPrimary = Color(0xFF17171A);
-  static const Color _darkBgSecondary = Color(0xFF1F1F24);
-  static const Color _darkBgTertiary = Color(0xFF2A2B31);
-  static const Color _darkTextPrimary = Color(0xFFECECF1);
-  static const Color _darkTextSecondary = Color(0xFFB2B4C2);
-  static const Color _darkTextTertiary = Color(0xFF8B8D9B);
-  static const Color _darkAccent = Color(0xFF5A7DFF);
-  static const Color _darkBorder = Color(0xFF2E3038);
+  static const Color _darkBgPrimary = Color(0xFF0A0A0A);
+  static const Color _darkBgSecondary = Color(0xFF141414);
+  static const Color _darkBgTertiary = Color(0xFF1F1F1F);
+  static const Color _darkTextPrimary = Color(0xFFFFFFFF);
+  static const Color _darkTextSecondary = Color(0xFFDDDDDD);
+  static const Color _darkTextTertiary = Color(0xFFA0A0A0);
+  static const Color _darkAccent = Color(0xFFFF5A6F);
+  static const Color _darkBorder = Color(0xFF2A2A2A);
+  static const Color _darkHover = Color(0xFF2A2A2A);
 
-  static const Color _lightBgPrimary = Color(0xFFF5F6FA);
-  static const Color _lightBgSecondary = Color(0xFFFFFFFF);
-  static const Color _lightBgTertiary = Color(0xFFEDEFF5);
-  static const Color _lightTextPrimary = Color(0xFF1F2430);
-  static const Color _lightTextSecondary = Color(0xFF4E5567);
-  static const Color _lightTextTertiary = Color(0xFF7E8597);
-  static const Color _lightAccent = Color(0xFF4267F6);
-  static const Color _lightBorder = Color(0xFFD8DCE7);
+  static const Color _lightBgPrimary = Color(0xFFF3F4F6);
+  static const Color _lightBgSecondary = Color(0xFFECEEF2);
+  static const Color _lightBgTertiary = Color(0xFFE3E6EC);
+  static const Color _lightTextPrimary = Color(0xFF17181B);
+  static const Color _lightTextSecondary = Color(0xFF595D66);
+  static const Color _lightTextTertiary = Color(0xFF8B909C);
+  static const Color _lightAccent = Color(0xFFE94757);
+  static const Color _lightBorder = Color(0xFFD8DBE2);
+  static const Color _lightHover = Color(0xFFE6E9EF);
 
   static ThemeData dark() {
     final base = ThemeData.dark(useMaterial3: true);
@@ -49,6 +51,7 @@ class AppTheme {
       ),
       extensions: const <ThemeExtension<dynamic>>[
         MashinColors.dark(),
+        MashinTableTextStyles.dark(),
       ],
     );
   }
@@ -81,6 +84,7 @@ class AppTheme {
       ),
       extensions: const <ThemeExtension<dynamic>>[
         MashinColors.light(),
+        MashinTableTextStyles.light(),
       ],
     );
   }
@@ -119,7 +123,7 @@ class MashinColors extends ThemeExtension<MashinColors> {
         textTertiary = AppTheme._darkTextTertiary,
         accent = AppTheme._darkAccent,
         border = AppTheme._darkBorder,
-        hover = const Color(0xFF282A32);
+        hover = AppTheme._darkHover;
 
   const MashinColors.light()
       : bgPrimary = AppTheme._lightBgPrimary,
@@ -130,7 +134,7 @@ class MashinColors extends ThemeExtension<MashinColors> {
         textTertiary = AppTheme._lightTextTertiary,
         accent = AppTheme._lightAccent,
         border = AppTheme._lightBorder,
-        hover = const Color(0xFFE9ECF5);
+        hover = AppTheme._lightHover;
 
   @override
   MashinColors copyWith({
@@ -177,10 +181,183 @@ class MashinColors extends ThemeExtension<MashinColors> {
   }
 }
 
+@immutable
+class MashinTableTextStyles extends ThemeExtension<MashinTableTextStyles> {
+  final TextStyle header;
+  final TextStyle bodyPrimary;
+  final TextStyle bodySecondary;
+  final TextStyle bodyTertiary;
+  final TextStyle mobileTitle;
+  final TextStyle mobileSubtitle;
+  final TextStyle mobileTrailing;
+  final TextStyle emptyState;
+  final TextStyle providerFallback;
+
+  const MashinTableTextStyles({
+    required this.header,
+    required this.bodyPrimary,
+    required this.bodySecondary,
+    required this.bodyTertiary,
+    required this.mobileTitle,
+    required this.mobileSubtitle,
+    required this.mobileTrailing,
+    required this.emptyState,
+    required this.providerFallback,
+  });
+
+  const MashinTableTextStyles.dark()
+      : header = const TextStyle(
+          fontFamily: 'PoppinsRegular',
+          color: AppTheme._darkTextSecondary,
+          fontWeight: FontWeight.w700,
+          fontSize: 12,
+        ),
+        bodyPrimary = const TextStyle(
+          fontFamily: 'PoppinsRegular',
+          color: AppTheme._darkTextPrimary,
+          fontSize: 13,
+        ),
+        bodySecondary = const TextStyle(
+          fontFamily: 'PoppinsRegular',
+          color: AppTheme._darkTextSecondary,
+          fontSize: 13,
+        ),
+        bodyTertiary = const TextStyle(
+          fontFamily: 'PoppinsRegular',
+          color: AppTheme._darkTextTertiary,
+          fontSize: 13,
+        ),
+        mobileTitle = const TextStyle(
+          fontFamily: 'PoppinsRegular',
+          color: AppTheme._darkTextPrimary,
+          fontSize: 14,
+        ),
+        mobileSubtitle = const TextStyle(
+          fontFamily: 'PoppinsRegular',
+          color: AppTheme._darkTextSecondary,
+          fontSize: 12,
+        ),
+        mobileTrailing = const TextStyle(
+          fontFamily: 'PoppinsRegular',
+          color: AppTheme._darkTextSecondary,
+          fontSize: 12,
+        ),
+        emptyState = const TextStyle(
+          fontFamily: 'PoppinsRegular',
+          color: AppTheme._darkTextSecondary,
+          fontSize: 14,
+        ),
+        providerFallback = const TextStyle(
+          fontFamily: 'PoppinsRegular',
+          color: AppTheme._darkTextSecondary,
+          fontWeight: FontWeight.w700,
+          fontSize: 12,
+        );
+
+  const MashinTableTextStyles.light()
+      : header = const TextStyle(
+          fontFamily: 'PoppinsRegular',
+          color: AppTheme._lightTextSecondary,
+          fontWeight: FontWeight.w700,
+          fontSize: 12,
+        ),
+        bodyPrimary = const TextStyle(
+          fontFamily: 'PoppinsRegular',
+          color: AppTheme._lightTextPrimary,
+          fontSize: 13,
+        ),
+        bodySecondary = const TextStyle(
+          fontFamily: 'PoppinsRegular',
+          color: AppTheme._lightTextSecondary,
+          fontSize: 13,
+        ),
+        bodyTertiary = const TextStyle(
+          fontFamily: 'PoppinsRegular',
+          color: AppTheme._lightTextTertiary,
+          fontSize: 13,
+        ),
+        mobileTitle = const TextStyle(
+          fontFamily: 'PoppinsRegular',
+          color: AppTheme._lightTextPrimary,
+          fontSize: 14,
+        ),
+        mobileSubtitle = const TextStyle(
+          fontFamily: 'PoppinsRegular',
+          color: AppTheme._lightTextSecondary,
+          fontSize: 12,
+        ),
+        mobileTrailing = const TextStyle(
+          fontFamily: 'PoppinsRegular',
+          color: AppTheme._lightTextSecondary,
+          fontSize: 12,
+        ),
+        emptyState = const TextStyle(
+          fontFamily: 'PoppinsRegular',
+          color: AppTheme._lightTextSecondary,
+          fontSize: 14,
+        ),
+        providerFallback = const TextStyle(
+          fontFamily: 'PoppinsRegular',
+          color: AppTheme._lightTextSecondary,
+          fontWeight: FontWeight.w700,
+          fontSize: 12,
+        );
+
+  @override
+  MashinTableTextStyles copyWith({
+    TextStyle? header,
+    TextStyle? bodyPrimary,
+    TextStyle? bodySecondary,
+    TextStyle? bodyTertiary,
+    TextStyle? mobileTitle,
+    TextStyle? mobileSubtitle,
+    TextStyle? mobileTrailing,
+    TextStyle? emptyState,
+    TextStyle? providerFallback,
+  }) {
+    return MashinTableTextStyles(
+      header: header ?? this.header,
+      bodyPrimary: bodyPrimary ?? this.bodyPrimary,
+      bodySecondary: bodySecondary ?? this.bodySecondary,
+      bodyTertiary: bodyTertiary ?? this.bodyTertiary,
+      mobileTitle: mobileTitle ?? this.mobileTitle,
+      mobileSubtitle: mobileSubtitle ?? this.mobileSubtitle,
+      mobileTrailing: mobileTrailing ?? this.mobileTrailing,
+      emptyState: emptyState ?? this.emptyState,
+      providerFallback: providerFallback ?? this.providerFallback,
+    );
+  }
+
+  @override
+  MashinTableTextStyles lerp(ThemeExtension<MashinTableTextStyles>? other, double t) {
+    if (other is! MashinTableTextStyles) {
+      return this;
+    }
+
+    return MashinTableTextStyles(
+      header: TextStyle.lerp(header, other.header, t) ?? header,
+      bodyPrimary: TextStyle.lerp(bodyPrimary, other.bodyPrimary, t) ?? bodyPrimary,
+      bodySecondary: TextStyle.lerp(bodySecondary, other.bodySecondary, t) ?? bodySecondary,
+      bodyTertiary: TextStyle.lerp(bodyTertiary, other.bodyTertiary, t) ?? bodyTertiary,
+      mobileTitle: TextStyle.lerp(mobileTitle, other.mobileTitle, t) ?? mobileTitle,
+      mobileSubtitle: TextStyle.lerp(mobileSubtitle, other.mobileSubtitle, t) ?? mobileSubtitle,
+      mobileTrailing: TextStyle.lerp(mobileTrailing, other.mobileTrailing, t) ?? mobileTrailing,
+      emptyState: TextStyle.lerp(emptyState, other.emptyState, t) ?? emptyState,
+      providerFallback: TextStyle.lerp(providerFallback, other.providerFallback, t) ?? providerFallback,
+    );
+  }
+}
+
 extension MashinColorsX on BuildContext {
   MashinColors get mashinColors {
     final extension = Theme.of(this).extension<MashinColors>();
     assert(extension != null, 'MashinColors extension is not configured.');
+    return extension!;
+  }
+
+  MashinTableTextStyles get mashinTableTextStyles {
+    final extension = Theme.of(this).extension<MashinTableTextStyles>();
+    assert(extension != null, 'MashinTableTextStyles extension is not configured.');
     return extension!;
   }
 }

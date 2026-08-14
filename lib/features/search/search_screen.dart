@@ -2,11 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../app/config/app_config.dart';
 import '../../app/theme/app_theme.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../../data/music_assistant/music_assistant_client.dart';
-import '../shared/widgets/media_row_section.dart';
-import '../shared/widgets/media_table_section.dart';
+import '../shared/widgets/media_table_section_desktop.dart';
+import '../shared/widgets/media_table_section_mobile.dart';
 
 class SearchScreen extends StatefulWidget {
   final MusicAssistantClient client;
@@ -75,6 +76,7 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
+    final isMobile = AppConfig.isMobile();
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
@@ -126,34 +128,87 @@ class _SearchScreenState extends State<SearchScreen> {
             ),
           )
         else ...<Widget>[
-          TrackTableSection(
-            tracks: _tracks,
-            isLoading: _isLoadingTracks,
-          ),
-          const SizedBox(height: 22),
-          MediaRowSection<MaAlbum>(
-            title: 'Alben',
-            isLoading: _isLoadingAlbums,
-            items: _albums,
-            emptyText: 'Keine Alben gefunden.',
-            cardMapper: albumRowCardData,
-          ),
-          const SizedBox(height: 22),
-          MediaRowSection<MaPlaylist>(
-            title: 'Playlists',
-            isLoading: _isLoadingPlaylists,
-            items: _playlists,
-            emptyText: 'Keine Playlists gefunden.',
-            cardMapper: playlistRowCardData,
-          ),
-          const SizedBox(height: 22),
-          MediaRowSection<MaArtist>(
-            title: 'Artists',
-            isLoading: _isLoadingArtists,
-            items: _artists,
-            emptyText: 'Keine Artists gefunden.',
-            cardMapper: artistRowCardData,
-          ),
+          isMobile
+              ? SizedBox(
+                  height: 500,
+                  child: MediaTableSectionMobile<MaTrack>(
+                    title: 'Tracks',
+                    items: _tracks,
+                    isLoading: _isLoadingTracks,
+                    emptyText: 'Keine Tracks gefunden.',
+                    rowMapper: mapTrackRowData,
+                    maxItemsPerPage: 0,
+                  ),
+                )
+              : SizedBox(
+                  height: 500,
+                  child: MediaTableSectionDesktop<MaTrack>(
+                    title: 'Tracks',
+                    items: _tracks,
+                    isLoading: _isLoadingTracks,
+                    emptyText: 'Keine Tracks gefunden.',
+                    rowMapper: mapTrackRowData,
+                    desktopColumns: buildTrackDesktopColumns(),
+                    maxItemsPerPage: 0,
+                  ),
+                ),
+          const SizedBox(height: 18),
+          isMobile
+              ? MediaTableSectionMobile<MaAlbum>(
+                  title: 'Alben',
+                  items: _albums,
+                  isLoading: _isLoadingAlbums,
+                  emptyText: 'Keine Alben gefunden.',
+                  rowMapper: mapAlbumRowData,
+                  maxItemsPerPage: 3,
+                )
+              : MediaTableSectionDesktop<MaAlbum>(
+                  title: 'Alben',
+                  items: _albums,
+                  isLoading: _isLoadingAlbums,
+                  emptyText: 'Keine Alben gefunden.',
+                  rowMapper: mapAlbumRowData,
+                  desktopColumns: buildAlbumDesktopColumns(),
+                  maxItemsPerPage: 3,
+                ),
+          const SizedBox(height: 18),
+          isMobile
+              ? MediaTableSectionMobile<MaPlaylist>(
+                  title: 'Playlists',
+                  items: _playlists,
+                  isLoading: _isLoadingPlaylists,
+                  emptyText: 'Keine Playlists gefunden.',
+                  rowMapper: mapPlaylistRowData,
+                  maxItemsPerPage: 3,
+                )
+              : MediaTableSectionDesktop<MaPlaylist>(
+                  title: 'Playlists',
+                  items: _playlists,
+                  isLoading: _isLoadingPlaylists,
+                  emptyText: 'Keine Playlists gefunden.',
+                  rowMapper: mapPlaylistRowData,
+                  desktopColumns: buildPlaylistDesktopColumns(),
+                  maxItemsPerPage: 3,
+                ),
+          const SizedBox(height: 18),
+          isMobile
+              ? MediaTableSectionMobile<MaArtist>(
+                  title: 'Artists',
+                  items: _artists,
+                  isLoading: _isLoadingArtists,
+                  emptyText: 'Keine Artists gefunden.',
+                  rowMapper: mapArtistRowData,
+                  maxItemsPerPage: 3,
+                )
+              : MediaTableSectionDesktop<MaArtist>(
+                  title: 'Artists',
+                  items: _artists,
+                  isLoading: _isLoadingArtists,
+                  emptyText: 'Keine Artists gefunden.',
+                  rowMapper: mapArtistRowData,
+                  desktopColumns: buildArtistDesktopColumns(),
+                  maxItemsPerPage: 3,
+                ),
         ],
       ],
     );
@@ -220,7 +275,6 @@ class _SearchScreenState extends State<SearchScreen> {
       _artists = const <MaArtist>[];
     });
 
-    // Load media-type buckets in parallel.
     await Future.wait(<Future<void>>[
       _searchForType(requestId, query, MaMediaType.track),
       _searchForType(requestId, query, MaMediaType.album),
@@ -235,7 +289,7 @@ class _SearchScreenState extends State<SearchScreen> {
       final result = await widget.client.search(
         searchQuery: query,
         mediaTypes: <MaMediaType>[mediaType],
-        limit: 50,
+        limit: 500,
         libraryOnly: false,
       );
 

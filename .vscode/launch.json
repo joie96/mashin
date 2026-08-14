@@ -3,9 +3,21 @@
   "configurations": [
     {
       "name": "Flutter App (main.dart)",
-      "request": "launch",
       "type": "dart",
+      "request": "launch",
       "program": "lib/main.dart"
+    },
+    {
+      "name": "Build Rust Sendspin (Windows Release)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Set-Location \"\"${workspaceFolder}/rust/sendspin_bridge\"\"; cargo build --release; New-Item -ItemType Directory -Path \"\"${workspaceFolder}/windows/native\"\" -Force | Out-Null; Copy-Item \"\"${workspaceFolder}/rust/sendspin_bridge/target/release/mashin_sendspin_bridge.dll\"\" \"\"${workspaceFolder}/windows/native/mashin_sendspin_bridge.dll\"\" -Force\""
+    },
+    {
+      "name": "Build Rust Sendspin (Android arm64-v8a Release)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Set-Location \"\"${workspaceFolder}/rust/sendspin_bridge\"\"; cargo ndk -t arm64-v8a -P 26 -o \"\"${workspaceFolder}/android/app/src/main/jniLibs\"\" build --release\""
     }
   ]
 }

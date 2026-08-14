@@ -1,9 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../config/app_config.dart';
 import '../../features/auth/login_screen.dart';
+import '../../features/shared/selection/selection_session_controller.dart';
+import '../../features/shared/widgets/mobile_selection_overlay.dart';
 import '../../data/music_assistant/ma_auth_store.dart';
 import '../../data/music_assistant/music_assistant_client.dart';
+import '../../features/playback/playback_backend.dart';
+import '../../features/playback/playback_coordinator.dart';
+import '../../features/playback/playback_models.dart';
+import '../../features/playback/sendspin/sendspin_rust_backend.dart';
+import '../../features/playback/sendspin/sendspin_rust_bridge_ffi.dart';
 import '../navigation/app_router.dart';
 import '../navigation/app_section.dart';
 import '../theme/app_theme.dart';
@@ -16,13 +25,16 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
-  static const double _desktopBreakpoint = 960;
+  static const double _mobileSelectionOverlayBottomInset = 84;
 
   AppSection _currentSection = AppSection.home;
   bool _isDarkTheme = true;
   final MaAuthStore _authStore = MaAuthStore();
+  final SelectionSessionController _selectionSessionController = SelectionSessionController.instance;
+  late final PlaybackCoordinator _playbackCoordinator;
 
   MusicAssistantClient? _musicAssistantClient;
+  PlaybackState _playbackState = const PlaybackState();
   bool _isBootstrapping = true;
   String _baseUrl = AppConfig.defaultMusicAssistantUrl;
   String? _username;
@@ -30,11 +42,26 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
-    _restoreSession();
+
+    _playbackCoordinator = PlaybackCoordinator(
+      backends: <PlaybackBackend>[
+        SendspinRustBackend(
+          bridge: FfiSendspinRustBridge(),
+          musicAssistantBaseUrlResolver: () => _baseUrl,
+        ),
+      ],
+      initialOutputMode: PlaybackOutputMode.localSendspin,
+    );
+
+    _playbackCoordinator.addListener(_onPlaybackChanged);
+    unawaited(_bootstrapStartup());
   }
 
   @override
   void dispose() {
+    _playbackCoordinator.removeListener(_onPlaybackChanged);
+    unawaited(_playbackCoordinator.shutdown());
+    _playbackCoordinator.dispose();
     _musicAssistantClient?.dispose();
     super.dispose();
   }
@@ -63,7 +90,7 @@ class _AppShellState extends State<AppShell> {
 
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
-        final isDesktop = constraints.maxWidth >= _desktopBreakpoint;
+        final isDesktop = !AppConfig.isMobile();
         return Scaffold(
           backgroundColor: context.mashinColors.bgPrimary,
           body: SafeArea(
@@ -148,7 +175,10 @@ class _AppShellState extends State<AppShell> {
                   child: AppRouter.pageFor(_currentSection, _musicAssistantClient!),
                 ),
               ),
-              const _DesktopPlayerBar(),
+              _DesktopPlayerBar(
+                isPlaying: _playbackState.playbackState == PlaybackStateType.playing,
+                onTogglePlayPause: _togglePlayPause,
+              ),
             ],
           ),
         ),
@@ -159,18 +189,44 @@ class _AppShellState extends State<AppShell> {
   Widget _buildMobileLayout(BuildContext context) {
     final colors = context.mashinColors;
 
-    return Column(
+    return Stack(
       children: <Widget>[
-        Expanded(
-          child: Container(
-            color: colors.bgPrimary,
-            child: AppRouter.pageFor(_currentSection, _musicAssistantClient!),
-          ),
+        Column(
+          children: <Widget>[
+            Expanded(
+              child: Container(
+                color: colors.bgPrimary,
+                child: AppRouter.pageFor(_currentSection, _musicAssistantClient!),
+              ),
+            ),
+            _MobilePlayerBar(
+              isPlaying: _playbackState.playbackState == PlaybackStateType.playing,
+              onTogglePlayPause: _togglePlayPause,
+            ),
+            _MobileBottomNav(
+              currentSection: _currentSection,
+              onSelected: _select,
+            ),
+          ],
         ),
-        const _MobilePlayerBar(),
-        _MobileBottomNav(
-          currentSection: _currentSection,
-          onSelected: _select,
+        AnimatedBuilder(
+          animation: _selectionSessionController,
+          builder: (BuildContext context, Widget? child) {
+            if (!_selectionSessionController.isVisible) {
+              return const SizedBox.shrink();
+            }
+
+            return Positioned(
+              right: 8,
+              bottom: _mobileSelectionOverlayBottomInset,
+              child: MobileSelectionOverlay(
+                allSelected: _selectionSessionController.allSelected,
+                onToggleAll: _selectionSessionController.onToggleAll,
+                onMenuTap: _selectionSessionController.onMenuTap,
+                onClose: _selectionSessionController.onClose,
+              ),
+            );
+          },
         ),
       ],
     );
@@ -315,6 +371,58 @@ class _AppShellState extends State<AppShell> {
       loginClient.dispose();
     }
   }
+
+  Future<void> _initializePlaybackCoordinator() async {
+    try {
+      await _playbackCoordinator.initialize();
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _playbackState = _playbackCoordinator.state;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _playbackState = const PlaybackState(
+          playbackState: PlaybackStateType.error,
+        );
+      });
+
+      debugPrint('Sendspin startup connection failed: $error');
+    }
+  }
+
+  Future<void> _bootstrapStartup() async {
+    try {
+      await _restoreSession();
+      await _initializePlaybackCoordinator();
+    } catch (error) {
+      debugPrint('Startup bootstrap failed: $error');
+    }
+  }
+
+  Future<void> _togglePlayPause() async {
+    try {
+      await _playbackCoordinator.togglePlayPause();
+    } catch (_) {
+      // Ignore playback command failures in shell-level controls.
+    }
+  }
+
+  void _onPlaybackChanged() {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _playbackState = _playbackCoordinator.state;
+    });
+  }
 }
 
 class _DesktopTopBar extends StatelessWidget {
@@ -433,7 +541,13 @@ class _DesktopNavItem extends StatelessWidget {
 }
 
 class _DesktopPlayerBar extends StatelessWidget {
-  const _DesktopPlayerBar();
+  final bool isPlaying;
+  final Future<void> Function() onTogglePlayPause;
+
+  const _DesktopPlayerBar({
+    required this.isPlaying,
+    required this.onTogglePlayPause,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -469,7 +583,12 @@ class _DesktopPlayerBar extends StatelessWidget {
             ),
           ),
           IconButton(onPressed: () {}, icon: const Icon(Icons.skip_previous_rounded)),
-          IconButton(onPressed: () {}, icon: const Icon(Icons.play_arrow_rounded)),
+          IconButton(
+            onPressed: () {
+              onTogglePlayPause();
+            },
+            icon: Icon(isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
+          ),
           IconButton(onPressed: () {}, icon: const Icon(Icons.skip_next_rounded)),
           const SizedBox(width: 16),
         ],
@@ -479,7 +598,13 @@ class _DesktopPlayerBar extends StatelessWidget {
 }
 
 class _MobilePlayerBar extends StatelessWidget {
-  const _MobilePlayerBar();
+  final bool isPlaying;
+  final Future<void> Function() onTogglePlayPause;
+
+  const _MobilePlayerBar({
+    required this.isPlaying,
+    required this.onTogglePlayPause,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -513,7 +638,12 @@ class _MobilePlayerBar extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          IconButton(onPressed: () {}, icon: const Icon(Icons.play_arrow_rounded)),
+          IconButton(
+            onPressed: () {
+              onTogglePlayPause();
+            },
+            icon: Icon(isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
+          ),
           const SizedBox(width: 4),
         ],
       ),
