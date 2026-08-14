@@ -47,14 +47,19 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# Generated Flutter plugin registrants
-**/flutter/generated_plugin_registrant.*
-**/flutter/generated_plugins.cmake
-**/GeneratedPluginRegistrant.swift
-**/GeneratedPluginRegistrant.h
-**/GeneratedPluginRegistrant.m
+# Generated Flutter plugin registrants and platform build outputs
+**/generated_plugin_registrant.*
+**/generated_plugins.cmake
+**/GeneratedPluginRegistrant.*
+**/Flutter/ephemeral/
+**/flutter/ephemeral/
+**/Flutter/Generated.xcconfig
+**/Flutter/flutter_export_environment.sh
 
 # Native Windows artifact
-/windows/native/mashin_sendspin_bridge.dll
+/windows/native/*.dll
+/windows/native/*.lib
+/windows/native/*.exp
+/windows/native/*.pdb
 
 mashin-maui
