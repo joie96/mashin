@@ -21,7 +21,7 @@ class MediaRowCardData {
   });
 }
 
-class MediaRowSection<T> extends StatelessWidget {
+class MediaRowSectionDesktop<T> extends StatelessWidget {
   final String title;
   final bool isLoading;
   final List<T> items;
@@ -34,7 +34,7 @@ class MediaRowSection<T> extends StatelessWidget {
   final double height;
   final int skeletonCount;
 
-  const MediaRowSection({
+  const MediaRowSectionDesktop({
     super.key,
     required this.title,
     required this.isLoading,
@@ -67,8 +67,8 @@ class MediaRowSection<T> extends StatelessWidget {
               ? ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: skeletonCount,
-                      separatorBuilder: (_, _) => SizedBox(width: itemSpacing),
-                      itemBuilder: (_, _) => RowCardSkeleton(
+                  separatorBuilder: (_, _) => SizedBox(width: itemSpacing),
+                  itemBuilder: (_, _) => _DesktopRowCardSkeleton(
                     itemWidth: itemWidth,
                     coverSize: coverSize,
                   ),
@@ -96,7 +96,7 @@ class MediaRowSection<T> extends StatelessWidget {
                       separatorBuilder: (_, _) => SizedBox(width: itemSpacing),
                       itemBuilder: (BuildContext context, int index) {
                         final data = cardMapper(items[index]);
-                        return BaseMediaRowCard(
+                        return _DesktopMediaRowCard(
                           itemWidth: itemWidth,
                           coverSize: coverSize,
                           icon: data.icon,
@@ -114,7 +114,7 @@ class MediaRowSection<T> extends StatelessWidget {
   }
 }
 
-class BaseMediaRowCard extends StatelessWidget {
+class _DesktopMediaRowCard extends StatelessWidget {
   final double itemWidth;
   final double coverSize;
   final IconData icon;
@@ -124,23 +124,22 @@ class BaseMediaRowCard extends StatelessWidget {
   final String? coverUrl;
   final bool showPlayOverlay;
 
-  const BaseMediaRowCard({
-    super.key,
-    this.itemWidth = 164,
-    this.coverSize = 132,
+  const _DesktopMediaRowCard({
+    required this.itemWidth,
+    required this.coverSize,
     required this.icon,
     required this.title,
-    this.secondaryText,
-    this.tertiaryText,
-    this.coverUrl,
-    this.showPlayOverlay = true,
+    required this.secondaryText,
+    required this.tertiaryText,
+    required this.coverUrl,
+    required this.showPlayOverlay,
   });
 
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
-    final hasSecondary = secondaryText != null && secondaryText!.trim().isNotEmpty;
-    final hasTertiary = tertiaryText != null && tertiaryText!.trim().isNotEmpty;
+    final bool hasSecondary = secondaryText != null && secondaryText!.trim().isNotEmpty;
+    final bool hasTertiary = tertiaryText != null && tertiaryText!.trim().isNotEmpty;
 
     return SizedBox(
       width: itemWidth,
@@ -159,7 +158,7 @@ class BaseMediaRowCard extends StatelessWidget {
                       ? Image.network(
                           coverUrl!,
                           fit: BoxFit.cover,
-                              errorBuilder: (_, _, _) => Icon(icon, color: colors.accent, size: 34),
+                          errorBuilder: (_, _, _) => Icon(icon, color: colors.accent, size: 34),
                         )
                       : Icon(icon, color: colors.accent, size: 34),
                 ),
@@ -219,14 +218,13 @@ class BaseMediaRowCard extends StatelessWidget {
   }
 }
 
-class RowCardSkeleton extends StatelessWidget {
+class _DesktopRowCardSkeleton extends StatelessWidget {
   final double itemWidth;
   final double coverSize;
 
-  const RowCardSkeleton({
-    super.key,
-    this.itemWidth = 164,
-    this.coverSize = 132,
+  const _DesktopRowCardSkeleton({
+    required this.itemWidth,
+    required this.coverSize,
   });
 
   @override

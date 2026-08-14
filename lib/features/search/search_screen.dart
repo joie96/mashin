@@ -6,6 +6,8 @@ import '../../app/config/app_config.dart';
 import '../../app/theme/app_theme.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../../data/music_assistant/music_assistant_client.dart';
+import '../shared/widgets/media_row_section_desktop.dart';
+import '../shared/widgets/media_row_section_mobile.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
 import '../shared/widgets/media_table_section_mobile.dart';
 
@@ -129,85 +131,70 @@ class _SearchScreenState extends State<SearchScreen> {
           )
         else ...<Widget>[
           isMobile
-              ? SizedBox(
-                  height: 500,
-                  child: MediaTableSectionMobile<MaTrack>(
-                    title: 'Tracks',
-                    items: _tracks,
-                    isLoading: _isLoadingTracks,
-                    emptyText: 'Keine Tracks gefunden.',
-                    rowMapper: mapTrackRowData,
-                    maxItemsPerPage: 0,
-                  ),
+              ? MediaTableSectionMobile<MaTrack>(
+                  title: 'Tracks',
+                  items: _tracks,
+                  isLoading: _isLoadingTracks,
+                  emptyText: 'Keine Tracks gefunden.',
+                  rowMapper: mapTrackRowData,
+                  maxItemsPerPage: 3,
                 )
-              : SizedBox(
-                  height: 500,
-                  child: MediaTableSectionDesktop<MaTrack>(
-                    title: 'Tracks',
-                    items: _tracks,
-                    isLoading: _isLoadingTracks,
-                    emptyText: 'Keine Tracks gefunden.',
-                    rowMapper: mapTrackRowData,
-                    desktopColumns: buildTrackDesktopColumns(),
-                    maxItemsPerPage: 0,
-                  ),
+              : MediaTableSectionDesktop<MaTrack>(
+                  title: 'Tracks',
+                  items: _tracks,
+                  isLoading: _isLoadingTracks,
+                  emptyText: 'Keine Tracks gefunden.',
+                  rowMapper: mapTrackRowData,
+                  desktopColumns: buildTrackDesktopColumns(),
+                  maxItemsPerPage: 10,
                 ),
           const SizedBox(height: 18),
           isMobile
-              ? MediaTableSectionMobile<MaAlbum>(
+              ? MediaRowSectionMobile<MaAlbum>(
                   title: 'Alben',
-                  items: _albums,
                   isLoading: _isLoadingAlbums,
+                  items: _albums,
                   emptyText: 'Keine Alben gefunden.',
-                  rowMapper: mapAlbumRowData,
-                  maxItemsPerPage: 3,
+                  cardMapper: albumRowCardData,
                 )
-              : MediaTableSectionDesktop<MaAlbum>(
+              : MediaRowSectionDesktop<MaAlbum>(
                   title: 'Alben',
-                  items: _albums,
                   isLoading: _isLoadingAlbums,
+                  items: _albums,
                   emptyText: 'Keine Alben gefunden.',
-                  rowMapper: mapAlbumRowData,
-                  desktopColumns: buildAlbumDesktopColumns(),
-                  maxItemsPerPage: 3,
+                  cardMapper: albumRowCardData,
                 ),
           const SizedBox(height: 18),
           isMobile
-              ? MediaTableSectionMobile<MaPlaylist>(
+              ? MediaRowSectionMobile<MaPlaylist>(
                   title: 'Playlists',
-                  items: _playlists,
                   isLoading: _isLoadingPlaylists,
+                  items: _playlists,
                   emptyText: 'Keine Playlists gefunden.',
-                  rowMapper: mapPlaylistRowData,
-                  maxItemsPerPage: 3,
+                  cardMapper: playlistRowCardData,
                 )
-              : MediaTableSectionDesktop<MaPlaylist>(
+              : MediaRowSectionDesktop<MaPlaylist>(
                   title: 'Playlists',
-                  items: _playlists,
                   isLoading: _isLoadingPlaylists,
+                  items: _playlists,
                   emptyText: 'Keine Playlists gefunden.',
-                  rowMapper: mapPlaylistRowData,
-                  desktopColumns: buildPlaylistDesktopColumns(),
-                  maxItemsPerPage: 3,
+                  cardMapper: playlistRowCardData,
                 ),
           const SizedBox(height: 18),
           isMobile
-              ? MediaTableSectionMobile<MaArtist>(
+              ? MediaRowSectionMobile<MaArtist>(
                   title: 'Artists',
-                  items: _artists,
                   isLoading: _isLoadingArtists,
+                  items: _artists,
                   emptyText: 'Keine Artists gefunden.',
-                  rowMapper: mapArtistRowData,
-                  maxItemsPerPage: 3,
+                  cardMapper: artistRowCardData,
                 )
-              : MediaTableSectionDesktop<MaArtist>(
+              : MediaRowSectionDesktop<MaArtist>(
                   title: 'Artists',
-                  items: _artists,
                   isLoading: _isLoadingArtists,
+                  items: _artists,
                   emptyText: 'Keine Artists gefunden.',
-                  rowMapper: mapArtistRowData,
-                  desktopColumns: buildArtistDesktopColumns(),
-                  maxItemsPerPage: 3,
+                  cardMapper: artistRowCardData,
                 ),
         ],
       ],

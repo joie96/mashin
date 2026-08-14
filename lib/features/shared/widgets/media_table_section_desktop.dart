@@ -41,13 +41,16 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
 
 class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T>> {
   static const double _desktopRowExtent = 64;
+  static const Duration _desktopPageFadeDuration = Duration(milliseconds: 140);
 
   final FocusNode _sectionFocusNode = FocusNode(debugLabel: 'MediaTableDesktopSectionFocus');
   final Set<int> _selectedIndexes = <int>{};
   final Object _selectionSessionOwner = Object();
   final SelectionSessionController _selectionSessionController = SelectionSessionController.instance;
+  final PageController _desktopChunkPageController = PageController();
   int? _selectionAnchorIndex;
   int _currentPage = 0;
+  bool _isPageFading = false;
 
   @override
   void didUpdateWidget(covariant MediaTableSectionDesktop<T> oldWidget) {
@@ -72,12 +75,19 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
     final int lastPage = _pageCount > 0 ? _pageCount - 1 : 0;
     if (_currentPage > lastPage) {
       _currentPage = lastPage;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_desktopChunkPageController.hasClients) {
+          return;
+        }
+        _desktopChunkPageController.jumpToPage(_currentPage);
+      });
     }
   }
 
   @override
   void dispose() {
     _sectionFocusNode.dispose();
+    _desktopChunkPageController.dispose();
     _deactivateSelectionSession();
     super.dispose();
   }
@@ -85,6 +95,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
   // Selection and Paging
   bool get _isPagingEnabled => widget.maxItemsPerPage > 0;
   bool get _isAllSelected => widget.items.isNotEmpty && _selectedIndexes.length == widget.items.length;
+  int get _chunkSize => _isPagingEnabled ? widget.maxItemsPerPage : 0;
 
   int get _pageSize {
     if (!_isPagingEnabled) {
@@ -98,26 +109,6 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
       return 1;
     }
     return (widget.items.length / _pageSize).ceil();
-  }
-
-  int get _pageStartIndex {
-    if (!_isPagingEnabled) {
-      return 0;
-    }
-    final int start = _currentPage * _pageSize;
-    if (start < 0 || start >= widget.items.length) {
-      return 0;
-    }
-    return start;
-  }
-
-  List<T> get _visibleItems {
-    if (!_isPagingEnabled || widget.items.isEmpty) {
-      return widget.items;
-    }
-    final int start = _pageStartIndex;
-    final int end = (start + _pageSize).clamp(0, widget.items.length);
-    return widget.items.sublist(start, end);
   }
 
   void _emitSelectionChanged() {
@@ -254,17 +245,37 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
     if (!_isPagingEnabled || _currentPage <= 0) {
       return;
     }
-    setState(() {
-      _currentPage -= 1;
-    });
+    _fadeToPage(_currentPage - 1);
   }
 
   void _goToNextPage() {
     if (!_isPagingEnabled || _currentPage >= _pageCount - 1) {
       return;
     }
+    _fadeToPage(_currentPage + 1);
+  }
+
+  Future<void> _fadeToPage(int targetPage) async {
+    if (_isPageFading || targetPage < 0 || targetPage >= _pageCount || targetPage == _currentPage) {
+      return;
+    }
+
     setState(() {
-      _currentPage += 1;
+      _isPageFading = true;
+    });
+
+    await Future<void>.delayed(_desktopPageFadeDuration);
+    if (!mounted) {
+      return;
+    }
+
+    if (_desktopChunkPageController.hasClients) {
+      _desktopChunkPageController.jumpToPage(targetPage);
+    }
+
+    setState(() {
+      _currentPage = targetPage;
+      _isPageFading = false;
     });
   }
 
@@ -273,23 +284,17 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
-    final List<T> visibleItems = _visibleItems;
-    final int pageStartIndex = _pageStartIndex;
 
     final Widget content = LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final bool hasBoundedHeight = constraints.maxHeight.isFinite;
         final bool fillScrollableViewport = hasBoundedHeight && !_isPagingEnabled;
 
-        final Widget tableContent = _buildPagingTransition(
-          _buildDesktopContent(
-            context,
-            colors,
-            visibleItems: visibleItems,
-            pageStartIndex: pageStartIndex,
-            constrainToHeight: hasBoundedHeight,
-            fillScrollableViewport: fillScrollableViewport,
-          ),
+        final Widget tableContent = _buildDesktopContent(
+          context,
+          colors,
+          constrainToHeight: hasBoundedHeight,
+          fillScrollableViewport: fillScrollableViewport,
         );
 
         return Column(
@@ -357,13 +362,12 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
   Widget _buildDesktopContent(
     BuildContext context,
     MashinColors colors, {
-    required List<T> visibleItems,
-    required int pageStartIndex,
     required bool constrainToHeight,
     required bool fillScrollableViewport,
   }) {
     final columns = widget.desktopColumns;
     final bool useInternalScroll = fillScrollableViewport || constrainToHeight;
+    final double pagedContentHeight = _chunkSize * _desktopRowExtent;
 
     if (widget.isLoading) {
       final Widget body = ListView.builder(
@@ -426,29 +430,77 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
       );
     }
 
-    final Widget list = ListView.builder(
-      primary: false,
-      shrinkWrap: !useInternalScroll,
-      physics: useInternalScroll ? const ClampingScrollPhysics() : const NeverScrollableScrollPhysics(),
-      addAutomaticKeepAlives: false,
-      addRepaintBoundaries: true,
-      addSemanticIndexes: false,
-      itemCount: visibleItems.length,
-      itemExtent: _desktopRowExtent,
-      itemBuilder: (BuildContext context, int index) {
-        final int itemIndex = pageStartIndex + index;
-        return _DesktopTableRow<T>(
-          columns: columns,
-          item: visibleItems[index],
-          index: itemIndex,
-          isFirst: index == 0,
-          isSelected: _selectedIndexes.contains(itemIndex),
-          selectionEnabled: widget.enableSelection,
-          onToggleSelected: () => _toggleSelectedIndex(itemIndex),
-          onPointerDown: (PointerDownEvent event) => _handleRowPointerDown(itemIndex, event),
-        );
-      },
-    );
+    final Widget list = _isPagingEnabled
+        ? AnimatedOpacity(
+            duration: _desktopPageFadeDuration,
+            curve: Curves.easeOut,
+            opacity: _isPageFading ? 0 : 1,
+            child: PageView.builder(
+              controller: _desktopChunkPageController,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _pageCount,
+              onPageChanged: (int page) {
+                if (page == _currentPage) {
+                  return;
+                }
+                setState(() {
+                  _currentPage = page;
+                });
+              },
+              itemBuilder: (BuildContext context, int pageIndex) {
+                final int start = pageIndex * _chunkSize;
+                final int end = (start + _chunkSize).clamp(0, widget.items.length);
+                final List<T> chunkItems = widget.items.sublist(start, end);
+
+                return ListView.builder(
+                  primary: false,
+                  shrinkWrap: !useInternalScroll,
+                  physics: useInternalScroll ? const ClampingScrollPhysics() : const NeverScrollableScrollPhysics(),
+                  addAutomaticKeepAlives: false,
+                  addRepaintBoundaries: true,
+                  addSemanticIndexes: false,
+                  itemCount: chunkItems.length,
+                  itemExtent: _desktopRowExtent,
+                  itemBuilder: (BuildContext context, int index) {
+                    final int itemIndex = start + index;
+                    return _DesktopTableRow<T>(
+                      columns: columns,
+                      item: chunkItems[index],
+                      index: itemIndex,
+                      isFirst: index == 0,
+                      isSelected: _selectedIndexes.contains(itemIndex),
+                      selectionEnabled: widget.enableSelection,
+                      onToggleSelected: () => _toggleSelectedIndex(itemIndex),
+                      onPointerDown: (PointerDownEvent event) => _handleRowPointerDown(itemIndex, event),
+                    );
+                  },
+                );
+              },
+            ),
+          )
+        : ListView.builder(
+            primary: false,
+            shrinkWrap: !useInternalScroll,
+            physics: useInternalScroll ? const ClampingScrollPhysics() : const NeverScrollableScrollPhysics(),
+            addAutomaticKeepAlives: false,
+            addRepaintBoundaries: true,
+            addSemanticIndexes: false,
+            itemCount: widget.items.length,
+            itemExtent: _desktopRowExtent,
+            itemBuilder: (BuildContext context, int index) {
+              final int itemIndex = index;
+              return _DesktopTableRow<T>(
+                columns: columns,
+                item: widget.items[index],
+                index: itemIndex,
+                isFirst: index == 0,
+                isSelected: _selectedIndexes.contains(itemIndex),
+                selectionEnabled: widget.enableSelection,
+                onToggleSelected: () => _toggleSelectedIndex(itemIndex),
+                onPointerDown: (PointerDownEvent event) => _handleRowPointerDown(itemIndex, event),
+              );
+            },
+          );
 
     return Column(
       mainAxisSize: useInternalScroll ? MainAxisSize.max : MainAxisSize.min,
@@ -461,6 +513,11 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
         ),
         if (useInternalScroll)
           Expanded(child: list)
+        else if (_isPagingEnabled)
+          SizedBox(
+            height: pagedContentHeight,
+            child: list,
+          )
         else
           list,
       ],
@@ -497,22 +554,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
   }
 
   Widget _buildPagingTransition(Widget child) {
-    if (!_isPagingEnabled) {
-      return child;
-    }
-
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 250),
-      switchInCurve: Curves.easeOut,
-      switchOutCurve: Curves.easeIn,
-      transitionBuilder: (Widget transitionChild, Animation<double> animation) {
-        return FadeTransition(opacity: animation, child: transitionChild);
-      },
-      child: KeyedSubtree(
-        key: ValueKey<int>(_currentPage),
-        child: child,
-      ),
-    );
+    return child;
   }
 
 }
