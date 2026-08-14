@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:math' as math;
 
 import '../../../app/theme/app_theme.dart';
 import '../../../data/music_assistant/ma_models.dart';
@@ -10,6 +11,7 @@ class MediaRowCardData {
   final String? tertiaryText;
   final String? coverUrl;
   final bool showPlayOverlay;
+  final bool isCircularCover;
 
   const MediaRowCardData({
     required this.icon,
@@ -18,20 +20,21 @@ class MediaRowCardData {
     this.tertiaryText,
     this.coverUrl,
     this.showPlayOverlay = true,
+    this.isCircularCover = false,
   });
 }
 
-class MediaRowSectionDesktop<T> extends StatelessWidget {
+class MediaRowSectionDesktop<T> extends StatefulWidget {
+  static const double _defaultHeight = 226;
+  static const double _reservedTextHeight = 66;
+
   final String title;
   final bool isLoading;
   final List<T> items;
   final String emptyText;
   final MediaRowCardData Function(T item) cardMapper;
-  final double itemWidth;
-  final double coverSize;
+  final double minItemWith;
   final double itemSpacing;
-  final int maxVisibleItems;
-  final double height;
   final int skeletonCount;
 
   const MediaRowSectionDesktop({
@@ -41,77 +44,374 @@ class MediaRowSectionDesktop<T> extends StatelessWidget {
     required this.items,
     required this.emptyText,
     required this.cardMapper,
-    this.itemWidth = 164,
-    this.coverSize = 132,
-    this.itemSpacing = 8,
-    this.maxVisibleItems = 20,
-    this.height = 226,
+    this.minItemWith = 160,
+    this.itemSpacing = 16,
     this.skeletonCount = 8,
   });
+
+  @override
+  State<MediaRowSectionDesktop<T>> createState() => _MediaRowSectionDesktopState<T>();
+}
+
+class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
+  static const Duration _pageOutDuration = Duration(milliseconds: 220);
+  static const Duration _pageInDuration = Duration(milliseconds: 220);
+  static const Curve _pageTransitionCurve = Curves.easeInOutCubic;
+  static const double _chunkTranslatePx = 50;
+
+  int _pageStartIndex = 0;
+  int _navigationDirection = 1;
+  int? _outgoingStartIndex;
+  int? _incomingStartIndex;
+  bool _isAnimatingOut = false;
+  bool _isAnimatingIn = false;
+  int _transitionRunId = 0;
+
+  _RowLayoutMetrics _computeLayoutMetrics(double maxWidth) {
+    final int itemCount = widget.items.length;
+
+    if (itemCount <= 0) {
+      return const _RowLayoutMetrics(visibleCount: 1, computedItemWidth: 0);
+    }
+
+    final double minItemWidth = widget.minItemWith > 0 ? widget.minItemWith : 164;
+    final double spacing = widget.itemSpacing;
+
+    if (!maxWidth.isFinite || maxWidth <= 0) {
+      final int fallbackVisible = math.max(1, itemCount);
+      return _RowLayoutMetrics(visibleCount: fallbackVisible, computedItemWidth: minItemWidth);
+    }
+
+    final double denominator = minItemWidth + spacing;
+    int fitByMinSize = denominator > 0 ? ((maxWidth + spacing) / denominator).floor() : 1;
+    fitByMinSize = math.max(1, fitByMinSize);
+
+    final int visibleCount = math.min(itemCount, fitByMinSize);
+    final double computedWidth = (maxWidth - ((visibleCount - 1) * spacing)) / visibleCount;
+
+    return _RowLayoutMetrics(
+      visibleCount: visibleCount,
+      computedItemWidth: math.max(minItemWidth, computedWidth),
+    );
+  }
+
+  double _resolveCoverSize(double resolvedItemWidth) {
+    return math.max(1, resolvedItemWidth);
+  }
+
+  @override
+  void didUpdateWidget(covariant MediaRowSectionDesktop<T> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.items.isEmpty) {
+      _pageStartIndex = 0;
+      return;
+    }
+    if (_pageStartIndex >= widget.items.length) {
+      _pageStartIndex = widget.items.length - 1;
+    }
+    if (_pageStartIndex < 0) {
+      _pageStartIndex = 0;
+    }
+  }
+
+  int _clampStartIndex({required int visibleCount}) {
+    if (widget.items.isEmpty) {
+      return 0;
+    }
+    final int pageCount = (widget.items.length / visibleCount).ceil();
+    final int maxStart = math.max(0, (pageCount - 1) * visibleCount);
+    return _pageStartIndex.clamp(0, maxStart);
+  }
+
+  bool get _isTransitionRunning => _isAnimatingOut || _isAnimatingIn;
+
+  void _finishRunningTransitionImmediately() {
+    if (!_isTransitionRunning) {
+      return;
+    }
+
+    _transitionRunId++;
+    if (_incomingStartIndex != null) {
+      _pageStartIndex = _incomingStartIndex!;
+    }
+
+    _outgoingStartIndex = null;
+    _incomingStartIndex = null;
+    _isAnimatingOut = false;
+    _isAnimatingIn = false;
+  }
+
+  Future<void> _startPageTransition({
+    required int targetStartIndex,
+    required int direction,
+  }) async {
+    if (_isTransitionRunning || targetStartIndex == _pageStartIndex) {
+      return;
+    }
+
+    final int runId = ++_transitionRunId;
+
+    setState(() {
+      _navigationDirection = direction;
+      _outgoingStartIndex = _pageStartIndex;
+      _incomingStartIndex = targetStartIndex;
+      _isAnimatingOut = true;
+      _isAnimatingIn = false;
+    });
+
+    await Future<void>.delayed(_pageOutDuration);
+    if (!mounted || runId != _transitionRunId) {
+      return;
+    }
+
+    setState(() {
+      _pageStartIndex = targetStartIndex;
+      _outgoingStartIndex = null;
+      _isAnimatingOut = false;
+      _isAnimatingIn = true;
+    });
+
+    await Future<void>.delayed(_pageInDuration);
+    if (!mounted || runId != _transitionRunId) {
+      return;
+    }
+
+    setState(() {
+      _incomingStartIndex = null;
+      _isAnimatingIn = false;
+    });
+  }
+
+  List<T> _sliceItems({required int startIndex, required int visibleCount}) {
+    if (widget.items.isEmpty) {
+      return <T>[];
+    }
+    final int safeStart = startIndex.clamp(0, widget.items.length - 1);
+    final int end = math.min(widget.items.length, safeStart + visibleCount);
+    return widget.items.sublist(safeStart, end);
+  }
+
+  Widget _buildSlideList({
+    required int startIndex,
+    required int visibleCount,
+    required double resolvedItemWidth,
+    required double resolvedCoverSize,
+  }) {
+    final List<T> visibleItems = _sliceItems(startIndex: startIndex, visibleCount: visibleCount);
+
+    return ListView.separated(
+      key: ValueKey<int>(startIndex),
+      scrollDirection: Axis.horizontal,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: visibleItems.length,
+      separatorBuilder: (_, _) => SizedBox(width: widget.itemSpacing),
+      itemBuilder: (BuildContext context, int index) {
+        final data = widget.cardMapper(visibleItems[index]);
+        return _DesktopMediaRowCard(
+          itemWidth: resolvedItemWidth,
+          coverSize: resolvedCoverSize,
+          icon: data.icon,
+          title: data.title,
+          secondaryText: data.secondaryText,
+          tertiaryText: data.tertiaryText,
+          coverUrl: data.coverUrl,
+          showPlayOverlay: data.showPlayOverlay,
+          isCircularCover: data.isCircularCover,
+        );
+      },
+    );
+  }
+
+  void _goToPreviousPage(int visibleCount) {
+    if (_isTransitionRunning) {
+      setState(_finishRunningTransitionImmediately);
+    }
+
+    if (_pageStartIndex <= 0) {
+      return;
+    }
+
+    final int target = math.max(0, _pageStartIndex - visibleCount);
+    _startPageTransition(targetStartIndex: target, direction: -1);
+  }
+
+  void _goToNextPage(int visibleCount, int pageCount) {
+    if (_isTransitionRunning) {
+      setState(_finishRunningTransitionImmediately);
+    }
+
+    final int maxStart = math.max(0, (pageCount - 1) * visibleCount);
+    if (_pageStartIndex >= maxStart) {
+      return;
+    }
+    final int target = math.min(maxStart, _pageStartIndex + visibleCount);
+    _startPageTransition(targetStartIndex: target, direction: 1);
+  }
+
+  Widget _buildPaginationControls(BuildContext context, {required int visibleCount, required int pageCount}) {
+    final int clampedStart = _clampStartIndex(visibleCount: visibleCount);
+    final int maxStart = math.max(0, (pageCount - 1) * visibleCount);
+    final bool canGoBack = clampedStart > 0;
+    final bool canGoNext = clampedStart < maxStart;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        IconButton(
+          tooltip: 'Vorherige Seite',
+          onPressed: canGoBack ? () => _goToPreviousPage(visibleCount) : null,
+          icon: const Icon(Icons.chevron_left_rounded),
+          visualDensity: VisualDensity.compact,
+        ),
+        IconButton(
+          tooltip: 'Nächste Seite',
+          onPressed: canGoNext ? () => _goToNextPage(visibleCount, pageCount) : null,
+          icon: const Icon(Icons.chevron_right_rounded),
+          visualDensity: VisualDensity.compact,
+        ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(
-          title,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 10),
-        SizedBox(
-          height: height,
-          child: isLoading
-              ? ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: skeletonCount,
-                  separatorBuilder: (_, _) => SizedBox(width: itemSpacing),
-                  itemBuilder: (_, _) => _DesktopRowCardSkeleton(
-                    itemWidth: itemWidth,
-                    coverSize: coverSize,
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final _RowLayoutMetrics metrics = _computeLayoutMetrics(constraints.maxWidth);
+        final int visibleCount = metrics.visibleCount;
+        final double resolvedItemWidth = metrics.computedItemWidth;
+        final double resolvedCoverSize = _resolveCoverSize(resolvedItemWidth);
+        final double sectionHeight = math.max(
+          MediaRowSectionDesktop._defaultHeight,
+          resolvedCoverSize + MediaRowSectionDesktop._reservedTextHeight,
+        );
+        final int pageCount = widget.items.isEmpty ? 1 : (widget.items.length / visibleCount).ceil();
+        final bool isPagingEnabled = pageCount > 1;
+        _pageStartIndex = _clampStartIndex(visibleCount: visibleCount);
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    widget.title,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
                   ),
-                )
-              : items.isEmpty
-                  ? Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: colors.border),
-                        color: colors.bgSecondary,
-                      ),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          emptyText,
-                          style: TextStyle(color: colors.textSecondary),
-                        ),
+                ),
+                if (isPagingEnabled && !widget.isLoading && widget.items.isNotEmpty)
+                  _buildPaginationControls(context, visibleCount: visibleCount, pageCount: pageCount),
+              ],
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              height: sectionHeight,
+              child: widget.isLoading
+                  ? ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: widget.skeletonCount,
+                      separatorBuilder: (_, _) => SizedBox(width: widget.itemSpacing),
+                      itemBuilder: (_, _) => _DesktopRowCardSkeleton(
+                        itemWidth: resolvedItemWidth,
+                        coverSize: resolvedCoverSize,
                       ),
                     )
-                  : ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: items.length > maxVisibleItems ? maxVisibleItems : items.length,
-                      separatorBuilder: (_, _) => SizedBox(width: itemSpacing),
-                      itemBuilder: (BuildContext context, int index) {
-                        final data = cardMapper(items[index]);
-                        return _DesktopMediaRowCard(
-                          itemWidth: itemWidth,
-                          coverSize: coverSize,
-                          icon: data.icon,
-                          title: data.title,
-                          secondaryText: data.secondaryText,
-                          tertiaryText: data.tertiaryText,
-                          coverUrl: data.coverUrl,
-                          showPlayOverlay: data.showPlayOverlay,
-                        );
-                      },
-                    ),
-        ),
-      ],
+                  : widget.items.isEmpty
+                      ? Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: colors.border),
+                            color: colors.bgSecondary,
+                          ),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              widget.emptyText,
+                              style: TextStyle(color: colors.textSecondary),
+                            ),
+                          ),
+                        )
+                      : ClipRect(
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: <Widget>[
+                              if (_isAnimatingOut && _outgoingStartIndex != null)
+                                TweenAnimationBuilder<double>(
+                                  key: ValueKey<int>(_outgoingStartIndex!),
+                                  tween: Tween<double>(begin: 0, end: 1),
+                                  duration: _pageOutDuration,
+                                  curve: _pageTransitionCurve,
+                                  builder: (BuildContext context, double value, Widget? child) {
+                                    final double dx = (_navigationDirection >= 0 ? -1 : 1) * _chunkTranslatePx * value;
+                                    return Opacity(
+                                      opacity: 1 - value,
+                                      child: Transform.translate(
+                                        offset: Offset(dx, 0),
+                                        child: child,
+                                      ),
+                                    );
+                                  },
+                                  child: _buildSlideList(
+                                    startIndex: _outgoingStartIndex!,
+                                    visibleCount: visibleCount,
+                                    resolvedItemWidth: resolvedItemWidth,
+                                    resolvedCoverSize: resolvedCoverSize,
+                                  ),
+                                )
+                              else if (_isAnimatingIn && _incomingStartIndex != null)
+                                TweenAnimationBuilder<double>(
+                                  key: ValueKey<int>(_incomingStartIndex!),
+                                  tween: Tween<double>(begin: 0, end: 1),
+                                  duration: _pageInDuration,
+                                  curve: _pageTransitionCurve,
+                                  builder: (BuildContext context, double value, Widget? child) {
+                                    final double dx = (_navigationDirection >= 0 ? 1 : -1) * _chunkTranslatePx * (1 - value);
+                                    return Opacity(
+                                      opacity: value,
+                                      child: Transform.translate(
+                                        offset: Offset(dx, 0),
+                                        child: child,
+                                      ),
+                                    );
+                                  },
+                                  child: _buildSlideList(
+                                    startIndex: _incomingStartIndex!,
+                                    visibleCount: visibleCount,
+                                    resolvedItemWidth: resolvedItemWidth,
+                                    resolvedCoverSize: resolvedCoverSize,
+                                  ),
+                                )
+                              else
+                                _buildSlideList(
+                                  startIndex: _pageStartIndex,
+                                  visibleCount: visibleCount,
+                                  resolvedItemWidth: resolvedItemWidth,
+                                  resolvedCoverSize: resolvedCoverSize,
+                                ),
+                            ],
+                          ),
+                        ),
+            ),
+          ],
+        );
+      },
     );
   }
+}
+
+class _RowLayoutMetrics {
+  final int visibleCount;
+  final double computedItemWidth;
+
+  const _RowLayoutMetrics({
+    required this.visibleCount,
+    required this.computedItemWidth,
+  });
 }
 
 class _DesktopMediaRowCard extends StatelessWidget {
@@ -123,6 +423,7 @@ class _DesktopMediaRowCard extends StatelessWidget {
   final String? tertiaryText;
   final String? coverUrl;
   final bool showPlayOverlay;
+  final bool isCircularCover;
 
   const _DesktopMediaRowCard({
     required this.itemWidth,
@@ -133,6 +434,7 @@ class _DesktopMediaRowCard extends StatelessWidget {
     required this.tertiaryText,
     required this.coverUrl,
     required this.showPlayOverlay,
+    required this.isCircularCover,
   });
 
   @override
@@ -148,21 +450,37 @@ class _DesktopMediaRowCard extends StatelessWidget {
         children: <Widget>[
           Stack(
             children: <Widget>[
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  width: coverSize,
-                  height: coverSize,
-                  color: colors.bgTertiary,
-                  child: coverUrl != null && coverUrl!.trim().isNotEmpty
-                      ? Image.network(
-                          coverUrl!,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => Icon(icon, color: colors.accent, size: 34),
-                        )
-                      : Icon(icon, color: colors.accent, size: 34),
+              if (isCircularCover)
+                ClipOval(
+                  child: Container(
+                    width: coverSize,
+                    height: coverSize,
+                    color: colors.bgTertiary,
+                    child: coverUrl != null && coverUrl!.trim().isNotEmpty
+                        ? Image.network(
+                            coverUrl!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => Icon(icon, color: colors.accent, size: 34),
+                          )
+                        : Icon(icon, color: colors.accent, size: 34),
+                  ),
+                )
+              else
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    width: coverSize,
+                    height: coverSize,
+                    color: colors.bgTertiary,
+                    child: coverUrl != null && coverUrl!.trim().isNotEmpty
+                        ? Image.network(
+                            coverUrl!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => Icon(icon, color: colors.accent, size: 34),
+                          )
+                        : Icon(icon, color: colors.accent, size: 34),
+                  ),
                 ),
-              ),
               if (showPlayOverlay)
                 Positioned(
                   left: 6,
@@ -379,6 +697,7 @@ MediaRowCardData artistRowCardData(MaArtist artist) {
     secondaryText: 'Artist',
     tertiaryText: _artistTertiary(artist),
     coverUrl: artist.imageUri ?? '',
+    isCircularCover: true,
   );
 }
 

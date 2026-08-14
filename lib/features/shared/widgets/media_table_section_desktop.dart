@@ -525,18 +525,12 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
   }
 
   Widget _buildPaginationControls(BuildContext context) {
-    final colors = context.mashinColors;
     final bool canGoBack = _currentPage > 0;
     final bool canGoNext = _currentPage < _pageCount - 1;
 
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        Text(
-          '${_currentPage + 1}/$_pageCount • $_pageSize / Seite',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
-        ),
-        const SizedBox(width: 8),
         IconButton(
           tooltip: 'Vorherige Seite',
           onPressed: canGoBack ? _goToPreviousPage : null,
