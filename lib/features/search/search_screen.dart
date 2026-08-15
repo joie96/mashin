@@ -6,6 +6,7 @@ import '../../app/config/app_config.dart';
 import '../../app/theme/app_theme.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../../data/music_assistant/music_assistant_client.dart';
+import '../playback/playback_coordinator.dart';
 import '../shared/widgets/media_row_section_desktop.dart';
 import '../shared/widgets/media_row_section_mobile.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
@@ -13,10 +14,12 @@ import '../shared/widgets/media_table_section_mobile.dart';
 
 class SearchScreen extends StatefulWidget {
   final MusicAssistantClient client;
+  final PlaybackCoordinator playbackCoordinator;
 
   const SearchScreen({
     super.key,
     required this.client,
+    required this.playbackCoordinator,
   });
 
   @override
@@ -147,6 +150,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   rowMapper: mapTrackRowData,
                   desktopColumns: buildTrackDesktopColumns(),
                   maxItemsPerPage: 10,
+                  onRowDoubleTap: _onTrackRowDoubleTap,
                 ),
           const SizedBox(height: 18),
           isMobile
@@ -347,6 +351,29 @@ class _SearchScreenState extends State<SearchScreen> {
           }
         });
       }
+    }
+  }
+
+  Future<void> _onTrackRowDoubleTap(MaTrack track, int index) async {
+    final String itemId = track.itemId.trim();
+    final String provider = track.provider.trim();
+    if (itemId.isEmpty || provider.isEmpty) {
+      return;
+    }
+
+    final Map<String, dynamic> mediaItem = <String, dynamic>{
+      'media_type': maMediaTypeToJson(MaMediaType.track),
+      'item_id': itemId,
+      'provider': provider,
+    };
+
+    try {
+      await widget.playbackCoordinator.playMedia(
+        <Map<String, dynamic>>[mediaItem],
+        option: PlaybackQueueInsertOption.replace,
+      );
+    } catch (_) {
+      // Keep the search UI responsive even if playback routing fails.
     }
   }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../data/music_assistant/music_assistant_client.dart';
+import '../../features/playback/playback_coordinator.dart';
 import '../../features/home/home_screen.dart';
 import '../../features/search/search_screen.dart';
 import 'app_section.dart';
@@ -8,7 +9,11 @@ import 'app_section.dart';
 class AppRouter {
   const AppRouter._();
 
-  static Widget pageFor(AppSection section, MusicAssistantClient client) {
+  static Widget pageFor(
+    AppSection section,
+    MusicAssistantClient client,
+    PlaybackCoordinator playbackCoordinator,
+  ) {
     switch (section) {
       case AppSection.home:
         return HomeScreen(
@@ -35,6 +40,7 @@ class AppRouter {
       case AppSection.search:
         return SearchScreen(
           client: client,
+          playbackCoordinator: playbackCoordinator,
         );
     }
   }

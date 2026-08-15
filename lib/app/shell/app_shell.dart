@@ -7,10 +7,11 @@ import '../../features/auth/login_screen.dart';
 import '../../features/shared/selection/selection_session_controller.dart';
 import '../../features/shared/widgets/mobile_selection_overlay.dart';
 import '../../data/music_assistant/ma_auth_store.dart';
+import '../../data/music_assistant/ma_models.dart';
 import '../../data/music_assistant/music_assistant_client.dart';
-import '../../features/playback/playback_backend.dart';
 import '../../features/playback/playback_coordinator.dart';
 import '../../features/playback/playback_models.dart';
+import '../../features/playback/sendspin/sendspin_player.dart';
 import '../../features/playback/sendspin/sendspin_rust_backend.dart';
 import '../../features/playback/sendspin/sendspin_rust_bridge_ffi.dart';
 import '../navigation/app_router.dart';
@@ -44,10 +45,13 @@ class _AppShellState extends State<AppShell> {
     super.initState();
 
     _playbackCoordinator = PlaybackCoordinator(
-      backends: <PlaybackBackend>[
-        SendspinRustBackend(
-          bridge: FfiSendspinRustBridge(),
-          musicAssistantBaseUrlResolver: () => _baseUrl,
+      players: <SendspinPlayer>[
+        SendspinPlayer(
+          transportBackend: SendspinRustBackend(
+            bridge: FfiSendspinRustBridge(),
+            musicAssistantBaseUrlResolver: () => _baseUrl,
+          ),
+          clientResolver: () => _musicAssistantClient,
         ),
       ],
       initialOutputMode: PlaybackOutputMode.localSendspin,
@@ -175,7 +179,7 @@ class _AppShellState extends State<AppShell> {
                     Expanded(
                       child: Container(
                         color: colors.bgPrimary,
-                        child: AppRouter.pageFor(_currentSection, _musicAssistantClient!),
+                        child: AppRouter.pageFor(_currentSection, _musicAssistantClient!, _playbackCoordinator),
                       ),
                     ),
                   ],
@@ -207,7 +211,7 @@ class _AppShellState extends State<AppShell> {
             Expanded(
               child: Container(
                 color: colors.bgPrimary,
-                child: AppRouter.pageFor(_currentSection, _musicAssistantClient!),
+                child: AppRouter.pageFor(_currentSection, _musicAssistantClient!, _playbackCoordinator),
               ),
             ),
             _MobilePlayerBar(

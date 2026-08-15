@@ -17,6 +17,56 @@ enum PlaybackStateType {
   error,
 }
 
+enum PlaybackQueueInsertOption {
+  replace,
+  next,
+  replaceNext,
+  last,
+}
+
+class PlaybackQueueSnapshot {
+  final String? queueId;
+  final List<Map<String, dynamic>> items;
+  final int? currentIndex;
+  final bool? shuffleEnabled;
+  final String? repeatMode;
+  final bool? dontStopTheMusicEnabled;
+
+  const PlaybackQueueSnapshot({
+    this.queueId,
+    this.items = const <Map<String, dynamic>>[],
+    this.currentIndex,
+    this.shuffleEnabled,
+    this.repeatMode,
+    this.dontStopTheMusicEnabled,
+  });
+
+  PlaybackQueueSnapshot copyWith({
+    String? queueId,
+    bool clearQueueId = false,
+    List<Map<String, dynamic>>? items,
+    int? currentIndex,
+    bool clearCurrentIndex = false,
+    bool? shuffleEnabled,
+    bool clearShuffleEnabled = false,
+    String? repeatMode,
+    bool clearRepeatMode = false,
+    bool? dontStopTheMusicEnabled,
+    bool clearDontStopTheMusicEnabled = false,
+  }) {
+    return PlaybackQueueSnapshot(
+      queueId: clearQueueId ? null : (queueId ?? this.queueId),
+      items: items ?? this.items,
+      currentIndex: clearCurrentIndex ? null : (currentIndex ?? this.currentIndex),
+      shuffleEnabled: clearShuffleEnabled ? null : (shuffleEnabled ?? this.shuffleEnabled),
+      repeatMode: clearRepeatMode ? null : (repeatMode ?? this.repeatMode),
+      dontStopTheMusicEnabled: clearDontStopTheMusicEnabled
+          ? null
+          : (dontStopTheMusicEnabled ?? this.dontStopTheMusicEnabled),
+    );
+  }
+}
+
 
 class PlaybackState {
   final PlaybackStateType playbackState;

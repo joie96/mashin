@@ -25,6 +25,7 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
   final VoidCallback? onHeaderMoreTap;
   final DesktopRowAction<T>? onRowMoreTap;
   final DesktopRowAction<T>? onRowFavoriteTap;
+  final DesktopRowAction<T>? onRowDoubleTap;
   final DesktopRowFavoriteResolver<T>? isRowFavorite;
 
   const MediaTableSectionDesktop({
@@ -43,6 +44,7 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
     this.onHeaderMoreTap,
     this.onRowMoreTap,
     this.onRowFavoriteTap,
+    this.onRowDoubleTap,
     this.isRowFavorite,
   });
 
@@ -495,6 +497,9 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
                       onMoreTap: widget.onRowMoreTap == null
                           ? null
                           : () => widget.onRowMoreTap!(chunkItems[index], itemIndex),
+                        onDoubleTap: widget.onRowDoubleTap == null
+                          ? null
+                          : () => widget.onRowDoubleTap!(chunkItems[index], itemIndex),
                       onPointerDown: (PointerDownEvent event) => _handleRowPointerDown(itemIndex, event),
                     );
                   },
@@ -525,6 +530,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
                 onFavoriteTap:
                     widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(widget.items[index], itemIndex),
                 onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(widget.items[index], itemIndex),
+                onDoubleTap: widget.onRowDoubleTap == null ? null : () => widget.onRowDoubleTap!(widget.items[index], itemIndex),
                 onPointerDown: (PointerDownEvent event) => _handleRowPointerDown(itemIndex, event),
               );
             },
@@ -680,6 +686,7 @@ class _DesktopTableRow<T> extends StatefulWidget {
   final VoidCallback onToggleSelected;
   final VoidCallback? onFavoriteTap;
   final VoidCallback? onMoreTap;
+  final VoidCallback? onDoubleTap;
   final ValueChanged<PointerDownEvent>? onPointerDown;
 
   const _DesktopTableRow({
@@ -693,6 +700,7 @@ class _DesktopTableRow<T> extends StatefulWidget {
     required this.onToggleSelected,
     this.onFavoriteTap,
     this.onMoreTap,
+    this.onDoubleTap,
     this.onPointerDown,
   });
 
@@ -711,85 +719,89 @@ class _DesktopTableRowState<T> extends State<_DesktopTableRow<T>> {
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
-      child: Container(
-        height: 64,
-        decoration: BoxDecoration(
-          color: widget.isSelected ? colors.hover : (_isHovered ? colors.hover : Colors.transparent),
-          border: widget.isFirst ? null : Border(top: BorderSide(color: colors.border)),
-        ),
-        child: Row(
-          children: <Widget>[
-            Expanded(
-              child: Listener(
-                onPointerDown: widget.onPointerDown,
-                child: Row(
-                  children: <Widget>[
-                    ...widget.columns
-                        .map(
-                          (column) => buildDesktopCellWidget(
-                            flex: column.flex,
-                            width: column.width,
-                            child: Padding(
-                              padding: column.padding,
-                              child: column.childBuilder != null
-                                  ? column.childBuilder!(context, widget.item, widget.index)
-                                  : Text(
-                                      column.valueBuilder!(widget.item, widget.index),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      textAlign: column.textAlign,
-                                      style: (() {
-                                        switch (column.textTone) {
-                                          case DesktopTextTone.primary:
-                                            return textStyles.bodyPrimary;
-                                          case DesktopTextTone.secondary:
-                                            return textStyles.bodySecondary;
-                                          case DesktopTextTone.tertiary:
-                                            return textStyles.bodyTertiary;
-                                        }
-                                      })().copyWith(fontSize: column.fontSize ?? 13),
-                                    ),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onDoubleTap: widget.onDoubleTap,
+        child: Container(
+          height: 64,
+          decoration: BoxDecoration(
+            color: widget.isSelected ? colors.hover : (_isHovered ? colors.hover : Colors.transparent),
+            border: widget.isFirst ? null : Border(top: BorderSide(color: colors.border)),
+          ),
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                child: Listener(
+                  onPointerDown: widget.onPointerDown,
+                  child: Row(
+                    children: <Widget>[
+                      ...widget.columns
+                          .map(
+                            (column) => buildDesktopCellWidget(
+                              flex: column.flex,
+                              width: column.width,
+                              child: Padding(
+                                padding: column.padding,
+                                child: column.childBuilder != null
+                                    ? column.childBuilder!(context, widget.item, widget.index)
+                                    : Text(
+                                        column.valueBuilder!(widget.item, widget.index),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        textAlign: column.textAlign,
+                                        style: (() {
+                                          switch (column.textTone) {
+                                            case DesktopTextTone.primary:
+                                              return textStyles.bodyPrimary;
+                                            case DesktopTextTone.secondary:
+                                              return textStyles.bodySecondary;
+                                            case DesktopTextTone.tertiary:
+                                              return textStyles.bodyTertiary;
+                                          }
+                                        })().copyWith(fontSize: column.fontSize ?? 13),
+                                      ),
+                              ),
                             ),
                           ),
-                        ),
-                  ],
-                ),
-              ),
-            ),
-            SizedBox(
-              width: 40,
-              child: Center(
-                child: _DesktopIconActionButton(
-                  icon: widget.isFavorite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                  onTap: widget.onFavoriteTap,
-                  baseColor: colors.textTertiary,
-                  hoverColor: colors.textSecondary,
-                ),
-              ),
-            ),
-            SizedBox(
-              width: 40,
-              child: Center(
-                child: _DesktopIconActionButton(
-                  icon: Icons.more_horiz_rounded,
-                  onTap: widget.onMoreTap,
-                  baseColor: colors.textTertiary,
-                  hoverColor: colors.textSecondary,
-                ),
-              ),
-            ),
-            if (widget.selectionEnabled)
-              SizedBox(
-                width: 40,
-                child: Center(
-                  child: _DesktopSelectionCheckBox(
-                    isChecked: widget.isSelected,
-                    isVisible: _isHovered || widget.isSelected,
-                    onTap: widget.onToggleSelected,
+                    ],
                   ),
                 ),
               ),
-          ],
+              SizedBox(
+                width: 40,
+                child: Center(
+                  child: _DesktopIconActionButton(
+                    icon: widget.isFavorite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                    onTap: widget.onFavoriteTap,
+                    baseColor: colors.textTertiary,
+                    hoverColor: colors.textSecondary,
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 40,
+                child: Center(
+                  child: _DesktopIconActionButton(
+                    icon: Icons.more_horiz_rounded,
+                    onTap: widget.onMoreTap,
+                    baseColor: colors.textTertiary,
+                    hoverColor: colors.textSecondary,
+                  ),
+                ),
+              ),
+              if (widget.selectionEnabled)
+                SizedBox(
+                  width: 40,
+                  child: Center(
+                    child: _DesktopSelectionCheckBox(
+                      isChecked: widget.isSelected,
+                      isVisible: _isHovered || widget.isSelected,
+                      onTap: widget.onToggleSelected,
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
