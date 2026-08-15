@@ -7,6 +7,9 @@ import '../../../app/theme/app_theme.dart';
 import '../../../data/music_assistant/ma_models.dart';
 import '../selection/selection_session_controller.dart';
 
+typedef DesktopRowAction<T> = void Function(T item, int index);
+typedef DesktopRowFavoriteResolver<T> = bool Function(T item, int index);
+
 class MediaTableSectionDesktop<T> extends StatefulWidget {
   final String title;
   final List<T> items;
@@ -19,6 +22,10 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
   final bool enableSelection;
   final ValueChanged<List<T>>? onSelectionChanged;
   final VoidCallback? onSelectionMenuTap;
+  final VoidCallback? onHeaderMoreTap;
+  final DesktopRowAction<T>? onRowMoreTap;
+  final DesktopRowAction<T>? onRowFavoriteTap;
+  final DesktopRowFavoriteResolver<T>? isRowFavorite;
 
   const MediaTableSectionDesktop({
     super.key,
@@ -33,6 +40,10 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
     this.enableSelection = true,
     this.onSelectionChanged,
     this.onSelectionMenuTap,
+    this.onHeaderMoreTap,
+    this.onRowMoreTap,
+    this.onRowFavoriteTap,
+    this.isRowFavorite,
   });
 
   @override
@@ -109,6 +120,10 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
       return 1;
     }
     return (widget.items.length / _pageSize).ceil();
+  }
+
+  bool _isItemFavorite(T item, int index) {
+    return widget.isRowFavorite?.call(item, index) ?? false;
   }
 
   void _emitSelectionChanged() {
@@ -396,6 +411,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
             showSelection: widget.enableSelection,
             isAllSelected: _isAllSelected,
             onToggleSelectAll: _toggleAllSelectedIndexes,
+            onMoreTap: widget.onHeaderMoreTap,
           ),
           if (useInternalScroll)
             Expanded(child: body)
@@ -415,6 +431,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
             showSelection: widget.enableSelection,
             isAllSelected: false,
             onToggleSelectAll: _toggleAllSelectedIndexes,
+            onMoreTap: widget.onHeaderMoreTap,
           ),
           Padding(
             padding: const EdgeInsets.all(16),
@@ -469,8 +486,15 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
                       index: itemIndex,
                       isFirst: index == 0,
                       isSelected: _selectedIndexes.contains(itemIndex),
+                      isFavorite: _isItemFavorite(chunkItems[index], itemIndex),
                       selectionEnabled: widget.enableSelection,
                       onToggleSelected: () => _toggleSelectedIndex(itemIndex),
+                      onFavoriteTap: widget.onRowFavoriteTap == null
+                          ? null
+                          : () => widget.onRowFavoriteTap!(chunkItems[index], itemIndex),
+                      onMoreTap: widget.onRowMoreTap == null
+                          ? null
+                          : () => widget.onRowMoreTap!(chunkItems[index], itemIndex),
                       onPointerDown: (PointerDownEvent event) => _handleRowPointerDown(itemIndex, event),
                     );
                   },
@@ -495,8 +519,12 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
                 index: itemIndex,
                 isFirst: index == 0,
                 isSelected: _selectedIndexes.contains(itemIndex),
+                isFavorite: _isItemFavorite(widget.items[index], itemIndex),
                 selectionEnabled: widget.enableSelection,
                 onToggleSelected: () => _toggleSelectedIndex(itemIndex),
+                onFavoriteTap:
+                    widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(widget.items[index], itemIndex),
+                onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(widget.items[index], itemIndex),
                 onPointerDown: (PointerDownEvent event) => _handleRowPointerDown(itemIndex, event),
               );
             },
@@ -510,6 +538,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
           showSelection: widget.enableSelection,
           isAllSelected: _isAllSelected,
           onToggleSelectAll: _toggleAllSelectedIndexes,
+          onMoreTap: widget.onHeaderMoreTap,
         ),
         if (useInternalScroll)
           Expanded(child: list)
@@ -560,12 +589,14 @@ class _DesktopTableHeader<T> extends StatelessWidget {
   final bool showSelection;
   final bool isAllSelected;
   final VoidCallback onToggleSelectAll;
+  final VoidCallback? onMoreTap;
 
   const _DesktopTableHeader({
     required this.columns,
     required this.showSelection,
     required this.isAllSelected,
     required this.onToggleSelectAll,
+    required this.onMoreTap,
   });
 
   @override
@@ -600,6 +631,27 @@ class _DesktopTableHeader<T> extends StatelessWidget {
                   ),
                 ),
               ),
+          SizedBox(
+            width: 40,
+            child: Center(
+              child: Icon(
+                Icons.favorite_border_rounded,
+                size: 18,
+                color: colors.textSecondary,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 40,
+            child: Center(
+              child: _DesktopIconActionButton(
+                icon: Icons.more_horiz_rounded,
+                onTap: onMoreTap,
+                baseColor: colors.textSecondary,
+                hoverColor: colors.textPrimary,
+              ),
+            ),
+          ),
           if (showSelection)
             SizedBox(
               width: 40,
@@ -623,8 +675,11 @@ class _DesktopTableRow<T> extends StatefulWidget {
   final int index;
   final bool isFirst;
   final bool isSelected;
+  final bool isFavorite;
   final bool selectionEnabled;
   final VoidCallback onToggleSelected;
+  final VoidCallback? onFavoriteTap;
+  final VoidCallback? onMoreTap;
   final ValueChanged<PointerDownEvent>? onPointerDown;
 
   const _DesktopTableRow({
@@ -633,8 +688,11 @@ class _DesktopTableRow<T> extends StatefulWidget {
     required this.index,
     required this.isFirst,
     required this.isSelected,
+    required this.isFavorite,
     required this.selectionEnabled,
     required this.onToggleSelected,
+    this.onFavoriteTap,
+    this.onMoreTap,
     this.onPointerDown,
   });
 
@@ -695,6 +753,28 @@ class _DesktopTableRowState<T> extends State<_DesktopTableRow<T>> {
                           ),
                         ),
                   ],
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 40,
+              child: Center(
+                child: _DesktopIconActionButton(
+                  icon: widget.isFavorite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                  onTap: widget.onFavoriteTap,
+                  baseColor: colors.textTertiary,
+                  hoverColor: colors.textSecondary,
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 40,
+              child: Center(
+                child: _DesktopIconActionButton(
+                  icon: Icons.more_horiz_rounded,
+                  onTap: widget.onMoreTap,
+                  baseColor: colors.textTertiary,
+                  hoverColor: colors.textSecondary,
                 ),
               ),
             ),
@@ -781,6 +861,18 @@ class _DesktopTableRowSkeleton<T> extends StatelessWidget {
                   ),
                 ),
               ),
+          SizedBox(
+            width: 40,
+            child: Center(
+              child: bar(width: 16, height: 16, radius: 8),
+            ),
+          ),
+          SizedBox(
+            width: 40,
+            child: Center(
+              child: bar(width: 16, height: 16, radius: 8),
+            ),
+          ),
           if (showSelection)
             const SizedBox(
               width: 40,
@@ -792,6 +884,54 @@ class _DesktopTableRowSkeleton<T> extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _DesktopIconActionButton extends StatefulWidget {
+  final IconData icon;
+  final VoidCallback? onTap;
+  final Color baseColor;
+  final Color hoverColor;
+
+  const _DesktopIconActionButton({
+    required this.icon,
+    required this.onTap,
+    required this.baseColor,
+    required this.hoverColor,
+  });
+
+  @override
+  State<_DesktopIconActionButton> createState() => _DesktopIconActionButtonState();
+}
+
+class _DesktopIconActionButtonState extends State<_DesktopIconActionButton> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color iconColor = _isHovered ? widget.hoverColor : widget.baseColor;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: IconButton(
+        onPressed: widget.onTap,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+        splashRadius: 18,
+        visualDensity: VisualDensity.compact,
+        icon: AnimatedScale(
+          scale: _isHovered ? 1.08 : 1,
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOutCubic,
+          child: Icon(
+            widget.icon,
+            size: 18,
+            color: iconColor,
+          ),
+        ),
       ),
     );
   }

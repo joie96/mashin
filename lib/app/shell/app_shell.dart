@@ -106,81 +106,92 @@ class _AppShellState extends State<AppShell> {
   Widget _buildDesktopLayout(BuildContext context) {
     final colors = context.mashinColors;
 
-    return Row(
+    return Column(
       children: <Widget>[
-        Container(
-          width: 250,
-          color: colors.bgSecondary,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+        Expanded(
+          child: Row(
             children: <Widget>[
-              const SizedBox(height: 44),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 22),
-                child: Text(
-                  'Mashin',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: colors.textPrimary,
-                  ),
+              Container(
+                width: 250,
+                color: colors.bgSecondary,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    const SizedBox(height: 44),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 22),
+                      child: Text(
+                        'Mashin',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: colors.textPrimary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+                    _DesktopNavItem(
+                      label: 'Home',
+                      icon: Icons.home_rounded,
+                      selected: _currentSection == AppSection.home,
+                      onTap: () => _select(AppSection.home),
+                    ),
+                    _DesktopNavItem(
+                      label: 'Entdecken',
+                      icon: Icons.explore_rounded,
+                      selected: _currentSection == AppSection.explore,
+                      onTap: () => _select(AppSection.explore),
+                    ),
+                    _DesktopNavItem(
+                      label: 'Favoriten',
+                      icon: Icons.favorite_rounded,
+                      selected: _currentSection == AppSection.favorites,
+                      onTap: () => _select(AppSection.favorites),
+                    ),
+                    const Divider(height: 24),
+                    _DesktopNavItem(
+                      label: 'Playlists',
+                      icon: Icons.queue_music_rounded,
+                      selected: _currentSection == AppSection.playlists,
+                      onTap: () => _select(AppSection.playlists),
+                    ),
+                    _DesktopNavItem(
+                      label: 'Suche',
+                      icon: Icons.search_rounded,
+                      selected: _currentSection == AppSection.search,
+                      onTap: () => _select(AppSection.search),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 22),
-              _DesktopNavItem(
-                label: 'Home',
-                icon: Icons.home_rounded,
-                selected: _currentSection == AppSection.home,
-                onTap: () => _select(AppSection.home),
-              ),
-              _DesktopNavItem(
-                label: 'Entdecken',
-                icon: Icons.explore_rounded,
-                selected: _currentSection == AppSection.explore,
-                onTap: () => _select(AppSection.explore),
-              ),
-              _DesktopNavItem(
-                label: 'Favoriten',
-                icon: Icons.favorite_rounded,
-                selected: _currentSection == AppSection.favorites,
-                onTap: () => _select(AppSection.favorites),
-              ),
-              const Divider(height: 24),
-              _DesktopNavItem(
-                label: 'Playlists',
-                icon: Icons.queue_music_rounded,
-                selected: _currentSection == AppSection.playlists,
-                onTap: () => _select(AppSection.playlists),
-              ),
-              _DesktopNavItem(
-                label: 'Suche',
-                icon: Icons.search_rounded,
-                selected: _currentSection == AppSection.search,
-                onTap: () => _select(AppSection.search),
+              VerticalDivider(width: 1, color: colors.border),
+              Expanded(
+                child: Column(
+                  children: <Widget>[
+                    _DesktopTopBar(
+                      title: _titleForSection(_currentSection),
+                      onToggleTheme: _toggleTheme,
+                      isDarkTheme: _isDarkTheme,
+                    ),
+                    Expanded(
+                      child: Container(
+                        color: colors.bgPrimary,
+                        child: AppRouter.pageFor(_currentSection, _musicAssistantClient!),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
         ),
-        VerticalDivider(width: 1, color: colors.border),
-        Expanded(
-          child: Column(
-            children: <Widget>[
-              _DesktopTopBar(
-                title: _titleForSection(_currentSection),
-                onToggleTheme: _toggleTheme,
-                isDarkTheme: _isDarkTheme,
-              ),
-              Expanded(
-                child: Container(
-                  color: colors.bgPrimary,
-                  child: AppRouter.pageFor(_currentSection, _musicAssistantClient!),
-                ),
-              ),
-              _DesktopPlayerBar(
-                isPlaying: _playbackState.playbackState == PlaybackStateType.playing,
-                onTogglePlayPause: _togglePlayPause,
-              ),
-            ],
-          ),
+        _DesktopPlayerBar(
+          isPlaying: _playbackState.playbackState == PlaybackStateType.playing,
+          playbackState: _playbackState,
+          onTogglePlayPause: _togglePlayPause,
+          onPrevious: _playPrevious,
+          onNext: _playNext,
+          onToggleMute: _toggleMute,
+          onVolumeChanged: _setVolume,
         ),
       ],
     );
@@ -414,6 +425,39 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
+  Future<void> _playPrevious() async {
+    try {
+      await _playbackCoordinator.previous();
+    } catch (_) {
+      // Ignore playback command failures in shell-level controls.
+    }
+  }
+
+  Future<void> _playNext() async {
+    try {
+      await _playbackCoordinator.next();
+    } catch (_) {
+      // Ignore playback command failures in shell-level controls.
+    }
+  }
+
+  Future<void> _toggleMute() async {
+    try {
+      await _playbackCoordinator.setMuted(!_playbackState.muted);
+    } catch (_) {
+      // Ignore playback command failures in shell-level controls.
+    }
+  }
+
+  Future<void> _setVolume(double next) async {
+    final int safeVolume = next.round().clamp(0, 100);
+    try {
+      await _playbackCoordinator.setVolume(safeVolume);
+    } catch (_) {
+      // Ignore playback command failures in shell-level controls.
+    }
+  }
+
   void _onPlaybackChanged() {
     if (!mounted) {
       return;
@@ -542,59 +586,244 @@ class _DesktopNavItem extends StatelessWidget {
 
 class _DesktopPlayerBar extends StatelessWidget {
   final bool isPlaying;
+  final PlaybackState playbackState;
   final Future<void> Function() onTogglePlayPause;
+  final Future<void> Function() onPrevious;
+  final Future<void> Function() onNext;
+  final Future<void> Function() onToggleMute;
+  final ValueChanged<double> onVolumeChanged;
 
   const _DesktopPlayerBar({
     required this.isPlaying,
+    required this.playbackState,
     required this.onTogglePlayPause,
+    required this.onPrevious,
+    required this.onNext,
+    required this.onToggleMute,
+    required this.onVolumeChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+    final bool hasPlaybackSession = playbackState.playbackState != PlaybackStateType.uninitialized;
+    final bool isShuffleActive = playbackState.shuffleEnabled == true;
+    final String repeatMode = playbackState.repeatMode?.trim().toLowerCase() ?? '';
+    final bool isRepeatActive = repeatMode.isNotEmpty && repeatMode != 'off' && repeatMode != 'none';
+    final double maxSeconds = ((playbackState.seekMaxMillis ?? 0) / 1000).clamp(0, 36000).toDouble();
+
+    return Container(
+      height: 90,
+      decoration: BoxDecoration(
+        color: colors.bgSecondary,
+        border: Border(top: BorderSide(color: colors.border)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Row(
+          children: <Widget>[
+            SizedBox(
+              width: 300,
+              child: Row(
+                children: <Widget>[
+                  Container(
+                    width: 60,
+                    height: 60,
+                    decoration: BoxDecoration(
+                      color: colors.bgTertiary,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Icon(Icons.music_note_rounded, color: colors.textSecondary),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          'Kein Track aktiv',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w600),
+                        ),
+                        Text(
+                          'Waehle einen Titel zum Starten',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: colors.textSecondary, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                  _PlayerBarIconButton(
+                    icon: Icons.favorite_border_rounded,
+                    onTap: () {},
+                    color: colors.textSecondary,
+                  ),
+                  _PlayerBarIconButton(
+                    icon: Icons.add_rounded,
+                    onTap: () {},
+                    color: colors.textSecondary,
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: <Widget>[
+                      _PlayerBarIconButton(
+                        icon: Icons.shuffle_rounded,
+                        onTap: () {},
+                        color: isShuffleActive ? colors.accent : colors.textSecondary,
+                      ),
+                      _PlayerBarIconButton(
+                        icon: Icons.skip_previous_rounded,
+                        onTap: hasPlaybackSession ? onPrevious : null,
+                        color: colors.textPrimary,
+                      ),
+                      const SizedBox(width: 6),
+                      SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: ElevatedButton(
+                          onPressed: hasPlaybackSession
+                              ? () {
+                                  onTogglePlayPause();
+                                }
+                              : null,
+                          style: ElevatedButton.styleFrom(
+                            padding: EdgeInsets.zero,
+                            shape: const CircleBorder(),
+                            backgroundColor: colors.textPrimary,
+                            foregroundColor: colors.bgPrimary,
+                            disabledBackgroundColor: colors.textPrimary.withValues(alpha: 0.45),
+                            disabledForegroundColor: colors.bgPrimary,
+                            elevation: 0,
+                          ),
+                          child: Icon(isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded, size: 20),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      _PlayerBarIconButton(
+                        icon: Icons.skip_next_rounded,
+                        onTap: hasPlaybackSession ? onNext : null,
+                        color: colors.textPrimary,
+                      ),
+                      _PlayerBarIconButton(
+                        icon: isRepeatActive ? Icons.repeat_on_rounded : Icons.repeat_rounded,
+                        onTap: () {},
+                        color: isRepeatActive ? colors.accent : colors.textSecondary,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 600),
+                    child: Row(
+                      children: <Widget>[
+                        Text(
+                          '0:00',
+                          style: TextStyle(color: colors.textTertiary, fontSize: 11),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Slider(
+                            value: 0,
+                            min: 0,
+                            max: maxSeconds > 0 ? maxSeconds : 1,
+                            onChanged: null,
+                            activeColor: colors.textSecondary,
+                            inactiveColor: colors.bgTertiary,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          _formatSeconds(maxSeconds),
+                          style: TextStyle(color: colors.textTertiary, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(
+              width: 300,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: <Widget>[
+                  _PlayerBarIconButton(icon: Icons.queue_music_rounded, onTap: () {}, color: colors.textSecondary),
+                  _PlayerBarIconButton(icon: Icons.auto_awesome_rounded, onTap: () {}, color: colors.textSecondary),
+                  _PlayerBarIconButton(icon: Icons.devices_rounded, onTap: () {}, color: colors.textSecondary),
+                  _PlayerBarIconButton(
+                    icon: playbackState.muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                    onTap: onToggleMute,
+                    color: playbackState.muted ? colors.accent : colors.textSecondary,
+                  ),
+                  SizedBox(
+                    width: 90,
+                    child: Slider(
+                      value: playbackState.volume.toDouble().clamp(0, 100),
+                      min: 0,
+                      max: 100,
+                      activeColor: colors.textSecondary,
+                      inactiveColor: colors.bgTertiary,
+                      onChanged: onVolumeChanged,
+                    ),
+                  ),
+                  _PlayerBarIconButton(icon: Icons.tune_rounded, onTap: () {}, color: colors.textSecondary),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PlayerBarIconButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback? onTap;
+  final Color color;
+
+  const _PlayerBarIconButton({
+    required this.icon,
+    required this.onTap,
+    required this.color,
   });
 
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
 
-    return Container(
-      height: 88,
-      decoration: BoxDecoration(
-        color: colors.bgSecondary,
-        border: Border(top: BorderSide(color: colors.border)),
-      ),
-      child: Row(
-        children: <Widget>[
-          const SizedBox(width: 18),
-          Container(
-            width: 54,
-            height: 54,
-            decoration: BoxDecoration(
-              color: colors.bgTertiary,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(Icons.music_note_rounded, color: colors.textSecondary),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text('Kein Track aktiv', style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w600)),
-                Text('Waehle einen Titel zum Starten', style: TextStyle(color: colors.textTertiary)),
-              ],
-            ),
-          ),
-          IconButton(onPressed: () {}, icon: const Icon(Icons.skip_previous_rounded)),
-          IconButton(
-            onPressed: () {
-              onTogglePlayPause();
-            },
-            icon: Icon(isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
-          ),
-          IconButton(onPressed: () {}, icon: const Icon(Icons.skip_next_rounded)),
-          const SizedBox(width: 16),
-        ],
+    return IconButton(
+      onPressed: onTap,
+      splashRadius: 16,
+      visualDensity: VisualDensity.compact,
+      icon: Icon(icon, size: 18, color: onTap == null ? color.withValues(alpha: 0.45) : color),
+      style: IconButton.styleFrom(
+        backgroundColor: Colors.transparent,
+        foregroundColor: colors.textSecondary,
       ),
     );
   }
+}
+
+String _formatSeconds(double seconds) {
+  if (!seconds.isFinite || seconds <= 0) {
+    return '0:00';
+  }
+
+  final int totalSeconds = seconds.round();
+  final int minutes = totalSeconds ~/ 60;
+  final int remainingSeconds = totalSeconds % 60;
+  return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
 }
 
 class _MobilePlayerBar extends StatelessWidget {
