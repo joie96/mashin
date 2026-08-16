@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../data/music_assistant/music_assistant_client.dart';
+import '../../data/music_assistant/ma_client.dart';
 
 class HomeScreen extends StatelessWidget {
   final MusicAssistantClient client;

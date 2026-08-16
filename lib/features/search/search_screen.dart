@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../../app/config/app_config.dart';
 import '../../app/theme/app_theme.dart';
 import '../../data/music_assistant/ma_models.dart';
-import '../../data/music_assistant/music_assistant_client.dart';
+import '../../data/music_assistant/ma_client.dart';
 import '../playback/playback_coordinator.dart';
 import '../playback/playback_models.dart';
 import '../shared/widgets/media_row_section_desktop.dart';
@@ -361,10 +361,7 @@ class _SearchScreenState extends State<SearchScreen> {
     }
 
     try {
-      await widget.playbackCoordinator.playMedia(
-        <MediaItem>[track],
-        option: PlaybackQueueInsertOption.replace,
-      );
+      await widget.playbackCoordinator.playMedia(<MediaItem>[track]);
     } catch (_) {
       // Keep the search UI responsive even if playback routing fails.
     }

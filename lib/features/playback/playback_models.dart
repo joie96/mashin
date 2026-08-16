@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../../data/music_assistant/ma_models.dart';
+
 // Output Modes (corresponding to different players)
 enum PlaybackOutputMode {
   localOffline,
@@ -19,18 +21,10 @@ enum PlaybackStateType {
   error,
 }
 
-// Play Media options
-enum PlaybackQueueInsertOption {
-  replace,
-  next,
-  replaceNext,
-  last,
-}
-
 // Queue State
 class PlaybackQueueSnapshot {
   final String? queueId;
-  final List<Map<String, dynamic>> items;
+  final List<QueueItem> items;
   final int? currentIndex;
   final bool? shuffleEnabled;
   final String? repeatMode;
@@ -38,7 +32,7 @@ class PlaybackQueueSnapshot {
 
   const PlaybackQueueSnapshot({
     this.queueId,
-    this.items = const <Map<String, dynamic>>[],
+    this.items = const <QueueItem>[],
     this.currentIndex,
     this.shuffleEnabled,
     this.repeatMode,
@@ -48,7 +42,7 @@ class PlaybackQueueSnapshot {
   PlaybackQueueSnapshot copyWith({
     String? queueId,
     bool clearQueueId = false,
-    List<Map<String, dynamic>>? items,
+    List<QueueItem>? items,
     int? currentIndex,
     bool clearCurrentIndex = false,
     bool? shuffleEnabled,

@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'dart:math' as math;
 
+import '../../../app/config/app_config.dart';
 import '../../../data/music_assistant/ma_models.dart';
-import '../../../data/music_assistant/music_assistant_client.dart';
+import '../../../data/music_assistant/ma_client.dart';
+import '../../../data/music_assistant/ma_event_hub.dart';
 import '../playback_models.dart';
 import '../playback_player.dart';
 import 'sendspin_rust_backend.dart';
@@ -11,14 +14,17 @@ class SendspinPlayer implements PlaybackPlayer {
   SendspinPlayer({
     required this.transportBackend,
     required this.clientResolver,
+    required this.eventHubResolver,
   });
 
   final SendspinRustBackend transportBackend;
   final MusicAssistantClient? Function() clientResolver;
+  final MusicAssistantEventHub? Function() eventHubResolver;
 
   final StreamController<PlaybackQueueSnapshot> _queueStateController =
       StreamController<PlaybackQueueSnapshot>.broadcast();
   PlaybackQueueSnapshot _queueState = const PlaybackQueueSnapshot();
+  StreamSubscription<MusicAssistantQueueEvent>? _queueEventSubscription;
 
   @override
   PlaybackOutputMode get outputMode => transportBackend.outputMode;
@@ -31,14 +37,25 @@ class SendspinPlayer implements PlaybackPlayer {
 
   // Connection and Activation
   @override
-  Future<void> activate({String? targetPlayerId}) =>
-      transportBackend.activate(targetPlayerId: targetPlayerId);
+  Future<void> activate({String? targetPlayerId}) async {
+    await transportBackend.activate(targetPlayerId: targetPlayerId);
+    await _ensureQueueEventSubscription();
+    await _refreshQueueFromServer();
+  }
 
   @override
-  Future<void> deactivate() => transportBackend.deactivate();
+  Future<void> deactivate() async {
+    await _queueEventSubscription?.cancel();
+    _queueEventSubscription = null;
+    await transportBackend.deactivate();
+  }
 
   @override
-  Future<void> connect() => transportBackend.connect();
+  Future<void> connect() async {
+    await transportBackend.connect();
+    await _ensureQueueEventSubscription();
+    await _refreshQueueFromServer();
+  }
 
   Future<void> reconnect() => transportBackend.reconnect();
 
@@ -47,6 +64,8 @@ class SendspinPlayer implements PlaybackPlayer {
 
   @override
   Future<void> terminate() async {
+    await _queueEventSubscription?.cancel();
+    _queueEventSubscription = null;
     if (!_queueStateController.isClosed) {
       await _queueStateController.close();
     }
@@ -78,29 +97,122 @@ class SendspinPlayer implements PlaybackPlayer {
 
   // Play Media and Queue Management
   @override
-  Future<void> playMedia(
-    List<MediaItem> mediaItems, {
-    PlaybackQueueInsertOption option = PlaybackQueueInsertOption.replace,
-    bool radioMode = false,
-    dynamic startItem,
-    String sortBy = 'original',
-  }) async {
+  Future<void> playMedia(List<MediaItem> mediaItems) async {
     final client = clientResolver();
     if (client == null || mediaItems.isEmpty) {
       return;
     }
 
-    final String queueId = await _resolveQueueId(client);
+    final String queueId = await _resolveQueueId();
     await client.playMedia(
       queueId,
       mediaItems,
-      option: _toMaQueueOption(option),
-      radioMode: radioMode,
-      startItem: startItem,
-      sortBy: sortBy,
+      option: QueueOption.replace,
+      radioMode: false,
+      sortBy: 'original',
     );
+  }
 
-    _projectPlayMedia(queueId, mediaItems, option: option);
+  @override
+  Future<void> playMediaNext(List<MediaItem> mediaItems) async {
+    final client = clientResolver();
+    if (client == null || mediaItems.isEmpty) {
+      return;
+    }
+
+    final String queueId = await _resolveQueueId();
+    await client.playMedia(
+      queueId,
+      mediaItems,
+      option: QueueOption.next,
+      radioMode: false,
+      sortBy: 'original',
+    );
+  }
+
+  @override
+  Future<void> playMediaReplaceNext(List<MediaItem> mediaItems) async {
+    final client = clientResolver();
+    if (client == null || mediaItems.isEmpty) {
+      return;
+    }
+
+    final String queueId = await _resolveQueueId();
+    await client.playMedia(
+      queueId,
+      mediaItems,
+      option: QueueOption.replaceNext,
+      radioMode: false,
+      sortBy: 'original',
+    );
+  }
+
+  @override
+  Future<void> playMediaLast(List<MediaItem> mediaItems) async {
+    final client = clientResolver();
+    if (client == null || mediaItems.isEmpty) {
+      return;
+    }
+
+    final String queueId = await _resolveQueueId();
+    await client.playMedia(
+      queueId,
+      mediaItems,
+      option: QueueOption.add,
+      radioMode: false,
+      sortBy: 'original',
+    );
+  }
+
+  @override
+  Future<void> playMediaRadioNext(List<MediaItem> mediaItems) async {
+    if (mediaItems.isEmpty) {
+      return;
+    }
+
+    final client = clientResolver();
+    if (client == null) {
+      return;
+    }
+
+    final String queueId = await _resolveQueueId();
+    await client.playMedia(
+      queueId,
+      mediaItems,
+      option: QueueOption.next,
+      radioMode: true,
+      startItem: mediaItems.first,
+      sortBy: 'original',
+    );
+  }
+
+  @override
+  Future<void> shufflePlayMedia(List<MediaItem> mediaItems) async {
+    if (mediaItems.isEmpty) {
+      return;
+    }
+
+    final client = clientResolver();
+    if (client == null) {
+      return;
+    }
+
+    final shuffled = mediaItems.toList(growable: true);
+    for (int i = shuffled.length - 1; i > 0; i--) {
+      final int j = math.Random().nextInt(i + 1);
+      final MediaItem temp = shuffled[i];
+      shuffled[i] = shuffled[j];
+      shuffled[j] = temp;
+    }
+
+    final String queueId = await _resolveQueueId();
+    await client.playMedia(
+      queueId,
+      shuffled,
+      option: QueueOption.replace,
+      radioMode: false,
+      sortBy: 'original',
+    );
   }
 
   @override
@@ -110,14 +222,8 @@ class SendspinPlayer implements PlaybackPlayer {
       return;
     }
 
-    final String queueId = await _resolveQueueId(client);
+    final String queueId = await _resolveQueueId();
     await client.clearQueue(queueId, skipStop: skipStop);
-    _queueState = _queueState.copyWith(
-      queueId: queueId,
-      items: const <Map<String, dynamic>>[],
-      clearCurrentIndex: true,
-    );
-    _emitQueueState();
   }
 
   @override
@@ -127,17 +233,8 @@ class SendspinPlayer implements PlaybackPlayer {
       return;
     }
 
-    final String queueId = await _resolveQueueId(client);
+    final String queueId = await _resolveQueueId();
     await client.playQueueIndex(queueId, index);
-    if (_queueState.items.isEmpty) {
-      _queueState = _queueState.copyWith(queueId: queueId, clearCurrentIndex: true);
-    } else {
-      _queueState = _queueState.copyWith(
-        queueId: queueId,
-        currentIndex: math.max(0, math.min(index, _queueState.items.length - 1)),
-      );
-    }
-    _emitQueueState();
   }
 
   @override
@@ -147,9 +244,8 @@ class SendspinPlayer implements PlaybackPlayer {
       return;
     }
 
-    final String queueId = await _resolveQueueId(client);
+    final String queueId = await _resolveQueueId();
     await client.moveQueueItem(queueId, queueItemId.trim(), posShift: posShift);
-    _projectMoveQueueItem(queueId, queueItemId.trim(), posShift);
   }
 
   @override
@@ -159,9 +255,8 @@ class SendspinPlayer implements PlaybackPlayer {
       return;
     }
 
-    final String queueId = await _resolveQueueId(client);
+    final String queueId = await _resolveQueueId();
     await client.deleteQueueItemById(queueId, queueItemId.trim());
-    _projectDeleteQueueItem(queueId, queueItemId.trim());
   }
 
   @override
@@ -171,30 +266,19 @@ class SendspinPlayer implements PlaybackPlayer {
       return;
     }
 
-    final String queueId = await _resolveQueueId(client);
+    final String queueId = await _resolveQueueId();
     await client.setShuffle(queueId, enabled);
-    _queueState = _queueState.copyWith(
-      queueId: queueId,
-      shuffleEnabled: enabled,
-    );
-    _emitQueueState();
   }
 
   @override
-  Future<void> setRepeatMode(String repeatMode) async {
+  Future<void> setRepeatMode(RepeatMode repeatMode) async {
     final client = clientResolver();
     if (client == null) {
       return;
     }
 
-    final String queueId = await _resolveQueueId(client);
-    final String normalized = _normalizeRepeatMode(repeatMode);
-    await client.setRepeat(queueId, _toMaRepeatMode(normalized));
-    _queueState = _queueState.copyWith(
-      queueId: queueId,
-      repeatMode: normalized,
-    );
-    _emitQueueState();
+    final String queueId = await _resolveQueueId();
+    await client.setRepeat(queueId, repeatMode);
   }
 
   @override
@@ -204,13 +288,8 @@ class SendspinPlayer implements PlaybackPlayer {
       return;
     }
 
-    final String queueId = await _resolveQueueId(client);
+    final String queueId = await _resolveQueueId();
     await client.setDontStopTheMusic(queueId, enabled);
-    _queueState = _queueState.copyWith(
-      queueId: queueId,
-      dontStopTheMusicEnabled: enabled,
-    );
-    _emitQueueState();
   }
 
   @override
@@ -221,214 +300,165 @@ class SendspinPlayer implements PlaybackPlayer {
     return _queueState;
   }
 
-  Future<String> _resolveQueueId(MusicAssistantClient client) async {
+  Future<String> _resolveQueueId() async {
     if ((_queueState.queueId ?? '').trim().isNotEmpty) {
       return _queueState.queueId!.trim();
     }
 
-    final List<PlayerQueue> queues = await client.getPlayerQueues();
-    final List<PlayerQueue> valid =
-        queues.where((q) => q.queueId.trim().isNotEmpty).toList(growable: false);
-    if (valid.isEmpty) {
-      throw StateError('Keine Player Queue verfuegbar.');
+    final playerId = AppConfig.maAppId.trim();
+    if (playerId.isNotEmpty) {
+      _queueState = _queueState.copyWith(queueId: playerId);
+      _emitQueueState();
+      return playerId;
     }
 
-    final PlayerQueue? active =
-        valid.where((q) => q.active).cast<PlayerQueue?>().firstWhere(
-              (q) => q != null,
-              orElse: () => null,
-            );
-    final PlayerQueue? available =
-        valid.where((q) => q.available).cast<PlayerQueue?>().firstWhere(
-              (q) => q != null,
-              orElse: () => null,
-            );
-
-    final String queueId = (active ?? available ?? valid.first).queueId.trim();
-    _queueState = _queueState.copyWith(queueId: queueId);
-    _emitQueueState();
-    return queueId;
+    developer.log(
+      'Sendspin queue id resolution failed: queueState.queueId and AppConfig.maAppId are empty.',
+      name: 'SendspinPlayer',
+      level: 1000,
+    );
+    throw StateError('Keine Sendspin QueueId verfuegbar.');
   }
 
-  QueueOption _toMaQueueOption(PlaybackQueueInsertOption option) {
-    switch (option) {
-      case PlaybackQueueInsertOption.replace:
-        return QueueOption.replace;
-      case PlaybackQueueInsertOption.next:
-        return QueueOption.next;
-      case PlaybackQueueInsertOption.replaceNext:
-        return QueueOption.replaceNext;
-      case PlaybackQueueInsertOption.last:
-        return QueueOption.add;
+  // Subscribes to Music Assistant queue events.
+  Future<void> _ensureQueueEventSubscription() async {
+    final hub = eventHubResolver();
+    if (hub == null) {
+      return;
     }
-  }
 
-  RepeatMode _toMaRepeatMode(String raw) {
-    switch (raw.trim().toLowerCase()) {
-      case 'all':
-        return RepeatMode.all;
-      case 'one':
-        return RepeatMode.one;
-      default:
-        return RepeatMode.off;
+    if (!hub.isConnected) {
+      await hub.connect();
     }
+
+    await _queueEventSubscription?.cancel();
+    _queueEventSubscription = hub.queueEvents.listen((event) {
+      unawaited(_onQueueEvent(event));
+    });
   }
 
-  String _normalizeRepeatMode(String raw) {
-    switch (raw.trim().toLowerCase()) {
-      case 'all':
-        return 'all';
-      case 'one':
-        return 'one';
-      default:
-        return 'off';
+  // Applies queue changes from MA event stream.
+  // Strategy:
+  // - ignore unrelated queue ids
+  // - apply lightweight fields directly from event payload
+  // - refresh full item list only when queue_items_updated arrives
+  Future<void> _onQueueEvent(MusicAssistantQueueEvent event) async {
+    final String expectedQueueId = (_queueState.queueId ?? AppConfig.maAppId).trim();
+    final String eventQueueId = (event.queueId ?? event.queue?.queueId ?? '').trim();
+
+    if (expectedQueueId.isNotEmpty && eventQueueId.isNotEmpty && eventQueueId != expectedQueueId) {
+      return;
     }
-  }
 
-  void _projectPlayMedia(
-    String queueId,
-    List<MediaItem> mediaItems, {
-    required PlaybackQueueInsertOption option,
-  }) {
-    final List<Map<String, dynamic>> current = _queueState.items
-        .map((e) => Map<String, dynamic>.from(e))
-        .toList(growable: true);
-    final List<Map<String, dynamic>> payload =
-        mediaItems.map(_toQueueProjection).toList(growable: false);
-    int? currentIndex = _queueState.currentIndex;
-
-    switch (option) {
-      case PlaybackQueueInsertOption.replace:
-        current
-          ..clear()
-          ..addAll(payload);
-        currentIndex = current.isEmpty ? null : 0;
-        break;
-      case PlaybackQueueInsertOption.next:
-        final int insertIndex =
-            currentIndex == null ? current.length : math.min(currentIndex + 1, current.length);
-        current.insertAll(insertIndex, payload);
-        currentIndex ??= current.isEmpty ? null : 0;
-        break;
-      case PlaybackQueueInsertOption.replaceNext:
-        if (currentIndex == null) {
-          current
-            ..clear()
-            ..addAll(payload);
-          currentIndex = current.isEmpty ? null : 0;
-        } else {
-          final int keepCount = math.min(currentIndex + 1, current.length);
-          final List<Map<String, dynamic>> prefix =
-              current.take(keepCount).toList(growable: false);
-          current
-            ..clear()
-            ..addAll(prefix)
-            ..addAll(payload);
+    switch (event.event) {
+      case 'queue_added':
+      case 'queue_updated':
+        final PlayerQueue? queue = event.queue;
+        if (queue != null) {
+          _queueState = _queueState.copyWith(
+            queueId: queue.queueId.isNotEmpty
+                ? queue.queueId
+                : (eventQueueId.isNotEmpty ? eventQueueId : _queueState.queueId),
+            currentIndex: queue.currentIndex,
+            clearCurrentIndex: queue.currentIndex == null,
+            shuffleEnabled: queue.shuffleEnabled,
+            repeatMode: queue.repeatMode?.name,
+            dontStopTheMusicEnabled: queue.dontStopTheMusicEnabled,
+          );
+          _emitQueueState();
         }
-        break;
-      case PlaybackQueueInsertOption.last:
-        current.addAll(payload);
-        currentIndex ??= current.isEmpty ? null : 0;
-        break;
+        return;
+      case 'queue_items_updated':
+        final String queueIdForItems = eventQueueId.isNotEmpty
+            ? eventQueueId
+            : ((_queueState.queueId ?? AppConfig.maAppId).trim());
+        if (queueIdForItems.isNotEmpty) {
+          await _refreshQueueItemsFromServer(queueIdForItems);
+        }
+        return;
+      case 'queue_settings_updated':
+        final raw = event.rawData ?? const <String, dynamic>{};
+        _queueState = _queueState.copyWith(
+          queueId: eventQueueId.isNotEmpty ? eventQueueId : _queueState.queueId,
+          shuffleEnabled: raw['shuffle_enabled'] as bool? ?? _queueState.shuffleEnabled,
+          repeatMode: (raw['repeat_mode'] as String?)?.trim() ?? _queueState.repeatMode,
+          dontStopTheMusicEnabled: raw['dont_stop_the_music_enabled'] as bool? ??
+              _queueState.dontStopTheMusicEnabled,
+        );
+        _emitQueueState();
+        return;
+      case 'queue_removed':
+        _queueState = _queueState.copyWith(
+          queueId: eventQueueId.isNotEmpty ? eventQueueId : _queueState.queueId,
+          items: const <QueueItem>[],
+          clearCurrentIndex: true,
+        );
+        _emitQueueState();
+        return;
+      case 'queue_time_updated':
+        // Position/progress is handled by playback state stream.
+      default:
+        return;
+    }
+  }
+
+  // Initial/full queue refresh used during activate/connect.
+  Future<void> _refreshQueueFromServer() async {
+    final client = clientResolver();
+    if (client == null) {
+      return;
     }
 
+    final String queueId = await _resolveQueueId();
+    final PlayerQueue? queue = await client.getPlayerQueue(queueId);
+    if (queue == null) {
+      return;
+    }
+
+    final int limit = queue.itemCount <= 0 ? 500 : math.max(100, queue.itemCount);
+    final List<QueueItem> items = await client.getQueueItems(queueId, limit: limit);
+
     _queueState = _queueState.copyWith(
-      queueId: queueId,
-      items: current,
-      currentIndex: currentIndex,
-      clearCurrentIndex: currentIndex == null,
+      queueId: queue.queueId.isNotEmpty ? queue.queueId : queueId,
+      items: items,
+      currentIndex: queue.currentIndex,
+      clearCurrentIndex: queue.currentIndex == null,
+      shuffleEnabled: queue.shuffleEnabled,
+      repeatMode: queue.repeatMode?.name,
+      dontStopTheMusicEnabled: queue.dontStopTheMusicEnabled,
     );
     _emitQueueState();
   }
 
-  void _projectMoveQueueItem(String queueId, String queueItemId, int posShift) {
-    final List<Map<String, dynamic>> current = _queueState.items
-        .map((e) => Map<String, dynamic>.from(e))
-        .toList(growable: true);
-    final int fromIndex = _indexOfQueueItem(current, queueItemId);
-    if (fromIndex < 0 || posShift == 0) {
+  // Targeted item refresh for queue_items_updated.
+  Future<void> _refreshQueueItemsFromServer(String queueId) async {
+    final client = clientResolver();
+    if (client == null) {
       return;
     }
 
-    final int toIndex = math.max(0, math.min(fromIndex + posShift, current.length - 1));
-    if (fromIndex == toIndex) {
+    final String normalizedQueueId = queueId.trim();
+    if (normalizedQueueId.isEmpty) {
       return;
     }
 
-    final moved = current.removeAt(fromIndex);
-    current.insert(toIndex, moved);
+    final int itemCount = _queueState.items.length;
+    final int limit = itemCount <= 0 ? 500 : math.max(100, itemCount);
+    final List<QueueItem> items = await client.getQueueItems(normalizedQueueId, limit: limit);
 
-    int? currentIndex = _queueState.currentIndex;
-    if (currentIndex != null) {
-      if (currentIndex == fromIndex) {
-        currentIndex = toIndex;
-      } else if (fromIndex < currentIndex && toIndex >= currentIndex) {
-        currentIndex = currentIndex - 1;
-      } else if (fromIndex > currentIndex && toIndex <= currentIndex) {
-        currentIndex = currentIndex + 1;
-      }
+    final String activeQueueId = (_queueState.queueId ?? AppConfig.maAppId).trim();
+    if (activeQueueId.isNotEmpty && normalizedQueueId != activeQueueId) {
+      return;
     }
 
     _queueState = _queueState.copyWith(
-      queueId: queueId,
-      items: current,
-      currentIndex: currentIndex,
-      clearCurrentIndex: currentIndex == null,
+      queueId: normalizedQueueId,
+      items: items,
     );
     _emitQueueState();
   }
 
-  void _projectDeleteQueueItem(String queueId, String queueItemId) {
-    final List<Map<String, dynamic>> current = _queueState.items
-        .map((e) => Map<String, dynamic>.from(e))
-        .toList(growable: true);
-    final int index = _indexOfQueueItem(current, queueItemId);
-    if (index < 0) {
-      return;
-    }
-
-    current.removeAt(index);
-    int? currentIndex = _queueState.currentIndex;
-    if (current.isEmpty) {
-      currentIndex = null;
-    } else if (currentIndex != null) {
-      if (index < currentIndex) {
-        currentIndex = currentIndex - 1;
-      } else if (index == currentIndex) {
-        currentIndex = math.min(currentIndex, current.length - 1);
-      }
-    }
-
-    _queueState = _queueState.copyWith(
-      queueId: queueId,
-      items: current,
-      currentIndex: currentIndex,
-      clearCurrentIndex: currentIndex == null,
-    );
-    _emitQueueState();
-  }
-
-  int _indexOfQueueItem(List<Map<String, dynamic>> items, String queueItemId) {
-    final String needle = queueItemId.trim();
-    for (int i = 0; i < items.length; i++) {
-      final dynamic value = items[i]['queue_item_id'] ?? items[i]['item_id'];
-      if (value is String && value.trim() == needle) {
-        return i;
-      }
-    }
-    return -1;
-  }
-
-  Map<String, dynamic> _toQueueProjection(MediaItem item) {
-    return <String, dynamic>{
-      'item_id': item.itemId,
-      'provider': item.provider,
-      'name': item.name,
-      'media_type': mediaTypeToJson(item.mediaType),
-      'uri': item.uri,
-    };
-  }
-
+  // Emits the current queue snapshot to the coordinator.
   void _emitQueueState() {
     if (_queueStateController.isClosed) {
       return;

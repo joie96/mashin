@@ -7,8 +7,9 @@ import '../../features/auth/login_screen.dart';
 import '../../features/shared/selection/selection_session_controller.dart';
 import '../../features/shared/widgets/mobile_selection_overlay.dart';
 import '../../data/music_assistant/ma_auth_store.dart';
+import '../../data/music_assistant/ma_client.dart';
+import '../../data/music_assistant/ma_event_hub.dart';
 import '../../data/music_assistant/ma_models.dart';
-import '../../data/music_assistant/music_assistant_client.dart';
 import '../../features/playback/playback_coordinator.dart';
 import '../../features/playback/playback_models.dart';
 import '../../features/playback/playback_player.dart';
@@ -28,6 +29,7 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   static const double _mobileSelectionOverlayBottomInset = 84;
+  static const Duration _busyUiFallbackAfter = Duration(seconds: 3);
 
   AppSection _currentSection = AppSection.home;
   bool _isDarkTheme = true;
@@ -36,11 +38,99 @@ class _AppShellState extends State<AppShell> {
   late final PlaybackCoordinator _playbackCoordinator;
 
   MusicAssistantClient? _musicAssistantClient;
+  MusicAssistantEventHub? _musicAssistantEventHub;
   PlaybackState _playbackState = const PlaybackState();
+  PlaybackStateType _lastStablePlaybackStateType = PlaybackStateType.uninitialized;
+  DateTime? _busySince;
   bool _isBootstrapping = true;
   String _baseUrl = AppConfig.defaultMusicAssistantUrl;
   String? _username;
 
+  // Getters for current Track and Queue state
+  QueueItem? get _currentQueueItem {
+    final items = _playbackCoordinator.queueItems;
+    final index = _playbackCoordinator.currentQueueIndex;
+    if (index == null || index < 0 || index >= items.length) {
+      return null;
+    }
+    return items[index];
+  }
+
+  String get _currentTrackTitle {
+    final item = _currentQueueItem;
+    if (item == null) {
+      return 'Kein Track aktiv';
+    }
+
+    final mediaName = item.mediaItem?.name.trim() ?? '';
+    final queueName = item.name.trim();
+    if (mediaName.isNotEmpty) {
+      return mediaName;
+    }
+    if (queueName.isNotEmpty) {
+      return queueName;
+    }
+    return 'Unbekannter Titel';
+  }
+
+  String get _currentTrackSubtitle {
+    final item = _currentQueueItem;
+    if (item == null) {
+      return 'Waehle einen Titel zum Starten';
+    }
+
+    final artists = item.mediaItem?.artists
+            .map((artist) => artist.name.trim())
+            .where((name) => name.isNotEmpty)
+            .toList() ??
+        const <String>[];
+    if (artists.isNotEmpty) {
+      return artists.join(', ');
+    }
+    return 'Unbekannte:r Interpret:in';
+  }
+
+  double get _currentTrackMaxSeconds {
+    final seekMaxSeconds = ((_playbackState.seekMaxMillis ?? 0) / 1000).toDouble();
+    if (seekMaxSeconds > 0) {
+      return seekMaxSeconds;
+    }
+
+    final queueDuration = _currentQueueItem?.duration;
+    if (queueDuration != null && queueDuration > 0) {
+      return queueDuration.toDouble();
+    }
+
+    return 0;
+  }
+
+  String? get _currentTrackCoverUrl {
+    final url = _currentQueueItem?.mediaItem?.imageUri?.trim() ?? '';
+    return url.isEmpty ? null : url;
+  }
+
+  PlaybackStateType get _effectivePlaybackStateType {
+    final raw = _playbackState.playbackState;
+    final isBusy = raw == PlaybackStateType.buffering || raw == PlaybackStateType.seeking;
+
+    if (!isBusy) {
+      return raw;
+    }
+
+    final busySince = _busySince;
+    if (busySince == null) {
+      return raw;
+    }
+
+    final isStaleBusy = DateTime.now().difference(busySince) > _busyUiFallbackAfter;
+    if (isStaleBusy) {
+      return _lastStablePlaybackStateType;
+    }
+
+    return raw;
+  }
+
+  // Initialization and Lifecycle
   @override
   void initState() {
     super.initState();
@@ -50,9 +140,9 @@ class _AppShellState extends State<AppShell> {
         SendspinPlayer(
           transportBackend: SendspinRustBackend(
             bridge: FfiSendspinRustBridge(),
-            musicAssistantBaseUrlResolver: () => _baseUrl,
           ),
           clientResolver: () => _musicAssistantClient,
+          eventHubResolver: () => _musicAssistantEventHub,
         ),
       ],
       initialOutputMode: PlaybackOutputMode.localSendspin,
@@ -67,10 +157,12 @@ class _AppShellState extends State<AppShell> {
     _playbackCoordinator.removeListener(_onPlaybackChanged);
     unawaited(_playbackCoordinator.shutdown());
     _playbackCoordinator.dispose();
+    unawaited(_musicAssistantEventHub?.dispose());
     _musicAssistantClient?.dispose();
     super.dispose();
   }
 
+  // Building the UI
   @override
   Widget build(BuildContext context) {
     if (_isBootstrapping) {
@@ -190,8 +282,12 @@ class _AppShellState extends State<AppShell> {
           ),
         ),
         _DesktopPlayerBar(
-          isPlaying: _playbackState.playbackState == PlaybackStateType.playing,
+          playStateType: _effectivePlaybackStateType,
           playbackState: _playbackState,
+          trackTitle: _currentTrackTitle,
+          trackSubtitle: _currentTrackSubtitle,
+          trackCoverUrl: _currentTrackCoverUrl,
+          maxSeconds: _currentTrackMaxSeconds,
           onTogglePlayPause: _togglePlayPause,
           onPrevious: _playPrevious,
           onNext: _playNext,
@@ -216,7 +312,9 @@ class _AppShellState extends State<AppShell> {
               ),
             ),
             _MobilePlayerBar(
-              isPlaying: _playbackState.playbackState == PlaybackStateType.playing,
+              playbackState: _effectivePlaybackStateType,
+              trackTitle: _currentTrackTitle,
+              trackCoverUrl: _currentTrackCoverUrl,
               onTogglePlayPause: _togglePlayPause,
             ),
             _MobileBottomNav(
@@ -283,22 +381,31 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
+  // Session & Login Management
   Future<void> _restoreSession() async {
     final stored = await _authStore.read();
 
     final candidateBaseUrl = stored?.baseUrl ?? _baseUrl;
+    final candidateSendspinUrl = stored?.sendspinUrl;
     final candidateToken = stored?.token;
     final candidateUsername = stored?.username;
 
     _baseUrl = candidateBaseUrl;
     _username = candidateUsername;
 
+    await _authStore.writeSendspinUrl(
+      baseUrl: _baseUrl,
+      sendspinUrl: candidateSendspinUrl,
+    );
+
     if (candidateToken == null || candidateToken.isEmpty) {
+      unawaited(_musicAssistantEventHub?.dispose());
       if (!mounted) {
         return;
       }
 
       setState(() {
+        _musicAssistantEventHub = null;
         _isBootstrapping = false;
       });
       return;
@@ -316,8 +423,13 @@ class _AppShellState extends State<AppShell> {
     }
 
     if (isValid) {
+      final eventHub = MusicAssistantEventHub(
+        baseUrl: candidateBaseUrl,
+        authToken: candidateToken,
+      );
       setState(() {
         _musicAssistantClient = candidateClient;
+        _musicAssistantEventHub = eventHub;
         _isBootstrapping = false;
       });
       return;
@@ -325,9 +437,11 @@ class _AppShellState extends State<AppShell> {
 
     candidateClient.dispose();
     await _authStore.clear();
+    unawaited(_musicAssistantEventHub?.dispose());
 
     setState(() {
       _musicAssistantClient = null;
+      _musicAssistantEventHub = null;
       _isBootstrapping = false;
     });
   }
@@ -338,6 +452,7 @@ class _AppShellState extends State<AppShell> {
     required String password,
   }) async {
     _baseUrl = baseUrl;
+    final sendspinUrl = await _authStore.readSendspinUrl(baseUrl: baseUrl);
     _username = username;
 
     final loginClient = MusicAssistantClient(baseUrl: baseUrl);
@@ -346,6 +461,11 @@ class _AppShellState extends State<AppShell> {
       final token = await loginClient.login(username: username, password: password);
 
       final authenticatedClient = MusicAssistantClient(
+        baseUrl: baseUrl,
+        authToken: token,
+      );
+
+      final authenticatedEventHub = MusicAssistantEventHub(
         baseUrl: baseUrl,
         authToken: token,
       );
@@ -359,6 +479,7 @@ class _AppShellState extends State<AppShell> {
       await _authStore.write(
         AuthSession(
           baseUrl: baseUrl,
+          sendspinUrl: sendspinUrl,
           username: username,
           token: token,
         ),
@@ -366,13 +487,16 @@ class _AppShellState extends State<AppShell> {
 
       if (!mounted) {
         authenticatedClient.dispose();
+        await authenticatedEventHub.dispose();
         return null;
       }
 
       _musicAssistantClient?.dispose();
+      unawaited(_musicAssistantEventHub?.dispose());
 
       setState(() {
         _musicAssistantClient = authenticatedClient;
+        _musicAssistantEventHub = authenticatedEventHub;
         _currentSection = AppSection.home;
       });
 
@@ -388,6 +512,7 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
+  // Bootstrap and Playback Initialization
   Future<void> _initializePlaybackCoordinator() async {
     try {
       await _playbackCoordinator.initialize();
@@ -397,6 +522,7 @@ class _AppShellState extends State<AppShell> {
 
       setState(() {
         _playbackState = _playbackCoordinator.state;
+        _lastStablePlaybackStateType = _playbackState.playbackState;
       });
     } catch (error) {
       if (!mounted) {
@@ -430,6 +556,7 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
+  // Playback Control Handlers
   Future<void> _playPrevious() async {
     try {
       await _playbackCoordinator.previous();
@@ -458,8 +585,8 @@ class _AppShellState extends State<AppShell> {
     final int safeVolume = next.round().clamp(0, 100);
     try {
       await _playbackCoordinator.setVolume(safeVolume);
-    } catch (_) {
-      // Ignore playback command failures in shell-level controls.
+    } catch (error) {
+      debugPrint('Set volume failed: $error');
     }
   }
 
@@ -468,12 +595,23 @@ class _AppShellState extends State<AppShell> {
       return;
     }
 
+    final nextPlaybackState = _playbackCoordinator.state;
+    final nextType = nextPlaybackState.playbackState;
+    final isBusy = nextType == PlaybackStateType.buffering || nextType == PlaybackStateType.seeking;
+
     setState(() {
-      _playbackState = _playbackCoordinator.state;
+      _playbackState = nextPlaybackState;
+      if (isBusy) {
+        _busySince ??= DateTime.now();
+      } else {
+        _busySince = null;
+        _lastStablePlaybackStateType = nextType;
+      }
     });
   }
 }
 
+// Desktop UI Components
 class _DesktopTopBar extends StatelessWidget {
   final String title;
   final VoidCallback onToggleTheme;
@@ -590,8 +728,12 @@ class _DesktopNavItem extends StatelessWidget {
 }
 
 class _DesktopPlayerBar extends StatelessWidget {
-  final bool isPlaying;
+  final PlaybackStateType playStateType;
   final PlaybackState playbackState;
+  final String trackTitle;
+  final String trackSubtitle;
+  final String? trackCoverUrl;
+  final double maxSeconds;
   final Future<void> Function() onTogglePlayPause;
   final Future<void> Function() onPrevious;
   final Future<void> Function() onNext;
@@ -599,8 +741,12 @@ class _DesktopPlayerBar extends StatelessWidget {
   final ValueChanged<double> onVolumeChanged;
 
   const _DesktopPlayerBar({
-    required this.isPlaying,
+    required this.playStateType,
     required this.playbackState,
+    required this.trackTitle,
+    required this.trackSubtitle,
+    required this.trackCoverUrl,
+    required this.maxSeconds,
     required this.onTogglePlayPause,
     required this.onPrevious,
     required this.onNext,
@@ -611,11 +757,14 @@ class _DesktopPlayerBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
-    final bool hasPlaybackSession = playbackState.playbackState != PlaybackStateType.uninitialized;
+    final bool hasPlaybackSession = playStateType != PlaybackStateType.uninitialized;
+    final bool isPlaying = playStateType == PlaybackStateType.playing;
+    final bool isBusy = playStateType == PlaybackStateType.buffering ||
+      playStateType == PlaybackStateType.seeking;
     final bool isShuffleActive = playbackState.shuffleEnabled == true;
     final String repeatMode = playbackState.repeatMode?.trim().toLowerCase() ?? '';
     final bool isRepeatActive = repeatMode.isNotEmpty && repeatMode != 'off' && repeatMode != 'none';
-    final double maxSeconds = ((playbackState.seekMaxMillis ?? 0) / 1000).clamp(0, 36000).toDouble();
+    final double clampedMaxSeconds = maxSeconds.clamp(0, 36000).toDouble();
 
     return Container(
       height: 90,
@@ -638,7 +787,18 @@ class _DesktopPlayerBar extends StatelessWidget {
                       color: colors.bgTertiary,
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: Icon(Icons.music_note_rounded, color: colors.textSecondary),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: trackCoverUrl != null
+                          ? Image.network(
+                              trackCoverUrl!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) {
+                                return Icon(Icons.music_note_rounded, color: colors.textSecondary);
+                              },
+                            )
+                          : Icon(Icons.music_note_rounded, color: colors.textSecondary),
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -647,13 +807,13 @@ class _DesktopPlayerBar extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         Text(
-                          'Kein Track aktiv',
+                          trackTitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w600),
                         ),
                         Text(
-                          'Waehle einen Titel zum Starten',
+                          trackSubtitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(color: colors.textSecondary, fontSize: 12),
@@ -679,28 +839,35 @@ class _DesktopPlayerBar extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: <Widget>[
                   Row(
+                    mainAxisSize: MainAxisSize.min,
                     mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: <Widget>[
-                      _PlayerBarIconButton(
+                      _TransportControlButton(
                         icon: Icons.shuffle_rounded,
+                        size: 32,
+                        iconSize: 16,
                         onTap: () {},
                         color: isShuffleActive ? colors.accent : colors.textSecondary,
                       ),
-                      _PlayerBarIconButton(
+                      const SizedBox(width: 12),
+                      _TransportControlButton(
                         icon: Icons.skip_previous_rounded,
+                        size: 32,
+                        iconSize: 18,
                         onTap: hasPlaybackSession ? onPrevious : null,
                         color: colors.textPrimary,
                       ),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: 12),
                       SizedBox(
                         width: 36,
                         height: 36,
                         child: ElevatedButton(
-                          onPressed: hasPlaybackSession
-                              ? () {
+                          onPressed: isBusy
+                              ? null
+                              : () {
                                   onTogglePlayPause();
-                                }
-                              : null,
+                                },
                           style: ElevatedButton.styleFrom(
                             padding: EdgeInsets.zero,
                             shape: const CircleBorder(),
@@ -710,23 +877,37 @@ class _DesktopPlayerBar extends StatelessWidget {
                             disabledForegroundColor: colors.bgPrimary,
                             elevation: 0,
                           ),
-                          child: Icon(isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded, size: 20),
+                          child: isBusy
+                              ? SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(colors.bgPrimary),
+                                  ),
+                                )
+                              : Icon(isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded, size: 20),
                         ),
                       ),
-                      const SizedBox(width: 6),
-                      _PlayerBarIconButton(
+                      const SizedBox(width: 12),
+                      _TransportControlButton(
                         icon: Icons.skip_next_rounded,
+                        size: 32,
+                        iconSize: 18,
                         onTap: hasPlaybackSession ? onNext : null,
                         color: colors.textPrimary,
                       ),
-                      _PlayerBarIconButton(
+                      const SizedBox(width: 12),
+                      _TransportControlButton(
                         icon: isRepeatActive ? Icons.repeat_on_rounded : Icons.repeat_rounded,
+                        size: 32,
+                        iconSize: 16,
                         onTap: () {},
                         color: isRepeatActive ? colors.accent : colors.textSecondary,
                       ),
                     ],
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 600),
                     child: Row(
@@ -740,7 +921,7 @@ class _DesktopPlayerBar extends StatelessWidget {
                           child: Slider(
                             value: 0,
                             min: 0,
-                            max: maxSeconds > 0 ? maxSeconds : 1,
+                            max: clampedMaxSeconds > 0 ? clampedMaxSeconds : 1,
                             onChanged: null,
                             activeColor: colors.textSecondary,
                             inactiveColor: colors.bgTertiary,
@@ -748,7 +929,7 @@ class _DesktopPlayerBar extends StatelessWidget {
                         ),
                         const SizedBox(width: 10),
                         Text(
-                          _formatSeconds(maxSeconds),
+                          _formatSeconds(clampedMaxSeconds),
                           style: TextStyle(color: colors.textTertiary, fontSize: 11),
                         ),
                       ],
@@ -771,7 +952,7 @@ class _DesktopPlayerBar extends StatelessWidget {
                     color: playbackState.muted ? colors.accent : colors.textSecondary,
                   ),
                   SizedBox(
-                    width: 90,
+                    width: 170,
                     child: Slider(
                       value: playbackState.volume.toDouble().clamp(0, 100),
                       min: 0,
@@ -786,6 +967,41 @@ class _DesktopPlayerBar extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TransportControlButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback? onTap;
+  final Color color;
+  final double size;
+  final double iconSize;
+
+  const _TransportControlButton({
+    required this.icon,
+    required this.onTap,
+    required this.color,
+    required this.size,
+    required this.iconSize,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: IconButton(
+        onPressed: onTap,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(minWidth: 0, minHeight: 0),
+        splashRadius: size / 2,
+        icon: Icon(
+          icon,
+          size: iconSize,
+          color: onTap == null ? color.withValues(alpha: 0.45) : color,
         ),
       ),
     );
@@ -831,18 +1047,26 @@ String _formatSeconds(double seconds) {
   return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
 }
 
+// Mobile UI Components
 class _MobilePlayerBar extends StatelessWidget {
-  final bool isPlaying;
+  final PlaybackStateType playbackState;
+  final String trackTitle;
+  final String? trackCoverUrl;
   final Future<void> Function() onTogglePlayPause;
 
   const _MobilePlayerBar({
-    required this.isPlaying,
+    required this.playbackState,
+    required this.trackTitle,
+    required this.trackCoverUrl,
     required this.onTogglePlayPause,
   });
 
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
+    final bool isPlaying = playbackState == PlaybackStateType.playing;
+    final bool isBusy = playbackState == PlaybackStateType.buffering ||
+        playbackState == PlaybackStateType.seeking;
 
     return Container(
       height: 68,
@@ -862,21 +1086,41 @@ class _MobilePlayerBar extends StatelessWidget {
               color: colors.bgTertiary,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(Icons.music_note_rounded, color: colors.textSecondary),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: trackCoverUrl != null
+                  ? Image.network(
+                      trackCoverUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => Icon(Icons.music_note_rounded, color: colors.textSecondary),
+                    )
+                  : Icon(Icons.music_note_rounded, color: colors.textSecondary),
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Kein Track aktiv',
+              trackTitle,
               style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w600),
               overflow: TextOverflow.ellipsis,
             ),
           ),
           IconButton(
-            onPressed: () {
-              onTogglePlayPause();
-            },
-            icon: Icon(isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
+            onPressed: isBusy
+                ? null
+                : () {
+                    onTogglePlayPause();
+                  },
+            icon: isBusy
+                ? SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(colors.textSecondary),
+                    ),
+                  )
+                : Icon(isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
           ),
           const SizedBox(width: 4),
         ],

@@ -6,7 +6,7 @@ abstract class SendspinRustBridge {
   Stream<SendspinPlayerState> get states;
   Stream<Map<String, dynamic>> get events;
 
-  Future<void> engineInit({required String musicAssistantBaseUrl});
+  Future<void> engineInit();
 
   Future<void> engineConnect();
 

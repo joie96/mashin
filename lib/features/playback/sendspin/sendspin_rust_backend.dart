@@ -7,11 +7,9 @@ import 'sendspin_rust_bridge.dart';
 class SendspinRustBackend {
   SendspinRustBackend({
     required this.bridge,
-    required this.musicAssistantBaseUrlResolver,
   });
 
   final SendspinRustBridge bridge;
-  final String Function() musicAssistantBaseUrlResolver;
 
   PlaybackOutputMode get outputMode => PlaybackOutputMode.localSendspin;
 
@@ -19,9 +17,7 @@ class SendspinRustBackend {
       bridge.states.map((SendspinPlayerState state) => state.toPlaybackState());
 
   Future<void> activate({String? targetPlayerId}) async {
-    await bridge.engineInit(
-      musicAssistantBaseUrl: musicAssistantBaseUrlResolver(),
-    );
+    await bridge.engineInit();
   }
 
   Future<void> deactivate() => bridge.engineDisconnect(reason: 'deactivate');

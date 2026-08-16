@@ -521,6 +521,19 @@ impl SendspinEngine {
                                             log_error(&format!("audio stream runtime error: {stream_err}"));
                                             write_last_error(format!("audio stream error: {stream_err}"));
                                         }
+
+                                        // StreamStart sets playback_state to buffering.
+                                        // As soon as audio is actually enqueued, reflect active playback.
+                                        let mut playback_state_changed = false;
+                                        if let Ok(mut state) = snapshot_for_task.lock() {
+                                            if state.playback_state != "playing" {
+                                                state.playback_state = "playing".to_string();
+                                                playback_state_changed = true;
+                                            }
+                                        }
+                                        if playback_state_changed {
+                                            emit_snapshot_event_from_shared(&snapshot_for_task);
+                                        }
                                     }
 
                                 }

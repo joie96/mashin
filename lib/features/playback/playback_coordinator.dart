@@ -27,13 +27,25 @@ class PlaybackCoordinator extends ChangeNotifier {
   PlaybackQueueSnapshot _queueState = const PlaybackQueueSnapshot();
   bool _initialized = false;
 
+  void _updateState(PlaybackState next, {required String source}) {
+    final previousType = _state.playbackState;
+    _state = next;
+    final nextType = _state.playbackState;
+
+    if (previousType != nextType) {
+      debugPrint(
+        'PlaybackCoordinator state change [$source]: ${previousType.name} -> ${nextType.name}',
+      );
+    }
+  }
+
   bool get isInitialized => _initialized;
 
   PlaybackOutputMode? get outputMode => _outputMode;
 
   PlaybackState get state => _state;
 
-  List<Map<String, dynamic>> get queueItems => List<Map<String, dynamic>>.unmodifiable(_queueState.items);
+  List<QueueItem> get queueItems => List<QueueItem>.unmodifiable(_queueState.items);
 
   int? get currentQueueIndex => _queueState.currentIndex;
 
@@ -59,7 +71,10 @@ class PlaybackCoordinator extends ChangeNotifier {
 
     await switchOutputMode(preferredMode);
     await _activePlayer!.connect();
-    _state = await _activePlayer!.getState();
+    _updateState(
+      await _activePlayer!.getState(),
+      source: 'initialize/getState',
+    );
     _queueState = await _activePlayer!.getQueueState();
     _initialized = true;
     notifyListeners();
@@ -90,7 +105,10 @@ class PlaybackCoordinator extends ChangeNotifier {
     _outputMode = mode;
 
     await _bindStreams(nextPlayer);
-    _state = await nextPlayer.getState();
+    _updateState(
+      await nextPlayer.getState(),
+      source: 'switchOutputMode/getState',
+    );
     _queueState = await nextPlayer.getQueueState();
     notifyListeners();
   }
@@ -121,36 +139,27 @@ class PlaybackCoordinator extends ChangeNotifier {
 
 
   // Media Actions
-  Future<void> playMedia(
-    List<MediaItem> mediaItems, {
-    PlaybackQueueInsertOption option = PlaybackQueueInsertOption.replace,
-    bool radioMode = false,
-    dynamic startItem,
-    String sortBy = 'original',
-  }) => _route((PlaybackPlayer player) => player.playMedia(mediaItems, option: option, radioMode: radioMode, startItem: startItem, sortBy: sortBy));
+  Future<void> playMedia(List<MediaItem> mediaItems) =>
+      _route((PlaybackPlayer player) => player.playMedia(mediaItems));
 
   Future<void> playMediaNext(List<MediaItem> mediaItems) {
-    return playMedia(mediaItems, option: PlaybackQueueInsertOption.next);
+    return _route((PlaybackPlayer player) => player.playMediaNext(mediaItems));
   }
 
   Future<void> playMediaReplaceNext(List<MediaItem> mediaItems) {
-    return playMedia(mediaItems, option: PlaybackQueueInsertOption.replaceNext);
+    return _route((PlaybackPlayer player) => player.playMediaReplaceNext(mediaItems));
   }
 
   Future<void> playMediaLast(List<MediaItem> mediaItems) {
-    return playMedia(mediaItems, option: PlaybackQueueInsertOption.last);
+    return _route((PlaybackPlayer player) => player.playMediaLast(mediaItems));
   }
 
   Future<void> playMediaRadioNext(List<MediaItem> mediaItems) {
-    return playMedia(
-      mediaItems,
-      option: PlaybackQueueInsertOption.next,
-      radioMode: true,
-    );
+    return _route((PlaybackPlayer player) => player.playMediaRadioNext(mediaItems));
   }
 
   Future<void> shufflePlayMedia(List<MediaItem> mediaItems) {
-    return playMedia(mediaItems, sortBy: 'random');
+    return _route((PlaybackPlayer player) => player.shufflePlayMedia(mediaItems));
   }
 
   Future<void> clearQueue({bool skipStop = false}) =>
@@ -172,10 +181,10 @@ class PlaybackCoordinator extends ChangeNotifier {
 
   Future<void> toggleRepeatMode([String? currentRepeatMode]) {
     final normalized = (currentRepeatMode ?? _queueState.repeatMode ?? _state.repeatMode ?? '').trim().toLowerCase();
-    final String next = switch (normalized) {
-      'off' || 'none' || '' => 'all',
-      'all' => 'one',
-      _ => 'off',
+    final RepeatMode next = switch (normalized) {
+      'off' || 'none' || '' => RepeatMode.all,
+      'all' => RepeatMode.one,
+      _ => RepeatMode.off,
     };
 
     return _route((PlaybackPlayer player) => player.setRepeatMode(next));
@@ -207,14 +216,23 @@ class PlaybackCoordinator extends ChangeNotifier {
     await _stateSubscription?.cancel();
     await _queueSubscription?.cancel();
     _stateSubscription = player.states.listen((PlaybackState next) {
-      _state = next;
+      if (!identical(player, _activePlayer)) {
+        return;
+      }
+      _updateState(next, source: 'stream/player.states');
       notifyListeners();
     });
     _queueSubscription = player.queueStates.listen((PlaybackQueueSnapshot next) {
+      if (!identical(player, _activePlayer)) {
+        return;
+      }
       _queueState = next;
-      _state = _state.copyWith(
+      _updateState(
+        _state.copyWith(
         shuffleEnabled: next.shuffleEnabled ?? _state.shuffleEnabled,
         repeatMode: next.repeatMode ?? _state.repeatMode,
+        ),
+        source: 'stream/player.queueStates',
       );
       notifyListeners();
     });
@@ -227,11 +245,17 @@ class PlaybackCoordinator extends ChangeNotifier {
     }
 
     await action(player);
-    _state = await player.getState();
+    _updateState(
+      await player.getState(),
+      source: 'route/getState',
+    );
     _queueState = await player.getQueueState();
-    _state = _state.copyWith(
-      shuffleEnabled: _queueState.shuffleEnabled ?? _state.shuffleEnabled,
-      repeatMode: _queueState.repeatMode ?? _state.repeatMode,
+    _updateState(
+      _state.copyWith(
+        shuffleEnabled: _queueState.shuffleEnabled ?? _state.shuffleEnabled,
+        repeatMode: _queueState.repeatMode ?? _state.repeatMode,
+      ),
+      source: 'route/queueProjection',
     );
     notifyListeners();
   }

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../data/music_assistant/music_assistant_client.dart';
+import '../../data/music_assistant/ma_client.dart';
 import '../../features/playback/playback_coordinator.dart';
 import '../../features/home/home_screen.dart';
 import '../../features/search/search_screen.dart';

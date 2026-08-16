@@ -1,18 +1,22 @@
-import 'package:flutter/foundation.dart';
+import 'dart:io' show Platform;
+
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/widgets.dart';
 
 class AppConfig {
   const AppConfig._();
 
   static const String defaultMusicAssistantUrl = 'http://192.168.1.2:8095';
-  static const String sendspinClientId = 'mashin_flutter';
-  static const String sendspinClientName = 'Mashin Flutter';
+  static const String defaultSendspinUrl = 'ws://192.168.1.2:8927/sendspin';
+
   static const int sendspinBufferCapacityBytes = 52428800;
   static const String sendspinPreferredCodec = 'pcm';
   static const int sendspinInitialVolume = 50;
   static const bool sendspinInitialMuted = false;
 
-  // Helper to determine if the app is running on a mobile platform (Android, iOS, Fuchsia) or not.
+  static const String _musicAssistantUrlKey = 'ma.base_url';
+  static const String _sendspinUrlKey = 'ma.sendspin_url';
+
   static bool isMobile() {
     // Temporary: decide mobile/desktop by viewport width.
     const double mobileWidthBreakpoint = 900;
@@ -42,10 +46,23 @@ class AppConfig {
     // }
   }
 
-  // Helper to derive the Sendspin WebSocket URL from the Music Assistant base URL.
-  static String deriveSendspinUrl(String musicAssistantBaseUrl) {
+  static Future<String> getSendspinUrl() async {
+    final prefs = await SharedPreferences.getInstance();
+    final configured = prefs.getString(_sendspinUrlKey)?.trim() ?? '';
+    if (configured.isNotEmpty) {
+      return configured;
+    }
+
+    final musicAssistantUrl =
+        prefs.getString(_musicAssistantUrlKey)?.trim() ?? defaultMusicAssistantUrl;
+    final derived = _deriveSendspinUrlFromMusicAssistantUrl(musicAssistantUrl);
+    await prefs.setString(_sendspinUrlKey, derived);
+    return derived;
+  }
+
+  static String _deriveSendspinUrlFromMusicAssistantUrl(String musicAssistantUrl) {
     final fallback = Uri.parse(defaultMusicAssistantUrl);
-    final source = Uri.tryParse(musicAssistantBaseUrl.trim());
+    final source = Uri.tryParse(musicAssistantUrl.trim());
 
     final host = (source != null && source.host.trim().isNotEmpty)
         ? source.host.trim()
@@ -58,5 +75,47 @@ class AppConfig {
       port: 8927,
       path: '/sendspin',
     ).toString();
+  }
+
+  // Device and App Identification
+  static String get deviceName {
+    final host = Platform.localHostname.trim();
+    if (host.isEmpty) {
+      return 'Device';
+    }
+    return host;
+  }
+
+  static String get appName => 'Mashin ($deviceName)';
+
+  static String get appId {
+    final normalizedDevice = _normalizeForId(deviceName, preserveHyphen: true);
+    final suffix = normalizedDevice.isEmpty ? 'device' : normalizedDevice;
+    return 'mashin-$suffix';
+  }
+
+  static String deriveMaAppId(String sourceAppId) {
+    final normalized = _normalizeForId(sourceAppId, preserveHyphen: false);
+    if (normalized.isEmpty) {
+      return '';
+    }
+
+    if (normalized.toLowerCase().startsWith('up')) {
+      return normalized.toLowerCase();
+    }
+
+    return 'up$normalized';
+  }
+
+  static String get maAppId => deriveMaAppId(appId);
+
+  static String _normalizeForId(String raw, {required bool preserveHyphen}) {
+    final lower = raw.trim().toLowerCase();
+    if (lower.isEmpty) {
+      return '';
+    }
+
+    final pattern = preserveHyphen ? RegExp(r'[^a-z0-9-]') : RegExp(r'[^a-z0-9]');
+    return lower.replaceAll(pattern, '');
   }
 }

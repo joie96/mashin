@@ -76,14 +76,13 @@ class FfiSendspinRustBridge implements SendspinRustBridge {
   Stream<Map<String, dynamic>> get events => _eventController.stream;
 
   @override
-  Future<void> engineInit({required String musicAssistantBaseUrl}) async {
-    final resolvedSendspinUrl =
-        AppConfig.deriveSendspinUrl(musicAssistantBaseUrl);
+  Future<void> engineInit() async {
+    final resolvedSendspinUrl = await AppConfig.getSendspinUrl();
 
     final config = <String, dynamic>{
       'sendspinUrl': resolvedSendspinUrl,
-      'clientId': AppConfig.sendspinClientId,
-      'clientName': AppConfig.sendspinClientName,
+      'clientId': AppConfig.appId,
+      'clientName': AppConfig.appName,
       'bufferCapacityBytes': AppConfig.sendspinBufferCapacityBytes,
       'preferredCodec': AppConfig.sendspinPreferredCodec,
       'initialVolume': AppConfig.sendspinInitialVolume,

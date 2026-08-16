@@ -32,13 +32,17 @@ abstract class PlaybackPlayer {
 
   Future<void> setMuted(bool muted);
 
-  Future<void> playMedia(
-    List<MediaItem> mediaItems, {
-    PlaybackQueueInsertOption option = PlaybackQueueInsertOption.replace,
-    bool radioMode = false,
-    dynamic startItem,
-    String sortBy = 'original',
-  });
+  Future<void> playMedia(List<MediaItem> mediaItems);
+
+  Future<void> playMediaNext(List<MediaItem> mediaItems);
+
+  Future<void> playMediaReplaceNext(List<MediaItem> mediaItems);
+
+  Future<void> playMediaLast(List<MediaItem> mediaItems);
+
+  Future<void> playMediaRadioNext(List<MediaItem> mediaItems);
+
+  Future<void> shufflePlayMedia(List<MediaItem> mediaItems);
 
   Future<void> clearQueue({bool skipStop = false});
 
@@ -50,7 +54,7 @@ abstract class PlaybackPlayer {
 
   Future<void> setShuffle(bool enabled);
 
-  Future<void> setRepeatMode(String repeatMode);
+  Future<void> setRepeatMode(RepeatMode repeatMode);
 
   Future<void> setDontStopTheMusic(bool enabled);
 
