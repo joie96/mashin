@@ -4,22 +4,22 @@ import 'package:http/http.dart' as http;
 
 import 'ma_models.dart';
 
-class MaUnauthorizedException implements Exception {
+class UnauthorizedException implements Exception {
   final String message;
 
-  MaUnauthorizedException([this.message = 'Nicht authentifiziert']);
+  UnauthorizedException([this.message = 'Nicht authentifiziert']);
 
   @override
-  String toString() => 'MaUnauthorizedException: $message';
+  String toString() => 'UnauthorizedException: $message';
 }
 
-class MaRequestException implements Exception {
+class RequestException implements Exception {
   final String message;
 
-  MaRequestException(this.message);
+  RequestException(this.message);
 
   @override
-  String toString() => 'MaRequestException: $message';
+  String toString() => 'RequestException: $message';
 }
 
 class MusicAssistantClient {
@@ -32,10 +32,10 @@ class MusicAssistantClient {
     this.authToken,
     http.Client? httpClient,
   }) : _httpClient = httpClient ?? http.Client() {
-    MaMediaItemImage.configureProxyBaseUrl(baseUrl);
+    MediaItemImage.configureProxyBaseUrl(baseUrl);
   }
 
-  // #region Authentication
+  // Authentication
 
   Future<String> login({
     required String username,
@@ -51,17 +51,17 @@ class MusicAssistantClient {
     );
 
     if (response is! Map<String, dynamic>) {
-      throw MaRequestException('Ungueltige Login-Antwort');
+      throw RequestException('Ungueltige Login-Antwort');
     }
 
     final success = response['success'];
     if (success == false) {
-      throw MaUnauthorizedException('Anmeldung fehlgeschlagen');
+      throw UnauthorizedException('Anmeldung fehlgeschlagen');
     }
 
     final token = (response['token'] as String?) ?? (response['access_token'] as String?);
     if (token == null || token.trim().isEmpty) {
-      throw MaRequestException('Login ohne Token');
+      throw RequestException('Login ohne Token');
     }
 
     return token.trim();
@@ -71,13 +71,13 @@ class MusicAssistantClient {
     await _sendCommand('auth/logout');
   }
 
-  Future<MaAuthUser?> getCurrentUser() async {
+  Future<AuthUser?> getCurrentUser() async {
     final result = await _sendCommand('auth/me');
     if (result is! Map<String, dynamic>) {
       return null;
     }
 
-    return MaAuthUser.fromJson(result);
+    return AuthUser.fromJson(result);
   }
 
   Future<List<dynamic>> getAuthProviders() async {
@@ -103,7 +103,7 @@ class MusicAssistantClient {
     await _sendCommand('auth/token/revoke', args: <String, dynamic>{'token_id': tokenId});
   }
 
-  Future<MaAuthUser?> updateUser({
+  Future<AuthUser?> updateUser({
     String? userId,
     String? username,
     String? displayName,
@@ -130,25 +130,25 @@ class MusicAssistantClient {
       return null;
     }
 
-    return MaAuthUser.fromJson(result);
+    return AuthUser.fromJson(result);
   }
 
-  // #endregion
 
-  // #region General
+
+  // General
 
   Future<bool> hasValidSession() async {
     try {
       final result = await _sendCommand('info');
       return result is Map<String, dynamic>;
-    } on MaUnauthorizedException {
+    } on UnauthorizedException {
       return false;
     } catch (_) {
       return false;
     }
   }
 
-  Future<MaServerInfo?> getServerInfoSafe() async {
+  Future<ServerInfo?> getServerInfoSafe() async {
     try {
       return await getServerInfo();
     } catch (_) {
@@ -165,44 +165,44 @@ class MusicAssistantClient {
     return result;
   }
 
-  // #endregion
 
-  // #region Bootstrap
 
-  Future<MaBootstrapData> loadBootstrapData() async {
+  // Bootstrap
+
+  Future<BootstrapData> loadBootstrapData() async {
     final info = await getServerInfo();
     final players = await getPlayersSafe();
     final recent = await getRecentlyPlayedSafe(limit: 20);
 
-    return MaBootstrapData(
+    return BootstrapData(
       serverInfo: info,
       players: players,
       recentlyPlayed: recent,
     );
   }
 
-  // #endregion
 
-  // #region Music - Core
 
-  Future<MaServerInfo> getServerInfo() async {
+  // Music - Core
+
+  Future<ServerInfo> getServerInfo() async {
     final result = await _sendCommand('info');
     if (result is! Map<String, dynamic>) {
-      throw MaRequestException('Ungueltige Antwort auf info');
+      throw RequestException('Ungueltige Antwort auf info');
     }
 
-    return MaServerInfo.fromJson(result);
+    return ServerInfo.fromJson(result);
   }
 
   Future<Map<String, dynamic>?> getLibraryItem({
-    required MaMediaType mediaType,
+    required MediaType mediaType,
     required String itemId,
     String providerInstanceIdOrDomain = 'library',
   }) async {
     final result = await _sendCommand(
       'music/get_library_item',
       args: <String, dynamic>{
-        'media_type': maMediaTypeToJson(mediaType),
+        'media_type': mediaTypeToJson(mediaType),
         'item_id': itemId,
         'provider_instance_id_or_domain': providerInstanceIdOrDomain,
       },
@@ -212,14 +212,14 @@ class MusicAssistantClient {
   }
 
   Future<Map<String, dynamic>?> getMusicItem({
-    required MaMediaType mediaType,
+    required MediaType mediaType,
     required String itemId,
     required String providerInstanceIdOrDomain,
   }) async {
     final result = await _sendCommand(
       'music/item',
       args: <String, dynamic>{
-        'media_type': maMediaTypeToJson(mediaType),
+        'media_type': mediaTypeToJson(mediaType),
         'item_id': itemId,
         'provider_instance_id_or_domain': providerInstanceIdOrDomain,
       },
@@ -233,11 +233,11 @@ class MusicAssistantClient {
     return result is Map<String, dynamic> ? result : null;
   }
 
-  // #endregion
 
-  // #region Music - Artists
 
-  Future<List<MaArtist>> getLibraryArtists({
+  // Music - Artists
+
+  Future<List<Artist>> getLibraryArtists({
     bool? favorite,
     String? search,
     int? limit,
@@ -253,10 +253,10 @@ class MusicAssistantClient {
     if (orderBy != null && orderBy.trim().isNotEmpty) args['order_by'] = orderBy.trim();
 
     final result = await _sendCommand('music/artists/library_items', args: args);
-    return _mapList(result, MaArtist.fromJson);
+    return _mapList(result, Artist.fromJson);
   }
 
-  Future<MaArtist?> getArtist(String itemId, String providerInstanceIdOrDomain) async {
+  Future<Artist?> getArtist(String itemId, String providerInstanceIdOrDomain) async {
     final result = await _sendCommand(
       'music/artists/get',
       args: <String, dynamic>{
@@ -265,10 +265,10 @@ class MusicAssistantClient {
       },
     );
 
-    return result is Map<String, dynamic> ? MaArtist.fromJson(result) : null;
+    return result is Map<String, dynamic> ? Artist.fromJson(result) : null;
   }
 
-  Future<List<MaAlbum>> getArtistAlbums(
+  Future<List<Album>> getArtistAlbums(
     String itemId,
     String providerInstanceIdOrDomain, {
     bool inLibraryOnly = false,
@@ -282,10 +282,10 @@ class MusicAssistantClient {
       },
     );
 
-    return _mapList(result, MaAlbum.fromJson);
+    return _mapList(result, Album.fromJson);
   }
 
-  Future<List<MaTrack>> getArtistTracks(
+  Future<List<Track>> getArtistTracks(
     String itemId,
     String providerInstanceIdOrDomain, {
     bool inLibraryOnly = false,
@@ -299,10 +299,10 @@ class MusicAssistantClient {
       },
     );
 
-    return _mapList(result, MaTrack.fromJson);
+    return _mapList(result, Track.fromJson);
   }
 
-  Future<List<MaTrack>> getArtistTopTracks(
+  Future<List<Track>> getArtistTopTracks(
     String itemId,
     String providerInstanceIdOrDomain, {
     String? providerFilter,
@@ -316,10 +316,10 @@ class MusicAssistantClient {
     }
 
     final result = await _sendCommand('music/artists/top_tracks', args: args);
-    return _mapList(result, MaTrack.fromJson);
+    return _mapList(result, Track.fromJson);
   }
 
-  Future<List<MaAlbum>> getArtistTopAlbums(
+  Future<List<Album>> getArtistTopAlbums(
     String itemId,
     String providerInstanceIdOrDomain, {
     String? providerFilter,
@@ -333,10 +333,10 @@ class MusicAssistantClient {
     }
 
     final result = await _sendCommand('music/artists/top_albums', args: args);
-    return _mapList(result, MaAlbum.fromJson);
+    return _mapList(result, Album.fromJson);
   }
 
-  Future<List<MaArtist>> getSimilarArtists(
+  Future<List<Artist>> getSimilarArtists(
     String itemId,
     String providerInstanceIdOrDomain, {
     String? providerFilter,
@@ -354,7 +354,7 @@ class MusicAssistantClient {
     }
 
     final result = await _sendCommand('music/artists/similar_artists', args: args);
-    return _mapList(result, MaArtist.fromJson);
+    return _mapList(result, Artist.fromJson);
   }
 
   Future<int> getArtistsCount({bool favoriteOnly = false}) async {
@@ -362,18 +362,18 @@ class MusicAssistantClient {
     return (result as num?)?.toInt() ?? 0;
   }
 
-  // #endregion
 
-  // #region Music - Albums
 
-  Future<List<MaAlbum>> getLibraryAlbums({
+  // Music - Albums
+
+  Future<List<Album>> getLibraryAlbums({
     bool? favorite,
     String? search,
     int? limit,
     int? offset,
     String? orderBy,
     bool libraryItemsOnly = true,
-    List<MaAlbumType>? albumTypes,
+    List<AlbumType>? albumTypes,
   }) async {
     final args = <String, dynamic>{'library_items_only': libraryItemsOnly};
     if (favorite != null) args['favorite'] = favorite;
@@ -386,10 +386,10 @@ class MusicAssistantClient {
     }
 
     final result = await _sendCommand('music/albums/library_items', args: args);
-    return _mapList(result, MaAlbum.fromJson);
+    return _mapList(result, Album.fromJson);
   }
 
-  Future<MaAlbum?> getAlbum(String itemId, String providerInstanceIdOrDomain) async {
+  Future<Album?> getAlbum(String itemId, String providerInstanceIdOrDomain) async {
     final result = await _sendCommand(
       'music/albums/get',
       args: <String, dynamic>{
@@ -398,10 +398,10 @@ class MusicAssistantClient {
       },
     );
 
-    return result is Map<String, dynamic> ? MaAlbum.fromJson(result) : null;
+    return result is Map<String, dynamic> ? Album.fromJson(result) : null;
   }
 
-  Future<List<MaTrack>> getAlbumTracks(
+  Future<List<Track>> getAlbumTracks(
     String itemId,
     String providerInstanceIdOrDomain, {
     bool inLibraryOnly = false,
@@ -415,10 +415,10 @@ class MusicAssistantClient {
       },
     );
 
-    return _mapList(result, MaTrack.fromJson);
+    return _mapList(result, Track.fromJson);
   }
 
-  Future<List<MaAlbum>> getAlbumVersions(String itemId, String providerInstanceIdOrDomain) async {
+  Future<List<Album>> getAlbumVersions(String itemId, String providerInstanceIdOrDomain) async {
     final result = await _sendCommand(
       'music/albums/album_versions',
       args: <String, dynamic>{
@@ -427,10 +427,10 @@ class MusicAssistantClient {
       },
     );
 
-    return _mapList(result, MaAlbum.fromJson);
+    return _mapList(result, Album.fromJson);
   }
 
-  Future<int> getAlbumsCount({bool favoriteOnly = false, List<MaAlbumType>? albumTypes}) async {
+  Future<int> getAlbumsCount({bool favoriteOnly = false, List<AlbumType>? albumTypes}) async {
     final args = <String, dynamic>{'favorite_only': favoriteOnly};
     if (albumTypes != null && albumTypes.isNotEmpty) {
       args['album_types'] = albumTypes.map((e) => e.name).toList();
@@ -439,11 +439,11 @@ class MusicAssistantClient {
     return (result as num?)?.toInt() ?? 0;
   }
 
-  // #endregion
 
-  // #region Music - Tracks
 
-  Future<List<MaTrack>> getLibraryTracks({
+  // Music - Tracks
+
+  Future<List<Track>> getLibraryTracks({
     bool? favorite,
     String? search,
     int? limit,
@@ -459,10 +459,10 @@ class MusicAssistantClient {
     if (orderBy != null && orderBy.trim().isNotEmpty) args['order_by'] = orderBy.trim();
 
     final result = await _sendCommand('music/tracks/library_items', args: args);
-    return _mapList(result, MaTrack.fromJson);
+    return _mapList(result, Track.fromJson);
   }
 
-  Future<MaTrack?> getTrack(String itemId, String providerInstanceIdOrDomain) async {
+  Future<Track?> getTrack(String itemId, String providerInstanceIdOrDomain) async {
     final result = await _sendCommand(
       'music/tracks/get',
       args: <String, dynamic>{
@@ -471,10 +471,10 @@ class MusicAssistantClient {
       },
     );
 
-    return result is Map<String, dynamic> ? MaTrack.fromJson(result) : null;
+    return result is Map<String, dynamic> ? Track.fromJson(result) : null;
   }
 
-  Future<List<MaTrack>> getTrackVersions(String itemId, String providerInstanceIdOrDomain) async {
+  Future<List<Track>> getTrackVersions(String itemId, String providerInstanceIdOrDomain) async {
     final result = await _sendCommand(
       'music/tracks/track_versions',
       args: <String, dynamic>{
@@ -482,10 +482,10 @@ class MusicAssistantClient {
         'provider_instance_id_or_domain': providerInstanceIdOrDomain,
       },
     );
-    return _mapList(result, MaTrack.fromJson);
+    return _mapList(result, Track.fromJson);
   }
 
-  Future<List<MaAlbum>> getTrackAlbums(
+  Future<List<Album>> getTrackAlbums(
     String itemId,
     String providerInstanceIdOrDomain, {
     bool inLibraryOnly = false,
@@ -499,7 +499,7 @@ class MusicAssistantClient {
       },
     );
 
-    return _mapList(result, MaAlbum.fromJson);
+    return _mapList(result, Album.fromJson);
   }
 
   Future<int> getTracksCount({bool favoriteOnly = false}) async {
@@ -518,7 +518,7 @@ class MusicAssistantClient {
     return result is String ? result : null;
   }
 
-  Future<List<MaTrack>> getSimilarTracks(
+  Future<List<Track>> getSimilarTracks(
     String itemId,
     String providerInstanceIdOrDomain, {
     int? limit,
@@ -536,14 +536,14 @@ class MusicAssistantClient {
     }
 
     final result = await _sendCommand('music/tracks/similar_tracks', args: args);
-    return _mapList(result, MaTrack.fromJson);
+    return _mapList(result, Track.fromJson);
   }
 
-  // #endregion
 
-  // #region Music - Playlists
 
-  Future<List<MaPlaylist>> getLibraryPlaylists({
+  // Music - Playlists
+
+  Future<List<Playlist>> getLibraryPlaylists({
     bool? favorite,
     String? search,
     int? limit,
@@ -559,10 +559,10 @@ class MusicAssistantClient {
     if (orderBy != null && orderBy.trim().isNotEmpty) args['order_by'] = orderBy.trim();
 
     final result = await _sendCommand('music/playlists/library_items', args: args);
-    return _mapList(result, MaPlaylist.fromJson);
+    return _mapList(result, Playlist.fromJson);
   }
 
-  Future<MaPlaylist?> getPlaylist(String itemId, String providerInstanceIdOrDomain) async {
+  Future<Playlist?> getPlaylist(String itemId, String providerInstanceIdOrDomain) async {
     final result = await _sendCommand(
       'music/playlists/get',
       args: <String, dynamic>{
@@ -571,10 +571,10 @@ class MusicAssistantClient {
       },
     );
 
-    return result is Map<String, dynamic> ? MaPlaylist.fromJson(result) : null;
+    return result is Map<String, dynamic> ? Playlist.fromJson(result) : null;
   }
 
-  Future<List<MaTrack>> getPlaylistTracks(
+  Future<List<Track>> getPlaylistTracks(
     String itemId,
     String providerInstanceIdOrDomain, {
     bool forceRefresh = false,
@@ -588,16 +588,16 @@ class MusicAssistantClient {
       },
     );
 
-    return _mapList(result, MaTrack.fromJson);
+    return _mapList(result, Track.fromJson);
   }
 
-  Future<MaPlaylist?> createPlaylist(String name, {String? providerInstanceOrDomain}) async {
+  Future<Playlist?> createPlaylist(String name, {String? providerInstanceOrDomain}) async {
     final args = <String, dynamic>{'name': name};
     if (providerInstanceOrDomain != null && providerInstanceOrDomain.trim().isNotEmpty) {
       args['provider_instance_or_domain'] = providerInstanceOrDomain.trim();
     }
     final result = await _sendCommand('music/playlists/create_playlist', args: args);
-    return result is Map<String, dynamic> ? MaPlaylist.fromJson(result) : null;
+    return result is Map<String, dynamic> ? Playlist.fromJson(result) : null;
   }
 
   Future<void> addPlaylistTracks(String playlistId, List<String> uris) async {
@@ -648,11 +648,11 @@ class MusicAssistantClient {
     return (result as num?)?.toInt() ?? 0;
   }
 
-  // #endregion
 
-  // #region Music - Radio/Podcast
 
-  Future<List<MaMediaItem>> getLibraryRadios({
+  // Music - Radio/Podcast
+
+  Future<List<MediaItem>> getLibraryRadios({
     bool? favorite,
     String? search,
     int? limit,
@@ -668,10 +668,10 @@ class MusicAssistantClient {
     if (orderBy != null && orderBy.trim().isNotEmpty) args['order_by'] = orderBy.trim();
 
     final result = await _sendCommand('music/radios/library_items', args: args);
-    return _mapList(result, MaMediaItem.fromJson);
+    return _mapList(result, mediaItemFromJson);
   }
 
-  Future<MaMediaItem?> getRadio(String itemId, String providerInstanceIdOrDomain) async {
+  Future<MediaItem?> getRadio(String itemId, String providerInstanceIdOrDomain) async {
     final result = await _sendCommand(
       'music/radios/get',
       args: <String, dynamic>{
@@ -679,7 +679,7 @@ class MusicAssistantClient {
         'provider_instance_id_or_domain': providerInstanceIdOrDomain,
       },
     );
-    return result is Map<String, dynamic> ? MaMediaItem.fromJson(result) : null;
+    return result is Map<String, dynamic> ? mediaItemFromJson(result) : null;
   }
 
   Future<int> getRadiosCount({bool favoriteOnly = false}) async {
@@ -687,7 +687,7 @@ class MusicAssistantClient {
     return (result as num?)?.toInt() ?? 0;
   }
 
-  Future<List<MaMediaItem>> getLibraryPodcasts({
+  Future<List<MediaItem>> getLibraryPodcasts({
     bool? favorite,
     String? search,
     int? limit,
@@ -703,10 +703,10 @@ class MusicAssistantClient {
     if (orderBy != null && orderBy.trim().isNotEmpty) args['order_by'] = orderBy.trim();
 
     final result = await _sendCommand('music/podcasts/library_items', args: args);
-    return _mapList(result, MaMediaItem.fromJson);
+    return _mapList(result, mediaItemFromJson);
   }
 
-  Future<MaMediaItem?> getPodcast(String itemId, String providerInstanceIdOrDomain) async {
+  Future<MediaItem?> getPodcast(String itemId, String providerInstanceIdOrDomain) async {
     final result = await _sendCommand(
       'music/podcasts/get',
       args: <String, dynamic>{
@@ -714,10 +714,10 @@ class MusicAssistantClient {
         'provider_instance_id_or_domain': providerInstanceIdOrDomain,
       },
     );
-    return result is Map<String, dynamic> ? MaMediaItem.fromJson(result) : null;
+    return result is Map<String, dynamic> ? mediaItemFromJson(result) : null;
   }
 
-  Future<List<MaMediaItem>> getPodcastEpisodes(String itemId, String providerInstanceIdOrDomain) async {
+  Future<List<MediaItem>> getPodcastEpisodes(String itemId, String providerInstanceIdOrDomain) async {
     final result = await _sendCommand(
       'music/podcasts/podcast_episodes',
       args: <String, dynamic>{
@@ -725,7 +725,7 @@ class MusicAssistantClient {
         'provider_instance_id_or_domain': providerInstanceIdOrDomain,
       },
     );
-    return _mapList(result, MaMediaItem.fromJson);
+    return _mapList(result, mediaItemFromJson);
   }
 
   Future<int> getPodcastsCount({bool favoriteOnly = false}) async {
@@ -733,13 +733,13 @@ class MusicAssistantClient {
     return (result as num?)?.toInt() ?? 0;
   }
 
-  // #endregion
 
-  // #region Music - Search & Browse
 
-  Future<MaSearchResults?> search({
+  // Music - Search & Browse
+
+  Future<SearchResults?> search({
     required String searchQuery,
-    List<MaMediaType>? mediaTypes,
+    List<MediaType>? mediaTypes,
     int? limit,
     bool libraryOnly = false,
   }) async {
@@ -748,7 +748,7 @@ class MusicAssistantClient {
       'library_only': libraryOnly,
     };
     if (mediaTypes != null && mediaTypes.isNotEmpty) {
-      args['media_types'] = mediaTypes.map(maMediaTypeToJson).toList();
+      args['media_types'] = mediaTypes.map(mediaTypeToJson).toList();
     }
     if (limit != null) args['limit'] = limit;
 
@@ -756,7 +756,7 @@ class MusicAssistantClient {
     if (result is! Map<String, dynamic>) {
       return null;
     }
-    return MaSearchResults.fromJson(result);
+    return SearchResults.fromJson(result);
   }
 
   Future<List<dynamic>> browse({String? path}) async {
@@ -768,19 +768,19 @@ class MusicAssistantClient {
     return result is List ? result : const <dynamic>[];
   }
 
-  Future<List<MaRecommendationFolder>> getRecommendations() async {
+  Future<List<RecommendationFolder>> getRecommendations() async {
     final result = await _sendCommand('music/recommendations');
-    return _mapList(result, MaRecommendationFolder.fromJson);
+    return _mapList(result, RecommendationFolder.fromJson);
   }
 
-  Future<List<MaTrack>> getRecentlyAddedTracks({int limit = 50}) async {
+  Future<List<Track>> getRecentlyAddedTracks({int limit = 50}) async {
     final result = await _sendCommand('music/recently_added_tracks', args: <String, dynamic>{'limit': limit});
-    return _mapList(result, MaTrack.fromJson);
+    return _mapList(result, Track.fromJson);
   }
 
-  Future<List<MaMediaItem>> getRecentlyPlayedItems({
+  Future<List<MediaItem>> getRecentlyPlayedItems({
     int limit = 50,
-    List<MaMediaType>? mediaTypes,
+    List<MediaType>? mediaTypes,
     String? userId,
     String? queueId,
     bool? fullyPlayedOnly,
@@ -788,7 +788,7 @@ class MusicAssistantClient {
   }) async {
     final args = <String, dynamic>{'limit': limit};
     if (mediaTypes != null && mediaTypes.isNotEmpty) {
-      args['media_types'] = mediaTypes.map(maMediaTypeToJson).toList();
+      args['media_types'] = mediaTypes.map(mediaTypeToJson).toList();
     }
     if (userId != null && userId.trim().isNotEmpty) args['user_id'] = userId.trim();
     if (queueId != null && queueId.trim().isNotEmpty) args['queue_id'] = queueId.trim();
@@ -796,12 +796,12 @@ class MusicAssistantClient {
     if (userInitiatedOnly != null) args['user_initiated_only'] = userInitiatedOnly;
 
     final result = await _sendCommand('music/recently_played_items', args: args);
-    return _mapList(result, MaMediaItem.fromJson);
+    return _mapList(result, mediaItemFromJson);
   }
 
-  // #endregion
 
-  // #region Music - Library Management
+
+  // Music - Library Management
 
   Future<dynamic> addLibraryItemByUri(String uri, {bool overwriteExisting = false}) {
     return _sendCommand(
@@ -824,14 +824,14 @@ class MusicAssistantClient {
   }
 
   Future<void> removeLibraryItem({
-    required MaMediaType mediaType,
+    required MediaType mediaType,
     required String libraryItemId,
     bool recursive = false,
   }) async {
     await _sendCommand(
       'music/library/remove_item',
       args: <String, dynamic>{
-        'media_type': maMediaTypeToJson(mediaType),
+        'media_type': mediaTypeToJson(mediaType),
         'library_item_id': libraryItemId,
         'recursive': recursive,
       },
@@ -842,36 +842,36 @@ class MusicAssistantClient {
     await _sendCommand('music/favorites/add_item', args: <String, dynamic>{'item': itemUri});
   }
 
-  Future<void> removeFavorite({required MaMediaType mediaType, required String libraryItemId}) async {
+  Future<void> removeFavorite({required MediaType mediaType, required String libraryItemId}) async {
     await _sendCommand(
       'music/favorites/remove_item',
       args: <String, dynamic>{
-        'media_type': maMediaTypeToJson(mediaType),
+        'media_type': mediaTypeToJson(mediaType),
         'library_item_id': libraryItemId,
       },
     );
   }
 
-  // #endregion
 
-  // #region Player Queues
 
-  Future<List<MaPlayerQueue>> getPlayerQueues() async {
+  // Player Queues
+
+  Future<List<PlayerQueue>> getPlayerQueues() async {
     final result = await _sendCommand('player_queues/all');
-    return _mapList(result, MaPlayerQueue.fromJson);
+    return _mapList(result, PlayerQueue.fromJson);
   }
 
-  Future<MaPlayerQueue?> getPlayerQueue(String queueId) async {
+  Future<PlayerQueue?> getPlayerQueue(String queueId) async {
     final result = await _sendCommand('player_queues/get', args: <String, dynamic>{'queue_id': queueId});
-    return result is Map<String, dynamic> ? MaPlayerQueue.fromJson(result) : null;
+    return result is Map<String, dynamic> ? PlayerQueue.fromJson(result) : null;
   }
 
-  Future<MaPlayerQueue?> getActiveQueueForPlayer(String playerId) async {
+  Future<PlayerQueue?> getActiveQueueForPlayer(String playerId) async {
     final result = await _sendCommand('player_queues/get_active_queue', args: <String, dynamic>{'player_id': playerId});
-    return result is Map<String, dynamic> ? MaPlayerQueue.fromJson(result) : null;
+    return result is Map<String, dynamic> ? PlayerQueue.fromJson(result) : null;
   }
 
-  Future<List<MaQueueItem>> getQueueItems(
+  Future<List<QueueItem>> getQueueItems(
     String queueId, {
     int? limit,
     int? offset,
@@ -881,29 +881,149 @@ class MusicAssistantClient {
     if (offset != null) args['offset'] = offset;
 
     final result = await _sendCommand('player_queues/items', args: args);
-    return _mapList(result, MaQueueItem.fromJson);
+    return _mapList(result, QueueItem.fromJson);
   }
 
   Future<void> playMedia(
     String queueId,
-    List<Map<String, dynamic>> mediaItems, {
-    MaQueueOption option = MaQueueOption.replace,
+    List<MediaItem> mediaItems, {
+    QueueOption option = QueueOption.replace,
     bool radioMode = false,
     dynamic startItem,
     String sortBy = 'original',
   }) async {
+    if (mediaItems.isEmpty) {
+      throw RequestException('Media items list cannot be empty');
+    }
+
+    final List<Map<String, dynamic>> mediaPayload = mediaItems
+        .where((item) => item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty)
+        .map(_createMediaItemPayload)
+        .toList(growable: false);
+
+    if (mediaPayload.isEmpty) {
+      throw RequestException('No valid media items with item_id/provider found');
+    }
+
+    final dynamic resolvedStartItem = _resolveStartItemPayload(startItem, mediaItems);
+
     final args = <String, dynamic>{
       'queue_id': queueId,
-      'media': mediaItems,
+      'media': mediaPayload,
       'option': option.name,
       'radio_mode': radioMode,
       'sort_by': sortBy,
     };
-    if (startItem != null) {
-      args['start_item'] = startItem;
+    if (resolvedStartItem != null) {
+      args['start_item'] = resolvedStartItem;
     }
 
     await _sendCommand('player_queues/play_media', args: args);
+  }
+
+  dynamic _resolveStartItemPayload(dynamic startItem, List<MediaItem> mediaItems) {
+    if (mediaItems.isEmpty) {
+      return null;
+    }
+
+    if (startItem is MediaItem) {
+      return _createMediaItemPayload(startItem);
+    }
+
+    if (startItem is String && startItem.trim().isNotEmpty) {
+      final String needle = startItem.trim();
+      final MediaItem match = mediaItems.firstWhere(
+        (item) =>
+            (item.uri ?? '').trim().toLowerCase() == needle.toLowerCase() ||
+            item.itemId.trim().toLowerCase() == needle.toLowerCase(),
+        orElse: () => mediaItems.first,
+      );
+
+      return _createMediaItemPayload(match);
+    }
+
+    return _createMediaItemPayload(mediaItems.first);
+  }
+
+  Map<String, dynamic> _createMediaItemPayload(MediaItem mediaItem) {
+    final payload = <String, dynamic>{
+      'item_id': mediaItem.itemId,
+      'provider': mediaItem.provider,
+      'name': mediaItem.name.trim().isEmpty ? mediaItem.itemId : mediaItem.name,
+      'sort_name': mediaItem.sortName,
+      'uri': mediaItem.uri,
+      'media_type': mediaTypeToJson(mediaItem.mediaType),
+      'provider_mappings': mediaItem.providerMappings
+          .map(
+            (mapping) => <String, dynamic>{
+              'item_id': mapping.itemId,
+              'provider_domain': mapping.providerDomain,
+              'provider_instance': mapping.providerInstance,
+              'available': mapping.available,
+              'url': mapping.url,
+            },
+          )
+          .toList(growable: false),
+      'metadata': _createMediaItemMetadataPayload(mediaItem.metadata),
+      'favorite': mediaItem.favorite,
+    };
+
+    if (mediaItem is Track) {
+      payload['duration'] = mediaItem.duration;
+      payload['artists'] = mediaItem.artists
+          .map((artist) => _createMediaItemMappingPayload(artist))
+          .toList(growable: false);
+      payload['album'] = mediaItem.album == null
+          ? null
+          : _createMediaItemMappingPayload(mediaItem.album!);
+    } else if (mediaItem is Album) {
+      payload['year'] = mediaItem.year;
+      payload['album_type'] = mediaItem.albumType;
+      payload['artists'] = mediaItem.artists
+          .map((artist) => _createMediaItemMappingPayload(artist))
+          .toList(growable: false);
+    } else if (mediaItem is Playlist) {
+      payload['owner'] = mediaItem.owner;
+      payload['is_editable'] = mediaItem.isEditable;
+    }
+
+    return payload;
+  }
+
+  Map<String, dynamic> _createMediaItemMappingPayload(MediaItem mediaItem) {
+    return <String, dynamic>{
+      'item_id': mediaItem.itemId,
+      'provider': mediaItem.provider,
+      'name': mediaItem.name.trim().isEmpty ? mediaItem.itemId : mediaItem.name,
+      'sort_name': mediaItem.sortName,
+      'uri': mediaItem.uri,
+      'available': true,
+      'metadata': _createMediaItemMetadataPayload(mediaItem.metadata),
+      'media_type': mediaTypeToJson(mediaItem.mediaType),
+    };
+  }
+
+  Map<String, dynamic>? _createMediaItemMetadataPayload(MediaItemMetadata? metadata) {
+    if (metadata == null) {
+      return null;
+    }
+
+    return <String, dynamic>{
+      'description': metadata.description,
+      'images': metadata.images
+          .map(
+            (image) => <String, dynamic>{
+              'type': image.type,
+              'path': image.path,
+              'provider': image.provider,
+              'remotely_accessible': image.remotelyAccessible,
+            },
+          )
+          .toList(growable: false),
+      'genres': metadata.genres,
+      'label': metadata.label,
+      'popularity': metadata.popularity,
+    };
   }
 
   Future<void> queuePlay(String queueId) => _sendCommand('player_queues/play', args: <String, dynamic>{'queue_id': queueId});
@@ -956,7 +1076,7 @@ class MusicAssistantClient {
         args: <String, dynamic>{'queue_id': queueId, 'shuffle_enabled': shuffleEnabled},
       );
 
-  Future<void> setRepeat(String queueId, MaRepeatMode repeatMode) => _sendCommand(
+  Future<void> setRepeat(String queueId, RepeatMode repeatMode) => _sendCommand(
         'player_queues/repeat',
         args: <String, dynamic>{'queue_id': queueId, 'repeat_mode': repeatMode.name},
       );
@@ -966,31 +1086,31 @@ class MusicAssistantClient {
         args: <String, dynamic>{'queue_id': queueId, 'dont_stop_the_music_enabled': enabled},
       );
 
-  // #endregion
 
-  // #region Players
 
-  Future<List<MaPlayer>> getPlayers({bool returnUnavailable = false}) async {
+  // Players
+
+  Future<List<Player>> getPlayers({bool returnUnavailable = false}) async {
     final result = await _sendCommand('players/all', args: <String, dynamic>{'return_unavailable': returnUnavailable});
-    return _mapList(result, MaPlayer.fromJson);
+    return _mapList(result, Player.fromJson);
   }
 
-  Future<List<MaPlayer>> getPlayersSafe() async {
+  Future<List<Player>> getPlayersSafe() async {
     try {
       return await getPlayers(returnUnavailable: true);
-    } on MaUnauthorizedException {
-      return const <MaPlayer>[];
+    } on UnauthorizedException {
+      return const <Player>[];
     } catch (_) {
-      return const <MaPlayer>[];
+      return const <Player>[];
     }
   }
 
-  Future<MaPlayer?> getPlayer(String playerId, {bool raiseUnavailable = false}) async {
+  Future<Player?> getPlayer(String playerId, {bool raiseUnavailable = false}) async {
     final result = await _sendCommand(
       'players/get',
       args: <String, dynamic>{'player_id': playerId, 'raise_unavailable': raiseUnavailable},
     );
-    return result is Map<String, dynamic> ? MaPlayer.fromJson(result) : null;
+    return result is Map<String, dynamic> ? Player.fromJson(result) : null;
   }
 
   Future<void> setPlayerPower(String playerId, bool powered) =>
@@ -1031,18 +1151,18 @@ class MusicAssistantClient {
   Future<void> playerSeek(String playerId, int position) =>
       _sendCommand('players/cmd/seek', args: <String, dynamic>{'player_id': playerId, 'position': position});
 
-  // #endregion
 
-  // #region Providers
 
-  Future<List<MaProviderManifest>> getProviderManifests() async {
+  // Providers
+
+  Future<List<ProviderManifest>> getProviderManifests() async {
     final result = await _sendCommand('providers/manifests');
-    final manifests = _mapList(result, MaProviderManifest.fromJson);
-    MaProviderManifestRegistry.registerAll(manifests);
+    final manifests = _mapList(result, ProviderManifest.fromJson);
+    ProviderManifestRegistry.registerAll(manifests);
     return manifests;
   }
 
-  Future<MaProviderManifest?> getProviderManifest(String domainOrInstanceId) async {
+  Future<ProviderManifest?> getProviderManifest(String domainOrInstanceId) async {
     final result = await _sendCommand(
       'providers/manifests/get',
       args: <String, dynamic>{'instance_id_or_domain': domainOrInstanceId},
@@ -1051,26 +1171,26 @@ class MusicAssistantClient {
       return null;
     }
 
-    final manifest = MaProviderManifest.fromJson(result);
-    MaProviderManifestRegistry.registerOne(manifest);
+    final manifest = ProviderManifest.fromJson(result);
+    ProviderManifestRegistry.registerOne(manifest);
     return manifest;
   }
 
-  // #endregion
 
-  // #region Existing helper facade
 
-  Future<List<MaMediaItem>> getRecentlyPlayedSafe({int limit = 20}) async {
+  // Existing helper facade
+
+  Future<List<MediaItem>> getRecentlyPlayedSafe({int limit = 20}) async {
     try {
       return await getRecentlyPlayedItems(limit: limit);
-    } on MaUnauthorizedException {
-      return const <MaMediaItem>[];
+    } on UnauthorizedException {
+      return const <MediaItem>[];
     } catch (_) {
-      return const <MaMediaItem>[];
+      return const <MediaItem>[];
     }
   }
 
-  // #endregion
+
 
   Future<dynamic> _sendCommand(
     String command, {
@@ -1097,17 +1217,17 @@ class MusicAssistantClient {
     );
 
     if (response.statusCode == 401) {
-      throw MaUnauthorizedException('Session abgelaufen oder kein gueltiges Token');
+      throw UnauthorizedException('Session abgelaufen oder kein gueltiges Token');
     }
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw MaRequestException('HTTP ${response.statusCode} bei $command');
+      throw RequestException('HTTP ${response.statusCode} bei $command');
     }
 
     try {
       return jsonDecode(response.body);
     } catch (_) {
-      throw MaRequestException('Antwort fuer $command ist kein gueltiges JSON');
+      throw RequestException('Antwort fuer $command ist kein gueltiges JSON');
     }
   }
 

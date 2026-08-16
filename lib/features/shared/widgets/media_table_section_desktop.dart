@@ -1189,7 +1189,7 @@ String _maybeDecodeSvgPayload(String raw) {
 
 
 // Row and Column Mappers
-MediaTableRowData mapTrackRowData(MaTrack track, int index) {
+MediaTableRowData mapTrackRowData(Track track, int index) {
   final String providerLabel = _providerLabelFromId(track.provider);
   return MediaTableRowData(
     title: _prefer(track.name, 'Unknown Track'),
@@ -1198,11 +1198,11 @@ MediaTableRowData mapTrackRowData(MaTrack track, int index) {
     coverUrl: track.imageUri,
     fallbackIcon: Icons.music_note_rounded,
     providerLabel: providerLabel,
-    providerIconSvg: MaProviderManifestRegistry.iconSvgForProvider(track.provider),
+    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(track.provider),
   );
 }
 
-MediaTableRowData mapAlbumRowData(MaAlbum album, int index) {
+MediaTableRowData mapAlbumRowData(Album album, int index) {
   final String providerLabel = _providerLabelFromId(album.provider);
   return MediaTableRowData(
     title: _prefer(album.name, 'Unknown Album'),
@@ -1211,11 +1211,11 @@ MediaTableRowData mapAlbumRowData(MaAlbum album, int index) {
     coverUrl: album.imageUri,
     fallbackIcon: Icons.album_rounded,
     providerLabel: providerLabel,
-    providerIconSvg: MaProviderManifestRegistry.iconSvgForProvider(album.provider),
+    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(album.provider),
   );
 }
 
-MediaTableRowData mapPlaylistRowData(MaPlaylist playlist, int index) {
+MediaTableRowData mapPlaylistRowData(Playlist playlist, int index) {
   final String providerLabel = _providerLabelFromId(playlist.provider);
   return MediaTableRowData(
     title: _prefer(playlist.name, 'Unknown Playlist'),
@@ -1224,11 +1224,11 @@ MediaTableRowData mapPlaylistRowData(MaPlaylist playlist, int index) {
     coverUrl: playlist.imageUri,
     fallbackIcon: Icons.queue_music_rounded,
     providerLabel: providerLabel,
-    providerIconSvg: MaProviderManifestRegistry.iconSvgForProvider(playlist.provider),
+    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(playlist.provider),
   );
 }
 
-MediaTableRowData mapArtistRowData(MaArtist artist, int index) {
+MediaTableRowData mapArtistRowData(Artist artist, int index) {
   final String providerLabel = _providerLabelFromId(artist.provider);
   return MediaTableRowData(
     title: _prefer(artist.name, 'Unknown Artist'),
@@ -1237,13 +1237,13 @@ MediaTableRowData mapArtistRowData(MaArtist artist, int index) {
     coverUrl: artist.imageUri,
     fallbackIcon: Icons.person_rounded,
     providerLabel: providerLabel,
-    providerIconSvg: MaProviderManifestRegistry.iconSvgForProvider(artist.provider),
+    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(artist.provider),
   );
 }
 
-List<DesktopTableColumn<MaTrack>> buildTrackDesktopColumns() {
-  return <DesktopTableColumn<MaTrack>>[
-    const DesktopTableColumn<MaTrack>(
+List<DesktopTableColumn<Track>> buildTrackDesktopColumns() {
+  return <DesktopTableColumn<Track>>[
+    const DesktopTableColumn<Track>(
       header: '#',
       width: 44,
       textAlign: TextAlign.left,
@@ -1251,10 +1251,10 @@ List<DesktopTableColumn<MaTrack>> buildTrackDesktopColumns() {
       fontSize: 12,
       valueBuilder: _trackIndexValue,
     ),
-    DesktopTableColumn<MaTrack>(
+    DesktopTableColumn<Track>(
       header: 'Cover',
       width: 62,
-      childBuilder: (BuildContext context, MaTrack track, int index) {
+      childBuilder: (BuildContext context, Track track, int index) {
         return MediaTableCover(
           coverUrl: track.imageUri,
           fallbackIcon: Icons.music_note_rounded,
@@ -1263,43 +1263,43 @@ List<DesktopTableColumn<MaTrack>> buildTrackDesktopColumns() {
         );
       },
     ),
-    const DesktopTableColumn<MaTrack>(
+    const DesktopTableColumn<Track>(
       header: 'Titel',
       flex: 5,
       textTone: DesktopTextTone.primary,
       valueBuilder: _trackTitleValue,
     ),
-    const DesktopTableColumn<MaTrack>(
+    const DesktopTableColumn<Track>(
       header: 'Artist',
       flex: 3,
       textTone: DesktopTextTone.secondary,
       valueBuilder: _trackArtistValue,
     ),
-    const DesktopTableColumn<MaTrack>(
+    const DesktopTableColumn<Track>(
       header: 'Album',
       flex: 3,
       textTone: DesktopTextTone.secondary,
       valueBuilder: _trackAlbumValue,
     ),
-    const DesktopTableColumn<MaTrack>(
+    const DesktopTableColumn<Track>(
       header: 'Länge',
       width: 76,
       textAlign: TextAlign.right,
       textTone: DesktopTextTone.tertiary,
       valueBuilder: _trackDurationValue,
     ),
-    DesktopTableColumn<MaTrack>(
+    DesktopTableColumn<Track>(
       header: 'Quelle',
       width: 72,
       textAlign: TextAlign.center,
-      childBuilder: (BuildContext context, MaTrack track, int index) {
+      childBuilder: (BuildContext context, Track track, int index) {
         final String providerLabel = _providerLabelFromId(track.provider);
         return Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             MediaProviderIcon(
               providerLabel: providerLabel,
-              iconSvg: MaProviderManifestRegistry.iconSvgForProvider(track.provider),
+              iconSvg: ProviderManifestRegistry.iconSvgForProvider(track.provider),
               size: 16,
             ),
           ],
@@ -1309,9 +1309,9 @@ List<DesktopTableColumn<MaTrack>> buildTrackDesktopColumns() {
   ];
 }
 
-List<DesktopTableColumn<MaAlbum>> buildAlbumDesktopColumns() {
-  return <DesktopTableColumn<MaAlbum>>[
-    const DesktopTableColumn<MaAlbum>(
+List<DesktopTableColumn<Album>> buildAlbumDesktopColumns() {
+  return <DesktopTableColumn<Album>>[
+    const DesktopTableColumn<Album>(
       header: '#',
       width: 44,
       textAlign: TextAlign.left,
@@ -1319,10 +1319,10 @@ List<DesktopTableColumn<MaAlbum>> buildAlbumDesktopColumns() {
       fontSize: 12,
       valueBuilder: _albumIndexValue,
     ),
-    DesktopTableColumn<MaAlbum>(
+    DesktopTableColumn<Album>(
       header: 'Cover',
       width: 62,
-      childBuilder: (BuildContext context, MaAlbum album, int index) {
+      childBuilder: (BuildContext context, Album album, int index) {
         return MediaTableCover(
           coverUrl: album.imageUri,
           fallbackIcon: Icons.album_rounded,
@@ -1331,43 +1331,43 @@ List<DesktopTableColumn<MaAlbum>> buildAlbumDesktopColumns() {
         );
       },
     ),
-    const DesktopTableColumn<MaAlbum>(
+    const DesktopTableColumn<Album>(
       header: 'Titel',
       flex: 5,
       textTone: DesktopTextTone.primary,
       valueBuilder: _albumTitleValue,
     ),
-    const DesktopTableColumn<MaAlbum>(
+    const DesktopTableColumn<Album>(
       header: 'Artist',
       flex: 4,
       textTone: DesktopTextTone.secondary,
       valueBuilder: _albumArtistValue,
     ),
-    const DesktopTableColumn<MaAlbum>(
+    const DesktopTableColumn<Album>(
       header: 'Typ',
       flex: 2,
       textTone: DesktopTextTone.secondary,
       valueBuilder: _albumTypeValue,
     ),
-    const DesktopTableColumn<MaAlbum>(
+    const DesktopTableColumn<Album>(
       header: 'Jahr',
       width: 64,
       textAlign: TextAlign.right,
       textTone: DesktopTextTone.tertiary,
       valueBuilder: _albumYearValue,
     ),
-    DesktopTableColumn<MaAlbum>(
+    DesktopTableColumn<Album>(
       header: 'Quelle',
       width: 72,
       textAlign: TextAlign.center,
-      childBuilder: (BuildContext context, MaAlbum album, int index) {
+      childBuilder: (BuildContext context, Album album, int index) {
         final String providerLabel = _providerLabelFromId(album.provider);
         return Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             MediaProviderIcon(
               providerLabel: providerLabel,
-              iconSvg: MaProviderManifestRegistry.iconSvgForProvider(album.provider),
+              iconSvg: ProviderManifestRegistry.iconSvgForProvider(album.provider),
               size: 16,
             ),
           ],
@@ -1377,9 +1377,9 @@ List<DesktopTableColumn<MaAlbum>> buildAlbumDesktopColumns() {
   ];
 }
 
-List<DesktopTableColumn<MaPlaylist>> buildPlaylistDesktopColumns() {
-  return <DesktopTableColumn<MaPlaylist>>[
-    const DesktopTableColumn<MaPlaylist>(
+List<DesktopTableColumn<Playlist>> buildPlaylistDesktopColumns() {
+  return <DesktopTableColumn<Playlist>>[
+    const DesktopTableColumn<Playlist>(
       header: '#',
       width: 44,
       textAlign: TextAlign.left,
@@ -1387,10 +1387,10 @@ List<DesktopTableColumn<MaPlaylist>> buildPlaylistDesktopColumns() {
       fontSize: 12,
       valueBuilder: _playlistIndexValue,
     ),
-    DesktopTableColumn<MaPlaylist>(
+    DesktopTableColumn<Playlist>(
       header: 'Cover',
       width: 62,
-      childBuilder: (BuildContext context, MaPlaylist playlist, int index) {
+      childBuilder: (BuildContext context, Playlist playlist, int index) {
         return MediaTableCover(
           coverUrl: playlist.imageUri,
           fallbackIcon: Icons.queue_music_rounded,
@@ -1399,36 +1399,36 @@ List<DesktopTableColumn<MaPlaylist>> buildPlaylistDesktopColumns() {
         );
       },
     ),
-    const DesktopTableColumn<MaPlaylist>(
+    const DesktopTableColumn<Playlist>(
       header: 'Titel',
       flex: 5,
       textTone: DesktopTextTone.primary,
       valueBuilder: _playlistTitleValue,
     ),
-    const DesktopTableColumn<MaPlaylist>(
+    const DesktopTableColumn<Playlist>(
       header: 'Owner',
       flex: 4,
       textTone: DesktopTextTone.secondary,
       valueBuilder: _playlistOwnerValue,
     ),
-    const DesktopTableColumn<MaPlaylist>(
+    const DesktopTableColumn<Playlist>(
       header: 'Status',
       flex: 2,
       textTone: DesktopTextTone.tertiary,
       valueBuilder: _playlistStatusValue,
     ),
-    DesktopTableColumn<MaPlaylist>(
+    DesktopTableColumn<Playlist>(
       header: 'Quelle',
       width: 72,
       textAlign: TextAlign.center,
-      childBuilder: (BuildContext context, MaPlaylist playlist, int index) {
+      childBuilder: (BuildContext context, Playlist playlist, int index) {
         final String providerLabel = _providerLabelFromId(playlist.provider);
         return Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             MediaProviderIcon(
               providerLabel: providerLabel,
-              iconSvg: MaProviderManifestRegistry.iconSvgForProvider(playlist.provider),
+              iconSvg: ProviderManifestRegistry.iconSvgForProvider(playlist.provider),
               size: 16,
             ),
           ],
@@ -1438,9 +1438,9 @@ List<DesktopTableColumn<MaPlaylist>> buildPlaylistDesktopColumns() {
   ];
 }
 
-List<DesktopTableColumn<MaArtist>> buildArtistDesktopColumns() {
-  return <DesktopTableColumn<MaArtist>>[
-    const DesktopTableColumn<MaArtist>(
+List<DesktopTableColumn<Artist>> buildArtistDesktopColumns() {
+  return <DesktopTableColumn<Artist>>[
+    const DesktopTableColumn<Artist>(
       header: '#',
       width: 44,
       textAlign: TextAlign.left,
@@ -1448,10 +1448,10 @@ List<DesktopTableColumn<MaArtist>> buildArtistDesktopColumns() {
       fontSize: 12,
       valueBuilder: _artistIndexValue,
     ),
-    DesktopTableColumn<MaArtist>(
+    DesktopTableColumn<Artist>(
       header: 'Bild',
       width: 62,
-      childBuilder: (BuildContext context, MaArtist artist, int index) {
+      childBuilder: (BuildContext context, Artist artist, int index) {
         return MediaTableCover(
           coverUrl: artist.imageUri,
           fallbackIcon: Icons.person_rounded,
@@ -1460,30 +1460,30 @@ List<DesktopTableColumn<MaArtist>> buildArtistDesktopColumns() {
         );
       },
     ),
-    const DesktopTableColumn<MaArtist>(
+    const DesktopTableColumn<Artist>(
       header: 'Artist',
       flex: 6,
       textTone: DesktopTextTone.primary,
       valueBuilder: _artistTitleValue,
     ),
-    const DesktopTableColumn<MaArtist>(
+    const DesktopTableColumn<Artist>(
       header: 'Provider',
       flex: 3,
       textTone: DesktopTextTone.secondary,
       valueBuilder: _artistProviderValue,
     ),
-    DesktopTableColumn<MaArtist>(
+    DesktopTableColumn<Artist>(
       header: 'Quelle',
       width: 72,
       textAlign: TextAlign.center,
-      childBuilder: (BuildContext context, MaArtist artist, int index) {
+      childBuilder: (BuildContext context, Artist artist, int index) {
         final String providerLabel = _providerLabelFromId(artist.provider);
         return Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             MediaProviderIcon(
               providerLabel: providerLabel,
-              iconSvg: MaProviderManifestRegistry.iconSvgForProvider(artist.provider),
+              iconSvg: ProviderManifestRegistry.iconSvgForProvider(artist.provider),
               size: 16,
             ),
           ],
@@ -1495,26 +1495,26 @@ List<DesktopTableColumn<MaArtist>> buildArtistDesktopColumns() {
 
 
 // Value Builders for Desktop Table Columns
-String _trackIndexValue(MaTrack track, int index) => '${index + 1}';
-String _trackTitleValue(MaTrack track, int index) => _prefer(track.name, 'Unknown Track');
-String _trackArtistValue(MaTrack track, int index) => _trackSubtitle(track);
-String _trackAlbumValue(MaTrack track, int index) => _prefer(track.album?.name ?? '', '-');
-String _trackDurationValue(MaTrack track, int index) => formatDuration(track.duration);
+String _trackIndexValue(Track track, int index) => '${index + 1}';
+String _trackTitleValue(Track track, int index) => _prefer(track.name, 'Unknown Track');
+String _trackArtistValue(Track track, int index) => _trackSubtitle(track);
+String _trackAlbumValue(Track track, int index) => _prefer(track.album?.name ?? '', '-');
+String _trackDurationValue(Track track, int index) => formatDuration(track.duration);
 
-String _albumIndexValue(MaAlbum album, int index) => '${index + 1}';
-String _albumTitleValue(MaAlbum album, int index) => _prefer(album.name, 'Unknown Album');
-String _albumArtistValue(MaAlbum album, int index) => _albumSubtitle(album);
-String _albumTypeValue(MaAlbum album, int index) => _mediaTypeLabel(album.albumType);
-String _albumYearValue(MaAlbum album, int index) => album.year != null && album.year! > 0 ? '${album.year}' : '-';
+String _albumIndexValue(Album album, int index) => '${index + 1}';
+String _albumTitleValue(Album album, int index) => _prefer(album.name, 'Unknown Album');
+String _albumArtistValue(Album album, int index) => _albumSubtitle(album);
+String _albumTypeValue(Album album, int index) => _mediaTypeLabel(album.albumType);
+String _albumYearValue(Album album, int index) => album.year != null && album.year! > 0 ? '${album.year}' : '-';
 
-String _playlistIndexValue(MaPlaylist playlist, int index) => '${index + 1}';
-String _playlistTitleValue(MaPlaylist playlist, int index) => _prefer(playlist.name, 'Unknown Playlist');
-String _playlistOwnerValue(MaPlaylist playlist, int index) => _playlistSubtitle(playlist);
-String _playlistStatusValue(MaPlaylist playlist, int index) => playlist.isEditable ? 'Editierbar' : 'Readonly';
+String _playlistIndexValue(Playlist playlist, int index) => '${index + 1}';
+String _playlistTitleValue(Playlist playlist, int index) => _prefer(playlist.name, 'Unknown Playlist');
+String _playlistOwnerValue(Playlist playlist, int index) => _playlistSubtitle(playlist);
+String _playlistStatusValue(Playlist playlist, int index) => playlist.isEditable ? 'Editierbar' : 'Readonly';
 
-String _artistIndexValue(MaArtist artist, int index) => '${index + 1}';
-String _artistTitleValue(MaArtist artist, int index) => _prefer(artist.name, 'Unknown Artist');
-String _artistProviderValue(MaArtist artist, int index) => _providerLabelFromId(artist.provider);
+String _artistIndexValue(Artist artist, int index) => '${index + 1}';
+String _artistTitleValue(Artist artist, int index) => _prefer(artist.name, 'Unknown Artist');
+String _artistProviderValue(Artist artist, int index) => _providerLabelFromId(artist.provider);
 
 // Helper Functions
 String _stripOrEmpty(String? value) {
@@ -1529,7 +1529,7 @@ String _prefer(String primary, String fallback) {
   return fallback.trim();
 }
 
-String _albumSubtitle(MaAlbum album) {
+String _albumSubtitle(Album album) {
   final artist = firstArtistName(album.artists);
   if (artist != '-') {
     return artist;
@@ -1537,7 +1537,7 @@ String _albumSubtitle(MaAlbum album) {
   return _mediaTypeLabel(album.albumType);
 }
 
-String _trackSubtitle(MaTrack track) {
+String _trackSubtitle(Track track) {
   final artist = firstArtistName(track.artists);
   if (artist != '-') {
     return artist;
@@ -1545,7 +1545,7 @@ String _trackSubtitle(MaTrack track) {
   return _prefer(track.album?.name ?? '', 'Track');
 }
 
-String _playlistSubtitle(MaPlaylist playlist) {
+String _playlistSubtitle(Playlist playlist) {
   final owner = _stripOrEmpty(playlist.owner);
   if (owner.isNotEmpty) {
     return owner;
@@ -1553,7 +1553,7 @@ String _playlistSubtitle(MaPlaylist playlist) {
   return 'Playlist';
 }
 
-String _artistTertiary(MaArtist artist) {
+String _artistTertiary(Artist artist) {
   final provider = _stripOrEmpty(artist.provider);
   if (provider.isEmpty) {
     return '-';
@@ -1583,7 +1583,7 @@ String _mediaTypeLabel(String? rawType) {
   }
 }
 
-String firstArtistName(List<MaArtist> artists) {
+String firstArtistName(List<Artist> artists) {
   if (artists.isEmpty) {
     return '-';
   }

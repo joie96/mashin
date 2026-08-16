@@ -11,6 +11,7 @@ import '../../data/music_assistant/ma_models.dart';
 import '../../data/music_assistant/music_assistant_client.dart';
 import '../../features/playback/playback_coordinator.dart';
 import '../../features/playback/playback_models.dart';
+import '../../features/playback/playback_player.dart';
 import '../../features/playback/sendspin/sendspin_player.dart';
 import '../../features/playback/sendspin/sendspin_rust_backend.dart';
 import '../../features/playback/sendspin/sendspin_rust_bridge_ffi.dart';
@@ -30,7 +31,7 @@ class _AppShellState extends State<AppShell> {
 
   AppSection _currentSection = AppSection.home;
   bool _isDarkTheme = true;
-  final MaAuthStore _authStore = MaAuthStore();
+  final AuthStore _authStore = AuthStore();
   final SelectionSessionController _selectionSessionController = SelectionSessionController.instance;
   late final PlaybackCoordinator _playbackCoordinator;
 
@@ -45,7 +46,7 @@ class _AppShellState extends State<AppShell> {
     super.initState();
 
     _playbackCoordinator = PlaybackCoordinator(
-      players: <SendspinPlayer>[
+      players: <PlaybackPlayer>[
         SendspinPlayer(
           transportBackend: SendspinRustBackend(
             bridge: FfiSendspinRustBridge(),
@@ -356,7 +357,7 @@ class _AppShellState extends State<AppShell> {
       }
 
       await _authStore.write(
-        MaAuthSession(
+        AuthSession(
           baseUrl: baseUrl,
           username: username,
           token: token,
@@ -376,9 +377,9 @@ class _AppShellState extends State<AppShell> {
       });
 
       return null;
-    } on MaUnauthorizedException {
+    } on UnauthorizedException {
       return 'Benutzername oder Passwort ist ungueltig.';
-    } on MaRequestException catch (ex) {
+    } on RequestException catch (ex) {
       return ex.message;
     } catch (_) {
       return 'Verbindung fehlgeschlagen. Bitte Server-URL pruefen.';

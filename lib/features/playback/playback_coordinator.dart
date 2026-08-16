@@ -2,21 +2,24 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../../data/music_assistant/ma_models.dart';
 import 'playback_models.dart';
-import 'sendspin/sendspin_player.dart';
+import 'playback_player.dart';
 
 class PlaybackCoordinator extends ChangeNotifier {
   PlaybackCoordinator({
-    required List<SendspinPlayer> players,
+    required List<PlaybackPlayer> players,
     this.initialOutputMode = PlaybackOutputMode.localSendspin,
-  }) : _players = <PlaybackOutputMode, SendspinPlayer>{
+  }) : _players = <PlaybackOutputMode, PlaybackPlayer>{
           for (final player in players) player.outputMode: player,
         };
 
-  final Map<PlaybackOutputMode, SendspinPlayer> _players;
+
+  // Fields
+  final Map<PlaybackOutputMode, PlaybackPlayer> _players;
   final PlaybackOutputMode initialOutputMode;
 
-  SendspinPlayer? _activePlayer;
+  PlaybackPlayer? _activePlayer;
   StreamSubscription<PlaybackState>? _stateSubscription;
   StreamSubscription<PlaybackQueueSnapshot>? _queueSubscription;
   PlaybackOutputMode? _outputMode;
@@ -40,6 +43,7 @@ class PlaybackCoordinator extends ChangeNotifier {
 
   bool? get dontStopTheMusicEnabled => _queueState.dontStopTheMusicEnabled;
 
+  // Initialization
   Future<void> initialize() async {
     if (_initialized) {
       return;
@@ -61,6 +65,7 @@ class PlaybackCoordinator extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Playback Actions
   Future<void> switchOutputMode(
     PlaybackOutputMode mode, {
     String? targetPlayerId,
@@ -91,7 +96,7 @@ class PlaybackCoordinator extends ChangeNotifier {
   }
 
   Future<void> togglePlayPause() async {
-    await _route((SendspinPlayer player) async {
+    await _route((PlaybackPlayer player) async {
       final current = _state.playbackState;
       if (current == PlaybackStateType.playing) {
         await player.transportPause();
@@ -101,40 +106,42 @@ class PlaybackCoordinator extends ChangeNotifier {
     });
   }
 
-  Future<void> next() => _route((SendspinPlayer player) => player.transportNext());
+    Future<void> next() => _route((PlaybackPlayer player) => player.transportNext());
 
-  Future<void> previous() => _route((SendspinPlayer player) => player.transportPrevious());
+    Future<void> previous() => _route((PlaybackPlayer player) => player.transportPrevious());
 
   Future<void> seek(double seconds) =>
-      _route((SendspinPlayer player) => player.transportSeek(seconds));
+      _route((PlaybackPlayer player) => player.transportSeek(seconds));
 
   Future<void> setVolume(int volume) =>
-      _route((SendspinPlayer player) => player.setVolume(volume));
+      _route((PlaybackPlayer player) => player.setVolume(volume));
 
   Future<void> setMuted(bool muted) =>
-      _route((SendspinPlayer player) => player.setMuted(muted));
+      _route((PlaybackPlayer player) => player.setMuted(muted));
 
+
+  // Media Actions
   Future<void> playMedia(
-    List<Map<String, dynamic>> mediaItems, {
+    List<MediaItem> mediaItems, {
     PlaybackQueueInsertOption option = PlaybackQueueInsertOption.replace,
     bool radioMode = false,
     dynamic startItem,
     String sortBy = 'original',
-  }) => _route((SendspinPlayer player) => player.playMedia(mediaItems, option: option, radioMode: radioMode, startItem: startItem, sortBy: sortBy));
+  }) => _route((PlaybackPlayer player) => player.playMedia(mediaItems, option: option, radioMode: radioMode, startItem: startItem, sortBy: sortBy));
 
-  Future<void> playMediaNext(List<Map<String, dynamic>> mediaItems) {
+  Future<void> playMediaNext(List<MediaItem> mediaItems) {
     return playMedia(mediaItems, option: PlaybackQueueInsertOption.next);
   }
 
-  Future<void> playMediaReplaceNext(List<Map<String, dynamic>> mediaItems) {
+  Future<void> playMediaReplaceNext(List<MediaItem> mediaItems) {
     return playMedia(mediaItems, option: PlaybackQueueInsertOption.replaceNext);
   }
 
-  Future<void> playMediaLast(List<Map<String, dynamic>> mediaItems) {
+  Future<void> playMediaLast(List<MediaItem> mediaItems) {
     return playMedia(mediaItems, option: PlaybackQueueInsertOption.last);
   }
 
-  Future<void> playMediaRadioNext(List<Map<String, dynamic>> mediaItems) {
+  Future<void> playMediaRadioNext(List<MediaItem> mediaItems) {
     return playMedia(
       mediaItems,
       option: PlaybackQueueInsertOption.next,
@@ -142,25 +149,25 @@ class PlaybackCoordinator extends ChangeNotifier {
     );
   }
 
-  Future<void> shufflePlayMedia(List<Map<String, dynamic>> mediaItems) {
+  Future<void> shufflePlayMedia(List<MediaItem> mediaItems) {
     return playMedia(mediaItems, sortBy: 'random');
   }
 
   Future<void> clearQueue({bool skipStop = false}) =>
-      _route((SendspinPlayer player) => player.clearQueue(skipStop: skipStop));
+      _route((PlaybackPlayer player) => player.clearQueue(skipStop: skipStop));
 
   Future<void> playQueueIndex(int index) =>
-      _route((SendspinPlayer player) => player.playQueueIndex(index));
+      _route((PlaybackPlayer player) => player.playQueueIndex(index));
 
   Future<void> moveQueueItem(String queueItemId, {int posShift = 0}) =>
-      _route((SendspinPlayer player) => player.moveQueueItem(queueItemId, posShift: posShift));
+      _route((PlaybackPlayer player) => player.moveQueueItem(queueItemId, posShift: posShift));
 
   Future<void> deleteQueueItem(String queueItemId) =>
-      _route((SendspinPlayer player) => player.deleteQueueItem(queueItemId));
+      _route((PlaybackPlayer player) => player.deleteQueueItem(queueItemId));
 
   Future<void> toggleShuffle([bool? currentShuffleEnabled]) {
     final bool next = !(currentShuffleEnabled ?? _queueState.shuffleEnabled ?? _state.shuffleEnabled ?? false);
-    return _route((SendspinPlayer player) => player.setShuffle(next));
+    return _route((PlaybackPlayer player) => player.setShuffle(next));
   }
 
   Future<void> toggleRepeatMode([String? currentRepeatMode]) {
@@ -171,11 +178,11 @@ class PlaybackCoordinator extends ChangeNotifier {
       _ => 'off',
     };
 
-    return _route((SendspinPlayer player) => player.setRepeatMode(next));
+    return _route((PlaybackPlayer player) => player.setRepeatMode(next));
   }
 
   Future<void> setDontStopTheMusic(bool enabled) =>
-      _route((SendspinPlayer player) => player.setDontStopTheMusic(enabled));
+      _route((PlaybackPlayer player) => player.setDontStopTheMusic(enabled));
 
   Future<void> shutdown() async {
     await _stateSubscription?.cancel();
@@ -196,7 +203,7 @@ class PlaybackCoordinator extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _bindStreams(SendspinPlayer player) async {
+  Future<void> _bindStreams(PlaybackPlayer player) async {
     await _stateSubscription?.cancel();
     await _queueSubscription?.cancel();
     _stateSubscription = player.states.listen((PlaybackState next) {
@@ -213,7 +220,7 @@ class PlaybackCoordinator extends ChangeNotifier {
     });
   }
 
-  Future<void> _route(Future<void> Function(SendspinPlayer player) action) async {
+  Future<void> _route(Future<void> Function(PlaybackPlayer player) action) async {
     final player = _activePlayer;
     if (player == null) {
       throw StateError('PlaybackCoordinator ist nicht initialisiert.');

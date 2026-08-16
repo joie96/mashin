@@ -7,6 +7,7 @@ import '../../app/theme/app_theme.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../../data/music_assistant/music_assistant_client.dart';
 import '../playback/playback_coordinator.dart';
+import '../playback/playback_models.dart';
 import '../shared/widgets/media_row_section_desktop.dart';
 import '../shared/widgets/media_row_section_mobile.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
@@ -40,10 +41,10 @@ class _SearchScreenState extends State<SearchScreen> {
   bool _isLoadingPlaylists = false;
   bool _isLoadingArtists = false;
 
-  List<MaTrack> _tracks = const <MaTrack>[];
-  List<MaAlbum> _albums = const <MaAlbum>[];
-  List<MaPlaylist> _playlists = const <MaPlaylist>[];
-  List<MaArtist> _artists = const <MaArtist>[];
+  List<Track> _tracks = const <Track>[];
+  List<Album> _albums = const <Album>[];
+  List<Playlist> _playlists = const <Playlist>[];
+  List<Artist> _artists = const <Artist>[];
 
   // #endregion
 
@@ -134,7 +135,7 @@ class _SearchScreenState extends State<SearchScreen> {
           )
         else ...<Widget>[
           isMobile
-              ? MediaTableSectionMobile<MaTrack>(
+              ? MediaTableSectionMobile<Track>(
                   title: 'Tracks',
                   items: _tracks,
                   isLoading: _isLoadingTracks,
@@ -142,7 +143,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   rowMapper: mapTrackRowData,
                   maxItemsPerPage: 3,
                 )
-              : MediaTableSectionDesktop<MaTrack>(
+              : MediaTableSectionDesktop<Track>(
                   title: 'Tracks',
                   items: _tracks,
                   isLoading: _isLoadingTracks,
@@ -154,14 +155,14 @@ class _SearchScreenState extends State<SearchScreen> {
                 ),
           const SizedBox(height: 18),
           isMobile
-              ? MediaRowSectionMobile<MaAlbum>(
+              ? MediaRowSectionMobile<Album>(
                   title: 'Alben',
                   isLoading: _isLoadingAlbums,
                   items: _albums,
                   emptyText: 'Keine Alben gefunden.',
                   cardMapper: albumRowCardData,
                 )
-              : MediaRowSectionDesktop<MaAlbum>(
+              : MediaRowSectionDesktop<Album>(
                   title: 'Alben',
                   isLoading: _isLoadingAlbums,
                   items: _albums,
@@ -170,14 +171,14 @@ class _SearchScreenState extends State<SearchScreen> {
                 ),
           const SizedBox(height: 18),
           isMobile
-              ? MediaRowSectionMobile<MaPlaylist>(
+              ? MediaRowSectionMobile<Playlist>(
                   title: 'Playlists',
                   isLoading: _isLoadingPlaylists,
                   items: _playlists,
                   emptyText: 'Keine Playlists gefunden.',
                   cardMapper: playlistRowCardData,
                 )
-              : MediaRowSectionDesktop<MaPlaylist>(
+              : MediaRowSectionDesktop<Playlist>(
                   title: 'Playlists',
                   isLoading: _isLoadingPlaylists,
                   items: _playlists,
@@ -186,14 +187,14 @@ class _SearchScreenState extends State<SearchScreen> {
                 ),
           const SizedBox(height: 18),
           isMobile
-              ? MediaRowSectionMobile<MaArtist>(
+              ? MediaRowSectionMobile<Artist>(
                   title: 'Artists',
                   isLoading: _isLoadingArtists,
                   items: _artists,
                   emptyText: 'Keine Artists gefunden.',
                   cardMapper: artistRowCardData,
                 )
-              : MediaRowSectionDesktop<MaArtist>(
+              : MediaRowSectionDesktop<Artist>(
                   title: 'Artists',
                   isLoading: _isLoadingArtists,
                   items: _artists,
@@ -229,10 +230,10 @@ class _SearchScreenState extends State<SearchScreen> {
       _isLoadingAlbums = false;
       _isLoadingPlaylists = false;
       _isLoadingArtists = false;
-      _tracks = const <MaTrack>[];
-      _albums = const <MaAlbum>[];
-      _playlists = const <MaPlaylist>[];
-      _artists = const <MaArtist>[];
+      _tracks = const <Track>[];
+      _albums = const <Album>[];
+      _playlists = const <Playlist>[];
+      _artists = const <Artist>[];
     });
   }
 
@@ -260,26 +261,26 @@ class _SearchScreenState extends State<SearchScreen> {
       _isLoadingAlbums = true;
       _isLoadingPlaylists = true;
       _isLoadingArtists = true;
-      _tracks = const <MaTrack>[];
-      _albums = const <MaAlbum>[];
-      _playlists = const <MaPlaylist>[];
-      _artists = const <MaArtist>[];
+      _tracks = const <Track>[];
+      _albums = const <Album>[];
+      _playlists = const <Playlist>[];
+      _artists = const <Artist>[];
     });
 
     await Future.wait(<Future<void>>[
-      _searchForType(requestId, query, MaMediaType.track),
-      _searchForType(requestId, query, MaMediaType.album),
-      _searchForType(requestId, query, MaMediaType.playlist),
-      _searchForType(requestId, query, MaMediaType.artist),
+      _searchForType(requestId, query, MediaType.track),
+      _searchForType(requestId, query, MediaType.album),
+      _searchForType(requestId, query, MediaType.playlist),
+      _searchForType(requestId, query, MediaType.artist),
     ]);
   }
 
-  Future<void> _searchForType(int requestId, String query, MaMediaType mediaType) async {
+  Future<void> _searchForType(int requestId, String query, MediaType mediaType) async {
     try {
       // One request per media type keeps section loading/error states independent.
       final result = await widget.client.search(
         searchQuery: query,
-        mediaTypes: <MaMediaType>[mediaType],
+        mediaTypes: <MediaType>[mediaType],
         limit: 500,
         libraryOnly: false,
       );
@@ -291,17 +292,17 @@ class _SearchScreenState extends State<SearchScreen> {
 
       setState(() {
         switch (mediaType) {
-          case MaMediaType.track:
-            _tracks = result?.tracks ?? const <MaTrack>[];
+          case MediaType.track:
+            _tracks = result?.tracks ?? const <Track>[];
             break;
-          case MaMediaType.album:
-            _albums = result?.albums ?? const <MaAlbum>[];
+          case MediaType.album:
+            _albums = result?.albums ?? const <Album>[];
             break;
-          case MaMediaType.playlist:
-            _playlists = result?.playlists ?? const <MaPlaylist>[];
+          case MediaType.playlist:
+            _playlists = result?.playlists ?? const <Playlist>[];
             break;
-          case MaMediaType.artist:
-            _artists = result?.artists ?? const <MaArtist>[];
+          case MediaType.artist:
+            _artists = result?.artists ?? const <Artist>[];
             break;
           default:
             break;
@@ -314,17 +315,17 @@ class _SearchScreenState extends State<SearchScreen> {
 
       setState(() {
         switch (mediaType) {
-          case MaMediaType.track:
-            _tracks = const <MaTrack>[];
+          case MediaType.track:
+            _tracks = const <Track>[];
             break;
-          case MaMediaType.album:
-            _albums = const <MaAlbum>[];
+          case MediaType.album:
+            _albums = const <Album>[];
             break;
-          case MaMediaType.playlist:
-            _playlists = const <MaPlaylist>[];
+          case MediaType.playlist:
+            _playlists = const <Playlist>[];
             break;
-          case MaMediaType.artist:
-            _artists = const <MaArtist>[];
+          case MediaType.artist:
+            _artists = const <Artist>[];
             break;
           default:
             break;
@@ -334,16 +335,16 @@ class _SearchScreenState extends State<SearchScreen> {
       if (mounted && requestId == _requestId) {
         setState(() {
           switch (mediaType) {
-            case MaMediaType.track:
+            case MediaType.track:
               _isLoadingTracks = false;
               break;
-            case MaMediaType.album:
+            case MediaType.album:
               _isLoadingAlbums = false;
               break;
-            case MaMediaType.playlist:
+            case MediaType.playlist:
               _isLoadingPlaylists = false;
               break;
-            case MaMediaType.artist:
+            case MediaType.artist:
               _isLoadingArtists = false;
               break;
             default:
@@ -354,22 +355,14 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
-  Future<void> _onTrackRowDoubleTap(MaTrack track, int index) async {
-    final String itemId = track.itemId.trim();
-    final String provider = track.provider.trim();
-    if (itemId.isEmpty || provider.isEmpty) {
+  Future<void> _onTrackRowDoubleTap(Track track, int index) async {
+    if (track.itemId.trim().isEmpty || track.provider.trim().isEmpty) {
       return;
     }
 
-    final Map<String, dynamic> mediaItem = <String, dynamic>{
-      'media_type': maMediaTypeToJson(MaMediaType.track),
-      'item_id': itemId,
-      'provider': provider,
-    };
-
     try {
       await widget.playbackCoordinator.playMedia(
-        <Map<String, dynamic>>[mediaItem],
+        <MediaItem>[track],
         option: PlaybackQueueInsertOption.replace,
       );
     } catch (_) {

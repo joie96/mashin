@@ -1,11 +1,13 @@
 import 'dart:convert';
 
+// Output Modes (corresponding to different players)
 enum PlaybackOutputMode {
   localOffline,
   localSendspin,
   maRemote,
 }
 
+// Playback State Types
 enum PlaybackStateType {
   unknown,
   uninitialized,
@@ -17,6 +19,7 @@ enum PlaybackStateType {
   error,
 }
 
+// Play Media options
 enum PlaybackQueueInsertOption {
   replace,
   next,
@@ -24,6 +27,7 @@ enum PlaybackQueueInsertOption {
   last,
 }
 
+// Queue State
 class PlaybackQueueSnapshot {
   final String? queueId;
   final List<Map<String, dynamic>> items;
@@ -67,7 +71,7 @@ class PlaybackQueueSnapshot {
   }
 }
 
-
+// Playback State
 class PlaybackState {
   final PlaybackStateType playbackState;
   final int volume;

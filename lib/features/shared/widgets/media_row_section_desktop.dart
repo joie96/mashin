@@ -597,7 +597,7 @@ String _prefer(String primary, String fallback) {
   return fallback.trim();
 }
 
-String _albumSubtitle(MaAlbum album) {
+String _albumSubtitle(Album album) {
   final artist = firstArtistName(album.artists);
   if (artist != '-') {
     return artist;
@@ -605,7 +605,7 @@ String _albumSubtitle(MaAlbum album) {
   return _mediaTypeLabel(album.albumType);
 }
 
-String _trackSubtitle(MaTrack track) {
+String _trackSubtitle(Track track) {
   final artist = firstArtistName(track.artists);
   if (artist != '-') {
     return artist;
@@ -613,7 +613,7 @@ String _trackSubtitle(MaTrack track) {
   return _prefer(track.album?.name ?? '', 'Track');
 }
 
-String _trackTertiary(MaTrack track) {
+String _trackTertiary(Track track) {
   final albumName = _stripOrEmpty(track.album?.name);
   if (albumName.isNotEmpty) {
     return albumName;
@@ -621,14 +621,14 @@ String _trackTertiary(MaTrack track) {
   return formatDuration(track.duration);
 }
 
-String _albumTertiary(MaAlbum album) {
+String _albumTertiary(Album album) {
   if (album.year != null && album.year! > 0) {
     return '${album.year}';
   }
   return 'Album';
 }
 
-String _playlistSubtitle(MaPlaylist playlist) {
+String _playlistSubtitle(Playlist playlist) {
   final owner = _stripOrEmpty(playlist.owner);
   if (owner.isNotEmpty) {
     return owner;
@@ -636,11 +636,11 @@ String _playlistSubtitle(MaPlaylist playlist) {
   return 'Playlist';
 }
 
-String _playlistTertiary(MaPlaylist playlist) {
+String _playlistTertiary(Playlist playlist) {
   return playlist.isEditable ? 'Editierbar' : 'Readonly';
 }
 
-String _artistTertiary(MaArtist artist) {
+String _artistTertiary(Artist artist) {
   final provider = _stripOrEmpty(artist.provider);
   if (provider.isEmpty) {
     return '-';
@@ -670,7 +670,7 @@ String _mediaTypeLabel(String? rawType) {
   }
 }
 
-MediaRowCardData albumRowCardData(MaAlbum album) {
+MediaRowCardData albumRowCardData(Album album) {
   return MediaRowCardData(
     icon: Icons.album_rounded,
     title: _prefer(album.name, 'Unknown Album'),
@@ -680,7 +680,7 @@ MediaRowCardData albumRowCardData(MaAlbum album) {
   );
 }
 
-MediaRowCardData playlistRowCardData(MaPlaylist playlist) {
+MediaRowCardData playlistRowCardData(Playlist playlist) {
   return MediaRowCardData(
     icon: Icons.queue_music_rounded,
     title: _prefer(playlist.name, 'Unknown Playlist'),
@@ -690,7 +690,7 @@ MediaRowCardData playlistRowCardData(MaPlaylist playlist) {
   );
 }
 
-MediaRowCardData artistRowCardData(MaArtist artist) {
+MediaRowCardData artistRowCardData(Artist artist) {
   return MediaRowCardData(
     icon: Icons.person_rounded,
     title: _prefer(artist.name, 'Unknown Artist'),
@@ -701,7 +701,7 @@ MediaRowCardData artistRowCardData(MaArtist artist) {
   );
 }
 
-MediaRowCardData trackRowCardData(MaTrack track) {
+MediaRowCardData trackRowCardData(Track track) {
   return MediaRowCardData(
     icon: Icons.music_note_rounded,
     title: _prefer(track.name, 'Unknown Track'),
@@ -711,7 +711,7 @@ MediaRowCardData trackRowCardData(MaTrack track) {
   );
 }
 
-String firstArtistName(List<MaArtist> artists) {
+String firstArtistName(List<Artist> artists) {
   if (artists.isEmpty) {
     return '-';
   }

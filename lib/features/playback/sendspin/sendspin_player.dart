@@ -4,9 +4,10 @@ import 'dart:math' as math;
 import '../../../data/music_assistant/ma_models.dart';
 import '../../../data/music_assistant/music_assistant_client.dart';
 import '../playback_models.dart';
+import '../playback_player.dart';
 import 'sendspin_rust_backend.dart';
 
-class SendspinPlayer {
+class SendspinPlayer implements PlaybackPlayer {
   SendspinPlayer({
     required this.transportBackend,
     required this.clientResolver,
@@ -19,17 +20,24 @@ class SendspinPlayer {
       StreamController<PlaybackQueueSnapshot>.broadcast();
   PlaybackQueueSnapshot _queueState = const PlaybackQueueSnapshot();
 
+  @override
   PlaybackOutputMode get outputMode => transportBackend.outputMode;
 
+  @override
   Stream<PlaybackState> get states => transportBackend.states;
 
+  @override
   Stream<PlaybackQueueSnapshot> get queueStates => _queueStateController.stream;
 
+  // Connection and Activation
+  @override
   Future<void> activate({String? targetPlayerId}) =>
       transportBackend.activate(targetPlayerId: targetPlayerId);
 
+  @override
   Future<void> deactivate() => transportBackend.deactivate();
 
+  @override
   Future<void> connect() => transportBackend.connect();
 
   Future<void> reconnect() => transportBackend.reconnect();
@@ -37,6 +45,7 @@ class SendspinPlayer {
   Future<void> disconnect({String reason = 'client_disconnect'}) =>
       transportBackend.disconnect(reason: reason);
 
+  @override
   Future<void> terminate() async {
     if (!_queueStateController.isClosed) {
       await _queueStateController.close();
@@ -44,23 +53,33 @@ class SendspinPlayer {
     await transportBackend.terminate();
   }
 
+  // Transport Controls
+  @override
   Future<void> transportPlay() => transportBackend.transportPlay();
 
+  @override
   Future<void> transportPause() => transportBackend.transportPause();
 
+  @override
   Future<void> transportNext() => transportBackend.transportNext();
 
+  @override
   Future<void> transportPrevious() => transportBackend.transportPrevious();
 
+  @override
   Future<void> transportSeek(double seconds) =>
       transportBackend.transportSeek(seconds);
 
+  @override
   Future<void> setVolume(int volume) => transportBackend.setVolume(volume);
 
+  @override
   Future<void> setMuted(bool muted) => transportBackend.setMuted(muted);
 
+  // Play Media and Queue Management
+  @override
   Future<void> playMedia(
-    List<Map<String, dynamic>> mediaItems, {
+    List<MediaItem> mediaItems, {
     PlaybackQueueInsertOption option = PlaybackQueueInsertOption.replace,
     bool radioMode = false,
     dynamic startItem,
@@ -84,6 +103,7 @@ class SendspinPlayer {
     _projectPlayMedia(queueId, mediaItems, option: option);
   }
 
+  @override
   Future<void> clearQueue({bool skipStop = false}) async {
     final client = clientResolver();
     if (client == null) {
@@ -100,6 +120,7 @@ class SendspinPlayer {
     _emitQueueState();
   }
 
+  @override
   Future<void> playQueueIndex(int index) async {
     final client = clientResolver();
     if (client == null) {
@@ -119,6 +140,7 @@ class SendspinPlayer {
     _emitQueueState();
   }
 
+  @override
   Future<void> moveQueueItem(String queueItemId, {int posShift = 0}) async {
     final client = clientResolver();
     if (client == null || queueItemId.trim().isEmpty) {
@@ -130,6 +152,7 @@ class SendspinPlayer {
     _projectMoveQueueItem(queueId, queueItemId.trim(), posShift);
   }
 
+  @override
   Future<void> deleteQueueItem(String queueItemId) async {
     final client = clientResolver();
     if (client == null || queueItemId.trim().isEmpty) {
@@ -141,6 +164,7 @@ class SendspinPlayer {
     _projectDeleteQueueItem(queueId, queueItemId.trim());
   }
 
+  @override
   Future<void> setShuffle(bool enabled) async {
     final client = clientResolver();
     if (client == null) {
@@ -156,6 +180,7 @@ class SendspinPlayer {
     _emitQueueState();
   }
 
+  @override
   Future<void> setRepeatMode(String repeatMode) async {
     final client = clientResolver();
     if (client == null) {
@@ -172,6 +197,7 @@ class SendspinPlayer {
     _emitQueueState();
   }
 
+  @override
   Future<void> setDontStopTheMusic(bool enabled) async {
     final client = clientResolver();
     if (client == null) {
@@ -187,8 +213,10 @@ class SendspinPlayer {
     _emitQueueState();
   }
 
+  @override
   Future<PlaybackState> getState() => transportBackend.getState();
 
+  @override
   Future<PlaybackQueueSnapshot> getQueueState() async {
     return _queueState;
   }
@@ -198,20 +226,20 @@ class SendspinPlayer {
       return _queueState.queueId!.trim();
     }
 
-    final List<MaPlayerQueue> queues = await client.getPlayerQueues();
-    final List<MaPlayerQueue> valid =
+    final List<PlayerQueue> queues = await client.getPlayerQueues();
+    final List<PlayerQueue> valid =
         queues.where((q) => q.queueId.trim().isNotEmpty).toList(growable: false);
     if (valid.isEmpty) {
       throw StateError('Keine Player Queue verfuegbar.');
     }
 
-    final MaPlayerQueue? active =
-        valid.where((q) => q.active).cast<MaPlayerQueue?>().firstWhere(
+    final PlayerQueue? active =
+        valid.where((q) => q.active).cast<PlayerQueue?>().firstWhere(
               (q) => q != null,
               orElse: () => null,
             );
-    final MaPlayerQueue? available =
-        valid.where((q) => q.available).cast<MaPlayerQueue?>().firstWhere(
+    final PlayerQueue? available =
+        valid.where((q) => q.available).cast<PlayerQueue?>().firstWhere(
               (q) => q != null,
               orElse: () => null,
             );
@@ -222,27 +250,27 @@ class SendspinPlayer {
     return queueId;
   }
 
-  MaQueueOption _toMaQueueOption(PlaybackQueueInsertOption option) {
+  QueueOption _toMaQueueOption(PlaybackQueueInsertOption option) {
     switch (option) {
       case PlaybackQueueInsertOption.replace:
-        return MaQueueOption.replace;
+        return QueueOption.replace;
       case PlaybackQueueInsertOption.next:
-        return MaQueueOption.next;
+        return QueueOption.next;
       case PlaybackQueueInsertOption.replaceNext:
-        return MaQueueOption.replaceNext;
+        return QueueOption.replaceNext;
       case PlaybackQueueInsertOption.last:
-        return MaQueueOption.add;
+        return QueueOption.add;
     }
   }
 
-  MaRepeatMode _toMaRepeatMode(String raw) {
+  RepeatMode _toMaRepeatMode(String raw) {
     switch (raw.trim().toLowerCase()) {
       case 'all':
-        return MaRepeatMode.all;
+        return RepeatMode.all;
       case 'one':
-        return MaRepeatMode.one;
+        return RepeatMode.one;
       default:
-        return MaRepeatMode.off;
+        return RepeatMode.off;
     }
   }
 
@@ -259,14 +287,14 @@ class SendspinPlayer {
 
   void _projectPlayMedia(
     String queueId,
-    List<Map<String, dynamic>> mediaItems, {
+    List<MediaItem> mediaItems, {
     required PlaybackQueueInsertOption option,
   }) {
     final List<Map<String, dynamic>> current = _queueState.items
         .map((e) => Map<String, dynamic>.from(e))
         .toList(growable: true);
     final List<Map<String, dynamic>> payload =
-        mediaItems.map((e) => Map<String, dynamic>.from(e)).toList(growable: false);
+        mediaItems.map(_toQueueProjection).toList(growable: false);
     int? currentIndex = _queueState.currentIndex;
 
     switch (option) {
@@ -389,6 +417,16 @@ class SendspinPlayer {
       }
     }
     return -1;
+  }
+
+  Map<String, dynamic> _toQueueProjection(MediaItem item) {
+    return <String, dynamic>{
+      'item_id': item.itemId,
+      'provider': item.provider,
+      'name': item.name,
+      'media_type': mediaTypeToJson(item.mediaType),
+      'uri': item.uri,
+    };
   }
 
   void _emitQueueState() {

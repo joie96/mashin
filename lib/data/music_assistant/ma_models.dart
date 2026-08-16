@@ -1,6 +1,6 @@
 // #region Enums
 
-enum MaMediaType {
+enum MediaType {
   artist,
   album,
   track,
@@ -18,7 +18,7 @@ enum MaMediaType {
   unknown,
 }
 
-enum MaAlbumType {
+enum AlbumType {
   album,
   single,
   compilation,
@@ -26,7 +26,7 @@ enum MaAlbumType {
   unknown,
 }
 
-enum MaQueueOption {
+enum QueueOption {
   play,
   replace,
   next,
@@ -34,13 +34,13 @@ enum MaQueueOption {
   add,
 }
 
-enum MaRepeatMode {
+enum RepeatMode {
   off,
   one,
   all,
 }
 
-enum MaPlaybackState {
+enum PlayerPlaybackState {
   idle,
   playing,
   paused,
@@ -52,66 +52,81 @@ enum MaPlaybackState {
 
 // #region Core Helpers
 
-MaMediaType maMediaTypeFromJson(String? value) {
+MediaType mediaTypeFromJson(String? value) {
   switch ((value ?? '').trim().toLowerCase()) {
     case 'artist':
-      return MaMediaType.artist;
+      return MediaType.artist;
     case 'album':
-      return MaMediaType.album;
+      return MediaType.album;
     case 'track':
-      return MaMediaType.track;
+      return MediaType.track;
     case 'playlist':
-      return MaMediaType.playlist;
+      return MediaType.playlist;
     case 'radio':
-      return MaMediaType.radio;
+      return MediaType.radio;
     case 'audiobook':
-      return MaMediaType.audiobook;
+      return MediaType.audiobook;
     case 'podcast':
-      return MaMediaType.podcast;
+      return MediaType.podcast;
     case 'podcast_episode':
-      return MaMediaType.podcastEpisode;
+      return MediaType.podcastEpisode;
     case 'folder':
-      return MaMediaType.folder;
+      return MediaType.folder;
     case 'announcement':
-      return MaMediaType.announcement;
+      return MediaType.announcement;
     case 'flow_stream':
-      return MaMediaType.flowStream;
+      return MediaType.flowStream;
     case 'plugin_source':
-      return MaMediaType.pluginSource;
+      return MediaType.pluginSource;
     case 'sound_effect':
-      return MaMediaType.soundEffect;
+      return MediaType.soundEffect;
     case 'genre':
-      return MaMediaType.genre;
+      return MediaType.genre;
     default:
-      return MaMediaType.unknown;
+      return MediaType.unknown;
   }
 }
 
-String maMediaTypeToJson(MaMediaType value) {
+String mediaTypeToJson(MediaType value) {
   switch (value) {
-    case MaMediaType.podcastEpisode:
+    case MediaType.podcastEpisode:
       return 'podcast_episode';
-    case MaMediaType.flowStream:
+    case MediaType.flowStream:
       return 'flow_stream';
-    case MaMediaType.pluginSource:
+    case MediaType.pluginSource:
       return 'plugin_source';
-    case MaMediaType.soundEffect:
+    case MediaType.soundEffect:
       return 'sound_effect';
     default:
       return value.name;
   }
 }
 
-MaRepeatMode? maRepeatModeFromJson(String? value) {
+RepeatMode? repeatModeFromJson(String? value) {
   switch ((value ?? '').trim().toLowerCase()) {
     case 'off':
-      return MaRepeatMode.off;
+      return RepeatMode.off;
     case 'one':
-      return MaRepeatMode.one;
+      return RepeatMode.one;
     case 'all':
-      return MaRepeatMode.all;
+      return RepeatMode.all;
     default:
       return null;
+  }
+}
+
+MediaItem mediaItemFromJson(Map<String, dynamic> json) {
+  switch (mediaTypeFromJson(json['media_type'] as String?)) {
+    case MediaType.artist:
+      return Artist.fromJson(json);
+    case MediaType.album:
+      return Album.fromJson(json);
+    case MediaType.track:
+      return Track.fromJson(json);
+    case MediaType.playlist:
+      return Playlist.fromJson(json);
+    default:
+      return MediaItem.fromJson(json);
   }
 }
 
@@ -119,14 +134,59 @@ MaRepeatMode? maRepeatModeFromJson(String? value) {
 
 // #region Base Models
 
-class MaProviderMapping {
+class MediaItem {
+  final String itemId;
+  final String provider;
+  final String name;
+  final String? sortName;
+  final String? uri;
+  final MediaType mediaType;
+  final List<ProviderMapping> providerMappings;
+  final MediaItemMetadata? metadata;
+  final bool favorite;
+
+  const MediaItem({
+    required this.itemId,
+    required this.provider,
+    required this.name,
+    required this.mediaType,
+    required this.providerMappings,
+    this.sortName,
+    this.uri,
+    this.metadata,
+    this.favorite = false,
+  });
+
+  factory MediaItem.fromJson(Map<String, dynamic> json) {
+    final metadataJson = json['metadata'];
+    final metadata = metadataJson is Map<String, dynamic> ? MediaItemMetadata.fromJson(metadataJson) : null;
+
+    return MediaItem(
+      itemId: (json['item_id'] as String?)?.trim() ?? '',
+      provider: (json['provider'] as String?)?.trim() ?? '',
+      name: (json['name'] as String?)?.trim() ?? 'Unbekannter Titel',
+      sortName: (json['sort_name'] as String?)?.trim(),
+      uri: (json['uri'] as String?)?.trim(),
+      mediaType: mediaTypeFromJson(json['media_type'] as String?),
+      providerMappings: (json['provider_mappings'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map(ProviderMapping.fromJson)
+              .toList() ??
+          const <ProviderMapping>[],
+      metadata: metadata,
+      favorite: json['favorite'] == true,
+    );
+  }
+}
+
+class ProviderMapping {
   final String itemId;
   final String providerDomain;
   final String providerInstance;
   final bool available;
   final String? url;
 
-  const MaProviderMapping({
+  const ProviderMapping({
     required this.itemId,
     required this.providerDomain,
     required this.providerInstance,
@@ -134,8 +194,8 @@ class MaProviderMapping {
     this.url,
   });
 
-  factory MaProviderMapping.fromJson(Map<String, dynamic> json) {
-    return MaProviderMapping(
+  factory ProviderMapping.fromJson(Map<String, dynamic> json) {
+    return ProviderMapping(
       itemId: (json['item_id'] as String?)?.trim() ?? '',
       providerDomain: (json['provider_domain'] as String?)?.trim() ?? '',
       providerInstance: (json['provider_instance'] as String?)?.trim() ?? '',
@@ -145,7 +205,7 @@ class MaProviderMapping {
   }
 }
 
-class MaMediaItemImage {
+class MediaItemImage {
   static const List<int> _allowedSizes = <int>[0, 80, 160, 256, 512, 1024];
   static String _proxyBaseUrl = '';
 
@@ -157,7 +217,7 @@ class MaMediaItemImage {
   final bool remotelyAccessible;
   final String? proxyId;
 
-  const MaMediaItemImage({
+  const MediaItemImage({
     required this.type,
     required this.path,
     required this.provider,
@@ -165,8 +225,8 @@ class MaMediaItemImage {
     this.proxyId,
   });
 
-  factory MaMediaItemImage.fromJson(Map<String, dynamic> json) {
-    return MaMediaItemImage(
+  factory MediaItemImage.fromJson(Map<String, dynamic> json) {
+    return MediaItemImage(
       type: (json['type'] as String?)?.trim() ?? 'thumb',
       path: (json['path'] as String?)?.trim() ?? '',
       provider: (json['provider'] as String?)?.trim() ?? '',
@@ -219,15 +279,15 @@ class MaMediaItemImage {
   }
 }
 
-class MaMediaItemMetadata {
+class MediaItemMetadata {
   final String? description;
-  final List<MaMediaItemImage> images;
+  final List<MediaItemImage> images;
   final List<String> genres;
   final String? label;
   final int? popularity;
   final String? cacheChecksum;
 
-  const MaMediaItemMetadata({
+  const MediaItemMetadata({
     this.description,
     required this.images,
     required this.genres,
@@ -236,14 +296,14 @@ class MaMediaItemMetadata {
     this.cacheChecksum,
   });
 
-  factory MaMediaItemMetadata.fromJson(Map<String, dynamic> json) {
-    return MaMediaItemMetadata(
+  factory MediaItemMetadata.fromJson(Map<String, dynamic> json) {
+    return MediaItemMetadata(
       description: (json['description'] as String?)?.trim(),
       images: (json['images'] as List?)
               ?.whereType<Map<String, dynamic>>()
-              .map(MaMediaItemImage.fromJson)
+              .map(MediaItemImage.fromJson)
               .toList() ??
-          const <MaMediaItemImage>[],
+          const <MediaItemImage>[],
       genres: (json['genres'] as List?)?.whereType<String>().toList() ?? const <String>[],
       label: (json['label'] as String?)?.trim(),
       popularity: (json['popularity'] as num?)?.toInt(),
@@ -252,85 +312,31 @@ class MaMediaItemMetadata {
   }
 }
 
-class MaMediaItem {
+class Artist implements MediaItem {
   final String itemId;
   final String provider;
   final String name;
   final String? sortName;
   final String? uri;
-  final MaMediaType mediaType;
-  final List<MaProviderMapping> providerMappings;
-  final MaMediaItemMetadata? metadata;
+  final List<ProviderMapping> providerMappings;
+  final MediaItemMetadata? metadata;
   final bool favorite;
-  final String? artistName;
-  final String? imageUri;
 
-  const MaMediaItem({
+  const Artist({
     required this.itemId,
     required this.provider,
     required this.name,
-    required this.mediaType,
-    required this.providerMappings,
     this.sortName,
     this.uri,
+    this.providerMappings = const <ProviderMapping>[],
     this.metadata,
     this.favorite = false,
-    this.artistName,
-    this.imageUri,
   });
 
-  factory MaMediaItem.fromJson(Map<String, dynamic> json) {
-    String? resolvedArtistName;
-    final artists = json['artists'];
-    if (artists is List && artists.isNotEmpty) {
-      final first = artists.first;
-      if (first is Map<String, dynamic>) {
-        resolvedArtistName = (first['name'] as String?)?.trim();
-      }
-    }
+  @override
+  MediaType get mediaType => MediaType.artist;
 
-    final metadataJson = json['metadata'];
-    final metadata = metadataJson is Map<String, dynamic> ? MaMediaItemMetadata.fromJson(metadataJson) : null;
-
-    String? resolvedImageUri;
-    if (metadata?.images.isNotEmpty == true) {
-      resolvedImageUri = metadata!.images.first.getProxyPath(checksum: metadata.cacheChecksum);
-    }
-
-    return MaMediaItem(
-      itemId: (json['item_id'] as String?)?.trim() ?? '',
-      provider: (json['provider'] as String?)?.trim() ?? '',
-      name: (json['name'] as String?)?.trim() ?? 'Unbekannter Titel',
-      sortName: (json['sort_name'] as String?)?.trim(),
-      uri: (json['uri'] as String?)?.trim(),
-      mediaType: maMediaTypeFromJson(json['media_type'] as String?),
-      providerMappings: (json['provider_mappings'] as List?)
-              ?.whereType<Map<String, dynamic>>()
-              .map(MaProviderMapping.fromJson)
-              .toList() ??
-          const <MaProviderMapping>[],
-      metadata: metadata,
-      favorite: json['favorite'] == true,
-      artistName: resolvedArtistName,
-      imageUri: resolvedImageUri,
-    );
-  }
-}
-
-class MaArtist {
-  final String itemId;
-  final String provider;
-  final String name;
-  final MaMediaItemMetadata? metadata;
-
-  const MaArtist({
-    required this.itemId,
-    required this.provider,
-    required this.name,
-    this.metadata,
-  });
-
-  MaMediaItemImage? get primaryImage {
+  MediaItemImage? get primaryImage {
     if (metadata == null || metadata!.images.isEmpty) {
       return null;
     }
@@ -345,39 +351,58 @@ class MaArtist {
     return image.getProxyPath(checksum: metadata?.cacheChecksum);
   }
 
-  factory MaArtist.fromJson(Map<String, dynamic> json) {
+  factory Artist.fromJson(Map<String, dynamic> json) {
     final metadataJson = json['metadata'];
-    final metadata = metadataJson is Map<String, dynamic> ? MaMediaItemMetadata.fromJson(metadataJson) : null;
+    final metadata = metadataJson is Map<String, dynamic> ? MediaItemMetadata.fromJson(metadataJson) : null;
 
-    return MaArtist(
+    return Artist(
       itemId: (json['item_id'] as String?)?.trim() ?? '',
       provider: (json['provider'] as String?)?.trim() ?? '',
       name: (json['name'] as String?)?.trim() ?? 'Unknown Artist',
+      sortName: (json['sort_name'] as String?)?.trim(),
+      uri: (json['uri'] as String?)?.trim(),
+      providerMappings: (json['provider_mappings'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map(ProviderMapping.fromJson)
+              .toList() ??
+          const <ProviderMapping>[],
       metadata: metadata,
+      favorite: json['favorite'] == true,
     );
   }
 }
 
-class MaAlbum {
+class Album implements MediaItem {
   final String itemId;
   final String provider;
   final String name;
+  final String? sortName;
+  final String? uri;
   final int? year;
   final String? albumType;
-  final List<MaArtist> artists;
-  final MaMediaItemMetadata? metadata;
+  final List<Artist> artists;
+  final List<ProviderMapping> providerMappings;
+  final MediaItemMetadata? metadata;
+  final bool favorite;
 
-  const MaAlbum({
+  const Album({
     required this.itemId,
     required this.provider,
     required this.name,
     required this.artists,
+    this.sortName,
+    this.uri,
     this.year,
     this.albumType,
+    this.providerMappings = const <ProviderMapping>[],
     this.metadata,
+    this.favorite = false,
   });
 
-  MaMediaItemImage? get primaryImage {
+  @override
+  MediaType get mediaType => MediaType.album;
+
+  MediaItemImage? get primaryImage {
     if (metadata == null || metadata!.images.isEmpty) {
       return null;
     }
@@ -392,46 +417,65 @@ class MaAlbum {
     return image.getProxyPath(checksum: metadata?.cacheChecksum);
   }
 
-  factory MaAlbum.fromJson(Map<String, dynamic> json) {
+  factory Album.fromJson(Map<String, dynamic> json) {
     final metadataJson = json['metadata'];
-    final metadata = metadataJson is Map<String, dynamic> ? MaMediaItemMetadata.fromJson(metadataJson) : null;
+    final metadata = metadataJson is Map<String, dynamic> ? MediaItemMetadata.fromJson(metadataJson) : null;
 
-    return MaAlbum(
+    return Album(
       itemId: (json['item_id'] as String?)?.trim() ?? '',
       provider: (json['provider'] as String?)?.trim() ?? '',
       name: (json['name'] as String?)?.trim() ?? 'Unknown Album',
+      sortName: (json['sort_name'] as String?)?.trim(),
+      uri: (json['uri'] as String?)?.trim(),
       year: (json['year'] as num?)?.toInt(),
       albumType: (json['album_type'] as String?)?.trim(),
       artists: (json['artists'] as List?)
               ?.whereType<Map<String, dynamic>>()
-              .map(MaArtist.fromJson)
+              .map(Artist.fromJson)
               .toList() ??
-          const <MaArtist>[],
+          const <Artist>[],
+      providerMappings: (json['provider_mappings'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map(ProviderMapping.fromJson)
+              .toList() ??
+          const <ProviderMapping>[],
       metadata: metadata,
+      favorite: json['favorite'] == true,
     );
   }
 }
 
-class MaTrack {
+class Track implements MediaItem {
   final String itemId;
   final String provider;
   final String name;
+  final String? sortName;
+  final String? uri;
   final int duration;
-  final List<MaArtist> artists;
-  final MaAlbum? album;
-  final MaMediaItemMetadata? metadata;
+  final List<Artist> artists;
+  final Album? album;
+  final List<ProviderMapping> providerMappings;
+  final MediaItemMetadata? metadata;
+  final bool favorite;
 
-  const MaTrack({
+  const Track({
     required this.itemId,
     required this.provider,
     required this.name,
     required this.duration,
     required this.artists,
+    this.sortName,
+    this.uri,
     this.album,
+    this.providerMappings = const <ProviderMapping>[],
     this.metadata,
+    this.favorite = false,
   });
 
-  MaMediaItemImage? get primaryImage {
+  @override
+  MediaType get mediaType => MediaType.track;
+
+  MediaItemImage? get primaryImage {
     final albumImage = album?.primaryImage;
     if (albumImage != null) {
       return albumImage;
@@ -458,45 +502,64 @@ class MaTrack {
     return image.getProxyPath(checksum: metadata?.cacheChecksum);
   }
 
-  factory MaTrack.fromJson(Map<String, dynamic> json) {
+  factory Track.fromJson(Map<String, dynamic> json) {
     final albumJson = json['album'];
     final metadataJson = json['metadata'];
-    final metadata = metadataJson is Map<String, dynamic> ? MaMediaItemMetadata.fromJson(metadataJson) : null;
+    final metadata = metadataJson is Map<String, dynamic> ? MediaItemMetadata.fromJson(metadataJson) : null;
 
-    return MaTrack(
+    return Track(
       itemId: (json['item_id'] as String?)?.trim() ?? '',
       provider: (json['provider'] as String?)?.trim() ?? '',
       name: (json['name'] as String?)?.trim() ?? 'Unknown Track',
+      sortName: (json['sort_name'] as String?)?.trim(),
+      uri: (json['uri'] as String?)?.trim(),
       duration: (json['duration'] as num?)?.toInt() ?? 0,
       artists: (json['artists'] as List?)
               ?.whereType<Map<String, dynamic>>()
-              .map(MaArtist.fromJson)
+              .map(Artist.fromJson)
               .toList() ??
-          const <MaArtist>[],
-      album: albumJson is Map<String, dynamic> ? MaAlbum.fromJson(albumJson) : null,
+          const <Artist>[],
+      album: albumJson is Map<String, dynamic> ? Album.fromJson(albumJson) : null,
+      providerMappings: (json['provider_mappings'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map(ProviderMapping.fromJson)
+              .toList() ??
+          const <ProviderMapping>[],
       metadata: metadata,
+      favorite: json['favorite'] == true,
     );
   }
 }
 
-class MaPlaylist {
+class Playlist implements MediaItem {
   final String itemId;
   final String provider;
   final String name;
+  final String? sortName;
+  final String? uri;
   final String? owner;
   final bool isEditable;
-  final MaMediaItemMetadata? metadata;
+  final List<ProviderMapping> providerMappings;
+  final MediaItemMetadata? metadata;
+  final bool favorite;
 
-  const MaPlaylist({
+  const Playlist({
     required this.itemId,
     required this.provider,
     required this.name,
     required this.isEditable,
+    this.sortName,
+    this.uri,
     this.owner,
+    this.providerMappings = const <ProviderMapping>[],
     this.metadata,
+    this.favorite = false,
   });
 
-  MaMediaItemImage? get primaryImage {
+  @override
+  MediaType get mediaType => MediaType.playlist;
+
+  MediaItemImage? get primaryImage {
     if (metadata == null || metadata!.images.isEmpty) {
       return null;
     }
@@ -511,17 +574,25 @@ class MaPlaylist {
     return image.getProxyPath(checksum: metadata?.cacheChecksum);
   }
 
-  factory MaPlaylist.fromJson(Map<String, dynamic> json) {
+  factory Playlist.fromJson(Map<String, dynamic> json) {
     final metadataJson = json['metadata'];
-    final metadata = metadataJson is Map<String, dynamic> ? MaMediaItemMetadata.fromJson(metadataJson) : null;
+    final metadata = metadataJson is Map<String, dynamic> ? MediaItemMetadata.fromJson(metadataJson) : null;
 
-    return MaPlaylist(
+    return Playlist(
       itemId: (json['item_id'] as String?)?.trim() ?? '',
       provider: (json['provider'] as String?)?.trim() ?? '',
       name: (json['name'] as String?)?.trim() ?? 'Unknown Playlist',
+      sortName: (json['sort_name'] as String?)?.trim(),
+      uri: (json['uri'] as String?)?.trim(),
       owner: (json['owner'] as String?)?.trim(),
       isEditable: json['is_editable'] == true,
+      providerMappings: (json['provider_mappings'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map(ProviderMapping.fromJson)
+              .toList() ??
+          const <ProviderMapping>[],
       metadata: metadata,
+      favorite: json['favorite'] == true,
     );
   }
 }
@@ -530,16 +601,16 @@ class MaPlaylist {
 
 // #region Queue/Player Models
 
-class MaQueueItem {
+class QueueItem {
   final String queueId;
   final String queueItemId;
   final String name;
   final int? duration;
   final int? sortIndex;
   final bool? available;
-  final MaTrack? mediaItem;
+  final Track? mediaItem;
 
-  const MaQueueItem({
+  const QueueItem({
     required this.queueId,
     required this.queueItemId,
     required this.name,
@@ -549,35 +620,35 @@ class MaQueueItem {
     this.mediaItem,
   });
 
-  factory MaQueueItem.fromJson(Map<String, dynamic> json) {
+  factory QueueItem.fromJson(Map<String, dynamic> json) {
     final mediaItemJson = json['media_item'];
-    return MaQueueItem(
+    return QueueItem(
       queueId: (json['queue_id'] as String?)?.trim() ?? '',
       queueItemId: (json['queue_item_id'] as String?)?.trim() ?? '',
       name: (json['name'] as String?)?.trim() ?? '',
       duration: (json['duration'] as num?)?.toInt(),
       sortIndex: (json['sort_index'] as num?)?.toInt(),
       available: json['available'] as bool?,
-      mediaItem: mediaItemJson is Map<String, dynamic> ? MaTrack.fromJson(mediaItemJson) : null,
+      mediaItem: mediaItemJson is Map<String, dynamic> ? Track.fromJson(mediaItemJson) : null,
     );
   }
 }
 
-class MaPlayerQueue {
+class PlayerQueue {
   final String queueId;
   final bool active;
   final String displayName;
   final bool available;
   final int itemCount;
   final bool? shuffleEnabled;
-  final MaRepeatMode? repeatMode;
+  final RepeatMode? repeatMode;
   final bool? dontStopTheMusicEnabled;
   final int? currentIndex;
   final double? elapsedTime;
-  final MaPlaybackState? state;
-  final MaQueueItem? currentItem;
+  final PlayerPlaybackState? state;
+  final QueueItem? currentItem;
 
-  const MaPlayerQueue({
+  const PlayerQueue({
     required this.queueId,
     required this.active,
     required this.displayName,
@@ -592,43 +663,43 @@ class MaPlayerQueue {
     this.currentItem,
   });
 
-  factory MaPlayerQueue.fromJson(Map<String, dynamic> json) {
+  factory PlayerQueue.fromJson(Map<String, dynamic> json) {
     final currentItemJson = json['current_item'];
-    return MaPlayerQueue(
+    return PlayerQueue(
       queueId: (json['queue_id'] as String?)?.trim() ?? '',
       active: json['active'] == true,
       displayName: (json['display_name'] as String?)?.trim() ?? '',
       available: json['available'] == true,
       itemCount: (json['items'] as num?)?.toInt() ?? 0,
       shuffleEnabled: json['shuffle_enabled'] as bool?,
-      repeatMode: maRepeatModeFromJson((json['repeat_mode'] as String?)),
+      repeatMode: repeatModeFromJson((json['repeat_mode'] as String?)),
       dontStopTheMusicEnabled: json['dont_stop_the_music_enabled'] as bool?,
       currentIndex: (json['current_index'] as num?)?.toInt(),
       elapsedTime: (json['elapsed_time'] as num?)?.toDouble(),
       state: _playbackStateFromJson(json['state'] as String?),
-      currentItem: currentItemJson is Map<String, dynamic> ? MaQueueItem.fromJson(currentItemJson) : null,
+      currentItem: currentItemJson is Map<String, dynamic> ? QueueItem.fromJson(currentItemJson) : null,
     );
   }
 }
 
-MaPlaybackState? _playbackStateFromJson(String? value) {
+PlayerPlaybackState? _playbackStateFromJson(String? value) {
   switch ((value ?? '').trim().toLowerCase()) {
     case 'idle':
-      return MaPlaybackState.idle;
+      return PlayerPlaybackState.idle;
     case 'playing':
-      return MaPlaybackState.playing;
+      return PlayerPlaybackState.playing;
     case 'paused':
-      return MaPlaybackState.paused;
+      return PlayerPlaybackState.paused;
     case 'buffering':
-      return MaPlaybackState.buffering;
+      return PlayerPlaybackState.buffering;
     case 'unknown':
-      return MaPlaybackState.unknown;
+      return PlayerPlaybackState.unknown;
     default:
       return null;
   }
 }
 
-class MaPlayer {
+class Player {
   final String playerId;
   final String name;
   final bool available;
@@ -642,7 +713,7 @@ class MaPlayer {
   final List<String> groupChilds;
   final String? activeSource;
 
-  const MaPlayer({
+  const Player({
     required this.playerId,
     required this.name,
     required this.available,
@@ -657,8 +728,8 @@ class MaPlayer {
     this.activeSource,
   });
 
-  factory MaPlayer.fromJson(Map<String, dynamic> json) {
-    return MaPlayer(
+  factory Player.fromJson(Map<String, dynamic> json) {
+    return Player(
       playerId: (json['player_id'] as String?)?.trim() ?? '',
       name: (json['name'] as String?)?.trim() ?? 'Unbekannter Player',
       available: json['available'] == true,
@@ -679,7 +750,7 @@ class MaPlayer {
 
 // #region Auth/General Models
 
-class MaAuthUser {
+class AuthUser {
   final String? userId;
   final String? username;
   final String? displayName;
@@ -687,7 +758,7 @@ class MaAuthUser {
   final String? role;
   final Map<String, dynamic>? preferences;
 
-  const MaAuthUser({
+  const AuthUser({
     this.userId,
     this.username,
     this.displayName,
@@ -696,8 +767,8 @@ class MaAuthUser {
     this.preferences,
   });
 
-  factory MaAuthUser.fromJson(Map<String, dynamic> json) {
-    return MaAuthUser(
+  factory AuthUser.fromJson(Map<String, dynamic> json) {
+    return AuthUser(
       userId: (json['user_id'] as String?)?.trim(),
       username: (json['username'] as String?)?.trim(),
       displayName: (json['display_name'] as String?)?.trim(),
@@ -710,7 +781,7 @@ class MaAuthUser {
   }
 }
 
-class MaServerInfo {
+class ServerInfo {
   final String serverId;
   final String name;
   final String? version;
@@ -719,7 +790,7 @@ class MaServerInfo {
   final int? minSupportedSchemaVersion;
   final bool? homeAssistantAddon;
 
-  const MaServerInfo({
+  const ServerInfo({
     required this.serverId,
     required this.name,
     this.version,
@@ -729,8 +800,8 @@ class MaServerInfo {
     this.homeAssistantAddon,
   });
 
-  factory MaServerInfo.fromJson(Map<String, dynamic> json) {
-    return MaServerInfo(
+  factory ServerInfo.fromJson(Map<String, dynamic> json) {
+    return ServerInfo(
       serverId: (json['server_id'] as String?)?.trim() ?? '',
       name: (json['name'] as String?)?.trim() ?? 'Music Assistant',
       version: (json['version'] as String?)?.trim(),
@@ -742,7 +813,7 @@ class MaServerInfo {
   }
 }
 
-class MaProviderManifest {
+class ProviderManifest {
   final String domain;
   final String? name;
   final String? description;
@@ -754,7 +825,7 @@ class MaProviderManifest {
   final bool? builtin;
   final Map<String, dynamic> raw;
 
-  const MaProviderManifest({
+  const ProviderManifest({
     required this.domain,
     this.name,
     this.description,
@@ -767,8 +838,8 @@ class MaProviderManifest {
     required this.raw,
   });
 
-  factory MaProviderManifest.fromJson(Map<String, dynamic> json) {
-    return MaProviderManifest(
+  factory ProviderManifest.fromJson(Map<String, dynamic> json) {
+    return ProviderManifest(
       domain: (json['domain'] as String?)?.trim() ?? '',
       name: (json['name'] as String?)?.trim(),
       description: (json['description'] as String?)?.trim(),
@@ -785,10 +856,10 @@ class MaProviderManifest {
   String? get preferredIconSvg => iconSvg?.trim();
 }
 
-class MaProviderManifestRegistry {
-  static final Map<String, MaProviderManifest> _byDomain = <String, MaProviderManifest>{};
+class ProviderManifestRegistry {
+  static final Map<String, ProviderManifest> _byDomain = <String, ProviderManifest>{};
 
-  static void registerAll(Iterable<MaProviderManifest> manifests) {
+  static void registerAll(Iterable<ProviderManifest> manifests) {
     for (final manifest in manifests) {
       final key = manifest.domain.trim().toLowerCase();
       if (key.isEmpty) {
@@ -798,11 +869,11 @@ class MaProviderManifestRegistry {
     }
   }
 
-  static void registerOne(MaProviderManifest manifest) {
-    registerAll(<MaProviderManifest>[manifest]);
+  static void registerOne(ProviderManifest manifest) {
+    registerAll(<ProviderManifest>[manifest]);
   }
 
-  static MaProviderManifest? getByProvider(String providerOrDomain) {
+  static ProviderManifest? getByProvider(String providerOrDomain) {
     final domain = _providerDomain(providerOrDomain);
     if (domain.isEmpty) {
       return null;
@@ -821,7 +892,7 @@ class MaProviderManifestRegistry {
     }
 
     if (raw.startsWith('/')) {
-      final base = MaMediaItemImage.currentBaseUrl.trim();
+      final base = MediaItemImage.currentBaseUrl.trim();
       if (base.isNotEmpty) {
         return '$base$raw';
       }
@@ -841,38 +912,38 @@ class MaProviderManifestRegistry {
   }
 }
 
-class MaRecommendationFolder {
+class RecommendationFolder {
   final String title;
   final String? subtitle;
-  final List<MaMediaItem> items;
+  final List<MediaItem> items;
 
-  const MaRecommendationFolder({
+  const RecommendationFolder({
     required this.title,
     this.subtitle,
     required this.items,
   });
 
-  factory MaRecommendationFolder.fromJson(Map<String, dynamic> json) {
-    return MaRecommendationFolder(
+  factory RecommendationFolder.fromJson(Map<String, dynamic> json) {
+    return RecommendationFolder(
       title: (json['title'] as String?)?.trim() ?? (json['name'] as String?)?.trim() ?? 'Empfehlungen',
       subtitle: (json['subtitle'] as String?)?.trim() ?? (json['description'] as String?)?.trim(),
       items: (json['items'] as List?)
               ?.whereType<Map<String, dynamic>>()
-              .map(MaMediaItem.fromJson)
+              .map(mediaItemFromJson)
               .toList() ??
-          const <MaMediaItem>[],
+          const <MediaItem>[],
     );
   }
 }
 
-class MaSearchResults {
-  final List<MaArtist> artists;
-  final List<MaAlbum> albums;
-  final List<MaTrack> tracks;
-  final List<MaPlaylist> playlists;
-  final List<MaMediaItem> radio;
+class SearchResults {
+  final List<Artist> artists;
+  final List<Album> albums;
+  final List<Track> tracks;
+  final List<Playlist> playlists;
+  final List<MediaItem> radio;
 
-  const MaSearchResults({
+  const SearchResults({
     required this.artists,
     required this.albums,
     required this.tracks,
@@ -880,43 +951,43 @@ class MaSearchResults {
     required this.radio,
   });
 
-  factory MaSearchResults.fromJson(Map<String, dynamic> json) {
-    return MaSearchResults(
+  factory SearchResults.fromJson(Map<String, dynamic> json) {
+    return SearchResults(
       artists: (json['artists'] as List?)
               ?.whereType<Map<String, dynamic>>()
-              .map(MaArtist.fromJson)
+              .map(Artist.fromJson)
               .toList() ??
-          const <MaArtist>[],
+          const <Artist>[],
       albums: (json['albums'] as List?)
               ?.whereType<Map<String, dynamic>>()
-              .map(MaAlbum.fromJson)
+              .map(Album.fromJson)
               .toList() ??
-          const <MaAlbum>[],
+          const <Album>[],
       tracks: (json['tracks'] as List?)
               ?.whereType<Map<String, dynamic>>()
-              .map(MaTrack.fromJson)
+              .map(Track.fromJson)
               .toList() ??
-          const <MaTrack>[],
+          const <Track>[],
       playlists: (json['playlists'] as List?)
               ?.whereType<Map<String, dynamic>>()
-              .map(MaPlaylist.fromJson)
+              .map(Playlist.fromJson)
               .toList() ??
-          const <MaPlaylist>[],
+          const <Playlist>[],
       radio: (json['radio'] as List?)
               ?.whereType<Map<String, dynamic>>()
-              .map(MaMediaItem.fromJson)
+              .map(mediaItemFromJson)
               .toList() ??
-          const <MaMediaItem>[],
+          const <MediaItem>[],
     );
   }
 }
 
-class MaBootstrapData {
-  final MaServerInfo serverInfo;
-  final List<MaPlayer> players;
-  final List<MaMediaItem> recentlyPlayed;
+class BootstrapData {
+  final ServerInfo serverInfo;
+  final List<Player> players;
+  final List<MediaItem> recentlyPlayed;
 
-  const MaBootstrapData({
+  const BootstrapData({
     required this.serverInfo,
     required this.players,
     required this.recentlyPlayed,
