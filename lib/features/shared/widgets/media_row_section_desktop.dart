@@ -260,13 +260,13 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         IconButton(
           tooltip: 'Vorherige Seite',
           onPressed: canGoBack ? () => _goToPreviousPage(visibleCount) : null,
-          icon: const Icon(Icons.chevron_left_rounded),
+          icon: const Icon(Icons.chevron_left_outlined),
           visualDensity: VisualDensity.compact,
         ),
         IconButton(
           tooltip: 'Nächste Seite',
           onPressed: canGoNext ? () => _goToNextPage(visibleCount, pageCount) : null,
-          icon: const Icon(Icons.chevron_right_rounded),
+          icon: const Icon(Icons.chevron_right_outlined),
           visualDensity: VisualDensity.compact,
         ),
       ],
@@ -494,7 +494,7 @@ class _DesktopMediaRowCard extends StatelessWidget {
                       border: Border.all(color: colors.border),
                     ),
                     child: Icon(
-                      Icons.play_arrow_rounded,
+                      Icons.play_arrow_outlined,
                       size: 22,
                       color: Theme.of(context).colorScheme.onSurface,
                     ),
@@ -672,7 +672,7 @@ String _mediaTypeLabel(String? rawType) {
 
 MediaRowCardData albumRowCardData(Album album) {
   return MediaRowCardData(
-    icon: Icons.album_rounded,
+    icon: Icons.album_outlined,
     title: _prefer(album.name, 'Unknown Album'),
     secondaryText: _albumSubtitle(album),
     tertiaryText: _albumTertiary(album),
@@ -682,7 +682,7 @@ MediaRowCardData albumRowCardData(Album album) {
 
 MediaRowCardData playlistRowCardData(Playlist playlist) {
   return MediaRowCardData(
-    icon: Icons.queue_music_rounded,
+    icon: Icons.queue_music_outlined,
     title: _prefer(playlist.name, 'Unknown Playlist'),
     secondaryText: _playlistSubtitle(playlist),
     tertiaryText: _playlistTertiary(playlist),
@@ -692,7 +692,7 @@ MediaRowCardData playlistRowCardData(Playlist playlist) {
 
 MediaRowCardData artistRowCardData(Artist artist) {
   return MediaRowCardData(
-    icon: Icons.person_rounded,
+    icon: Icons.person_outlined,
     title: _prefer(artist.name, 'Unknown Artist'),
     secondaryText: 'Artist',
     tertiaryText: _artistTertiary(artist),
@@ -703,7 +703,7 @@ MediaRowCardData artistRowCardData(Artist artist) {
 
 MediaRowCardData trackRowCardData(Track track) {
   return MediaRowCardData(
-    icon: Icons.music_note_rounded,
+    icon: Icons.music_note_outlined,
     title: _prefer(track.name, 'Unknown Track'),
     secondaryText: _trackSubtitle(track),
     tertiaryText: _trackTertiary(track),

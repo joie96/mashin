@@ -569,13 +569,13 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
         IconButton(
           tooltip: 'Vorherige Seite',
           onPressed: canGoBack ? _goToPreviousPage : null,
-          icon: const Icon(Icons.chevron_left_rounded),
+          icon: const Icon(Icons.chevron_left_outlined),
           visualDensity: VisualDensity.compact,
         ),
         IconButton(
           tooltip: 'Nächste Seite',
           onPressed: canGoNext ? _goToNextPage : null,
-          icon: const Icon(Icons.chevron_right_rounded),
+          icon: const Icon(Icons.chevron_right_outlined),
           visualDensity: VisualDensity.compact,
         ),
       ],
@@ -641,7 +641,7 @@ class _DesktopTableHeader<T> extends StatelessWidget {
             width: 40,
             child: Center(
               child: Icon(
-                Icons.favorite_border_rounded,
+                Icons.favorite_border_outlined,
                 size: 18,
                 color: colors.textSecondary,
               ),
@@ -651,7 +651,7 @@ class _DesktopTableHeader<T> extends StatelessWidget {
             width: 40,
             child: Center(
               child: _DesktopIconActionButton(
-                icon: Icons.more_horiz_rounded,
+                icon: Icons.more_horiz_outlined,
                 onTap: onMoreTap,
                 baseColor: colors.textSecondary,
                 hoverColor: colors.textPrimary,
@@ -771,7 +771,7 @@ class _DesktopTableRowState<T> extends State<_DesktopTableRow<T>> {
                 width: 40,
                 child: Center(
                   child: _DesktopIconActionButton(
-                    icon: widget.isFavorite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                    icon: widget.isFavorite ? Icons.favorite_outlined : Icons.favorite_border_outlined,
                     onTap: widget.onFavoriteTap,
                     baseColor: colors.textTertiary,
                     hoverColor: colors.textSecondary,
@@ -782,7 +782,7 @@ class _DesktopTableRowState<T> extends State<_DesktopTableRow<T>> {
                 width: 40,
                 child: Center(
                   child: _DesktopIconActionButton(
-                    icon: Icons.more_horiz_rounded,
+                    icon: Icons.more_horiz_outlined,
                     onTap: widget.onMoreTap,
                     baseColor: colors.textTertiary,
                     hoverColor: colors.textSecondary,
@@ -1144,7 +1144,7 @@ class MediaProviderIcon extends StatelessWidget {
     final colors = context.mashinColors;
     final String? trimmed = iconSvg?.trim();
     if (trimmed == null || trimmed.isEmpty) {
-      return Icon(Icons.radio_button_checked_rounded, size: size, color: colors.textSecondary);
+      return Icon(Icons.radio_button_checked_outlined, size: size, color: colors.textSecondary);
     }
 
     // Provider manifests may deliver raw XML, XML with declaration, or URL-encoded XML.
@@ -1163,14 +1163,14 @@ class MediaProviderIcon extends StatelessWidget {
     final Uri? uri = Uri.tryParse(trimmed);
     final bool isNetworkSvg = uri != null && (uri.scheme == 'http' || uri.scheme == 'https');
     if (!isNetworkSvg) {
-      return Icon(Icons.radio_button_checked_rounded, size: size, color: colors.textSecondary);
+      return Icon(Icons.radio_button_checked_outlined, size: size, color: colors.textSecondary);
     }
 
     return SvgPicture.network(
       trimmed,
       width: size,
       height: size,
-      placeholderBuilder: (_) => Icon(Icons.radio_button_checked_rounded, size: size, color: colors.textSecondary),
+      placeholderBuilder: (_) => Icon(Icons.radio_button_checked_outlined, size: size, color: colors.textSecondary),
     );
   }
 }
@@ -1196,7 +1196,7 @@ MediaTableRowData mapTrackRowData(Track track, int index) {
     subtitle: _trackSubtitle(track),
     trailing: formatDuration(track.duration),
     coverUrl: track.imageUri,
-    fallbackIcon: Icons.music_note_rounded,
+    fallbackIcon: Icons.music_note_outlined,
     providerLabel: providerLabel,
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(track.provider),
   );
@@ -1209,7 +1209,7 @@ MediaTableRowData mapAlbumRowData(Album album, int index) {
     subtitle: _albumSubtitle(album),
     trailing: album.year != null && album.year! > 0 ? '${album.year}' : '-',
     coverUrl: album.imageUri,
-    fallbackIcon: Icons.album_rounded,
+    fallbackIcon: Icons.album_outlined,
     providerLabel: providerLabel,
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(album.provider),
   );
@@ -1222,7 +1222,7 @@ MediaTableRowData mapPlaylistRowData(Playlist playlist, int index) {
     subtitle: _playlistSubtitle(playlist),
     trailing: playlist.isEditable ? 'Editierbar' : 'Readonly',
     coverUrl: playlist.imageUri,
-    fallbackIcon: Icons.queue_music_rounded,
+    fallbackIcon: Icons.queue_music_outlined,
     providerLabel: providerLabel,
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(playlist.provider),
   );
@@ -1235,7 +1235,7 @@ MediaTableRowData mapArtistRowData(Artist artist, int index) {
     subtitle: 'Artist',
     trailing: _artistTertiary(artist),
     coverUrl: artist.imageUri,
-    fallbackIcon: Icons.person_rounded,
+    fallbackIcon: Icons.person_outlined,
     providerLabel: providerLabel,
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(artist.provider),
   );
@@ -1257,7 +1257,7 @@ List<DesktopTableColumn<Track>> buildTrackDesktopColumns() {
       childBuilder: (BuildContext context, Track track, int index) {
         return MediaTableCover(
           coverUrl: track.imageUri,
-          fallbackIcon: Icons.music_note_rounded,
+          fallbackIcon: Icons.music_note_outlined,
           size: 48,
           radius: 8,
         );
@@ -1325,7 +1325,7 @@ List<DesktopTableColumn<Album>> buildAlbumDesktopColumns() {
       childBuilder: (BuildContext context, Album album, int index) {
         return MediaTableCover(
           coverUrl: album.imageUri,
-          fallbackIcon: Icons.album_rounded,
+          fallbackIcon: Icons.album_outlined,
           size: 48,
           radius: 8,
         );
@@ -1393,7 +1393,7 @@ List<DesktopTableColumn<Playlist>> buildPlaylistDesktopColumns() {
       childBuilder: (BuildContext context, Playlist playlist, int index) {
         return MediaTableCover(
           coverUrl: playlist.imageUri,
-          fallbackIcon: Icons.queue_music_rounded,
+          fallbackIcon: Icons.queue_music_outlined,
           size: 48,
           radius: 8,
         );
@@ -1454,7 +1454,7 @@ List<DesktopTableColumn<Artist>> buildArtistDesktopColumns() {
       childBuilder: (BuildContext context, Artist artist, int index) {
         return MediaTableCover(
           coverUrl: artist.imageUri,
-          fallbackIcon: Icons.person_rounded,
+          fallbackIcon: Icons.person_outlined,
           size: 48,
           radius: 8,
         );

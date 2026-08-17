@@ -97,7 +97,7 @@ class _SearchScreenState extends State<SearchScreen> {
           textInputAction: TextInputAction.search,
           decoration: InputDecoration(
             hintText: 'Tracks, Alben, Playlists, Artists',
-            prefixIcon: const Icon(Icons.search_rounded),
+            prefixIcon: const Icon(Icons.search_outlined),
             suffixIcon: _queryController.text.isEmpty
                 ? null
                 : Row(
@@ -106,12 +106,12 @@ class _SearchScreenState extends State<SearchScreen> {
                       IconButton(
                         tooltip: 'Suchen',
                         onPressed: _submitSearch,
-                        icon: const Icon(Icons.search_rounded),
+                        icon: const Icon(Icons.search_outlined),
                       ),
                       IconButton(
                         tooltip: 'Leeren',
                         onPressed: _clearSearch,
-                        icon: const Icon(Icons.close_rounded),
+                        icon: const Icon(Icons.close_outlined),
                       ),
                     ],
                   ),

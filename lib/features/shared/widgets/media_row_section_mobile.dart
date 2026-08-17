@@ -158,7 +158,7 @@ class _MobileMediaRowCard extends StatelessWidget {
                       border: Border.all(color: colors.border),
                     ),
                     child: Icon(
-                      Icons.play_arrow_rounded,
+                      Icons.play_arrow_outlined,
                       size: 20,
                       color: Theme.of(context).colorScheme.onSurface,
                     ),

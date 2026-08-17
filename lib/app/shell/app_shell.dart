@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide RepeatMode;
 
 import '../config/app_config.dart';
 import '../../features/auth/login_screen.dart';
@@ -228,32 +228,32 @@ class _AppShellState extends State<AppShell> {
                     const SizedBox(height: 22),
                     _DesktopNavItem(
                       label: 'Home',
-                      icon: Icons.home_rounded,
+                      icon: Icons.home_outlined,
                       selected: _currentSection == AppSection.home,
                       onTap: () => _select(AppSection.home),
                     ),
                     _DesktopNavItem(
                       label: 'Entdecken',
-                      icon: Icons.explore_rounded,
+                      icon: Icons.explore_outlined,
                       selected: _currentSection == AppSection.explore,
                       onTap: () => _select(AppSection.explore),
                     ),
                     _DesktopNavItem(
                       label: 'Favoriten',
-                      icon: Icons.favorite_rounded,
+                      icon: Icons.favorite_outlined,
                       selected: _currentSection == AppSection.favorites,
                       onTap: () => _select(AppSection.favorites),
                     ),
                     const Divider(height: 24),
                     _DesktopNavItem(
                       label: 'Playlists',
-                      icon: Icons.queue_music_rounded,
+                      icon: Icons.queue_music_outlined,
                       selected: _currentSection == AppSection.playlists,
                       onTap: () => _select(AppSection.playlists),
                     ),
                     _DesktopNavItem(
                       label: 'Suche',
-                      icon: Icons.search_rounded,
+                      icon: Icons.search_outlined,
                       selected: _currentSection == AppSection.search,
                       onTap: () => _select(AppSection.search),
                     ),
@@ -284,6 +284,7 @@ class _AppShellState extends State<AppShell> {
         _DesktopPlayerBar(
           playStateType: _effectivePlaybackStateType,
           playbackState: _playbackState,
+          dontStopTheMusicEnabled: _playbackCoordinator.dontStopTheMusicEnabled ?? false,
           trackTitle: _currentTrackTitle,
           trackSubtitle: _currentTrackSubtitle,
           trackCoverUrl: _currentTrackCoverUrl,
@@ -291,6 +292,9 @@ class _AppShellState extends State<AppShell> {
           onTogglePlayPause: _togglePlayPause,
           onPrevious: _playPrevious,
           onNext: _playNext,
+          onToggleShuffle: _toggleShuffle,
+          onToggleRepeatMode: _toggleRepeatMode,
+          onToggleDontStopTheMusic: _toggleDontStopTheMusic,
           onToggleMute: _toggleMute,
           onVolumeChanged: _setVolume,
         ),
@@ -573,6 +577,31 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
+  Future<void> _toggleShuffle() async {
+    try {
+      await _playbackCoordinator.toggleShuffle(_playbackState.shuffleEnabled);
+    } catch (_) {
+      // Ignore playback command failures in shell-level controls.
+    }
+  }
+
+  Future<void> _toggleRepeatMode() async {
+    try {
+      await _playbackCoordinator.toggleRepeatMode(_playbackState.repeatMode);
+    } catch (_) {
+      // Ignore playback command failures in shell-level controls.
+    }
+  }
+
+  Future<void> _toggleDontStopTheMusic() async {
+    try {
+      final enabled = _playbackCoordinator.dontStopTheMusicEnabled ?? false;
+      await _playbackCoordinator.setDontStopTheMusic(!enabled);
+    } catch (_) {
+      // Ignore playback command failures in shell-level controls.
+    }
+  }
+
   Future<void> _toggleMute() async {
     try {
       await _playbackCoordinator.setMuted(!_playbackState.muted);
@@ -636,7 +665,7 @@ class _DesktopTopBar extends StatelessWidget {
       child: Row(
         children: <Widget>[
           const SizedBox(width: 22),
-          Icon(Icons.chevron_left_rounded, color: colors.textSecondary),
+          Icon(Icons.chevron_left_outlined, color: colors.textSecondary),
           const SizedBox(width: 18),
           Expanded(
             child: TextField(
@@ -665,13 +694,13 @@ class _DesktopTopBar extends StatelessWidget {
           IconButton(
             tooltip: 'Theme wechseln',
             onPressed: onToggleTheme,
-            icon: Icon(isDarkTheme ? Icons.light_mode_rounded : Icons.dark_mode_rounded),
+            icon: Icon(isDarkTheme ? Icons.light_mode_outlined : Icons.dark_mode_outlined),
           ),
           const SizedBox(width: 12),
           CircleAvatar(
             radius: 18,
             backgroundColor: colors.bgTertiary,
-            child: Icon(Icons.person_rounded, color: colors.textSecondary),
+            child: Icon(Icons.person_outlined, color: colors.textSecondary),
           ),
           const SizedBox(width: 24),
         ],
@@ -730,6 +759,7 @@ class _DesktopNavItem extends StatelessWidget {
 class _DesktopPlayerBar extends StatelessWidget {
   final PlaybackStateType playStateType;
   final PlaybackState playbackState;
+  final bool dontStopTheMusicEnabled;
   final String trackTitle;
   final String trackSubtitle;
   final String? trackCoverUrl;
@@ -737,12 +767,16 @@ class _DesktopPlayerBar extends StatelessWidget {
   final Future<void> Function() onTogglePlayPause;
   final Future<void> Function() onPrevious;
   final Future<void> Function() onNext;
+  final Future<void> Function() onToggleShuffle;
+  final Future<void> Function() onToggleRepeatMode;
+  final Future<void> Function() onToggleDontStopTheMusic;
   final Future<void> Function() onToggleMute;
   final ValueChanged<double> onVolumeChanged;
 
   const _DesktopPlayerBar({
     required this.playStateType,
     required this.playbackState,
+    required this.dontStopTheMusicEnabled,
     required this.trackTitle,
     required this.trackSubtitle,
     required this.trackCoverUrl,
@@ -750,6 +784,9 @@ class _DesktopPlayerBar extends StatelessWidget {
     required this.onTogglePlayPause,
     required this.onPrevious,
     required this.onNext,
+    required this.onToggleShuffle,
+    required this.onToggleRepeatMode,
+    required this.onToggleDontStopTheMusic,
     required this.onToggleMute,
     required this.onVolumeChanged,
   });
@@ -762,8 +799,10 @@ class _DesktopPlayerBar extends StatelessWidget {
     final bool isBusy = playStateType == PlaybackStateType.buffering ||
       playStateType == PlaybackStateType.seeking;
     final bool isShuffleActive = playbackState.shuffleEnabled == true;
-    final String repeatMode = playbackState.repeatMode?.trim().toLowerCase() ?? '';
-    final bool isRepeatActive = repeatMode.isNotEmpty && repeatMode != 'off' && repeatMode != 'none';
+    final RepeatMode repeatMode = playbackState.repeatMode ?? RepeatMode.off;
+    final bool isRepeatOne = repeatMode == RepeatMode.one;
+    final IconData repeatIcon = isRepeatOne ? Icons.repeat_one_outlined : Icons.repeat_outlined;
+    final Color repeatColor = repeatMode == RepeatMode.off ? colors.textSecondary : colors.accent;
     final double clampedMaxSeconds = maxSeconds.clamp(0, 36000).toDouble();
 
     return Container(
@@ -794,10 +833,10 @@ class _DesktopPlayerBar extends StatelessWidget {
                               trackCoverUrl!,
                               fit: BoxFit.cover,
                               errorBuilder: (_, _, _) {
-                                return Icon(Icons.music_note_rounded, color: colors.textSecondary);
+                                return Icon(Icons.music_note_outlined, color: colors.textSecondary);
                               },
                             )
-                          : Icon(Icons.music_note_rounded, color: colors.textSecondary),
+                          : Icon(Icons.music_note_outlined, color: colors.textSecondary),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -822,12 +861,12 @@ class _DesktopPlayerBar extends StatelessWidget {
                     ),
                   ),
                   _PlayerBarIconButton(
-                    icon: Icons.favorite_border_rounded,
+                    icon: Icons.favorite_border_outlined,
                     onTap: () {},
                     color: colors.textSecondary,
                   ),
                   _PlayerBarIconButton(
-                    icon: Icons.add_rounded,
+                    icon: Icons.add_outlined,
                     onTap: () {},
                     color: colors.textSecondary,
                   ),
@@ -845,15 +884,15 @@ class _DesktopPlayerBar extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: <Widget>[
                       _TransportControlButton(
-                        icon: Icons.shuffle_rounded,
+                        icon: Icons.shuffle_outlined,
                         size: 32,
                         iconSize: 18,
-                        onTap: () {},
+                        onTap: hasPlaybackSession ? onToggleShuffle : null,
                         color: isShuffleActive ? colors.accent : colors.textSecondary,
                       ),
                       const SizedBox(width: 12),
                       _TransportControlButton(
-                        icon: Icons.skip_previous_rounded,
+                        icon: Icons.skip_previous_sharp,
                         size: 32,
                         iconSize: 26,
                         onTap: hasPlaybackSession ? onPrevious : null,
@@ -886,11 +925,11 @@ class _DesktopPlayerBar extends StatelessWidget {
                                   valueColor: AlwaysStoppedAnimation<Color>(colors.bgPrimary),
                                 ),
                               )
-                            : Icon(isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded, size: 30),
+                            : Icon(isPlaying ? Icons.pause_sharp : Icons.play_arrow_sharp, size: 30),
                       ),
                       const SizedBox(width: 12),
                       _TransportControlButton(
-                        icon: Icons.skip_next_rounded,
+                        icon: Icons.skip_next_sharp,
                         size: 32,
                         iconSize: 26,
                         onTap: hasPlaybackSession ? onNext : null,
@@ -898,11 +937,11 @@ class _DesktopPlayerBar extends StatelessWidget {
                       ),
                       const SizedBox(width: 12),
                       _TransportControlButton(
-                        icon: isRepeatActive ? Icons.repeat_on_rounded : Icons.repeat_rounded,
+                        icon: repeatIcon,
                         size: 32,
                         iconSize: 18,
-                        onTap: () {},
-                        color: isRepeatActive ? colors.accent : colors.textSecondary,
+                        onTap: hasPlaybackSession ? onToggleRepeatMode : null,
+                        color: repeatColor,
                       ),
                     ],
                   ),
@@ -943,11 +982,15 @@ class _DesktopPlayerBar extends StatelessWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: <Widget>[
-                  _PlayerBarIconButton(icon: Icons.queue_music_rounded, onTap: () {}, color: colors.textSecondary),
-                  _PlayerBarIconButton(icon: Icons.auto_awesome_rounded, onTap: () {}, color: colors.textSecondary),
-                  _PlayerBarIconButton(icon: Icons.devices_rounded, onTap: () {}, color: colors.textSecondary),
+                  _PlayerBarIconButton(icon: Icons.queue_music_outlined, onTap: () {}, color: colors.textSecondary),
                   _PlayerBarIconButton(
-                    icon: playbackState.muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                    icon: Icons.cell_tower_outlined,
+                    onTap: hasPlaybackSession ? onToggleDontStopTheMusic : null,
+                    color: dontStopTheMusicEnabled ? colors.accent : colors.textSecondary,
+                  ),
+                  _PlayerBarIconButton(icon: Icons.devices_outlined, onTap: () {}, color: colors.textSecondary),
+                  _PlayerBarIconButton(
+                    icon: playbackState.muted ? Icons.volume_off_outlined : Icons.volume_up_outlined,
                     onTap: onToggleMute,
                     color: playbackState.muted ? colors.accent : colors.textSecondary,
                   ),
@@ -974,7 +1017,7 @@ class _DesktopPlayerBar extends StatelessWidget {
                       ),
                     ),
                   ),
-                  _PlayerBarIconButton(icon: Icons.tune_rounded, onTap: () {}, color: colors.textSecondary),
+                  _PlayerBarIconButton(icon: Icons.tune_outlined, onTap: () {}, color: colors.textSecondary),
                 ],
               ),
             ),
@@ -1159,9 +1202,9 @@ class _MobilePlayerBar extends StatelessWidget {
                   ? Image.network(
                       trackCoverUrl!,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => Icon(Icons.music_note_rounded, color: colors.textSecondary),
+                      errorBuilder: (_, _, _) => Icon(Icons.music_note_outlined, color: colors.textSecondary),
                     )
-                  : Icon(Icons.music_note_rounded, color: colors.textSecondary),
+                  : Icon(Icons.music_note_outlined, color: colors.textSecondary),
             ),
           ),
           const SizedBox(width: 10),
@@ -1187,7 +1230,7 @@ class _MobilePlayerBar extends StatelessWidget {
                       valueColor: AlwaysStoppedAnimation<Color>(colors.textSecondary),
                     ),
                   )
-                : Icon(isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
+                : Icon(isPlaying ? Icons.pause_outlined : Icons.play_arrow_outlined),
           ),
           const SizedBox(width: 4),
         ],
@@ -1220,27 +1263,27 @@ class _MobileBottomNav extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: <Widget>[
           _MobileNavButton(
-            icon: Icons.home_rounded,
+            icon: Icons.home_outlined,
             selected: currentSection == AppSection.home,
             onTap: () => onSelected(AppSection.home),
           ),
           _MobileNavButton(
-            icon: Icons.explore_rounded,
+            icon: Icons.explore_outlined,
             selected: currentSection == AppSection.explore,
             onTap: () => onSelected(AppSection.explore),
           ),
           _MobileNavButton(
-            icon: Icons.favorite_rounded,
+            icon: Icons.favorite_outlined,
             selected: currentSection == AppSection.favorites,
             onTap: () => onSelected(AppSection.favorites),
           ),
           _MobileNavButton(
-            icon: Icons.queue_music_rounded,
+            icon: Icons.queue_music_outlined,
             selected: currentSection == AppSection.playlists,
             onTap: () => onSelected(AppSection.playlists),
           ),
           _MobileNavButton(
-            icon: Icons.search_rounded,
+            icon: Icons.search_outlined,
             selected: currentSection == AppSection.search,
             onTap: () => onSelected(AppSection.search),
           ),

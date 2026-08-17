@@ -51,7 +51,7 @@ class PlaybackCoordinator extends ChangeNotifier {
 
   bool? get shuffleEnabled => _queueState.shuffleEnabled ?? _state.shuffleEnabled;
 
-  String? get repeatMode => _queueState.repeatMode ?? _state.repeatMode;
+  RepeatMode? get repeatMode => _queueState.repeatMode ?? _state.repeatMode;
 
   bool? get dontStopTheMusicEnabled => _queueState.dontStopTheMusicEnabled;
 
@@ -179,12 +179,12 @@ class PlaybackCoordinator extends ChangeNotifier {
     return _route((PlaybackPlayer player) => player.setShuffle(next));
   }
 
-  Future<void> toggleRepeatMode([String? currentRepeatMode]) {
-    final normalized = (currentRepeatMode ?? _queueState.repeatMode ?? _state.repeatMode ?? '').trim().toLowerCase();
-    final RepeatMode next = switch (normalized) {
-      'off' || 'none' || '' => RepeatMode.all,
-      'all' => RepeatMode.one,
-      _ => RepeatMode.off,
+  Future<void> toggleRepeatMode([RepeatMode? currentRepeatMode]) {
+    final current = currentRepeatMode ?? _queueState.repeatMode ?? _state.repeatMode ?? RepeatMode.off;
+    final RepeatMode next = switch (current) {
+      RepeatMode.off => RepeatMode.all,
+      RepeatMode.all => RepeatMode.one,
+      RepeatMode.one => RepeatMode.off,
     };
 
     return _route((PlaybackPlayer player) => player.setRepeatMode(next));

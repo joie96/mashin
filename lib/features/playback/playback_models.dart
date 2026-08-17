@@ -27,7 +27,7 @@ class PlaybackQueueSnapshot {
   final List<QueueItem> items;
   final int? currentIndex;
   final bool? shuffleEnabled;
-  final String? repeatMode;
+  final RepeatMode? repeatMode;
   final bool? dontStopTheMusicEnabled;
 
   const PlaybackQueueSnapshot({
@@ -47,7 +47,7 @@ class PlaybackQueueSnapshot {
     bool clearCurrentIndex = false,
     bool? shuffleEnabled,
     bool clearShuffleEnabled = false,
-    String? repeatMode,
+    RepeatMode? repeatMode,
     bool clearRepeatMode = false,
     bool? dontStopTheMusicEnabled,
     bool clearDontStopTheMusicEnabled = false,
@@ -70,7 +70,7 @@ class PlaybackState {
   final PlaybackStateType playbackState;
   final int volume;
   final bool muted;
-  final String? repeatMode;
+  final RepeatMode? repeatMode;
   final bool? shuffleEnabled;
   final int? seekMaxMillis;
 
@@ -87,7 +87,7 @@ class PlaybackState {
     PlaybackStateType? playbackState,
     int? volume,
     bool? muted,
-    String? repeatMode,
+    RepeatMode? repeatMode,
     bool clearRepeatMode = false,
     bool? shuffleEnabled,
     bool clearShuffleEnabled = false,
@@ -111,7 +111,7 @@ class PlaybackState {
       'playbackState': playbackState.name,
       'volume': volume,
       'muted': muted,
-      'repeatMode': repeatMode,
+      'repeatMode': repeatMode?.name,
       'shuffleEnabled': shuffleEnabled,
       'seekMaxMillis': seekMaxMillis,
     };
@@ -129,7 +129,7 @@ class PlaybackState {
       playbackState: _parsePlaybackState(json['playbackState']),
       volume: (json['volume'] as num?)?.toInt().clamp(0, 100) ?? 50,
       muted: json['muted'] == true,
-      repeatMode: (json['repeatMode'] as String?)?.trim(),
+      repeatMode: repeatModeFromJson((json['repeatMode'] as String?)?.trim()),
       shuffleEnabled: json['shuffleEnabled'] as bool?,
       seekMaxMillis: seekMaxMillis,
     );

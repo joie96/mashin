@@ -7,6 +7,7 @@ import 'dart:io';
 import 'package:ffi/ffi.dart';
 
 import '../../../app/config/app_config.dart';
+import '../../../data/music_assistant/ma_models.dart';
 import 'sendspin_player_models.dart';
 import 'sendspin_rust_bridge.dart';
 
@@ -170,13 +171,11 @@ class FfiSendspinRustBridge implements SendspinRustBridge {
   }
 
   @override
-  Future<void> transportRepeatMode(String mode) async {
-    final normalized = mode.trim().toLowerCase();
-    final int value = switch (normalized) {
-      'off' => 0,
-      'one' => 1,
-      'all' => 2,
-      _ => throw ArgumentError.value(mode, 'mode', 'Expected off, one, or all'),
+  Future<void> transportRepeatMode(RepeatMode mode) async {
+    final int value = switch (mode) {
+      RepeatMode.off => 0,
+      RepeatMode.one => 1,
+      RepeatMode.all => 2,
     };
 
     final code = _bindings.transportRepeatMode(value);

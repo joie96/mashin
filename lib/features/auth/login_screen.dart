@@ -141,7 +141,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               color: colors.bgPrimary,
                             ),
                           )
-                        : const Icon(Icons.login_rounded),
+                        : const Icon(Icons.login_outlined),
                     label: Text(_isSubmitting ? 'Anmeldung...' : 'Anmelden'),
                   ),
                 ],

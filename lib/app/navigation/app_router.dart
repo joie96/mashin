@@ -23,19 +23,19 @@ class AppRouter {
         return const _SectionPlaceholder(
           title: 'Entdecken',
           subtitle: 'Genres, neue Releases, kuratierte Inhalte',
-          icon: Icons.explore_rounded,
+          icon: Icons.explore_outlined,
         );
       case AppSection.favorites:
         return const _SectionPlaceholder(
           title: 'Favoriten',
           subtitle: 'Deine favorisierten Tracks, Alben und Artists',
-          icon: Icons.favorite_rounded,
+          icon: Icons.favorite_outlined,
         );
       case AppSection.playlists:
         return const _SectionPlaceholder(
           title: 'Playlists',
           subtitle: 'Lokale und remote Playlists',
-          icon: Icons.queue_music_rounded,
+          icon: Icons.queue_music_outlined,
         );
       case AppSection.search:
         return SearchScreen(

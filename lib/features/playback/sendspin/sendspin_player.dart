@@ -362,7 +362,7 @@ class SendspinPlayer implements PlaybackPlayer {
             currentIndex: queue.currentIndex,
             clearCurrentIndex: queue.currentIndex == null,
             shuffleEnabled: queue.shuffleEnabled,
-            repeatMode: queue.repeatMode?.name,
+            repeatMode: queue.repeatMode,
             dontStopTheMusicEnabled: queue.dontStopTheMusicEnabled,
           );
           _emitQueueState();
@@ -381,7 +381,7 @@ class SendspinPlayer implements PlaybackPlayer {
         _queueState = _queueState.copyWith(
           queueId: eventQueueId.isNotEmpty ? eventQueueId : _queueState.queueId,
           shuffleEnabled: raw['shuffle_enabled'] as bool? ?? _queueState.shuffleEnabled,
-          repeatMode: (raw['repeat_mode'] as String?)?.trim() ?? _queueState.repeatMode,
+          repeatMode: repeatModeFromJson((raw['repeat_mode'] as String?)?.trim()) ?? _queueState.repeatMode,
           dontStopTheMusicEnabled: raw['dont_stop_the_music_enabled'] as bool? ??
               _queueState.dontStopTheMusicEnabled,
         );
@@ -424,7 +424,7 @@ class SendspinPlayer implements PlaybackPlayer {
       currentIndex: queue.currentIndex,
       clearCurrentIndex: queue.currentIndex == null,
       shuffleEnabled: queue.shuffleEnabled,
-      repeatMode: queue.repeatMode?.name,
+      repeatMode: queue.repeatMode,
       dontStopTheMusicEnabled: queue.dontStopTheMusicEnabled,
     );
     _emitQueueState();

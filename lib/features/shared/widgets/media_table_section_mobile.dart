@@ -442,7 +442,7 @@ class _MobileTableRowState extends State<_MobileTableRow> {
                           onTap: widget.onToggleSelected,
                         )
                       : Icon(
-                          Icons.more_vert_rounded,
+                          Icons.more_vert_outlined,
                           size: 18,
                           color: colors.textSecondary,
                         ),

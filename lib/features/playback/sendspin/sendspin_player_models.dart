@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../../../data/music_assistant/ma_models.dart';
 import '../playback_models.dart';
 
 enum SendspinConnectionState {
@@ -14,7 +15,7 @@ class SendspinPlayerState {
   final PlaybackStateType playbackState;
   final int volume;
   final bool muted;
-  final String? repeatMode;
+  final RepeatMode? repeatMode;
   final bool? shuffleEnabled;
   final int? seekMaxMillis;
 
@@ -81,7 +82,7 @@ class SendspinPlayerState {
     PlaybackStateType? playbackState,
     int? volume,
     bool? muted,
-    String? repeatMode,
+    RepeatMode? repeatMode,
     bool clearRepeatMode = false,
     bool? shuffleEnabled,
     bool clearShuffleEnabled = false,
@@ -195,7 +196,7 @@ class SendspinPlayerState {
       'playbackState': playbackState.name,
       'volume': volume,
       'muted': muted,
-      'repeatMode': repeatMode,
+      'repeatMode': repeatMode?.name,
       'shuffleEnabled': shuffleEnabled,
       'seekMaxMillis': seekMaxMillis,
       'metadataTimestampMicros': metadataTimestampMicros,
@@ -245,7 +246,7 @@ class SendspinPlayerState {
       playbackState: _parsePlaybackState(json['playbackState']),
       volume: (json['volume'] as num?)?.toInt().clamp(0, 100) ?? 50,
       muted: json['muted'] == true,
-      repeatMode: (json['repeatMode'] as String?)?.trim(),
+      repeatMode: repeatModeFromJson((json['repeatMode'] as String?)?.trim()),
       shuffleEnabled: json['shuffleEnabled'] as bool?,
       seekMaxMillis: seekMaxMillis,
       metadataTimestampMicros: (json['metadataTimestampMicros'] as num?)?.toInt(),

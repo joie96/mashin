@@ -55,11 +55,11 @@ class MobileSelectionOverlay extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            actionButton(icon: allSelected ? Icons.deselect_rounded : Icons.select_all_rounded, onTap: onToggleAll),
+            actionButton(icon: allSelected ? Icons.deselect_outlined : Icons.select_all_outlined, onTap: onToggleAll),
             const SizedBox(width: 6),
-            actionButton(icon: Icons.more_vert_rounded, onTap: onMenuTap),
+            actionButton(icon: Icons.more_vert_outlined, onTap: onMenuTap),
             const SizedBox(width: 6),
-            actionButton(icon: Icons.close_rounded, onTap: onClose),
+            actionButton(icon: Icons.close_outlined, onTap: onClose),
           ],
         ),
       ),

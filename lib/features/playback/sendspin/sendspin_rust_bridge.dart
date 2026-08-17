@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../../../data/music_assistant/ma_models.dart';
 import 'sendspin_player_models.dart';
 
 abstract class SendspinRustBridge {
@@ -30,7 +31,7 @@ abstract class SendspinRustBridge {
 
   Future<void> transportSeekRelativeMs(int offsetMs);
 
-  Future<void> transportRepeatMode(String mode);
+  Future<void> transportRepeatMode(RepeatMode mode);
 
   Future<void> transportShuffle(bool enabled);
 
