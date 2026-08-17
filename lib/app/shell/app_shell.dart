@@ -836,8 +836,9 @@ class _DesktopPlayerBar extends StatelessWidget {
             ),
             Expanded(
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisAlignment: MainAxisAlignment.start,
                 children: <Widget>[
+                  const SizedBox(height: 12),
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -846,7 +847,7 @@ class _DesktopPlayerBar extends StatelessWidget {
                       _TransportControlButton(
                         icon: Icons.shuffle_rounded,
                         size: 32,
-                        iconSize: 16,
+                        iconSize: 18,
                         onTap: () {},
                         color: isShuffleActive ? colors.accent : colors.textSecondary,
                       ),
@@ -854,46 +855,44 @@ class _DesktopPlayerBar extends StatelessWidget {
                       _TransportControlButton(
                         icon: Icons.skip_previous_rounded,
                         size: 32,
-                        iconSize: 18,
+                        iconSize: 26,
                         onTap: hasPlaybackSession ? onPrevious : null,
                         color: colors.textPrimary,
                       ),
                       const SizedBox(width: 12),
-                      SizedBox(
-                        width: 36,
-                        height: 36,
-                        child: ElevatedButton(
-                          onPressed: isBusy
-                              ? null
-                              : () {
-                                  onTogglePlayPause();
-                                },
-                          style: ElevatedButton.styleFrom(
-                            padding: EdgeInsets.zero,
-                            shape: const CircleBorder(),
-                            backgroundColor: colors.textPrimary,
-                            foregroundColor: colors.bgPrimary,
-                            disabledBackgroundColor: colors.textPrimary.withValues(alpha: 0.45),
-                            disabledForegroundColor: colors.bgPrimary,
-                            elevation: 0,
-                          ),
-                          child: isBusy
-                              ? SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(colors.bgPrimary),
-                                  ),
-                                )
-                              : Icon(isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded, size: 20),
+                      _HoverScaleControlButton(
+                        width: 40,
+                        height: 40,
+                        onPressed: isBusy
+                            ? null
+                            : () {
+                                onTogglePlayPause();
+                              },
+                        style: ElevatedButton.styleFrom(
+                          padding: EdgeInsets.zero,
+                          shape: const CircleBorder(),
+                          backgroundColor: colors.textPrimary,
+                          foregroundColor: colors.bgPrimary,
+                          disabledBackgroundColor: colors.textPrimary.withValues(alpha: 0.45),
+                          disabledForegroundColor: colors.bgPrimary,
+                          elevation: 0,
                         ),
+                        child: isBusy
+                            ? SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(colors.bgPrimary),
+                                ),
+                              )
+                            : Icon(isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded, size: 30),
                       ),
                       const SizedBox(width: 12),
                       _TransportControlButton(
                         icon: Icons.skip_next_rounded,
                         size: 32,
-                        iconSize: 18,
+                        iconSize: 26,
                         onTap: hasPlaybackSession ? onNext : null,
                         color: colors.textPrimary,
                       ),
@@ -901,15 +900,15 @@ class _DesktopPlayerBar extends StatelessWidget {
                       _TransportControlButton(
                         icon: isRepeatActive ? Icons.repeat_on_rounded : Icons.repeat_rounded,
                         size: 32,
-                        iconSize: 16,
+                        iconSize: 18,
                         onTap: () {},
                         color: isRepeatActive ? colors.accent : colors.textSecondary,
                       ),
                     ],
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 4),
                   ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 600),
+                    constraints: const BoxConstraints(maxWidth: 500),
                     child: Row(
                       children: <Widget>[
                         Text(
@@ -922,6 +921,7 @@ class _DesktopPlayerBar extends StatelessWidget {
                             value: 0,
                             min: 0,
                             max: clampedMaxSeconds > 0 ? clampedMaxSeconds : 1,
+                            padding: EdgeInsets.zero,
                             onChanged: null,
                             activeColor: colors.textSecondary,
                             inactiveColor: colors.bgTertiary,
@@ -952,14 +952,26 @@ class _DesktopPlayerBar extends StatelessWidget {
                     color: playbackState.muted ? colors.accent : colors.textSecondary,
                   ),
                   SizedBox(
-                    width: 170,
-                    child: Slider(
-                      value: playbackState.volume.toDouble().clamp(0, 100),
-                      min: 0,
-                      max: 100,
-                      activeColor: colors.textSecondary,
-                      inactiveColor: colors.bgTertiary,
-                      onChanged: onVolumeChanged,
+                    width: 100,
+                    child: SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: 2,
+                        thumbShape: const RoundSliderThumbShape(
+                          enabledThumbRadius: 6,
+                          disabledThumbRadius: 6,
+                        ),
+                        overlayShape: const RoundSliderOverlayShape(
+                          overlayRadius: 10,
+                        ),
+                      ),
+                      child: Slider(
+                        value: playbackState.volume.toDouble().clamp(0, 100),
+                        min: 0,
+                        max: 100,
+                        activeColor: colors.textSecondary,
+                        inactiveColor: colors.bgTertiary,
+                        onChanged: onVolumeChanged,
+                      ),
                     ),
                   ),
                   _PlayerBarIconButton(icon: Icons.tune_rounded, onTap: () {}, color: colors.textSecondary),
@@ -1008,6 +1020,61 @@ class _TransportControlButton extends StatelessWidget {
   }
 }
 
+class _HoverScaleControlButton extends StatefulWidget {
+  final double width;
+  final double height;
+  final VoidCallback? onPressed;
+  final ButtonStyle style;
+  final Widget child;
+
+  const _HoverScaleControlButton({
+    required this.width,
+    required this.height,
+    required this.onPressed,
+    required this.style,
+    required this.child,
+  });
+
+  @override
+  State<_HoverScaleControlButton> createState() => _HoverScaleControlButtonState();
+}
+
+class _HoverScaleControlButtonState extends State<_HoverScaleControlButton> {
+  bool _isHovered = false;
+
+  void _setHovered(bool value) {
+    if (_isHovered == value || widget.onPressed == null) {
+      return;
+    }
+
+    setState(() {
+      _isHovered = value;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => _setHovered(true),
+      onExit: (_) => _setHovered(false),
+      child: AnimatedScale(
+        scale: _isHovered ? 1.08 : 1,
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOutCubic,
+        child: SizedBox(
+          width: widget.width,
+          height: widget.height,
+          child: ElevatedButton(
+            onPressed: widget.onPressed,
+            style: widget.style,
+            child: widget.child,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _PlayerBarIconButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback? onTap;
@@ -1027,7 +1094,7 @@ class _PlayerBarIconButton extends StatelessWidget {
       onPressed: onTap,
       splashRadius: 16,
       visualDensity: VisualDensity.compact,
-      icon: Icon(icon, size: 18, color: onTap == null ? color.withValues(alpha: 0.45) : color),
+      icon: Icon(icon, size: 20, color: onTap == null ? color.withValues(alpha: 0.45) : color),
       style: IconButton.styleFrom(
         backgroundColor: Colors.transparent,
         foregroundColor: colors.textSecondary,
