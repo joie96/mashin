@@ -275,19 +275,6 @@ class PlaybackCoordinator extends ChangeNotifier {
     _logger.debug('routing command to active player. OutputMode=${_outputMode?.name ?? 'null'}');
 
     await action(player);
-    _updateState(
-      await player.getState(),
-      source: 'route/getState',
-    );
-    _queueState = await player.getQueueState();
-    _updateState(
-      _state.copyWith(
-        shuffleEnabled: _queueState.shuffleEnabled ?? _state.shuffleEnabled,
-        repeatMode: _queueState.repeatMode ?? _state.repeatMode,
-      ),
-      source: 'route/queueProjection',
-    );
-    notifyListeners();
   }
 
   @override

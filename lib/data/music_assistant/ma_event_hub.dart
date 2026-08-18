@@ -9,15 +9,39 @@ class MusicAssistantQueueEvent {
     required this.event,
     required this.queueId,
     this.queue,
-    this.rawData,
+    this.elapsedTimeSeconds,
+    this.queueSettings,
+    this.additionalData,
     required this.receivedAt,
   });
 
   final String event;
   final String? queueId;
   final PlayerQueue? queue;
-  final Map<String, dynamic>? rawData;
+  final double? elapsedTimeSeconds;
+  final MusicAssistantQueueSettings? queueSettings;
+  final Map<String, dynamic>? additionalData;
   final DateTime receivedAt;
+}
+
+class MusicAssistantQueueSettings {
+  const MusicAssistantQueueSettings({
+    this.shuffleEnabled,
+    this.repeatMode,
+    this.dontStopTheMusicEnabled,
+  });
+
+  final bool? shuffleEnabled;
+  final RepeatMode? repeatMode;
+  final bool? dontStopTheMusicEnabled;
+
+  factory MusicAssistantQueueSettings.fromJson(Map<String, dynamic> json) {
+    return MusicAssistantQueueSettings(
+      shuffleEnabled: json['shuffle_enabled'] as bool?,
+      repeatMode: repeatModeFromJson((json['repeat_mode'] as String?)?.trim()),
+      dontStopTheMusicEnabled: json['dont_stop_the_music_enabled'] as bool?,
+    );
+  }
 }
 
 class MusicAssistantEventHub {
@@ -166,7 +190,8 @@ class MusicAssistantEventHub {
     }
 
     final eventName = (decoded['event'] as String?)?.trim();
-    if (eventName == null || !_queueEventsFilter.contains(eventName)) {
+    final eventNameLower = eventName?.toLowerCase();
+    if (eventNameLower == null || !_queueEventsFilter.contains(eventNameLower)) {
       return;
     }
 
@@ -174,24 +199,37 @@ class MusicAssistantEventHub {
     final data = decoded['data'];
 
     PlayerQueue? queue;
-    Map<String, dynamic>? rawData;
+    double? elapsedTimeSeconds;
+    MusicAssistantQueueSettings? queueSettings;
+    Map<String, dynamic>? additionalData;
 
     if (data is Map<String, dynamic>) {
-      rawData = Map<String, dynamic>.from(data);
-      if (eventName == 'queue_added' ||
-          eventName == 'queue_removed' ||
-          eventName == 'queue_updated' ||
-          eventName == 'queue_items_updated') {
-        queue = PlayerQueue.fromJson(rawData);
+      final payload = Map<String, dynamic>.from(data);
+
+      if (eventNameLower == 'queue_added' ||
+          eventNameLower == 'queue_updated' ||
+          eventNameLower == 'queue_removed' ||
+          eventNameLower == 'queue_items_updated') {
+        queue = PlayerQueue.fromJson(payload);
+      } else if (eventNameLower == 'queue_settings_updated') {
+        queueSettings = MusicAssistantQueueSettings.fromJson(payload);
+      } else {
+        additionalData = payload;
+      }
+    } else if (data is num) {
+      if (eventNameLower == 'queue_time_updated') {
+        elapsedTimeSeconds = data.toDouble();
       }
     }
 
     _queueEventController.add(
       MusicAssistantQueueEvent(
-        event: eventName,
+        event: eventNameLower,
         queueId: queueId,
         queue: queue,
-        rawData: rawData,
+        elapsedTimeSeconds: elapsedTimeSeconds,
+        queueSettings: queueSettings,
+        additionalData: additionalData,
         receivedAt: DateTime.now().toUtc(),
       ),
     );

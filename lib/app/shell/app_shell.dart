@@ -311,6 +311,7 @@ class _AppShellState extends State<AppShell> {
           onToggleRepeatMode: _toggleRepeatMode,
           onToggleDontStopTheMusic: _toggleDontStopTheMusic,
           onToggleMute: _toggleMute,
+          onSeek: _seek,
           onVolumeChanged: _setVolume,
         ),
       ],
@@ -634,6 +635,14 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
+  Future<void> _seek(double seconds) async {
+    try {
+      await _playbackCoordinator.seek(seconds);
+    } catch (_) {
+      // Ignore playback command failures in shell-level controls.
+    }
+  }
+
   void _onPlaybackChanged() {
     if (!mounted) {
       return;
@@ -787,6 +796,7 @@ class _DesktopPlayerBar extends StatelessWidget {
   final Future<void> Function() onToggleRepeatMode;
   final Future<void> Function() onToggleDontStopTheMusic;
   final Future<void> Function() onToggleMute;
+  final Future<void> Function(double) onSeek;
   final ValueChanged<double> onVolumeChanged;
 
   const _DesktopPlayerBar({
@@ -805,6 +815,7 @@ class _DesktopPlayerBar extends StatelessWidget {
     required this.onToggleRepeatMode,
     required this.onToggleDontStopTheMusic,
     required this.onToggleMute,
+    required this.onSeek,
     required this.onVolumeChanged,
   });
 
@@ -976,14 +987,27 @@ class _DesktopPlayerBar extends StatelessWidget {
                         ),
                         const SizedBox(width: 10),
                         Expanded(
-                          child: Slider(
-                            value: clampedCurrentSeconds,
-                            min: 0,
-                            max: clampedMaxSeconds > 0 ? clampedMaxSeconds : 1,
-                            padding: EdgeInsets.zero,
-                            onChanged: null,
-                            activeColor: colors.textSecondary,
-                            inactiveColor: colors.bgTertiary,
+                          child: SliderTheme(
+                            data: SliderTheme.of(context).copyWith(
+                              trackHeight: 3,
+                              thumbShape: const RoundSliderThumbShape(
+                                enabledThumbRadius: 7,
+                                disabledThumbRadius: 7,
+                              ),
+                              overlayShape: const RoundSliderOverlayShape(
+                                overlayRadius: 10,
+                              ),
+                              thumbColor: colors.textSecondary,
+                              activeTrackColor: colors.textSecondary,
+                              inactiveTrackColor: colors.bgTertiary,
+                            ),
+                            child: _SeekSlider(
+                              value: clampedCurrentSeconds,
+                              min: 0,
+                              max: clampedMaxSeconds > 0 ? clampedMaxSeconds : 1,
+                              enabled: hasPlaybackSession,
+                              onSeek: onSeek,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -1079,6 +1103,69 @@ class _TransportControlButton extends StatelessWidget {
           color: onTap == null ? color.withValues(alpha: 0.45) : color,
         ),
       ),
+    );
+  }
+}
+
+class _SeekSlider extends StatefulWidget {
+  final double value;
+  final double min;
+  final double max;
+  final bool enabled;
+  final Future<void> Function(double) onSeek;
+
+  const _SeekSlider({
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.enabled,
+    required this.onSeek,
+  });
+
+  @override
+  State<_SeekSlider> createState() => _SeekSliderState();
+}
+
+class _SeekSliderState extends State<_SeekSlider> {
+  bool _isDragging = false;
+  double? _dragValue;
+
+  @override
+  void didUpdateWidget(covariant _SeekSlider oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_isDragging) {
+      _dragValue = null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final double effectiveValue = (_isDragging ? (_dragValue ?? widget.value) : widget.value)
+        .clamp(widget.min, widget.max)
+        .toDouble();
+
+    return Slider(
+      value: effectiveValue,
+      min: widget.min,
+      max: widget.max,
+      padding: EdgeInsets.zero,
+      onChanged: widget.enabled
+          ? (double next) {
+              setState(() {
+                _isDragging = true;
+                _dragValue = next;
+              });
+            }
+          : null,
+      onChangeEnd: widget.enabled
+          ? (double next) {
+              setState(() {
+                _isDragging = false;
+                _dragValue = null;
+              });
+              unawaited(widget.onSeek(next));
+            }
+          : null,
     );
   }
 }
@@ -1373,8 +1460,13 @@ class _MashinAppState extends State<MashinApp> {
       title: 'Mashin',
       debugShowCheckedModeBanner: false,
       themeMode: _themeMode,
-      theme: AppTheme.light(),
+      theme: AppTheme.light(),  
       darkTheme: AppTheme.dark(),
+      builder: (BuildContext context, Widget? child) {
+        return ExcludeSemantics(
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       home: const AppShell(),
     );
   }
