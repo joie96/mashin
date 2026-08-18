@@ -74,6 +74,8 @@ class SendspinPlayerState {
       repeatMode: repeatMode,
       shuffleEnabled: shuffleEnabled,
       seekMaxMillis: seekMaxMillis,
+      positionMillis: metadataTrackProgressMillis,
+      durationMillis: metadataTrackDurationMillis,
     );
   }
 
@@ -308,3 +310,4 @@ PlaybackStateType _parsePlaybackState(dynamic value) {
       return PlaybackStateType.unknown;
   }
 }
+

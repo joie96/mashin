@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../../app/logging/app_logger.dart';
 import '../../data/music_assistant/ma_models.dart';
 import 'playback_models.dart';
 import 'playback_player.dart';
@@ -26,15 +27,21 @@ class PlaybackCoordinator extends ChangeNotifier {
   PlaybackState _state = const PlaybackState();
   PlaybackQueueSnapshot _queueState = const PlaybackQueueSnapshot();
   bool _initialized = false;
+  final AppLogger _logger = AppLogger('PlaybackCoordinator');
 
   void _updateState(PlaybackState next, {required String source}) {
     final previousType = _state.playbackState;
     _state = next;
     final nextType = _state.playbackState;
 
+    final bool isSendspinEventSource = source == 'stream/player.states';
+    if (isSendspinEventSource) {
+      return;
+    }
+
     if (previousType != nextType) {
-      debugPrint(
-        'PlaybackCoordinator state change [$source]: ${previousType.name} -> ${nextType.name}',
+      _logger.debug(
+        'state changed. Source=$source, PreviousState=${previousType.name}, NextState=${nextType.name}',
       );
     }
   }
@@ -58,6 +65,9 @@ class PlaybackCoordinator extends ChangeNotifier {
   // Initialization
   Future<void> initialize() async {
     if (_initialized) {
+      _logger.debug(
+        'initialize skipped because coordinator is already initialized. OutputMode=${_outputMode?.name ?? 'null'}',
+      );
       return;
     }
 
@@ -69,6 +79,10 @@ class PlaybackCoordinator extends ChangeNotifier {
       throw StateError('Kein Playback-Player registriert.');
     }
 
+    _logger.info(
+      'initialize requested. PreferredMode=${preferredMode.name}, AvailablePlayerCount=${_players.length}',
+    );
+
     await switchOutputMode(preferredMode);
     await _activePlayer!.connect();
     _updateState(
@@ -77,6 +91,9 @@ class PlaybackCoordinator extends ChangeNotifier {
     );
     _queueState = await _activePlayer!.getQueueState();
     _initialized = true;
+    _logger.info(
+      'initialize completed. OutputMode=${_outputMode?.name ?? 'null'}, QueueItemCount=${_queueState.items.length}',
+    );
     notifyListeners();
   }
 
@@ -93,11 +110,19 @@ class PlaybackCoordinator extends ChangeNotifier {
     final hadPreviousPlayer = _activePlayer != null;
     final playerChanged = !identical(nextPlayer, _activePlayer);
 
+    _logger.info(
+      'output mode switch requested. CurrentMode=${_outputMode?.name ?? 'null'}, RequestedMode=${mode.name}, PlayerChanged=$playerChanged, HadPreviousPlayer=$hadPreviousPlayer, TargetPlayerId=${targetPlayerId ?? ''}',
+    );
+
     if (hadPreviousPlayer && playerChanged) {
+      _logger.debug(
+        'deactivating previous player before output mode switch. PreviousMode=${_outputMode?.name ?? 'null'}',
+      );
       await _activePlayer!.deactivate();
     }
 
     if (!hadPreviousPlayer || playerChanged) {
+      _logger.debug('activating target player for output mode switch. RequestedMode=${mode.name}');
       await nextPlayer.activate(targetPlayerId: targetPlayerId);
     }
 
@@ -110,6 +135,9 @@ class PlaybackCoordinator extends ChangeNotifier {
       source: 'switchOutputMode/getState',
     );
     _queueState = await nextPlayer.getQueueState();
+    _logger.info(
+      'output mode switch completed. OutputMode=${_outputMode?.name ?? 'null'}, QueueItemCount=${_queueState.items.length}',
+    );
     notifyListeners();
   }
 
@@ -243,6 +271,8 @@ class PlaybackCoordinator extends ChangeNotifier {
     if (player == null) {
       throw StateError('PlaybackCoordinator ist nicht initialisiert.');
     }
+
+    _logger.debug('routing command to active player. OutputMode=${_outputMode?.name ?? 'null'}');
 
     await action(player);
     _updateState(

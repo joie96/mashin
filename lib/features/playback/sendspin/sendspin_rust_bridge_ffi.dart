@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:developer' as developer;
 import 'dart:ffi' as ffi;
 import 'dart:io';
 
@@ -311,11 +310,6 @@ class FfiSendspinRustBridge implements SendspinRustBridge {
       }
 
       final statePayload = decoded;
-
-      developer.log(
-        'Sendspin event received: ${jsonEncode(statePayload)}',
-        name: 'mashin.sendspin.events',
-      );
 
       _eventController.add(statePayload);
 

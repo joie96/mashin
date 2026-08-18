@@ -73,6 +73,8 @@ class PlaybackState {
   final RepeatMode? repeatMode;
   final bool? shuffleEnabled;
   final int? seekMaxMillis;
+  final int? positionMillis;
+  final int? durationMillis;
 
   const PlaybackState({
     this.playbackState = PlaybackStateType.uninitialized,
@@ -81,6 +83,8 @@ class PlaybackState {
     this.repeatMode,
     this.shuffleEnabled,
     this.seekMaxMillis,
+    this.positionMillis,
+    this.durationMillis,
   });
 
   PlaybackState copyWith({
@@ -93,6 +97,10 @@ class PlaybackState {
     bool clearShuffleEnabled = false,
     int? seekMaxMillis,
     bool clearSeekMaxMillis = false,
+    int? positionMillis,
+    bool clearPositionMillis = false,
+    int? durationMillis,
+    bool clearDurationMillis = false,
   }) {
     return PlaybackState(
       playbackState: playbackState ?? this.playbackState,
@@ -103,6 +111,8 @@ class PlaybackState {
       seekMaxMillis: clearSeekMaxMillis
           ? null
           : (seekMaxMillis ?? this.seekMaxMillis),
+      positionMillis: clearPositionMillis ? null : (positionMillis ?? this.positionMillis),
+      durationMillis: clearDurationMillis ? null : (durationMillis ?? this.durationMillis),
     );
   }
 
@@ -114,6 +124,8 @@ class PlaybackState {
       'repeatMode': repeatMode?.name,
       'shuffleEnabled': shuffleEnabled,
       'seekMaxMillis': seekMaxMillis,
+      'positionMillis': positionMillis,
+      'durationMillis': durationMillis,
     };
     return payload;
   }
@@ -124,6 +136,16 @@ class PlaybackState {
     final seekMaxMillis =
         (json['seekMaxMillis'] as num?)?.toInt() ??
             (json['seekMaxMilliseconds'] as num?)?.toInt();
+    final positionMillis =
+      _toClampedMillis((json['positionMillis'] as num?)?.toDouble()) ??
+        _toClampedMillis((json['positionMs'] as num?)?.toDouble()) ??
+        _toClampedMillisFromSeconds((json['positionSecs'] as num?)?.toDouble()) ??
+        _toClampedMillisFromSeconds((json['positionSeconds'] as num?)?.toDouble());
+    final durationMillis =
+      _toClampedMillis((json['durationMillis'] as num?)?.toDouble()) ??
+        _toClampedMillis((json['durationMs'] as num?)?.toDouble()) ??
+        _toClampedMillisFromSeconds((json['durationSecs'] as num?)?.toDouble()) ??
+        _toClampedMillisFromSeconds((json['durationSeconds'] as num?)?.toDouble());
 
     return PlaybackState(
       playbackState: _parsePlaybackState(json['playbackState']),
@@ -132,8 +154,27 @@ class PlaybackState {
       repeatMode: repeatModeFromJson((json['repeatMode'] as String?)?.trim()),
       shuffleEnabled: json['shuffleEnabled'] as bool?,
       seekMaxMillis: seekMaxMillis,
+      positionMillis: positionMillis,
+      durationMillis: durationMillis,
     );
   }
+}
+
+int? _toClampedMillis(double? value) {
+  if (value == null) {
+    return null;
+  }
+
+  final int millis = value.round();
+  return millis < 0 ? 0 : millis;
+}
+
+int? _toClampedMillisFromSeconds(double? value) {
+  if (value == null) {
+    return null;
+  }
+
+  return _toClampedMillis(value * 1000);
 }
 
 

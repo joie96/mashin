@@ -91,6 +91,11 @@ class _AppShellState extends State<AppShell> {
   }
 
   double get _currentTrackMaxSeconds {
+    final durationFromStateSeconds = ((_playbackState.durationMillis ?? 0) / 1000).toDouble();
+    if (durationFromStateSeconds > 0) {
+      return durationFromStateSeconds;
+    }
+
     final seekMaxSeconds = ((_playbackState.seekMaxMillis ?? 0) / 1000).toDouble();
     if (seekMaxSeconds > 0) {
       return seekMaxSeconds;
@@ -107,6 +112,15 @@ class _AppShellState extends State<AppShell> {
   String? get _currentTrackCoverUrl {
     final url = _currentQueueItem?.mediaItem?.imageUri?.trim() ?? '';
     return url.isEmpty ? null : url;
+  }
+
+  double get _currentTrackPositionSeconds {
+    final positionFromStateSeconds = ((_playbackState.positionMillis ?? 0) / 1000).toDouble();
+    if (positionFromStateSeconds > 0) {
+      return positionFromStateSeconds;
+    }
+
+    return 0;
   }
 
   PlaybackStateType get _effectivePlaybackStateType {
@@ -289,6 +303,7 @@ class _AppShellState extends State<AppShell> {
           trackSubtitle: _currentTrackSubtitle,
           trackCoverUrl: _currentTrackCoverUrl,
           maxSeconds: _currentTrackMaxSeconds,
+          currentSeconds: _currentTrackPositionSeconds,
           onTogglePlayPause: _togglePlayPause,
           onPrevious: _playPrevious,
           onNext: _playNext,
@@ -764,6 +779,7 @@ class _DesktopPlayerBar extends StatelessWidget {
   final String trackSubtitle;
   final String? trackCoverUrl;
   final double maxSeconds;
+  final double currentSeconds;
   final Future<void> Function() onTogglePlayPause;
   final Future<void> Function() onPrevious;
   final Future<void> Function() onNext;
@@ -781,6 +797,7 @@ class _DesktopPlayerBar extends StatelessWidget {
     required this.trackSubtitle,
     required this.trackCoverUrl,
     required this.maxSeconds,
+    required this.currentSeconds,
     required this.onTogglePlayPause,
     required this.onPrevious,
     required this.onNext,
@@ -804,6 +821,9 @@ class _DesktopPlayerBar extends StatelessWidget {
     final IconData repeatIcon = isRepeatOne ? Icons.repeat_one_outlined : Icons.repeat_outlined;
     final Color repeatColor = repeatMode == RepeatMode.off ? colors.textSecondary : colors.accent;
     final double clampedMaxSeconds = maxSeconds.clamp(0, 36000).toDouble();
+    final double clampedCurrentSeconds = currentSeconds
+      .clamp(0, clampedMaxSeconds > 0 ? clampedMaxSeconds : 1)
+      .toDouble();
 
     return Container(
       height: 90,
@@ -951,13 +971,13 @@ class _DesktopPlayerBar extends StatelessWidget {
                     child: Row(
                       children: <Widget>[
                         Text(
-                          '0:00',
+                          _formatSeconds(clampedCurrentSeconds),
                           style: TextStyle(color: colors.textTertiary, fontSize: 11),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Slider(
-                            value: 0,
+                            value: clampedCurrentSeconds,
                             min: 0,
                             max: clampedMaxSeconds > 0 ? clampedMaxSeconds : 1,
                             padding: EdgeInsets.zero,
