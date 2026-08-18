@@ -343,7 +343,7 @@ class SendspinPlayer implements PlaybackPlayer {
     return _queueState;
   }
 
-  // Subscription to Sendspin state stream
+  // Playback state stream subscription.
   Future<void> _ensureStateSubscription() async {
     if (_transportStateSubscription != null) {
       return;
@@ -365,23 +365,31 @@ class SendspinPlayer implements PlaybackPlayer {
     );
   }
 
+  // Apply playback state
+  // - update playback flags (state/volume/mute/repeat/shuffle)
+  // - keep duration from metadata
+  // - do not overwrite position anchor from this stream
   void _applyPlaybackState(PlaybackState next, {required bool emit}) {
     final PlaybackState previous = _playbackState;
-    _playbackState = next;
-
-    if (next.positionMillis != null) {
-      _positionAnchorMillis = next.positionMillis;
-      _positionAnchorUpdatedAt = DateTime.now();
-      _logger.debug(
-        'Sendspin progress anchor updated. PositionMillis=${next.positionMillis}, DurationMillis=${next.durationMillis}',
-      );
-    } else if (_positionAnchorMillis != null) {
-      _logger.debug('Sendspin progress anchor unchanged because incoming position is null.');
-    }
+    _playbackState = _playbackState.copyWith(
+      playbackState: next.playbackState,
+      volume: next.volume,
+      muted: next.muted,
+      repeatMode: next.repeatMode,
+      clearRepeatMode: next.repeatMode == null,
+      shuffleEnabled: next.shuffleEnabled,
+      clearShuffleEnabled: next.shuffleEnabled == null,
+      seekMaxMillis: next.seekMaxMillis,
+      clearSeekMaxMillis: next.seekMaxMillis == null,
+      durationMillis: next.durationMillis,
+      clearDurationMillis: next.durationMillis == null,
+    );
 
     if (next.playbackState == PlaybackStateType.playing && _positionAnchorMillis != null) {
       _startPositionInterpolation();
     } else {
+      // Reset anchor when not playing.
+      _resetPositionAnchor();
       if (_positionInterpolationTimer != null) {
         _logger.debug('Sendspin interpolation stopped. State=${next.playbackState.name}');
       }
@@ -402,7 +410,15 @@ class SendspinPlayer implements PlaybackPlayer {
     }
   }
 
-  // Position Interpolation from PlaybackState stream
+  void _resetPositionAnchor() {
+    _positionAnchorMillis = _playbackState.positionMillis;
+    _positionAnchorUpdatedAt = null;
+  }
+
+  // Position interpolation.
+  // - run only while playing
+  // - derive from anchor + elapsed wall time
+  // - clamp to track duration if known
   void _startPositionInterpolation() {
     if (_positionInterpolationTimer != null) {
       return;
@@ -443,6 +459,7 @@ class SendspinPlayer implements PlaybackPlayer {
     });
   }
 
+  // Emit playback state to the coordinator
   void _emitPlaybackState() {
     if (_stateController.isClosed) {
       return;
@@ -469,7 +486,7 @@ class SendspinPlayer implements PlaybackPlayer {
     throw StateError('Keine Sendspin QueueId verfuegbar.');
   }
 
-  // Subscribes to Music Assistant queue events.
+  // Queue event subscription
   Future<void> _ensureQueueEventSubscription() async {
     final hub = eventHubResolver();
     if (hub == null) {
@@ -489,11 +506,10 @@ class SendspinPlayer implements PlaybackPlayer {
     _logger.debug('Queue event subscription initialized.');
   }
 
-  // Applies queue changes from MA event stream.
-  // Strategy:
+  // Apply queue events.
   // - ignore unrelated queue ids
-  // - apply lightweight fields directly from event payload
-  // - refresh full item list only when queue_items_updated arrives
+  // - project queue metadata/settings
+  // - take progress anchor from queue timing
   Future<void> _onQueueEvent(MusicAssistantQueueEvent event) async {
     final String expectedQueueId = (_queueState.queueId ?? AppConfig.maAppId).trim();
     final String eventQueueId = (event.queueId ?? event.queue?.queueId ?? '').trim();
@@ -510,6 +526,8 @@ class SendspinPlayer implements PlaybackPlayer {
       case 'queue_updated':
         final PlayerQueue? queue = event.queue;
         if (queue != null) {
+          final PlaybackStateType nextPlaybackState = _mapQueuePlaybackState(queue.state);
+
           _queueState = _queueState.copyWith(
             queueId: queue.queueId.isNotEmpty
                 ? queue.queueId
@@ -520,7 +538,26 @@ class SendspinPlayer implements PlaybackPlayer {
             repeatMode: queue.repeatMode,
             dontStopTheMusicEnabled: queue.dontStopTheMusicEnabled,
           );
+
+          _playbackState = _playbackState.copyWith(
+            playbackState: nextPlaybackState,
+            durationMillis: _queueDurationToMillis(queue.currentItem?.duration),
+            clearDurationMillis: queue.currentItem?.duration == null,
+          );
+
+          if (queue.elapsedTime != null) {
+            _applyQueueTimingProgress(
+              (queue.elapsedTime! * 1000).round(),
+              source: 'queue_updated',
+            );
+          }
+
+          if (nextPlaybackState != PlaybackStateType.playing) {
+            _resetPositionAnchor();
+          }
+
           _emitQueueState();
+          _emitPlaybackState();
         }
         return;
       case 'queue_items_updated':
@@ -541,6 +578,18 @@ class SendspinPlayer implements PlaybackPlayer {
               _queueState.dontStopTheMusicEnabled,
         );
         _emitQueueState();
+        final PlaybackStateType nextPlaybackState = _mapQueuePlaybackState(event.queue?.state);
+        _playbackState = _playbackState.copyWith(playbackState: nextPlaybackState);
+        if (nextPlaybackState != PlaybackStateType.playing) {
+          _resetPositionAnchor();
+        }
+        if (event.queue?.elapsedTime != null) {
+          _applyQueueTimingProgress(
+            (event.queue!.elapsedTime! * 1000).round(),
+            source: 'queue_settings_updated',
+          );
+        }
+        _emitPlaybackState();
         return;
       case 'queue_removed':
         _queueState = _queueState.copyWith(
@@ -548,16 +597,107 @@ class SendspinPlayer implements PlaybackPlayer {
           items: const <QueueItem>[],
           clearCurrentIndex: true,
         );
+        _resetPositionAnchor();
+        _playbackState = _playbackState.copyWith(
+          playbackState: PlaybackStateType.idle,
+          clearPositionMillis: true,
+          clearDurationMillis: true,
+        );
         _emitQueueState();
+        _emitPlaybackState();
         return;
       case 'queue_time_updated':
-        // Position/progress is handled by sendspin playback state stream.
+        // Set position/progress from queue_time_updated.
+        final int? elapsedMillis = _extractElapsedMillis(event);
+        if (elapsedMillis != null) {
+          _applyQueueTimingProgress(elapsedMillis, source: 'queue_time_updated');
+        } else {
+          _logger.debug(
+            'Queue timing update ignored because elapsed time is missing. QueueId=$eventQueueId, Event=${event.event}',
+          );
+        }
       default:
         return;
     }
   }
 
-  // Initial/full queue refresh used during activate/connect.
+
+  void _applyQueueTimingProgress(int positionMillis, {required String source}) {
+    final int clampedPosition = positionMillis < 0 ? 0 : positionMillis;
+
+    _positionAnchorMillis = clampedPosition;
+    _positionAnchorUpdatedAt = DateTime.now();
+
+    _playbackState = _playbackState.copyWith(positionMillis: clampedPosition);
+
+    if (_playbackState.playbackState == PlaybackStateType.playing) {
+      _startPositionInterpolation();
+    }
+
+    _emitPlaybackState();
+    _logger.debug(
+      'Queue timing progress applied. Source=$source, PositionMillis=$clampedPosition, DurationMillis=${_playbackState.durationMillis}',
+    );
+  }
+
+
+  int? _extractElapsedMillis(MusicAssistantQueueEvent event) {
+    final dynamic raw = event.rawData;
+    if (raw is Map<String, dynamic>) {
+      final dynamic elapsedSeconds = raw['elapsed_time'];
+      if (elapsedSeconds is num) {
+        return (elapsedSeconds.toDouble() * 1000).round();
+      }
+
+      final dynamic elapsedSecondsAlt = raw['elapsed_time_seconds'];
+      if (elapsedSecondsAlt is num) {
+        return (elapsedSecondsAlt.toDouble() * 1000).round();
+      }
+
+      final dynamic elapsedMillis = raw['elapsed_time_ms'];
+      if (elapsedMillis is num) {
+        return elapsedMillis.round();
+      }
+    }
+
+    final double? queueElapsed = event.queue?.elapsedTime;
+    if (queueElapsed != null) {
+      return (queueElapsed * 1000).round();
+    }
+
+    return null;
+  }
+
+  int? _queueDurationToMillis(int? value) {
+    if (value == null) {
+      return null;
+    }
+
+    if (value <= 0) {
+      return 0;
+    }
+
+    // Queue duration is usually seconds. Keep large values that already look like milliseconds.
+    return value >= 100000 ? value : value * 1000;
+  }
+
+  PlaybackStateType _mapQueuePlaybackState(PlayerPlaybackState? state) {
+    switch (state) {
+      case PlayerPlaybackState.idle:
+        return PlaybackStateType.idle;
+      case PlayerPlaybackState.playing:
+        return PlaybackStateType.playing;
+      case PlayerPlaybackState.paused:
+        return PlaybackStateType.paused;
+      case PlayerPlaybackState.buffering:
+        return PlaybackStateType.buffering;
+      case PlayerPlaybackState.unknown:
+      case null:
+        return _playbackState.playbackState;
+    }
+  }
+
+  // Full queue refresh
   Future<void> _refreshQueueFromServer() async {
     final client = clientResolver();
     if (client == null) {
@@ -584,13 +724,31 @@ class SendspinPlayer implements PlaybackPlayer {
       repeatMode: queue.repeatMode,
       dontStopTheMusicEnabled: queue.dontStopTheMusicEnabled,
     );
+
+    final PlaybackStateType nextPlaybackState = _mapQueuePlaybackState(queue.state);
+    _playbackState = _playbackState.copyWith(
+      playbackState: nextPlaybackState,
+      durationMillis: _queueDurationToMillis(queue.currentItem?.duration),
+      clearDurationMillis: queue.currentItem?.duration == null,
+    );
+
+    if (queue.elapsedTime != null) {
+      _applyQueueTimingProgress(
+        (queue.elapsedTime! * 1000).round(),
+        source: 'refresh_queue',
+      );
+    } else if (nextPlaybackState != PlaybackStateType.playing) {
+      _resetPositionAnchor();
+      _emitPlaybackState();
+    }
+
     _emitQueueState();
     _logger.debug(
       'Queue refresh applied. QueueId=${_queueState.queueId ?? ''}, Items=${_queueState.items.length}, CurrentIndex=${_queueState.currentIndex}',
     );
   }
 
-  // Targeted item refresh for queue_items_updated.
+  // Targeted item refresh
   Future<void> _refreshQueueItemsFromServer(String queueId) async {
     final client = clientResolver();
     if (client == null) {
