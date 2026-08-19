@@ -140,7 +140,6 @@ class _SearchScreenState extends State<SearchScreen> {
                   items: _tracks,
                   isLoading: _isLoadingTracks,
                   emptyText: 'Keine Tracks gefunden.',
-                  rowMapper: mapTrackRowData,
                   maxItemsPerPage: 3,
                 )
               : MediaTableSectionDesktop<Track>(
@@ -148,8 +147,6 @@ class _SearchScreenState extends State<SearchScreen> {
                   items: _tracks,
                   isLoading: _isLoadingTracks,
                   emptyText: 'Keine Tracks gefunden.',
-                  rowMapper: mapTrackRowData,
-                  desktopColumns: buildTrackDesktopColumns(),
                   maxItemsPerPage: 10,
                   onRowDoubleTap: _onTrackRowDoubleTap,
                 ),
@@ -160,14 +157,12 @@ class _SearchScreenState extends State<SearchScreen> {
                   isLoading: _isLoadingAlbums,
                   items: _albums,
                   emptyText: 'Keine Alben gefunden.',
-                  cardMapper: albumRowCardData,
                 )
               : MediaRowSectionDesktop<Album>(
                   title: 'Alben',
                   isLoading: _isLoadingAlbums,
                   items: _albums,
                   emptyText: 'Keine Alben gefunden.',
-                  cardMapper: albumRowCardData,
                 ),
           const SizedBox(height: 18),
           isMobile
@@ -176,14 +171,12 @@ class _SearchScreenState extends State<SearchScreen> {
                   isLoading: _isLoadingPlaylists,
                   items: _playlists,
                   emptyText: 'Keine Playlists gefunden.',
-                  cardMapper: playlistRowCardData,
                 )
               : MediaRowSectionDesktop<Playlist>(
                   title: 'Playlists',
                   isLoading: _isLoadingPlaylists,
                   items: _playlists,
                   emptyText: 'Keine Playlists gefunden.',
-                  cardMapper: playlistRowCardData,
                 ),
           const SizedBox(height: 18),
           isMobile
@@ -192,14 +185,12 @@ class _SearchScreenState extends State<SearchScreen> {
                   isLoading: _isLoadingArtists,
                   items: _artists,
                   emptyText: 'Keine Artists gefunden.',
-                  cardMapper: artistRowCardData,
                 )
               : MediaRowSectionDesktop<Artist>(
                   title: 'Artists',
                   isLoading: _isLoadingArtists,
                   items: _artists,
                   emptyText: 'Keine Artists gefunden.',
-                  cardMapper: artistRowCardData,
                 ),
         ],
       ],

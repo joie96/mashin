@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
+import '../../../data/music_assistant/ma_models.dart';
 import '../selection/selection_session_controller.dart';
 import 'media_table_section_desktop.dart';
 
@@ -11,7 +12,6 @@ class MediaTableSectionMobile<T> extends StatefulWidget {
   final List<T> items;
   final bool isLoading;
   final String emptyText;
-  final MediaTableRowData Function(T item, int index) rowMapper;
   final int skeletonRowCount;
   final int maxItemsPerPage;
   final bool enableSelection;
@@ -25,7 +25,6 @@ class MediaTableSectionMobile<T> extends StatefulWidget {
     required this.items,
     required this.isLoading,
     required this.emptyText,
-    required this.rowMapper,
     this.skeletonRowCount = 10,
     this.maxItemsPerPage = 10,
     this.enableSelection = true,
@@ -292,8 +291,9 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
                   final int itemIndex = start + localIndex;
                   return SizedBox(
                     height: _mobileRowExtent,
-                    child: _MobileTableRow(
-                      data: widget.rowMapper(chunkItems[localIndex], itemIndex),
+                    child: _buildMobileTypedRow(
+                      item: chunkItems[localIndex],
+                      index: itemIndex,
                       isFirst: localIndex == 0,
                       isSelected: _selectedIndexes.contains(itemIndex),
                       selectionModeActive: _isMobileSelectionMode,
@@ -324,8 +324,9 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
       itemExtent: _mobileRowExtent,
       itemBuilder: (BuildContext context, int index) {
         final int itemIndex = index;
-        return _MobileTableRow(
-          data: widget.rowMapper(widget.items[index], itemIndex),
+        return _buildMobileTypedRow(
+          item: widget.items[index],
+          index: itemIndex,
           isFirst: index == 0,
           isSelected: _selectedIndexes.contains(itemIndex),
           selectionModeActive: _isMobileSelectionMode,
@@ -341,10 +342,286 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
 
     return list;
   }
+
+  Widget _buildMobileTypedRow({
+    required T item,
+    required int index,
+    required bool isFirst,
+    required bool isSelected,
+    required bool selectionModeActive,
+    required bool selectionEnabled,
+    required VoidCallback onToggleSelected,
+    required VoidCallback onLongPressSelect,
+    required VoidCallback? onTap,
+  }) {
+    final Object? typedItem = item;
+
+    if (typedItem is Track) {
+      return _buildMobileTableRowTrack(
+        item: typedItem,
+        isFirst: isFirst,
+        isSelected: isSelected,
+        selectionModeActive: selectionModeActive,
+        selectionEnabled: selectionEnabled,
+        onToggleSelected: onToggleSelected,
+        onLongPressSelect: onLongPressSelect,
+        onTap: onTap,
+      );
+    }
+
+    if (typedItem is QueueItem) {
+      return _buildMobileTableRowQueue(
+        item: typedItem,
+        isFirst: isFirst,
+        isSelected: isSelected,
+        selectionModeActive: selectionModeActive,
+        selectionEnabled: selectionEnabled,
+        onToggleSelected: onToggleSelected,
+        onLongPressSelect: onLongPressSelect,
+        onTap: onTap,
+      );
+    }
+
+    if (typedItem is Album) {
+      return _buildMobileTableRowAlbum(
+        item: typedItem,
+        isFirst: isFirst,
+        isSelected: isSelected,
+        selectionModeActive: selectionModeActive,
+        selectionEnabled: selectionEnabled,
+        onToggleSelected: onToggleSelected,
+        onLongPressSelect: onLongPressSelect,
+        onTap: onTap,
+      );
+    }
+
+    if (typedItem is Playlist) {
+      return _buildMobileTableRowPlaylist(
+        item: typedItem,
+        isFirst: isFirst,
+        isSelected: isSelected,
+        selectionModeActive: selectionModeActive,
+        selectionEnabled: selectionEnabled,
+        onToggleSelected: onToggleSelected,
+        onLongPressSelect: onLongPressSelect,
+        onTap: onTap,
+      );
+    }
+
+    if (typedItem is Artist) {
+      return _buildMobileTableRowArtist(
+        item: typedItem,
+        isFirst: isFirst,
+        isSelected: isSelected,
+        selectionModeActive: selectionModeActive,
+        selectionEnabled: selectionEnabled,
+        onToggleSelected: onToggleSelected,
+        onLongPressSelect: onLongPressSelect,
+        onTap: onTap,
+      );
+    }
+
+    return _buildMobileTableRowUnknown(
+      itemLabel: typedItem?.toString() ?? '-',
+      isFirst: isFirst,
+      isSelected: isSelected,
+      selectionModeActive: selectionModeActive,
+      selectionEnabled: selectionEnabled,
+      onToggleSelected: onToggleSelected,
+      onLongPressSelect: onLongPressSelect,
+      onTap: onTap,
+    );
+  }
+
+  Widget _buildMobileTableRowTrack({
+    required Track item,
+    required bool isFirst,
+    required bool isSelected,
+    required bool selectionModeActive,
+    required bool selectionEnabled,
+    required VoidCallback onToggleSelected,
+    required VoidCallback onLongPressSelect,
+    required VoidCallback? onTap,
+  }) {
+    return _buildMobileTableRowBase(
+      title: _prefer(item.name, 'Unknown Track'),
+      subtitle: _trackSubtitle(item),
+      trailing: _formatDuration(item.duration),
+      coverUrl: item.imageUri,
+      fallbackIcon: Icons.music_note_outlined,
+      providerLabel: _providerLabelFromId(item.provider),
+      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+      isFirst: isFirst,
+      isSelected: isSelected,
+      selectionModeActive: selectionModeActive,
+      selectionEnabled: selectionEnabled,
+      onToggleSelected: onToggleSelected,
+      onLongPressSelect: onLongPressSelect,
+      onTap: onTap,
+    );
+  }
+
+  Widget _buildMobileTableRowQueue({
+    required QueueItem item,
+    required bool isFirst,
+    required bool isSelected,
+    required bool selectionModeActive,
+    required bool selectionEnabled,
+    required VoidCallback onToggleSelected,
+    required VoidCallback onLongPressSelect,
+    required VoidCallback? onTap,
+  }) {
+    final String provider = item.mediaItem?.provider.trim() ?? '';
+    final String title = (item.mediaItem?.name.trim().isNotEmpty == true)
+        ? item.mediaItem!.name.trim()
+        : item.name.trim().isNotEmpty
+            ? item.name.trim()
+            : 'Unbekannter Titel';
+    final String subtitle = item.mediaItem?.artists
+            .map((artist) => artist.name.trim())
+            .where((name) => name.isNotEmpty)
+            .join(', ') ??
+        '';
+
+    return _buildMobileTableRowBase(
+      title: title,
+      subtitle: subtitle.isEmpty ? '-' : subtitle,
+      trailing: _formatQueueDuration((item.duration ?? 0).toDouble()),
+      coverUrl: item.mediaItem?.imageUri,
+      fallbackIcon: Icons.music_note_outlined,
+      providerLabel: _providerLabelFromId(provider),
+      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(provider),
+      isFirst: isFirst,
+      isSelected: isSelected,
+      selectionModeActive: selectionModeActive,
+      selectionEnabled: selectionEnabled,
+      onToggleSelected: onToggleSelected,
+      onLongPressSelect: onLongPressSelect,
+      onTap: onTap,
+    );
+  }
+
+  Widget _buildMobileTableRowAlbum({
+    required Album item,
+    required bool isFirst,
+    required bool isSelected,
+    required bool selectionModeActive,
+    required bool selectionEnabled,
+    required VoidCallback onToggleSelected,
+    required VoidCallback onLongPressSelect,
+    required VoidCallback? onTap,
+  }) {
+    return _buildMobileTableRowBase(
+      title: _prefer(item.name, 'Unknown Album'),
+      subtitle: _albumSubtitle(item),
+      trailing: item.year != null && item.year! > 0 ? '${item.year}' : '-',
+      coverUrl: item.imageUri,
+      fallbackIcon: Icons.album_outlined,
+      providerLabel: _providerLabelFromId(item.provider),
+      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+      isFirst: isFirst,
+      isSelected: isSelected,
+      selectionModeActive: selectionModeActive,
+      selectionEnabled: selectionEnabled,
+      onToggleSelected: onToggleSelected,
+      onLongPressSelect: onLongPressSelect,
+      onTap: onTap,
+    );
+  }
+
+  Widget _buildMobileTableRowPlaylist({
+    required Playlist item,
+    required bool isFirst,
+    required bool isSelected,
+    required bool selectionModeActive,
+    required bool selectionEnabled,
+    required VoidCallback onToggleSelected,
+    required VoidCallback onLongPressSelect,
+    required VoidCallback? onTap,
+  }) {
+    return _buildMobileTableRowBase(
+      title: _prefer(item.name, 'Unknown Playlist'),
+      subtitle: _playlistSubtitle(item),
+      trailing: item.isEditable ? 'Editierbar' : 'Readonly',
+      coverUrl: item.imageUri,
+      fallbackIcon: Icons.queue_music_outlined,
+      providerLabel: _providerLabelFromId(item.provider),
+      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+      isFirst: isFirst,
+      isSelected: isSelected,
+      selectionModeActive: selectionModeActive,
+      selectionEnabled: selectionEnabled,
+      onToggleSelected: onToggleSelected,
+      onLongPressSelect: onLongPressSelect,
+      onTap: onTap,
+    );
+  }
+
+  Widget _buildMobileTableRowArtist({
+    required Artist item,
+    required bool isFirst,
+    required bool isSelected,
+    required bool selectionModeActive,
+    required bool selectionEnabled,
+    required VoidCallback onToggleSelected,
+    required VoidCallback onLongPressSelect,
+    required VoidCallback? onTap,
+  }) {
+    return _buildMobileTableRowBase(
+      title: _prefer(item.name, 'Unknown Artist'),
+      subtitle: 'Artist',
+      trailing: _artistTertiary(item),
+      coverUrl: item.imageUri,
+      fallbackIcon: Icons.person_outlined,
+      providerLabel: _providerLabelFromId(item.provider),
+      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+      isFirst: isFirst,
+      isSelected: isSelected,
+      selectionModeActive: selectionModeActive,
+      selectionEnabled: selectionEnabled,
+      onToggleSelected: onToggleSelected,
+      onLongPressSelect: onLongPressSelect,
+      onTap: onTap,
+    );
+  }
+
+  Widget _buildMobileTableRowUnknown({
+    required String itemLabel,
+    required bool isFirst,
+    required bool isSelected,
+    required bool selectionModeActive,
+    required bool selectionEnabled,
+    required VoidCallback onToggleSelected,
+    required VoidCallback onLongPressSelect,
+    required VoidCallback? onTap,
+  }) {
+    return _buildMobileTableRowBase(
+      title: itemLabel,
+      subtitle: '-',
+      trailing: '-',
+      coverUrl: null,
+      fallbackIcon: Icons.music_note_outlined,
+      providerLabel: '-',
+      providerIconSvg: null,
+      isFirst: isFirst,
+      isSelected: isSelected,
+      selectionModeActive: selectionModeActive,
+      selectionEnabled: selectionEnabled,
+      onToggleSelected: onToggleSelected,
+      onLongPressSelect: onLongPressSelect,
+      onTap: onTap,
+    );
+  }
 }
 
-class _MobileTableRow extends StatefulWidget {
-  final MediaTableRowData data;
+class _MobileTableRowBase extends StatefulWidget {
+  final String title;
+  final String subtitle;
+  final String trailing;
+  final String? coverUrl;
+  final IconData fallbackIcon;
+  final String providerLabel;
+  final String? providerIconSvg;
   final bool isFirst;
   final bool isSelected;
   final bool selectionModeActive;
@@ -353,8 +630,14 @@ class _MobileTableRow extends StatefulWidget {
   final VoidCallback onLongPressSelect;
   final VoidCallback? onTap;
 
-  const _MobileTableRow({
-    required this.data,
+  const _MobileTableRowBase({
+    required this.title,
+    required this.subtitle,
+    required this.trailing,
+    required this.coverUrl,
+    required this.fallbackIcon,
+    required this.providerLabel,
+    required this.providerIconSvg,
     required this.isFirst,
     required this.isSelected,
     required this.selectionModeActive,
@@ -365,10 +648,10 @@ class _MobileTableRow extends StatefulWidget {
   });
 
   @override
-  State<_MobileTableRow> createState() => _MobileTableRowState();
+  State<_MobileTableRowBase> createState() => _MobileTableRowBaseState();
 }
 
-class _MobileTableRowState extends State<_MobileTableRow> {
+class _MobileTableRowBaseState extends State<_MobileTableRowBase> {
   bool _isHovered = false;
 
   @override
@@ -395,8 +678,8 @@ class _MobileTableRowState extends State<_MobileTableRow> {
           child: Row(
             children: <Widget>[
               MediaTableCover(
-                coverUrl: widget.data.coverUrl,
-                fallbackIcon: widget.data.fallbackIcon,
+                coverUrl: widget.coverUrl,
+                fallbackIcon: widget.fallbackIcon,
                 size: 52,
                 radius: 8,
               ),
@@ -407,14 +690,14 @@ class _MobileTableRowState extends State<_MobileTableRow> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: <Widget>[
                     Text(
-                      widget.data.title,
+                      widget.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: textStyles.mobileTitle,
                     ),
                     const SizedBox(height: 1),
                     Text(
-                      widget.data.subtitle,
+                      widget.subtitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: textStyles.mobileSubtitle,
@@ -426,7 +709,7 @@ class _MobileTableRowState extends State<_MobileTableRow> {
               SizedBox(
                 width: 52,
                 child: Text(
-                  widget.data.trailing,
+                  widget.trailing,
                   textAlign: TextAlign.right,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -437,8 +720,8 @@ class _MobileTableRowState extends State<_MobileTableRow> {
               SizedBox(
                 width: 20,
                 child: MediaProviderIcon(
-                  providerLabel: widget.data.providerLabel,
-                  iconSvg: widget.data.providerIconSvg,
+                  providerLabel: widget.providerLabel,
+                  iconSvg: widget.providerIconSvg,
                   size: 16,
                 ),
               ),
@@ -466,6 +749,40 @@ class _MobileTableRowState extends State<_MobileTableRow> {
       ),
     );
   }
+}
+
+Widget _buildMobileTableRowBase({
+  required String title,
+  required String subtitle,
+  required String trailing,
+  required String? coverUrl,
+  required IconData fallbackIcon,
+  required String providerLabel,
+  required String? providerIconSvg,
+  required bool isFirst,
+  required bool isSelected,
+  required bool selectionModeActive,
+  required bool selectionEnabled,
+  required VoidCallback onToggleSelected,
+  required VoidCallback onLongPressSelect,
+  required VoidCallback? onTap,
+}) {
+  return _MobileTableRowBase(
+    title: title,
+    subtitle: subtitle,
+    trailing: trailing,
+    coverUrl: coverUrl,
+    fallbackIcon: fallbackIcon,
+    providerLabel: providerLabel,
+    providerIconSvg: providerIconSvg,
+    isFirst: isFirst,
+    isSelected: isSelected,
+    selectionModeActive: selectionModeActive,
+    selectionEnabled: selectionEnabled,
+    onToggleSelected: onToggleSelected,
+    onLongPressSelect: onLongPressSelect,
+    onTap: onTap,
+  );
 }
 
 class _MobileTableRowSkeleton extends StatelessWidget {
@@ -565,4 +882,115 @@ class _MobileSelectionCheckBox extends StatelessWidget {
       ),
     );
   }
+}
+
+// Helper
+String _stripOrEmpty(String? value) {
+  return value?.trim() ?? '';
+}
+
+String _prefer(String primary, String fallback) {
+  final a = primary.trim();
+  if (a.isNotEmpty) {
+    return a;
+  }
+  return fallback.trim();
+}
+
+String _albumSubtitle(Album album) {
+  final artist = _firstArtistName(album.artists);
+  if (artist != '-') {
+    return artist;
+  }
+  return _mediaTypeLabel(album.albumType);
+}
+
+String _trackSubtitle(Track track) {
+  final artist = _firstArtistName(track.artists);
+  if (artist != '-') {
+    return artist;
+  }
+  return _prefer(track.album?.name ?? '', 'Track');
+}
+
+String _playlistSubtitle(Playlist playlist) {
+  final owner = _stripOrEmpty(playlist.owner);
+  if (owner.isNotEmpty) {
+    return owner;
+  }
+  return 'Playlist';
+}
+
+String _artistTertiary(Artist artist) {
+  final provider = _stripOrEmpty(artist.provider);
+  if (provider.isEmpty) {
+    return '-';
+  }
+
+  final cut = provider.split('--').first.trim();
+  return cut.isEmpty ? provider : cut;
+}
+
+String _mediaTypeLabel(String? rawType) {
+  final value = rawType?.trim().toLowerCase() ?? '';
+  if (value.isEmpty) {
+    return '-';
+  }
+
+  switch (value) {
+    case 'album':
+      return 'Album';
+    case 'single':
+      return 'Single';
+    case 'compilation':
+      return 'Compilation';
+    case 'ep':
+      return 'EP';
+    default:
+      return rawType ?? '-';
+  }
+}
+
+String _firstArtistName(List<Artist> artists) {
+  if (artists.isEmpty) {
+    return '-';
+  }
+
+  return artists.first.name;
+}
+
+String _formatDuration(int seconds) {
+  if (seconds <= 0) {
+    return '0:00';
+  }
+
+  final Duration duration = Duration(seconds: seconds);
+  final int minutes = duration.inMinutes;
+  final int remainingSeconds = duration.inSeconds % 60;
+  return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
+}
+
+String _formatQueueDuration(double seconds) {
+  if (!seconds.isFinite || seconds <= 0) {
+    return '0:00';
+  }
+
+  final int totalSeconds = seconds.round();
+  final int minutes = totalSeconds ~/ 60;
+  final int remainingSeconds = totalSeconds % 60;
+  return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
+}
+
+String _providerLabelFromId(String providerOrDomain) {
+  final String trimmed = providerOrDomain.trim();
+  if (trimmed.isEmpty) {
+    return '-';
+  }
+
+  final String domain = trimmed.split('--').first.trim();
+  if (domain.isEmpty) {
+    return trimmed;
+  }
+
+  return domain[0].toUpperCase() + domain.substring(1);
 }

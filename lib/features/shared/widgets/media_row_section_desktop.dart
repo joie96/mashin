@@ -4,26 +4,6 @@ import 'dart:math' as math;
 import '../../../app/theme/app_theme.dart';
 import '../../../data/music_assistant/ma_models.dart';
 
-class MediaRowCardData {
-  final IconData icon;
-  final String title;
-  final String? secondaryText;
-  final String? tertiaryText;
-  final String? coverUrl;
-  final bool showPlayOverlay;
-  final bool isCircularCover;
-
-  const MediaRowCardData({
-    required this.icon,
-    required this.title,
-    this.secondaryText,
-    this.tertiaryText,
-    this.coverUrl,
-    this.showPlayOverlay = true,
-    this.isCircularCover = false,
-  });
-}
-
 class MediaRowSectionDesktop<T> extends StatefulWidget {
   static const double _defaultHeight = 226;
   static const double _reservedTextHeight = 66;
@@ -32,7 +12,6 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
   final bool isLoading;
   final List<T> items;
   final String emptyText;
-  final MediaRowCardData Function(T item) cardMapper;
   final double minItemWith;
   final double itemSpacing;
   final int skeletonCount;
@@ -43,7 +22,6 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
     required this.isLoading,
     required this.items,
     required this.emptyText,
-    required this.cardMapper,
     this.minItemWith = 160,
     this.itemSpacing = 16,
     this.skeletonCount = 8,
@@ -206,17 +184,39 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
       itemCount: visibleItems.length,
       separatorBuilder: (_, _) => SizedBox(width: widget.itemSpacing),
       itemBuilder: (BuildContext context, int index) {
-        final data = widget.cardMapper(visibleItems[index]);
-        return _DesktopMediaRowCard(
+        final Object? item = visibleItems[index];
+        if (item is Album) {
+          return _buildDesktopMediaRowAlbum(
+            item: item,
+            itemWidth: resolvedItemWidth,
+            coverSize: resolvedCoverSize,
+          );
+        }
+        if (item is Playlist) {
+          return _buildDesktopMediaRowPlaylist(
+            item: item,
+            itemWidth: resolvedItemWidth,
+            coverSize: resolvedCoverSize,
+          );
+        }
+        if (item is Artist) {
+          return _buildDesktopMediaRowArtist(
+            item: item,
+            itemWidth: resolvedItemWidth,
+            coverSize: resolvedCoverSize,
+          );
+        }
+        if (item is Track) {
+          return _buildDesktopMediaRowTrack(
+            item: item,
+            itemWidth: resolvedItemWidth,
+            coverSize: resolvedCoverSize,
+          );
+        }
+
+        return _buildDesktopMediaRowUnknown(
           itemWidth: resolvedItemWidth,
           coverSize: resolvedCoverSize,
-          icon: data.icon,
-          title: data.title,
-          secondaryText: data.secondaryText,
-          tertiaryText: data.tertiaryText,
-          coverUrl: data.coverUrl,
-          showPlayOverlay: data.showPlayOverlay,
-          isCircularCover: data.isCircularCover,
         );
       },
     );
@@ -314,10 +314,37 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
                       scrollDirection: Axis.horizontal,
                       itemCount: widget.skeletonCount,
                       separatorBuilder: (_, _) => SizedBox(width: widget.itemSpacing),
-                      itemBuilder: (_, _) => _DesktopRowCardSkeleton(
-                        itemWidth: resolvedItemWidth,
-                        coverSize: resolvedCoverSize,
-                      ),
+                      itemBuilder: (_, _) {
+                        if (T == Album) {
+                          return _buildDesktopMediaRowAlbumSkeleton(
+                            itemWidth: resolvedItemWidth,
+                            coverSize: resolvedCoverSize,
+                          );
+                        }
+                        if (T == Playlist) {
+                          return _buildDesktopMediaRowPlaylistSkeleton(
+                            itemWidth: resolvedItemWidth,
+                            coverSize: resolvedCoverSize,
+                          );
+                        }
+                        if (T == Artist) {
+                          return _buildDesktopMediaRowArtistSkeleton(
+                            itemWidth: resolvedItemWidth,
+                            coverSize: resolvedCoverSize,
+                          );
+                        }
+                        if (T == Track) {
+                          return _buildDesktopMediaRowTrackSkeleton(
+                            itemWidth: resolvedItemWidth,
+                            coverSize: resolvedCoverSize,
+                          );
+                        }
+
+                        return _buildDesktopMediaRowUnknownSkeleton(
+                          itemWidth: resolvedItemWidth,
+                          coverSize: resolvedCoverSize,
+                        );
+                      },
                     )
                   : widget.items.isEmpty
                       ? Container(
@@ -414,177 +441,280 @@ class _RowLayoutMetrics {
   });
 }
 
-class _DesktopMediaRowCard extends StatelessWidget {
-  final double itemWidth;
-  final double coverSize;
-  final IconData icon;
-  final String title;
-  final String? secondaryText;
-  final String? tertiaryText;
-  final String? coverUrl;
-  final bool showPlayOverlay;
-  final bool isCircularCover;
-
-  const _DesktopMediaRowCard({
-    required this.itemWidth,
-    required this.coverSize,
-    required this.icon,
-    required this.title,
-    required this.secondaryText,
-    required this.tertiaryText,
-    required this.coverUrl,
-    required this.showPlayOverlay,
-    required this.isCircularCover,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.mashinColors;
-    final bool hasSecondary = secondaryText != null && secondaryText!.trim().isNotEmpty;
-    final bool hasTertiary = tertiaryText != null && tertiaryText!.trim().isNotEmpty;
-
-    return SizedBox(
-      width: itemWidth,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: <Widget>[
-          Stack(
-            children: <Widget>[
-              if (isCircularCover)
-                ClipOval(
-                  child: Container(
-                    width: coverSize,
-                    height: coverSize,
-                    color: colors.bgTertiary,
-                    child: coverUrl != null && coverUrl!.trim().isNotEmpty
-                        ? Image.network(
-                            coverUrl!,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) => Icon(icon, color: colors.accent, size: 34),
-                          )
-                        : Icon(icon, color: colors.accent, size: 34),
-                  ),
-                )
-              else
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Container(
-                    width: coverSize,
-                    height: coverSize,
-                    color: colors.bgTertiary,
-                    child: coverUrl != null && coverUrl!.trim().isNotEmpty
-                        ? Image.network(
-                            coverUrl!,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) => Icon(icon, color: colors.accent, size: 34),
-                          )
-                        : Icon(icon, color: colors.accent, size: 34),
-                  ),
-                ),
-              if (showPlayOverlay)
-                Positioned(
-                  left: 6,
-                  bottom: 6,
-                  child: Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.9),
-                      borderRadius: BorderRadius.circular(19),
-                      border: Border.all(color: colors.border),
-                    ),
-                    child: Icon(
-                      Icons.play_arrow_outlined,
-                      size: 22,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            title,
-            maxLines: 1,
-            textAlign: TextAlign.center,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          if (hasSecondary) ...<Widget>[
-            const SizedBox(height: 2),
-            Text(
-              secondaryText!,
-              maxLines: 1,
-              textAlign: TextAlign.center,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: colors.textSecondary, fontSize: 12),
-            ),
-          ],
-          if (hasTertiary) ...<Widget>[
-            const SizedBox(height: 2),
-            Text(
-              tertiaryText!,
-              maxLines: 1,
-              textAlign: TextAlign.center,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: colors.textSecondary, fontSize: 12),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
+// Typed desktop row builders
+Widget _buildDesktopMediaRowAlbum({
+  required Album item,
+  required double itemWidth,
+  required double coverSize,
+}) {
+  return _buildDesktopMediaRowItemBase(
+    itemWidth: itemWidth,
+    coverSize: coverSize,
+    icon: Icons.album_outlined,
+    title: _prefer(item.name, 'Unknown Album'),
+    secondaryText: _albumSubtitle(item),
+    tertiaryText: _albumTertiary(item),
+    coverUrl: item.imageUri ?? '',
+  );
 }
 
-class _DesktopRowCardSkeleton extends StatelessWidget {
-  final double itemWidth;
-  final double coverSize;
+Widget _buildDesktopMediaRowPlaylist({
+  required Playlist item,
+  required double itemWidth,
+  required double coverSize,
+}) {
+  return _buildDesktopMediaRowItemBase(
+    itemWidth: itemWidth,
+    coverSize: coverSize,
+    icon: Icons.queue_music_outlined,
+    title: _prefer(item.name, 'Unknown Playlist'),
+    secondaryText: _playlistSubtitle(item),
+    tertiaryText: _playlistTertiary(item),
+    coverUrl: item.imageUri ?? '',
+  );
+}
 
-  const _DesktopRowCardSkeleton({
-    required this.itemWidth,
-    required this.coverSize,
-  });
+Widget _buildDesktopMediaRowArtist({
+  required Artist item,
+  required double itemWidth,
+  required double coverSize,
+}) {
+  return _buildDesktopMediaRowItemBase(
+    itemWidth: itemWidth,
+    coverSize: coverSize,
+    icon: Icons.person_outlined,
+    title: _prefer(item.name, 'Unknown Artist'),
+    secondaryText: 'Artist',
+    tertiaryText: _artistTertiary(item),
+    coverUrl: item.imageUri ?? '',
+    isCircularCover: true,
+  );
+}
 
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.mashinColors;
+Widget _buildDesktopMediaRowTrack({
+  required Track item,
+  required double itemWidth,
+  required double coverSize,
+}) {
+  return _buildDesktopMediaRowItemBase(
+    itemWidth: itemWidth,
+    coverSize: coverSize,
+    icon: Icons.music_note_outlined,
+    title: _prefer(item.name, 'Unknown Track'),
+    secondaryText: _trackSubtitle(item),
+    tertiaryText: _trackTertiary(item),
+    coverUrl: item.imageUri ?? '',
+  );
+}
 
-    Widget line(double width) {
-      return Container(
-        width: width,
-        height: 10,
-        decoration: BoxDecoration(
-          color: colors.bgTertiary,
-          borderRadius: BorderRadius.circular(6),
+Widget _buildDesktopMediaRowUnknown({
+  required double itemWidth,
+  required double coverSize,
+}) {
+  return _buildDesktopMediaRowItemBase(
+    itemWidth: itemWidth,
+    coverSize: coverSize,
+    icon: Icons.music_note_outlined,
+    title: 'Unknown Item',
+    secondaryText: '-',
+    tertiaryText: '-',
+    coverUrl: '',
+  );
+}
+
+Widget _buildDesktopMediaRowItemBase({
+  required double itemWidth,
+  required double coverSize,
+  required IconData icon,
+  required String title,
+  required String? secondaryText,
+  required String? tertiaryText,
+  required String? coverUrl,
+  bool showPlayOverlay = true,
+  bool isCircularCover = false,
+}) {
+  return Builder(
+    builder: (BuildContext context) {
+      final colors = context.mashinColors;
+      final bool hasSecondary = secondaryText != null && secondaryText.trim().isNotEmpty;
+      final bool hasTertiary = tertiaryText != null && tertiaryText.trim().isNotEmpty;
+
+      return SizedBox(
+        width: itemWidth,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: <Widget>[
+            Stack(
+              children: <Widget>[
+                if (isCircularCover)
+                  ClipOval(
+                    child: Container(
+                      width: coverSize,
+                      height: coverSize,
+                      color: colors.bgTertiary,
+                      child: coverUrl != null && coverUrl.trim().isNotEmpty
+                          ? Image.network(
+                              coverUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) => Icon(icon, color: colors.accent, size: 34),
+                            )
+                          : Icon(icon, color: colors.accent, size: 34),
+                    ),
+                  )
+                else
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      width: coverSize,
+                      height: coverSize,
+                      color: colors.bgTertiary,
+                      child: coverUrl != null && coverUrl.trim().isNotEmpty
+                          ? Image.network(
+                              coverUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) => Icon(icon, color: colors.accent, size: 34),
+                            )
+                          : Icon(icon, color: colors.accent, size: 34),
+                    ),
+                  ),
+                if (showPlayOverlay)
+                  Positioned(
+                    left: 6,
+                    bottom: 6,
+                    child: Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.9),
+                        borderRadius: BorderRadius.circular(19),
+                        border: Border.all(color: colors.border),
+                      ),
+                      child: Icon(
+                        Icons.play_arrow_outlined,
+                        size: 22,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              title,
+              maxLines: 1,
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            if (hasSecondary) ...<Widget>[
+              const SizedBox(height: 2),
+              Text(
+                secondaryText!,
+                maxLines: 1,
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: colors.textSecondary, fontSize: 12),
+              ),
+            ],
+            if (hasTertiary) ...<Widget>[
+              const SizedBox(height: 2),
+              Text(
+                tertiaryText!,
+                maxLines: 1,
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: colors.textSecondary, fontSize: 12),
+              ),
+            ],
+          ],
         ),
       );
-    }
-
-    return SizedBox(
-      width: itemWidth,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: <Widget>[
-          Container(
-            width: coverSize,
-            height: coverSize,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              color: colors.bgTertiary,
-            ),
-          ),
-          const SizedBox(height: 8),
-          line(108),
-          const SizedBox(height: 6),
-          line(86),
-          const SizedBox(height: 6),
-          line(72),
-        ],
-      ),
-    );
-  }
+    },
+  );
 }
 
+// Typed desktop row skeleton builders
+Widget _buildDesktopMediaRowAlbumSkeleton({
+  required double itemWidth,
+  required double coverSize,
+}) {
+  return _buildDesktopMediaRowSkeletonBase(itemWidth: itemWidth, coverSize: coverSize);
+}
+
+Widget _buildDesktopMediaRowPlaylistSkeleton({
+  required double itemWidth,
+  required double coverSize,
+}) {
+  return _buildDesktopMediaRowSkeletonBase(itemWidth: itemWidth, coverSize: coverSize);
+}
+
+Widget _buildDesktopMediaRowArtistSkeleton({
+  required double itemWidth,
+  required double coverSize,
+}) {
+  return _buildDesktopMediaRowSkeletonBase(itemWidth: itemWidth, coverSize: coverSize);
+}
+
+Widget _buildDesktopMediaRowTrackSkeleton({
+  required double itemWidth,
+  required double coverSize,
+}) {
+  return _buildDesktopMediaRowSkeletonBase(itemWidth: itemWidth, coverSize: coverSize);
+}
+
+Widget _buildDesktopMediaRowUnknownSkeleton({
+  required double itemWidth,
+  required double coverSize,
+}) {
+  return _buildDesktopMediaRowSkeletonBase(itemWidth: itemWidth, coverSize: coverSize);
+}
+
+Widget _buildDesktopMediaRowSkeletonBase({
+  required double itemWidth,
+  required double coverSize,
+}) {
+  return Builder(
+    builder: (BuildContext context) {
+      final colors = context.mashinColors;
+
+      Widget line(double width) {
+        return Container(
+          width: width,
+          height: 10,
+          decoration: BoxDecoration(
+            color: colors.bgTertiary,
+            borderRadius: BorderRadius.circular(6),
+          ),
+        );
+      }
+
+      return SizedBox(
+        width: itemWidth,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: <Widget>[
+            Container(
+              width: coverSize,
+              height: coverSize,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                color: colors.bgTertiary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            line(108),
+            const SizedBox(height: 6),
+            line(86),
+            const SizedBox(height: 6),
+            line(72),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+// Helper
 String _stripOrEmpty(String? value) {
   return value?.trim() ?? '';
 }
@@ -668,47 +798,6 @@ String _mediaTypeLabel(String? rawType) {
     default:
       return rawType ?? '-';
   }
-}
-
-MediaRowCardData albumRowCardData(Album album) {
-  return MediaRowCardData(
-    icon: Icons.album_outlined,
-    title: _prefer(album.name, 'Unknown Album'),
-    secondaryText: _albumSubtitle(album),
-    tertiaryText: _albumTertiary(album),
-    coverUrl: album.imageUri ?? '',
-  );
-}
-
-MediaRowCardData playlistRowCardData(Playlist playlist) {
-  return MediaRowCardData(
-    icon: Icons.queue_music_outlined,
-    title: _prefer(playlist.name, 'Unknown Playlist'),
-    secondaryText: _playlistSubtitle(playlist),
-    tertiaryText: _playlistTertiary(playlist),
-    coverUrl: playlist.imageUri ?? '',
-  );
-}
-
-MediaRowCardData artistRowCardData(Artist artist) {
-  return MediaRowCardData(
-    icon: Icons.person_outlined,
-    title: _prefer(artist.name, 'Unknown Artist'),
-    secondaryText: 'Artist',
-    tertiaryText: _artistTertiary(artist),
-    coverUrl: artist.imageUri ?? '',
-    isCircularCover: true,
-  );
-}
-
-MediaRowCardData trackRowCardData(Track track) {
-  return MediaRowCardData(
-    icon: Icons.music_note_outlined,
-    title: _prefer(track.name, 'Unknown Track'),
-    secondaryText: _trackSubtitle(track),
-    tertiaryText: _trackTertiary(track),
-    coverUrl: track.imageUri ?? '',
-  );
 }
 
 String firstArtistName(List<Artist> artists) {

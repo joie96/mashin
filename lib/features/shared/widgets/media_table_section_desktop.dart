@@ -15,8 +15,6 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
   final List<T> items;
   final bool isLoading;
   final String emptyText;
-  final MediaTableRowData Function(T item, int index) rowMapper;
-  final List<DesktopTableColumn<T>> desktopColumns;
   final int skeletonRowCount;
   final int maxItemsPerPage;
   final bool enableSelection;
@@ -34,8 +32,6 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
     required this.items,
     required this.isLoading,
     required this.emptyText,
-    required this.rowMapper,
-    required this.desktopColumns,
     this.skeletonRowCount = 10,
     this.maxItemsPerPage = 10,
     this.enableSelection = true,
@@ -217,7 +213,9 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
   }
 
   void _handleRowPointerDown(int index, PointerDownEvent event) {
-    if (!widget.enableSelection || event.kind != PointerDeviceKind.mouse || event.buttons != kPrimaryMouseButton) {
+    if (!widget.enableSelection ||
+        event.kind != PointerDeviceKind.mouse ||
+        (event.buttons & kPrimaryMouseButton) == 0) {
       return;
     }
 
@@ -382,7 +380,6 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
     required bool constrainToHeight,
     required bool fillScrollableViewport,
   }) {
-    final columns = widget.desktopColumns;
     final bool useInternalScroll = fillScrollableViewport || constrainToHeight;
     final double pagedContentHeight = _chunkSize * _desktopRowExtent;
 
@@ -397,10 +394,8 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
         itemCount: widget.skeletonRowCount,
         itemExtent: _desktopRowExtent,
         itemBuilder: (BuildContext context, int index) {
-          return _DesktopTableRowSkeleton<T>(
-            columns: columns,
+          return _buildDesktopTypedSkeletonRow(
             isFirst: index == 0,
-            showSelection: widget.enableSelection,
           );
         },
       );
@@ -408,13 +403,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
       return Column(
         mainAxisSize: useInternalScroll ? MainAxisSize.max : MainAxisSize.min,
         children: <Widget>[
-          _DesktopTableHeader<T>(
-            columns: columns,
-            showSelection: widget.enableSelection,
-            isAllSelected: _isAllSelected,
-            onToggleSelectAll: _toggleAllSelectedIndexes,
-            onMoreTap: widget.onHeaderMoreTap,
-          ),
+          _buildDesktopTypedHeader(),
           if (useInternalScroll)
             Expanded(child: body)
           else
@@ -428,13 +417,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
       return Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          _DesktopTableHeader<T>(
-            columns: columns,
-            showSelection: widget.enableSelection,
-            isAllSelected: false,
-            onToggleSelectAll: _toggleAllSelectedIndexes,
-            onMoreTap: widget.onHeaderMoreTap,
-          ),
+          _buildDesktopTypedHeader(),
           Padding(
             padding: const EdgeInsets.all(16),
             child: Align(
@@ -482,24 +465,12 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
                   itemExtent: _desktopRowExtent,
                   itemBuilder: (BuildContext context, int index) {
                     final int itemIndex = start + index;
-                    return _DesktopTableRow<T>(
-                      columns: columns,
+                    return _buildDesktopTypedRow(
                       item: chunkItems[index],
                       index: itemIndex,
                       isFirst: index == 0,
                       isSelected: _selectedIndexes.contains(itemIndex),
-                      isFavorite: _isItemFavorite(chunkItems[index], itemIndex),
-                      selectionEnabled: widget.enableSelection,
                       onToggleSelected: () => _toggleSelectedIndex(itemIndex),
-                      onFavoriteTap: widget.onRowFavoriteTap == null
-                          ? null
-                          : () => widget.onRowFavoriteTap!(chunkItems[index], itemIndex),
-                      onMoreTap: widget.onRowMoreTap == null
-                          ? null
-                          : () => widget.onRowMoreTap!(chunkItems[index], itemIndex),
-                        onDoubleTap: widget.onRowDoubleTap == null
-                          ? null
-                          : () => widget.onRowDoubleTap!(chunkItems[index], itemIndex),
                       onPointerDown: (PointerDownEvent event) => _handleRowPointerDown(itemIndex, event),
                     );
                   },
@@ -518,19 +489,12 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
             itemExtent: _desktopRowExtent,
             itemBuilder: (BuildContext context, int index) {
               final int itemIndex = index;
-              return _DesktopTableRow<T>(
-                columns: columns,
+              return _buildDesktopTypedRow(
                 item: widget.items[index],
                 index: itemIndex,
                 isFirst: index == 0,
                 isSelected: _selectedIndexes.contains(itemIndex),
-                isFavorite: _isItemFavorite(widget.items[index], itemIndex),
-                selectionEnabled: widget.enableSelection,
                 onToggleSelected: () => _toggleSelectedIndex(itemIndex),
-                onFavoriteTap:
-                    widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(widget.items[index], itemIndex),
-                onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(widget.items[index], itemIndex),
-                onDoubleTap: widget.onRowDoubleTap == null ? null : () => widget.onRowDoubleTap!(widget.items[index], itemIndex),
                 onPointerDown: (PointerDownEvent event) => _handleRowPointerDown(itemIndex, event),
               );
             },
@@ -539,13 +503,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
     return Column(
       mainAxisSize: useInternalScroll ? MainAxisSize.max : MainAxisSize.min,
       children: <Widget>[
-        _DesktopTableHeader<T>(
-          columns: columns,
-          showSelection: widget.enableSelection,
-          isAllSelected: _isAllSelected,
-          onToggleSelectAll: _toggleAllSelectedIndexes,
-          onMoreTap: widget.onHeaderMoreTap,
-        ),
+        _buildDesktopTypedHeader(),
         if (useInternalScroll)
           Expanded(child: list)
         else if (_isPagingEnabled)
@@ -557,6 +515,167 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
           list,
       ],
     );
+  }
+
+  // Typed desktop table builders
+  Widget _buildDesktopTypedHeader() {
+    if (T == Album) {
+      return _buildDesktopTableHeaderAlbum(
+        showSelection: widget.enableSelection,
+        isAllSelected: _isAllSelected,
+        onToggleSelectAll: _toggleAllSelectedIndexes,
+        onMoreTap: widget.onHeaderMoreTap,
+      );
+    }
+    if (T == Playlist) {
+      return _buildDesktopTableHeaderPlaylist(
+        showSelection: widget.enableSelection,
+        isAllSelected: _isAllSelected,
+        onToggleSelectAll: _toggleAllSelectedIndexes,
+        onMoreTap: widget.onHeaderMoreTap,
+      );
+    }
+    if (T == Artist) {
+      return _buildDesktopTableHeaderArtist(
+        showSelection: widget.enableSelection,
+        isAllSelected: _isAllSelected,
+        onToggleSelectAll: _toggleAllSelectedIndexes,
+        onMoreTap: widget.onHeaderMoreTap,
+      );
+    }
+    if (T == Track || T == QueueItem) {
+      return _buildDesktopTableHeaderTrack(
+        showSelection: widget.enableSelection,
+        isAllSelected: _isAllSelected,
+        onToggleSelectAll: _toggleAllSelectedIndexes,
+        onMoreTap: widget.onHeaderMoreTap,
+      );
+    }
+
+    return _buildDesktopTableHeaderTrack(
+      showSelection: widget.enableSelection,
+      isAllSelected: _isAllSelected,
+      onToggleSelectAll: _toggleAllSelectedIndexes,
+      onMoreTap: widget.onHeaderMoreTap,
+    );
+  }
+
+  Widget _buildDesktopTypedRow({
+    required T item,
+    required int index,
+    required bool isFirst,
+    required bool isSelected,
+    required VoidCallback onToggleSelected,
+    required ValueChanged<PointerDownEvent> onPointerDown,
+  }) {
+    final Object? typedItem = item;
+
+    if (typedItem is Album) {
+      return _buildDesktopTableRowAlbum(
+        item: typedItem,
+        index: index,
+        isFirst: isFirst,
+        isSelected: isSelected,
+        isFavorite: _isItemFavorite(item, index),
+        selectionEnabled: widget.enableSelection,
+        onToggleSelected: onToggleSelected,
+        onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(item, index),
+        onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item, index),
+        onDoubleTap: widget.onRowDoubleTap == null ? null : () => widget.onRowDoubleTap!(item, index),
+        onPointerDown: onPointerDown,
+      );
+    }
+    if (typedItem is Playlist) {
+      return _buildDesktopTableRowPlaylist(
+        item: typedItem,
+        index: index,
+        isFirst: isFirst,
+        isSelected: isSelected,
+        isFavorite: _isItemFavorite(item, index),
+        selectionEnabled: widget.enableSelection,
+        onToggleSelected: onToggleSelected,
+        onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(item, index),
+        onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item, index),
+        onDoubleTap: widget.onRowDoubleTap == null ? null : () => widget.onRowDoubleTap!(item, index),
+        onPointerDown: onPointerDown,
+      );
+    }
+    if (typedItem is Artist) {
+      return _buildDesktopTableRowArtist(
+        item: typedItem,
+        index: index,
+        isFirst: isFirst,
+        isSelected: isSelected,
+        isFavorite: _isItemFavorite(item, index),
+        selectionEnabled: widget.enableSelection,
+        onToggleSelected: onToggleSelected,
+        onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(item, index),
+        onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item, index),
+        onDoubleTap: widget.onRowDoubleTap == null ? null : () => widget.onRowDoubleTap!(item, index),
+        onPointerDown: onPointerDown,
+      );
+    }
+    if (typedItem is Track) {
+      return _buildDesktopTableRowTrack(
+        item: typedItem,
+        index: index,
+        isFirst: isFirst,
+        isSelected: isSelected,
+        isFavorite: _isItemFavorite(item, index),
+        selectionEnabled: widget.enableSelection,
+        onToggleSelected: onToggleSelected,
+        onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(item, index),
+        onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item, index),
+        onDoubleTap: widget.onRowDoubleTap == null ? null : () => widget.onRowDoubleTap!(item, index),
+        onPointerDown: onPointerDown,
+      );
+    }
+    if (typedItem is QueueItem) {
+      return _buildDesktopTableRowQueue(
+        item: typedItem,
+        index: index,
+        isFirst: isFirst,
+        isSelected: isSelected,
+        isFavorite: _isItemFavorite(item, index),
+        selectionEnabled: widget.enableSelection,
+        onToggleSelected: onToggleSelected,
+        onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(item, index),
+        onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item, index),
+        onDoubleTap: widget.onRowDoubleTap == null ? null : () => widget.onRowDoubleTap!(item, index),
+        onPointerDown: onPointerDown,
+      );
+    }
+
+    return _buildDesktopTableRowUnknown(
+      itemLabel: typedItem?.toString() ?? '-',
+      isFirst: isFirst,
+      isSelected: isSelected,
+      isFavorite: _isItemFavorite(item, index),
+      selectionEnabled: widget.enableSelection,
+      onToggleSelected: onToggleSelected,
+      onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(item, index),
+      onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item, index),
+      onDoubleTap: widget.onRowDoubleTap == null ? null : () => widget.onRowDoubleTap!(item, index),
+      onPointerDown: onPointerDown,
+    );
+  }
+
+  // Typed desktop table skeleton builders
+  Widget _buildDesktopTypedSkeletonRow({required bool isFirst}) {
+    if (T == Album) {
+      return _buildDesktopTableRowAlbumSkeleton(isFirst: isFirst, showSelection: widget.enableSelection);
+    }
+    if (T == Playlist) {
+      return _buildDesktopTableRowPlaylistSkeleton(isFirst: isFirst, showSelection: widget.enableSelection);
+    }
+    if (T == Artist) {
+      return _buildDesktopTableRowArtistSkeleton(isFirst: isFirst, showSelection: widget.enableSelection);
+    }
+    if (T == Track || T == QueueItem) {
+      return _buildDesktopTableRowTrackSkeleton(isFirst: isFirst, showSelection: widget.enableSelection);
+    }
+
+    return _buildDesktopTableRowUnknownSkeleton(isFirst: isFirst, showSelection: widget.enableSelection);
   }
 
   Widget _buildPaginationControls(BuildContext context) {
@@ -587,98 +706,516 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
   }
 
 }
+// Typed desktop table widgets
+Widget _buildDesktopTableHeaderTrack({
+  required bool showSelection,
+  required bool isAllSelected,
+  required VoidCallback onToggleSelectAll,
+  required VoidCallback? onMoreTap,
+}) {
+  return _buildDesktopTableHeaderBase(
+    cells: <Widget>[
+      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopHeaderText('#', TextAlign.left)),
+      _buildDesktopTableSizedCell(width: 62, child: _buildDesktopHeaderText('Cover', TextAlign.left)),
+      _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopHeaderText('Titel', TextAlign.left)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopHeaderText('Artist', TextAlign.left)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopHeaderText('Album', TextAlign.left)),
+      _buildDesktopTableSizedCell(width: 76, child: _buildDesktopHeaderText('Länge', TextAlign.right)),
+      _buildDesktopTableSizedCell(width: 72, child: _buildDesktopHeaderText('Quelle', TextAlign.center)),
+    ],
+    showSelection: showSelection,
+    isAllSelected: isAllSelected,
+    onToggleSelectAll: onToggleSelectAll,
+    onMoreTap: onMoreTap,
+  );
+}
 
+Widget _buildDesktopTableHeaderAlbum({
+  required bool showSelection,
+  required bool isAllSelected,
+  required VoidCallback onToggleSelectAll,
+  required VoidCallback? onMoreTap,
+}) {
+  return _buildDesktopTableHeaderBase(
+    cells: <Widget>[
+      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopHeaderText('#', TextAlign.left)),
+      _buildDesktopTableSizedCell(width: 62, child: _buildDesktopHeaderText('Cover', TextAlign.left)),
+      _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopHeaderText('Titel', TextAlign.left)),
+      _buildDesktopTableSizedCell(flex: 4, child: _buildDesktopHeaderText('Artist', TextAlign.left)),
+      _buildDesktopTableSizedCell(flex: 2, child: _buildDesktopHeaderText('Typ', TextAlign.left)),
+      _buildDesktopTableSizedCell(width: 64, child: _buildDesktopHeaderText('Jahr', TextAlign.right)),
+      _buildDesktopTableSizedCell(width: 72, child: _buildDesktopHeaderText('Quelle', TextAlign.center)),
+    ],
+    showSelection: showSelection,
+    isAllSelected: isAllSelected,
+    onToggleSelectAll: onToggleSelectAll,
+    onMoreTap: onMoreTap,
+  );
+}
 
-// Desktop Table Widgets
-class _DesktopTableHeader<T> extends StatelessWidget {
-  final List<DesktopTableColumn<T>> columns;
-  final bool showSelection;
-  final bool isAllSelected;
-  final VoidCallback onToggleSelectAll;
-  final VoidCallback? onMoreTap;
+Widget _buildDesktopTableHeaderPlaylist({
+  required bool showSelection,
+  required bool isAllSelected,
+  required VoidCallback onToggleSelectAll,
+  required VoidCallback? onMoreTap,
+}) {
+  return _buildDesktopTableHeaderBase(
+    cells: <Widget>[
+      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopHeaderText('#', TextAlign.left)),
+      _buildDesktopTableSizedCell(width: 62, child: _buildDesktopHeaderText('Cover', TextAlign.left)),
+      _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopHeaderText('Titel', TextAlign.left)),
+      _buildDesktopTableSizedCell(flex: 4, child: _buildDesktopHeaderText('Owner', TextAlign.left)),
+      _buildDesktopTableSizedCell(flex: 2, child: _buildDesktopHeaderText('Status', TextAlign.left)),
+      _buildDesktopTableSizedCell(width: 72, child: _buildDesktopHeaderText('Quelle', TextAlign.center)),
+    ],
+    showSelection: showSelection,
+    isAllSelected: isAllSelected,
+    onToggleSelectAll: onToggleSelectAll,
+    onMoreTap: onMoreTap,
+  );
+}
 
-  const _DesktopTableHeader({
-    required this.columns,
-    required this.showSelection,
-    required this.isAllSelected,
-    required this.onToggleSelectAll,
-    required this.onMoreTap,
-  });
+Widget _buildDesktopTableHeaderArtist({
+  required bool showSelection,
+  required bool isAllSelected,
+  required VoidCallback onToggleSelectAll,
+  required VoidCallback? onMoreTap,
+}) {
+  return _buildDesktopTableHeaderBase(
+    cells: <Widget>[
+      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopHeaderText('#', TextAlign.left)),
+      _buildDesktopTableSizedCell(width: 62, child: _buildDesktopHeaderText('Bild', TextAlign.left)),
+      _buildDesktopTableSizedCell(flex: 6, child: _buildDesktopHeaderText('Artist', TextAlign.left)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopHeaderText('Provider', TextAlign.left)),
+      _buildDesktopTableSizedCell(width: 72, child: _buildDesktopHeaderText('Quelle', TextAlign.center)),
+    ],
+    showSelection: showSelection,
+    isAllSelected: isAllSelected,
+    onToggleSelectAll: onToggleSelectAll,
+    onMoreTap: onMoreTap,
+  );
+}
 
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.mashinColors;
-    final textStyles = context.mashinTableTextStyles;
-
-    return Container(
-      decoration: BoxDecoration(
-        border: Border(
-          top: BorderSide(color: colors.border),
-          bottom: BorderSide(color: colors.border),
+Widget _buildDesktopTableRowTrack({
+  required Track item,
+  required int index,
+  required bool isFirst,
+  required bool isSelected,
+  required bool isFavorite,
+  required bool selectionEnabled,
+  required VoidCallback onToggleSelected,
+  required VoidCallback? onFavoriteTap,
+  required VoidCallback? onMoreTap,
+  required VoidCallback? onDoubleTap,
+  required ValueChanged<PointerDownEvent>? onPointerDown,
+}) {
+  return _buildDesktopTableRowBase(
+    cells: <Widget>[
+      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopBodyText('${index + 1}', TextAlign.left, DesktopTextTone.tertiary)),
+      _buildDesktopTableSizedCell(
+        width: 62,
+        child: MediaTableCover(coverUrl: item.imageUri, fallbackIcon: Icons.music_note_outlined, size: 48, radius: 8),
+      ),
+      _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopBodyText(_prefer(item.name, 'Unknown Track'), TextAlign.left, DesktopTextTone.primary)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopBodyText(_trackSubtitle(item), TextAlign.left, DesktopTextTone.secondary)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopBodyText(_prefer(item.album?.name ?? '', '-'), TextAlign.left, DesktopTextTone.secondary)),
+      _buildDesktopTableSizedCell(width: 76, child: _buildDesktopBodyText(formatDuration(item.duration), TextAlign.right, DesktopTextTone.tertiary)),
+      _buildDesktopTableSizedCell(
+        width: 72,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            MediaProviderIcon(
+              providerLabel: _providerLabelFromId(item.provider),
+              iconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+              size: 16,
+            ),
+          ],
         ),
       ),
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        children: <Widget>[
-          ...columns
-              .map(
-                (column) => buildDesktopCellWidget(
-                  flex: column.flex,
-                  width: column.width,
-                  child: Padding(
-                    padding: column.padding,
-                    child: Text(
-                      column.header,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: column.textAlign,
-                      style: textStyles.header,
-                    ),
-                  ),
-                ),
-              ),
-          SizedBox(
-            width: 40,
-            child: Center(
-              child: Icon(
-                Icons.favorite_border_outlined,
-                size: 18,
-                color: colors.textSecondary,
-              ),
+    ],
+    isFirst: isFirst,
+    isSelected: isSelected,
+    isFavorite: isFavorite,
+    selectionEnabled: selectionEnabled,
+    onToggleSelected: onToggleSelected,
+    onFavoriteTap: onFavoriteTap,
+    onMoreTap: onMoreTap,
+    onDoubleTap: onDoubleTap,
+    onPointerDown: onPointerDown,
+  );
+}
+
+Widget _buildDesktopTableRowAlbum({
+  required Album item,
+  required int index,
+  required bool isFirst,
+  required bool isSelected,
+  required bool isFavorite,
+  required bool selectionEnabled,
+  required VoidCallback onToggleSelected,
+  required VoidCallback? onFavoriteTap,
+  required VoidCallback? onMoreTap,
+  required VoidCallback? onDoubleTap,
+  required ValueChanged<PointerDownEvent>? onPointerDown,
+}) {
+  return _buildDesktopTableRowBase(
+    cells: <Widget>[
+      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopBodyText('${index + 1}', TextAlign.left, DesktopTextTone.tertiary)),
+      _buildDesktopTableSizedCell(
+        width: 62,
+        child: MediaTableCover(coverUrl: item.imageUri, fallbackIcon: Icons.album_outlined, size: 48, radius: 8),
+      ),
+      _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopBodyText(_prefer(item.name, 'Unknown Album'), TextAlign.left, DesktopTextTone.primary)),
+      _buildDesktopTableSizedCell(flex: 4, child: _buildDesktopBodyText(_albumSubtitle(item), TextAlign.left, DesktopTextTone.secondary)),
+      _buildDesktopTableSizedCell(flex: 2, child: _buildDesktopBodyText(_mediaTypeLabel(item.albumType), TextAlign.left, DesktopTextTone.secondary)),
+      _buildDesktopTableSizedCell(width: 64, child: _buildDesktopBodyText(item.year != null && item.year! > 0 ? '${item.year}' : '-', TextAlign.right, DesktopTextTone.tertiary)),
+      _buildDesktopTableSizedCell(
+        width: 72,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            MediaProviderIcon(
+              providerLabel: _providerLabelFromId(item.provider),
+              iconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+              size: 16,
             ),
-          ),
-          SizedBox(
-            width: 40,
-            child: Center(
-              child: _DesktopIconActionButton(
-                icon: Icons.more_horiz_outlined,
-                onTap: onMoreTap,
-                baseColor: colors.textSecondary,
-                hoverColor: colors.textPrimary,
-              ),
+          ],
+        ),
+      ),
+    ],
+    isFirst: isFirst,
+    isSelected: isSelected,
+    isFavorite: isFavorite,
+    selectionEnabled: selectionEnabled,
+    onToggleSelected: onToggleSelected,
+    onFavoriteTap: onFavoriteTap,
+    onMoreTap: onMoreTap,
+    onDoubleTap: onDoubleTap,
+    onPointerDown: onPointerDown,
+  );
+}
+
+Widget _buildDesktopTableRowPlaylist({
+  required Playlist item,
+  required int index,
+  required bool isFirst,
+  required bool isSelected,
+  required bool isFavorite,
+  required bool selectionEnabled,
+  required VoidCallback onToggleSelected,
+  required VoidCallback? onFavoriteTap,
+  required VoidCallback? onMoreTap,
+  required VoidCallback? onDoubleTap,
+  required ValueChanged<PointerDownEvent>? onPointerDown,
+}) {
+  return _buildDesktopTableRowBase(
+    cells: <Widget>[
+      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopBodyText('${index + 1}', TextAlign.left, DesktopTextTone.tertiary)),
+      _buildDesktopTableSizedCell(
+        width: 62,
+        child: MediaTableCover(coverUrl: item.imageUri, fallbackIcon: Icons.queue_music_outlined, size: 48, radius: 8),
+      ),
+      _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopBodyText(_prefer(item.name, 'Unknown Playlist'), TextAlign.left, DesktopTextTone.primary)),
+      _buildDesktopTableSizedCell(flex: 4, child: _buildDesktopBodyText(_playlistSubtitle(item), TextAlign.left, DesktopTextTone.secondary)),
+      _buildDesktopTableSizedCell(flex: 2, child: _buildDesktopBodyText(item.isEditable ? 'Editierbar' : 'Readonly', TextAlign.left, DesktopTextTone.tertiary)),
+      _buildDesktopTableSizedCell(
+        width: 72,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            MediaProviderIcon(
+              providerLabel: _providerLabelFromId(item.provider),
+              iconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+              size: 16,
             ),
+          ],
+        ),
+      ),
+    ],
+    isFirst: isFirst,
+    isSelected: isSelected,
+    isFavorite: isFavorite,
+    selectionEnabled: selectionEnabled,
+    onToggleSelected: onToggleSelected,
+    onFavoriteTap: onFavoriteTap,
+    onMoreTap: onMoreTap,
+    onDoubleTap: onDoubleTap,
+    onPointerDown: onPointerDown,
+  );
+}
+
+Widget _buildDesktopTableRowArtist({
+  required Artist item,
+  required int index,
+  required bool isFirst,
+  required bool isSelected,
+  required bool isFavorite,
+  required bool selectionEnabled,
+  required VoidCallback onToggleSelected,
+  required VoidCallback? onFavoriteTap,
+  required VoidCallback? onMoreTap,
+  required VoidCallback? onDoubleTap,
+  required ValueChanged<PointerDownEvent>? onPointerDown,
+}) {
+  return _buildDesktopTableRowBase(
+    cells: <Widget>[
+      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopBodyText('${index + 1}', TextAlign.left, DesktopTextTone.tertiary)),
+      _buildDesktopTableSizedCell(
+        width: 62,
+        child: MediaTableCover(coverUrl: item.imageUri, fallbackIcon: Icons.person_outlined, size: 48, radius: 8),
+      ),
+      _buildDesktopTableSizedCell(flex: 6, child: _buildDesktopBodyText(_prefer(item.name, 'Unknown Artist'), TextAlign.left, DesktopTextTone.primary)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopBodyText(_providerLabelFromId(item.provider), TextAlign.left, DesktopTextTone.secondary)),
+      _buildDesktopTableSizedCell(
+        width: 72,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            MediaProviderIcon(
+              providerLabel: _providerLabelFromId(item.provider),
+              iconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+              size: 16,
+            ),
+          ],
+        ),
+      ),
+    ],
+    isFirst: isFirst,
+    isSelected: isSelected,
+    isFavorite: isFavorite,
+    selectionEnabled: selectionEnabled,
+    onToggleSelected: onToggleSelected,
+    onFavoriteTap: onFavoriteTap,
+    onMoreTap: onMoreTap,
+    onDoubleTap: onDoubleTap,
+    onPointerDown: onPointerDown,
+  );
+}
+
+Widget _buildDesktopTableRowQueue({
+  required QueueItem item,
+  required int index,
+  required bool isFirst,
+  required bool isSelected,
+  required bool isFavorite,
+  required bool selectionEnabled,
+  required VoidCallback onToggleSelected,
+  required VoidCallback? onFavoriteTap,
+  required VoidCallback? onMoreTap,
+  required VoidCallback? onDoubleTap,
+  required ValueChanged<PointerDownEvent>? onPointerDown,
+}) {
+  final String provider = item.mediaItem?.provider.trim() ?? '';
+  final String title = (item.mediaItem?.name.trim().isNotEmpty == true)
+      ? item.mediaItem!.name.trim()
+      : item.name.trim().isNotEmpty
+          ? item.name.trim()
+          : 'Unbekannter Titel';
+  final String artists = item.mediaItem?.artists
+          .map((artist) => artist.name.trim())
+          .where((name) => name.isNotEmpty)
+          .join(', ') ??
+      '';
+
+  return _buildDesktopTableRowBase(
+    cells: <Widget>[
+      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopBodyText('${index + 1}', TextAlign.left, DesktopTextTone.tertiary)),
+      _buildDesktopTableSizedCell(
+        width: 62,
+        child: MediaTableCover(coverUrl: item.mediaItem?.imageUri, fallbackIcon: Icons.music_note_outlined, size: 48, radius: 8),
+      ),
+      _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopBodyText(title, TextAlign.left, DesktopTextTone.primary)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopBodyText(artists.isEmpty ? '-' : artists, TextAlign.left, DesktopTextTone.secondary)),
+      _buildDesktopTableSizedCell(width: 76, child: _buildDesktopBodyText(_formatQueueDurationSeconds((item.duration ?? 0).toDouble()), TextAlign.right, DesktopTextTone.tertiary)),
+      _buildDesktopTableSizedCell(
+        width: 72,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            MediaProviderIcon(
+              providerLabel: _providerLabelFromId(provider),
+              iconSvg: ProviderManifestRegistry.iconSvgForProvider(provider),
+              size: 16,
+            ),
+          ],
+        ),
+      ),
+    ],
+    isFirst: isFirst,
+    isSelected: isSelected,
+    isFavorite: isFavorite,
+    selectionEnabled: selectionEnabled,
+    onToggleSelected: onToggleSelected,
+    onFavoriteTap: onFavoriteTap,
+    onMoreTap: onMoreTap,
+    onDoubleTap: onDoubleTap,
+    onPointerDown: onPointerDown,
+  );
+}
+
+Widget _buildDesktopTableRowUnknown({
+  required String itemLabel,
+  required bool isFirst,
+  required bool isSelected,
+  required bool isFavorite,
+  required bool selectionEnabled,
+  required VoidCallback onToggleSelected,
+  required VoidCallback? onFavoriteTap,
+  required VoidCallback? onMoreTap,
+  required VoidCallback? onDoubleTap,
+  required ValueChanged<PointerDownEvent>? onPointerDown,
+}) {
+  return _buildDesktopTableRowBase(
+    cells: <Widget>[
+      _buildDesktopTableSizedCell(flex: 1, child: _buildDesktopBodyText(itemLabel, TextAlign.left, DesktopTextTone.primary)),
+    ],
+    isFirst: isFirst,
+    isSelected: isSelected,
+    isFavorite: isFavorite,
+    selectionEnabled: selectionEnabled,
+    onToggleSelected: onToggleSelected,
+    onFavoriteTap: onFavoriteTap,
+    onMoreTap: onMoreTap,
+    onDoubleTap: onDoubleTap,
+    onPointerDown: onPointerDown,
+  );
+}
+
+Widget _buildDesktopTableRowTrackSkeleton({required bool isFirst, required bool showSelection}) {
+  return _buildDesktopTableRowSkeletonBase(
+    cells: <Widget>[
+      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopSkeletonBar(width: 20)),
+      _buildDesktopTableSizedCell(width: 62, child: _buildDesktopSkeletonBar(width: 48, height: 48, radius: 8)),
+      _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopSkeletonBar(width: 220)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopSkeletonBar(width: 120)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopSkeletonBar(width: 120)),
+      _buildDesktopTableSizedCell(width: 76, child: Align(alignment: Alignment.centerRight, child: _buildDesktopSkeletonBar(width: 40))),
+      _buildDesktopTableSizedCell(width: 72, child: Center(child: _buildDesktopSkeletonBar(width: 16, height: 16, radius: 8))),
+    ],
+    isFirst: isFirst,
+    showSelection: showSelection,
+  );
+}
+
+Widget _buildDesktopTableRowAlbumSkeleton({required bool isFirst, required bool showSelection}) {
+  return _buildDesktopTableRowSkeletonBase(
+    cells: <Widget>[
+      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopSkeletonBar(width: 20)),
+      _buildDesktopTableSizedCell(width: 62, child: _buildDesktopSkeletonBar(width: 48, height: 48, radius: 8)),
+      _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopSkeletonBar(width: 220)),
+      _buildDesktopTableSizedCell(flex: 4, child: _buildDesktopSkeletonBar(width: 130)),
+      _buildDesktopTableSizedCell(flex: 2, child: _buildDesktopSkeletonBar(width: 70)),
+      _buildDesktopTableSizedCell(width: 64, child: Align(alignment: Alignment.centerRight, child: _buildDesktopSkeletonBar(width: 36))),
+      _buildDesktopTableSizedCell(width: 72, child: Center(child: _buildDesktopSkeletonBar(width: 16, height: 16, radius: 8))),
+    ],
+    isFirst: isFirst,
+    showSelection: showSelection,
+  );
+}
+
+Widget _buildDesktopTableRowPlaylistSkeleton({required bool isFirst, required bool showSelection}) {
+  return _buildDesktopTableRowSkeletonBase(
+    cells: <Widget>[
+      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopSkeletonBar(width: 20)),
+      _buildDesktopTableSizedCell(width: 62, child: _buildDesktopSkeletonBar(width: 48, height: 48, radius: 8)),
+      _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopSkeletonBar(width: 220)),
+      _buildDesktopTableSizedCell(flex: 4, child: _buildDesktopSkeletonBar(width: 120)),
+      _buildDesktopTableSizedCell(flex: 2, child: _buildDesktopSkeletonBar(width: 80)),
+      _buildDesktopTableSizedCell(width: 72, child: Center(child: _buildDesktopSkeletonBar(width: 16, height: 16, radius: 8))),
+    ],
+    isFirst: isFirst,
+    showSelection: showSelection,
+  );
+}
+
+Widget _buildDesktopTableRowArtistSkeleton({required bool isFirst, required bool showSelection}) {
+  return _buildDesktopTableRowSkeletonBase(
+    cells: <Widget>[
+      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopSkeletonBar(width: 20)),
+      _buildDesktopTableSizedCell(width: 62, child: _buildDesktopSkeletonBar(width: 48, height: 48, radius: 8)),
+      _buildDesktopTableSizedCell(flex: 6, child: _buildDesktopSkeletonBar(width: 220)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopSkeletonBar(width: 120)),
+      _buildDesktopTableSizedCell(width: 72, child: Center(child: _buildDesktopSkeletonBar(width: 16, height: 16, radius: 8))),
+    ],
+    isFirst: isFirst,
+    showSelection: showSelection,
+  );
+}
+
+Widget _buildDesktopTableRowUnknownSkeleton({required bool isFirst, required bool showSelection}) {
+  return _buildDesktopTableRowSkeletonBase(
+    cells: <Widget>[
+      _buildDesktopTableSizedCell(flex: 1, child: _buildDesktopSkeletonBar(width: 220)),
+    ],
+    isFirst: isFirst,
+    showSelection: showSelection,
+  );
+}
+
+Widget _buildDesktopTableHeaderBase({
+  required List<Widget> cells,
+  required bool showSelection,
+  required bool isAllSelected,
+  required VoidCallback onToggleSelectAll,
+  required VoidCallback? onMoreTap,
+}) {
+  return Builder(
+    builder: (BuildContext context) {
+      final colors = context.mashinColors;
+
+      return Container(
+        decoration: BoxDecoration(
+          border: Border(
+            top: BorderSide(color: colors.border),
+            bottom: BorderSide(color: colors.border),
           ),
-          if (showSelection)
+        ),
+        padding: const EdgeInsets.symmetric(vertical: 5),
+        child: Row(
+          children: <Widget>[
+            ...cells,
             SizedBox(
               width: 40,
               child: Center(
-                child: _DesktopSelectionCheckBox(
-                  isChecked: isAllSelected,
-                  isVisible: true,
-                  onTap: onToggleSelectAll,
+                child: Icon(
+                  Icons.favorite_border_outlined,
+                  size: 18,
+                  color: colors.textSecondary,
                 ),
               ),
             ),
-        ],
-      ),
-    );
-  }
+            SizedBox(
+              width: 40,
+              child: Center(
+                child: _DesktopIconActionButton(
+                  icon: Icons.more_horiz_outlined,
+                  onTap: onMoreTap,
+                  baseColor: colors.textSecondary,
+                  hoverColor: colors.textPrimary,
+                ),
+              ),
+            ),
+            if (showSelection)
+              SizedBox(
+                width: 40,
+                child: Center(
+                  child: _DesktopSelectionCheckBox(
+                    isChecked: isAllSelected,
+                    isVisible: true,
+                    onTap: onToggleSelectAll,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    },
+  );
 }
 
-class _DesktopTableRow<T> extends StatefulWidget {
-  final List<DesktopTableColumn<T>> columns;
-  final T item;
-  final int index;
+class _DesktopTableRowBase extends StatefulWidget {
+  final List<Widget> cells;
   final bool isFirst;
   final bool isSelected;
   final bool isFavorite;
@@ -689,10 +1226,8 @@ class _DesktopTableRow<T> extends StatefulWidget {
   final VoidCallback? onDoubleTap;
   final ValueChanged<PointerDownEvent>? onPointerDown;
 
-  const _DesktopTableRow({
-    required this.columns,
-    required this.item,
-    required this.index,
+  const _DesktopTableRowBase({
+    required this.cells,
     required this.isFirst,
     required this.isSelected,
     required this.isFavorite,
@@ -705,102 +1240,70 @@ class _DesktopTableRow<T> extends StatefulWidget {
   });
 
   @override
-  State<_DesktopTableRow<T>> createState() => _DesktopTableRowState<T>();
+  State<_DesktopTableRowBase> createState() => _DesktopTableRowBaseState();
 }
 
-class _DesktopTableRowState<T> extends State<_DesktopTableRow<T>> {
+class _DesktopTableRowBaseState extends State<_DesktopTableRowBase> {
   bool _isHovered = false;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
-    final textStyles = context.mashinTableTextStyles;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onDoubleTap: widget.onDoubleTap,
-        child: Container(
-          height: 64,
-          decoration: BoxDecoration(
-            color: widget.isSelected ? colors.hover : (_isHovered ? colors.hover : Colors.transparent),
-            border: widget.isFirst ? null : Border(top: BorderSide(color: colors.border)),
-          ),
-          child: Row(
-            children: <Widget>[
-              Expanded(
-                child: Listener(
-                  onPointerDown: widget.onPointerDown,
-                  child: Row(
-                    children: <Widget>[
-                      ...widget.columns
-                          .map(
-                            (column) => buildDesktopCellWidget(
-                              flex: column.flex,
-                              width: column.width,
-                              child: Padding(
-                                padding: column.padding,
-                                child: column.childBuilder != null
-                                    ? column.childBuilder!(context, widget.item, widget.index)
-                                    : Text(
-                                        column.valueBuilder!(widget.item, widget.index),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        textAlign: column.textAlign,
-                                        style: (() {
-                                          switch (column.textTone) {
-                                            case DesktopTextTone.primary:
-                                              return textStyles.bodyPrimary;
-                                            case DesktopTextTone.secondary:
-                                              return textStyles.bodySecondary;
-                                            case DesktopTextTone.tertiary:
-                                              return textStyles.bodyTertiary;
-                                          }
-                                        })().copyWith(fontSize: column.fontSize ?? 13),
-                                      ),
-                              ),
-                            ),
-                          ),
-                    ],
-                  ),
+      child: Listener(
+        onPointerDown: widget.onPointerDown,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onDoubleTap: widget.onDoubleTap,
+          child: Container(
+            height: 64,
+            decoration: BoxDecoration(
+              color: widget.isSelected ? colors.hover : (_isHovered ? colors.hover : Colors.transparent),
+              border: widget.isFirst ? null : Border(top: BorderSide(color: colors.border)),
+            ),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: Row(children: widget.cells),
                 ),
-              ),
-              SizedBox(
-                width: 40,
-                child: Center(
-                  child: _DesktopIconActionButton(
-                    icon: widget.isFavorite ? Icons.favorite_outlined : Icons.favorite_border_outlined,
-                    onTap: widget.onFavoriteTap,
-                    baseColor: colors.textTertiary,
-                    hoverColor: colors.textSecondary,
-                  ),
-                ),
-              ),
-              SizedBox(
-                width: 40,
-                child: Center(
-                  child: _DesktopIconActionButton(
-                    icon: Icons.more_horiz_outlined,
-                    onTap: widget.onMoreTap,
-                    baseColor: colors.textTertiary,
-                    hoverColor: colors.textSecondary,
-                  ),
-                ),
-              ),
-              if (widget.selectionEnabled)
                 SizedBox(
                   width: 40,
                   child: Center(
-                    child: _DesktopSelectionCheckBox(
-                      isChecked: widget.isSelected,
-                      isVisible: _isHovered || widget.isSelected,
-                      onTap: widget.onToggleSelected,
+                    child: _DesktopIconActionButton(
+                      icon: widget.isFavorite ? Icons.favorite_outlined : Icons.favorite_border_outlined,
+                      onTap: widget.onFavoriteTap,
+                      baseColor: colors.textTertiary,
+                      hoverColor: colors.textSecondary,
                     ),
                   ),
                 ),
-            ],
+                SizedBox(
+                  width: 40,
+                  child: Center(
+                    child: _DesktopIconActionButton(
+                      icon: Icons.more_horiz_outlined,
+                      onTap: widget.onMoreTap,
+                      baseColor: colors.textTertiary,
+                      hoverColor: colors.textSecondary,
+                    ),
+                  ),
+                ),
+                if (widget.selectionEnabled)
+                  SizedBox(
+                    width: 40,
+                    child: Center(
+                      child: _DesktopSelectionCheckBox(
+                        isChecked: widget.isSelected,
+                        isVisible: _isHovered || widget.isSelected,
+                        onTap: widget.onToggleSelected,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -808,22 +1311,137 @@ class _DesktopTableRowState<T> extends State<_DesktopTableRow<T>> {
   }
 }
 
-class _DesktopTableRowSkeleton<T> extends StatelessWidget {
-  final List<DesktopTableColumn<T>> columns;
-  final bool isFirst;
-  final bool showSelection;
+Widget _buildDesktopTableRowBase({
+  required List<Widget> cells,
+  required bool isFirst,
+  required bool isSelected,
+  required bool isFavorite,
+  required bool selectionEnabled,
+  required VoidCallback onToggleSelected,
+  required VoidCallback? onFavoriteTap,
+  required VoidCallback? onMoreTap,
+  required VoidCallback? onDoubleTap,
+  required ValueChanged<PointerDownEvent>? onPointerDown,
+}) {
+  return _DesktopTableRowBase(
+    cells: cells,
+    isFirst: isFirst,
+    isSelected: isSelected,
+    isFavorite: isFavorite,
+    selectionEnabled: selectionEnabled,
+    onToggleSelected: onToggleSelected,
+    onFavoriteTap: onFavoriteTap,
+    onMoreTap: onMoreTap,
+    onDoubleTap: onDoubleTap,
+    onPointerDown: onPointerDown,
+  );
+}
 
-  const _DesktopTableRowSkeleton({
-    required this.columns,
-    required this.isFirst,
-    required this.showSelection,
-  });
+Widget _buildDesktopTableRowSkeletonBase({
+  required List<Widget> cells,
+  required bool isFirst,
+  required bool showSelection,
+}) {
+  return Builder(
+    builder: (BuildContext context) {
+      final colors = context.mashinColors;
 
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.mashinColors;
+      return Container(
+        height: 64,
+        decoration: BoxDecoration(
+          color: Colors.transparent,
+          border: isFirst ? null : Border(top: BorderSide(color: colors.border)),
+        ),
+        child: Row(
+          children: <Widget>[
+            ...cells,
+            SizedBox(
+              width: 40,
+              child: Center(
+                child: _buildDesktopSkeletonBar(width: 16, height: 16, radius: 8),
+              ),
+            ),
+            SizedBox(
+              width: 40,
+              child: Center(
+                child: _buildDesktopSkeletonBar(width: 16, height: 16, radius: 8),
+              ),
+            ),
+            if (showSelection)
+              const SizedBox(
+                width: 40,
+                child: Center(
+                  child: _DesktopSelectionCheckBox(
+                    isChecked: false,
+                    isVisible: false,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    },
+  );
+}
 
-    Widget bar({required double width, required double height, double radius = 4}) {
+Widget _buildDesktopTableSizedCell({required Widget child, int? flex, double? width}) {
+  if (width != null) {
+    return SizedBox(width: width, child: child);
+  }
+
+  if (flex != null) {
+    return Expanded(flex: flex, child: child);
+  }
+
+  return Expanded(child: child);
+}
+
+Widget _buildDesktopHeaderText(String text, TextAlign textAlign) {
+  return Builder(
+    builder: (BuildContext context) {
+      final textStyles = context.mashinTableTextStyles;
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: textAlign,
+          style: textStyles.header,
+        ),
+      );
+    },
+  );
+}
+
+Widget _buildDesktopBodyText(String text, TextAlign textAlign, DesktopTextTone tone) {
+  return Builder(
+    builder: (BuildContext context) {
+      final textStyles = context.mashinTableTextStyles;
+      final TextStyle base = switch (tone) {
+        DesktopTextTone.primary => textStyles.bodyPrimary,
+        DesktopTextTone.secondary => textStyles.bodySecondary,
+        DesktopTextTone.tertiary => textStyles.bodyTertiary,
+      };
+
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: textAlign,
+          style: base.copyWith(fontSize: 13),
+        ),
+      );
+    },
+  );
+}
+
+Widget _buildDesktopSkeletonBar({required double width, double height = 14, double radius = 4}) {
+  return Builder(
+    builder: (BuildContext context) {
+      final colors = context.mashinColors;
       return Container(
         width: width,
         height: height,
@@ -832,73 +1450,8 @@ class _DesktopTableRowSkeleton<T> extends StatelessWidget {
           borderRadius: BorderRadius.circular(radius),
         ),
       );
-    }
-
-    Widget skeletonFor(DesktopTableColumn<T> column, int columnIndex) {
-      if (columnIndex == 1) {
-        return bar(width: 48, height: 48, radius: 8);
-      }
-
-      if (column.width != null) {
-        return Align(
-          alignment: alignmentForText(column.textAlign),
-          child: bar(
-            width: (column.width! * 0.5).clamp(16, 60),
-            height: 14,
-          ),
-        );
-      }
-
-      return Align(
-        alignment: alignmentForText(column.textAlign),
-        child: bar(width: columnIndex == 2 ? 220 : 120, height: 14),
-      );
-    }
-
-    return Container(
-      height: 64,
-      decoration: BoxDecoration(
-        color: Colors.transparent,
-        border: isFirst ? null : Border(top: BorderSide(color: colors.border)),
-      ),
-      child: Row(
-        children: <Widget>[
-          ...columns.asMap().entries.map(
-                (entry) => buildDesktopCellWidget(
-                  flex: entry.value.flex,
-                  width: entry.value.width,
-                  child: Padding(
-                    padding: entry.value.padding,
-                    child: skeletonFor(entry.value, entry.key),
-                  ),
-                ),
-              ),
-          SizedBox(
-            width: 40,
-            child: Center(
-              child: bar(width: 16, height: 16, radius: 8),
-            ),
-          ),
-          SizedBox(
-            width: 40,
-            child: Center(
-              child: bar(width: 16, height: 16, radius: 8),
-            ),
-          ),
-          if (showSelection)
-            const SizedBox(
-              width: 40,
-              child: Center(
-                child: _DesktopSelectionCheckBox(
-                  isChecked: false,
-                  isVisible: false,
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
+    },
+  );
 }
 
 class _DesktopIconActionButton extends StatefulWidget {
@@ -967,7 +1520,8 @@ class _DesktopSelectionCheckBox extends StatelessWidget {
     return IgnorePointer(
       ignoring: !isVisible,
       child: GestureDetector(
-        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        onTapDown: onTap == null ? null : (_) => onTap!.call(),
         child: Opacity(
           opacity: isVisible ? 1 : 0,
           child: Container(
@@ -1003,90 +1557,10 @@ class _SelectAllIntent extends Intent {
 class _ClearSelectionIntent extends Intent {
   const _ClearSelectionIntent();
 }
-
-
-// Base Row and Column Data Models
-class MediaTableRowData {
-  final String title;
-  final String subtitle;
-  final String trailing;
-  final String? coverUrl;
-  final IconData fallbackIcon;
-  final String providerLabel;
-  final String? providerIconSvg;
-
-  const MediaTableRowData({
-    required this.title,
-    required this.subtitle,
-    required this.trailing,
-    required this.coverUrl,
-    required this.fallbackIcon,
-    required this.providerLabel,
-    required this.providerIconSvg,
-  });
-}
-
 enum DesktopTextTone {
   primary,
   secondary,
   tertiary,
-}
-
-class DesktopTableColumn<T> {
-  final String header;
-  final int? flex;
-  final double? width;
-  final EdgeInsetsGeometry padding;
-  final TextAlign textAlign;
-  final DesktopTextTone textTone;
-  final double? fontSize;
-  final String Function(T item, int index)? valueBuilder;
-  final Widget Function(BuildContext context, T item, int index)? childBuilder;
-
-  const DesktopTableColumn({
-    required this.header,
-    this.flex,
-    this.width,
-    this.padding = const EdgeInsets.symmetric(horizontal: 8),
-    this.textAlign = TextAlign.left,
-    this.textTone = DesktopTextTone.primary,
-    this.fontSize,
-    this.valueBuilder,
-    this.childBuilder,
-  }) : assert(
-          valueBuilder != null || childBuilder != null,
-          'Either valueBuilder or childBuilder must be provided.',
-        );
-}
-
-Widget buildDesktopCellWidget({
-  required Widget child,
-  int? flex,
-  double? width,
-}) {
-  if (width != null) {
-    return SizedBox(width: width, child: child);
-  }
-
-  if (flex != null) {
-    return Expanded(flex: flex, child: child);
-  }
-
-  return Expanded(child: child);
-}
-
-Alignment alignmentForText(TextAlign textAlign) {
-  switch (textAlign) {
-    case TextAlign.right:
-    case TextAlign.end:
-      return Alignment.centerRight;
-    case TextAlign.center:
-      return Alignment.center;
-    case TextAlign.left:
-    case TextAlign.start:
-    case TextAlign.justify:
-      return Alignment.centerLeft;
-  }
 }
 
 class MediaTableCover extends StatelessWidget {
@@ -1186,336 +1660,6 @@ String _maybeDecodeSvgPayload(String raw) {
     return raw;
   }
 }
-
-
-// Row and Column Mappers
-MediaTableRowData mapTrackRowData(Track track, int index) {
-  final String providerLabel = _providerLabelFromId(track.provider);
-  return MediaTableRowData(
-    title: _prefer(track.name, 'Unknown Track'),
-    subtitle: _trackSubtitle(track),
-    trailing: formatDuration(track.duration),
-    coverUrl: track.imageUri,
-    fallbackIcon: Icons.music_note_outlined,
-    providerLabel: providerLabel,
-    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(track.provider),
-  );
-}
-
-MediaTableRowData mapAlbumRowData(Album album, int index) {
-  final String providerLabel = _providerLabelFromId(album.provider);
-  return MediaTableRowData(
-    title: _prefer(album.name, 'Unknown Album'),
-    subtitle: _albumSubtitle(album),
-    trailing: album.year != null && album.year! > 0 ? '${album.year}' : '-',
-    coverUrl: album.imageUri,
-    fallbackIcon: Icons.album_outlined,
-    providerLabel: providerLabel,
-    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(album.provider),
-  );
-}
-
-MediaTableRowData mapPlaylistRowData(Playlist playlist, int index) {
-  final String providerLabel = _providerLabelFromId(playlist.provider);
-  return MediaTableRowData(
-    title: _prefer(playlist.name, 'Unknown Playlist'),
-    subtitle: _playlistSubtitle(playlist),
-    trailing: playlist.isEditable ? 'Editierbar' : 'Readonly',
-    coverUrl: playlist.imageUri,
-    fallbackIcon: Icons.queue_music_outlined,
-    providerLabel: providerLabel,
-    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(playlist.provider),
-  );
-}
-
-MediaTableRowData mapArtistRowData(Artist artist, int index) {
-  final String providerLabel = _providerLabelFromId(artist.provider);
-  return MediaTableRowData(
-    title: _prefer(artist.name, 'Unknown Artist'),
-    subtitle: 'Artist',
-    trailing: _artistTertiary(artist),
-    coverUrl: artist.imageUri,
-    fallbackIcon: Icons.person_outlined,
-    providerLabel: providerLabel,
-    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(artist.provider),
-  );
-}
-
-List<DesktopTableColumn<Track>> buildTrackDesktopColumns() {
-  return <DesktopTableColumn<Track>>[
-    const DesktopTableColumn<Track>(
-      header: '#',
-      width: 44,
-      textAlign: TextAlign.left,
-      textTone: DesktopTextTone.tertiary,
-      fontSize: 12,
-      valueBuilder: _trackIndexValue,
-    ),
-    DesktopTableColumn<Track>(
-      header: 'Cover',
-      width: 62,
-      childBuilder: (BuildContext context, Track track, int index) {
-        return MediaTableCover(
-          coverUrl: track.imageUri,
-          fallbackIcon: Icons.music_note_outlined,
-          size: 48,
-          radius: 8,
-        );
-      },
-    ),
-    const DesktopTableColumn<Track>(
-      header: 'Titel',
-      flex: 5,
-      textTone: DesktopTextTone.primary,
-      valueBuilder: _trackTitleValue,
-    ),
-    const DesktopTableColumn<Track>(
-      header: 'Artist',
-      flex: 3,
-      textTone: DesktopTextTone.secondary,
-      valueBuilder: _trackArtistValue,
-    ),
-    const DesktopTableColumn<Track>(
-      header: 'Album',
-      flex: 3,
-      textTone: DesktopTextTone.secondary,
-      valueBuilder: _trackAlbumValue,
-    ),
-    const DesktopTableColumn<Track>(
-      header: 'Länge',
-      width: 76,
-      textAlign: TextAlign.right,
-      textTone: DesktopTextTone.tertiary,
-      valueBuilder: _trackDurationValue,
-    ),
-    DesktopTableColumn<Track>(
-      header: 'Quelle',
-      width: 72,
-      textAlign: TextAlign.center,
-      childBuilder: (BuildContext context, Track track, int index) {
-        final String providerLabel = _providerLabelFromId(track.provider);
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            MediaProviderIcon(
-              providerLabel: providerLabel,
-              iconSvg: ProviderManifestRegistry.iconSvgForProvider(track.provider),
-              size: 16,
-            ),
-          ],
-        );
-      },
-    ),
-  ];
-}
-
-List<DesktopTableColumn<Album>> buildAlbumDesktopColumns() {
-  return <DesktopTableColumn<Album>>[
-    const DesktopTableColumn<Album>(
-      header: '#',
-      width: 44,
-      textAlign: TextAlign.left,
-      textTone: DesktopTextTone.tertiary,
-      fontSize: 12,
-      valueBuilder: _albumIndexValue,
-    ),
-    DesktopTableColumn<Album>(
-      header: 'Cover',
-      width: 62,
-      childBuilder: (BuildContext context, Album album, int index) {
-        return MediaTableCover(
-          coverUrl: album.imageUri,
-          fallbackIcon: Icons.album_outlined,
-          size: 48,
-          radius: 8,
-        );
-      },
-    ),
-    const DesktopTableColumn<Album>(
-      header: 'Titel',
-      flex: 5,
-      textTone: DesktopTextTone.primary,
-      valueBuilder: _albumTitleValue,
-    ),
-    const DesktopTableColumn<Album>(
-      header: 'Artist',
-      flex: 4,
-      textTone: DesktopTextTone.secondary,
-      valueBuilder: _albumArtistValue,
-    ),
-    const DesktopTableColumn<Album>(
-      header: 'Typ',
-      flex: 2,
-      textTone: DesktopTextTone.secondary,
-      valueBuilder: _albumTypeValue,
-    ),
-    const DesktopTableColumn<Album>(
-      header: 'Jahr',
-      width: 64,
-      textAlign: TextAlign.right,
-      textTone: DesktopTextTone.tertiary,
-      valueBuilder: _albumYearValue,
-    ),
-    DesktopTableColumn<Album>(
-      header: 'Quelle',
-      width: 72,
-      textAlign: TextAlign.center,
-      childBuilder: (BuildContext context, Album album, int index) {
-        final String providerLabel = _providerLabelFromId(album.provider);
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            MediaProviderIcon(
-              providerLabel: providerLabel,
-              iconSvg: ProviderManifestRegistry.iconSvgForProvider(album.provider),
-              size: 16,
-            ),
-          ],
-        );
-      },
-    ),
-  ];
-}
-
-List<DesktopTableColumn<Playlist>> buildPlaylistDesktopColumns() {
-  return <DesktopTableColumn<Playlist>>[
-    const DesktopTableColumn<Playlist>(
-      header: '#',
-      width: 44,
-      textAlign: TextAlign.left,
-      textTone: DesktopTextTone.tertiary,
-      fontSize: 12,
-      valueBuilder: _playlistIndexValue,
-    ),
-    DesktopTableColumn<Playlist>(
-      header: 'Cover',
-      width: 62,
-      childBuilder: (BuildContext context, Playlist playlist, int index) {
-        return MediaTableCover(
-          coverUrl: playlist.imageUri,
-          fallbackIcon: Icons.queue_music_outlined,
-          size: 48,
-          radius: 8,
-        );
-      },
-    ),
-    const DesktopTableColumn<Playlist>(
-      header: 'Titel',
-      flex: 5,
-      textTone: DesktopTextTone.primary,
-      valueBuilder: _playlistTitleValue,
-    ),
-    const DesktopTableColumn<Playlist>(
-      header: 'Owner',
-      flex: 4,
-      textTone: DesktopTextTone.secondary,
-      valueBuilder: _playlistOwnerValue,
-    ),
-    const DesktopTableColumn<Playlist>(
-      header: 'Status',
-      flex: 2,
-      textTone: DesktopTextTone.tertiary,
-      valueBuilder: _playlistStatusValue,
-    ),
-    DesktopTableColumn<Playlist>(
-      header: 'Quelle',
-      width: 72,
-      textAlign: TextAlign.center,
-      childBuilder: (BuildContext context, Playlist playlist, int index) {
-        final String providerLabel = _providerLabelFromId(playlist.provider);
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            MediaProviderIcon(
-              providerLabel: providerLabel,
-              iconSvg: ProviderManifestRegistry.iconSvgForProvider(playlist.provider),
-              size: 16,
-            ),
-          ],
-        );
-      },
-    ),
-  ];
-}
-
-List<DesktopTableColumn<Artist>> buildArtistDesktopColumns() {
-  return <DesktopTableColumn<Artist>>[
-    const DesktopTableColumn<Artist>(
-      header: '#',
-      width: 44,
-      textAlign: TextAlign.left,
-      textTone: DesktopTextTone.tertiary,
-      fontSize: 12,
-      valueBuilder: _artistIndexValue,
-    ),
-    DesktopTableColumn<Artist>(
-      header: 'Bild',
-      width: 62,
-      childBuilder: (BuildContext context, Artist artist, int index) {
-        return MediaTableCover(
-          coverUrl: artist.imageUri,
-          fallbackIcon: Icons.person_outlined,
-          size: 48,
-          radius: 8,
-        );
-      },
-    ),
-    const DesktopTableColumn<Artist>(
-      header: 'Artist',
-      flex: 6,
-      textTone: DesktopTextTone.primary,
-      valueBuilder: _artistTitleValue,
-    ),
-    const DesktopTableColumn<Artist>(
-      header: 'Provider',
-      flex: 3,
-      textTone: DesktopTextTone.secondary,
-      valueBuilder: _artistProviderValue,
-    ),
-    DesktopTableColumn<Artist>(
-      header: 'Quelle',
-      width: 72,
-      textAlign: TextAlign.center,
-      childBuilder: (BuildContext context, Artist artist, int index) {
-        final String providerLabel = _providerLabelFromId(artist.provider);
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            MediaProviderIcon(
-              providerLabel: providerLabel,
-              iconSvg: ProviderManifestRegistry.iconSvgForProvider(artist.provider),
-              size: 16,
-            ),
-          ],
-        );
-      },
-    ),
-  ];
-}
-
-
-// Value Builders for Desktop Table Columns
-String _trackIndexValue(Track track, int index) => '${index + 1}';
-String _trackTitleValue(Track track, int index) => _prefer(track.name, 'Unknown Track');
-String _trackArtistValue(Track track, int index) => _trackSubtitle(track);
-String _trackAlbumValue(Track track, int index) => _prefer(track.album?.name ?? '', '-');
-String _trackDurationValue(Track track, int index) => formatDuration(track.duration);
-
-String _albumIndexValue(Album album, int index) => '${index + 1}';
-String _albumTitleValue(Album album, int index) => _prefer(album.name, 'Unknown Album');
-String _albumArtistValue(Album album, int index) => _albumSubtitle(album);
-String _albumTypeValue(Album album, int index) => _mediaTypeLabel(album.albumType);
-String _albumYearValue(Album album, int index) => album.year != null && album.year! > 0 ? '${album.year}' : '-';
-
-String _playlistIndexValue(Playlist playlist, int index) => '${index + 1}';
-String _playlistTitleValue(Playlist playlist, int index) => _prefer(playlist.name, 'Unknown Playlist');
-String _playlistOwnerValue(Playlist playlist, int index) => _playlistSubtitle(playlist);
-String _playlistStatusValue(Playlist playlist, int index) => playlist.isEditable ? 'Editierbar' : 'Readonly';
-
-String _artistIndexValue(Artist artist, int index) => '${index + 1}';
-String _artistTitleValue(Artist artist, int index) => _prefer(artist.name, 'Unknown Artist');
-String _artistProviderValue(Artist artist, int index) => _providerLabelFromId(artist.provider);
-
 // Helper Functions
 String _stripOrEmpty(String? value) {
   return value?.trim() ?? '';
@@ -1599,6 +1743,17 @@ String formatDuration(int seconds) {
   final Duration duration = Duration(seconds: seconds);
   final int minutes = duration.inMinutes;
   final int remainingSeconds = duration.inSeconds % 60;
+  return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
+}
+
+String _formatQueueDurationSeconds(double seconds) {
+  if (!seconds.isFinite || seconds <= 0) {
+    return '0:00';
+  }
+
+  final int totalSeconds = seconds.round();
+  final int minutes = totalSeconds ~/ 60;
+  final int remainingSeconds = totalSeconds % 60;
   return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
 }
 

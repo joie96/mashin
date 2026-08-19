@@ -227,8 +227,6 @@ class _QueueOverlayState extends State<QueueOverlay> {
                     items: widget.queueItems,
                     isLoading: false,
                     emptyText: 'Queue ist leer',
-                    rowMapper: _mapQueueRowData,
-                    desktopColumns: _buildQueueDesktopColumns(),
                     maxItemsPerPage: 0,
                     enableSelection: false,
                     onRowDoubleTap: (QueueItem item, int index) {
@@ -284,7 +282,6 @@ class _QueueOverlayState extends State<QueueOverlay> {
               items: widget.queueItems,
               isLoading: false,
               emptyText: 'Queue ist leer',
-              rowMapper: _mapQueueRowData,
               maxItemsPerPage: 0,
               enableSelection: false,
               onRowTap: (QueueItem item, int index) {
@@ -296,118 +293,6 @@ class _QueueOverlayState extends State<QueueOverlay> {
       ),
     );
   }
-}
-
-MediaTableRowData _mapQueueRowData(QueueItem item, int index) {
-  final String provider = item.mediaItem?.provider.trim() ?? '';
-  final String title = (item.mediaItem?.name.trim().isNotEmpty == true)
-      ? item.mediaItem!.name.trim()
-      : item.name.trim().isNotEmpty
-          ? item.name.trim()
-          : 'Unbekannter Titel';
-  final String subtitle = item.mediaItem?.artists
-          .map((artist) => artist.name.trim())
-          .where((name) => name.isNotEmpty)
-          .join(', ') ??
-      '';
-
-  return MediaTableRowData(
-    title: title,
-    subtitle: subtitle.isEmpty ? '-' : subtitle,
-    trailing: _formatOverlaySeconds((item.duration ?? 0).toDouble()),
-    coverUrl: item.mediaItem?.imageUri,
-    fallbackIcon: Icons.music_note_outlined,
-    providerLabel: _providerLabelFromId(provider),
-    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(provider),
-  );
-}
-
-List<DesktopTableColumn<QueueItem>> _buildQueueDesktopColumns() {
-  return <DesktopTableColumn<QueueItem>>[
-    const DesktopTableColumn<QueueItem>(
-      header: '#',
-      width: 44,
-      textAlign: TextAlign.left,
-      textTone: DesktopTextTone.tertiary,
-      fontSize: 12,
-      valueBuilder: _queueIndexValue,
-    ),
-    DesktopTableColumn<QueueItem>(
-      header: 'Cover',
-      width: 62,
-      childBuilder: (BuildContext context, QueueItem item, int index) {
-        return MediaTableCover(
-          coverUrl: item.mediaItem?.imageUri,
-          fallbackIcon: Icons.music_note_outlined,
-          size: 48,
-          radius: 8,
-        );
-      },
-    ),
-    const DesktopTableColumn<QueueItem>(
-      header: 'Titel',
-      flex: 5,
-      textTone: DesktopTextTone.primary,
-      valueBuilder: _queueTitleValue,
-    ),
-    const DesktopTableColumn<QueueItem>(
-      header: 'Artist',
-      flex: 3,
-      textTone: DesktopTextTone.secondary,
-      valueBuilder: _queueArtistValue,
-    ),
-    const DesktopTableColumn<QueueItem>(
-      header: 'Länge',
-      width: 76,
-      textAlign: TextAlign.right,
-      textTone: DesktopTextTone.tertiary,
-      valueBuilder: _queueDurationValue,
-    ),
-    DesktopTableColumn<QueueItem>(
-      header: 'Quelle',
-      width: 72,
-      textAlign: TextAlign.center,
-      childBuilder: (BuildContext context, QueueItem item, int index) {
-        final String provider = item.mediaItem?.provider.trim() ?? '';
-        final String providerLabel = _providerLabelFromId(provider);
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            MediaProviderIcon(
-              providerLabel: providerLabel,
-              iconSvg: ProviderManifestRegistry.iconSvgForProvider(provider),
-              size: 16,
-            ),
-          ],
-        );
-      },
-    ),
-  ];
-}
-
-String _queueIndexValue(QueueItem item, int index) => '${index + 1}';
-
-String _queueTitleValue(QueueItem item, int index) {
-  if (item.mediaItem?.name.trim().isNotEmpty == true) {
-    return item.mediaItem!.name.trim();
-  }
-  if (item.name.trim().isNotEmpty) {
-    return item.name.trim();
-  }
-  return 'Unbekannter Titel';
-}
-
-String _queueArtistValue(QueueItem item, int index) {
-  final String artists = item.mediaItem?.artists
-          .map((artist) => artist.name.trim())
-          .where((name) => name.isNotEmpty)
-          .join(', ') ??
-      '';
-  return artists.isEmpty ? '-' : artists;
-}
-
-String _queueDurationValue(QueueItem item, int index) {
-  return _formatOverlaySeconds((item.duration ?? 0).toDouble());
 }
 
 String _providerLabelFromId(String providerOrDomain) {
