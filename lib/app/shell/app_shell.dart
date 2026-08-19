@@ -19,6 +19,7 @@ import '../../features/playback/sendspin/sendspin_rust_bridge_ffi.dart';
 import '../navigation/app_router.dart';
 import '../navigation/app_section.dart';
 import '../theme/app_theme.dart';
+import 'widgets/queue_overlay.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -42,6 +43,7 @@ class _AppShellState extends State<AppShell> {
   PlaybackState _playbackState = const PlaybackState();
   PlaybackStateType _lastStablePlaybackStateType = PlaybackStateType.uninitialized;
   DateTime? _busySince;
+  bool _isQueueOverlayOpen = false;
   bool _isBootstrapping = true;
   String _baseUrl = AppConfig.defaultMusicAssistantUrl;
   String? _username;
@@ -112,6 +114,29 @@ class _AppShellState extends State<AppShell> {
   String? get _currentTrackCoverUrl {
     final url = _currentQueueItem?.mediaItem?.imageUri?.trim() ?? '';
     return url.isEmpty ? null : url;
+  }
+
+  int get _queueTrackCount => _playbackCoordinator.queueItems.length;
+
+  String get _queueTrackCountText => '$_queueTrackCount Tracks';
+
+  String get _queueTotalDurationText {
+    int totalSeconds = 0;
+    for (final item in _playbackCoordinator.queueItems) {
+      final int duration = item.duration ?? 0;
+      if (duration > 0) {
+        totalSeconds += duration;
+      }
+    }
+
+    final int hours = totalSeconds ~/ 3600;
+    final int minutes = (totalSeconds % 3600) ~/ 60;
+    final int seconds = totalSeconds % 60;
+
+    if (hours > 0) {
+      return '$hours:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    }
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
   }
 
   double get _currentTrackPositionSeconds {
@@ -217,102 +242,122 @@ class _AppShellState extends State<AppShell> {
   Widget _buildDesktopLayout(BuildContext context) {
     final colors = context.mashinColors;
 
-    return Column(
+    return Stack(
       children: <Widget>[
-        Expanded(
-          child: Row(
-            children: <Widget>[
-              Container(
-                width: 250,
-                color: colors.bgSecondary,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    const SizedBox(height: 44),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 22),
-                      child: Text(
-                        'Mashin',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: colors.textPrimary,
+        Column(
+          children: <Widget>[
+            Expanded(
+              child: Row(
+                children: <Widget>[
+                  Container(
+                    width: 250,
+                    color: colors.bgSecondary,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        const SizedBox(height: 44),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 22),
+                          child: Text(
+                            'Mashin',
+                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: colors.textPrimary,
+                            ),
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 22),
+                        _DesktopNavItem(
+                          label: 'Home',
+                          icon: Icons.home_outlined,
+                          selected: _currentSection == AppSection.home,
+                          onTap: () => _select(AppSection.home),
+                        ),
+                        _DesktopNavItem(
+                          label: 'Entdecken',
+                          icon: Icons.explore_outlined,
+                          selected: _currentSection == AppSection.explore,
+                          onTap: () => _select(AppSection.explore),
+                        ),
+                        _DesktopNavItem(
+                          label: 'Favoriten',
+                          icon: Icons.favorite_outlined,
+                          selected: _currentSection == AppSection.favorites,
+                          onTap: () => _select(AppSection.favorites),
+                        ),
+                        const Divider(height: 24),
+                        _DesktopNavItem(
+                          label: 'Playlists',
+                          icon: Icons.queue_music_outlined,
+                          selected: _currentSection == AppSection.playlists,
+                          onTap: () => _select(AppSection.playlists),
+                        ),
+                        _DesktopNavItem(
+                          label: 'Suche',
+                          icon: Icons.search_outlined,
+                          selected: _currentSection == AppSection.search,
+                          onTap: () => _select(AppSection.search),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 22),
-                    _DesktopNavItem(
-                      label: 'Home',
-                      icon: Icons.home_outlined,
-                      selected: _currentSection == AppSection.home,
-                      onTap: () => _select(AppSection.home),
+                  ),
+                  VerticalDivider(width: 1, color: colors.border),
+                  Expanded(
+                    child: Column(
+                      children: <Widget>[
+                        _DesktopTopBar(
+                          title: _titleForSection(_currentSection),
+                          onToggleTheme: _toggleTheme,
+                          isDarkTheme: _isDarkTheme,
+                        ),
+                        Expanded(
+                          child: Container(
+                            color: colors.bgPrimary,
+                            child: AppRouter.pageFor(_currentSection, _musicAssistantClient!, _playbackCoordinator),
+                          ),
+                        ),
+                      ],
                     ),
-                    _DesktopNavItem(
-                      label: 'Entdecken',
-                      icon: Icons.explore_outlined,
-                      selected: _currentSection == AppSection.explore,
-                      onTap: () => _select(AppSection.explore),
-                    ),
-                    _DesktopNavItem(
-                      label: 'Favoriten',
-                      icon: Icons.favorite_outlined,
-                      selected: _currentSection == AppSection.favorites,
-                      onTap: () => _select(AppSection.favorites),
-                    ),
-                    const Divider(height: 24),
-                    _DesktopNavItem(
-                      label: 'Playlists',
-                      icon: Icons.queue_music_outlined,
-                      selected: _currentSection == AppSection.playlists,
-                      onTap: () => _select(AppSection.playlists),
-                    ),
-                    _DesktopNavItem(
-                      label: 'Suche',
-                      icon: Icons.search_outlined,
-                      selected: _currentSection == AppSection.search,
-                      onTap: () => _select(AppSection.search),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              VerticalDivider(width: 1, color: colors.border),
-              Expanded(
-                child: Column(
-                  children: <Widget>[
-                    _DesktopTopBar(
-                      title: _titleForSection(_currentSection),
-                      onToggleTheme: _toggleTheme,
-                      isDarkTheme: _isDarkTheme,
-                    ),
-                    Expanded(
-                      child: Container(
-                        color: colors.bgPrimary,
-                        child: AppRouter.pageFor(_currentSection, _musicAssistantClient!, _playbackCoordinator),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+            ),
+            _DesktopPlayerBar(
+              playStateType: _effectivePlaybackStateType,
+              playbackState: _playbackState,
+              dontStopTheMusicEnabled: _playbackCoordinator.dontStopTheMusicEnabled ?? false,
+              trackTitle: _currentTrackTitle,
+              trackSubtitle: _currentTrackSubtitle,
+              trackCoverUrl: _currentTrackCoverUrl,
+              maxSeconds: _currentTrackMaxSeconds,
+              currentSeconds: _currentTrackPositionSeconds,
+              onTogglePlayPause: _togglePlayPause,
+              onPrevious: _playPrevious,
+              onNext: _playNext,
+              onToggleShuffle: _toggleShuffle,
+              onToggleRepeatMode: _toggleRepeatMode,
+              onToggleDontStopTheMusic: _toggleDontStopTheMusic,
+              onToggleMute: _toggleMute,
+              onSeek: _seek,
+              onVolumeChanged: _setVolume,
+              onOpenQueue: _openQueueOverlay,
+            ),
+          ],
         ),
-        _DesktopPlayerBar(
-          playStateType: _effectivePlaybackStateType,
-          playbackState: _playbackState,
-          dontStopTheMusicEnabled: _playbackCoordinator.dontStopTheMusicEnabled ?? false,
+        QueueOverlay(
+          isOpen: _isQueueOverlayOpen,
+          isDesktop: true,
           trackTitle: _currentTrackTitle,
           trackSubtitle: _currentTrackSubtitle,
           trackCoverUrl: _currentTrackCoverUrl,
-          maxSeconds: _currentTrackMaxSeconds,
-          currentSeconds: _currentTrackPositionSeconds,
-          onTogglePlayPause: _togglePlayPause,
-          onPrevious: _playPrevious,
-          onNext: _playNext,
-          onToggleShuffle: _toggleShuffle,
-          onToggleRepeatMode: _toggleRepeatMode,
+          queueTrackCountText: _queueTrackCountText,
+          queueTotalDurationText: _queueTotalDurationText,
+          dontStopTheMusicEnabled: _playbackCoordinator.dontStopTheMusicEnabled ?? false,
+          queueItems: _playbackCoordinator.queueItems,
+          currentQueueIndex: _playbackCoordinator.currentQueueIndex,
+          onClose: _closeQueueOverlay,
+          onPlayQueueIndex: _playQueueIndex,
           onToggleDontStopTheMusic: _toggleDontStopTheMusic,
-          onToggleMute: _toggleMute,
-          onSeek: _seek,
-          onVolumeChanged: _setVolume,
         ),
       ],
     );
@@ -336,6 +381,7 @@ class _AppShellState extends State<AppShell> {
               trackTitle: _currentTrackTitle,
               trackCoverUrl: _currentTrackCoverUrl,
               onTogglePlayPause: _togglePlayPause,
+              onOpenQueue: _openQueueOverlay,
             ),
             _MobileBottomNav(
               currentSection: _currentSection,
@@ -362,8 +408,49 @@ class _AppShellState extends State<AppShell> {
             );
           },
         ),
+        QueueOverlay(
+          isOpen: _isQueueOverlayOpen,
+          isDesktop: false,
+          trackTitle: _currentTrackTitle,
+          trackSubtitle: _currentTrackSubtitle,
+          trackCoverUrl: _currentTrackCoverUrl,
+          queueTrackCountText: _queueTrackCountText,
+          queueTotalDurationText: _queueTotalDurationText,
+          dontStopTheMusicEnabled: _playbackCoordinator.dontStopTheMusicEnabled ?? false,
+          queueItems: _playbackCoordinator.queueItems,
+          currentQueueIndex: _playbackCoordinator.currentQueueIndex,
+          onClose: _closeQueueOverlay,
+          onPlayQueueIndex: _playQueueIndex,
+          onToggleDontStopTheMusic: _toggleDontStopTheMusic,
+        ),
       ],
     );
+  }
+
+  void _openQueueOverlay() {
+    if (_isQueueOverlayOpen) {
+      return;
+    }
+    setState(() {
+      _isQueueOverlayOpen = true;
+    });
+  }
+
+  void _closeQueueOverlay() {
+    if (!_isQueueOverlayOpen) {
+      return;
+    }
+    setState(() {
+      _isQueueOverlayOpen = false;
+    });
+  }
+
+  Future<void> _playQueueIndex(int index) async {
+    try {
+      await _playbackCoordinator.playQueueIndex(index);
+    } catch (_) {
+      // Ignore playback command failures in shell-level controls.
+    }
   }
 
   void _select(AppSection section) {
@@ -798,6 +885,7 @@ class _DesktopPlayerBar extends StatelessWidget {
   final Future<void> Function() onToggleMute;
   final Future<void> Function(double) onSeek;
   final ValueChanged<double> onVolumeChanged;
+  final VoidCallback onOpenQueue;
 
   const _DesktopPlayerBar({
     required this.playStateType,
@@ -817,6 +905,7 @@ class _DesktopPlayerBar extends StatelessWidget {
     required this.onToggleMute,
     required this.onSeek,
     required this.onVolumeChanged,
+    required this.onOpenQueue,
   });
 
   @override
@@ -1026,7 +1115,7 @@ class _DesktopPlayerBar extends StatelessWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: <Widget>[
-                  _PlayerBarIconButton(icon: Icons.queue_music_outlined, onTap: () {}, color: colors.textSecondary),
+                  _PlayerBarIconButton(icon: Icons.queue_music_outlined, onTap: onOpenQueue, color: colors.textSecondary),
                   _PlayerBarIconButton(
                     icon: Icons.cell_tower_outlined,
                     onTap: hasPlaybackSession ? onToggleDontStopTheMusic : null,
@@ -1270,12 +1359,14 @@ class _MobilePlayerBar extends StatelessWidget {
   final String trackTitle;
   final String? trackCoverUrl;
   final Future<void> Function() onTogglePlayPause;
+  final VoidCallback onOpenQueue;
 
   const _MobilePlayerBar({
     required this.playbackState,
     required this.trackTitle,
     required this.trackCoverUrl,
     required this.onTogglePlayPause,
+    required this.onOpenQueue,
   });
 
   @override
@@ -1321,6 +1412,10 @@ class _MobilePlayerBar extends StatelessWidget {
               style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w600),
               overflow: TextOverflow.ellipsis,
             ),
+          ),
+          IconButton(
+            onPressed: onOpenQueue,
+            icon: const Icon(Icons.queue_music_outlined),
           ),
           IconButton(
             onPressed: isBusy

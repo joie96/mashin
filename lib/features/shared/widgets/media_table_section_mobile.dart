@@ -15,6 +15,7 @@ class MediaTableSectionMobile<T> extends StatefulWidget {
   final int skeletonRowCount;
   final int maxItemsPerPage;
   final bool enableSelection;
+  final DesktopRowAction<T>? onRowTap;
   final ValueChanged<List<T>>? onSelectionChanged;
   final VoidCallback? onSelectionMenuTap;
 
@@ -28,6 +29,7 @@ class MediaTableSectionMobile<T> extends StatefulWidget {
     this.skeletonRowCount = 10,
     this.maxItemsPerPage = 10,
     this.enableSelection = true,
+    this.onRowTap,
     this.onSelectionChanged,
     this.onSelectionMenuTap,
   });
@@ -298,6 +300,9 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
                       selectionEnabled: widget.enableSelection,
                       onToggleSelected: () => _toggleSelectedIndex(itemIndex),
                       onLongPressSelect: () => _enterSelectionMode(itemIndex),
+                      onTap: widget.onRowTap == null
+                          ? null
+                          : () => widget.onRowTap!(chunkItems[localIndex], itemIndex),
                     ),
                   );
                 }),
@@ -327,6 +332,9 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
           selectionEnabled: widget.enableSelection,
           onToggleSelected: () => _toggleSelectedIndex(itemIndex),
           onLongPressSelect: () => _enterSelectionMode(itemIndex),
+          onTap: widget.onRowTap == null
+              ? null
+              : () => widget.onRowTap!(widget.items[index], itemIndex),
         );
       },
     );
@@ -343,6 +351,7 @@ class _MobileTableRow extends StatefulWidget {
   final bool selectionEnabled;
   final VoidCallback onToggleSelected;
   final VoidCallback onLongPressSelect;
+  final VoidCallback? onTap;
 
   const _MobileTableRow({
     required this.data,
@@ -352,6 +361,7 @@ class _MobileTableRow extends StatefulWidget {
     required this.selectionEnabled,
     required this.onToggleSelected,
     required this.onLongPressSelect,
+    this.onTap,
   });
 
   @override
@@ -372,7 +382,9 @@ class _MobileTableRowState extends State<_MobileTableRow> {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onLongPress: widget.selectionEnabled ? widget.onLongPressSelect : null,
-        onTap: widget.selectionModeActive ? widget.onToggleSelected : null,
+        onTap: widget.selectionModeActive
+            ? widget.onToggleSelected
+            : widget.onTap,
         child: Container(
           constraints: const BoxConstraints(minHeight: 64),
           decoration: BoxDecoration(
