@@ -299,6 +299,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
+    final bool hasTitle = widget.title.trim().isNotEmpty;
 
     final Widget content = LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
@@ -316,18 +317,23 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: hasBoundedHeight ? MainAxisSize.max : MainAxisSize.min,
           children: <Widget>[
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: Text(
-                    widget.title,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-                  ),
-                ),
-                if (_isPagingEnabled && widget.items.isNotEmpty) _buildPaginationControls(context),
-              ],
-            ),
-            const SizedBox(height: 10),
+            if (hasTitle || (_isPagingEnabled && widget.items.isNotEmpty))
+              Row(
+                children: <Widget>[
+                  if (hasTitle)
+                    Expanded(
+                      child: Text(
+                        widget.title,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                    )
+                  else
+                    const Spacer(),
+                  if (_isPagingEnabled && widget.items.isNotEmpty) _buildPaginationControls(context),
+                ],
+              ),
+            if (hasTitle || (_isPagingEnabled && widget.items.isNotEmpty))
+              const SizedBox(height: 10),
             if (hasBoundedHeight)
               Expanded(child: ClipRect(child: tableContent))
             else

@@ -881,7 +881,49 @@ class MusicAssistantClient {
     if (offset != null) args['offset'] = offset;
 
     final result = await _sendCommand('player_queues/items', args: args);
-    return _mapList(result, QueueItem.fromJson);
+    
+    // Get Provider Manifests 
+    final items = _mapList(result, QueueItem.fromJson);
+    if (items.isNotEmpty) {
+      final Set<String> providers = <String>{};
+      for (final QueueItem item in items) {
+        final Track? media = item.mediaItem;
+        if (media == null) {
+          continue;
+        }
+
+        final String direct = media.provider.trim();
+        if (direct.isNotEmpty) {
+          providers.add(direct);
+        }
+
+        for (final ProviderMapping mapping in media.providerMappings) {
+          final String domain = mapping.providerDomain.trim();
+          if (domain.isNotEmpty) {
+            providers.add(domain);
+          }
+
+          final String instance = mapping.providerInstance.trim();
+          if (instance.isNotEmpty) {
+            providers.add(instance);
+          }
+        }
+      }
+
+      for (final String provider in providers) {
+        if (ProviderManifestRegistry.getByProvider(provider) != null) {
+          continue;
+        }
+
+        try {
+          await getProviderManifest(provider);
+        } catch (_) {
+          // Ignore unavailable manifests and keep fallback icon behavior.
+        }
+      }
+    }
+
+    return items;
   }
 
   Future<void> playMedia(

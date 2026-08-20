@@ -33,15 +33,18 @@ class MediaRowSectionMobile<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
+    final bool hasTitle = title.trim().isNotEmpty;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Text(
-          title,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 10),
+        if (hasTitle)
+          Text(
+            title,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
+        if (hasTitle)
+          const SizedBox(height: 10),
         SizedBox(
           height: height,
           child: isLoading

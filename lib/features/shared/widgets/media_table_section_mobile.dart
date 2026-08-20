@@ -176,6 +176,7 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
   // Build
   @override
   Widget build(BuildContext context) {
+    final bool hasTitle = widget.title.trim().isNotEmpty;
     final Widget section = LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final bool hasBoundedHeight = constraints.maxHeight.isFinite;
@@ -193,11 +194,13 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: hasBoundedHeight ? MainAxisSize.max : MainAxisSize.min,
           children: <Widget>[
-            Text(
-              widget.title,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 10),
+            if (hasTitle)
+              Text(
+                widget.title,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            if (hasTitle)
+              const SizedBox(height: 10),
             if (hasBoundedHeight)
               Expanded(child: ClipRect(child: tableContent))
             else

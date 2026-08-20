@@ -136,7 +136,7 @@ class _QueueOverlayState extends State<QueueOverlay> {
                             decoration: BoxDecoration(
                               color: colors.bgSecondary,
                               borderRadius: widget.isDesktop
-                                  ? const BorderRadius.vertical(top: Radius.circular(18))
+                                  ? BorderRadius.zero
                                   : const BorderRadius.vertical(top: Radius.circular(20)),
                               border: Border(
                                 top: BorderSide(color: colors.border),
@@ -167,53 +167,75 @@ class _QueueOverlayState extends State<QueueOverlay> {
     final colors = context.mashinColors;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(36, 34, 36, 18),
+      padding: const EdgeInsets.fromLTRB(48, 52, 48, 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           SizedBox(
             width: 300,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: <Widget>[
-                Container(
-                  width: 260,
-                  height: 260,
-                  decoration: BoxDecoration(
-                    color: colors.bgTertiary,
-                    borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.only(top: 50),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: <Widget>[
+                  Container(
+                    width: 300,
+                    height: 300,
+                    decoration: BoxDecoration(
+                      color: colors.bgTertiary,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: widget.trackCoverUrl != null
+                          ? Image.network(
+                              widget.trackCoverUrl!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) {
+                                return Icon(Icons.music_note_outlined, size: 64, color: colors.textSecondary);
+                              },
+                            )
+                          : Icon(Icons.music_note_outlined, size: 64, color: colors.textSecondary),
+                    ),
                   ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: widget.trackCoverUrl != null
-                        ? Image.network(
-                            widget.trackCoverUrl!,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) {
-                              return Icon(Icons.music_note_outlined, size: 64, color: colors.textSecondary);
-                            },
-                          )
-                        : Icon(Icons.music_note_outlined, size: 64, color: colors.textSecondary),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: <Widget>[
+                      _buildTrackActionIcon(
+                        context,
+                        icon: Icons.favorite_border_outlined,
+                        tooltip: 'Favorit',
+                      ),
+                      const SizedBox(width: 22),
+                      _buildTrackActionIcon(
+                        context,
+                        icon: Icons.add_outlined,
+                        tooltip: 'Zu Wiedergabeliste hinzufügen',
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  widget.trackTitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  widget.trackSubtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: colors.textSecondary),
-                ),
-              ],
+                  const SizedBox(height: 16),
+                  Text(
+                    widget.trackTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w700, fontSize: 16),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    widget.trackSubtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: colors.textSecondary, fontSize: 14),
+                  ),
+                ],
+              ),
             ),
           ),
-          const SizedBox(width: 30),
+          const SizedBox(width: 40),
           Expanded(
             child: Column(
               children: <Widget>[
@@ -232,19 +254,20 @@ class _QueueOverlayState extends State<QueueOverlay> {
                     const SizedBox(width: 8),
                     Text(widget.queueTotalDurationText, style: TextStyle(color: colors.textTertiary)),
                     const Spacer(),
-                    Text('Automatische Empfehlungen', style: TextStyle(color: colors.textSecondary)),
+                    Text('Automatische Empfehlungen:', style: TextStyle(color: colors.textSecondary)),
                     const SizedBox(width: 8),
-                    Switch(
-                      value: widget.dontStopTheMusicEnabled,
-                      onChanged: (_) {
-                        unawaited(widget.onToggleDontStopTheMusic());
-                      },
+                    Transform.scale(
+                      scale: 0.85,
+                      child: Switch(
+                        value: widget.dontStopTheMusicEnabled,
+                        onChanged: (_) {
+                          unawaited(widget.onToggleDontStopTheMusic());
+                        },
+                      ),
                     ),
-                    const SizedBox(width: 8),
-                    IconButton(onPressed: widget.onClose, icon: const Icon(Icons.close_outlined)),
                   ],
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
                 Expanded(
                   child: MediaTableSectionDesktop<QueueItem>(
                     title: ' ',
@@ -262,6 +285,29 @@ class _QueueOverlayState extends State<QueueOverlay> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildTrackActionIcon(
+    BuildContext context, {
+    required IconData icon,
+    required String tooltip,
+  }) {
+    final colors = context.mashinColors;
+    return Tooltip(
+      message: tooltip,
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: const BoxDecoration(
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          icon,
+          size: 24,
+          color: colors.textSecondary,
+        ),
       ),
     );
   }

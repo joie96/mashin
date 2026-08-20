@@ -277,6 +277,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
+    final bool hasTitle = widget.title.trim().isNotEmpty;
 
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
@@ -295,19 +296,24 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: Text(
-                    widget.title,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-                  ),
-                ),
-                if (isPagingEnabled && !widget.isLoading && widget.items.isNotEmpty)
-                  _buildPaginationControls(context, visibleCount: visibleCount, pageCount: pageCount),
-              ],
-            ),
-            const SizedBox(height: 10),
+            if (hasTitle || (isPagingEnabled && !widget.isLoading && widget.items.isNotEmpty))
+              Row(
+                children: <Widget>[
+                  if (hasTitle)
+                    Expanded(
+                      child: Text(
+                        widget.title,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                    )
+                  else
+                    const Spacer(),
+                  if (isPagingEnabled && !widget.isLoading && widget.items.isNotEmpty)
+                    _buildPaginationControls(context, visibleCount: visibleCount, pageCount: pageCount),
+                ],
+              ),
+            if (hasTitle || (isPagingEnabled && !widget.isLoading && widget.items.isNotEmpty))
+              const SizedBox(height: 10),
             SizedBox(
               height: sectionHeight,
               child: widget.isLoading
