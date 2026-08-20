@@ -543,8 +543,16 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
         onMoreTap: widget.onHeaderMoreTap,
       );
     }
-    if (T == Track || T == QueueItem) {
+    if (T == Track) {
       return _buildDesktopTableHeaderTrack(
+        showSelection: widget.enableSelection,
+        isAllSelected: _isAllSelected,
+        onToggleSelectAll: _toggleAllSelectedIndexes,
+        onMoreTap: widget.onHeaderMoreTap,
+      );
+    }
+    if (T == QueueItem) {
+      return _buildDesktopTableHeaderQueue(
         showSelection: widget.enableSelection,
         isAllSelected: _isAllSelected,
         onToggleSelectAll: _toggleAllSelectedIndexes,
@@ -671,8 +679,11 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
     if (T == Artist) {
       return _buildDesktopTableRowArtistSkeleton(isFirst: isFirst, showSelection: widget.enableSelection);
     }
-    if (T == Track || T == QueueItem) {
+    if (T == Track) {
       return _buildDesktopTableRowTrackSkeleton(isFirst: isFirst, showSelection: widget.enableSelection);
+    }
+    if (T == QueueItem) {
+      return _buildDesktopTableRowQueueSkeleton(isFirst: isFirst, showSelection: widget.enableSelection);
     }
 
     return _buildDesktopTableRowUnknownSkeleton(isFirst: isFirst, showSelection: widget.enableSelection);
@@ -715,13 +726,37 @@ Widget _buildDesktopTableHeaderTrack({
 }) {
   return _buildDesktopTableHeaderBase(
     cells: <Widget>[
-      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopHeaderText('#', TextAlign.left)),
-      _buildDesktopTableSizedCell(width: 62, child: _buildDesktopHeaderText('Cover', TextAlign.left)),
+      _buildDesktopTableSizedCell(width: 40, child: _buildDesktopHeaderText('#', TextAlign.left)),
+      _buildDesktopTableSizedCell(width: 48, child: _buildDesktopHeaderText('', TextAlign.left)),
       _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopHeaderText('Titel', TextAlign.left)),
-      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopHeaderText('Artist', TextAlign.left)),
+      _buildDesktopTableSizedCell(width: 80, child: _buildDesktopHeaderText('Dauer', TextAlign.right)),
       _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopHeaderText('Album', TextAlign.left)),
-      _buildDesktopTableSizedCell(width: 76, child: _buildDesktopHeaderText('Länge', TextAlign.right)),
-      _buildDesktopTableSizedCell(width: 72, child: _buildDesktopHeaderText('Quelle', TextAlign.center)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopHeaderText('Artist', TextAlign.left)),
+      _buildDesktopTableSizedCell(flex: 1, child: _buildDesktopHeaderText('Jahr', TextAlign.left)),
+      _buildDesktopTableSizedCell(width: 80, child: _buildDesktopHeaderText('Quelle', TextAlign.center)),
+    ],
+    showSelection: showSelection,
+    isAllSelected: isAllSelected,
+    onToggleSelectAll: onToggleSelectAll,
+    onMoreTap: onMoreTap,
+  );
+}
+
+Widget _buildDesktopTableHeaderQueue({
+  required bool showSelection,
+  required bool isAllSelected,
+  required VoidCallback onToggleSelectAll,
+  required VoidCallback? onMoreTap,
+}) {
+  return _buildDesktopTableHeaderBase(
+    cells: <Widget>[
+      _buildDesktopTableSizedCell(width: 40, child: _buildDesktopHeaderText('#', TextAlign.left)),
+      _buildDesktopTableSizedCell(width: 48, child: _buildDesktopHeaderText('', TextAlign.left)),
+      _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopHeaderText('Titel', TextAlign.left)),
+      _buildDesktopTableSizedCell(width: 80, child: _buildDesktopHeaderText('Dauer', TextAlign.right)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopHeaderText('Album', TextAlign.left)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopHeaderText('Artist', TextAlign.left)),
+      _buildDesktopTableSizedCell(width: 80, child: _buildDesktopHeaderText('Quelle', TextAlign.center)),
     ],
     showSelection: showSelection,
     isAllSelected: isAllSelected,
@@ -739,7 +774,7 @@ Widget _buildDesktopTableHeaderAlbum({
   return _buildDesktopTableHeaderBase(
     cells: <Widget>[
       _buildDesktopTableSizedCell(width: 44, child: _buildDesktopHeaderText('#', TextAlign.left)),
-      _buildDesktopTableSizedCell(width: 62, child: _buildDesktopHeaderText('Cover', TextAlign.left)),
+      _buildDesktopTableSizedCell(width: 62, child: _buildDesktopHeaderText('', TextAlign.left)),
       _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopHeaderText('Titel', TextAlign.left)),
       _buildDesktopTableSizedCell(flex: 4, child: _buildDesktopHeaderText('Artist', TextAlign.left)),
       _buildDesktopTableSizedCell(flex: 2, child: _buildDesktopHeaderText('Typ', TextAlign.left)),
@@ -762,7 +797,7 @@ Widget _buildDesktopTableHeaderPlaylist({
   return _buildDesktopTableHeaderBase(
     cells: <Widget>[
       _buildDesktopTableSizedCell(width: 44, child: _buildDesktopHeaderText('#', TextAlign.left)),
-      _buildDesktopTableSizedCell(width: 62, child: _buildDesktopHeaderText('Cover', TextAlign.left)),
+      _buildDesktopTableSizedCell(width: 62, child: _buildDesktopHeaderText('', TextAlign.left)),
       _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopHeaderText('Titel', TextAlign.left)),
       _buildDesktopTableSizedCell(flex: 4, child: _buildDesktopHeaderText('Owner', TextAlign.left)),
       _buildDesktopTableSizedCell(flex: 2, child: _buildDesktopHeaderText('Status', TextAlign.left)),
@@ -811,17 +846,18 @@ Widget _buildDesktopTableRowTrack({
 }) {
   return _buildDesktopTableRowBase(
     cells: <Widget>[
-      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopBodyText('${index + 1}', TextAlign.left, DesktopTextTone.tertiary)),
+      _buildDesktopTableSizedCell(width: 40, child: _buildDesktopBodyText('${index + 1}', TextAlign.left, DesktopTextTone.tertiary)),
       _buildDesktopTableSizedCell(
-        width: 62,
+        width: 48,
         child: MediaTableCover(coverUrl: item.imageUri, fallbackIcon: Icons.music_note_outlined, size: 48, radius: 8),
       ),
       _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopBodyText(_prefer(item.name, 'Unknown Track'), TextAlign.left, DesktopTextTone.primary)),
-      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopBodyText(_trackSubtitle(item), TextAlign.left, DesktopTextTone.secondary)),
+      _buildDesktopTableSizedCell(width: 80, child: _buildDesktopBodyText(formatDuration(item.duration), TextAlign.right, DesktopTextTone.tertiary)),
       _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopBodyText(_prefer(item.album?.name ?? '', '-'), TextAlign.left, DesktopTextTone.secondary)),
-      _buildDesktopTableSizedCell(width: 76, child: _buildDesktopBodyText(formatDuration(item.duration), TextAlign.right, DesktopTextTone.tertiary)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopBodyText(_trackSubtitle(item), TextAlign.left, DesktopTextTone.secondary)),
+      _buildDesktopTableSizedCell(flex: 1, child: _buildDesktopBodyText('-', TextAlign.left, DesktopTextTone.tertiary)),
       _buildDesktopTableSizedCell(
-        width: 72,
+        width: 80,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
@@ -1006,7 +1042,7 @@ Widget _buildDesktopTableRowQueue({
   required VoidCallback? onDoubleTap,
   required ValueChanged<PointerDownEvent>? onPointerDown,
 }) {
-  final String provider = item.mediaItem?.provider.trim() ?? '';
+  final String provider = _resolveQueueProvider(item);
   final String title = (item.mediaItem?.name.trim().isNotEmpty == true)
       ? item.mediaItem!.name.trim()
       : item.name.trim().isNotEmpty
@@ -1017,19 +1053,21 @@ Widget _buildDesktopTableRowQueue({
           .where((name) => name.isNotEmpty)
           .join(', ') ??
       '';
+  final String albumName = _stripOrEmpty(item.mediaItem?.album?.name);
 
   return _buildDesktopTableRowBase(
     cells: <Widget>[
-      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopBodyText('${index + 1}', TextAlign.left, DesktopTextTone.tertiary)),
+      _buildDesktopTableSizedCell(width: 40, child: _buildDesktopBodyText('${index + 1}', TextAlign.left, DesktopTextTone.tertiary)),
       _buildDesktopTableSizedCell(
-        width: 62,
+        width: 48,
         child: MediaTableCover(coverUrl: item.mediaItem?.imageUri, fallbackIcon: Icons.music_note_outlined, size: 48, radius: 8),
       ),
       _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopBodyText(title, TextAlign.left, DesktopTextTone.primary)),
+      _buildDesktopTableSizedCell(width: 80, child: _buildDesktopBodyText(_formatQueueDurationSeconds((item.duration ?? 0).toDouble()), TextAlign.right, DesktopTextTone.tertiary)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopBodyText(albumName.isEmpty ? '-' : albumName, TextAlign.left, DesktopTextTone.secondary)),
       _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopBodyText(artists.isEmpty ? '-' : artists, TextAlign.left, DesktopTextTone.secondary)),
-      _buildDesktopTableSizedCell(width: 76, child: _buildDesktopBodyText(_formatQueueDurationSeconds((item.duration ?? 0).toDouble()), TextAlign.right, DesktopTextTone.tertiary)),
       _buildDesktopTableSizedCell(
-        width: 72,
+        width: 80,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
@@ -1085,13 +1123,30 @@ Widget _buildDesktopTableRowUnknown({
 Widget _buildDesktopTableRowTrackSkeleton({required bool isFirst, required bool showSelection}) {
   return _buildDesktopTableRowSkeletonBase(
     cells: <Widget>[
-      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopSkeletonBar(width: 20)),
-      _buildDesktopTableSizedCell(width: 62, child: _buildDesktopSkeletonBar(width: 48, height: 48, radius: 8)),
+      _buildDesktopTableSizedCell(width: 40, child: _buildDesktopSkeletonBar(width: 18)),
+      _buildDesktopTableSizedCell(width: 48, child: _buildDesktopSkeletonBar(width: 48, height: 48, radius: 8)),
       _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopSkeletonBar(width: 220)),
+      _buildDesktopTableSizedCell(width: 80, child: Align(alignment: Alignment.centerRight, child: _buildDesktopSkeletonBar(width: 44))),
       _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopSkeletonBar(width: 120)),
       _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopSkeletonBar(width: 120)),
-      _buildDesktopTableSizedCell(width: 76, child: Align(alignment: Alignment.centerRight, child: _buildDesktopSkeletonBar(width: 40))),
-      _buildDesktopTableSizedCell(width: 72, child: Center(child: _buildDesktopSkeletonBar(width: 16, height: 16, radius: 8))),
+      _buildDesktopTableSizedCell(flex: 1, child: _buildDesktopSkeletonBar(width: 40)),
+      _buildDesktopTableSizedCell(width: 80, child: Center(child: _buildDesktopSkeletonBar(width: 16, height: 16, radius: 8))),
+    ],
+    isFirst: isFirst,
+    showSelection: showSelection,
+  );
+}
+
+Widget _buildDesktopTableRowQueueSkeleton({required bool isFirst, required bool showSelection}) {
+  return _buildDesktopTableRowSkeletonBase(
+    cells: <Widget>[
+      _buildDesktopTableSizedCell(width: 40, child: _buildDesktopSkeletonBar(width: 18)),
+      _buildDesktopTableSizedCell(width: 48, child: _buildDesktopSkeletonBar(width: 48, height: 48, radius: 8)),
+      _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopSkeletonBar(width: 220)),
+      _buildDesktopTableSizedCell(width: 80, child: Align(alignment: Alignment.centerRight, child: _buildDesktopSkeletonBar(width: 44))),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopSkeletonBar(width: 120)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopSkeletonBar(width: 120)),
+      _buildDesktopTableSizedCell(width: 80, child: Center(child: _buildDesktopSkeletonBar(width: 16, height: 16, radius: 8))),
     ],
     isFirst: isFirst,
     showSelection: showSelection,
@@ -1755,6 +1810,28 @@ String _formatQueueDurationSeconds(double seconds) {
   final int minutes = totalSeconds ~/ 60;
   final int remainingSeconds = totalSeconds % 60;
   return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
+}
+
+String _resolveQueueProvider(QueueItem item) {
+  final String directProvider = _stripOrEmpty(item.mediaItem?.provider);
+  if (directProvider.isNotEmpty) {
+    return directProvider;
+  }
+
+  final List<ProviderMapping> mappings = item.mediaItem?.providerMappings ?? const <ProviderMapping>[];
+  for (final ProviderMapping mapping in mappings) {
+    final String domain = _stripOrEmpty(mapping.providerDomain);
+    if (domain.isNotEmpty) {
+      return domain;
+    }
+
+    final String instance = _stripOrEmpty(mapping.providerInstance);
+    if (instance.isNotEmpty) {
+      return instance;
+    }
+  }
+
+  return '';
 }
 
 String _providerLabelFromId(String providerOrDomain) {

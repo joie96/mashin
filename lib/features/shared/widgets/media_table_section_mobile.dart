@@ -683,7 +683,7 @@ class _MobileTableRowBaseState extends State<_MobileTableRowBase> {
                 size: 52,
                 radius: 8,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -705,27 +705,27 @@ class _MobileTableRowBaseState extends State<_MobileTableRowBase> {
                   ],
                 ),
               ),
-              const SizedBox(width: 0),
-              SizedBox(
-                width: 52,
-                child: Text(
-                  widget.trailing,
-                  textAlign: TextAlign.right,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: textStyles.mobileTrailing,
-                ),
+              const SizedBox(width: 10),
+              Text(
+                widget.trailing,
+                textAlign: TextAlign.right,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: textStyles.mobileTrailing,
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 10),
               SizedBox(
                 width: 20,
-                child: MediaProviderIcon(
-                  providerLabel: widget.providerLabel,
-                  iconSvg: widget.providerIconSvg,
-                  size: 16,
+                child: Align(
+                  alignment: Alignment.center,
+                  child: MediaProviderIcon(
+                    providerLabel: widget.providerLabel,
+                    iconSvg: widget.providerIconSvg,
+                    size: 16,
+                  ),
                 ),
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: 10),
               SizedBox(
                 width: 40,
                 height: 40,
@@ -826,11 +826,11 @@ class _MobileTableRowSkeleton extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           skeletonBox(width: 32, height: 20, radius: 4),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           skeletonBox(width: 18, height: 18, radius: 4),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           skeletonBox(width: 20, height: 20, radius: 10),
         ],
       ),

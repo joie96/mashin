@@ -347,6 +347,7 @@ class _AppShellState extends State<AppShell> {
         QueueOverlay(
           isOpen: _isQueueOverlayOpen,
           isDesktop: true,
+          desktopBottomInset: _DesktopPlayerBar.barHeight,
           trackTitle: _currentTrackTitle,
           trackSubtitle: _currentTrackSubtitle,
           trackCoverUrl: _currentTrackCoverUrl,
@@ -428,11 +429,8 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _openQueueOverlay() {
-    if (_isQueueOverlayOpen) {
-      return;
-    }
     setState(() {
-      _isQueueOverlayOpen = true;
+      _isQueueOverlayOpen = !_isQueueOverlayOpen;
     });
   }
 
@@ -868,6 +866,8 @@ class _DesktopNavItem extends StatelessWidget {
 }
 
 class _DesktopPlayerBar extends StatelessWidget {
+  static const double barHeight = 90;
+
   final PlaybackStateType playStateType;
   final PlaybackState playbackState;
   final bool dontStopTheMusicEnabled;
@@ -926,7 +926,7 @@ class _DesktopPlayerBar extends StatelessWidget {
       .toDouble();
 
     return Container(
-      height: 90,
+      height: barHeight,
       decoration: BoxDecoration(
         color: colors.bgSecondary,
         border: Border(top: BorderSide(color: colors.border)),

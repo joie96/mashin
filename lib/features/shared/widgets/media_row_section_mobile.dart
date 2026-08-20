@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../data/music_assistant/ma_models.dart';
+import 'media_table_section_desktop.dart';
 
 class MediaRowSectionMobile<T> extends StatelessWidget {
   final String title;
@@ -158,6 +159,8 @@ Widget _buildMobileMediaRowAlbum({
     secondaryText: _albumSubtitle(item),
     tertiaryText: _albumTertiary(item),
     coverUrl: item.imageUri ?? '',
+    providerLabel: _providerLabelFromId(item.provider),
+    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
   );
 }
 
@@ -174,6 +177,8 @@ Widget _buildMobileMediaRowPlaylist({
     secondaryText: _playlistSubtitle(item),
     tertiaryText: _playlistTertiary(item),
     coverUrl: item.imageUri ?? '',
+    providerLabel: _providerLabelFromId(item.provider),
+    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
   );
 }
 
@@ -190,6 +195,8 @@ Widget _buildMobileMediaRowArtist({
     secondaryText: 'Artist',
     tertiaryText: _artistTertiary(item),
     coverUrl: item.imageUri ?? '',
+    providerLabel: _providerLabelFromId(item.provider),
+    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
   );
 }
 
@@ -206,6 +213,8 @@ Widget _buildMobileMediaRowTrack({
     secondaryText: _trackSubtitle(item),
     tertiaryText: _trackTertiary(item),
     coverUrl: item.imageUri ?? '',
+    providerLabel: _providerLabelFromId(item.provider),
+    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
   );
 }
 
@@ -221,6 +230,8 @@ Widget _buildMobileMediaRowUnknown({
     secondaryText: '-',
     tertiaryText: '-',
     coverUrl: '',
+    providerLabel: '-',
+    providerIconSvg: null,
   );
 }
 
@@ -232,6 +243,8 @@ Widget _buildMobileMediaRowItemBase({
   required String? secondaryText,
   required String? tertiaryText,
   required String? coverUrl,
+  required String providerLabel,
+  required String? providerIconSvg,
   bool showPlayOverlay = true,
 }) {
   return Builder(
@@ -248,7 +261,7 @@ Widget _buildMobileMediaRowItemBase({
             Stack(
               children: <Widget>[
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(8),
                   child: Container(
                     width: coverSize,
                     height: coverSize,
@@ -262,16 +275,25 @@ Widget _buildMobileMediaRowItemBase({
                         : Icon(icon, color: colors.accent, size: 28),
                   ),
                 ),
+                Positioned(
+                  left: 6,
+                  top: 6,
+                  child: MediaProviderIcon(
+                    providerLabel: providerLabel,
+                    iconSvg: providerIconSvg,
+                    size: 18,
+                  ),
+                ),
                 if (showPlayOverlay)
                   Positioned(
                     left: 6,
                     bottom: 6,
                     child: Container(
-                      width: 32,
-                      height: 32,
+                      width: 40,
+                      height: 40,
                       decoration: BoxDecoration(
                         color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.9),
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(20),
                         border: Border.all(color: colors.border),
                       ),
                       child: Icon(
@@ -503,4 +525,18 @@ String _formatDuration(int seconds) {
   final remainingSeconds = duration.inSeconds % 60;
 
   return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
+}
+
+String _providerLabelFromId(String providerOrDomain) {
+  final String trimmed = providerOrDomain.trim();
+  if (trimmed.isEmpty) {
+    return '-';
+  }
+
+  final String domain = trimmed.split('--').first.trim();
+  if (domain.isEmpty) {
+    return trimmed;
+  }
+
+  return domain[0].toUpperCase() + domain.substring(1);
 }

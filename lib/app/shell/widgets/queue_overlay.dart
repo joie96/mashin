@@ -19,6 +19,7 @@ class QueueOverlay extends StatefulWidget {
     required this.dontStopTheMusicEnabled,
     required this.queueItems,
     required this.currentQueueIndex,
+    this.desktopBottomInset = 0,
     required this.onClose,
     required this.onPlayQueueIndex,
     required this.onToggleDontStopTheMusic,
@@ -35,6 +36,7 @@ class QueueOverlay extends StatefulWidget {
   final bool dontStopTheMusicEnabled;
   final List<QueueItem> queueItems;
   final int? currentQueueIndex;
+  final double desktopBottomInset;
   final VoidCallback onClose;
   final Future<void> Function(int index) onPlayQueueIndex;
   final Future<void> Function() onToggleDontStopTheMusic;
@@ -46,6 +48,7 @@ class QueueOverlay extends StatefulWidget {
 class _QueueOverlayState extends State<QueueOverlay> {
   static const double _mobileDismissThreshold = 120;
   static const double _dragResistance = 0.92;
+  static const Duration _overlayAnimationDuration = Duration(milliseconds: 260);
   double _dragOffset = 0;
 
   @override
@@ -60,81 +63,102 @@ class _QueueOverlayState extends State<QueueOverlay> {
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
     final bool interactable = widget.isOpen || _dragOffset > 0;
-    final double targetOpacity = widget.isOpen ? 1 : 0;
+    final double panelBottomInset = widget.isDesktop ? widget.desktopBottomInset : 0;
 
     return IgnorePointer(
       ignoring: !interactable,
-      child: Stack(
-        children: <Widget>[
-          AnimatedOpacity(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
-            opacity: targetOpacity,
-            child: GestureDetector(
-              onTap: widget.onClose,
-              child: Container(color: Colors.black54),
-            ),
-          ),
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: AnimatedSlide(
-              duration: const Duration(milliseconds: 260),
-              curve: Curves.easeOutCubic,
-              offset: widget.isOpen ? Offset.zero : const Offset(0, 1),
-              child: Transform.translate(
-                offset: Offset(0, _dragOffset),
-                child: GestureDetector(
-                  onVerticalDragUpdate: widget.isDesktop
-                      ? null
-                      : (details) {
-                          if (!widget.isOpen) {
-                            return;
-                          }
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final double viewportHeight = constraints.maxHeight;
+          final double panelHeight = (viewportHeight - panelBottomInset).clamp(0, viewportHeight).toDouble();
 
-                          final double next = _dragOffset + (details.delta.dy * _dragResistance);
-                          setState(() {
-                            _dragOffset = next < 0 ? 0 : next;
-                          });
-                        },
-                  onVerticalDragEnd: widget.isDesktop
-                      ? null
-                      : (_) {
-                          if (_dragOffset >= _mobileDismissThreshold) {
-                            setState(() {
-                              _dragOffset = 0;
-                            });
-                            widget.onClose();
-                            return;
-                          }
-
-                          setState(() {
-                            _dragOffset = 0;
-                          });
-                        },
-                  child: Container(
-                    constraints: BoxConstraints(
-                      maxWidth: widget.isDesktop ? 1400 : double.infinity,
-                      minHeight: widget.isDesktop ? 420 : 380,
-                      maxHeight: MediaQuery.of(context).size.height * (widget.isDesktop ? 0.86 : 0.78),
-                    ),
-                    decoration: BoxDecoration(
-                      color: colors.bgSecondary,
-                      borderRadius: widget.isDesktop
-                          ? const BorderRadius.vertical(top: Radius.circular(18))
-                          : const BorderRadius.vertical(top: Radius.circular(20)),
-                      border: Border(
-                        top: BorderSide(color: colors.border),
-                      ),
-                    ),
-                    child: widget.isDesktop
-                        ? _buildDesktopContent(context)
-                        : _buildMobileContent(context),
+          return Stack(
+            children: <Widget>[
+              Positioned.fill(
+                bottom: panelBottomInset,
+                child: AnimatedOpacity(
+                  duration: _overlayAnimationDuration,
+                  curve: Curves.easeOutCubic,
+                  opacity: widget.isOpen ? 1 : 0,
+                  child: GestureDetector(
+                    onTap: widget.onClose,
+                    child: Container(color: Colors.black54),
                   ),
                 ),
               ),
-            ),
-          ),
-        ],
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: panelBottomInset,
+                height: panelHeight,
+                child: ClipRect(
+                  child: AnimatedSlide(
+                    duration: _overlayAnimationDuration,
+                    curve: Curves.easeOutCubic,
+                    offset: widget.isOpen ? Offset.zero : const Offset(0, 1),
+                    child: Transform.translate(
+                      offset: Offset(0, _dragOffset),
+                      child: GestureDetector(
+                        onVerticalDragUpdate: widget.isDesktop
+                            ? null
+                            : (details) {
+                                if (!widget.isOpen) {
+                                  return;
+                                }
+
+                                final double next = _dragOffset + (details.delta.dy * _dragResistance);
+                                setState(() {
+                                  _dragOffset = next < 0 ? 0 : next;
+                                });
+                              },
+                        onVerticalDragEnd: widget.isDesktop
+                            ? null
+                            : (_) {
+                                if (_dragOffset >= _mobileDismissThreshold) {
+                                  setState(() {
+                                    _dragOffset = 0;
+                                  });
+                                  widget.onClose();
+                                  return;
+                                }
+
+                                setState(() {
+                                  _dragOffset = 0;
+                                });
+                              },
+                        child: Center(
+                          child: Container(
+                            constraints: BoxConstraints(
+                              maxWidth: widget.isDesktop ? 1400 : double.infinity,
+                              minHeight: panelHeight,
+                              maxHeight: panelHeight,
+                            ),
+                            decoration: BoxDecoration(
+                              color: colors.bgSecondary,
+                              borderRadius: widget.isDesktop
+                                  ? const BorderRadius.vertical(top: Radius.circular(18))
+                                  : const BorderRadius.vertical(top: Radius.circular(20)),
+                              border: Border(
+                                top: BorderSide(color: colors.border),
+                              ),
+                            ),
+                            child: widget.isDesktop
+                                ? _buildDesktopContent(context)
+                                : SafeArea(
+                                    top: true,
+                                    bottom: false,
+                                    child: _buildMobileContent(context),
+                                  ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

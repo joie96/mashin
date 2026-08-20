@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import '../../../app/theme/app_theme.dart';
 import '../../../data/music_assistant/ma_models.dart';
+import 'media_table_section_desktop.dart';
 
 class MediaRowSectionDesktop<T> extends StatefulWidget {
   static const double _defaultHeight = 226;
@@ -455,6 +456,8 @@ Widget _buildDesktopMediaRowAlbum({
     secondaryText: _albumSubtitle(item),
     tertiaryText: _albumTertiary(item),
     coverUrl: item.imageUri ?? '',
+    providerLabel: _providerLabelFromId(item.provider),
+    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
   );
 }
 
@@ -471,6 +474,8 @@ Widget _buildDesktopMediaRowPlaylist({
     secondaryText: _playlistSubtitle(item),
     tertiaryText: _playlistTertiary(item),
     coverUrl: item.imageUri ?? '',
+    providerLabel: _providerLabelFromId(item.provider),
+    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
   );
 }
 
@@ -488,6 +493,8 @@ Widget _buildDesktopMediaRowArtist({
     tertiaryText: _artistTertiary(item),
     coverUrl: item.imageUri ?? '',
     isCircularCover: true,
+    providerLabel: _providerLabelFromId(item.provider),
+    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
   );
 }
 
@@ -504,6 +511,8 @@ Widget _buildDesktopMediaRowTrack({
     secondaryText: _trackSubtitle(item),
     tertiaryText: _trackTertiary(item),
     coverUrl: item.imageUri ?? '',
+    providerLabel: _providerLabelFromId(item.provider),
+    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
   );
 }
 
@@ -519,6 +528,8 @@ Widget _buildDesktopMediaRowUnknown({
     secondaryText: '-',
     tertiaryText: '-',
     coverUrl: '',
+    providerLabel: '-',
+    providerIconSvg: null,
   );
 }
 
@@ -530,6 +541,8 @@ Widget _buildDesktopMediaRowItemBase({
   required String? secondaryText,
   required String? tertiaryText,
   required String? coverUrl,
+  required String providerLabel,
+  required String? providerIconSvg,
   bool showPlayOverlay = true,
   bool isCircularCover = false,
 }) {
@@ -542,7 +555,7 @@ Widget _buildDesktopMediaRowItemBase({
       return SizedBox(
         width: itemWidth,
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Stack(
               children: <Widget>[
@@ -563,7 +576,7 @@ Widget _buildDesktopMediaRowItemBase({
                   )
                 else
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(8),
                     child: Container(
                       width: coverSize,
                       height: coverSize,
@@ -577,43 +590,52 @@ Widget _buildDesktopMediaRowItemBase({
                           : Icon(icon, color: colors.accent, size: 34),
                     ),
                   ),
+                Positioned(
+                  left: 6,
+                  top: 6,
+                  child: MediaProviderIcon(
+                    providerLabel: providerLabel,
+                    iconSvg: providerIconSvg,
+                    size: 18,
+                  ),
+                ),
                 if (showPlayOverlay)
                   Positioned(
                     left: 6,
                     bottom: 6,
                     child: Container(
-                      width: 38,
-                      height: 38,
+                      width: 40,
+                      height: 40,
                       decoration: BoxDecoration(
                         color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.9),
-                        borderRadius: BorderRadius.circular(19),
+                        borderRadius: BorderRadius.circular(20),
                         border: Border.all(color: colors.border),
                       ),
                       child: Icon(
                         Icons.play_arrow_outlined,
-                        size: 22,
+                        size: 20,
                         color: Theme.of(context).colorScheme.onSurface,
                       ),
                     ),
                   ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             Text(
               title,
               maxLines: 1,
-              textAlign: TextAlign.center,
+              textAlign: TextAlign.left,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w400, fontSize: 15),
             ),
             if (hasSecondary) ...<Widget>[
               const SizedBox(height: 2),
               Text(
                 secondaryText!,
                 maxLines: 1,
-                textAlign: TextAlign.center,
+                textAlign: TextAlign.left,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: colors.textSecondary, fontSize: 12),
+                style: TextStyle(color: colors.textSecondary, fontSize: 14),
               ),
             ],
             if (hasTertiary) ...<Widget>[
@@ -621,9 +643,9 @@ Widget _buildDesktopMediaRowItemBase({
               Text(
                 tertiaryText!,
                 maxLines: 1,
-                textAlign: TextAlign.center,
+                textAlign: TextAlign.left,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: colors.textSecondary, fontSize: 12),
+                style: TextStyle(color: colors.textTertiary, fontSize: 14),
               ),
             ],
           ],
@@ -818,4 +840,18 @@ String formatDuration(int seconds) {
   final remainingSeconds = duration.inSeconds % 60;
 
   return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
+}
+
+String _providerLabelFromId(String providerOrDomain) {
+  final String trimmed = providerOrDomain.trim();
+  if (trimmed.isEmpty) {
+    return '-';
+  }
+
+  final String domain = trimmed.split('--').first.trim();
+  if (domain.isEmpty) {
+    return trimmed;
+  }
+
+  return domain[0].toUpperCase() + domain.substring(1);
 }
