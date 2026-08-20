@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'dart:math' as math;
+import 'dart:async';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../data/music_assistant/ma_models.dart';
+import '../../playback/playback_coordinator.dart';
 import 'media_table_section_desktop.dart';
 
 class MediaRowSectionDesktop<T> extends StatefulWidget {
@@ -16,6 +19,7 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
   final double minItemWith;
   final double itemSpacing;
   final int skeletonCount;
+  final PlaybackCoordinator? playbackCoordinator;
 
   const MediaRowSectionDesktop({
     super.key,
@@ -26,6 +30,7 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
     this.minItemWith = 160,
     this.itemSpacing = 16,
     this.skeletonCount = 8,
+    this.playbackCoordinator,
   });
 
   @override
@@ -170,6 +175,57 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
     return widget.items.sublist(safeStart, end);
   }
 
+  MediaItem? _resolvePlayableMediaItem(Object? rawItem) {
+    if (rawItem is QueueItem) {
+      return rawItem.mediaItem;
+    }
+    if (rawItem is MediaItem) {
+      return rawItem;
+    }
+    return null;
+  }
+
+  bool _isValidPlayable(MediaItem item) {
+    return item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty;
+  }
+
+  List<MediaItem> _playableItemsFromIndex(int startIndex) {
+    if (widget.items.isEmpty || startIndex < 0 || startIndex >= widget.items.length) {
+      return const <MediaItem>[];
+    }
+
+    final List<MediaItem> playItems = <MediaItem>[];
+    for (int i = startIndex; i < widget.items.length; i++) {
+      final MediaItem? resolved = _resolvePlayableMediaItem(widget.items[i]);
+      if (resolved == null || !_isValidPlayable(resolved)) {
+        continue;
+      }
+      playItems.add(resolved);
+    }
+
+    return playItems;
+  }
+
+  void _onPlayTap(int absoluteIndex) {
+    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
+    if (coordinator == null) {
+      return;
+    }
+
+    final List<MediaItem> playItems = _playableItemsFromIndex(absoluteIndex);
+    if (playItems.isEmpty) {
+      return;
+    }
+
+    unawaited(() async {
+      try {
+        await coordinator.playMedia(playItems);
+      } catch (_) {
+        // Ignore failures to keep row interactions responsive.
+      }
+    }());
+  }
+
   Widget _buildSlideList({
     required int startIndex,
     required int visibleCount,
@@ -185,12 +241,14 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
       itemCount: visibleItems.length,
       separatorBuilder: (_, _) => SizedBox(width: widget.itemSpacing),
       itemBuilder: (BuildContext context, int index) {
+        final int absoluteIndex = startIndex + index;
         final Object? item = visibleItems[index];
         if (item is Album) {
           return _buildDesktopMediaRowAlbum(
             item: item,
             itemWidth: resolvedItemWidth,
             coverSize: resolvedCoverSize,
+            onPlayTap: () => _onPlayTap(absoluteIndex),
           );
         }
         if (item is Playlist) {
@@ -198,6 +256,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
             item: item,
             itemWidth: resolvedItemWidth,
             coverSize: resolvedCoverSize,
+            onPlayTap: () => _onPlayTap(absoluteIndex),
           );
         }
         if (item is Artist) {
@@ -205,6 +264,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
             item: item,
             itemWidth: resolvedItemWidth,
             coverSize: resolvedCoverSize,
+            onPlayTap: () => _onPlayTap(absoluteIndex),
           );
         }
         if (item is Track) {
@@ -212,12 +272,14 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
             item: item,
             itemWidth: resolvedItemWidth,
             coverSize: resolvedCoverSize,
+            onPlayTap: () => _onPlayTap(absoluteIndex),
           );
         }
 
         return _buildDesktopMediaRowUnknown(
           itemWidth: resolvedItemWidth,
           coverSize: resolvedCoverSize,
+          onPlayTap: () => _onPlayTap(absoluteIndex),
         );
       },
     );
@@ -453,6 +515,7 @@ Widget _buildDesktopMediaRowAlbum({
   required Album item,
   required double itemWidth,
   required double coverSize,
+  required VoidCallback? onPlayTap,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -464,6 +527,7 @@ Widget _buildDesktopMediaRowAlbum({
     coverUrl: item.imageUri ?? '',
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+    onPlayTap: onPlayTap,
   );
 }
 
@@ -471,6 +535,7 @@ Widget _buildDesktopMediaRowPlaylist({
   required Playlist item,
   required double itemWidth,
   required double coverSize,
+  required VoidCallback? onPlayTap,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -482,6 +547,7 @@ Widget _buildDesktopMediaRowPlaylist({
     coverUrl: item.imageUri ?? '',
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+    onPlayTap: onPlayTap,
   );
 }
 
@@ -489,6 +555,7 @@ Widget _buildDesktopMediaRowArtist({
   required Artist item,
   required double itemWidth,
   required double coverSize,
+  required VoidCallback? onPlayTap,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -501,6 +568,7 @@ Widget _buildDesktopMediaRowArtist({
     isCircularCover: true,
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+    onPlayTap: onPlayTap,
   );
 }
 
@@ -508,6 +576,7 @@ Widget _buildDesktopMediaRowTrack({
   required Track item,
   required double itemWidth,
   required double coverSize,
+  required VoidCallback? onPlayTap,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -519,12 +588,14 @@ Widget _buildDesktopMediaRowTrack({
     coverUrl: item.imageUri ?? '',
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+    onPlayTap: onPlayTap,
   );
 }
 
 Widget _buildDesktopMediaRowUnknown({
   required double itemWidth,
   required double coverSize,
+  required VoidCallback? onPlayTap,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -536,6 +607,7 @@ Widget _buildDesktopMediaRowUnknown({
     coverUrl: '',
     providerLabel: '-',
     providerIconSvg: null,
+    onPlayTap: onPlayTap,
   );
 }
 
@@ -549,9 +621,17 @@ Widget _buildDesktopMediaRowItemBase({
   required String? coverUrl,
   required String providerLabel,
   required String? providerIconSvg,
+  required VoidCallback? onPlayTap,
   bool showPlayOverlay = true,
   bool isCircularCover = false,
 }) {
+  bool isPrimaryActivationPointer(PointerDownEvent event) {
+    if (event.kind == PointerDeviceKind.mouse) {
+      return (event.buttons & kPrimaryMouseButton) != 0;
+    }
+    return true;
+  }
+
   return Builder(
     builder: (BuildContext context) {
       final colors = context.mashinColors;
@@ -609,18 +689,27 @@ Widget _buildDesktopMediaRowItemBase({
                   Positioned(
                     left: 6,
                     bottom: 6,
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.9),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: colors.border),
-                      ),
-                      child: Icon(
-                        Icons.play_arrow_outlined,
-                        size: 20,
-                        color: Theme.of(context).colorScheme.onSurface,
+                    child: Listener(
+                      onPointerDown: onPlayTap == null
+                          ? null
+                          : (PointerDownEvent event) {
+                              if (isPrimaryActivationPointer(event)) {
+                                onPlayTap.call();
+                              }
+                            },
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.9),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: colors.border),
+                        ),
+                        child: Icon(
+                          Icons.play_arrow_outlined,
+                          size: 20,
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
                       ),
                     ),
                   ),

@@ -2,9 +2,11 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'dart:async';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../data/music_assistant/ma_models.dart';
+import '../../playback/playback_coordinator.dart';
 import '../selection/selection_session_controller.dart';
 
 typedef DesktopRowAction<T> = void Function(T item, int index);
@@ -25,6 +27,7 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
   final DesktopRowAction<T>? onRowFavoriteTap;
   final DesktopRowAction<T>? onRowDoubleTap;
   final DesktopRowFavoriteResolver<T>? isRowFavorite;
+  final PlaybackCoordinator? playbackCoordinator;
 
   const MediaTableSectionDesktop({
     super.key,
@@ -42,6 +45,7 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
     this.onRowFavoriteTap,
     this.onRowDoubleTap,
     this.isRowFavorite,
+    this.playbackCoordinator,
   });
 
   @override
@@ -124,6 +128,86 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
     return widget.isRowFavorite?.call(item, index) ?? false;
   }
 
+  MediaItem? _resolvePlayableMediaItem(Object? rawItem) {
+    if (rawItem is QueueItem) {
+      return rawItem.mediaItem;
+    }
+    if (rawItem is MediaItem) {
+      return rawItem;
+    }
+    return null;
+  }
+
+  bool _isValidPlayable(MediaItem item) {
+    return item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty;
+  }
+
+  List<MediaItem> _playableItemsFromIndex(int startIndex) {
+    if (widget.items.isEmpty || startIndex < 0 || startIndex >= widget.items.length) {
+      return const <MediaItem>[];
+    }
+
+    final List<MediaItem> playItems = <MediaItem>[];
+    for (int i = startIndex; i < widget.items.length; i++) {
+      final MediaItem? resolved = _resolvePlayableMediaItem(widget.items[i]);
+      if (resolved == null || !_isValidPlayable(resolved)) {
+        continue;
+      }
+      playItems.add(resolved);
+    }
+
+    return playItems;
+  }
+
+  Future<bool> _handleRowActivate({required T item, required int index}) async {
+    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
+    if (coordinator == null || index < 0 || index >= widget.items.length) {
+      return false;
+    }
+
+    if (widget.enableSelection) {
+      setState(() {
+        _selectedIndexes
+          ..clear()
+          ..add(index);
+        _selectionAnchorIndex = index;
+      });
+      _syncSelectionSession();
+      _emitSelectionChanged();
+    }
+
+    final Object? rawItem = item;
+    if (rawItem is QueueItem) {
+      try {
+        await coordinator.playQueueIndex(index);
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    final List<MediaItem> playItems = _playableItemsFromIndex(index);
+    if (playItems.isEmpty) {
+      return false;
+    }
+
+    try {
+      await coordinator.playMedia(playItems);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _onRowActivated({required T item, required int index}) {
+    unawaited(() async {
+      final bool handled = await _handleRowActivate(item: item, index: index);
+      if (!handled) {
+        widget.onRowDoubleTap?.call(item, index);
+      }
+    }());
+  }
+
   void _emitSelectionChanged() {
     if (widget.onSelectionChanged == null) {
       return;
@@ -194,6 +278,21 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
     _emitSelectionChanged();
   }
 
+  void _selectSingleIndex(int index) {
+    if (!widget.enableSelection || index < 0 || index >= widget.items.length) {
+      return;
+    }
+
+    setState(() {
+      _selectedIndexes
+        ..clear()
+        ..add(index);
+      _selectionAnchorIndex = index;
+    });
+    _syncSelectionSession();
+    _emitSelectionChanged();
+  }
+
   void _selectRangeTo(int index) {
     if (!widget.enableSelection || index < 0 || index >= widget.items.length) {
       return;
@@ -223,10 +322,6 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
     final bool isCtrlPressed = keys.contains(LogicalKeyboardKey.controlLeft) || keys.contains(LogicalKeyboardKey.controlRight);
     final bool isShiftPressed = keys.contains(LogicalKeyboardKey.shiftLeft) || keys.contains(LogicalKeyboardKey.shiftRight);
 
-    if (!isCtrlPressed && !isShiftPressed) {
-      return;
-    }
-
     _requestSectionFocus();
 
     if (isShiftPressed) {
@@ -236,7 +331,12 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
 
     if (isCtrlPressed) {
       _toggleSelectedIndex(index);
+      return;
     }
+
+    // Perform single selection on pointer down to avoid tap-delay caused by
+    // double-tap recognizers and to snapshot modifier state immediately.
+    _selectSingleIndex(index);
   }
 
   void _toggleAllSelectedIndexes() {
@@ -595,7 +695,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
         onToggleSelected: onToggleSelected,
         onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(item, index),
         onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item, index),
-        onDoubleTap: widget.onRowDoubleTap == null ? null : () => widget.onRowDoubleTap!(item, index),
+        onDoubleTap: () => _onRowActivated(item: item, index: index),
         onPointerDown: onPointerDown,
       );
     }
@@ -610,7 +710,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
         onToggleSelected: onToggleSelected,
         onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(item, index),
         onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item, index),
-        onDoubleTap: widget.onRowDoubleTap == null ? null : () => widget.onRowDoubleTap!(item, index),
+        onDoubleTap: () => _onRowActivated(item: item, index: index),
         onPointerDown: onPointerDown,
       );
     }
@@ -625,7 +725,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
         onToggleSelected: onToggleSelected,
         onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(item, index),
         onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item, index),
-        onDoubleTap: widget.onRowDoubleTap == null ? null : () => widget.onRowDoubleTap!(item, index),
+        onDoubleTap: () => _onRowActivated(item: item, index: index),
         onPointerDown: onPointerDown,
       );
     }
@@ -640,7 +740,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
         onToggleSelected: onToggleSelected,
         onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(item, index),
         onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item, index),
-        onDoubleTap: widget.onRowDoubleTap == null ? null : () => widget.onRowDoubleTap!(item, index),
+        onDoubleTap: () => _onRowActivated(item: item, index: index),
         onPointerDown: onPointerDown,
       );
     }
@@ -655,7 +755,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
         onToggleSelected: onToggleSelected,
         onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(item, index),
         onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item, index),
-        onDoubleTap: widget.onRowDoubleTap == null ? null : () => widget.onRowDoubleTap!(item, index),
+        onDoubleTap: () => _onRowActivated(item: item, index: index),
         onPointerDown: onPointerDown,
       );
     }
@@ -669,7 +769,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
       onToggleSelected: onToggleSelected,
       onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(item, index),
       onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item, index),
-      onDoubleTap: widget.onRowDoubleTap == null ? null : () => widget.onRowDoubleTap!(item, index),
+      onDoubleTap: () => _onRowActivated(item: item, index: index),
       onPointerDown: onPointerDown,
     );
   }
@@ -1307,22 +1407,52 @@ class _DesktopTableRowBase extends StatefulWidget {
 class _DesktopTableRowBaseState extends State<_DesktopTableRowBase> {
   bool _isHovered = false;
 
+  void _handleRowPointerDown(PointerDownEvent event) {
+    if (widget.onPointerDown == null) {
+      return;
+    }
+
+    final RenderObject? renderObject = context.findRenderObject();
+    if (renderObject is! RenderBox) {
+      widget.onPointerDown!(event);
+      return;
+    }
+
+    // Exclude favorite/more/checkbox action columns from row selection pointer handling.
+    final double trailingActionWidth = widget.selectionEnabled ? 120 : 80;
+    final double rowWidth = renderObject.size.width;
+    if (rowWidth > 0 && event.localPosition.dx >= rowWidth - trailingActionWidth) {
+      return;
+    }
+
+    widget.onPointerDown!(event);
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
+    final Color selectedBackground = colors.selection;
+    final Color hoverBackground = colors.hover;
+
+    Color rowBackground = Colors.transparent;
+    if (widget.isSelected) {
+      rowBackground = _isHovered ? hoverBackground : selectedBackground;
+    } else if (_isHovered) {
+      rowBackground = hoverBackground;
+    }
 
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
       child: Listener(
-        onPointerDown: widget.onPointerDown,
+        onPointerDown: _handleRowPointerDown,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onDoubleTap: widget.onDoubleTap,
           child: Container(
             height: 64,
             decoration: BoxDecoration(
-              color: widget.isSelected ? colors.hover : (_isHovered ? colors.hover : Colors.transparent),
+              color: rowBackground,
               border: widget.isFirst ? null : Border(top: BorderSide(color: colors.border)),
             ),
             child: Row(
@@ -1535,6 +1665,13 @@ class _DesktopIconActionButton extends StatefulWidget {
 class _DesktopIconActionButtonState extends State<_DesktopIconActionButton> {
   bool _isHovered = false;
 
+  bool _isPrimaryActivationPointer(PointerDownEvent event) {
+    if (event.kind == PointerDeviceKind.mouse) {
+      return (event.buttons & kPrimaryMouseButton) != 0;
+    }
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
     final Color iconColor = _isHovered ? widget.hoverColor : widget.baseColor;
@@ -1542,20 +1679,28 @@ class _DesktopIconActionButtonState extends State<_DesktopIconActionButton> {
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
-      child: IconButton(
-        onPressed: widget.onTap,
-        padding: EdgeInsets.zero,
-        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-        splashRadius: 18,
-        visualDensity: VisualDensity.compact,
-        icon: AnimatedScale(
-          scale: _isHovered ? 1.08 : 1,
-          duration: const Duration(milliseconds: 120),
-          curve: Curves.easeOutCubic,
-          child: Icon(
-            widget.icon,
-            size: 18,
-            color: iconColor,
+      child: Listener(
+        onPointerDown: widget.onTap == null
+            ? null
+            : (PointerDownEvent event) {
+                if (_isPrimaryActivationPointer(event)) {
+                  widget.onTap!.call();
+                }
+              },
+        child: SizedBox(
+          width: 32,
+          height: 32,
+          child: Center(
+            child: AnimatedScale(
+              scale: _isHovered ? 1.08 : 1,
+              duration: const Duration(milliseconds: 120),
+              curve: Curves.easeOutCubic,
+              child: Icon(
+                widget.icon,
+                size: 18,
+                color: iconColor,
+              ),
+            ),
           ),
         ),
       ),
@@ -1574,15 +1719,27 @@ class _DesktopSelectionCheckBox extends StatelessWidget {
     this.onTap,
   });
 
+  bool _isPrimaryActivationPointer(PointerDownEvent event) {
+    if (event.kind == PointerDeviceKind.mouse) {
+      return (event.buttons & kPrimaryMouseButton) != 0;
+    }
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
 
     return IgnorePointer(
       ignoring: !isVisible,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTapDown: onTap == null ? null : (_) => onTap!.call(),
+      child: Listener(
+        onPointerDown: onTap == null
+            ? null
+            : (PointerDownEvent event) {
+                if (_isPrimaryActivationPointer(event)) {
+                  onTap!.call();
+                }
+              },
         child: Opacity(
           opacity: isVisible ? 1 : 0,
           child: Container(

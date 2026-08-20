@@ -1,9 +1,11 @@
 import 'dart:math' as math;
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../data/music_assistant/ma_models.dart';
+import '../../playback/playback_coordinator.dart';
 import '../selection/selection_session_controller.dart';
 import 'media_table_section_desktop.dart';
 
@@ -18,6 +20,7 @@ class MediaTableSectionMobile<T> extends StatefulWidget {
   final DesktopRowAction<T>? onRowTap;
   final ValueChanged<List<T>>? onSelectionChanged;
   final VoidCallback? onSelectionMenuTap;
+  final PlaybackCoordinator? playbackCoordinator;
 
   const MediaTableSectionMobile({
     super.key,
@@ -31,6 +34,7 @@ class MediaTableSectionMobile<T> extends StatefulWidget {
     this.onRowTap,
     this.onSelectionChanged,
     this.onSelectionMenuTap,
+    this.playbackCoordinator,
   });
 
   @override
@@ -53,6 +57,75 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
   bool get _isChunkModeEnabled => widget.maxItemsPerPage > 0;
   int get _chunkSize => _isChunkModeEnabled ? widget.maxItemsPerPage : 0;
   bool get _isAllSelected => widget.items.isNotEmpty && _selectedIndexes.length == widget.items.length;
+
+  MediaItem? _resolvePlayableMediaItem(Object? rawItem) {
+    if (rawItem is QueueItem) {
+      return rawItem.mediaItem;
+    }
+    if (rawItem is MediaItem) {
+      return rawItem;
+    }
+    return null;
+  }
+
+  bool _isValidPlayable(MediaItem item) {
+    return item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty;
+  }
+
+  List<MediaItem> _playableItemsFromIndex(int startIndex) {
+    if (widget.items.isEmpty || startIndex < 0 || startIndex >= widget.items.length) {
+      return const <MediaItem>[];
+    }
+
+    final List<MediaItem> playItems = <MediaItem>[];
+    for (int i = startIndex; i < widget.items.length; i++) {
+      final MediaItem? resolved = _resolvePlayableMediaItem(widget.items[i]);
+      if (resolved == null || !_isValidPlayable(resolved)) {
+        continue;
+      }
+      playItems.add(resolved);
+    }
+
+    return playItems;
+  }
+
+  Future<bool> _handleRowActivate({required T item, required int index}) async {
+    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
+    if (coordinator == null || index < 0 || index >= widget.items.length) {
+      return false;
+    }
+
+    final Object? rawItem = item;
+    if (rawItem is QueueItem) {
+      try {
+        await coordinator.playQueueIndex(index);
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    final List<MediaItem> playItems = _playableItemsFromIndex(index);
+    if (playItems.isEmpty) {
+      return false;
+    }
+
+    try {
+      await coordinator.playMedia(playItems);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _onRowActivated({required T item, required int index}) {
+    unawaited(() async {
+      final bool handled = await _handleRowActivate(item: item, index: index);
+      if (!handled) {
+        widget.onRowTap?.call(item, index);
+      }
+    }());
+  }
 
   @override
   void didUpdateWidget(covariant MediaTableSectionMobile<T> oldWidget) {
@@ -303,9 +376,7 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
                       selectionEnabled: widget.enableSelection,
                       onToggleSelected: () => _toggleSelectedIndex(itemIndex),
                       onLongPressSelect: () => _enterSelectionMode(itemIndex),
-                      onTap: widget.onRowTap == null
-                          ? null
-                          : () => widget.onRowTap!(chunkItems[localIndex], itemIndex),
+                      onTap: () => _onRowActivated(item: chunkItems[localIndex], index: itemIndex),
                     ),
                   );
                 }),
@@ -336,9 +407,7 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
           selectionEnabled: widget.enableSelection,
           onToggleSelected: () => _toggleSelectedIndex(itemIndex),
           onLongPressSelect: () => _enterSelectionMode(itemIndex),
-          onTap: widget.onRowTap == null
-              ? null
-              : () => widget.onRowTap!(widget.items[index], itemIndex),
+          onTap: () => _onRowActivated(item: widget.items[index], index: itemIndex),
         );
       },
     );
@@ -662,6 +731,13 @@ class _MobileTableRowBaseState extends State<_MobileTableRowBase> {
     final colors = context.mashinColors;
     final textStyles = context.mashinTableTextStyles;
 
+    Color rowBackground = Colors.transparent;
+    if (widget.isSelected) {
+      rowBackground = _isHovered ? colors.hover : colors.selection;
+    } else if (_isHovered) {
+      rowBackground = colors.hover;
+    }
+
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
@@ -674,7 +750,7 @@ class _MobileTableRowBaseState extends State<_MobileTableRowBase> {
         child: Container(
           constraints: const BoxConstraints(minHeight: 64),
           decoration: BoxDecoration(
-            color: widget.isSelected ? colors.hover : (_isHovered ? colors.hover : Colors.transparent),
+            color: rowBackground,
             border: widget.isFirst ? null : Border(top: BorderSide(color: colors.border)),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),

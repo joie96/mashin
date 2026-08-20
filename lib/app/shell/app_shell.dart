@@ -356,8 +356,8 @@ class _AppShellState extends State<AppShell> {
           dontStopTheMusicEnabled: _playbackCoordinator.dontStopTheMusicEnabled ?? false,
           queueItems: _playbackCoordinator.queueItems,
           currentQueueIndex: _playbackCoordinator.currentQueueIndex,
+          playbackCoordinator: _playbackCoordinator,
           onClose: _closeQueueOverlay,
-          onPlayQueueIndex: _playQueueIndex,
           onToggleDontStopTheMusic: _toggleDontStopTheMusic,
         ),
       ],
@@ -420,8 +420,8 @@ class _AppShellState extends State<AppShell> {
           dontStopTheMusicEnabled: _playbackCoordinator.dontStopTheMusicEnabled ?? false,
           queueItems: _playbackCoordinator.queueItems,
           currentQueueIndex: _playbackCoordinator.currentQueueIndex,
+          playbackCoordinator: _playbackCoordinator,
           onClose: _closeQueueOverlay,
-          onPlayQueueIndex: _playQueueIndex,
           onToggleDontStopTheMusic: _toggleDontStopTheMusic,
         ),
       ],
@@ -441,14 +441,6 @@ class _AppShellState extends State<AppShell> {
     setState(() {
       _isQueueOverlayOpen = false;
     });
-  }
-
-  Future<void> _playQueueIndex(int index) async {
-    try {
-      await _playbackCoordinator.playQueueIndex(index);
-    } catch (_) {
-      // Ignore playback command failures in shell-level controls.
-    }
   }
 
   void _select(AppSection section) {

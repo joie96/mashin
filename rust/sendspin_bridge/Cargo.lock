@@ -542,6 +542,7 @@ name = "mashin_sendspin_bridge"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "cpal",
  "jni 0.21.1",
  "ndk-context",
  "once_cell",

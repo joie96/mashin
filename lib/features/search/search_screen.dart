@@ -141,6 +141,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   isLoading: _isLoadingTracks,
                   emptyText: 'Keine Tracks gefunden.',
                   maxItemsPerPage: 3,
+                  playbackCoordinator: widget.playbackCoordinator,
                 )
               : MediaTableSectionDesktop<Track>(
                   title: 'Tracks',
@@ -148,7 +149,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   isLoading: _isLoadingTracks,
                   emptyText: 'Keine Tracks gefunden.',
                   maxItemsPerPage: 10,
-                  onRowDoubleTap: _onTrackRowDoubleTap,
+                  playbackCoordinator: widget.playbackCoordinator,
                 ),
           const SizedBox(height: 18),
           isMobile
@@ -157,12 +158,14 @@ class _SearchScreenState extends State<SearchScreen> {
                   isLoading: _isLoadingAlbums,
                   items: _albums,
                   emptyText: 'Keine Alben gefunden.',
+                  playbackCoordinator: widget.playbackCoordinator,
                 )
               : MediaRowSectionDesktop<Album>(
                   title: 'Alben',
                   isLoading: _isLoadingAlbums,
                   items: _albums,
                   emptyText: 'Keine Alben gefunden.',
+                  playbackCoordinator: widget.playbackCoordinator,
                 ),
           const SizedBox(height: 18),
           isMobile
@@ -171,12 +174,14 @@ class _SearchScreenState extends State<SearchScreen> {
                   isLoading: _isLoadingPlaylists,
                   items: _playlists,
                   emptyText: 'Keine Playlists gefunden.',
+                  playbackCoordinator: widget.playbackCoordinator,
                 )
               : MediaRowSectionDesktop<Playlist>(
                   title: 'Playlists',
                   isLoading: _isLoadingPlaylists,
                   items: _playlists,
                   emptyText: 'Keine Playlists gefunden.',
+                  playbackCoordinator: widget.playbackCoordinator,
                 ),
           const SizedBox(height: 18),
           isMobile
@@ -185,12 +190,14 @@ class _SearchScreenState extends State<SearchScreen> {
                   isLoading: _isLoadingArtists,
                   items: _artists,
                   emptyText: 'Keine Artists gefunden.',
+                  playbackCoordinator: widget.playbackCoordinator,
                 )
               : MediaRowSectionDesktop<Artist>(
                   title: 'Artists',
                   isLoading: _isLoadingArtists,
                   items: _artists,
                   emptyText: 'Keine Artists gefunden.',
+                  playbackCoordinator: widget.playbackCoordinator,
                 ),
         ],
       ],
@@ -343,18 +350,6 @@ class _SearchScreenState extends State<SearchScreen> {
           }
         });
       }
-    }
-  }
-
-  Future<void> _onTrackRowDoubleTap(Track track, int index) async {
-    if (track.itemId.trim().isEmpty || track.provider.trim().isEmpty) {
-      return;
-    }
-
-    try {
-      await widget.playbackCoordinator.playMedia(<MediaItem>[track]);
-    } catch (_) {
-      // Keep the search UI responsive even if playback routing fails.
     }
   }
 

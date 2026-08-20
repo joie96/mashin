@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../theme/app_theme.dart';
 import '../../../data/music_assistant/ma_models.dart';
+import '../../../features/playback/playback_coordinator.dart';
 import '../../../features/shared/widgets/media_table_section_desktop.dart';
 import '../../../features/shared/widgets/media_table_section_mobile.dart';
 
@@ -19,9 +20,9 @@ class QueueOverlay extends StatefulWidget {
     required this.dontStopTheMusicEnabled,
     required this.queueItems,
     required this.currentQueueIndex,
+    required this.playbackCoordinator,
     this.desktopBottomInset = 0,
     required this.onClose,
-    required this.onPlayQueueIndex,
     required this.onToggleDontStopTheMusic,
     super.key,
   });
@@ -36,9 +37,9 @@ class QueueOverlay extends StatefulWidget {
   final bool dontStopTheMusicEnabled;
   final List<QueueItem> queueItems;
   final int? currentQueueIndex;
+  final PlaybackCoordinator playbackCoordinator;
   final double desktopBottomInset;
   final VoidCallback onClose;
-  final Future<void> Function(int index) onPlayQueueIndex;
   final Future<void> Function() onToggleDontStopTheMusic;
 
   @override
@@ -174,7 +175,7 @@ class _QueueOverlayState extends State<QueueOverlay> {
           SizedBox(
             width: 300,
             child: Padding(
-              padding: const EdgeInsets.only(top: 50),
+              padding: const EdgeInsets.only(top: 58),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: <Widget>[
@@ -205,13 +206,11 @@ class _QueueOverlayState extends State<QueueOverlay> {
                       _buildTrackActionIcon(
                         context,
                         icon: Icons.favorite_border_outlined,
-                        tooltip: 'Favorit',
                       ),
                       const SizedBox(width: 22),
                       _buildTrackActionIcon(
                         context,
                         icon: Icons.add_outlined,
-                        tooltip: 'Zu Wiedergabeliste hinzufügen',
                       ),
                     ],
                   ),
@@ -255,14 +254,18 @@ class _QueueOverlayState extends State<QueueOverlay> {
                     Text(widget.queueTotalDurationText, style: TextStyle(color: colors.textTertiary)),
                     const Spacer(),
                     Text('Automatische Empfehlungen:', style: TextStyle(color: colors.textSecondary)),
-                    const SizedBox(width: 8),
-                    Transform.scale(
-                      scale: 0.85,
-                      child: Switch(
-                        value: widget.dontStopTheMusicEnabled,
-                        onChanged: (_) {
-                          unawaited(widget.onToggleDontStopTheMusic());
-                        },
+                    const SizedBox(width: 2),
+                    Align(
+                      alignment: Alignment.center,
+                      child: Transform.scale(
+                        alignment: Alignment.center,
+                        scale: 0.65,
+                        child: Switch(
+                          value: widget.dontStopTheMusicEnabled,
+                          onChanged: (_) {
+                            unawaited(widget.onToggleDontStopTheMusic());
+                          },
+                        ),
                       ),
                     ),
                   ],
@@ -275,10 +278,8 @@ class _QueueOverlayState extends State<QueueOverlay> {
                     isLoading: false,
                     emptyText: 'Queue ist leer',
                     maxItemsPerPage: 0,
-                    enableSelection: false,
-                    onRowDoubleTap: (QueueItem item, int index) {
-                      unawaited(widget.onPlayQueueIndex(index));
-                    },
+                    enableSelection: true,
+                    playbackCoordinator: widget.playbackCoordinator,
                   ),
                 ),
               ],
@@ -292,21 +293,19 @@ class _QueueOverlayState extends State<QueueOverlay> {
   Widget _buildTrackActionIcon(
     BuildContext context, {
     required IconData icon,
-    required String tooltip,
   }) {
     final colors = context.mashinColors;
-    return Tooltip(
-      message: tooltip,
-      child: Container(
-        width: 36,
-        height: 36,
-        decoration: const BoxDecoration(
-          shape: BoxShape.circle,
-        ),
-        child: Icon(
-          icon,
-          size: 24,
-          color: colors.textSecondary,
+    return SizedBox(
+      width: 36,
+      height: 36,
+      child: IconButton(
+        onPressed: () {},
+        splashRadius: 16,
+        visualDensity: VisualDensity.compact,
+        icon: Icon(icon, size: 20, color: colors.textSecondary),
+        style: IconButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          foregroundColor: colors.textSecondary,
         ),
       ),
     );
@@ -353,10 +352,8 @@ class _QueueOverlayState extends State<QueueOverlay> {
               isLoading: false,
               emptyText: 'Queue ist leer',
               maxItemsPerPage: 0,
-              enableSelection: false,
-              onRowTap: (QueueItem item, int index) {
-                unawaited(widget.onPlayQueueIndex(index));
-              },
+              enableSelection: true,
+              playbackCoordinator: widget.playbackCoordinator,
             ),
           ),
         ],

@@ -12,6 +12,7 @@ class AppTheme {
   static const Color _darkAccent = Color(0xFFFF5A6F);
   static const Color _darkBorder = Color(0xFF2A2A2A);
   static const Color _darkHover = Color(0xFF2A2A2A);
+  static const Color _darkSelection = Color(0xFF3A3A3A);
 
   static const Color _lightBgPrimary = Color(0xFFF3F4F6);
   static const Color _lightBgSecondary = Color(0xFFECEEF2);
@@ -22,6 +23,7 @@ class AppTheme {
   static const Color _lightAccent = Color(0xFFE94757);
   static const Color _lightBorder = Color(0xFFD8DBE2);
   static const Color _lightHover = Color(0xFFE6E9EF);
+  static const Color _lightSelection = Color(0xFFDCE0E8);
 
   static ThemeData dark() {
     final base = ThemeData.dark(useMaterial3: true);
@@ -101,6 +103,7 @@ class MashinColors extends ThemeExtension<MashinColors> {
   final Color accent;
   final Color border;
   final Color hover;
+  final Color selection;
 
   const MashinColors({
     required this.bgPrimary,
@@ -112,6 +115,7 @@ class MashinColors extends ThemeExtension<MashinColors> {
     required this.accent,
     required this.border,
     required this.hover,
+    required this.selection,
   });
 
   const MashinColors.dark()
@@ -123,7 +127,8 @@ class MashinColors extends ThemeExtension<MashinColors> {
         textTertiary = AppTheme._darkTextTertiary,
         accent = AppTheme._darkAccent,
         border = AppTheme._darkBorder,
-        hover = AppTheme._darkHover;
+        hover = AppTheme._darkHover,
+        selection = AppTheme._darkSelection;
 
   const MashinColors.light()
       : bgPrimary = AppTheme._lightBgPrimary,
@@ -134,7 +139,8 @@ class MashinColors extends ThemeExtension<MashinColors> {
         textTertiary = AppTheme._lightTextTertiary,
         accent = AppTheme._lightAccent,
         border = AppTheme._lightBorder,
-        hover = AppTheme._lightHover;
+        hover = AppTheme._lightHover,
+        selection = AppTheme._lightSelection;
 
   @override
   MashinColors copyWith({
@@ -147,6 +153,7 @@ class MashinColors extends ThemeExtension<MashinColors> {
     Color? accent,
     Color? border,
     Color? hover,
+    Color? selection,
   }) {
     return MashinColors(
       bgPrimary: bgPrimary ?? this.bgPrimary,
@@ -158,6 +165,7 @@ class MashinColors extends ThemeExtension<MashinColors> {
       accent: accent ?? this.accent,
       border: border ?? this.border,
       hover: hover ?? this.hover,
+      selection: selection ?? this.selection,
     );
   }
 
@@ -177,6 +185,7 @@ class MashinColors extends ThemeExtension<MashinColors> {
       accent: Color.lerp(accent, other.accent, t) ?? accent,
       border: Color.lerp(border, other.border, t) ?? border,
       hover: Color.lerp(hover, other.hover, t) ?? hover,
+      selection: Color.lerp(selection, other.selection, t) ?? selection,
     );
   }
 }

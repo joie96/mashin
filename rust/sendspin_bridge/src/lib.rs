@@ -1,4 +1,5 @@
 use base64::prelude::*;
+use cpal::traits::{DeviceTrait, HostTrait};
 use once_cell::sync::Lazy;
 use sendspin::audio::decode::{Decoder, FlacDecoder, OpusDecoder, PcmDecoder, PcmEndian};
 use sendspin::audio::{AudioBuffer, AudioFormat, Codec, SyncedPlayer, SyncedPlayerConfig};
@@ -10,6 +11,7 @@ use sendspin::protocol::messages::{
 };
 use sendspin::ProtocolClientBuilder;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::ffi::{c_char, CStr, CString};
 use std::ptr;
 use std::sync::{Arc, Mutex};
@@ -35,6 +37,18 @@ static ANDROID_APP_CONTEXT: Lazy<Mutex<Option<GlobalRef>>> = Lazy::new(|| Mutex:
 
 fn log_error(message: &str) {
     eprintln!("[mashin_sendspin_bridge][E] {}", message);
+}
+
+fn log_info(message: &str) {
+    eprintln!("[mashin_sendspin_bridge][I] {}", message);
+}
+
+fn detect_default_output_profile() -> Option<(String, u32, u8)> {
+    let host = cpal::default_host();
+    let device = host.default_output_device()?;
+    let name = device.to_string();
+    let config = device.default_output_config().ok()?;
+    Some((name, config.sample_rate(), config.channels() as u8))
 }
 
 fn panic_payload_to_string(payload: Box<dyn std::any::Any + Send>) -> String {
@@ -139,6 +153,43 @@ struct StreamFormatsRequest {
     visualizer: Option<VisualizerFormatRequest>,
 }
 
+fn build_supported_audio_formats(preferred_codec: &str) -> Vec<AudioFormatSpec> {
+    let mut seen = HashSet::<(u32, u8, u8)>::new();
+    let mut formats = Vec::<AudioFormatSpec>::new();
+
+    let mut push_spec = |sample_rate: u32, channels: u8, bit_depth: u8| {
+        if seen.insert((sample_rate, channels, bit_depth)) {
+            formats.push(AudioFormatSpec {
+                codec: preferred_codec.to_string(),
+                channels,
+                sample_rate,
+                bit_depth,
+            });
+        }
+    };
+
+    // Put the active Windows default endpoint profile first because some
+    // servers prefer the first format and WASAPI shared mode is strict.
+    if let Some((_name, sample_rate, channels)) = detect_default_output_profile() {
+        push_spec(sample_rate, channels, 24);
+        push_spec(sample_rate, channels, 16);
+    }
+
+    // Keep the previous default near the front as a stable server fallback.
+    push_spec(48_000, 2, 24);
+
+    // Add common shared-mode fallback formats used by consumer audio devices.
+    for sample_rate in [48_000_u32, 44_100_u32] {
+        for channels in [2_u8, 1_u8] {
+            for bit_depth in [24_u8, 16_u8] {
+                push_spec(sample_rate, channels, bit_depth);
+            }
+        }
+    }
+
+    formats
+}
+
 enum ActiveDecoder {
     Pcm(PcmDecoder),
     Opus(OpusDecoder),
@@ -223,6 +274,15 @@ impl SendspinEngine {
             snapshot.connection_state = "connecting".to_string();
         });
 
+        if let Some((device_name, sample_rate, channels)) = detect_default_output_profile() {
+            log_info(&format!(
+                "default output device='{}' profile={}Hz/{}ch (shared mode target)",
+                device_name, sample_rate, channels
+            ));
+        } else {
+            log_info("default output profile unavailable");
+        }
+
         let snapshot = Arc::clone(&self.snapshot);
 
         let (controller, sender, guard, io_task, server_name) = self.runtime.block_on(async {
@@ -230,12 +290,7 @@ impl SendspinEngine {
                 .client_id(config.client_id.clone())
                 .name(config.client_name.clone())
                 .player_v1_support(PlayerV1Support {
-                    supported_formats: vec![AudioFormatSpec {
-                        codec: config.preferred_codec.clone(),
-                        channels: 2,
-                        sample_rate: 48_000,
-                        bit_depth: 24,
-                    }],
+                    supported_formats: build_supported_audio_formats(&config.preferred_codec),
                     buffer_capacity: config
                         .buffer_capacity_bytes
                         .min(u32::MAX as u64) as u32,
@@ -488,7 +543,13 @@ impl SendspinEngine {
                                                 synced_player = Some(player);
                                             }
                                             Ok(Err(err)) => {
-                                                write_last_error(format!("audio output init failed: {err}"));
+                                                write_last_error(format!(
+                                                    "audio output init failed: {err} (requested stream={}Hz/{}ch/{}bit codec={:?})",
+                                                    format.sample_rate,
+                                                    format.channels,
+                                                    format.bit_depth,
+                                                    format.codec
+                                                ));
                                                 audio_output_broken = true;
                                                 continue;
                                             }
