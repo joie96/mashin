@@ -11,8 +11,8 @@ class AppTheme {
   static const Color _darkTextTertiary = Color(0xFFA0A0A0);
   static const Color _darkAccent = Color(0xFFFF5A6F);
   static const Color _darkBorder = Color(0xFF2A2A2A);
-  static const Color _darkHover = Color(0xFF2A2A2A);
-  static const Color _darkSelection = Color(0xFF3A3A3A);
+  static const Color _darkHover = Color(0xFF363636);
+  static const Color _darkSelection = Color(0xFF474747);
 
   static const Color _lightBgPrimary = Color(0xFFF3F4F6);
   static const Color _lightBgSecondary = Color(0xFFECEEF2);

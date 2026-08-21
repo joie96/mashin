@@ -36,7 +36,7 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
     required this.items,
     required this.emptyText,
     this.minItemWith = 160,
-    this.itemSpacing = 16,
+    this.itemSpacing = 8,
     this.skeletonCount = 8,
     this.playbackCoordinator,
     this.enableSelection = true,
@@ -224,7 +224,8 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
   }
 
   _RowLayoutMetrics _computeLayoutMetrics(double maxWidth) {
-    final int itemCount = widget.items.length;
+    // While loading, items is still empty, so fall back to skeletonCount to keep skeleton items visibly sized.
+    final int itemCount = widget.isLoading ? widget.skeletonCount : widget.items.length;
 
     if (itemCount <= 0) {
       return const _RowLayoutMetrics(visibleCount: 1, computedItemWidth: 0);
@@ -417,6 +418,46 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
     }());
   }
 
+  void _onPlayAllTap() {
+    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
+    if (coordinator == null) {
+      return;
+    }
+
+    final List<MediaItem> playItems = _playableItemsFromIndex(0);
+    if (playItems.isEmpty) {
+      return;
+    }
+
+    unawaited(() async {
+      try {
+        await coordinator.playMedia(playItems);
+      } catch (_) {
+        // Ignore failures to keep header interactions responsive.
+      }
+    }());
+  }
+
+  void _onShuffleAllTap() {
+    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
+    if (coordinator == null) {
+      return;
+    }
+
+    final List<MediaItem> playItems = _playableItemsFromIndex(0);
+    if (playItems.isEmpty) {
+      return;
+    }
+
+    unawaited(() async {
+      try {
+        await coordinator.shufflePlayMedia(playItems);
+      } catch (_) {
+        // Ignore failures to keep header interactions responsive.
+      }
+    }());
+  }
+
   Widget _buildSlideList({
     required int startIndex,
     required int visibleCount,
@@ -515,6 +556,24 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
     );
   }
 
+  // Typed desktop row skeleton dispatch
+  Widget _buildDesktopTypedRowSkeleton({required double itemWidth, required double coverSize}) {
+    if (T == Album) {
+      return _buildDesktopMediaRowAlbumSkeleton(itemWidth: itemWidth, coverSize: coverSize);
+    }
+    if (T == Playlist) {
+      return _buildDesktopMediaRowPlaylistSkeleton(itemWidth: itemWidth, coverSize: coverSize);
+    }
+    if (T == Artist) {
+      return _buildDesktopMediaRowArtistSkeleton(itemWidth: itemWidth, coverSize: coverSize);
+    }
+    if (T == Track) {
+      return _buildDesktopMediaRowTrackSkeleton(itemWidth: itemWidth, coverSize: coverSize);
+    }
+
+    return _buildDesktopMediaRowUnknownSkeleton(itemWidth: itemWidth, coverSize: coverSize);
+  }
+
   void _goToPreviousPage(int visibleCount) {
     if (_isTransitionRunning) {
       setState(_finishRunningTransitionImmediately);
@@ -584,27 +643,48 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         final int pageCount = widget.items.isEmpty ? 1 : (widget.items.length / visibleCount).ceil();
         final bool isPagingEnabled = pageCount > 1;
         _pageStartIndex = _clampStartIndex(visibleCount: visibleCount);
+        final bool hasPlayableContent = !widget.isLoading && widget.items.isNotEmpty;
+        final bool showHeaderRow = hasTitle || (hasPlayableContent && (isPagingEnabled || widget.playbackCoordinator != null));
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            if (hasTitle || (isPagingEnabled && !widget.isLoading && widget.items.isNotEmpty))
+            if (showHeaderRow)
               Row(
                 children: <Widget>[
                   if (hasTitle)
-                    Expanded(
-                      child: Text(
-                        widget.title,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                    )
-                  else
-                    const Spacer(),
-                  if (isPagingEnabled && !widget.isLoading && widget.items.isNotEmpty)
+                    Text(
+                      widget.title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                  if (hasTitle && hasPlayableContent) ...<Widget>[
+                    const SizedBox(width: 10),
+                    SectionCountBadge(count: widget.items.length),
+                  ],
+                  const SizedBox(width: 16),
+                  const Expanded(child: SectionHeaderDivider()),
+                  const SizedBox(width: 16),
+                  if (hasPlayableContent && widget.playbackCoordinator != null) ...<Widget>[
+                    SectionHeaderIconButton(
+                      icon: Icons.play_arrow,
+                      tooltip: 'Abspielen',
+                      onTap: _onPlayAllTap,
+                    ),
+                    const SizedBox(width: 8),
+                    SectionHeaderIconButton(
+                      icon: Icons.shuffle,
+                      tooltip: 'Zufällig',
+                      onTap: _onShuffleAllTap,
+                    ),
+                  ],
+                  if (isPagingEnabled && hasPlayableContent) ...<Widget>[
+                    const SizedBox(width: 4),
+                    const SectionHeaderVerticalDivider(),
                     _buildPaginationControls(context, visibleCount: visibleCount, pageCount: pageCount),
+                  ],
                 ],
               ),
-            if (hasTitle || (isPagingEnabled && !widget.isLoading && widget.items.isNotEmpty))
+            if (showHeaderRow)
               const SizedBox(height: 10),
             SizedBox(
               height: sectionHeight,
@@ -613,37 +693,10 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
                       scrollDirection: Axis.horizontal,
                       itemCount: widget.skeletonCount,
                       separatorBuilder: (_, _) => SizedBox(width: widget.itemSpacing),
-                      itemBuilder: (_, _) {
-                        if (T == Album) {
-                          return _buildDesktopMediaRowAlbumSkeleton(
-                            itemWidth: resolvedItemWidth,
-                            coverSize: resolvedCoverSize,
-                          );
-                        }
-                        if (T == Playlist) {
-                          return _buildDesktopMediaRowPlaylistSkeleton(
-                            itemWidth: resolvedItemWidth,
-                            coverSize: resolvedCoverSize,
-                          );
-                        }
-                        if (T == Artist) {
-                          return _buildDesktopMediaRowArtistSkeleton(
-                            itemWidth: resolvedItemWidth,
-                            coverSize: resolvedCoverSize,
-                          );
-                        }
-                        if (T == Track) {
-                          return _buildDesktopMediaRowTrackSkeleton(
-                            itemWidth: resolvedItemWidth,
-                            coverSize: resolvedCoverSize,
-                          );
-                        }
-
-                        return _buildDesktopMediaRowUnknownSkeleton(
-                          itemWidth: resolvedItemWidth,
-                          coverSize: resolvedCoverSize,
-                        );
-                      },
+                      itemBuilder: (_, _) => _buildDesktopTypedRowSkeleton(
+                        itemWidth: resolvedItemWidth,
+                        coverSize: resolvedCoverSize,
+                      ),
                     )
                   : widget.items.isEmpty
                       ? Container(
@@ -999,39 +1052,42 @@ Widget _buildDesktopMediaRowItemBase({
             showPlayOverlay: showPlayOverlay,
             isCircularCover: isCircularCover,
           ),
-          textArea: Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  title,
-                  maxLines: 1,
-                  textAlign: TextAlign.left,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w400, fontSize: 15),
-                ),
-                if (hasSecondary) ...<Widget>[
-                  const SizedBox(height: 2),
+          textArea: SizedBox(
+            width: double.infinity,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
                   Text(
-                    secondaryText,
+                    title,
                     maxLines: 1,
                     textAlign: TextAlign.left,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: colors.textSecondary, fontSize: 14),
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w400, fontSize: 15),
                   ),
+                  if (hasSecondary) ...<Widget>[
+                    const SizedBox(height: 2),
+                    Text(
+                      secondaryText,
+                      maxLines: 1,
+                      textAlign: TextAlign.left,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: colors.textSecondary, fontSize: 14),
+                    ),
+                  ],
+                  if (hasTertiary) ...<Widget>[
+                    const SizedBox(height: 2),
+                    Text(
+                      tertiaryText,
+                      maxLines: 1,
+                      textAlign: TextAlign.left,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: colors.textTertiary, fontSize: 14),
+                    ),
+                  ],
                 ],
-                if (hasTertiary) ...<Widget>[
-                  const SizedBox(height: 2),
-                  Text(
-                    tertiaryText,
-                    maxLines: 1,
-                    textAlign: TextAlign.left,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: colors.textTertiary, fontSize: 14),
-                  ),
-                ],
-              ],
+              ),
             ),
           ),
         ),
@@ -1258,9 +1314,9 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
             ),
           if (showOverlayActions)
             Positioned(
-              left: 8,
-              right: 8,
-              bottom: 8,
+              left: 2,
+              right: 2,
+              bottom: 2,
               child: AnimatedOpacity(
                 duration: _hoverFadeDuration,
                 opacity: widget.isHovered ? 1 : 0,
@@ -1273,7 +1329,7 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
                       baseColor: colors.textPrimary,
                       hoverColor: colors.textSecondary,
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 4),
                     _DesktopCoverOverlayIconButton(
                       icon: Icons.more_horiz_outlined,
                       onTap: widget.onMoreTap,
@@ -1319,12 +1375,25 @@ class _DesktopCoverSelectionCheckbox extends StatelessWidget {
     required this.onTap,
   });
 
+  bool _isPrimaryActivationPointer(PointerDownEvent event) {
+    if (event.kind == PointerDeviceKind.mouse) {
+      return (event.buttons & kPrimaryMouseButton) != 0;
+    }
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
 
-    return GestureDetector(
-      onTap: onTap,
+    return Listener(
+      onPointerDown: onTap == null
+          ? null
+          : (PointerDownEvent event) {
+              if (_isPrimaryActivationPointer(event)) {
+                onTap!.call();
+              }
+            },
       behavior: HitTestBehavior.opaque,
       child: SizedBox(
         width: 20,
@@ -1463,6 +1532,7 @@ Widget _buildDesktopMediaRowSkeletonBase({
     builder: (BuildContext context) {
       final colors = context.mashinColors;
       final double safeItemWidth = itemWidth > 0 ? itemWidth : 1;
+      final double insetCoverSize = math.max(1, coverSize - (_kRowItemInset * 2));
 
       double safeClamp({required double preferred, required double minWidth}) {
         final double lower = math.min(minWidth, safeItemWidth);
@@ -1486,59 +1556,32 @@ Widget _buildDesktopMediaRowSkeletonBase({
       }
 
       final Widget cover = Container(
-        width: coverSize,
-        height: coverSize,
+        width: insetCoverSize,
+        height: insetCoverSize,
         color: colors.bgTertiary,
       );
 
       return SizedBox(
         width: itemWidth,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Stack(
-              children: <Widget>[
-                if (isCircularCover)
-                  ClipOval(child: cover)
-                else
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: cover,
-                  ),
-                Positioned(
-                  left: 6,
-                  top: 6,
-                  child: Container(
-                    width: 18,
-                    height: 18,
-                    decoration: BoxDecoration(
-                      color: colors.bgSecondary,
-                      borderRadius: BorderRadius.circular(9),
+        child: Padding(
+          padding: const EdgeInsets.all(_kRowItemInset),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              isCircularCover
+                  ? ClipOval(child: cover)
+                  : ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: cover,
                     ),
-                  ),
-                ),
-                Positioned(
-                  left: 6,
-                  bottom: 6,
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: colors.bgSecondary,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: colors.border),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            line(titleWidth),
-            const SizedBox(height: 6),
-            line(secondaryWidth),
-            const SizedBox(height: 6),
-            line(tertiaryWidth),
-          ],
+              const SizedBox(height: 12),
+              line(titleWidth),
+              const SizedBox(height: 6),
+              line(secondaryWidth),
+              const SizedBox(height: 6),
+              line(tertiaryWidth),
+            ],
+          ),
         ),
       );
     },

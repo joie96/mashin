@@ -208,6 +208,46 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
     }());
   }
 
+  void _onPlayAllTap() {
+    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
+    if (coordinator == null) {
+      return;
+    }
+
+    final List<MediaItem> playItems = _playableItemsFromIndex(0);
+    if (playItems.isEmpty) {
+      return;
+    }
+
+    unawaited(() async {
+      try {
+        await coordinator.playMedia(playItems);
+      } catch (_) {
+        // Ignore failures to keep header interactions responsive.
+      }
+    }());
+  }
+
+  void _onShuffleAllTap() {
+    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
+    if (coordinator == null) {
+      return;
+    }
+
+    final List<MediaItem> playItems = _playableItemsFromIndex(0);
+    if (playItems.isEmpty) {
+      return;
+    }
+
+    unawaited(() async {
+      try {
+        await coordinator.shufflePlayMedia(playItems);
+      } catch (_) {
+        // Ignore failures to keep header interactions responsive.
+      }
+    }());
+  }
+
   void _emitSelectionChanged() {
     if (widget.onSelectionChanged == null) {
       return;
@@ -421,15 +461,35 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
               Row(
                 children: <Widget>[
                   if (hasTitle)
-                    Expanded(
-                      child: Text(
-                        widget.title,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                    )
-                  else
-                    const Spacer(),
-                  if (_isPagingEnabled && widget.items.isNotEmpty) _buildPaginationControls(context),
+                    Text(
+                      widget.title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                  if (hasTitle && widget.items.isNotEmpty) ...<Widget>[
+                    const SizedBox(width: 10),
+                    SectionCountBadge(count: widget.items.length),
+                  ],
+                  const SizedBox(width: 16),
+                  const Expanded(child: SectionHeaderDivider()),
+                  const SizedBox(width: 16),
+                  if (widget.playbackCoordinator != null && widget.items.isNotEmpty) ...<Widget>[
+                    SectionHeaderIconButton(
+                      icon: Icons.play_arrow,
+                      tooltip: 'Abspielen',
+                      onTap: _onPlayAllTap,
+                    ),
+                    const SizedBox(width: 8),
+                    SectionHeaderIconButton(
+                      icon: Icons.shuffle,
+                      tooltip: 'Zufällig',
+                      onTap: _onShuffleAllTap,
+                    ),
+                  ],
+                  if (_isPagingEnabled && widget.items.isNotEmpty) ...<Widget>[
+                    const SizedBox(width: 4),
+                    const SectionHeaderVerticalDivider(),
+                    _buildPaginationControls(context),
+                  ],
                 ],
               ),
             if (hasTitle || (_isPagingEnabled && widget.items.isNotEmpty))
@@ -1953,6 +2013,110 @@ class _MediaTableCoverState extends State<MediaTableCover> {
         ),
       ),
     );
+  }
+}
+
+// Section header badge showing item count, matching the MAUI Album/Playlist detail header pill.
+class SectionCountBadge extends StatelessWidget {
+  final int count;
+
+  const SectionCountBadge({super.key, required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+
+    return Container(
+      height: 22,
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        border: Border.all(color: colors.border),
+        borderRadius: BorderRadius.circular(3),
+      ),
+      child: Text(
+        '$count',
+        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: colors.textPrimary),
+      ),
+    );
+  }
+}
+
+// Horizontal separator filling the space between the title/badge and the header actions.
+class SectionHeaderDivider extends StatelessWidget {
+  const SectionHeaderDivider({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+    return Container(height: 1, color: colors.border.withValues(alpha: 0.75));
+  }
+}
+
+// Vertical separator between header actions and pagination controls.
+class SectionHeaderVerticalDivider extends StatelessWidget {
+  const SectionHeaderVerticalDivider({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+    return Container(
+      width: 1,
+      height: 18,
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      color: colors.border.withValues(alpha: 0.75),
+    );
+  }
+}
+
+class SectionHeaderIconButton extends StatefulWidget {
+  final IconData icon;
+  final VoidCallback? onTap;
+  final String? tooltip;
+  final double iconSize;
+
+  const SectionHeaderIconButton({
+    super.key,
+    required this.icon,
+    required this.onTap,
+    this.tooltip,
+    this.iconSize = 18,
+  });
+
+  @override
+  State<SectionHeaderIconButton> createState() => _SectionHeaderIconButtonState();
+}
+
+class _SectionHeaderIconButtonState extends State<SectionHeaderIconButton> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+
+    final Widget button = MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          width: 28,
+          height: 28,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: _isHovered ? colors.hover : Colors.transparent,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Icon(widget.icon, size: widget.iconSize, color: colors.textSecondary),
+        ),
+      ),
+    );
+
+    if (widget.tooltip == null || widget.tooltip!.isEmpty) {
+      return button;
+    }
+    return Tooltip(message: widget.tooltip!, child: button);
   }
 }
 
