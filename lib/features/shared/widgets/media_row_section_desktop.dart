@@ -10,7 +10,7 @@ import 'media_table_section_desktop.dart';
 
 class MediaRowSectionDesktop<T> extends StatefulWidget {
   static const double _defaultHeight = 226;
-  static const double _reservedTextHeight = 66;
+  static const double _reservedTextHeight = 80;
 
   final String title;
   final bool isLoading;
@@ -20,6 +20,11 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
   final double itemSpacing;
   final int skeletonCount;
   final PlaybackCoordinator? playbackCoordinator;
+  final DesktopRowAction<T>? onRowMoreTap;
+  final DesktopRowAction<T>? onRowFavoriteTap;
+  final DesktopRowAction<T>? onRowSelectTap;
+  final DesktopRowFavoriteResolver<T>? isRowFavorite;
+  final DesktopRowFavoriteResolver<T>? isRowSelected;
 
   const MediaRowSectionDesktop({
     super.key,
@@ -31,6 +36,11 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
     this.itemSpacing = 16,
     this.skeletonCount = 8,
     this.playbackCoordinator,
+    this.onRowMoreTap,
+    this.onRowFavoriteTap,
+    this.onRowSelectTap,
+    this.isRowFavorite,
+    this.isRowSelected,
   });
 
   @override
@@ -50,6 +60,14 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
   bool _isAnimatingOut = false;
   bool _isAnimatingIn = false;
   int _transitionRunId = 0;
+
+  bool _isItemFavorite(T item, int index) {
+    return widget.isRowFavorite?.call(item, index) ?? false;
+  }
+
+  bool _isItemSelected(T item, int index) {
+    return widget.isRowSelected?.call(item, index) ?? false;
+  }
 
   _RowLayoutMetrics _computeLayoutMetrics(double maxWidth) {
     final int itemCount = widget.items.length;
@@ -246,40 +264,70 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         if (item is Album) {
           return _buildDesktopMediaRowAlbum(
             item: item,
+            index: absoluteIndex,
             itemWidth: resolvedItemWidth,
             coverSize: resolvedCoverSize,
             onPlayTap: () => _onPlayTap(absoluteIndex),
+            isFavorite: _isItemFavorite(item as T, absoluteIndex),
+            onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(item as T, absoluteIndex),
+            onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item as T, absoluteIndex),
+            isSelected: _isItemSelected(item as T, absoluteIndex),
+            onSelectTap: widget.onRowSelectTap == null ? null : () => widget.onRowSelectTap!(item as T, absoluteIndex),
           );
         }
         if (item is Playlist) {
           return _buildDesktopMediaRowPlaylist(
             item: item,
+            index: absoluteIndex,
             itemWidth: resolvedItemWidth,
             coverSize: resolvedCoverSize,
             onPlayTap: () => _onPlayTap(absoluteIndex),
+            isFavorite: _isItemFavorite(item as T, absoluteIndex),
+            onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(item as T, absoluteIndex),
+            onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item as T, absoluteIndex),
+            isSelected: _isItemSelected(item as T, absoluteIndex),
+            onSelectTap: widget.onRowSelectTap == null ? null : () => widget.onRowSelectTap!(item as T, absoluteIndex),
           );
         }
         if (item is Artist) {
           return _buildDesktopMediaRowArtist(
             item: item,
+            index: absoluteIndex,
             itemWidth: resolvedItemWidth,
             coverSize: resolvedCoverSize,
             onPlayTap: () => _onPlayTap(absoluteIndex),
+            isFavorite: _isItemFavorite(item as T, absoluteIndex),
+            onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(item as T, absoluteIndex),
+            onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item as T, absoluteIndex),
+            isSelected: _isItemSelected(item as T, absoluteIndex),
+            onSelectTap: widget.onRowSelectTap == null ? null : () => widget.onRowSelectTap!(item as T, absoluteIndex),
           );
         }
         if (item is Track) {
           return _buildDesktopMediaRowTrack(
             item: item,
+            index: absoluteIndex,
             itemWidth: resolvedItemWidth,
             coverSize: resolvedCoverSize,
             onPlayTap: () => _onPlayTap(absoluteIndex),
+            isFavorite: _isItemFavorite(item as T, absoluteIndex),
+            onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(item as T, absoluteIndex),
+            onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item as T, absoluteIndex),
+            isSelected: _isItemSelected(item as T, absoluteIndex),
+            onSelectTap: widget.onRowSelectTap == null ? null : () => widget.onRowSelectTap!(item as T, absoluteIndex),
           );
         }
 
         return _buildDesktopMediaRowUnknown(
+          index: absoluteIndex,
           itemWidth: resolvedItemWidth,
           coverSize: resolvedCoverSize,
           onPlayTap: () => _onPlayTap(absoluteIndex),
+          isFavorite: _isItemFavorite(visibleItems[index], absoluteIndex),
+          onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(visibleItems[index], absoluteIndex),
+          onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(visibleItems[index], absoluteIndex),
+          isSelected: _isItemSelected(visibleItems[index], absoluteIndex),
+          onSelectTap: widget.onRowSelectTap == null ? null : () => widget.onRowSelectTap!(visibleItems[index], absoluteIndex),
         );
       },
     );
@@ -513,9 +561,15 @@ class _RowLayoutMetrics {
 // Typed desktop row builders
 Widget _buildDesktopMediaRowAlbum({
   required Album item,
+  required int index,
   required double itemWidth,
   required double coverSize,
   required VoidCallback? onPlayTap,
+  required bool isFavorite,
+  required VoidCallback? onFavoriteTap,
+  required VoidCallback? onMoreTap,
+  required bool isSelected,
+  required VoidCallback? onSelectTap,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -528,14 +582,25 @@ Widget _buildDesktopMediaRowAlbum({
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
     onPlayTap: onPlayTap,
+    isFavorite: isFavorite,
+    onFavoriteTap: onFavoriteTap,
+    onMoreTap: onMoreTap,
+    isSelected: isSelected,
+    onSelectTap: onSelectTap,
   );
 }
 
 Widget _buildDesktopMediaRowPlaylist({
   required Playlist item,
+  required int index,
   required double itemWidth,
   required double coverSize,
   required VoidCallback? onPlayTap,
+  required bool isFavorite,
+  required VoidCallback? onFavoriteTap,
+  required VoidCallback? onMoreTap,
+  required bool isSelected,
+  required VoidCallback? onSelectTap,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -548,14 +613,25 @@ Widget _buildDesktopMediaRowPlaylist({
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
     onPlayTap: onPlayTap,
+    isFavorite: isFavorite,
+    onFavoriteTap: onFavoriteTap,
+    onMoreTap: onMoreTap,
+    isSelected: isSelected,
+    onSelectTap: onSelectTap,
   );
 }
 
 Widget _buildDesktopMediaRowArtist({
   required Artist item,
+  required int index,
   required double itemWidth,
   required double coverSize,
   required VoidCallback? onPlayTap,
+  required bool isFavorite,
+  required VoidCallback? onFavoriteTap,
+  required VoidCallback? onMoreTap,
+  required bool isSelected,
+  required VoidCallback? onSelectTap,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -569,14 +645,25 @@ Widget _buildDesktopMediaRowArtist({
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
     onPlayTap: onPlayTap,
+    isFavorite: isFavorite,
+    onFavoriteTap: onFavoriteTap,
+    onMoreTap: onMoreTap,
+    isSelected: isSelected,
+    onSelectTap: onSelectTap,
   );
 }
 
 Widget _buildDesktopMediaRowTrack({
   required Track item,
+  required int index,
   required double itemWidth,
   required double coverSize,
   required VoidCallback? onPlayTap,
+  required bool isFavorite,
+  required VoidCallback? onFavoriteTap,
+  required VoidCallback? onMoreTap,
+  required bool isSelected,
+  required VoidCallback? onSelectTap,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -589,13 +676,24 @@ Widget _buildDesktopMediaRowTrack({
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
     onPlayTap: onPlayTap,
+    isFavorite: isFavorite,
+    onFavoriteTap: onFavoriteTap,
+    onMoreTap: onMoreTap,
+    isSelected: isSelected,
+    onSelectTap: onSelectTap,
   );
 }
 
 Widget _buildDesktopMediaRowUnknown({
+  required int index,
   required double itemWidth,
   required double coverSize,
   required VoidCallback? onPlayTap,
+  required bool isFavorite,
+  required VoidCallback? onFavoriteTap,
+  required VoidCallback? onMoreTap,
+  required bool isSelected,
+  required VoidCallback? onSelectTap,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -608,6 +706,11 @@ Widget _buildDesktopMediaRowUnknown({
     providerLabel: '-',
     providerIconSvg: null,
     onPlayTap: onPlayTap,
+    isFavorite: isFavorite,
+    onFavoriteTap: onFavoriteTap,
+    onMoreTap: onMoreTap,
+    isSelected: isSelected,
+    onSelectTap: onSelectTap,
   );
 }
 
@@ -622,16 +725,14 @@ Widget _buildDesktopMediaRowItemBase({
   required String providerLabel,
   required String? providerIconSvg,
   required VoidCallback? onPlayTap,
+  required bool isFavorite,
+  required VoidCallback? onFavoriteTap,
+  required VoidCallback? onMoreTap,
+  required bool isSelected,
+  required VoidCallback? onSelectTap,
   bool showPlayOverlay = true,
   bool isCircularCover = false,
 }) {
-  bool isPrimaryActivationPointer(PointerDownEvent event) {
-    if (event.kind == PointerDeviceKind.mouse) {
-      return (event.buttons & kPrimaryMouseButton) != 0;
-    }
-    return true;
-  }
-
   return Builder(
     builder: (BuildContext context) {
       final colors = context.mashinColors;
@@ -643,77 +744,20 @@ Widget _buildDesktopMediaRowItemBase({
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Stack(
-              children: <Widget>[
-                if (isCircularCover)
-                  ClipOval(
-                    child: Container(
-                      width: coverSize,
-                      height: coverSize,
-                      color: colors.bgTertiary,
-                      child: coverUrl != null && coverUrl.trim().isNotEmpty
-                          ? Image.network(
-                              coverUrl,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, _, _) => Icon(icon, color: colors.accent, size: 34),
-                            )
-                          : Icon(icon, color: colors.accent, size: 34),
-                    ),
-                  )
-                else
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      width: coverSize,
-                      height: coverSize,
-                      color: colors.bgTertiary,
-                      child: coverUrl != null && coverUrl.trim().isNotEmpty
-                          ? Image.network(
-                              coverUrl,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, _, _) => Icon(icon, color: colors.accent, size: 34),
-                            )
-                          : Icon(icon, color: colors.accent, size: 34),
-                    ),
-                  ),
-                Positioned(
-                  left: 6,
-                  top: 6,
-                  child: MediaProviderIcon(
-                    providerLabel: providerLabel,
-                    iconSvg: providerIconSvg,
-                    size: 18,
-                  ),
-                ),
-                if (showPlayOverlay)
-                  Positioned(
-                    left: 6,
-                    bottom: 6,
-                    child: Listener(
-                      onPointerDown: onPlayTap == null
-                          ? null
-                          : (PointerDownEvent event) {
-                              if (isPrimaryActivationPointer(event)) {
-                                onPlayTap.call();
-                              }
-                            },
-                      child: Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.9),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: colors.border),
-                        ),
-                        child: Icon(
-                          Icons.play_arrow_outlined,
-                          size: 20,
-                          color: Theme.of(context).colorScheme.onSurface,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
+            _DesktopMediaCover(
+              coverSize: coverSize,
+              icon: icon,
+              coverUrl: coverUrl,
+              providerLabel: providerLabel,
+              providerIconSvg: providerIconSvg,
+              onPlayTap: onPlayTap,
+              isFavorite: isFavorite,
+              onFavoriteTap: onFavoriteTap,
+              onMoreTap: onMoreTap,
+              isSelected: isSelected,
+              onSelectTap: onSelectTap,
+              showPlayOverlay: showPlayOverlay,
+              isCircularCover: isCircularCover,
             ),
             const SizedBox(height: 12),
             Text(
@@ -726,7 +770,7 @@ Widget _buildDesktopMediaRowItemBase({
             if (hasSecondary) ...<Widget>[
               const SizedBox(height: 2),
               Text(
-                secondaryText!,
+                secondaryText,
                 maxLines: 1,
                 textAlign: TextAlign.left,
                 overflow: TextOverflow.ellipsis,
@@ -736,7 +780,7 @@ Widget _buildDesktopMediaRowItemBase({
             if (hasTertiary) ...<Widget>[
               const SizedBox(height: 2),
               Text(
-                tertiaryText!,
+                tertiaryText,
                 maxLines: 1,
                 textAlign: TextAlign.left,
                 overflow: TextOverflow.ellipsis,
@@ -748,6 +792,315 @@ Widget _buildDesktopMediaRowItemBase({
       );
     },
   );
+}
+
+class _DesktopMediaCover extends StatefulWidget {
+  final double coverSize;
+  final IconData icon;
+  final String? coverUrl;
+  final String providerLabel;
+  final String? providerIconSvg;
+  final VoidCallback? onPlayTap;
+  final bool isFavorite;
+  final VoidCallback? onFavoriteTap;
+  final VoidCallback? onMoreTap;
+  final bool isSelected;
+  final VoidCallback? onSelectTap;
+  final bool showPlayOverlay;
+  final bool isCircularCover;
+
+  const _DesktopMediaCover({
+    required this.coverSize,
+    required this.icon,
+    required this.coverUrl,
+    required this.providerLabel,
+    required this.providerIconSvg,
+    required this.onPlayTap,
+    required this.isFavorite,
+    required this.onFavoriteTap,
+    required this.onMoreTap,
+    required this.isSelected,
+    required this.onSelectTap,
+    required this.showPlayOverlay,
+    required this.isCircularCover,
+  });
+
+  @override
+  State<_DesktopMediaCover> createState() => _DesktopMediaCoverState();
+}
+
+class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
+  static const Duration _hoverFadeDuration = Duration(milliseconds: 140);
+  static const Duration _buttonScaleDuration = Duration(milliseconds: 140);
+  bool _isHovered = false;
+  bool _isPlayHovered = false;
+
+  bool _isPrimaryActivationPointer(PointerDownEvent event) {
+    if (event.kind == PointerDeviceKind.mouse) {
+      return (event.buttons & kPrimaryMouseButton) != 0;
+    }
+    return true;
+  }
+
+  void _setPlayHovered(bool value) {
+    if (_isPlayHovered == value || widget.onPlayTap == null) {
+      return;
+    }
+    setState(() {
+      _isPlayHovered = value;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+    final bool hasCover = widget.coverUrl != null && widget.coverUrl!.trim().isNotEmpty;
+    final bool showHoverPlay = widget.showPlayOverlay && widget.onPlayTap != null;
+    const bool showSelectControl = true;
+    final bool showSelectControlVisible = _isHovered || widget.isSelected;
+    const bool showOverlayActions = true;
+
+    final Widget clippedContent = SizedBox(
+      width: widget.coverSize,
+      height: widget.coverSize,
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          Container(
+            color: colors.bgTertiary,
+            child: widget.isCircularCover
+                ? ClipOval(
+                    child: hasCover
+                        ? Image.network(
+                            widget.coverUrl!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => Icon(widget.icon, color: colors.accent, size: 34),
+                          )
+                        : Icon(widget.icon, color: colors.accent, size: 34),
+                  )
+                : hasCover
+                    ? Image.network(
+                        widget.coverUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => Icon(widget.icon, color: colors.accent, size: 34),
+                      )
+                    : Icon(widget.icon, color: colors.accent, size: 34),
+          ),
+          if (showHoverPlay)
+            IgnorePointer(
+              child: AnimatedOpacity(
+                duration: _hoverFadeDuration,
+                opacity: _isHovered ? 1 : 0,
+                child: Container(color: Colors.black.withValues(alpha: 0.34)),
+              ),
+            ),
+          Positioned(
+            left: 6,
+            top: 6,
+            child: MediaProviderIcon(
+              providerLabel: widget.providerLabel,
+              iconSvg: widget.providerIconSvg,
+              size: 18,
+            ),
+          ),
+          if (showHoverPlay)
+            Positioned.fill(
+              child: Center(
+                child: AnimatedOpacity(
+                  duration: _hoverFadeDuration,
+                  opacity: _isHovered ? 1 : 0,
+                  child: MouseRegion(
+                    onEnter: (_) => _setPlayHovered(true),
+                    onExit: (_) => _setPlayHovered(false),
+                    child: AnimatedScale(
+                      scale: _isPlayHovered ? 1.08 : 1,
+                      duration: _buttonScaleDuration,
+                      curve: Curves.easeOutCubic,
+                      child: Listener(
+                        onPointerDown: (PointerDownEvent event) {
+                          if (_isPrimaryActivationPointer(event)) {
+                            widget.onPlayTap?.call();
+                          }
+                        },
+                        child: Container(
+                          width: 56,
+                          height: 56,
+                          decoration: BoxDecoration(
+                            color: colors.textPrimary,
+                            borderRadius: BorderRadius.circular(28),
+                          ),
+                          child: Icon(
+                            Icons.play_arrow_sharp,
+                            size: 30,
+                            color: colors.bgPrimary,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (showOverlayActions)
+            Positioned(
+              left: 8,
+              right: 8,
+              bottom: 8,
+              child: AnimatedOpacity(
+                duration: _hoverFadeDuration,
+                opacity: _isHovered ? 1 : 0,
+                child: Row(
+                  children: <Widget>[
+                    const Spacer(),
+                    _DesktopCoverOverlayIconButton(
+                      icon: widget.isFavorite ? Icons.favorite_outlined : Icons.favorite_border_outlined,
+                      onTap: widget.onFavoriteTap,
+                      baseColor: colors.textSecondary,
+                      hoverColor: colors.textPrimary,
+                    ),
+                    const SizedBox(width: 12),
+                    _DesktopCoverOverlayIconButton(
+                      icon: Icons.more_horiz_outlined,
+                      onTap: widget.onMoreTap,
+                      baseColor: colors.textSecondary,
+                      hoverColor: colors.textPrimary,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (showSelectControl)
+            Positioned(
+              right: 6,
+              top: 6,
+              child: AnimatedOpacity(
+                duration: _hoverFadeDuration,
+                opacity: showSelectControlVisible ? 1 : 0,
+                child: _DesktopCoverSelectionCheckbox(
+                  isChecked: widget.isSelected,
+                  onTap: widget.onSelectTap,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+
+    final Widget shapedContent = ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: clippedContent,
+    );
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: shapedContent,
+    );
+  }
+}
+
+class _DesktopCoverSelectionCheckbox extends StatelessWidget {
+  final bool isChecked;
+  final VoidCallback? onTap;
+
+  const _DesktopCoverSelectionCheckbox({
+    required this.isChecked,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: 20,
+        height: 20,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: isChecked ? colors.accent : Colors.transparent,
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(
+              color: isChecked ? colors.accent : colors.textSecondary,
+              width: 0.75,
+            ),
+          ),
+          child: isChecked
+              ? Icon(
+                  Icons.check,
+                  size: 14,
+                  color: colors.bgPrimary,
+                )
+              : null,
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopCoverOverlayIconButton extends StatefulWidget {
+  final IconData icon;
+  final VoidCallback? onTap;
+  final Color baseColor;
+  final Color hoverColor;
+
+  const _DesktopCoverOverlayIconButton({
+    required this.icon,
+    required this.onTap,
+    required this.baseColor,
+    required this.hoverColor,
+  });
+
+  @override
+  State<_DesktopCoverOverlayIconButton> createState() => _DesktopCoverOverlayIconButtonState();
+}
+
+class _DesktopCoverOverlayIconButtonState extends State<_DesktopCoverOverlayIconButton> {
+  bool _isHovered = false;
+
+  bool _isPrimaryActivationPointer(PointerDownEvent event) {
+    if (event.kind == PointerDeviceKind.mouse) {
+      return (event.buttons & kPrimaryMouseButton) != 0;
+    }
+    return true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Color iconColor = _isHovered ? widget.hoverColor : widget.baseColor;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: AnimatedScale(
+        scale: _isHovered && widget.onTap != null ? 1.08 : 1,
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOutCubic,
+        child: Listener(
+          onPointerDown: widget.onTap == null
+              ? null
+              : (PointerDownEvent event) {
+                  if (_isPrimaryActivationPointer(event)) {
+                    widget.onTap!.call();
+                  }
+                },
+          child: SizedBox(
+            width: 30,
+            height: 30,
+            child: Center(
+              child: Icon(
+                widget.icon,
+                size: 18,
+                color: iconColor,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // Typed desktop row skeleton builders
@@ -769,7 +1122,11 @@ Widget _buildDesktopMediaRowArtistSkeleton({
   required double itemWidth,
   required double coverSize,
 }) {
-  return _buildDesktopMediaRowSkeletonBase(itemWidth: itemWidth, coverSize: coverSize);
+  return _buildDesktopMediaRowSkeletonBase(
+    itemWidth: itemWidth,
+    coverSize: coverSize,
+    isCircularCover: true,
+  );
 }
 
 Widget _buildDesktopMediaRowTrackSkeleton({
@@ -789,15 +1146,27 @@ Widget _buildDesktopMediaRowUnknownSkeleton({
 Widget _buildDesktopMediaRowSkeletonBase({
   required double itemWidth,
   required double coverSize,
+  bool isCircularCover = false,
 }) {
   return Builder(
     builder: (BuildContext context) {
       final colors = context.mashinColors;
+      final double safeItemWidth = itemWidth > 0 ? itemWidth : 1;
+
+      double safeClamp({required double preferred, required double minWidth}) {
+        final double lower = math.min(minWidth, safeItemWidth);
+        final double upper = math.max(lower, safeItemWidth);
+        return preferred.clamp(lower, upper).toDouble();
+      }
+
+      final double titleWidth = safeClamp(preferred: math.min(safeItemWidth - 8, 118), minWidth: 52);
+      final double secondaryWidth = safeClamp(preferred: math.min(safeItemWidth - 16, 92), minWidth: 44);
+      final double tertiaryWidth = safeClamp(preferred: math.min(safeItemWidth - 24, 74), minWidth: 40);
 
       Widget line(double width) {
         return Container(
           width: width,
-          height: 10,
+          height: 12,
           decoration: BoxDecoration(
             color: colors.bgTertiary,
             borderRadius: BorderRadius.circular(6),
@@ -805,25 +1174,59 @@ Widget _buildDesktopMediaRowSkeletonBase({
         );
       }
 
+      final Widget cover = Container(
+        width: coverSize,
+        height: coverSize,
+        color: colors.bgTertiary,
+      );
+
       return SizedBox(
         width: itemWidth,
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Container(
-              width: coverSize,
-              height: coverSize,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color: colors.bgTertiary,
-              ),
+            Stack(
+              children: <Widget>[
+                if (isCircularCover)
+                  ClipOval(child: cover)
+                else
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: cover,
+                  ),
+                Positioned(
+                  left: 6,
+                  top: 6,
+                  child: Container(
+                    width: 18,
+                    height: 18,
+                    decoration: BoxDecoration(
+                      color: colors.bgSecondary,
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 6,
+                  bottom: 6,
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: colors.bgSecondary,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: colors.border),
+                    ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 8),
-            line(108),
+            const SizedBox(height: 12),
+            line(titleWidth),
             const SizedBox(height: 6),
-            line(86),
+            line(secondaryWidth),
             const SizedBox(height: 6),
-            line(72),
+            line(tertiaryWidth),
           ],
         ),
       );

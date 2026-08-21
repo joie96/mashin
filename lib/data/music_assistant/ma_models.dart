@@ -313,13 +313,21 @@ class MediaItemMetadata {
 }
 
 class Artist implements MediaItem {
+  @override
   final String itemId;
+  @override
   final String provider;
+  @override
   final String name;
+  @override
   final String? sortName;
+  @override
   final String? uri;
+  @override
   final List<ProviderMapping> providerMappings;
+  @override
   final MediaItemMetadata? metadata;
+  @override
   final bool favorite;
 
   const Artist({
@@ -373,16 +381,24 @@ class Artist implements MediaItem {
 }
 
 class Album implements MediaItem {
+  @override
   final String itemId;
+  @override
   final String provider;
+  @override
   final String name;
+  @override
   final String? sortName;
+  @override
   final String? uri;
   final int? year;
   final String? albumType;
   final List<Artist> artists;
+  @override
   final List<ProviderMapping> providerMappings;
+  @override
   final MediaItemMetadata? metadata;
+  @override
   final bool favorite;
 
   const Album({
@@ -446,16 +462,24 @@ class Album implements MediaItem {
 }
 
 class Track implements MediaItem {
+  @override
   final String itemId;
+  @override
   final String provider;
+  @override
   final String name;
+  @override
   final String? sortName;
+  @override
   final String? uri;
   final int duration;
   final List<Artist> artists;
   final Album? album;
+  @override
   final List<ProviderMapping> providerMappings;
+  @override
   final MediaItemMetadata? metadata;
+  @override
   final bool favorite;
 
   const Track({
@@ -532,15 +556,23 @@ class Track implements MediaItem {
 }
 
 class Playlist implements MediaItem {
+  @override
   final String itemId;
+  @override
   final String provider;
+  @override
   final String name;
+  @override
   final String? sortName;
+  @override
   final String? uri;
   final String? owner;
   final bool isEditable;
+  @override
   final List<ProviderMapping> providerMappings;
+  @override
   final MediaItemMetadata? metadata;
+  @override
   final bool favorite;
 
   const Playlist({

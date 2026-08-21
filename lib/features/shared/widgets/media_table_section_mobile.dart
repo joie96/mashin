@@ -898,19 +898,31 @@ class _MobileTableRowSkeleton extends StatelessWidget {
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
-                skeletonBox(width: 190, height: 16),
-                const SizedBox(height: 6),
-                skeletonBox(width: 140, height: 13),
+                skeletonBox(width: 176, height: 15),
+                const SizedBox(height: 4),
+                skeletonBox(width: 124, height: 12),
               ],
             ),
           ),
           const SizedBox(width: 10),
-          skeletonBox(width: 32, height: 20, radius: 4),
+          skeletonBox(width: 34, height: 12, radius: 4),
           const SizedBox(width: 10),
-          skeletonBox(width: 18, height: 18, radius: 4),
+          SizedBox(
+            width: 20,
+            child: Center(
+              child: skeletonBox(width: 16, height: 16, radius: 8),
+            ),
+          ),
           const SizedBox(width: 10),
-          skeletonBox(width: 20, height: 20, radius: 10),
+          SizedBox(
+            width: 40,
+            height: 40,
+            child: Center(
+              child: skeletonBox(width: 18, height: 18, radius: 9),
+            ),
+          ),
         ],
       ),
     );

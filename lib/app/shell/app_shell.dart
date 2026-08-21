@@ -31,6 +31,7 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   static const double _mobileSelectionOverlayBottomInset = 84;
   static const Duration _busyUiFallbackAfter = Duration(seconds: 3);
+  static const Duration _desktopSearchDebounceDuration = Duration(milliseconds: 320);
 
   AppSection _currentSection = AppSection.home;
   bool _isDarkTheme = true;
@@ -47,6 +48,9 @@ class _AppShellState extends State<AppShell> {
   bool _isBootstrapping = true;
   String _baseUrl = AppConfig.defaultMusicAssistantUrl;
   String? _username;
+  final TextEditingController _desktopSearchController = TextEditingController();
+  Timer? _desktopSearchDebounce;
+  String _desktopSearchQuery = '';
 
   // Getters for current Track and Queue state
   QueueItem? get _currentQueueItem {
@@ -193,6 +197,8 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    _desktopSearchDebounce?.cancel();
+    _desktopSearchController.dispose();
     _playbackCoordinator.removeListener(_onPlaybackChanged);
     unawaited(_playbackCoordinator.shutdown());
     _playbackCoordinator.dispose();
@@ -285,19 +291,6 @@ class _AppShellState extends State<AppShell> {
                           selected: _currentSection == AppSection.favorites,
                           onTap: () => _select(AppSection.favorites),
                         ),
-                        const Divider(height: 24),
-                        _DesktopNavItem(
-                          label: 'Playlists',
-                          icon: Icons.queue_music_outlined,
-                          selected: _currentSection == AppSection.playlists,
-                          onTap: () => _select(AppSection.playlists),
-                        ),
-                        _DesktopNavItem(
-                          label: 'Suche',
-                          icon: Icons.search_outlined,
-                          selected: _currentSection == AppSection.search,
-                          onTap: () => _select(AppSection.search),
-                        ),
                       ],
                     ),
                   ),
@@ -309,11 +302,21 @@ class _AppShellState extends State<AppShell> {
                           title: _titleForSection(_currentSection),
                           onToggleTheme: _toggleTheme,
                           isDarkTheme: _isDarkTheme,
+                          searchController: _desktopSearchController,
+                          onSearchChanged: _onDesktopSearchChanged,
+                          onSearchSubmitted: _submitDesktopSearch,
+                          onClearSearch: _clearDesktopSearch,
                         ),
                         Expanded(
                           child: Container(
                             color: colors.bgPrimary,
-                            child: AppRouter.pageFor(_currentSection, _musicAssistantClient!, _playbackCoordinator),
+                            child: AppRouter.pageFor(
+                              _currentSection,
+                              _musicAssistantClient!,
+                              _playbackCoordinator,
+                              desktopSearchDriven: true,
+                              desktopSearchQuery: _desktopSearchQuery,
+                            ),
                           ),
                         ),
                       ],
@@ -374,7 +377,11 @@ class _AppShellState extends State<AppShell> {
             Expanded(
               child: Container(
                 color: colors.bgPrimary,
-                child: AppRouter.pageFor(_currentSection, _musicAssistantClient!, _playbackCoordinator),
+                child: AppRouter.pageFor(
+                  _currentSection,
+                  _musicAssistantClient!,
+                  _playbackCoordinator,
+                ),
               ),
             ),
             _MobilePlayerBar(
@@ -450,6 +457,52 @@ class _AppShellState extends State<AppShell> {
 
     setState(() {
       _currentSection = section;
+    });
+  }
+
+  void _onDesktopSearchChanged(String value) {
+    final trimmed = value.trim();
+
+    _desktopSearchDebounce?.cancel();
+
+    if (_currentSection != AppSection.search && trimmed.isNotEmpty) {
+      setState(() {
+        _currentSection = AppSection.search;
+      });
+    } else {
+      // Rebuild keeps clear button visibility in sync while typing.
+      setState(() {});
+    }
+
+    _desktopSearchDebounce = Timer(_desktopSearchDebounceDuration, () {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _desktopSearchQuery = trimmed;
+      });
+    });
+  }
+
+  void _submitDesktopSearch(String value) {
+    final trimmed = value.trim();
+    _desktopSearchDebounce?.cancel();
+
+    setState(() {
+      _desktopSearchQuery = trimmed;
+      if (trimmed.isNotEmpty) {
+        _currentSection = AppSection.search;
+      }
+    });
+  }
+
+  void _clearDesktopSearch() {
+    _desktopSearchDebounce?.cancel();
+    _desktopSearchController.clear();
+
+    setState(() {
+      _desktopSearchQuery = '';
     });
   }
 
@@ -746,11 +799,19 @@ class _DesktopTopBar extends StatelessWidget {
   final String title;
   final VoidCallback onToggleTheme;
   final bool isDarkTheme;
+  final TextEditingController searchController;
+  final ValueChanged<String> onSearchChanged;
+  final ValueChanged<String> onSearchSubmitted;
+  final VoidCallback onClearSearch;
 
   const _DesktopTopBar({
     required this.title,
     required this.onToggleTheme,
     required this.isDarkTheme,
+    required this.searchController,
+    required this.onSearchChanged,
+    required this.onSearchSubmitted,
+    required this.onClearSearch,
   });
 
   @override
@@ -770,9 +831,19 @@ class _DesktopTopBar extends StatelessWidget {
           const SizedBox(width: 18),
           Expanded(
             child: TextField(
+              controller: searchController,
+              textInputAction: TextInputAction.search,
               decoration: InputDecoration(
                 hintText: 'Kuenstler:innen, Songs, Alben ...',
                 hintStyle: TextStyle(color: colors.textTertiary),
+                prefixIcon: const Icon(Icons.search_outlined),
+                suffixIcon: searchController.text.trim().isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Leeren',
+                        onPressed: onClearSearch,
+                        icon: const Icon(Icons.close_outlined),
+                      ),
                 filled: true,
                 fillColor: colors.bgSecondary,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
@@ -781,6 +852,8 @@ class _DesktopTopBar extends StatelessWidget {
                   borderSide: BorderSide.none,
                 ),
               ),
+              onChanged: onSearchChanged,
+              onSubmitted: onSearchSubmitted,
             ),
           ),
           const SizedBox(width: 18),

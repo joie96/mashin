@@ -955,7 +955,13 @@ Widget _buildDesktopTableRowTrack({
       _buildDesktopTableSizedCell(width: 40, child: _buildDesktopBodyText('${index + 1}', TextAlign.left, DesktopTextTone.tertiary)),
       _buildDesktopTableSizedCell(
         width: 48,
-        child: MediaTableCover(coverUrl: item.imageUri, fallbackIcon: Icons.music_note_outlined, size: 48, radius: 8),
+        child: MediaTableCover(
+          coverUrl: item.imageUri,
+          fallbackIcon: Icons.music_note_outlined,
+          size: 48,
+          radius: 8,
+          onPlayTap: onDoubleTap,
+        ),
       ),
       _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopBodyText(_prefer(item.name, 'Unknown Track'), TextAlign.left, DesktopTextTone.primary)),
       _buildDesktopTableSizedCell(width: 80, child: _buildDesktopBodyText(formatDuration(item.duration), TextAlign.right, DesktopTextTone.tertiary)),
@@ -1006,7 +1012,13 @@ Widget _buildDesktopTableRowAlbum({
       _buildDesktopTableSizedCell(width: 44, child: _buildDesktopBodyText('${index + 1}', TextAlign.left, DesktopTextTone.tertiary)),
       _buildDesktopTableSizedCell(
         width: 62,
-        child: MediaTableCover(coverUrl: item.imageUri, fallbackIcon: Icons.album_outlined, size: 48, radius: 8),
+        child: MediaTableCover(
+          coverUrl: item.imageUri,
+          fallbackIcon: Icons.album_outlined,
+          size: 48,
+          radius: 8,
+          onPlayTap: onDoubleTap,
+        ),
       ),
       _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopBodyText(_prefer(item.name, 'Unknown Album'), TextAlign.left, DesktopTextTone.primary)),
       _buildDesktopTableSizedCell(flex: 4, child: _buildDesktopBodyText(_albumSubtitle(item), TextAlign.left, DesktopTextTone.secondary)),
@@ -1056,7 +1068,13 @@ Widget _buildDesktopTableRowPlaylist({
       _buildDesktopTableSizedCell(width: 44, child: _buildDesktopBodyText('${index + 1}', TextAlign.left, DesktopTextTone.tertiary)),
       _buildDesktopTableSizedCell(
         width: 62,
-        child: MediaTableCover(coverUrl: item.imageUri, fallbackIcon: Icons.queue_music_outlined, size: 48, radius: 8),
+        child: MediaTableCover(
+          coverUrl: item.imageUri,
+          fallbackIcon: Icons.queue_music_outlined,
+          size: 48,
+          radius: 8,
+          onPlayTap: onDoubleTap,
+        ),
       ),
       _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopBodyText(_prefer(item.name, 'Unknown Playlist'), TextAlign.left, DesktopTextTone.primary)),
       _buildDesktopTableSizedCell(flex: 4, child: _buildDesktopBodyText(_playlistSubtitle(item), TextAlign.left, DesktopTextTone.secondary)),
@@ -1105,7 +1123,13 @@ Widget _buildDesktopTableRowArtist({
       _buildDesktopTableSizedCell(width: 44, child: _buildDesktopBodyText('${index + 1}', TextAlign.left, DesktopTextTone.tertiary)),
       _buildDesktopTableSizedCell(
         width: 62,
-        child: MediaTableCover(coverUrl: item.imageUri, fallbackIcon: Icons.person_outlined, size: 48, radius: 8),
+        child: MediaTableCover(
+          coverUrl: item.imageUri,
+          fallbackIcon: Icons.person_outlined,
+          size: 48,
+          radius: 8,
+          onPlayTap: onDoubleTap,
+        ),
       ),
       _buildDesktopTableSizedCell(flex: 6, child: _buildDesktopBodyText(_prefer(item.name, 'Unknown Artist'), TextAlign.left, DesktopTextTone.primary)),
       _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopBodyText(_providerLabelFromId(item.provider), TextAlign.left, DesktopTextTone.secondary)),
@@ -1166,7 +1190,13 @@ Widget _buildDesktopTableRowQueue({
       _buildDesktopTableSizedCell(width: 40, child: _buildDesktopBodyText('${index + 1}', TextAlign.left, DesktopTextTone.tertiary)),
       _buildDesktopTableSizedCell(
         width: 48,
-        child: MediaTableCover(coverUrl: item.mediaItem?.imageUri, fallbackIcon: Icons.music_note_outlined, size: 48, radius: 8),
+        child: MediaTableCover(
+          coverUrl: item.mediaItem?.imageUri,
+          fallbackIcon: Icons.music_note_outlined,
+          size: 48,
+          radius: 8,
+          onPlayTap: onDoubleTap,
+        ),
       ),
       _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopBodyText(title, TextAlign.left, DesktopTextTone.primary)),
       _buildDesktopTableSizedCell(width: 80, child: _buildDesktopBodyText(_formatQueueDurationSeconds((item.duration ?? 0).toDouble()), TextAlign.right, DesktopTextTone.tertiary)),
@@ -1229,13 +1259,13 @@ Widget _buildDesktopTableRowUnknown({
 Widget _buildDesktopTableRowTrackSkeleton({required bool isFirst, required bool showSelection}) {
   return _buildDesktopTableRowSkeletonBase(
     cells: <Widget>[
-      _buildDesktopTableSizedCell(width: 40, child: _buildDesktopSkeletonBar(width: 18)),
+      _buildDesktopTableSizedCell(width: 40, child: _buildDesktopFixedTextSkeleton(width: 12)),
       _buildDesktopTableSizedCell(width: 48, child: _buildDesktopSkeletonBar(width: 48, height: 48, radius: 8)),
-      _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopSkeletonBar(width: 220)),
-      _buildDesktopTableSizedCell(width: 80, child: Align(alignment: Alignment.centerRight, child: _buildDesktopSkeletonBar(width: 44))),
-      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopSkeletonBar(width: 120)),
-      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopSkeletonBar(width: 120)),
-      _buildDesktopTableSizedCell(flex: 1, child: _buildDesktopSkeletonBar(width: 40)),
+      _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopFixedTextSkeleton(width: 148)),
+      _buildDesktopTableSizedCell(width: 80, child: _buildDesktopFixedTextSkeleton(width: 36, alignRight: true)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopFixedTextSkeleton(width: 94)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopFixedTextSkeleton(width: 82)),
+      _buildDesktopTableSizedCell(flex: 1, child: _buildDesktopFixedTextSkeleton(width: 30)),
       _buildDesktopTableSizedCell(width: 80, child: Center(child: _buildDesktopSkeletonBar(width: 16, height: 16, radius: 8))),
     ],
     isFirst: isFirst,
@@ -1246,12 +1276,12 @@ Widget _buildDesktopTableRowTrackSkeleton({required bool isFirst, required bool 
 Widget _buildDesktopTableRowQueueSkeleton({required bool isFirst, required bool showSelection}) {
   return _buildDesktopTableRowSkeletonBase(
     cells: <Widget>[
-      _buildDesktopTableSizedCell(width: 40, child: _buildDesktopSkeletonBar(width: 18)),
+      _buildDesktopTableSizedCell(width: 40, child: _buildDesktopFixedTextSkeleton(width: 12)),
       _buildDesktopTableSizedCell(width: 48, child: _buildDesktopSkeletonBar(width: 48, height: 48, radius: 8)),
-      _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopSkeletonBar(width: 220)),
-      _buildDesktopTableSizedCell(width: 80, child: Align(alignment: Alignment.centerRight, child: _buildDesktopSkeletonBar(width: 44))),
-      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopSkeletonBar(width: 120)),
-      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopSkeletonBar(width: 120)),
+      _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopFixedTextSkeleton(width: 148)),
+      _buildDesktopTableSizedCell(width: 80, child: _buildDesktopFixedTextSkeleton(width: 36, alignRight: true)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopFixedTextSkeleton(width: 88)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopFixedTextSkeleton(width: 78)),
       _buildDesktopTableSizedCell(width: 80, child: Center(child: _buildDesktopSkeletonBar(width: 16, height: 16, radius: 8))),
     ],
     isFirst: isFirst,
@@ -1262,12 +1292,12 @@ Widget _buildDesktopTableRowQueueSkeleton({required bool isFirst, required bool 
 Widget _buildDesktopTableRowAlbumSkeleton({required bool isFirst, required bool showSelection}) {
   return _buildDesktopTableRowSkeletonBase(
     cells: <Widget>[
-      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopSkeletonBar(width: 20)),
+      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopFixedTextSkeleton(width: 12)),
       _buildDesktopTableSizedCell(width: 62, child: _buildDesktopSkeletonBar(width: 48, height: 48, radius: 8)),
-      _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopSkeletonBar(width: 220)),
-      _buildDesktopTableSizedCell(flex: 4, child: _buildDesktopSkeletonBar(width: 130)),
-      _buildDesktopTableSizedCell(flex: 2, child: _buildDesktopSkeletonBar(width: 70)),
-      _buildDesktopTableSizedCell(width: 64, child: Align(alignment: Alignment.centerRight, child: _buildDesktopSkeletonBar(width: 36))),
+      _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopFixedTextSkeleton(width: 140)),
+      _buildDesktopTableSizedCell(flex: 4, child: _buildDesktopFixedTextSkeleton(width: 102)),
+      _buildDesktopTableSizedCell(flex: 2, child: _buildDesktopFixedTextSkeleton(width: 56)),
+      _buildDesktopTableSizedCell(width: 64, child: _buildDesktopFixedTextSkeleton(width: 28, alignRight: true)),
       _buildDesktopTableSizedCell(width: 72, child: Center(child: _buildDesktopSkeletonBar(width: 16, height: 16, radius: 8))),
     ],
     isFirst: isFirst,
@@ -1278,11 +1308,11 @@ Widget _buildDesktopTableRowAlbumSkeleton({required bool isFirst, required bool 
 Widget _buildDesktopTableRowPlaylistSkeleton({required bool isFirst, required bool showSelection}) {
   return _buildDesktopTableRowSkeletonBase(
     cells: <Widget>[
-      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopSkeletonBar(width: 20)),
+      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopFixedTextSkeleton(width: 12)),
       _buildDesktopTableSizedCell(width: 62, child: _buildDesktopSkeletonBar(width: 48, height: 48, radius: 8)),
-      _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopSkeletonBar(width: 220)),
-      _buildDesktopTableSizedCell(flex: 4, child: _buildDesktopSkeletonBar(width: 120)),
-      _buildDesktopTableSizedCell(flex: 2, child: _buildDesktopSkeletonBar(width: 80)),
+      _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopFixedTextSkeleton(width: 146)),
+      _buildDesktopTableSizedCell(flex: 4, child: _buildDesktopFixedTextSkeleton(width: 98)),
+      _buildDesktopTableSizedCell(flex: 2, child: _buildDesktopFixedTextSkeleton(width: 64)),
       _buildDesktopTableSizedCell(width: 72, child: Center(child: _buildDesktopSkeletonBar(width: 16, height: 16, radius: 8))),
     ],
     isFirst: isFirst,
@@ -1293,10 +1323,10 @@ Widget _buildDesktopTableRowPlaylistSkeleton({required bool isFirst, required bo
 Widget _buildDesktopTableRowArtistSkeleton({required bool isFirst, required bool showSelection}) {
   return _buildDesktopTableRowSkeletonBase(
     cells: <Widget>[
-      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopSkeletonBar(width: 20)),
+      _buildDesktopTableSizedCell(width: 44, child: _buildDesktopFixedTextSkeleton(width: 12)),
       _buildDesktopTableSizedCell(width: 62, child: _buildDesktopSkeletonBar(width: 48, height: 48, radius: 8)),
-      _buildDesktopTableSizedCell(flex: 6, child: _buildDesktopSkeletonBar(width: 220)),
-      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopSkeletonBar(width: 120)),
+      _buildDesktopTableSizedCell(flex: 6, child: _buildDesktopFixedTextSkeleton(width: 154)),
+      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopFixedTextSkeleton(width: 82)),
       _buildDesktopTableSizedCell(width: 72, child: Center(child: _buildDesktopSkeletonBar(width: 16, height: 16, radius: 8))),
     ],
     isFirst: isFirst,
@@ -1307,7 +1337,7 @@ Widget _buildDesktopTableRowArtistSkeleton({required bool isFirst, required bool
 Widget _buildDesktopTableRowUnknownSkeleton({required bool isFirst, required bool showSelection}) {
   return _buildDesktopTableRowSkeletonBase(
     cells: <Widget>[
-      _buildDesktopTableSizedCell(flex: 1, child: _buildDesktopSkeletonBar(width: 220)),
+      _buildDesktopTableSizedCell(flex: 1, child: _buildDesktopFixedTextSkeleton(width: 120)),
     ],
     isFirst: isFirst,
     showSelection: showSelection,
@@ -1545,7 +1575,9 @@ Widget _buildDesktopTableRowSkeletonBase({
         ),
         child: Row(
           children: <Widget>[
-            ...cells,
+            Expanded(
+              child: Row(children: cells),
+            ),
             SizedBox(
               width: 40,
               child: Center(
@@ -1642,6 +1674,23 @@ Widget _buildDesktopSkeletonBar({required double width, double height = 14, doub
         ),
       );
     },
+  );
+}
+
+Widget _buildDesktopFixedTextSkeleton({
+  required double width,
+  bool alignRight = false,
+  double height = 12,
+}) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 8),
+    child: Align(
+      alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
+      child: _buildDesktopSkeletonBar(
+        width: width,
+        height: height,
+      ),
+    ),
   );
 }
 
@@ -1781,11 +1830,12 @@ enum DesktopTextTone {
   tertiary,
 }
 
-class MediaTableCover extends StatelessWidget {
+class MediaTableCover extends StatefulWidget {
   final String? coverUrl;
   final IconData fallbackIcon;
   final double size;
   final double radius;
+  final VoidCallback? onPlayTap;
 
   const MediaTableCover({
     super.key,
@@ -1793,27 +1843,114 @@ class MediaTableCover extends StatelessWidget {
     required this.fallbackIcon,
     this.size = 48,
     this.radius = 8,
+    this.onPlayTap,
   });
+
+  @override
+  State<MediaTableCover> createState() => _MediaTableCoverState();
+}
+
+class _MediaTableCoverState extends State<MediaTableCover> {
+  static const Duration _overlayFadeDuration = Duration(milliseconds: 120);
+  static const Duration _buttonScaleDuration = Duration(milliseconds: 140);
+  bool _isHovered = false;
+  bool _isPlayHovered = false;
+
+  bool _isPrimaryActivationPointer(PointerDownEvent event) {
+    if (event.kind == PointerDeviceKind.mouse) {
+      return (event.buttons & kPrimaryMouseButton) != 0;
+    }
+    return true;
+  }
+
+  void _setPlayHovered(bool value) {
+    if (_isPlayHovered == value || widget.onPlayTap == null) {
+      return;
+    }
+    setState(() {
+      _isPlayHovered = value;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
-    final String? trimmedCover = coverUrl?.trim();
+    final String? trimmedCover = widget.coverUrl?.trim();
     final bool hasCover = trimmedCover != null && trimmedCover.isNotEmpty;
+    final bool showPlayOverlay = widget.onPlayTap != null;
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
-      child: Container(
-        width: size,
-        height: size,
-        color: colors.bgTertiary,
-        child: hasCover
-            ? Image.network(
-                trimmedCover,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => Icon(fallbackIcon, color: colors.accent, size: size * 0.5),
-              )
-            : Icon(fallbackIcon, color: colors.accent, size: size * 0.5),
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(widget.radius),
+        child: SizedBox(
+          width: widget.size,
+          height: widget.size,
+          child: Stack(
+            fit: StackFit.expand,
+            children: <Widget>[
+              Container(
+                color: colors.bgTertiary,
+                child: hasCover
+                    ? Image.network(
+                        trimmedCover,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => Icon(widget.fallbackIcon, color: colors.accent, size: widget.size * 0.5),
+                      )
+                    : Icon(widget.fallbackIcon, color: colors.accent, size: widget.size * 0.5),
+              ),
+              if (showPlayOverlay)
+                IgnorePointer(
+                  child: AnimatedOpacity(
+                    duration: _overlayFadeDuration,
+                    curve: Curves.easeOut,
+                    opacity: _isHovered ? 1 : 0,
+                    child: Container(color: Colors.black.withValues(alpha: 0.34)),
+                  ),
+                ),
+              if (showPlayOverlay)
+                Positioned.fill(
+                  child: Center(
+                    child: AnimatedOpacity(
+                      duration: _overlayFadeDuration,
+                      curve: Curves.easeOut,
+                      opacity: _isHovered ? 1 : 0,
+                      child: MouseRegion(
+                        onEnter: (_) => _setPlayHovered(true),
+                        onExit: (_) => _setPlayHovered(false),
+                        child: AnimatedScale(
+                          scale: _isPlayHovered ? 1.08 : 1,
+                          duration: _buttonScaleDuration,
+                          curve: Curves.easeOutCubic,
+                          child: Listener(
+                            onPointerDown: (PointerDownEvent event) {
+                              if (_isPrimaryActivationPointer(event)) {
+                                widget.onPlayTap?.call();
+                              }
+                            },
+                            child: Container(
+                              width: 35,
+                              height: 35,
+                              decoration: BoxDecoration(
+                                color: colors.textPrimary,
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              child: Icon(
+                                Icons.play_arrow_sharp,
+                                size: 24,
+                                color: colors.bgPrimary,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }

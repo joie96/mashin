@@ -452,7 +452,7 @@ class SendspinPlayer implements PlaybackPlayer {
     }
 
     _logger.debug(
-      'Sendspin interpolation started. TickMs=${_positionTickInterval.inMilliseconds}, AnchorMillis=${_positionAnchorMillis}',
+      'Sendspin interpolation started. TickMs=${_positionTickInterval.inMilliseconds}, AnchorMillis=$_positionAnchorMillis',
     );
 
     _positionInterpolationTimer = Timer.periodic(_positionTickInterval, (_) {

@@ -7,7 +7,6 @@ import '../../app/theme/app_theme.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../../data/music_assistant/ma_client.dart';
 import '../playback/playback_coordinator.dart';
-import '../playback/playback_models.dart';
 import '../shared/widgets/media_row_section_desktop.dart';
 import '../shared/widgets/media_row_section_mobile.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
@@ -16,11 +15,15 @@ import '../shared/widgets/media_table_section_mobile.dart';
 class SearchScreen extends StatefulWidget {
   final MusicAssistantClient client;
   final PlaybackCoordinator playbackCoordinator;
+  final bool desktopSearchDriven;
+  final String desktopSearchQuery;
 
   const SearchScreen({
     super.key,
     required this.client,
     required this.playbackCoordinator,
+    this.desktopSearchDriven = false,
+    this.desktopSearchQuery = '',
   });
 
   @override
@@ -54,6 +57,23 @@ class _SearchScreenState extends State<SearchScreen> {
   void initState() {
     super.initState();
     _primeProviderManifests();
+
+    if (widget.desktopSearchDriven) {
+      _syncDesktopQuery(widget.desktopSearchQuery);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant SearchScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (!widget.desktopSearchDriven) {
+      return;
+    }
+
+    if (oldWidget.desktopSearchQuery != widget.desktopSearchQuery) {
+      _syncDesktopQuery(widget.desktopSearchQuery);
+    }
   }
 
   Future<void> _primeProviderManifests() async {
@@ -91,34 +111,36 @@ class _SearchScreenState extends State<SearchScreen> {
           'Suche',
           style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
         ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _queryController,
-          textInputAction: TextInputAction.search,
-          decoration: InputDecoration(
-            hintText: 'Tracks, Alben, Playlists, Artists',
-            prefixIcon: const Icon(Icons.search_outlined),
-            suffixIcon: _queryController.text.isEmpty
-                ? null
-                : Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      IconButton(
-                        tooltip: 'Suchen',
-                        onPressed: _submitSearch,
-                        icon: const Icon(Icons.search_outlined),
-                      ),
-                      IconButton(
-                        tooltip: 'Leeren',
-                        onPressed: _clearSearch,
-                        icon: const Icon(Icons.close_outlined),
-                      ),
-                    ],
-                  ),
+        if (isMobile) ...<Widget>[
+          const SizedBox(height: 12),
+          TextField(
+            controller: _queryController,
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              hintText: 'Tracks, Alben, Playlists, Artists',
+              prefixIcon: const Icon(Icons.search_outlined),
+              suffixIcon: _queryController.text.isEmpty
+                  ? null
+                  : Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        IconButton(
+                          tooltip: 'Suchen',
+                          onPressed: _submitSearch,
+                          icon: const Icon(Icons.search_outlined),
+                        ),
+                        IconButton(
+                          tooltip: 'Leeren',
+                          onPressed: _clearSearch,
+                          icon: const Icon(Icons.close_outlined),
+                        ),
+                      ],
+                    ),
+            ),
+            onChanged: _onQueryChanged,
+            onSubmitted: (_) => _submitSearch(),
           ),
-          onChanged: _onQueryChanged,
-          onSubmitted: (_) => _submitSearch(),
-        ),
+        ],
         const SizedBox(height: 20),
         if (!_hasSearchRequest)
           Container(
@@ -129,7 +151,9 @@ class _SearchScreenState extends State<SearchScreen> {
               border: Border.all(color: colors.border),
             ),
             child: Text(
-              'Gib einen Suchbegriff ein, um Ergebnisse anzuzeigen.',
+              isMobile
+                  ? 'Gib einen Suchbegriff ein, um Ergebnisse anzuzeigen.'
+                  : 'Nutze die Suchleiste oben, um Ergebnisse anzuzeigen.',
               style: TextStyle(color: colors.textSecondary),
             ),
           )
@@ -219,8 +243,14 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   void _clearSearch() {
+    _resetResults(clearInput: true);
+  }
+
+  void _resetResults({required bool clearInput}) {
     _debounce?.cancel();
-    _queryController.clear();
+    if (clearInput) {
+      _queryController.clear();
+    }
 
     setState(() {
       _hasSearchRequest = false;
@@ -247,7 +277,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Future<void> _runSearch(String query) async {
     if (query.isEmpty) {
-      _clearSearch();
+      _resetResults(clearInput: false);
       return;
     }
 
@@ -273,13 +303,19 @@ class _SearchScreenState extends State<SearchScreen> {
     ]);
   }
 
+  void _syncDesktopQuery(String query) {
+    final trimmed = query.trim();
+    _debounce?.cancel();
+    unawaited(_runSearch(trimmed));
+  }
+
   Future<void> _searchForType(int requestId, String query, MediaType mediaType) async {
     try {
       // One request per media type keeps section loading/error states independent.
       final result = await widget.client.search(
         searchQuery: query,
         mediaTypes: <MediaType>[mediaType],
-        limit: 500,
+        limit: 50,
         libraryOnly: false,
       );
 

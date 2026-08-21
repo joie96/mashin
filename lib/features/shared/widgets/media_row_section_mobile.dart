@@ -394,7 +394,7 @@ Widget _buildMobileMediaRowItemBase({
             if (hasSecondary) ...<Widget>[
               const SizedBox(height: 2),
               Text(
-                secondaryText!,
+                secondaryText,
                 maxLines: 1,
                 textAlign: TextAlign.center,
                 overflow: TextOverflow.ellipsis,
@@ -404,7 +404,7 @@ Widget _buildMobileMediaRowItemBase({
             if (hasTertiary) ...<Widget>[
               const SizedBox(height: 2),
               Text(
-                tertiaryText!,
+                tertiaryText,
                 maxLines: 1,
                 textAlign: TextAlign.center,
                 overflow: TextOverflow.ellipsis,
@@ -461,6 +461,9 @@ Widget _buildMobileMediaRowSkeletonBase({
   return Builder(
     builder: (BuildContext context) {
       final colors = context.mashinColors;
+      final double titleWidth = (itemWidth * 0.72).clamp(48, itemWidth).toDouble();
+      final double secondaryWidth = (itemWidth * 0.56).clamp(42, itemWidth).toDouble();
+      final double tertiaryWidth = (itemWidth * 0.46).clamp(36, itemWidth).toDouble();
 
       Widget line(double width) {
         return Container(
@@ -478,20 +481,49 @@ Widget _buildMobileMediaRowSkeletonBase({
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
-            Container(
-              width: coverSize,
-              height: coverSize,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color: colors.bgTertiary,
-              ),
+            Stack(
+              children: <Widget>[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    width: coverSize,
+                    height: coverSize,
+                    color: colors.bgTertiary,
+                  ),
+                ),
+                Positioned(
+                  left: 6,
+                  top: 6,
+                  child: Container(
+                    width: 18,
+                    height: 18,
+                    decoration: BoxDecoration(
+                      color: colors.bgSecondary,
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 6,
+                  bottom: 6,
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: colors.bgSecondary,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: colors.border),
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 8),
-            line(98),
+            line(titleWidth),
             const SizedBox(height: 6),
-            line(78),
+            line(secondaryWidth),
             const SizedBox(height: 6),
-            line(66),
+            line(tertiaryWidth),
           ],
         ),
       );

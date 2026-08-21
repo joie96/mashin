@@ -13,6 +13,10 @@ class AppRouter {
     AppSection section,
     MusicAssistantClient client,
     PlaybackCoordinator playbackCoordinator,
+    {
+    bool desktopSearchDriven = false,
+    String desktopSearchQuery = '',
+  }
   ) {
     switch (section) {
       case AppSection.home:
@@ -41,6 +45,8 @@ class AppRouter {
         return SearchScreen(
           client: client,
           playbackCoordinator: playbackCoordinator,
+          desktopSearchDriven: desktopSearchDriven,
+          desktopSearchQuery: desktopSearchQuery,
         );
     }
   }
