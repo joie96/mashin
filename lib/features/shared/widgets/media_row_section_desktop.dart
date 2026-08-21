@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'dart:math' as math;
 import 'dart:async';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../data/music_assistant/ma_models.dart';
 import '../../playback/playback_coordinator.dart';
+import '../selection/selection_session_controller.dart';
 import 'media_table_section_desktop.dart';
 
 class MediaRowSectionDesktop<T> extends StatefulWidget {
@@ -20,11 +22,12 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
   final double itemSpacing;
   final int skeletonCount;
   final PlaybackCoordinator? playbackCoordinator;
+  final bool enableSelection;
   final DesktopRowAction<T>? onRowMoreTap;
   final DesktopRowAction<T>? onRowFavoriteTap;
-  final DesktopRowAction<T>? onRowSelectTap;
   final DesktopRowFavoriteResolver<T>? isRowFavorite;
-  final DesktopRowFavoriteResolver<T>? isRowSelected;
+  final ValueChanged<List<T>>? onSelectionChanged;
+  final VoidCallback? onSelectionMenuTap;
 
   const MediaRowSectionDesktop({
     super.key,
@@ -36,11 +39,12 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
     this.itemSpacing = 16,
     this.skeletonCount = 8,
     this.playbackCoordinator,
+    this.enableSelection = true,
     this.onRowMoreTap,
     this.onRowFavoriteTap,
-    this.onRowSelectTap,
     this.isRowFavorite,
-    this.isRowSelected,
+    this.onSelectionChanged,
+    this.onSelectionMenuTap,
   });
 
   @override
@@ -61,12 +65,162 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
   bool _isAnimatingIn = false;
   int _transitionRunId = 0;
 
+  final FocusNode _sectionFocusNode = FocusNode(debugLabel: 'MediaRowDesktopSectionFocus');
+  final Set<int> _selectedIndexes = <int>{};
+  final Object _selectionSessionOwner = Object();
+  final SelectionSessionController _selectionSessionController = SelectionSessionController.instance;
+  int? _selectionAnchorIndex;
+
   bool _isItemFavorite(T item, int index) {
     return widget.isRowFavorite?.call(item, index) ?? false;
   }
 
-  bool _isItemSelected(T item, int index) {
-    return widget.isRowSelected?.call(item, index) ?? false;
+  bool _isItemSelected(int index) {
+    return widget.enableSelection && _selectedIndexes.contains(index);
+  }
+
+  bool get _isAllSelected => widget.items.isNotEmpty && _selectedIndexes.length == widget.items.length;
+
+  void _emitSelectionChanged() {
+    if (widget.onSelectionChanged == null) {
+      return;
+    }
+    final List<T> selected = _selectedIndexes
+        .where((int index) => index >= 0 && index < widget.items.length)
+        .map((int index) => widget.items[index])
+        .toList(growable: false);
+    widget.onSelectionChanged!(selected);
+  }
+
+  void _syncSelectionSession() {
+    if (_selectedIndexes.isEmpty) {
+      _deactivateSelectionSession();
+      return;
+    }
+
+    _selectionSessionController.activate(
+      owner: _selectionSessionOwner,
+      registration: SelectionSessionRegistration(
+        allSelected: _isAllSelected,
+        onToggleAll: _toggleAllSelectedIndexes,
+        onMenuTap: widget.onSelectionMenuTap,
+        onClose: _clearSelectionFromController,
+      ),
+    );
+  }
+
+  void _deactivateSelectionSession() {
+    _selectionSessionController.deactivate(_selectionSessionOwner);
+  }
+
+  void _clearSelectionFromController() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _selectedIndexes.clear();
+      _selectionAnchorIndex = null;
+    });
+    _deactivateSelectionSession();
+    _emitSelectionChanged();
+  }
+
+  void _requestSectionFocus() {
+    if (!_sectionFocusNode.hasFocus) {
+      _sectionFocusNode.requestFocus();
+    }
+  }
+
+  void _toggleSelectedIndex(int index) {
+    if (!widget.enableSelection) {
+      return;
+    }
+    setState(() {
+      if (_selectedIndexes.contains(index)) {
+        _selectedIndexes.remove(index);
+      } else {
+        _selectedIndexes.add(index);
+      }
+      _selectionAnchorIndex = index;
+    });
+    _syncSelectionSession();
+    _emitSelectionChanged();
+  }
+
+  void _selectSingleIndex(int index) {
+    if (!widget.enableSelection || index < 0 || index >= widget.items.length) {
+      return;
+    }
+
+    setState(() {
+      _selectedIndexes
+        ..clear()
+        ..add(index);
+      _selectionAnchorIndex = index;
+    });
+    _syncSelectionSession();
+    _emitSelectionChanged();
+  }
+
+  void _selectRangeTo(int index) {
+    if (!widget.enableSelection || index < 0 || index >= widget.items.length) {
+      return;
+    }
+
+    final int anchor = _selectionAnchorIndex ?? index;
+    final int start = anchor < index ? anchor : index;
+    final int end = anchor > index ? anchor : index;
+
+    setState(() {
+      _selectedIndexes
+        ..clear()
+        ..addAll(List<int>.generate(end - start + 1, (int offset) => start + offset));
+    });
+    _syncSelectionSession();
+    _emitSelectionChanged();
+  }
+
+  void _toggleAllSelectedIndexes() {
+    if (!widget.enableSelection || widget.items.isEmpty) {
+      return;
+    }
+    setState(() {
+      if (_isAllSelected) {
+        _selectedIndexes.clear();
+      } else {
+        _selectedIndexes
+          ..clear()
+          ..addAll(List<int>.generate(widget.items.length, (int index) => index));
+      }
+    });
+    _syncSelectionSession();
+    _emitSelectionChanged();
+  }
+
+  void _handleItemPointerDown(int index, PointerDownEvent event) {
+    if (!widget.enableSelection ||
+        event.kind != PointerDeviceKind.mouse ||
+        (event.buttons & kPrimaryMouseButton) == 0) {
+      return;
+    }
+
+    final Set<LogicalKeyboardKey> keys = HardwareKeyboard.instance.logicalKeysPressed;
+    final bool isCtrlPressed = keys.contains(LogicalKeyboardKey.controlLeft) || keys.contains(LogicalKeyboardKey.controlRight);
+    final bool isShiftPressed = keys.contains(LogicalKeyboardKey.shiftLeft) || keys.contains(LogicalKeyboardKey.shiftRight);
+
+    _requestSectionFocus();
+
+    if (isShiftPressed) {
+      _selectRangeTo(index);
+      return;
+    }
+
+    if (isCtrlPressed) {
+      _toggleSelectedIndex(index);
+      return;
+    }
+
+    _selectSingleIndex(index);
   }
 
   _RowLayoutMetrics _computeLayoutMetrics(double maxWidth) {
@@ -104,6 +258,18 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
   @override
   void didUpdateWidget(covariant MediaRowSectionDesktop<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
+
+    _selectedIndexes.removeWhere((int index) => index < 0 || index >= widget.items.length);
+    if (_selectionAnchorIndex != null && (_selectionAnchorIndex! < 0 || _selectionAnchorIndex! >= widget.items.length)) {
+      _selectionAnchorIndex = null;
+    }
+
+    if (_selectedIndexes.isEmpty) {
+      _deactivateSelectionSession();
+    } else {
+      _syncSelectionSession();
+    }
+
     if (widget.items.isEmpty) {
       _pageStartIndex = 0;
       return;
@@ -114,6 +280,13 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
     if (_pageStartIndex < 0) {
       _pageStartIndex = 0;
     }
+  }
+
+  @override
+  void dispose() {
+    _sectionFocusNode.dispose();
+    _deactivateSelectionSession();
+    super.dispose();
   }
 
   int _clampStartIndex({required int visibleCount}) {
@@ -261,6 +434,10 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
       itemBuilder: (BuildContext context, int index) {
         final int absoluteIndex = startIndex + index;
         final Object? item = visibleItems[index];
+        final bool isSelected = _isItemSelected(absoluteIndex);
+        void onSelectTap() => _toggleSelectedIndex(absoluteIndex);
+        void onSelectPointerDown(PointerDownEvent event) => _handleItemPointerDown(absoluteIndex, event);
+
         if (item is Album) {
           return _buildDesktopMediaRowAlbum(
             item: item,
@@ -271,8 +448,9 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
             isFavorite: _isItemFavorite(item as T, absoluteIndex),
             onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(item as T, absoluteIndex),
             onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item as T, absoluteIndex),
-            isSelected: _isItemSelected(item as T, absoluteIndex),
-            onSelectTap: widget.onRowSelectTap == null ? null : () => widget.onRowSelectTap!(item as T, absoluteIndex),
+            isSelected: isSelected,
+            onSelectTap: widget.enableSelection ? onSelectTap : null,
+            onSelectPointerDown: widget.enableSelection ? onSelectPointerDown : null,
           );
         }
         if (item is Playlist) {
@@ -285,8 +463,9 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
             isFavorite: _isItemFavorite(item as T, absoluteIndex),
             onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(item as T, absoluteIndex),
             onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item as T, absoluteIndex),
-            isSelected: _isItemSelected(item as T, absoluteIndex),
-            onSelectTap: widget.onRowSelectTap == null ? null : () => widget.onRowSelectTap!(item as T, absoluteIndex),
+            isSelected: isSelected,
+            onSelectTap: widget.enableSelection ? onSelectTap : null,
+            onSelectPointerDown: widget.enableSelection ? onSelectPointerDown : null,
           );
         }
         if (item is Artist) {
@@ -299,8 +478,9 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
             isFavorite: _isItemFavorite(item as T, absoluteIndex),
             onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(item as T, absoluteIndex),
             onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item as T, absoluteIndex),
-            isSelected: _isItemSelected(item as T, absoluteIndex),
-            onSelectTap: widget.onRowSelectTap == null ? null : () => widget.onRowSelectTap!(item as T, absoluteIndex),
+            isSelected: isSelected,
+            onSelectTap: widget.enableSelection ? onSelectTap : null,
+            onSelectPointerDown: widget.enableSelection ? onSelectPointerDown : null,
           );
         }
         if (item is Track) {
@@ -313,8 +493,9 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
             isFavorite: _isItemFavorite(item as T, absoluteIndex),
             onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(item as T, absoluteIndex),
             onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item as T, absoluteIndex),
-            isSelected: _isItemSelected(item as T, absoluteIndex),
-            onSelectTap: widget.onRowSelectTap == null ? null : () => widget.onRowSelectTap!(item as T, absoluteIndex),
+            isSelected: isSelected,
+            onSelectTap: widget.enableSelection ? onSelectTap : null,
+            onSelectPointerDown: widget.enableSelection ? onSelectPointerDown : null,
           );
         }
 
@@ -326,8 +507,9 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
           isFavorite: _isItemFavorite(visibleItems[index], absoluteIndex),
           onFavoriteTap: widget.onRowFavoriteTap == null ? null : () => widget.onRowFavoriteTap!(visibleItems[index], absoluteIndex),
           onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(visibleItems[index], absoluteIndex),
-          isSelected: _isItemSelected(visibleItems[index], absoluteIndex),
-          onSelectTap: widget.onRowSelectTap == null ? null : () => widget.onRowSelectTap!(visibleItems[index], absoluteIndex),
+          isSelected: isSelected,
+          onSelectTap: widget.enableSelection ? onSelectTap : null,
+          onSelectPointerDown: widget.enableSelection ? onSelectPointerDown : null,
         );
       },
     );
@@ -389,7 +571,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
     final colors = context.mashinColors;
     final bool hasTitle = widget.title.trim().isNotEmpty;
 
-    return LayoutBuilder(
+    final Widget content = LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final _RowLayoutMetrics metrics = _computeLayoutMetrics(constraints.maxWidth);
         final int visibleCount = metrics.visibleCount;
@@ -545,7 +727,48 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         );
       },
     );
+
+    final Widget focusableContent = Focus(
+      focusNode: _sectionFocusNode,
+      child: content,
+    );
+
+    if (!widget.enableSelection) {
+      return focusableContent;
+    }
+
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.keyA, control: true): _SelectAllIntent(),
+        SingleActivator(LogicalKeyboardKey.escape): _ClearSelectionIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          _SelectAllIntent: CallbackAction<_SelectAllIntent>(
+            onInvoke: (_SelectAllIntent intent) {
+              _toggleAllSelectedIndexes();
+              return null;
+            },
+          ),
+          _ClearSelectionIntent: CallbackAction<_ClearSelectionIntent>(
+            onInvoke: (_ClearSelectionIntent intent) {
+              _clearSelectionFromController();
+              return null;
+            },
+          ),
+        },
+        child: focusableContent,
+      ),
+    );
   }
+}
+
+class _SelectAllIntent extends Intent {
+  const _SelectAllIntent();
+}
+
+class _ClearSelectionIntent extends Intent {
+  const _ClearSelectionIntent();
 }
 
 class _RowLayoutMetrics {
@@ -557,6 +780,9 @@ class _RowLayoutMetrics {
     required this.computedItemWidth,
   });
 }
+
+// Inset between the item's cover/text content and the frame edge, revealing the hover/selection background.
+const double _kRowItemInset = 6;
 
 // Typed desktop row builders
 Widget _buildDesktopMediaRowAlbum({
@@ -570,6 +796,7 @@ Widget _buildDesktopMediaRowAlbum({
   required VoidCallback? onMoreTap,
   required bool isSelected,
   required VoidCallback? onSelectTap,
+  required ValueChanged<PointerDownEvent>? onSelectPointerDown,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -587,6 +814,7 @@ Widget _buildDesktopMediaRowAlbum({
     onMoreTap: onMoreTap,
     isSelected: isSelected,
     onSelectTap: onSelectTap,
+    onSelectPointerDown: onSelectPointerDown,
   );
 }
 
@@ -601,6 +829,7 @@ Widget _buildDesktopMediaRowPlaylist({
   required VoidCallback? onMoreTap,
   required bool isSelected,
   required VoidCallback? onSelectTap,
+  required ValueChanged<PointerDownEvent>? onSelectPointerDown,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -618,6 +847,7 @@ Widget _buildDesktopMediaRowPlaylist({
     onMoreTap: onMoreTap,
     isSelected: isSelected,
     onSelectTap: onSelectTap,
+    onSelectPointerDown: onSelectPointerDown,
   );
 }
 
@@ -632,6 +862,7 @@ Widget _buildDesktopMediaRowArtist({
   required VoidCallback? onMoreTap,
   required bool isSelected,
   required VoidCallback? onSelectTap,
+  required ValueChanged<PointerDownEvent>? onSelectPointerDown,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -650,6 +881,7 @@ Widget _buildDesktopMediaRowArtist({
     onMoreTap: onMoreTap,
     isSelected: isSelected,
     onSelectTap: onSelectTap,
+    onSelectPointerDown: onSelectPointerDown,
   );
 }
 
@@ -664,6 +896,7 @@ Widget _buildDesktopMediaRowTrack({
   required VoidCallback? onMoreTap,
   required bool isSelected,
   required VoidCallback? onSelectTap,
+  required ValueChanged<PointerDownEvent>? onSelectPointerDown,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -681,6 +914,7 @@ Widget _buildDesktopMediaRowTrack({
     onMoreTap: onMoreTap,
     isSelected: isSelected,
     onSelectTap: onSelectTap,
+    onSelectPointerDown: onSelectPointerDown,
   );
 }
 
@@ -694,6 +928,7 @@ Widget _buildDesktopMediaRowUnknown({
   required VoidCallback? onMoreTap,
   required bool isSelected,
   required VoidCallback? onSelectTap,
+  required ValueChanged<PointerDownEvent>? onSelectPointerDown,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -711,6 +946,7 @@ Widget _buildDesktopMediaRowUnknown({
     onMoreTap: onMoreTap,
     isSelected: isSelected,
     onSelectTap: onSelectTap,
+    onSelectPointerDown: onSelectPointerDown,
   );
 }
 
@@ -730,6 +966,7 @@ Widget _buildDesktopMediaRowItemBase({
   required VoidCallback? onMoreTap,
   required bool isSelected,
   required VoidCallback? onSelectTap,
+  required ValueChanged<PointerDownEvent>? onSelectPointerDown,
   bool showPlayOverlay = true,
   bool isCircularCover = false,
 }) {
@@ -738,60 +975,126 @@ Widget _buildDesktopMediaRowItemBase({
       final colors = context.mashinColors;
       final bool hasSecondary = secondaryText != null && secondaryText.trim().isNotEmpty;
       final bool hasTertiary = tertiaryText != null && tertiaryText.trim().isNotEmpty;
+      final double insetCoverSize = math.max(1, coverSize - (_kRowItemInset * 2));
 
       return SizedBox(
         width: itemWidth,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            _DesktopMediaCover(
-              coverSize: coverSize,
-              icon: icon,
-              coverUrl: coverUrl,
-              providerLabel: providerLabel,
-              providerIconSvg: providerIconSvg,
-              onPlayTap: onPlayTap,
-              isFavorite: isFavorite,
-              onFavoriteTap: onFavoriteTap,
-              onMoreTap: onMoreTap,
-              isSelected: isSelected,
-              onSelectTap: onSelectTap,
-              showPlayOverlay: showPlayOverlay,
-              isCircularCover: isCircularCover,
+        child: _DesktopRowItemFrame(
+          isSelected: isSelected,
+          onSelectPointerDown: onSelectPointerDown,
+          coverBuilder: (bool isHovered) => _DesktopMediaCover(
+            coverSize: insetCoverSize,
+            icon: icon,
+            coverUrl: coverUrl,
+            providerLabel: providerLabel,
+            providerIconSvg: providerIconSvg,
+            onPlayTap: onPlayTap,
+            isFavorite: isFavorite,
+            onFavoriteTap: onFavoriteTap,
+            onMoreTap: onMoreTap,
+            isSelected: isSelected,
+            onSelectTap: onSelectTap,
+            onBackgroundPointerDown: onSelectPointerDown,
+            isHovered: isHovered,
+            showPlayOverlay: showPlayOverlay,
+            isCircularCover: isCircularCover,
+          ),
+          textArea: Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  title,
+                  maxLines: 1,
+                  textAlign: TextAlign.left,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w400, fontSize: 15),
+                ),
+                if (hasSecondary) ...<Widget>[
+                  const SizedBox(height: 2),
+                  Text(
+                    secondaryText,
+                    maxLines: 1,
+                    textAlign: TextAlign.left,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: colors.textSecondary, fontSize: 14),
+                  ),
+                ],
+                if (hasTertiary) ...<Widget>[
+                  const SizedBox(height: 2),
+                  Text(
+                    tertiaryText,
+                    maxLines: 1,
+                    textAlign: TextAlign.left,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: colors.textTertiary, fontSize: 14),
+                  ),
+                ],
+              ],
             ),
-            const SizedBox(height: 12),
-            Text(
-              title,
-              maxLines: 1,
-              textAlign: TextAlign.left,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w400, fontSize: 15),
-            ),
-            if (hasSecondary) ...<Widget>[
-              const SizedBox(height: 2),
-              Text(
-                secondaryText,
-                maxLines: 1,
-                textAlign: TextAlign.left,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: colors.textSecondary, fontSize: 14),
-              ),
-            ],
-            if (hasTertiary) ...<Widget>[
-              const SizedBox(height: 2),
-              Text(
-                tertiaryText,
-                maxLines: 1,
-                textAlign: TextAlign.left,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: colors.textTertiary, fontSize: 14),
-              ),
-            ],
-          ],
+          ),
         ),
       );
     },
   );
+}
+
+class _DesktopRowItemFrame extends StatefulWidget {
+  final Widget Function(bool isHovered) coverBuilder;
+  final Widget textArea;
+  final bool isSelected;
+  final ValueChanged<PointerDownEvent>? onSelectPointerDown;
+
+  const _DesktopRowItemFrame({
+    required this.coverBuilder,
+    required this.textArea,
+    required this.isSelected,
+    required this.onSelectPointerDown,
+  });
+
+  @override
+  State<_DesktopRowItemFrame> createState() => _DesktopRowItemFrameState();
+}
+
+class _DesktopRowItemFrameState extends State<_DesktopRowItemFrame> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+
+    // Matches the hover/selection background of MediaTableSectionDesktop rows.
+    Color background = Colors.transparent;
+    if (widget.isSelected) {
+      background = _isHovered ? colors.hover : colors.selection;
+    } else if (_isHovered) {
+      background = colors.hover;
+    }
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: Container(
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        padding: const EdgeInsets.all(_kRowItemInset),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            widget.coverBuilder(_isHovered),
+            Listener(
+              onPointerDown: widget.onSelectPointerDown,
+              behavior: HitTestBehavior.opaque,
+              child: widget.textArea,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _DesktopMediaCover extends StatefulWidget {
@@ -806,6 +1109,8 @@ class _DesktopMediaCover extends StatefulWidget {
   final VoidCallback? onMoreTap;
   final bool isSelected;
   final VoidCallback? onSelectTap;
+  final ValueChanged<PointerDownEvent>? onBackgroundPointerDown;
+  final bool isHovered;
   final bool showPlayOverlay;
   final bool isCircularCover;
 
@@ -821,6 +1126,8 @@ class _DesktopMediaCover extends StatefulWidget {
     required this.onMoreTap,
     required this.isSelected,
     required this.onSelectTap,
+    required this.onBackgroundPointerDown,
+    required this.isHovered,
     required this.showPlayOverlay,
     required this.isCircularCover,
   });
@@ -832,7 +1139,6 @@ class _DesktopMediaCover extends StatefulWidget {
 class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
   static const Duration _hoverFadeDuration = Duration(milliseconds: 140);
   static const Duration _buttonScaleDuration = Duration(milliseconds: 140);
-  bool _isHovered = false;
   bool _isPlayHovered = false;
 
   bool _isPrimaryActivationPointer(PointerDownEvent event) {
@@ -857,7 +1163,7 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
     final bool hasCover = widget.coverUrl != null && widget.coverUrl!.trim().isNotEmpty;
     final bool showHoverPlay = widget.showPlayOverlay && widget.onPlayTap != null;
     const bool showSelectControl = true;
-    final bool showSelectControlVisible = _isHovered || widget.isSelected;
+    final bool showSelectControlVisible = widget.isHovered || widget.isSelected;
     const bool showOverlayActions = true;
 
     final Widget clippedContent = SizedBox(
@@ -866,10 +1172,24 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
       child: Stack(
         fit: StackFit.expand,
         children: <Widget>[
-          Container(
-            color: colors.bgTertiary,
+          Listener(
+            onPointerDown: widget.onBackgroundPointerDown,
+            behavior: HitTestBehavior.opaque,
             child: widget.isCircularCover
                 ? ClipOval(
+                    child: Container(
+                      color: colors.bgTertiary,
+                      child: hasCover
+                          ? Image.network(
+                              widget.coverUrl!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) => Icon(widget.icon, color: colors.accent, size: 34),
+                            )
+                          : Icon(widget.icon, color: colors.accent, size: 34),
+                    ),
+                  )
+                : Container(
+                    color: colors.bgTertiary,
                     child: hasCover
                         ? Image.network(
                             widget.coverUrl!,
@@ -877,21 +1197,16 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
                             errorBuilder: (_, _, _) => Icon(widget.icon, color: colors.accent, size: 34),
                           )
                         : Icon(widget.icon, color: colors.accent, size: 34),
-                  )
-                : hasCover
-                    ? Image.network(
-                        widget.coverUrl!,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => Icon(widget.icon, color: colors.accent, size: 34),
-                      )
-                    : Icon(widget.icon, color: colors.accent, size: 34),
+                  ),
           ),
           if (showHoverPlay)
             IgnorePointer(
               child: AnimatedOpacity(
                 duration: _hoverFadeDuration,
-                opacity: _isHovered ? 1 : 0,
-                child: Container(color: Colors.black.withValues(alpha: 0.34)),
+                opacity: widget.isHovered ? 1 : 0,
+                child: widget.isCircularCover
+                    ? ClipOval(child: Container(color: Colors.black.withValues(alpha: 0.34)))
+                    : Container(color: Colors.black.withValues(alpha: 0.34)),
               ),
             ),
           Positioned(
@@ -908,7 +1223,7 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
               child: Center(
                 child: AnimatedOpacity(
                   duration: _hoverFadeDuration,
-                  opacity: _isHovered ? 1 : 0,
+                  opacity: widget.isHovered ? 1 : 0,
                   child: MouseRegion(
                     onEnter: (_) => _setPlayHovered(true),
                     onExit: (_) => _setPlayHovered(false),
@@ -948,22 +1263,22 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
               bottom: 8,
               child: AnimatedOpacity(
                 duration: _hoverFadeDuration,
-                opacity: _isHovered ? 1 : 0,
+                opacity: widget.isHovered ? 1 : 0,
                 child: Row(
                   children: <Widget>[
                     const Spacer(),
                     _DesktopCoverOverlayIconButton(
                       icon: widget.isFavorite ? Icons.favorite_outlined : Icons.favorite_border_outlined,
                       onTap: widget.onFavoriteTap,
-                      baseColor: colors.textSecondary,
-                      hoverColor: colors.textPrimary,
+                      baseColor: colors.textPrimary,
+                      hoverColor: colors.textSecondary,
                     ),
                     const SizedBox(width: 12),
                     _DesktopCoverOverlayIconButton(
                       icon: Icons.more_horiz_outlined,
                       onTap: widget.onMoreTap,
-                      baseColor: colors.textSecondary,
-                      hoverColor: colors.textPrimary,
+                      baseColor: colors.textPrimary,
+                      hoverColor: colors.textSecondary,
                     ),
                   ],
                 ),
@@ -991,11 +1306,7 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
       child: clippedContent,
     );
 
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      child: shapedContent,
-    );
+    return shapedContent;
   }
 }
 
@@ -1074,22 +1385,22 @@ class _DesktopCoverOverlayIconButtonState extends State<_DesktopCoverOverlayIcon
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
-      child: AnimatedScale(
-        scale: _isHovered && widget.onTap != null ? 1.08 : 1,
-        duration: const Duration(milliseconds: 140),
-        curve: Curves.easeOutCubic,
-        child: Listener(
-          onPointerDown: widget.onTap == null
-              ? null
-              : (PointerDownEvent event) {
-                  if (_isPrimaryActivationPointer(event)) {
-                    widget.onTap!.call();
-                  }
-                },
-          child: SizedBox(
-            width: 30,
-            height: 30,
-            child: Center(
+      child: Listener(
+        onPointerDown: widget.onTap == null
+            ? null
+            : (PointerDownEvent event) {
+                if (_isPrimaryActivationPointer(event)) {
+                  widget.onTap!.call();
+                }
+              },
+        child: SizedBox(
+          width: 32,
+          height: 32,
+          child: Center(
+            child: AnimatedScale(
+              scale: _isHovered ? 1.08 : 1,
+              duration: const Duration(milliseconds: 120),
+              curve: Curves.easeOutCubic,
               child: Icon(
                 widget.icon,
                 size: 18,
