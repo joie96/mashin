@@ -7,13 +7,13 @@ import '../../app/theme/app_theme.dart';
 import '../../data/music_assistant/ma_client.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../playback/playback_coordinator.dart';
+import '../shared/context_menu/context_menu_controller.dart';
 import '../shared/widgets/media_row_section_desktop.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
 import 'artist_detail_controller.dart';
 
 /// Desktop artist detail page: header with cover/name/actions, description and
-/// paginated album/similar-artist rows plus a top-tracks table, mirroring the
-/// MAUI Views/Desktop/ArtistDetailPage layout.
+/// paginated album/similar-artist rows plus a top-tracks table
 class ArtistDetailPageDesktop extends StatefulWidget {
   final MusicAssistantClient client;
   final PlaybackCoordinator playbackCoordinator;
@@ -40,6 +40,7 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
   static const double _coverSize = 200;
 
   late final ArtistDetailController _controller;
+  final GlobalKey _headerMenuAnchorKey = GlobalKey();
 
   @override
   void initState() {
@@ -66,42 +67,68 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
     super.dispose();
   }
 
-  void _showItemMenu(MediaItem item) {
-    showModalBottomSheet<void>(
+  List<ContextMenuAction> _buildItemMenuActions(MediaItem item) {
+    final bool isFavorite = _controller.isItemFavorite(item);
+    return <ContextMenuAction>[
+      ContextMenuAction(
+        label: 'Abspielen',
+        icon: Icons.play_arrow_outlined,
+        onSelected: () =>
+            widget.playbackCoordinator.playMedia(<MediaItem>[item]),
+      ),
+      ContextMenuAction(
+        label: isFavorite ? 'Favorit entfernen' : 'Als Favorit markieren',
+        icon: isFavorite
+            ? Icons.favorite_outlined
+            : Icons.favorite_border_outlined,
+        onSelected: () => _controller.toggleItemFavorite(item),
+      ),
+    ];
+  }
+
+  List<ContextMenuAction> _buildHeaderMenuActions(Artist artist) {
+    final bool isFavorite = _controller.isArtistFavorite;
+    return <ContextMenuAction>[
+      ContextMenuAction(
+        label: 'Radio starten',
+        icon: Icons.radio_outlined,
+        onSelected: _controller.startArtistRadio,
+      ),
+      ContextMenuAction(
+        label: 'Als Nächstes spielen',
+        icon: Icons.queue_play_next_outlined,
+        onSelected: () =>
+            widget.playbackCoordinator.playMediaNext(<MediaItem>[artist]),
+      ),
+      ContextMenuAction(
+        label: 'Als Letztes spielen',
+        icon: Icons.playlist_add_outlined,
+        onSelected: () =>
+            widget.playbackCoordinator.playMediaLast(<MediaItem>[artist]),
+      ),
+      ContextMenuAction(
+        label: isFavorite ? 'Favorit entfernen' : 'Als Favorit markieren',
+        icon: isFavorite
+            ? Icons.favorite_outlined
+            : Icons.favorite_border_outlined,
+        onSelected: _controller.toggleArtistFavorite,
+      ),
+    ];
+  }
+
+  Future<void> _showItemMenu(MediaItem item, {BuildContext? anchorContext}) {
+    return const AppContextMenuController().show(
       context: context,
-      builder: (BuildContext sheetContext) {
-        final bool isFavorite = _controller.isItemFavorite(item);
-        return SafeArea(
-          child: Wrap(
-            children: <Widget>[
-              ListTile(
-                leading: const Icon(Icons.play_arrow_outlined),
-                title: const Text('Abspielen'),
-                onTap: () {
-                  Navigator.of(sheetContext).pop();
-                  unawaited(
-                    widget.playbackCoordinator.playMedia(<MediaItem>[item]),
-                  );
-                },
-              ),
-              ListTile(
-                leading: Icon(
-                  isFavorite
-                      ? Icons.favorite_outlined
-                      : Icons.favorite_border_outlined,
-                ),
-                title: Text(
-                  isFavorite ? 'Favorit entfernen' : 'Als Favorit markieren',
-                ),
-                onTap: () {
-                  Navigator.of(sheetContext).pop();
-                  unawaited(_controller.toggleItemFavorite(item));
-                },
-              ),
-            ],
-          ),
-        );
-      },
+      anchorContext: anchorContext,
+      actions: _buildItemMenuActions(item),
+    );
+  }
+
+  Future<void> _showHeaderMenu(Artist artist, {BuildContext? anchorContext}) {
+    return const AppContextMenuController().show(
+      context: context,
+      anchorContext: anchorContext,
+      actions: _buildHeaderMenuActions(artist),
     );
   }
 
@@ -137,8 +164,9 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
                         _controller.isItemFavorite(item),
                     onRowFavoriteTap: (Album item, int index) =>
                         _controller.toggleItemFavorite(item),
-                    onRowMoreTap: (Album item, int index) =>
-                        _showItemMenu(item),
+                    onRowMoreAnchorTap:
+                        (Album item, int index, BuildContext anchorContext) =>
+                            _showItemMenu(item, anchorContext: anchorContext),
                     onArtistTap: _openArtist,
                   ),
                   const SizedBox(height: 32),
@@ -152,8 +180,9 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
                         _controller.isItemFavorite(item),
                     onRowFavoriteTap: (Artist item, int index) =>
                         _controller.toggleItemFavorite(item),
-                    onRowMoreTap: (Artist item, int index) =>
-                        _showItemMenu(item),
+                    onRowMoreAnchorTap:
+                        (Artist item, int index, BuildContext anchorContext) =>
+                            _showItemMenu(item, anchorContext: anchorContext),
                   ),
                   const SizedBox(height: 32),
                   MediaTableSectionDesktop<Track>(
@@ -167,8 +196,9 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
                         _controller.isItemFavorite(item),
                     onRowFavoriteTap: (Track item, int index) =>
                         _controller.toggleItemFavorite(item),
-                    onRowMoreTap: (Track item, int index) =>
-                        _showItemMenu(item),
+                    onRowMoreAnchorTap:
+                        (Track item, int index, BuildContext anchorContext) =>
+                            _showItemMenu(item, anchorContext: anchorContext),
                     onArtistTap: _openArtist,
                   ),
                 ],
@@ -319,10 +349,17 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
                             ),
                             const SizedBox(width: 12),
                             _HeaderHoverIconButton(
+                              key: _headerMenuAnchorKey,
                               tooltip: 'Weitere Optionen',
                               onTap: artist == null
                                   ? null
-                                  : () => _showItemMenu(artist),
+                                  : () => unawaited(
+                                      _showHeaderMenu(
+                                        artist,
+                                        anchorContext:
+                                            _headerMenuAnchorKey.currentContext,
+                                      ),
+                                    ),
                               icon: Icons.more_horiz_outlined,
                             ),
                           ],
@@ -506,6 +543,7 @@ class _HeaderHoverIconButton extends StatelessWidget {
   final VoidCallback? onTap;
 
   const _HeaderHoverIconButton({
+    super.key,
     required this.tooltip,
     required this.icon,
     required this.onTap,

@@ -6,6 +6,7 @@ import '../../app/theme/app_theme.dart';
 import '../../data/music_assistant/ma_client.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../playback/playback_coordinator.dart';
+import '../shared/context_menu/context_menu_controller.dart';
 import '../shared/widgets/media_row_section_mobile.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
 import '../shared/widgets/media_table_section_mobile.dart';
@@ -63,42 +64,66 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
     super.dispose();
   }
 
-  void _showItemMenu(MediaItem item) {
-    showModalBottomSheet<void>(
+  List<ContextMenuAction> _buildItemMenuActions(MediaItem item) {
+    final bool isFavorite = _controller.isItemFavorite(item);
+    return <ContextMenuAction>[
+      ContextMenuAction(
+        label: 'Abspielen',
+        icon: Icons.play_arrow_outlined,
+        onSelected: () =>
+            widget.playbackCoordinator.playMedia(<MediaItem>[item]),
+      ),
+      ContextMenuAction(
+        label: isFavorite ? 'Favorit entfernen' : 'Als Favorit markieren',
+        icon: isFavorite
+            ? Icons.favorite_outlined
+            : Icons.favorite_border_outlined,
+        onSelected: () => _controller.toggleItemFavorite(item),
+      ),
+    ];
+  }
+
+  List<ContextMenuAction> _buildHeaderMenuActions(Artist artist) {
+    final bool isFavorite = _controller.isArtistFavorite;
+    return <ContextMenuAction>[
+      ContextMenuAction(
+        label: 'Radio starten',
+        icon: Icons.radio_outlined,
+        onSelected: _controller.startArtistRadio,
+      ),
+      ContextMenuAction(
+        label: 'Als Nächstes spielen',
+        icon: Icons.queue_play_next_outlined,
+        onSelected: () =>
+            widget.playbackCoordinator.playMediaNext(<MediaItem>[artist]),
+      ),
+      ContextMenuAction(
+        label: 'Als Letztes spielen',
+        icon: Icons.playlist_add_outlined,
+        onSelected: () =>
+            widget.playbackCoordinator.playMediaLast(<MediaItem>[artist]),
+      ),
+      ContextMenuAction(
+        label: isFavorite ? 'Favorit entfernen' : 'Als Favorit markieren',
+        icon: isFavorite
+            ? Icons.favorite_outlined
+            : Icons.favorite_border_outlined,
+        onSelected: _controller.toggleArtistFavorite,
+      ),
+    ];
+  }
+
+  Future<void> _showItemMenu(MediaItem item) {
+    return const AppContextMenuController().show(
       context: context,
-      builder: (BuildContext sheetContext) {
-        final bool isFavorite = _controller.isItemFavorite(item);
-        return SafeArea(
-          child: Wrap(
-            children: <Widget>[
-              ListTile(
-                leading: const Icon(Icons.play_arrow_outlined),
-                title: const Text('Abspielen'),
-                onTap: () {
-                  Navigator.of(sheetContext).pop();
-                  unawaited(
-                    widget.playbackCoordinator.playMedia(<MediaItem>[item]),
-                  );
-                },
-              ),
-              ListTile(
-                leading: Icon(
-                  isFavorite
-                      ? Icons.favorite_outlined
-                      : Icons.favorite_border_outlined,
-                ),
-                title: Text(
-                  isFavorite ? 'Favorit entfernen' : 'Als Favorit markieren',
-                ),
-                onTap: () {
-                  Navigator.of(sheetContext).pop();
-                  unawaited(_controller.toggleItemFavorite(item));
-                },
-              ),
-            ],
-          ),
-        );
-      },
+      actions: _buildItemMenuActions(item),
+    );
+  }
+
+  Future<void> _showHeaderMenu(Artist artist) {
+    return const AppContextMenuController().show(
+      context: context,
+      actions: _buildHeaderMenuActions(artist),
     );
   }
 
@@ -305,7 +330,7 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
           icon: Icons.more_vert_outlined,
           onTap: _controller.artist == null
               ? null
-              : () => _showItemMenu(_controller.artist!),
+              : () => _showHeaderMenu(_controller.artist!),
         ),
       ],
     );

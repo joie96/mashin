@@ -11,6 +11,8 @@ import '../selection/selection_controller.dart';
 import 'media_link_text.dart';
 
 typedef DesktopRowAction<T> = void Function(T item, int index);
+typedef DesktopRowMoreAnchorAction<T> =
+    void Function(T item, int index, BuildContext anchorContext);
 typedef DesktopRowFavoriteResolver<T> = bool Function(T item, int index);
 
 class MediaTableSectionDesktop<T> extends StatefulWidget {
@@ -25,6 +27,7 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
   final VoidCallback? onSelectionMenuTap;
   final VoidCallback? onHeaderMoreTap;
   final DesktopRowAction<T>? onRowMoreTap;
+  final DesktopRowMoreAnchorAction<T>? onRowMoreAnchorTap;
   final DesktopRowAction<T>? onRowFavoriteTap;
   final DesktopRowAction<T>? onRowDoubleTap;
   final DesktopRowFavoriteResolver<T>? isRowFavorite;
@@ -44,6 +47,7 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
     this.onSelectionMenuTap,
     this.onHeaderMoreTap,
     this.onRowMoreTap,
+    this.onRowMoreAnchorTap,
     this.onRowFavoriteTap,
     this.onRowDoubleTap,
     this.isRowFavorite,
@@ -140,6 +144,13 @@ class _MediaTableSectionDesktopState<T>
 
   bool _isItemFavorite(T item, int index) {
     return widget.isRowFavorite?.call(item, index) ?? false;
+  }
+
+  ValueChanged<BuildContext>? _moreAnchorHandler(T item, int index) {
+    final DesktopRowMoreAnchorAction<T>? handler = widget.onRowMoreAnchorTap;
+    return handler == null
+        ? null
+        : (BuildContext anchorContext) => handler(item, index, anchorContext);
   }
 
   MediaItem? _resolvePlayableMediaItem(Object? rawItem) {
@@ -797,6 +808,7 @@ class _MediaTableSectionDesktopState<T>
         onMoreTap: widget.onRowMoreTap == null
             ? null
             : () => widget.onRowMoreTap!(item, index),
+        onMoreAnchorTap: _moreAnchorHandler(item, index),
         onDoubleTap: () => _onRowActivated(item: item, index: index),
         onPointerDown: onPointerDown,
       );
@@ -816,6 +828,7 @@ class _MediaTableSectionDesktopState<T>
         onMoreTap: widget.onRowMoreTap == null
             ? null
             : () => widget.onRowMoreTap!(item, index),
+        onMoreAnchorTap: _moreAnchorHandler(item, index),
         onDoubleTap: () => _onRowActivated(item: item, index: index),
         onPointerDown: onPointerDown,
       );
@@ -835,6 +848,7 @@ class _MediaTableSectionDesktopState<T>
         onMoreTap: widget.onRowMoreTap == null
             ? null
             : () => widget.onRowMoreTap!(item, index),
+        onMoreAnchorTap: _moreAnchorHandler(item, index),
         onDoubleTap: () => _onRowActivated(item: item, index: index),
         onPointerDown: onPointerDown,
       );
@@ -854,6 +868,7 @@ class _MediaTableSectionDesktopState<T>
         onMoreTap: widget.onRowMoreTap == null
             ? null
             : () => widget.onRowMoreTap!(item, index),
+        onMoreAnchorTap: _moreAnchorHandler(item, index),
         onDoubleTap: () => _onRowActivated(item: item, index: index),
         onPointerDown: onPointerDown,
         onArtistTap: widget.onArtistTap,
@@ -875,6 +890,7 @@ class _MediaTableSectionDesktopState<T>
         onMoreTap: widget.onRowMoreTap == null
             ? null
             : () => widget.onRowMoreTap!(item, index),
+        onMoreAnchorTap: _moreAnchorHandler(item, index),
         onDoubleTap: () => _onRowActivated(item: item, index: index),
         onPointerDown: onPointerDown,
         onArtistTap: widget.onArtistTap,
@@ -895,6 +911,7 @@ class _MediaTableSectionDesktopState<T>
       onMoreTap: widget.onRowMoreTap == null
           ? null
           : () => widget.onRowMoreTap!(item, index),
+      onMoreAnchorTap: _moreAnchorHandler(item, index),
       onDoubleTap: () => _onRowActivated(item: item, index: index),
       onPointerDown: onPointerDown,
     );
@@ -1186,6 +1203,7 @@ Widget _buildDesktopTableRowTrack({
   required VoidCallback onToggleSelected,
   required VoidCallback? onFavoriteTap,
   required VoidCallback? onMoreTap,
+  ValueChanged<BuildContext>? onMoreAnchorTap,
   required VoidCallback? onDoubleTap,
   required ValueChanged<PointerDownEvent>? onPointerDown,
   ValueChanged<Artist>? onArtistTap,
@@ -1275,6 +1293,7 @@ Widget _buildDesktopTableRowTrack({
     onToggleSelected: onToggleSelected,
     onFavoriteTap: onFavoriteTap,
     onMoreTap: onMoreTap,
+    onMoreAnchorTap: onMoreAnchorTap,
     onDoubleTap: onDoubleTap,
     onPointerDown: onPointerDown,
   );
@@ -1290,6 +1309,7 @@ Widget _buildDesktopTableRowAlbum({
   required VoidCallback onToggleSelected,
   required VoidCallback? onFavoriteTap,
   required VoidCallback? onMoreTap,
+  ValueChanged<BuildContext>? onMoreAnchorTap,
   required VoidCallback? onDoubleTap,
   required ValueChanged<PointerDownEvent>? onPointerDown,
 }) {
@@ -1368,6 +1388,7 @@ Widget _buildDesktopTableRowAlbum({
     onToggleSelected: onToggleSelected,
     onFavoriteTap: onFavoriteTap,
     onMoreTap: onMoreTap,
+    onMoreAnchorTap: onMoreAnchorTap,
     onDoubleTap: onDoubleTap,
     onPointerDown: onPointerDown,
   );
@@ -1383,6 +1404,7 @@ Widget _buildDesktopTableRowPlaylist({
   required VoidCallback onToggleSelected,
   required VoidCallback? onFavoriteTap,
   required VoidCallback? onMoreTap,
+  ValueChanged<BuildContext>? onMoreAnchorTap,
   required VoidCallback? onDoubleTap,
   required ValueChanged<PointerDownEvent>? onPointerDown,
 }) {
@@ -1453,6 +1475,7 @@ Widget _buildDesktopTableRowPlaylist({
     onToggleSelected: onToggleSelected,
     onFavoriteTap: onFavoriteTap,
     onMoreTap: onMoreTap,
+    onMoreAnchorTap: onMoreAnchorTap,
     onDoubleTap: onDoubleTap,
     onPointerDown: onPointerDown,
   );
@@ -1468,6 +1491,7 @@ Widget _buildDesktopTableRowArtist({
   required VoidCallback onToggleSelected,
   required VoidCallback? onFavoriteTap,
   required VoidCallback? onMoreTap,
+  ValueChanged<BuildContext>? onMoreAnchorTap,
   required VoidCallback? onDoubleTap,
   required ValueChanged<PointerDownEvent>? onPointerDown,
 }) {
@@ -1530,6 +1554,7 @@ Widget _buildDesktopTableRowArtist({
     onToggleSelected: onToggleSelected,
     onFavoriteTap: onFavoriteTap,
     onMoreTap: onMoreTap,
+    onMoreAnchorTap: onMoreAnchorTap,
     onDoubleTap: onDoubleTap,
     onPointerDown: onPointerDown,
   );
@@ -1545,6 +1570,7 @@ Widget _buildDesktopTableRowQueue({
   required VoidCallback onToggleSelected,
   required VoidCallback? onFavoriteTap,
   required VoidCallback? onMoreTap,
+  ValueChanged<BuildContext>? onMoreAnchorTap,
   required VoidCallback? onDoubleTap,
   required ValueChanged<PointerDownEvent>? onPointerDown,
   ValueChanged<Artist>? onArtistTap,
@@ -1637,6 +1663,7 @@ Widget _buildDesktopTableRowQueue({
     onToggleSelected: onToggleSelected,
     onFavoriteTap: onFavoriteTap,
     onMoreTap: onMoreTap,
+    onMoreAnchorTap: onMoreAnchorTap,
     onDoubleTap: onDoubleTap,
     onPointerDown: onPointerDown,
   );
@@ -1651,6 +1678,7 @@ Widget _buildDesktopTableRowUnknown({
   required VoidCallback onToggleSelected,
   required VoidCallback? onFavoriteTap,
   required VoidCallback? onMoreTap,
+  ValueChanged<BuildContext>? onMoreAnchorTap,
   required VoidCallback? onDoubleTap,
   required ValueChanged<PointerDownEvent>? onPointerDown,
 }) {
@@ -1672,6 +1700,7 @@ Widget _buildDesktopTableRowUnknown({
     onToggleSelected: onToggleSelected,
     onFavoriteTap: onFavoriteTap,
     onMoreTap: onMoreTap,
+    onMoreAnchorTap: onMoreAnchorTap,
     onDoubleTap: onDoubleTap,
     onPointerDown: onPointerDown,
   );
@@ -1965,6 +1994,7 @@ class _DesktopTableRowBase extends StatefulWidget {
   final VoidCallback onToggleSelected;
   final VoidCallback? onFavoriteTap;
   final VoidCallback? onMoreTap;
+  final ValueChanged<BuildContext>? onMoreAnchorTap;
   final VoidCallback? onDoubleTap;
   final ValueChanged<PointerDownEvent>? onPointerDown;
 
@@ -1977,6 +2007,7 @@ class _DesktopTableRowBase extends StatefulWidget {
     required this.onToggleSelected,
     this.onFavoriteTap,
     this.onMoreTap,
+    this.onMoreAnchorTap,
     this.onDoubleTap,
     this.onPointerDown,
   });
@@ -2061,6 +2092,7 @@ class _DesktopTableRowBaseState extends State<_DesktopTableRowBase> {
                     child: _DesktopIconActionButton(
                       icon: Icons.more_horiz_outlined,
                       onTap: widget.onMoreTap,
+                      onAnchorTap: widget.onMoreAnchorTap,
                       baseColor: colors.textTertiary,
                       hoverColor: colors.textSecondary,
                     ),
@@ -2095,6 +2127,7 @@ Widget _buildDesktopTableRowBase({
   required VoidCallback onToggleSelected,
   required VoidCallback? onFavoriteTap,
   required VoidCallback? onMoreTap,
+  ValueChanged<BuildContext>? onMoreAnchorTap,
   required VoidCallback? onDoubleTap,
   required ValueChanged<PointerDownEvent>? onPointerDown,
 }) {
@@ -2107,6 +2140,7 @@ Widget _buildDesktopTableRowBase({
     onToggleSelected: onToggleSelected,
     onFavoriteTap: onFavoriteTap,
     onMoreTap: onMoreTap,
+    onMoreAnchorTap: onMoreAnchorTap,
     onDoubleTap: onDoubleTap,
     onPointerDown: onPointerDown,
   );
@@ -2293,12 +2327,14 @@ Widget _buildDesktopFixedTextSkeleton({
 class _DesktopIconActionButton extends StatefulWidget {
   final IconData icon;
   final VoidCallback? onTap;
+  final ValueChanged<BuildContext>? onAnchorTap;
   final Color baseColor;
   final Color hoverColor;
 
   const _DesktopIconActionButton({
     required this.icon,
     required this.onTap,
+    this.onAnchorTap,
     required this.baseColor,
     required this.hoverColor,
   });
@@ -2326,11 +2362,17 @@ class _DesktopIconActionButtonState extends State<_DesktopIconActionButton> {
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
       child: Listener(
-        onPointerDown: widget.onTap == null
+        onPointerDown: widget.onTap == null && widget.onAnchorTap == null
             ? null
             : (PointerDownEvent event) {
                 if (_isPrimaryActivationPointer(event)) {
-                  widget.onTap!.call();
+                  final ValueChanged<BuildContext>? onAnchorTap =
+                      widget.onAnchorTap;
+                  if (onAnchorTap != null) {
+                    onAnchorTap(context);
+                  } else {
+                    widget.onTap?.call();
+                  }
                 }
               },
         child: SizedBox(
