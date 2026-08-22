@@ -15,10 +15,10 @@ class SelectionSessionRegistration {
   });
 }
 
-class SelectionSessionController extends ChangeNotifier {
-  SelectionSessionController._();
+class SelectionController extends ChangeNotifier {
+  SelectionController._();
 
-  static final SelectionSessionController instance = SelectionSessionController._();
+  static final SelectionController instance = SelectionController._();
 
   Object? _activeOwner;
   SelectionSessionRegistration? _activeRegistration;

@@ -7,7 +7,8 @@ import 'dart:async';
 import '../../../app/theme/app_theme.dart';
 import '../../../data/music_assistant/ma_models.dart';
 import '../../playback/playback_coordinator.dart';
-import '../selection/selection_session_controller.dart';
+import '../selection/selection_controller.dart';
+import 'media_link_text.dart';
 
 typedef DesktopRowAction<T> = void Function(T item, int index);
 typedef DesktopRowFavoriteResolver<T> = bool Function(T item, int index);
@@ -28,6 +29,7 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
   final DesktopRowAction<T>? onRowDoubleTap;
   final DesktopRowFavoriteResolver<T>? isRowFavorite;
   final PlaybackCoordinator? playbackCoordinator;
+  final ValueChanged<Artist>? onArtistTap;
 
   const MediaTableSectionDesktop({
     super.key,
@@ -46,6 +48,7 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
     this.onRowDoubleTap,
     this.isRowFavorite,
     this.playbackCoordinator,
+    this.onArtistTap,
   });
 
   @override
@@ -59,7 +62,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
   final FocusNode _sectionFocusNode = FocusNode(debugLabel: 'MediaTableDesktopSectionFocus');
   final Set<int> _selectedIndexes = <int>{};
   final Object _selectionSessionOwner = Object();
-  final SelectionSessionController _selectionSessionController = SelectionSessionController.instance;
+  final SelectionController _selectionSessionController = SelectionController.instance;
   final PageController _desktopChunkPageController = PageController();
   int? _selectionAnchorIndex;
   int _currentPage = 0;
@@ -804,6 +807,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
         onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item, index),
         onDoubleTap: () => _onRowActivated(item: item, index: index),
         onPointerDown: onPointerDown,
+        onArtistTap: widget.onArtistTap,
       );
     }
     if (typedItem is QueueItem) {
@@ -819,6 +823,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
         onMoreTap: widget.onRowMoreTap == null ? null : () => widget.onRowMoreTap!(item, index),
         onDoubleTap: () => _onRowActivated(item: item, index: index),
         onPointerDown: onPointerDown,
+        onArtistTap: widget.onArtistTap,
       );
     }
 
@@ -1011,6 +1016,7 @@ Widget _buildDesktopTableRowTrack({
   required VoidCallback? onMoreTap,
   required VoidCallback? onDoubleTap,
   required ValueChanged<PointerDownEvent>? onPointerDown,
+  ValueChanged<Artist>? onArtistTap,
 }) {
   return _buildDesktopTableRowBase(
     cells: <Widget>[
@@ -1028,7 +1034,14 @@ Widget _buildDesktopTableRowTrack({
       _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopBodyText(_prefer(item.name, 'Unknown Track'), TextAlign.left, DesktopTextTone.primary)),
       _buildDesktopTableSizedCell(width: 80, child: _buildDesktopBodyText(formatDuration(item.duration), TextAlign.right, DesktopTextTone.tertiary)),
       _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopBodyText(_prefer(item.album?.name ?? '', '-'), TextAlign.left, DesktopTextTone.secondary)),
-      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopBodyText(_trackSubtitle(item), TextAlign.left, DesktopTextTone.secondary)),
+      _buildDesktopTableSizedCell(
+        flex: 3,
+        child: _buildDesktopArtistLinkCell(
+          artists: item.artists,
+          fallbackText: _trackSubtitle(item),
+          onArtistTap: onArtistTap,
+        ),
+      ),
       _buildDesktopTableSizedCell(flex: 1, child: _buildDesktopBodyText('-', TextAlign.left, DesktopTextTone.tertiary)),
       _buildDesktopTableSizedCell(
         width: 80,
@@ -1233,6 +1246,7 @@ Widget _buildDesktopTableRowQueue({
   required VoidCallback? onMoreTap,
   required VoidCallback? onDoubleTap,
   required ValueChanged<PointerDownEvent>? onPointerDown,
+  ValueChanged<Artist>? onArtistTap,
 }) {
   final String provider = _resolveQueueProvider(item);
   final String title = (item.mediaItem?.name.trim().isNotEmpty == true)
@@ -1240,11 +1254,8 @@ Widget _buildDesktopTableRowQueue({
       : item.name.trim().isNotEmpty
           ? item.name.trim()
           : 'Unbekannter Titel';
-  final String artists = item.mediaItem?.artists
-          .map((artist) => artist.name.trim())
-          .where((name) => name.isNotEmpty)
-          .join(', ') ??
-      '';
+  final List<Artist> artists = item.mediaItem?.artists ?? const <Artist>[];
+  final String artistsFallbackText = artists.map((artist) => artist.name.trim()).where((name) => name.isNotEmpty).join(', ');
   final String albumName = _stripOrEmpty(item.mediaItem?.album?.name);
 
   return _buildDesktopTableRowBase(
@@ -1263,7 +1274,14 @@ Widget _buildDesktopTableRowQueue({
       _buildDesktopTableSizedCell(flex: 5, child: _buildDesktopBodyText(title, TextAlign.left, DesktopTextTone.primary)),
       _buildDesktopTableSizedCell(width: 80, child: _buildDesktopBodyText(_formatQueueDurationSeconds((item.duration ?? 0).toDouble()), TextAlign.right, DesktopTextTone.tertiary)),
       _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopBodyText(albumName.isEmpty ? '-' : albumName, TextAlign.left, DesktopTextTone.secondary)),
-      _buildDesktopTableSizedCell(flex: 3, child: _buildDesktopBodyText(artists.isEmpty ? '-' : artists, TextAlign.left, DesktopTextTone.secondary)),
+      _buildDesktopTableSizedCell(
+        flex: 3,
+        child: _buildDesktopArtistLinkCell(
+          artists: artists,
+          fallbackText: artistsFallbackText.isEmpty ? '-' : artistsFallbackText,
+          onArtistTap: onArtistTap,
+        ),
+      ),
       _buildDesktopTableSizedCell(
         width: 80,
         child: Row(
@@ -1717,6 +1735,27 @@ Widget _buildDesktopBodyText(String text, TextAlign textAlign, DesktopTextTone t
           overflow: TextOverflow.ellipsis,
           textAlign: textAlign,
           style: base.copyWith(fontSize: 13),
+        ),
+      );
+    },
+  );
+}
+
+Widget _buildDesktopArtistLinkCell({
+  required List<Artist> artists,
+  required String fallbackText,
+  required ValueChanged<Artist>? onArtistTap,
+}) {
+  return Builder(
+    builder: (BuildContext context) {
+      final textStyles = context.mashinTableTextStyles;
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: MediaLinkText(
+          items: artists,
+          fallbackText: fallbackText,
+          onItemTap: onArtistTap == null ? null : (MediaItem media) => onArtistTap(media as Artist),
+          style: textStyles.bodySecondary.copyWith(fontSize: 13),
         ),
       );
     },

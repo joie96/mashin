@@ -6,6 +6,7 @@ import '../../app/config/app_config.dart';
 import '../../app/theme/app_theme.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../../data/music_assistant/ma_client.dart';
+import '../artist/artist_detail_page.dart';
 import '../playback/playback_coordinator.dart';
 import '../shared/widgets/media_row_section_desktop.dart';
 import '../shared/widgets/media_row_section_mobile.dart';
@@ -174,6 +175,12 @@ class _SearchScreenState extends State<SearchScreen> {
                   emptyText: 'Keine Tracks gefunden.',
                   maxItemsPerPage: 10,
                   playbackCoordinator: widget.playbackCoordinator,
+                  onArtistTap: (Artist artist) => ArtistDetailPage.push(
+                    context,
+                    client: widget.client,
+                    playbackCoordinator: widget.playbackCoordinator,
+                    artist: artist,
+                  ),
                 ),
           const SizedBox(height: 18),
           isMobile
@@ -190,6 +197,12 @@ class _SearchScreenState extends State<SearchScreen> {
                   items: _albums,
                   emptyText: 'Keine Alben gefunden.',
                   playbackCoordinator: widget.playbackCoordinator,
+                  onArtistTap: (Artist artist) => ArtistDetailPage.push(
+                    context,
+                    client: widget.client,
+                    playbackCoordinator: widget.playbackCoordinator,
+                    artist: artist,
+                  ),
                 ),
           const SizedBox(height: 18),
           isMobile

@@ -4,8 +4,8 @@ import 'package:flutter/material.dart' hide RepeatMode;
 
 import '../config/app_config.dart';
 import '../../features/auth/login_screen.dart';
-import '../../features/shared/selection/selection_session_controller.dart';
-import '../../features/shared/widgets/mobile_selection_overlay.dart';
+import '../../features/shared/selection/selection_controller.dart';
+import '../../features/shared/selection/selection_overlay.dart';
 import '../../data/music_assistant/ma_auth_store.dart';
 import '../../data/music_assistant/ma_client.dart';
 import '../../data/music_assistant/ma_event_hub.dart';
@@ -36,7 +36,7 @@ class _AppShellState extends State<AppShell> {
   AppSection _currentSection = AppSection.home;
   bool _isDarkTheme = true;
   final AuthStore _authStore = AuthStore();
-  final SelectionSessionController _selectionSessionController = SelectionSessionController.instance;
+  final SelectionController _selectionSessionController = SelectionController.instance;
   late final PlaybackCoordinator _playbackCoordinator;
 
   MusicAssistantClient? _musicAssistantClient;
@@ -407,7 +407,7 @@ class _AppShellState extends State<AppShell> {
             return Positioned(
               right: 8,
               bottom: _mobileSelectionOverlayBottomInset,
-              child: MobileSelectionOverlay(
+              child: SelectionActionsOverlay(
                 allSelected: _selectionSessionController.allSelected,
                 onToggleAll: _selectionSessionController.onToggleAll,
                 onMenuTap: _selectionSessionController.onMenuTap,

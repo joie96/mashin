@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
 
-class MobileSelectionOverlay extends StatelessWidget {
+class SelectionActionsOverlay extends StatelessWidget {
   final bool allSelected;
   final VoidCallback onToggleAll;
   final VoidCallback? onMenuTap;
   final VoidCallback onClose;
 
-  const MobileSelectionOverlay({
+  const SelectionActionsOverlay({
     super.key,
     required this.allSelected,
     required this.onToggleAll,

@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../data/music_assistant/ma_models.dart';
 import '../../playback/playback_coordinator.dart';
-import '../selection/selection_session_controller.dart';
+import '../selection/selection_controller.dart';
 import 'media_table_section_desktop.dart';
 
 class MediaTableSectionMobile<T> extends StatefulWidget {
@@ -48,7 +48,7 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
 
   final Set<int> _selectedIndexes = <int>{};
   final Object _selectionSessionOwner = Object();
-  final SelectionSessionController _selectionSessionController = SelectionSessionController.instance;
+  final SelectionController _selectionSessionController = SelectionController.instance;
   final PageController _mobileChunkPageController =
       PageController(viewportFraction: _mobileChunkViewportFraction);
 

@@ -7,7 +7,8 @@ import 'dart:async';
 import '../../../app/theme/app_theme.dart';
 import '../../../data/music_assistant/ma_models.dart';
 import '../../playback/playback_coordinator.dart';
-import '../selection/selection_session_controller.dart';
+import '../selection/selection_controller.dart';
+import 'media_link_text.dart';
 import 'media_table_section_desktop.dart';
 
 class MediaRowSectionDesktop<T> extends StatefulWidget {
@@ -28,6 +29,7 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
   final DesktopRowFavoriteResolver<T>? isRowFavorite;
   final ValueChanged<List<T>>? onSelectionChanged;
   final VoidCallback? onSelectionMenuTap;
+  final ValueChanged<Artist>? onArtistTap;
 
   const MediaRowSectionDesktop({
     super.key,
@@ -45,6 +47,7 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
     this.isRowFavorite,
     this.onSelectionChanged,
     this.onSelectionMenuTap,
+    this.onArtistTap,
   });
 
   @override
@@ -68,7 +71,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
   final FocusNode _sectionFocusNode = FocusNode(debugLabel: 'MediaRowDesktopSectionFocus');
   final Set<int> _selectedIndexes = <int>{};
   final Object _selectionSessionOwner = Object();
-  final SelectionSessionController _selectionSessionController = SelectionSessionController.instance;
+  final SelectionController _selectionSessionController = SelectionController.instance;
   int? _selectionAnchorIndex;
 
   @override
@@ -521,6 +524,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
             isSelected: isSelected,
             onSelectTap: widget.enableSelection ? onSelectTap : null,
             onSelectPointerDown: widget.enableSelection ? onSelectPointerDown : null,
+            onArtistTap: widget.onArtistTap,
           );
         }
         if (item is Playlist) {
@@ -566,6 +570,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
             isSelected: isSelected,
             onSelectTap: widget.enableSelection ? onSelectTap : null,
             onSelectPointerDown: widget.enableSelection ? onSelectPointerDown : null,
+            onArtistTap: widget.onArtistTap,
           );
         }
 
@@ -853,6 +858,7 @@ Widget _buildDesktopMediaRowAlbum({
   required bool isSelected,
   required VoidCallback? onSelectTap,
   required ValueChanged<PointerDownEvent>? onSelectPointerDown,
+  ValueChanged<Artist>? onArtistTap,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -860,6 +866,8 @@ Widget _buildDesktopMediaRowAlbum({
     icon: Icons.album_outlined,
     title: _prefer(item.name, 'Unknown Album'),
     secondaryText: _albumSubtitle(item),
+    secondaryArtists: item.artists,
+    onArtistTap: onArtistTap,
     tertiaryText: _albumTertiary(item),
     coverUrl: item.imageUri ?? '',
     providerLabel: _providerLabelFromId(item.provider),
@@ -953,6 +961,7 @@ Widget _buildDesktopMediaRowTrack({
   required bool isSelected,
   required VoidCallback? onSelectTap,
   required ValueChanged<PointerDownEvent>? onSelectPointerDown,
+  ValueChanged<Artist>? onArtistTap,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -960,6 +969,8 @@ Widget _buildDesktopMediaRowTrack({
     icon: Icons.music_note_outlined,
     title: _prefer(item.name, 'Unknown Track'),
     secondaryText: _trackSubtitle(item),
+    secondaryArtists: item.artists,
+    onArtistTap: onArtistTap,
     tertiaryText: _trackTertiary(item),
     coverUrl: item.imageUri ?? '',
     providerLabel: _providerLabelFromId(item.provider),
@@ -1023,13 +1034,16 @@ Widget _buildDesktopMediaRowItemBase({
   required bool isSelected,
   required VoidCallback? onSelectTap,
   required ValueChanged<PointerDownEvent>? onSelectPointerDown,
+  List<Artist>? secondaryArtists,
+  ValueChanged<Artist>? onArtistTap,
   bool showPlayOverlay = true,
   bool isCircularCover = false,
 }) {
   return Builder(
     builder: (BuildContext context) {
       final colors = context.mashinColors;
-      final bool hasSecondary = secondaryText != null && secondaryText.trim().isNotEmpty;
+      final bool hasArtistLinks = secondaryArtists != null && secondaryArtists.isNotEmpty;
+      final bool hasSecondary = hasArtistLinks || (secondaryText != null && secondaryText.trim().isNotEmpty);
       final bool hasTertiary = tertiaryText != null && tertiaryText.trim().isNotEmpty;
       final double insetCoverSize = math.max(1, coverSize - (_kRowItemInset * 2));
 
@@ -1071,13 +1085,20 @@ Widget _buildDesktopMediaRowItemBase({
                   ),
                   if (hasSecondary) ...<Widget>[
                     const SizedBox(height: 2),
-                    Text(
-                      secondaryText,
-                      maxLines: 1,
-                      textAlign: TextAlign.left,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: colors.textSecondary, fontSize: 14),
-                    ),
+                    hasArtistLinks
+                        ? MediaLinkText(
+                            items: secondaryArtists,
+                            fallbackText: secondaryText ?? '',
+                            onItemTap: onArtistTap == null ? null : (MediaItem media) => onArtistTap(media as Artist),
+                            style: TextStyle(color: colors.textSecondary, fontSize: 14),
+                          )
+                        : Text(
+                            secondaryText ?? '',
+                            maxLines: 1,
+                            textAlign: TextAlign.left,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: colors.textSecondary, fontSize: 14),
+                          ),
                   ],
                   if (hasTertiary) ...<Widget>[
                     const SizedBox(height: 2),
