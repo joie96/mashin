@@ -13,6 +13,7 @@ class ArtistDetailPage extends StatelessWidget {
   final PlaybackCoordinator playbackCoordinator;
   final String itemId;
   final String providerInstanceIdOrDomain;
+  final ValueChanged<Artist>? onOpenArtist;
 
   const ArtistDetailPage({
     super.key,
@@ -20,26 +21,8 @@ class ArtistDetailPage extends StatelessWidget {
     required this.playbackCoordinator,
     required this.itemId,
     required this.providerInstanceIdOrDomain,
+    this.onOpenArtist,
   });
-
-  /// Navigates to the detail page of [artist], mirroring MAUI's ArtistTappedCommand.
-  static Future<void> push(
-    BuildContext context, {
-    required MusicAssistantClient client,
-    required PlaybackCoordinator playbackCoordinator,
-    required Artist artist,
-  }) {
-    return Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => ArtistDetailPage(
-          client: client,
-          playbackCoordinator: playbackCoordinator,
-          itemId: artist.itemId,
-          providerInstanceIdOrDomain: artist.provider,
-        ),
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -49,6 +32,7 @@ class ArtistDetailPage extends StatelessWidget {
         playbackCoordinator: playbackCoordinator,
         itemId: itemId,
         providerInstanceIdOrDomain: providerInstanceIdOrDomain,
+        onOpenArtist: onOpenArtist,
       );
     }
 
@@ -57,6 +41,7 @@ class ArtistDetailPage extends StatelessWidget {
       playbackCoordinator: playbackCoordinator,
       itemId: itemId,
       providerInstanceIdOrDomain: providerInstanceIdOrDomain,
+      onOpenArtist: onOpenArtist,
     );
   }
 }

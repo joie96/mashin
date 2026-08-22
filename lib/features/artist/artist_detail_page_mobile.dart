@@ -17,6 +17,7 @@ class ArtistDetailPageMobile extends StatefulWidget {
   final PlaybackCoordinator playbackCoordinator;
   final String itemId;
   final String providerInstanceIdOrDomain;
+  final ValueChanged<Artist>? onOpenArtist;
 
   const ArtistDetailPageMobile({
     super.key,
@@ -24,6 +25,7 @@ class ArtistDetailPageMobile extends StatefulWidget {
     required this.playbackCoordinator,
     required this.itemId,
     required this.providerInstanceIdOrDomain,
+    this.onOpenArtist,
   });
 
   @override

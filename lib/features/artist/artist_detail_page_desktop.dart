@@ -9,7 +9,6 @@ import '../playback/playback_coordinator.dart';
 import '../shared/widgets/media_row_section_desktop.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
 import 'artist_detail_controller.dart';
-import 'artist_detail_page.dart';
 
 /// Desktop artist detail page: header with cover/name/actions, description and
 /// paginated album/similar-artist rows plus a top-tracks table, mirroring the
@@ -19,6 +18,7 @@ class ArtistDetailPageDesktop extends StatefulWidget {
   final PlaybackCoordinator playbackCoordinator;
   final String itemId;
   final String providerInstanceIdOrDomain;
+  final ValueChanged<Artist>? onOpenArtist;
 
   const ArtistDetailPageDesktop({
     super.key,
@@ -26,6 +26,7 @@ class ArtistDetailPageDesktop extends StatefulWidget {
     required this.playbackCoordinator,
     required this.itemId,
     required this.providerInstanceIdOrDomain,
+    this.onOpenArtist,
   });
 
   @override
@@ -120,12 +121,7 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop> {
               isRowFavorite: (Album item, int index) => _controller.isItemFavorite(item),
               onRowFavoriteTap: (Album item, int index) => _controller.toggleItemFavorite(item),
               onRowMoreTap: (Album item, int index) => _showItemMenu(item),
-              onArtistTap: (Artist artist) => ArtistDetailPage.push(
-                context,
-                client: widget.client,
-                playbackCoordinator: widget.playbackCoordinator,
-                artist: artist,
-              ),
+              onArtistTap: _openArtist,
             ),
             const SizedBox(height: 32),
             MediaRowSectionDesktop<Artist>(
@@ -149,17 +145,16 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop> {
               isRowFavorite: (Track item, int index) => _controller.isItemFavorite(item),
               onRowFavoriteTap: (Track item, int index) => _controller.toggleItemFavorite(item),
               onRowMoreTap: (Track item, int index) => _showItemMenu(item),
-              onArtistTap: (Artist artist) => ArtistDetailPage.push(
-                context,
-                client: widget.client,
-                playbackCoordinator: widget.playbackCoordinator,
-                artist: artist,
-              ),
+              onArtistTap: _openArtist,
             ),
           ],
         ),
       ),
     );
+  }
+
+  void _openArtist(Artist artist) {
+    widget.onOpenArtist?.call(artist);
   }
 
   Widget _buildHeader(BuildContext context, MashinColors colors) {

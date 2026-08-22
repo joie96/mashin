@@ -13,13 +13,12 @@ import '../../data/music_assistant/ma_models.dart';
 import '../../features/playback/playback_coordinator.dart';
 import '../../features/playback/playback_models.dart';
 import '../../features/playback/playback_player.dart';
+import '../../features/queue/queue_overlay.dart';
 import '../../features/playback/sendspin/sendspin_player.dart';
 import '../../features/playback/sendspin/sendspin_rust_backend.dart';
 import '../../features/playback/sendspin/sendspin_rust_bridge_ffi.dart';
-import '../navigation/app_router.dart';
-import '../navigation/app_section.dart';
+import '../navigation/app_navigation_controller.dart';
 import '../theme/app_theme.dart';
-import 'widgets/queue_overlay.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -33,7 +32,7 @@ class _AppShellState extends State<AppShell> {
   static const Duration _busyUiFallbackAfter = Duration(seconds: 3);
   static const Duration _desktopSearchDebounceDuration = Duration(milliseconds: 320);
 
-  AppSection _currentSection = AppSection.home;
+  final AppNavigationController _navigation = AppNavigationController();
   bool _isDarkTheme = true;
   final AuthStore _authStore = AuthStore();
   final SelectionController _selectionSessionController = SelectionController.instance;
@@ -50,7 +49,6 @@ class _AppShellState extends State<AppShell> {
   String? _username;
   final TextEditingController _desktopSearchController = TextEditingController();
   Timer? _desktopSearchDebounce;
-  String _desktopSearchQuery = '';
 
   // Getters for current Track and Queue state
   QueueItem? get _currentQueueItem {
@@ -192,6 +190,7 @@ class _AppShellState extends State<AppShell> {
     );
 
     _playbackCoordinator.addListener(_onPlaybackChanged);
+    _navigation.addListener(_onNavigationChanged);
     unawaited(_bootstrapStartup());
   }
 
@@ -199,6 +198,8 @@ class _AppShellState extends State<AppShell> {
   void dispose() {
     _desktopSearchDebounce?.cancel();
     _desktopSearchController.dispose();
+    _navigation.removeListener(_onNavigationChanged);
+    _navigation.dispose();
     _playbackCoordinator.removeListener(_onPlaybackChanged);
     unawaited(_playbackCoordinator.shutdown());
     _playbackCoordinator.dispose();
@@ -276,19 +277,19 @@ class _AppShellState extends State<AppShell> {
                         _DesktopNavItem(
                           label: 'Home',
                           icon: Icons.home_outlined,
-                          selected: _currentSection == AppSection.home,
+                          selected: _navigation.currentSection == AppSection.home,
                           onTap: () => _select(AppSection.home),
                         ),
                         _DesktopNavItem(
                           label: 'Entdecken',
                           icon: Icons.explore_outlined,
-                          selected: _currentSection == AppSection.explore,
+                          selected: _navigation.currentSection == AppSection.explore,
                           onTap: () => _select(AppSection.explore),
                         ),
                         _DesktopNavItem(
                           label: 'Favoriten',
                           icon: Icons.favorite_outlined,
-                          selected: _currentSection == AppSection.favorites,
+                          selected: _navigation.currentSection == AppSection.favorites,
                           onTap: () => _select(AppSection.favorites),
                         ),
                       ],
@@ -299,7 +300,7 @@ class _AppShellState extends State<AppShell> {
                     child: Column(
                       children: <Widget>[
                         _DesktopTopBar(
-                          title: _titleForSection(_currentSection),
+                          title: _titleForSection(_navigation.currentSection),
                           onToggleTheme: _toggleTheme,
                           isDarkTheme: _isDarkTheme,
                           searchController: _desktopSearchController,
@@ -310,12 +311,10 @@ class _AppShellState extends State<AppShell> {
                         Expanded(
                           child: Container(
                             color: colors.bgPrimary,
-                            child: AppRouter.pageFor(
-                              _currentSection,
+                            child: _navigation.buildPage(
                               _musicAssistantClient!,
                               _playbackCoordinator,
                               desktopSearchDriven: true,
-                              desktopSearchQuery: _desktopSearchQuery,
                             ),
                           ),
                         ),
@@ -377,8 +376,7 @@ class _AppShellState extends State<AppShell> {
             Expanded(
               child: Container(
                 color: colors.bgPrimary,
-                child: AppRouter.pageFor(
-                  _currentSection,
+                child: _navigation.buildPage(
                   _musicAssistantClient!,
                   _playbackCoordinator,
                 ),
@@ -392,7 +390,7 @@ class _AppShellState extends State<AppShell> {
               onOpenQueue: _openQueueOverlay,
             ),
             _MobileBottomNav(
-              currentSection: _currentSection,
+              currentSection: _navigation.currentSection,
               onSelected: _select,
             ),
           ],
@@ -451,13 +449,7 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _select(AppSection section) {
-    if (_currentSection == section) {
-      return;
-    }
-
-    setState(() {
-      _currentSection = section;
-    });
+    _navigation.selectSection(section);
   }
 
   void _onDesktopSearchChanged(String value) {
@@ -465,45 +457,30 @@ class _AppShellState extends State<AppShell> {
 
     _desktopSearchDebounce?.cancel();
 
-    if (_currentSection != AppSection.search && trimmed.isNotEmpty) {
-      setState(() {
-        _currentSection = AppSection.search;
-      });
-    } else {
-      // Rebuild keeps clear button visibility in sync while typing.
-      setState(() {});
-    }
+    _navigation.ensureSearchSectionForInput(trimmed);
+    // Rebuild keeps clear button visibility in sync while typing.
+    setState(() {});
 
     _desktopSearchDebounce = Timer(_desktopSearchDebounceDuration, () {
       if (!mounted) {
         return;
       }
 
-      setState(() {
-        _desktopSearchQuery = trimmed;
-      });
+      _navigation.onDesktopSearchChanged(trimmed);
     });
   }
 
   void _submitDesktopSearch(String value) {
     final trimmed = value.trim();
     _desktopSearchDebounce?.cancel();
-
-    setState(() {
-      _desktopSearchQuery = trimmed;
-      if (trimmed.isNotEmpty) {
-        _currentSection = AppSection.search;
-      }
-    });
+    _navigation.submitDesktopSearch(trimmed);
   }
 
   void _clearDesktopSearch() {
     _desktopSearchDebounce?.cancel();
     _desktopSearchController.clear();
-
-    setState(() {
-      _desktopSearchQuery = '';
-    });
+    _navigation.clearDesktopSearch();
+    setState(() {});
   }
 
   void _toggleTheme() {
@@ -647,8 +624,8 @@ class _AppShellState extends State<AppShell> {
       setState(() {
         _musicAssistantClient = authenticatedClient;
         _musicAssistantEventHub = authenticatedEventHub;
-        _currentSection = AppSection.home;
       });
+      _navigation.selectSection(AppSection.home);
 
       return null;
     } on UnauthorizedException {
@@ -791,6 +768,13 @@ class _AppShellState extends State<AppShell> {
         _lastStablePlaybackStateType = nextType;
       }
     });
+  }
+
+  void _onNavigationChanged() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
   }
 }
 
