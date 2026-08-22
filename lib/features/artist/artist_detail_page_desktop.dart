@@ -30,10 +30,12 @@ class ArtistDetailPageDesktop extends StatefulWidget {
   });
 
   @override
-  State<ArtistDetailPageDesktop> createState() => _ArtistDetailPageDesktopState();
+  State<ArtistDetailPageDesktop> createState() =>
+      _ArtistDetailPageDesktopState();
 }
 
-class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop> {
+class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
+    with TickerProviderStateMixin {
   static const double _coverSize = 200;
 
   late final ArtistDetailController _controller;
@@ -47,7 +49,7 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop> {
       itemId: widget.itemId,
       providerInstanceIdOrDomain: widget.providerInstanceIdOrDomain,
     )..addListener(_onControllerChanged);
-    unawaited(_controller.load());
+    unawaited(_controller.loadArtist());
   }
 
   void _onControllerChanged() {
@@ -76,12 +78,20 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop> {
                 title: const Text('Abspielen'),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
-                  unawaited(widget.playbackCoordinator.playMedia(<MediaItem>[item]));
+                  unawaited(
+                    widget.playbackCoordinator.playMedia(<MediaItem>[item]),
+                  );
                 },
               ),
               ListTile(
-                leading: Icon(isFavorite ? Icons.favorite_outlined : Icons.favorite_border_outlined),
-                title: Text(isFavorite ? 'Favorit entfernen' : 'Als Favorit markieren'),
+                leading: Icon(
+                  isFavorite
+                      ? Icons.favorite_outlined
+                      : Icons.favorite_border_outlined,
+                ),
+                title: Text(
+                  isFavorite ? 'Favorit entfernen' : 'Als Favorit markieren',
+                ),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   unawaited(_controller.toggleItemFavorite(item));
@@ -106,7 +116,8 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             _buildHeader(context, colors),
-            if (_controller.isLoadingMetadata || _controller.hasDescription) ...<Widget>[
+            if (_controller.isLoadingMetadata ||
+                _controller.hasDescription) ...<Widget>[
               const SizedBox(height: 32),
               _buildDescription(context, colors),
             ],
@@ -117,8 +128,10 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop> {
               items: _controller.albums,
               emptyText: 'Keine Veröffentlichungen gefunden.',
               playbackCoordinator: widget.playbackCoordinator,
-              isRowFavorite: (Album item, int index) => _controller.isItemFavorite(item),
-              onRowFavoriteTap: (Album item, int index) => _controller.toggleItemFavorite(item),
+              isRowFavorite: (Album item, int index) =>
+                  _controller.isItemFavorite(item),
+              onRowFavoriteTap: (Album item, int index) =>
+                  _controller.toggleItemFavorite(item),
               onRowMoreTap: (Album item, int index) => _showItemMenu(item),
               onArtistTap: _openArtist,
             ),
@@ -129,8 +142,10 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop> {
               items: _controller.similarArtists,
               emptyText: 'Keine ähnlichen Interpreten gefunden.',
               playbackCoordinator: widget.playbackCoordinator,
-              isRowFavorite: (Artist item, int index) => _controller.isItemFavorite(item),
-              onRowFavoriteTap: (Artist item, int index) => _controller.toggleItemFavorite(item),
+              isRowFavorite: (Artist item, int index) =>
+                  _controller.isItemFavorite(item),
+              onRowFavoriteTap: (Artist item, int index) =>
+                  _controller.toggleItemFavorite(item),
               onRowMoreTap: (Artist item, int index) => _showItemMenu(item),
             ),
             const SizedBox(height: 32),
@@ -141,8 +156,10 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop> {
               emptyText: 'Keine Toplieder gefunden.',
               maxItemsPerPage: 15,
               playbackCoordinator: widget.playbackCoordinator,
-              isRowFavorite: (Track item, int index) => _controller.isItemFavorite(item),
-              onRowFavoriteTap: (Track item, int index) => _controller.toggleItemFavorite(item),
+              isRowFavorite: (Track item, int index) =>
+                  _controller.isItemFavorite(item),
+              onRowFavoriteTap: (Track item, int index) =>
+                  _controller.toggleItemFavorite(item),
               onRowMoreTap: (Track item, int index) => _showItemMenu(item),
               onArtistTap: _openArtist,
             ),
@@ -172,10 +189,16 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.end,
               children: <Widget>[
-                Text(
-                  'ARTIST/INTERPRET',
-                  style: TextStyle(color: colors.textSecondary, fontWeight: FontWeight.bold, fontSize: 12),
-                ),
+                isLoading
+                    ? _buildSkeletonLine(colors, width: 120, height: 12)
+                    : Text(
+                        'ARTIST/INTERPRET',
+                        style: TextStyle(
+                          color: colors.textSecondary,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
                 const SizedBox(height: 16),
                 isLoading
                     ? _buildSkeletonLine(colors, width: 320, height: 32)
@@ -187,14 +210,18 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop> {
                               _controller.artistName,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
+                              style: Theme.of(context).textTheme.headlineMedium
+                                  ?.copyWith(fontWeight: FontWeight.bold),
                             ),
                           ),
                           if (artist != null) ...<Widget>[
                             const SizedBox(width: 16),
                             MediaProviderIcon(
                               providerLabel: artist.provider,
-                              iconSvg: ProviderManifestRegistry.iconSvgForProvider(artist.provider),
+                              iconSvg:
+                                  ProviderManifestRegistry.iconSvgForProvider(
+                                    artist.provider,
+                                  ),
                               size: 28,
                             ),
                           ],
@@ -203,26 +230,42 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop> {
                 const SizedBox(height: 8),
                 isLoading
                     ? _buildSkeletonLine(colors, width: 150, height: 14)
-                    : Text('${_controller.albums.length} Alben', style: TextStyle(color: colors.textSecondary)),
+                    : Text(
+                        '${_controller.albums.length} Alben',
+                        style: TextStyle(color: colors.textSecondary),
+                      ),
                 const SizedBox(height: 16),
                 if (!isLoading)
                   Row(
                     children: <Widget>[
-                      _HeaderActionButton(icon: Icons.play_arrow, label: 'Abspielen', onTap: _controller.playArtist),
-                      const SizedBox(width: 12),
-                      _HeaderActionButton(icon: Icons.shuffle, label: 'Zufällig', onTap: _controller.shuffleArtist),
-                      const SizedBox(width: 12),
-                      IconButton(
-                        tooltip: _controller.isArtistFavorite ? 'Favorit entfernen' : 'Als Favorit markieren',
-                        onPressed: _controller.toggleArtistFavorite,
-                        icon: Icon(
-                          _controller.isArtistFavorite ? Icons.favorite_outlined : Icons.favorite_border_outlined,
-                        ),
+                      _HeaderActionButton(
+                        icon: Icons.play_arrow,
+                        label: 'Abspielen',
+                        onTap: _controller.playArtist,
                       ),
-                      IconButton(
+                      const SizedBox(width: 12),
+                      _HeaderActionButton(
+                        icon: Icons.shuffle,
+                        label: 'Zufällig',
+                        onTap: _controller.shuffleArtist,
+                      ),
+                      const SizedBox(width: 24),
+                      _HeaderHoverIconButton(
+                        tooltip: _controller.isArtistFavorite
+                            ? 'Favorit entfernen'
+                            : 'Als Favorit markieren',
+                        onTap: _controller.toggleArtistFavorite,
+                        icon: _controller.isArtistFavorite
+                            ? Icons.favorite
+                            : Icons.favorite_border_outlined,
+                      ),
+                      const SizedBox(width: 12),
+                      _HeaderHoverIconButton(
                         tooltip: 'Weitere Optionen',
-                        onPressed: artist == null ? null : () => _showItemMenu(artist),
-                        icon: const Icon(Icons.more_horiz_outlined),
+                        onTap: artist == null
+                            ? null
+                            : () => _showItemMenu(artist),
+                        icon: Icons.more_horiz_outlined,
                       ),
                     ],
                   ),
@@ -234,10 +277,18 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop> {
     );
   }
 
-  Widget _buildArtistImage(MashinColors colors, Artist? artist, bool isLoading) {
+  Widget _buildArtistImage(
+    MashinColors colors,
+    Artist? artist,
+    bool isLoading,
+  ) {
     if (isLoading) {
       return ClipOval(
-        child: Container(width: _coverSize, height: _coverSize, color: colors.bgTertiary),
+        child: Container(
+          width: _coverSize,
+          height: _coverSize,
+          color: colors.bgTertiary,
+        ),
       );
     }
 
@@ -252,7 +303,8 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop> {
             : Image.network(
                 imageUri,
                 fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => Icon(Icons.person_outlined, color: colors.accent, size: 72),
+                errorBuilder: (_, _, _) =>
+                    Icon(Icons.person_outlined, color: colors.accent, size: 72),
               ),
       ),
     );
@@ -266,7 +318,9 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop> {
           _buildSkeletonLine(colors, width: 200, height: 18),
           const SizedBox(height: 16),
           _buildSkeletonLine(colors, width: double.infinity, height: 14),
-          const SizedBox(height: 8),
+          const SizedBox(height: 16),
+          _buildSkeletonLine(colors, width: double.infinity, height: 14),
+          const SizedBox(height: 16),
           _buildSkeletonLine(colors, width: double.infinity, height: 14),
         ],
       );
@@ -277,34 +331,49 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop> {
       children: <Widget>[
         Text(
           'Über ${_controller.artistName}',
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 16),
-        GestureDetector(
-          onTap: _controller.toggleDescription,
-          child: Text(
-            _controller.description ?? '',
-            maxLines: _controller.descriptionMaxLines,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: colors.textSecondary),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeInOutCubic,
+          alignment: Alignment.topCenter,
+          clipBehavior: Clip.hardEdge,
+          child: GestureDetector(
+            onTap: _controller.toggleDescription,
+            child: Text(
+              _controller.description ?? '',
+              maxLines: _controller.descriptionMaxLines,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: colors.textSecondary),
+            ),
           ),
         ),
         const SizedBox(height: 8),
         Center(
-          child: IconButton(
-            onPressed: _controller.toggleDescription,
-            icon: Icon(_controller.isDescriptionExpanded ? Icons.expand_less_outlined : Icons.expand_more_outlined),
+          child: _DescriptionToggleButton(
+            isExpanded: _controller.isDescriptionExpanded,
+            onTap: _controller.toggleDescription,
           ),
         ),
       ],
     );
   }
 
-  Widget _buildSkeletonLine(MashinColors colors, {required double width, required double height}) {
+  Widget _buildSkeletonLine(
+    MashinColors colors, {
+    required double width,
+    required double height,
+  }) {
     return Container(
       width: width,
       height: height,
-      decoration: BoxDecoration(color: colors.bgTertiary, borderRadius: BorderRadius.circular(6)),
+      decoration: BoxDecoration(
+        color: colors.bgTertiary,
+        borderRadius: BorderRadius.circular(6),
+      ),
     );
   }
 }
@@ -314,27 +383,131 @@ class _HeaderActionButton extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
 
-  const _HeaderActionButton({required this.icon, required this.label, required this.onTap});
+  const _HeaderActionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
 
     return Material(
-      color: colors.bgSecondary,
-      borderRadius: BorderRadius.circular(8),
+      color: colors.textPrimary,
+      borderRadius: BorderRadius.circular(26),
       child: InkWell(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(26),
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Icon(icon, size: 18, color: colors.textPrimary),
-              const SizedBox(width: 8),
-              Text(label, style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w600)),
-            ],
+        hoverColor: colors.bgPrimary.withValues(alpha: 0.45),
+        splashColor: colors.bgPrimary.withValues(alpha: 0.55),
+        child: SizedBox(
+          height: 40,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Center(
+              child: SizedBox(
+                height: 20,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: <Widget>[
+                    Icon(icon, size: 20, color: colors.bgPrimary),
+                    const SizedBox(width: 8),
+                    Text(
+                      label,
+                      strutStyle: const StrutStyle(
+                        fontSize: 15,
+                        height: 1.3333333333,
+                        forceStrutHeight: true,
+                      ),
+                      style: TextStyle(
+                        color: colors.bgPrimary,
+                        fontSize: 15,
+                        height: 1.3333333333,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HeaderHoverIconButton extends StatelessWidget {
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  const _HeaderHoverIconButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          hoverColor: colors.hover,
+          splashColor: colors.hover,
+          child: SizedBox(
+            width: 28,
+            height: 28,
+            child: Icon(icon, size: 18, color: colors.textSecondary),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DescriptionToggleButton extends StatelessWidget {
+  final bool isExpanded;
+  final VoidCallback onTap;
+
+  const _DescriptionToggleButton({
+    required this.isExpanded,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        hoverColor: colors.hover,
+        splashColor: colors.hover,
+        child: SizedBox(
+          width: 24,
+          height: 24,
+          child: AnimatedRotation(
+            turns: isExpanded ? 0.5 : 0,
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            child: Icon(
+              Icons.expand_more_outlined,
+              size: 14,
+              color: colors.textPrimary,
+            ),
           ),
         ),
       ),

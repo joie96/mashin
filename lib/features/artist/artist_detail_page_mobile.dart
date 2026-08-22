@@ -32,7 +32,8 @@ class ArtistDetailPageMobile extends StatefulWidget {
   State<ArtistDetailPageMobile> createState() => _ArtistDetailPageMobileState();
 }
 
-class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile> {
+class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
+    with TickerProviderStateMixin {
   static const double _bannerHeight = 220;
 
   late final ArtistDetailController _controller;
@@ -46,7 +47,7 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile> {
       itemId: widget.itemId,
       providerInstanceIdOrDomain: widget.providerInstanceIdOrDomain,
     )..addListener(_onControllerChanged);
-    unawaited(_controller.load());
+    unawaited(_controller.loadArtist());
   }
 
   void _onControllerChanged() {
@@ -75,12 +76,20 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile> {
                 title: const Text('Abspielen'),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
-                  unawaited(widget.playbackCoordinator.playMedia(<MediaItem>[item]));
+                  unawaited(
+                    widget.playbackCoordinator.playMedia(<MediaItem>[item]),
+                  );
                 },
               ),
               ListTile(
-                leading: Icon(isFavorite ? Icons.favorite_outlined : Icons.favorite_border_outlined),
-                title: Text(isFavorite ? 'Favorit entfernen' : 'Als Favorit markieren'),
+                leading: Icon(
+                  isFavorite
+                      ? Icons.favorite_outlined
+                      : Icons.favorite_border_outlined,
+                ),
+                title: Text(
+                  isFavorite ? 'Favorit entfernen' : 'Als Favorit markieren',
+                ),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   unawaited(_controller.toggleItemFavorite(item));
@@ -109,7 +118,8 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile> {
             _buildNameAndMeta(context, colors),
             const SizedBox(height: 16),
             _buildActions(colors),
-            if (_controller.isLoadingMetadata || _controller.hasDescription) ...<Widget>[
+            if (_controller.isLoadingMetadata ||
+                _controller.hasDescription) ...<Widget>[
               const SizedBox(height: 16),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -160,24 +170,34 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile> {
   Widget _buildBanner(MashinColors colors) {
     final Artist? artist = _controller.artist;
     final String? imageUri = artist?.imageUri;
-    final bool hasImage = !_controller.isLoadingMetadata && imageUri != null && imageUri.trim().isNotEmpty;
+    final bool hasImage =
+        !_controller.isLoadingMetadata &&
+        imageUri != null &&
+        imageUri.trim().isNotEmpty;
 
     return SizedBox(
       height: _bannerHeight,
       width: double.infinity,
       child: ClipRRect(
-        borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(16), bottomRight: Radius.circular(16)),
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(16),
+          bottomRight: Radius.circular(16),
+        ),
         child: Container(
           color: colors.bgTertiary,
           child: hasImage
               ? Image.network(
                   imageUri,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => Icon(Icons.person_outlined, color: colors.accent, size: 72),
+                  errorBuilder: (_, _, _) => Icon(
+                    Icons.person_outlined,
+                    color: colors.accent,
+                    size: 72,
+                  ),
                 )
               : _controller.isLoadingMetadata
-                  ? null
-                  : Icon(Icons.person_outlined, color: colors.accent, size: 72),
+              ? null
+              : Icon(Icons.person_outlined, color: colors.accent, size: 72),
         ),
       ),
     );
@@ -187,13 +207,27 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile> {
     final Artist? artist = _controller.artist;
 
     if (_controller.isLoadingMetadata) {
-      return Center(
-        child: Container(
-          width: 200,
-          height: 24,
-          margin: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(color: colors.bgTertiary, borderRadius: BorderRadius.circular(6)),
-        ),
+      return Column(
+        children: <Widget>[
+          Container(
+            width: 200,
+            height: 24,
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+              color: colors.bgTertiary,
+              borderRadius: BorderRadius.circular(6),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Container(
+            width: 64,
+            height: 12,
+            decoration: BoxDecoration(
+              color: colors.bgTertiary,
+              borderRadius: BorderRadius.circular(6),
+            ),
+          ),
+        ],
       );
     }
 
@@ -217,7 +251,9 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile> {
                 const SizedBox(width: 8),
                 MediaProviderIcon(
                   providerLabel: artist.provider,
-                  iconSvg: ProviderManifestRegistry.iconSvgForProvider(artist.provider),
+                  iconSvg: ProviderManifestRegistry.iconSvgForProvider(
+                    artist.provider,
+                  ),
                   size: 20,
                 ),
               ],
@@ -225,7 +261,10 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile> {
           ),
         ),
         const SizedBox(height: 4),
-        Text('${_controller.albums.length} Alben', style: TextStyle(color: colors.textSecondary, fontSize: 12)),
+        Text(
+          '${_controller.albums.length} Alben',
+          style: TextStyle(color: colors.textSecondary, fontSize: 12),
+        ),
       ],
     );
   }
@@ -241,17 +280,32 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile> {
         const SizedBox(width: 14),
         _MobileActionButton(
           icon: Icons.shuffle,
-          onTap: _controller.isLoadingMetadata ? null : _controller.shuffleArtist,
+          onTap: _controller.isLoadingMetadata
+              ? null
+              : _controller.shuffleArtist,
         ),
         const SizedBox(width: 14),
         _MobileActionButton(
-          icon: _controller.isArtistFavorite ? Icons.favorite : Icons.favorite_border_outlined,
-          onTap: _controller.isLoadingMetadata ? null : _controller.toggleArtistFavorite,
+          icon: Icons.radio_outlined,
+          onTap: _controller.isLoadingMetadata
+              ? null
+              : _controller.startArtistRadio,
+        ),
+        const SizedBox(width: 14),
+        _MobileActionButton(
+          icon: _controller.isArtistFavorite
+              ? Icons.favorite
+              : Icons.favorite_border_outlined,
+          onTap: _controller.isLoadingMetadata
+              ? null
+              : _controller.toggleArtistFavorite,
         ),
         const SizedBox(width: 14),
         _MobileActionButton(
           icon: Icons.more_vert_outlined,
-          onTap: _controller.artist == null ? null : () => _showItemMenu(_controller.artist!),
+          onTap: _controller.artist == null
+              ? null
+              : () => _showItemMenu(_controller.artist!),
         ),
       ],
     );
@@ -262,9 +316,13 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Container(width: 160, height: 14, color: colors.bgTertiary),
-          const SizedBox(height: 8),
-          Container(width: double.infinity, height: 12, color: colors.bgTertiary),
+          _buildSkeletonLine(colors, width: 160, height: 14),
+          const SizedBox(height: 6),
+          _buildSkeletonLine(colors, width: double.infinity, height: 13),
+          const SizedBox(height: 6),
+          _buildSkeletonLine(colors, width: double.infinity, height: 13),
+          const SizedBox(height: 6),
+          _buildSkeletonLine(colors, width: 220, height: 13),
         ],
       );
     }
@@ -272,24 +330,53 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Text('Über ${_controller.artistName}', style: TextStyle(color: colors.textPrimary, fontSize: 14)),
+        Text(
+          'Über ${_controller.artistName}',
+          style: TextStyle(color: colors.textPrimary, fontSize: 14),
+        ),
         const SizedBox(height: 6),
-        GestureDetector(
-          onTap: _controller.toggleDescription,
-          child: Text(
-            _controller.description ?? '',
-            maxLines: _controller.descriptionMaxLines,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: colors.textSecondary, fontSize: 13),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeInOutCubic,
+          alignment: Alignment.topCenter,
+          clipBehavior: Clip.hardEdge,
+          child: GestureDetector(
+            onTap: _controller.toggleDescription,
+            child: Text(
+              _controller.description ?? '',
+              maxLines: _controller.descriptionMaxLines,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: colors.textSecondary, fontSize: 13),
+            ),
           ),
         ),
         Center(
           child: IconButton(
             onPressed: _controller.toggleDescription,
-            icon: Icon(_controller.isDescriptionExpanded ? Icons.expand_less_outlined : Icons.expand_more_outlined),
+            icon: AnimatedRotation(
+              turns: _controller.isDescriptionExpanded ? 0.5 : 0,
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              child: const Icon(Icons.expand_more_outlined),
+            ),
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildSkeletonLine(
+    MashinColors colors, {
+    required double width,
+    required double height,
+  }) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: colors.bgTertiary,
+        borderRadius: BorderRadius.circular(6),
+      ),
     );
   }
 }
@@ -310,6 +397,9 @@ class _MobileActionButton extends StatelessWidget {
       child: InkWell(
         customBorder: const CircleBorder(),
         onTap: onTap,
+        hoverColor: colors.hover,
+        highlightColor: colors.selection,
+        splashColor: colors.selection,
         child: SizedBox(
           width: 44,
           height: 44,

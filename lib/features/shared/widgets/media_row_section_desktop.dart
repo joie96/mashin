@@ -14,6 +14,7 @@ import 'media_table_section_desktop.dart';
 class MediaRowSectionDesktop<T> extends StatefulWidget {
   static const double _defaultHeight = 226;
   static const double _reservedTextHeight = 80;
+  static const double _minItemWidth = 150;
 
   final String title;
   final bool isLoading;
@@ -37,7 +38,7 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
     required this.isLoading,
     required this.items,
     required this.emptyText,
-    this.minItemWith = 160,
+    this.minItemWith = _minItemWidth,
     this.itemSpacing = 8,
     this.skeletonCount = 8,
     this.playbackCoordinator,
@@ -309,7 +310,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
       return const _RowLayoutMetrics(visibleCount: 1, computedItemWidth: 0);
     }
 
-    final double minItemWidth = widget.minItemWith > 0 ? widget.minItemWith : 164;
+    final double minItemWidth = widget.minItemWith > 0 ? widget.minItemWith : MediaRowSectionDesktop._minItemWidth;
     final double spacing = widget.itemSpacing;
 
     if (!maxWidth.isFinite || maxWidth <= 0) {

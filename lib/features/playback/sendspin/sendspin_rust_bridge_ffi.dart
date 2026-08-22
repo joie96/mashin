@@ -38,13 +38,10 @@ typedef _NativeFreeStringFn = ffi.Void Function(ffi.Pointer<Utf8>);
 typedef _DartFreeStringFn = void Function(ffi.Pointer<Utf8>);
 
 typedef _NativeEventCallbackFn = ffi.Void Function(ffi.Pointer<Utf8>);
-typedef _DartEventCallbackFn = void Function(ffi.Pointer<Utf8>);
-typedef _NativeRegisterEventCallbackFn = ffi.Int32 Function(
-  ffi.Pointer<ffi.NativeFunction<_NativeEventCallbackFn>>,
-);
-typedef _DartRegisterEventCallbackFn = int Function(
-  ffi.Pointer<ffi.NativeFunction<_NativeEventCallbackFn>>,
-);
+typedef _NativeRegisterEventCallbackFn =
+    ffi.Int32 Function(ffi.Pointer<ffi.NativeFunction<_NativeEventCallbackFn>>);
+typedef _DartRegisterEventCallbackFn =
+    int Function(ffi.Pointer<ffi.NativeFunction<_NativeEventCallbackFn>>);
 
 class FfiSendspinRustBridge implements SendspinRustBridge {
   FfiSendspinRustBridge() : _bindings = _RustBindings(_openLibrary()) {
@@ -53,7 +50,9 @@ class FfiSendspinRustBridge implements SendspinRustBridge {
       _dispatchNativeEvent,
     );
 
-    final code = _bindings.registerEventCallback(_nativeEventCallback.nativeFunction);
+    final code = _bindings.registerEventCallback(
+      _nativeEventCallback.nativeFunction,
+    );
     _throwIfError(code, 'registerEventCallback');
   }
 
@@ -224,7 +223,9 @@ class FfiSendspinRustBridge implements SendspinRustBridge {
   }
 
   @override
-  Future<void> senderExitExternalSource({Map<String, dynamic>? playerState}) async {
+  Future<void> senderExitExternalSource({
+    Map<String, dynamic>? playerState,
+  }) async {
     ffi.Pointer<Utf8> pointer = ffi.nullptr;
     if (playerState != null) {
       pointer = jsonEncode(playerState).toNativeUtf8();
@@ -375,7 +376,8 @@ class FfiSendspinRustBridge implements SendspinRustBridge {
     final fileName = _libraryFileNameForPlatform();
     final candidates = <String>[];
 
-    final envOverride = Platform.environment['MASHIN_SENDSPIN_BRIDGE_PATH']?.trim();
+    final envOverride = Platform.environment['MASHIN_SENDSPIN_BRIDGE_PATH']
+        ?.trim();
     if (envOverride != null && envOverride.isNotEmpty) {
       candidates.add(envOverride);
     }
@@ -388,8 +390,12 @@ class FfiSendspinRustBridge implements SendspinRustBridge {
     final cwd = Directory.current.path;
     candidates.add(_joinPath(cwd, fileName));
     candidates.add(_joinPath(cwd, 'windows', 'native', fileName));
-    candidates.add(_joinPath(cwd, 'rust', 'sendspin_bridge', 'target', 'debug', fileName));
-    candidates.add(_joinPath(cwd, 'rust', 'sendspin_bridge', 'target', 'release', fileName));
+    candidates.add(
+      _joinPath(cwd, 'rust', 'sendspin_bridge', 'target', 'debug', fileName),
+    );
+    candidates.add(
+      _joinPath(cwd, 'rust', 'sendspin_bridge', 'target', 'release', fileName),
+    );
 
     Object? lastError;
     for (final candidate in candidates.toSet()) {
@@ -420,10 +426,19 @@ class FfiSendspinRustBridge implements SendspinRustBridge {
       return 'libmashin_sendspin_bridge.so';
     }
 
-    throw UnsupportedError('Sendspin Rust bridge is not supported on this platform.');
+    throw UnsupportedError(
+      'Sendspin Rust bridge is not supported on this platform.',
+    );
   }
 
-  static String _joinPath(String a, String b, [String? c, String? d, String? e, String? f]) {
+  static String _joinPath(
+    String a,
+    String b, [
+    String? c,
+    String? d,
+    String? e,
+    String? f,
+  ]) {
     final separator = Platform.pathSeparator;
     final parts = <String>[a, b];
     if (c != null) parts.add(c);
@@ -436,89 +451,97 @@ class FfiSendspinRustBridge implements SendspinRustBridge {
 
 class _RustBindings {
   _RustBindings(ffi.DynamicLibrary library)
-      : engineInit = library.lookupFunction<_NativeInitFn, _DartInitFn>(
-          'mashin_sendspin_engine_init',
-        ),
-        engineConnect = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
-          'mashin_sendspin_engine_connect',
-        ),
-        engineReconnect = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
-          'mashin_sendspin_engine_reconnect',
-        ),
-        engineDisconnect =
-            library.lookupFunction<_NativeDisconnectFn, _DartDisconnectFn>(
-          'mashin_sendspin_engine_disconnect',
-        ),
-        engineTerminate = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
-          'mashin_sendspin_engine_terminate',
-        ),
-        transportPlay = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
-          'mashin_sendspin_transport_play',
-        ),
-        transportPause = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
-          'mashin_sendspin_transport_pause',
-        ),
-        transportStop = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
-          'mashin_sendspin_transport_stop',
-        ),
-        transportNext = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
-          'mashin_sendspin_transport_next',
-        ),
-        transportPrevious = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
-          'mashin_sendspin_transport_previous',
-        ),
-        transportSeek = library.lookupFunction<_NativeSeekFn, _DartSeekFn>(
-          'mashin_sendspin_transport_seek',
-        ),
-        transportSeekRelativeMs = library.lookupFunction<_NativeI64Fn, _DartI64Fn>(
-          'mashin_sendspin_transport_seek_relative_ms',
-        ),
-        transportRepeatMode = library.lookupFunction<_NativeVolumeFn, _DartVolumeFn>(
-          'mashin_sendspin_transport_repeat_mode',
-        ),
-        transportShuffle = library.lookupFunction<_NativeMutedFn, _DartMutedFn>(
-          'mashin_sendspin_transport_shuffle',
-        ),
-        transportSwitchGroup = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
-          'mashin_sendspin_transport_switch_group',
-        ),
-        setVolume = library.lookupFunction<_NativeVolumeFn, _DartVolumeFn>(
-          'mashin_sendspin_set_volume',
-        ),
-        setMuted = library.lookupFunction<_NativeMutedFn, _DartMutedFn>(
-          'mashin_sendspin_set_muted',
-        ),
-        senderSendSyncState = library.lookupFunction<_NativeDisconnectFn, _DartDisconnectFn>(
-          'mashin_sendspin_sender_send_sync_state',
-        ),
-        senderEnterExternalSource = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
-          'mashin_sendspin_sender_enter_external_source',
-        ),
-        senderExitExternalSource = library.lookupFunction<_NativeDisconnectFn, _DartDisconnectFn>(
-          'mashin_sendspin_sender_exit_external_source',
-        ),
-        senderRequestStreamFormats = library.lookupFunction<_NativeDisconnectFn, _DartDisconnectFn>(
-          'mashin_sendspin_sender_request_stream_formats',
-        ),
-        senderSendMessageJson = library.lookupFunction<_NativeDisconnectFn, _DartDisconnectFn>(
-          'mashin_sendspin_sender_send_message_json',
-        ),
-        registerEventCallback = library.lookupFunction<
-          _NativeRegisterEventCallbackFn,
-          _DartRegisterEventCallbackFn
-        >(
-          'mashin_sendspin_register_event_callback',
-        ),
-        getSnapshotJson = library.lookupFunction<_NativeGetStringFn, _DartGetStringFn>(
-          'mashin_sendspin_get_snapshot_json',
-        ),
-        getLastError = library.lookupFunction<_NativeGetStringFn, _DartGetStringFn>(
-          'mashin_sendspin_get_last_error',
-        ),
-        freeRustString =
-            library.lookupFunction<_NativeFreeStringFn, _DartFreeStringFn>(
-          'mashin_sendspin_free_string',
-        );
+    : engineInit = library.lookupFunction<_NativeInitFn, _DartInitFn>(
+        'mashin_sendspin_engine_init',
+      ),
+      engineConnect = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
+        'mashin_sendspin_engine_connect',
+      ),
+      engineReconnect = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
+        'mashin_sendspin_engine_reconnect',
+      ),
+      engineDisconnect = library
+          .lookupFunction<_NativeDisconnectFn, _DartDisconnectFn>(
+            'mashin_sendspin_engine_disconnect',
+          ),
+      engineTerminate = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
+        'mashin_sendspin_engine_terminate',
+      ),
+      transportPlay = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
+        'mashin_sendspin_transport_play',
+      ),
+      transportPause = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
+        'mashin_sendspin_transport_pause',
+      ),
+      transportStop = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
+        'mashin_sendspin_transport_stop',
+      ),
+      transportNext = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
+        'mashin_sendspin_transport_next',
+      ),
+      transportPrevious = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
+        'mashin_sendspin_transport_previous',
+      ),
+      transportSeek = library.lookupFunction<_NativeSeekFn, _DartSeekFn>(
+        'mashin_sendspin_transport_seek',
+      ),
+      transportSeekRelativeMs = library
+          .lookupFunction<_NativeI64Fn, _DartI64Fn>(
+            'mashin_sendspin_transport_seek_relative_ms',
+          ),
+      transportRepeatMode = library
+          .lookupFunction<_NativeVolumeFn, _DartVolumeFn>(
+            'mashin_sendspin_transport_repeat_mode',
+          ),
+      transportShuffle = library.lookupFunction<_NativeMutedFn, _DartMutedFn>(
+        'mashin_sendspin_transport_shuffle',
+      ),
+      transportSwitchGroup = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
+        'mashin_sendspin_transport_switch_group',
+      ),
+      setVolume = library.lookupFunction<_NativeVolumeFn, _DartVolumeFn>(
+        'mashin_sendspin_set_volume',
+      ),
+      setMuted = library.lookupFunction<_NativeMutedFn, _DartMutedFn>(
+        'mashin_sendspin_set_muted',
+      ),
+      senderSendSyncState = library
+          .lookupFunction<_NativeDisconnectFn, _DartDisconnectFn>(
+            'mashin_sendspin_sender_send_sync_state',
+          ),
+      senderEnterExternalSource = library
+          .lookupFunction<_NativeVoidFn, _DartVoidFn>(
+            'mashin_sendspin_sender_enter_external_source',
+          ),
+      senderExitExternalSource = library
+          .lookupFunction<_NativeDisconnectFn, _DartDisconnectFn>(
+            'mashin_sendspin_sender_exit_external_source',
+          ),
+      senderRequestStreamFormats = library
+          .lookupFunction<_NativeDisconnectFn, _DartDisconnectFn>(
+            'mashin_sendspin_sender_request_stream_formats',
+          ),
+      senderSendMessageJson = library
+          .lookupFunction<_NativeDisconnectFn, _DartDisconnectFn>(
+            'mashin_sendspin_sender_send_message_json',
+          ),
+      registerEventCallback = library
+          .lookupFunction<
+            _NativeRegisterEventCallbackFn,
+            _DartRegisterEventCallbackFn
+          >('mashin_sendspin_register_event_callback'),
+      getSnapshotJson = library
+          .lookupFunction<_NativeGetStringFn, _DartGetStringFn>(
+            'mashin_sendspin_get_snapshot_json',
+          ),
+      getLastError = library
+          .lookupFunction<_NativeGetStringFn, _DartGetStringFn>(
+            'mashin_sendspin_get_last_error',
+          ),
+      freeRustString = library
+          .lookupFunction<_NativeFreeStringFn, _DartFreeStringFn>(
+            'mashin_sendspin_free_string',
+          );
 
   final _DartInitFn engineInit;
   final _DartVoidFn engineConnect;
