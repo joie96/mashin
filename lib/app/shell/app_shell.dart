@@ -301,6 +301,8 @@ class _AppShellState extends State<AppShell> {
                       children: <Widget>[
                         _DesktopTopBar(
                           title: _titleForSection(_navigation.currentSection),
+                          canGoBack: _navigation.canGoBack,
+                          onBack: _onBack,
                           onToggleTheme: _toggleTheme,
                           isDarkTheme: _isDarkTheme,
                           searchController: _desktopSearchController,
@@ -491,6 +493,10 @@ class _AppShellState extends State<AppShell> {
     setState(() {
       _isDarkTheme = !_isDarkTheme;
     });
+  }
+
+  void _onBack() {
+    _navigation.goBack();
   }
 
   String _titleForSection(AppSection section) {
@@ -781,6 +787,8 @@ class _AppShellState extends State<AppShell> {
 // Desktop UI Components
 class _DesktopTopBar extends StatelessWidget {
   final String title;
+  final bool canGoBack;
+  final VoidCallback onBack;
   final VoidCallback onToggleTheme;
   final bool isDarkTheme;
   final TextEditingController searchController;
@@ -790,6 +798,8 @@ class _DesktopTopBar extends StatelessWidget {
 
   const _DesktopTopBar({
     required this.title,
+    required this.canGoBack,
+    required this.onBack,
     required this.onToggleTheme,
     required this.isDarkTheme,
     required this.searchController,
@@ -811,7 +821,23 @@ class _DesktopTopBar extends StatelessWidget {
       child: Row(
         children: <Widget>[
           const SizedBox(width: 22),
-          Icon(Icons.chevron_left_outlined, color: colors.textSecondary),
+          Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              hoverColor: colors.hover,
+              splashColor: colors.hover,
+              onTap: canGoBack ? onBack : null,
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Icon(
+                  Icons.chevron_left_outlined,
+                  color: canGoBack ? colors.textSecondary : colors.textTertiary,
+                ),
+              ),
+            ),
+          ),
           const SizedBox(width: 18),
           Expanded(
             child: TextField(

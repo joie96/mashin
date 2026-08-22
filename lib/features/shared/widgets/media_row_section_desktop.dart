@@ -70,6 +70,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
 
   final FocusNode _sectionFocusNode = FocusNode(debugLabel: 'MediaRowDesktopSectionFocus');
   final Set<int> _selectedIndexes = <int>{};
+  final Set<int> _suppressedSelectionPointers = <int>{};
   final Object _selectionSessionOwner = Object();
   final SelectionController _selectionSessionController = SelectionController.instance;
   int? _selectionAnchorIndex;
@@ -267,6 +268,10 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
   }
 
   void _handleItemPointerDown(int index, PointerDownEvent event) {
+    if (_suppressedSelectionPointers.remove(event.pointer)) {
+      return;
+    }
+
     if (!widget.enableSelection ||
         event.kind != PointerDeviceKind.mouse ||
         (event.buttons & kPrimaryMouseButton) == 0) {
@@ -290,6 +295,10 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
     }
 
     _selectSingleIndex(index);
+  }
+
+  void _suppressSelectionForPointer(int pointer) {
+    _suppressedSelectionPointers.add(pointer);
   }
 
   _RowLayoutMetrics _computeLayoutMetrics(double maxWidth) {
@@ -525,6 +534,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
             onSelectTap: widget.enableSelection ? onSelectTap : null,
             onSelectPointerDown: widget.enableSelection ? onSelectPointerDown : null,
             onArtistTap: widget.onArtistTap,
+            onArtistPointerDown: _suppressSelectionForPointer,
           );
         }
         if (item is Playlist) {
@@ -571,6 +581,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
             onSelectTap: widget.enableSelection ? onSelectTap : null,
             onSelectPointerDown: widget.enableSelection ? onSelectPointerDown : null,
             onArtistTap: widget.onArtistTap,
+            onArtistPointerDown: _suppressSelectionForPointer,
           );
         }
 
@@ -859,6 +870,7 @@ Widget _buildDesktopMediaRowAlbum({
   required VoidCallback? onSelectTap,
   required ValueChanged<PointerDownEvent>? onSelectPointerDown,
   ValueChanged<Artist>? onArtistTap,
+  ValueChanged<int>? onArtistPointerDown,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -868,6 +880,7 @@ Widget _buildDesktopMediaRowAlbum({
     secondaryText: _albumSubtitle(item),
     secondaryArtists: item.artists,
     onArtistTap: onArtistTap,
+    onArtistPointerDown: onArtistPointerDown,
     tertiaryText: _albumTertiary(item),
     coverUrl: item.imageUri ?? '',
     providerLabel: _providerLabelFromId(item.provider),
@@ -962,6 +975,7 @@ Widget _buildDesktopMediaRowTrack({
   required VoidCallback? onSelectTap,
   required ValueChanged<PointerDownEvent>? onSelectPointerDown,
   ValueChanged<Artist>? onArtistTap,
+  ValueChanged<int>? onArtistPointerDown,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -971,6 +985,7 @@ Widget _buildDesktopMediaRowTrack({
     secondaryText: _trackSubtitle(item),
     secondaryArtists: item.artists,
     onArtistTap: onArtistTap,
+    onArtistPointerDown: onArtistPointerDown,
     tertiaryText: _trackTertiary(item),
     coverUrl: item.imageUri ?? '',
     providerLabel: _providerLabelFromId(item.provider),
@@ -1036,6 +1051,7 @@ Widget _buildDesktopMediaRowItemBase({
   required ValueChanged<PointerDownEvent>? onSelectPointerDown,
   List<Artist>? secondaryArtists,
   ValueChanged<Artist>? onArtistTap,
+  ValueChanged<int>? onArtistPointerDown,
   bool showPlayOverlay = true,
   bool isCircularCover = false,
 }) {
@@ -1090,6 +1106,7 @@ Widget _buildDesktopMediaRowItemBase({
                             items: secondaryArtists,
                             fallbackText: secondaryText ?? '',
                             onItemTap: onArtistTap == null ? null : (MediaItem media) => onArtistTap(media as Artist),
+                            onItemPointerDown: onArtistPointerDown,
                             style: TextStyle(color: colors.textSecondary, fontSize: 14),
                           )
                         : Text(

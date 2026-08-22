@@ -64,6 +64,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
   final Object _selectionSessionOwner = Object();
   final SelectionController _selectionSessionController = SelectionController.instance;
   final PageController _desktopChunkPageController = PageController();
+  final Set<int> _suppressedSelectionPointers = <int>{};
   int? _selectionAnchorIndex;
   int _currentPage = 0;
   bool _isPageFading = false;
@@ -315,6 +316,10 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
   }
 
   void _handleRowPointerDown(int index, PointerDownEvent event) {
+    if (_suppressedSelectionPointers.remove(event.pointer)) {
+      return;
+    }
+
     if (!widget.enableSelection ||
         event.kind != PointerDeviceKind.mouse ||
         (event.buttons & kPrimaryMouseButton) == 0) {
@@ -340,6 +345,10 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
     // Perform single selection on pointer down to avoid tap-delay caused by
     // double-tap recognizers and to snapshot modifier state immediately.
     _selectSingleIndex(index);
+  }
+
+  void _suppressSelectionForPointer(int pointer) {
+    _suppressedSelectionPointers.add(pointer);
   }
 
   void _toggleAllSelectedIndexes() {
@@ -808,6 +817,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
         onDoubleTap: () => _onRowActivated(item: item, index: index),
         onPointerDown: onPointerDown,
         onArtistTap: widget.onArtistTap,
+        onArtistPointerDown: _suppressSelectionForPointer,
       );
     }
     if (typedItem is QueueItem) {
@@ -824,6 +834,7 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
         onDoubleTap: () => _onRowActivated(item: item, index: index),
         onPointerDown: onPointerDown,
         onArtistTap: widget.onArtistTap,
+        onArtistPointerDown: _suppressSelectionForPointer,
       );
     }
 
@@ -1017,6 +1028,7 @@ Widget _buildDesktopTableRowTrack({
   required VoidCallback? onDoubleTap,
   required ValueChanged<PointerDownEvent>? onPointerDown,
   ValueChanged<Artist>? onArtistTap,
+  ValueChanged<int>? onArtistPointerDown,
 }) {
   return _buildDesktopTableRowBase(
     cells: <Widget>[
@@ -1040,6 +1052,7 @@ Widget _buildDesktopTableRowTrack({
           artists: item.artists,
           fallbackText: _trackSubtitle(item),
           onArtistTap: onArtistTap,
+          onArtistPointerDown: onArtistPointerDown,
         ),
       ),
       _buildDesktopTableSizedCell(flex: 1, child: _buildDesktopBodyText('-', TextAlign.left, DesktopTextTone.tertiary)),
@@ -1247,6 +1260,7 @@ Widget _buildDesktopTableRowQueue({
   required VoidCallback? onDoubleTap,
   required ValueChanged<PointerDownEvent>? onPointerDown,
   ValueChanged<Artist>? onArtistTap,
+  ValueChanged<int>? onArtistPointerDown,
 }) {
   final String provider = _resolveQueueProvider(item);
   final String title = (item.mediaItem?.name.trim().isNotEmpty == true)
@@ -1280,6 +1294,7 @@ Widget _buildDesktopTableRowQueue({
           artists: artists,
           fallbackText: artistsFallbackText.isEmpty ? '-' : artistsFallbackText,
           onArtistTap: onArtistTap,
+          onArtistPointerDown: onArtistPointerDown,
         ),
       ),
       _buildDesktopTableSizedCell(
@@ -1745,6 +1760,7 @@ Widget _buildDesktopArtistLinkCell({
   required List<Artist> artists,
   required String fallbackText,
   required ValueChanged<Artist>? onArtistTap,
+  ValueChanged<int>? onArtistPointerDown,
 }) {
   return Builder(
     builder: (BuildContext context) {
@@ -1755,6 +1771,7 @@ Widget _buildDesktopArtistLinkCell({
           items: artists,
           fallbackText: fallbackText,
           onItemTap: onArtistTap == null ? null : (MediaItem media) => onArtistTap(media as Artist),
+          onItemPointerDown: onArtistPointerDown,
           style: textStyles.bodySecondary.copyWith(fontSize: 13),
         ),
       );

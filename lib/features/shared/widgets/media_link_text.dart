@@ -12,6 +12,7 @@ class MediaLinkText extends StatefulWidget {
   final TextAlign textAlign;
   final int maxLines;
   final ValueChanged<MediaItem>? onItemTap;
+  final ValueChanged<int>? onItemPointerDown;
 
   const MediaLinkText({
     super.key,
@@ -21,6 +22,7 @@ class MediaLinkText extends StatefulWidget {
     this.textAlign = TextAlign.left,
     this.maxLines = 1,
     this.onItemTap,
+    this.onItemPointerDown,
   });
 
   @override
@@ -67,11 +69,14 @@ class _MediaLinkTextState extends State<MediaLinkText> {
               cursor: SystemMouseCursors.click,
               onEnter: (_) => _setHovered(i),
               onExit: (_) => _setHovered(null),
-              child: GestureDetector(
-                onTap: () => widget.onItemTap!(item),
-                child: Text(
-                  item.name,
-                  style: baseStyle.copyWith(decoration: isHovered ? TextDecoration.underline : TextDecoration.none),
+              child: Listener(
+                onPointerDown: (PointerDownEvent event) => widget.onItemPointerDown?.call(event.pointer),
+                child: GestureDetector(
+                  onTap: () => widget.onItemTap!(item),
+                  child: Text(
+                    item.name,
+                    style: baseStyle.copyWith(decoration: isHovered ? TextDecoration.underline : TextDecoration.none),
+                  ),
                 ),
               ),
             ),

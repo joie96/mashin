@@ -97,10 +97,9 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile> {
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
 
-    return Scaffold(
-      backgroundColor: colors.bgPrimary,
-      appBar: AppBar(title: Text(_controller.artistName)),
-      body: SingleChildScrollView(
+    return Container(
+      color: colors.bgPrimary,
+      child: SingleChildScrollView(
         padding: const EdgeInsets.only(bottom: 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

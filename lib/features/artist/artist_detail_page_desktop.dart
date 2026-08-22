@@ -98,10 +98,9 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop> {
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
 
-    return Scaffold(
-      backgroundColor: colors.bgPrimary,
-      appBar: AppBar(title: Text(_controller.artistName)),
-      body: SingleChildScrollView(
+    return Container(
+      color: colors.bgPrimary,
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

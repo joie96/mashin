@@ -39,6 +39,7 @@ class AppNavigationController extends ChangeNotifier {
   AppSection get currentSection => _currentSection;
   String get desktopSearchQuery => _desktopSearchQuery;
   AppDetailDestination? get activeDetail => _detailStack.isEmpty ? null : _detailStack.last;
+  bool get canGoBack => _detailStack.isNotEmpty;
 
   void selectSection(AppSection section) {
     final bool isSameSection = _currentSection == section;
@@ -96,6 +97,10 @@ class AppNavigationController extends ChangeNotifier {
     _detailStack.removeLast();
     notifyListeners();
     return true;
+  }
+
+  bool goBack() {
+    return popDetail();
   }
 
   void clearDetail() {
