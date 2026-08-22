@@ -71,6 +71,41 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
   final SelectionSessionController _selectionSessionController = SelectionSessionController.instance;
   int? _selectionAnchorIndex;
 
+  @override
+  void didUpdateWidget(covariant MediaRowSectionDesktop<T> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    _selectedIndexes.removeWhere((int index) => index < 0 || index >= widget.items.length);
+    if (_selectionAnchorIndex != null && (_selectionAnchorIndex! < 0 || _selectionAnchorIndex! >= widget.items.length)) {
+      _selectionAnchorIndex = null;
+    }
+
+    if (_selectedIndexes.isEmpty) {
+      _deactivateSelectionSession();
+    } else {
+      _syncSelectionSession();
+    }
+
+    if (widget.items.isEmpty) {
+      _pageStartIndex = 0;
+      return;
+    }
+    if (_pageStartIndex >= widget.items.length) {
+      _pageStartIndex = widget.items.length - 1;
+    }
+    if (_pageStartIndex < 0) {
+      _pageStartIndex = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _sectionFocusNode.dispose();
+    _deactivateSelectionSession();
+    super.dispose();
+  }
+
+  // Selection and Paging
   bool _isItemFavorite(T item, int index) {
     return widget.isRowFavorite?.call(item, index) ?? false;
   }
@@ -80,6 +115,37 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
   }
 
   bool get _isAllSelected => widget.items.isNotEmpty && _selectedIndexes.length == widget.items.length;
+
+  MediaItem? _resolvePlayableMediaItem(Object? rawItem) {
+    if (rawItem is QueueItem) {
+      return rawItem.mediaItem;
+    }
+    if (rawItem is MediaItem) {
+      return rawItem;
+    }
+    return null;
+  }
+
+  bool _isValidPlayable(MediaItem item) {
+    return item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty;
+  }
+
+  List<MediaItem> _playableItemsFromIndex(int startIndex) {
+    if (widget.items.isEmpty || startIndex < 0 || startIndex >= widget.items.length) {
+      return const <MediaItem>[];
+    }
+
+    final List<MediaItem> playItems = <MediaItem>[];
+    for (int i = startIndex; i < widget.items.length; i++) {
+      final MediaItem? resolved = _resolvePlayableMediaItem(widget.items[i]);
+      if (resolved == null || !_isValidPlayable(resolved)) {
+        continue;
+      }
+      playItems.add(resolved);
+    }
+
+    return playItems;
+  }
 
   void _emitSelectionChanged() {
     if (widget.onSelectionChanged == null) {
@@ -256,40 +322,6 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
     return math.max(1, resolvedItemWidth);
   }
 
-  @override
-  void didUpdateWidget(covariant MediaRowSectionDesktop<T> oldWidget) {
-    super.didUpdateWidget(oldWidget);
-
-    _selectedIndexes.removeWhere((int index) => index < 0 || index >= widget.items.length);
-    if (_selectionAnchorIndex != null && (_selectionAnchorIndex! < 0 || _selectionAnchorIndex! >= widget.items.length)) {
-      _selectionAnchorIndex = null;
-    }
-
-    if (_selectedIndexes.isEmpty) {
-      _deactivateSelectionSession();
-    } else {
-      _syncSelectionSession();
-    }
-
-    if (widget.items.isEmpty) {
-      _pageStartIndex = 0;
-      return;
-    }
-    if (_pageStartIndex >= widget.items.length) {
-      _pageStartIndex = widget.items.length - 1;
-    }
-    if (_pageStartIndex < 0) {
-      _pageStartIndex = 0;
-    }
-  }
-
-  @override
-  void dispose() {
-    _sectionFocusNode.dispose();
-    _deactivateSelectionSession();
-    super.dispose();
-  }
-
   int _clampStartIndex({required int visibleCount}) {
     if (widget.items.isEmpty) {
       return 0;
@@ -367,37 +399,33 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
     return widget.items.sublist(safeStart, end);
   }
 
-  MediaItem? _resolvePlayableMediaItem(Object? rawItem) {
-    if (rawItem is QueueItem) {
-      return rawItem.mediaItem;
+  void _goToPreviousPage(int visibleCount) {
+    if (_isTransitionRunning) {
+      setState(_finishRunningTransitionImmediately);
     }
-    if (rawItem is MediaItem) {
-      return rawItem;
+
+    if (_pageStartIndex <= 0) {
+      return;
     }
-    return null;
+
+    final int target = math.max(0, _pageStartIndex - visibleCount);
+    _startPageTransition(targetStartIndex: target, direction: -1);
   }
 
-  bool _isValidPlayable(MediaItem item) {
-    return item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty;
-  }
-
-  List<MediaItem> _playableItemsFromIndex(int startIndex) {
-    if (widget.items.isEmpty || startIndex < 0 || startIndex >= widget.items.length) {
-      return const <MediaItem>[];
+  void _goToNextPage(int visibleCount, int pageCount) {
+    if (_isTransitionRunning) {
+      setState(_finishRunningTransitionImmediately);
     }
 
-    final List<MediaItem> playItems = <MediaItem>[];
-    for (int i = startIndex; i < widget.items.length; i++) {
-      final MediaItem? resolved = _resolvePlayableMediaItem(widget.items[i]);
-      if (resolved == null || !_isValidPlayable(resolved)) {
-        continue;
-      }
-      playItems.add(resolved);
+    final int maxStart = math.max(0, (pageCount - 1) * visibleCount);
+    if (_pageStartIndex >= maxStart) {
+      return;
     }
-
-    return playItems;
+    final int target = math.min(maxStart, _pageStartIndex + visibleCount);
+    _startPageTransition(targetStartIndex: target, direction: 1);
   }
 
+  // Playback actions
   void _onPlayTap(int absoluteIndex) {
     final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
     if (coordinator == null) {
@@ -458,6 +486,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
     }());
   }
 
+  // Build
   Widget _buildSlideList({
     required int startIndex,
     required int visibleCount,
@@ -572,32 +601,6 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
     }
 
     return _buildDesktopMediaRowUnknownSkeleton(itemWidth: itemWidth, coverSize: coverSize);
-  }
-
-  void _goToPreviousPage(int visibleCount) {
-    if (_isTransitionRunning) {
-      setState(_finishRunningTransitionImmediately);
-    }
-
-    if (_pageStartIndex <= 0) {
-      return;
-    }
-
-    final int target = math.max(0, _pageStartIndex - visibleCount);
-    _startPageTransition(targetStartIndex: target, direction: -1);
-  }
-
-  void _goToNextPage(int visibleCount, int pageCount) {
-    if (_isTransitionRunning) {
-      setState(_finishRunningTransitionImmediately);
-    }
-
-    final int maxStart = math.max(0, (pageCount - 1) * visibleCount);
-    if (_pageStartIndex >= maxStart) {
-      return;
-    }
-    final int target = math.min(maxStart, _pageStartIndex + visibleCount);
-    _startPageTransition(targetStartIndex: target, direction: 1);
   }
 
   Widget _buildPaginationControls(BuildContext context, {required int visibleCount, required int pageCount}) {

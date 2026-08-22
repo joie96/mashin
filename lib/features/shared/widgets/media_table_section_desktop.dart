@@ -208,46 +208,6 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
     }());
   }
 
-  void _onPlayAllTap() {
-    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
-    if (coordinator == null) {
-      return;
-    }
-
-    final List<MediaItem> playItems = _playableItemsFromIndex(0);
-    if (playItems.isEmpty) {
-      return;
-    }
-
-    unawaited(() async {
-      try {
-        await coordinator.playMedia(playItems);
-      } catch (_) {
-        // Ignore failures to keep header interactions responsive.
-      }
-    }());
-  }
-
-  void _onShuffleAllTap() {
-    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
-    if (coordinator == null) {
-      return;
-    }
-
-    final List<MediaItem> playItems = _playableItemsFromIndex(0);
-    if (playItems.isEmpty) {
-      return;
-    }
-
-    unawaited(() async {
-      try {
-        await coordinator.shufflePlayMedia(playItems);
-      } catch (_) {
-        // Ignore failures to keep header interactions responsive.
-      }
-    }());
-  }
-
   void _emitSelectionChanged() {
     if (widget.onSelectionChanged == null) {
       return;
@@ -432,6 +392,48 @@ class _MediaTableSectionDesktopState<T> extends State<MediaTableSectionDesktop<T
       _currentPage = targetPage;
       _isPageFading = false;
     });
+  }
+
+
+  // Playback actions
+  void _onPlayAllTap() {
+    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
+    if (coordinator == null) {
+      return;
+    }
+
+    final List<MediaItem> playItems = _playableItemsFromIndex(0);
+    if (playItems.isEmpty) {
+      return;
+    }
+
+    unawaited(() async {
+      try {
+        await coordinator.playMedia(playItems);
+      } catch (_) {
+        // Ignore failures to keep header interactions responsive.
+      }
+    }());
+  }
+
+  void _onShuffleAllTap() {
+    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
+    if (coordinator == null) {
+      return;
+    }
+
+    final List<MediaItem> playItems = _playableItemsFromIndex(0);
+    if (playItems.isEmpty) {
+      return;
+    }
+
+    unawaited(() async {
+      try {
+        await coordinator.shufflePlayMedia(playItems);
+      } catch (_) {
+        // Ignore failures to keep header interactions responsive.
+      }
+    }());
   }
 
 
