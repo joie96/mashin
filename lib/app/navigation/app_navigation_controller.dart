@@ -6,6 +6,7 @@ import '../../features/album/album_detail_page.dart';
 import '../../features/artist/artist_detail_page.dart';
 import '../../features/home/home_screen.dart';
 import '../../features/playback/playback_coordinator.dart';
+import '../../features/playlist/playlist_detail_page.dart';
 import '../../features/search/search_screen.dart';
 
 enum AppDetailType { artist, album, playlist }
@@ -75,6 +76,14 @@ class AppNavigationController extends ChangeNotifier {
       type: AppDetailType.album,
       itemId: album.itemId,
       providerInstanceIdOrDomain: album.provider,
+    );
+  }
+
+  void openPlaylist(Playlist playlist) {
+    openDetail(
+      type: AppDetailType.playlist,
+      itemId: playlist.itemId,
+      providerInstanceIdOrDomain: playlist.provider,
     );
   }
 
@@ -219,6 +228,20 @@ class AppNavigationController extends ChangeNotifier {
       );
     }
 
+    if (detail != null && detail.type == AppDetailType.playlist) {
+      return PlaylistDetailPage(
+        key: ValueKey<String>(
+          'playlist:${detail.itemId}:${detail.providerInstanceIdOrDomain}',
+        ),
+        client: client,
+        playbackCoordinator: playbackCoordinator,
+        itemId: detail.itemId,
+        providerInstanceIdOrDomain: detail.providerInstanceIdOrDomain,
+        onOpenArtist: openArtist,
+        onOpenAlbum: openAlbum,
+      );
+    }
+
     switch (currentSection) {
       case AppSection.home:
         return HomeScreen(client: client);
@@ -248,6 +271,7 @@ class AppNavigationController extends ChangeNotifier {
           desktopSearchQuery: desktopSearchQuery,
           onOpenArtist: openArtist,
           onOpenAlbum: openAlbum,
+          onOpenPlaylist: openPlaylist,
         );
     }
   }

@@ -38,6 +38,7 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
   final PlaybackCoordinator? playbackCoordinator;
   final ValueChanged<Artist>? onArtistTap;
   final ValueChanged<Album>? onAlbumTap;
+  final ValueChanged<Playlist>? onPlaylistTap;
 
   const MediaTableSectionDesktop({
     super.key,
@@ -60,6 +61,7 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
     this.playbackCoordinator,
     this.onArtistTap,
     this.onAlbumTap,
+    this.onPlaylistTap,
   });
 
   @override
@@ -973,6 +975,7 @@ class _MediaTableSectionDesktopState<T>
         onMoreAnchorTap: _moreAnchorHandler(item, index),
         onDoubleTap: () => _onRowActivated(item: item, index: index),
         onPointerDown: onPointerDown,
+        onPlaylistTap: widget.onPlaylistTap,
       );
     }
     if (typedItem is Artist) {
@@ -1551,6 +1554,7 @@ Widget _buildDesktopTableRowPlaylist({
   ValueChanged<BuildContext>? onMoreAnchorTap,
   required VoidCallback? onDoubleTap,
   required ValueChanged<PointerDownEvent>? onPointerDown,
+  ValueChanged<Playlist>? onPlaylistTap,
 }) {
   return _buildDesktopTableRowBase(
     cells: <Widget>[
@@ -1574,10 +1578,9 @@ Widget _buildDesktopTableRowPlaylist({
       ),
       _buildDesktopTableSizedCell(
         flex: 5,
-        child: _buildDesktopBodyText(
-          _prefer(item.name, 'Unknown Playlist'),
-          TextAlign.left,
-          DesktopTextTone.primary,
+        child: _buildDesktopPlaylistLinkCell(
+          playlist: item,
+          onPlaylistTap: onPlaylistTap,
         ),
       ),
       _buildDesktopTableSizedCell(
@@ -2437,6 +2440,28 @@ Widget _buildDesktopArtistLinkCell({
               : (MediaItem media) => onArtistTap(media as Artist),
           onItemPointerDown: onArtistPointerDown,
           style: textStyles.bodySecondary.copyWith(fontSize: 13),
+        ),
+      );
+    },
+  );
+}
+
+Widget _buildDesktopPlaylistLinkCell({
+  required Playlist playlist,
+  required ValueChanged<Playlist>? onPlaylistTap,
+}) {
+  return Builder(
+    builder: (BuildContext context) {
+      final textStyles = context.mashinTableTextStyles;
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: MediaLinkText(
+          items: <MediaItem>[playlist],
+          fallbackText: _prefer(playlist.name, 'Unknown Playlist'),
+          onItemTap: onPlaylistTap == null
+              ? null
+              : (MediaItem media) => onPlaylistTap(media as Playlist),
+          style: textStyles.bodyPrimary.copyWith(fontSize: 13),
         ),
       );
     },

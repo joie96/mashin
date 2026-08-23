@@ -15,6 +15,7 @@ class SearchScreen extends StatelessWidget {
   final String desktopSearchQuery;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
+  final ValueChanged<Playlist>? onOpenPlaylist;
 
   const SearchScreen({
     super.key,
@@ -24,6 +25,7 @@ class SearchScreen extends StatelessWidget {
     this.desktopSearchQuery = '',
     this.onOpenArtist,
     this.onOpenAlbum,
+    this.onOpenPlaylist,
   });
 
   @override
@@ -42,6 +44,7 @@ class SearchScreen extends StatelessWidget {
       desktopSearchQuery: desktopSearchQuery,
       onOpenArtist: onOpenArtist,
       onOpenAlbum: onOpenAlbum,
+      onOpenPlaylist: onOpenPlaylist,
     );
   }
 }

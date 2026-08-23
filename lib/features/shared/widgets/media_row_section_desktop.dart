@@ -16,6 +16,8 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
   static const double _reservedTextHeight = 80;
   static const double _artistDefaultHeight = 184;
   static const double _artistReservedTextHeight = 40;
+  static const double _playlistDefaultHeight = 206;
+  static const double _playlistReservedTextHeight = 60;
   static const double _minItemWidth = 150;
 
   final String title;
@@ -36,6 +38,7 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
   final VoidCallback? onSelectionMenuTap;
   final ValueChanged<Artist>? onArtistTap;
   final ValueChanged<Album>? onAlbumTap;
+  final ValueChanged<Playlist>? onPlaylistTap;
 
   const MediaRowSectionDesktop({
     super.key,
@@ -57,6 +60,7 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
     this.onSelectionMenuTap,
     this.onArtistTap,
     this.onAlbumTap,
+    this.onPlaylistTap,
   });
 
   @override
@@ -713,6 +717,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         onSelectPointerDown: widget.enableSelection
             ? onSelectPointerDown
             : null,
+        onPlaylistTap: widget.onPlaylistTap,
       );
     }
     if (item is Artist) {
@@ -983,14 +988,21 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         final double resolvedItemWidth = metrics.computedItemWidth;
         final double resolvedCoverSize = _resolveCoverSize(resolvedItemWidth);
         final bool isArtistSection = T == Artist;
+        final bool isPlaylistSection = T == Playlist;
+        // Artists render one text line, playlists two, everything else three.
+        final double minSectionHeight = isArtistSection
+            ? MediaRowSectionDesktop._artistDefaultHeight
+            : isPlaylistSection
+            ? MediaRowSectionDesktop._playlistDefaultHeight
+            : MediaRowSectionDesktop._defaultHeight;
+        final double reservedTextHeight = isArtistSection
+            ? MediaRowSectionDesktop._artistReservedTextHeight
+            : isPlaylistSection
+            ? MediaRowSectionDesktop._playlistReservedTextHeight
+            : MediaRowSectionDesktop._reservedTextHeight;
         final double sectionHeight = math.max(
-          isArtistSection
-              ? MediaRowSectionDesktop._artistDefaultHeight
-              : MediaRowSectionDesktop._defaultHeight,
-          resolvedCoverSize +
-              (isArtistSection
-                  ? MediaRowSectionDesktop._artistReservedTextHeight
-                  : MediaRowSectionDesktop._reservedTextHeight),
+          minSectionHeight,
+          resolvedCoverSize + reservedTextHeight,
         );
         final int pageCount = widget.items.isEmpty
             ? 1
@@ -1438,14 +1450,19 @@ Widget _buildDesktopMediaRowPlaylist({
   required bool isSelected,
   required VoidCallback? onSelectTap,
   required ValueChanged<PointerDownEvent>? onSelectPointerDown,
+  ValueChanged<Playlist>? onPlaylistTap,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
     coverSize: coverSize,
     icon: Icons.queue_music_outlined,
     title: _prefer(item.name, 'Unknown Playlist'),
+    titleLinkItem: item,
+    onTitleTap: onPlaylistTap == null
+        ? null
+        : (MediaItem media) => onPlaylistTap(media as Playlist),
     secondaryText: _playlistSubtitle(item),
-    tertiaryText: _playlistTertiary(item),
+    tertiaryText: null,
     coverUrl: item.imageUri ?? '',
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
@@ -2162,6 +2179,7 @@ Widget _buildDesktopMediaRowPlaylistSkeleton({
   return _buildDesktopMediaRowSkeletonBase(
     itemWidth: itemWidth,
     coverSize: coverSize,
+    lineCount: 2,
   );
 }
 
@@ -2333,10 +2351,6 @@ String _playlistSubtitle(Playlist playlist) {
     return owner;
   }
   return 'Playlist';
-}
-
-String _playlistTertiary(Playlist playlist) {
-  return playlist.isEditable ? 'Editierbar' : 'Readonly';
 }
 
 String _artistTertiary(Artist artist) {

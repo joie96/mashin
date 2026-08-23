@@ -18,6 +18,7 @@ class SearchScreenDesktop extends StatefulWidget {
   final String desktopSearchQuery;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
+  final ValueChanged<Playlist>? onOpenPlaylist;
 
   const SearchScreenDesktop({
     super.key,
@@ -27,6 +28,7 @@ class SearchScreenDesktop extends StatefulWidget {
     this.desktopSearchQuery = '',
     this.onOpenArtist,
     this.onOpenAlbum,
+    this.onOpenPlaylist,
   });
 
   @override
@@ -129,6 +131,7 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             items: _controller.playlists,
             emptyText: 'Keine Playlists gefunden.',
             playbackCoordinator: widget.playbackCoordinator,
+            onPlaylistTap: widget.onOpenPlaylist,
           ),
           const SizedBox(height: 14),
           MediaRowSectionDesktop<Artist>(
