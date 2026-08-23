@@ -139,7 +139,8 @@ class _MediaTableSectionDesktopState<T>
   bool get _isPagingEnabled => widget.maxItemsPerPage > 0;
   bool get _isAllSelected =>
       widget.items.isNotEmpty && _selectedIndexes.length == widget.items.length;
-  int get _chunkSize => _isPagingEnabled ? widget.maxItemsPerPage : 0;
+    int get _chunkSize =>
+      _isPagingEnabled ? math.min(widget.maxItemsPerPage, widget.items.length) : 0;
 
   int get _pageSize {
     if (!_isPagingEnabled) {
@@ -625,14 +626,19 @@ class _MediaTableSectionDesktopState<T>
               Expanded(child: ClipRect(child: tableContent))
             else
               tableContent,
-            if (_canToggleExpand && !hasBoundedHeight)
+            if (!hasBoundedHeight)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: Center(
-                  child: _ExpandToggleButton(
-                    isExpanded: _isExpanded,
-                    onTap: _toggleExpanded,
-                  ),
+                child: SizedBox(
+                  height: 24,
+                  child: _canToggleExpand
+                      ? Center(
+                          child: _ExpandToggleButton(
+                            isExpanded: _isExpanded,
+                            onTap: _toggleExpanded,
+                          ),
+                        )
+                      : const SizedBox.shrink(),
                 ),
               ),
           ],
@@ -1032,6 +1038,7 @@ class _MediaTableSectionDesktopState<T>
         onPointerDown: onPointerDown,
         onArtistTap: widget.onArtistTap,
         onArtistPointerDown: _suppressSelectionForPointer,
+        onAlbumTap: widget.onAlbumTap,
       );
     }
 
@@ -1712,6 +1719,7 @@ Widget _buildDesktopTableRowQueue({
   required ValueChanged<PointerDownEvent>? onPointerDown,
   ValueChanged<Artist>? onArtistTap,
   ValueChanged<int>? onArtistPointerDown,
+  ValueChanged<Album>? onAlbumTap,
 }) {
   final String provider = _resolveQueueProvider(item);
   final String title = (item.mediaItem?.name.trim().isNotEmpty == true)
@@ -1724,7 +1732,6 @@ Widget _buildDesktopTableRowQueue({
       .map((artist) => artist.name.trim())
       .where((name) => name.isNotEmpty)
       .join(', ');
-  final String albumName = _stripOrEmpty(item.mediaItem?.album?.name);
 
   return _buildDesktopTableRowBase(
     cells: <Widget>[
@@ -1764,10 +1771,9 @@ Widget _buildDesktopTableRowQueue({
       ),
       _buildDesktopTableSizedCell(
         flex: 3,
-        child: _buildDesktopBodyText(
-          albumName.isEmpty ? '-' : albumName,
-          TextAlign.left,
-          DesktopTextTone.secondary,
+        child: _buildDesktopAlbumLinkCell(
+          album: item.mediaItem?.album,
+          onAlbumTap: onAlbumTap,
         ),
       ),
       _buildDesktopTableSizedCell(
