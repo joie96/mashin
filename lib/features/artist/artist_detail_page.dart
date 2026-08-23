@@ -14,6 +14,7 @@ class ArtistDetailPage extends StatelessWidget {
   final String itemId;
   final String providerInstanceIdOrDomain;
   final ValueChanged<Artist>? onOpenArtist;
+  final ValueChanged<Album>? onOpenAlbum;
 
   const ArtistDetailPage({
     super.key,
@@ -22,6 +23,7 @@ class ArtistDetailPage extends StatelessWidget {
     required this.itemId,
     required this.providerInstanceIdOrDomain,
     this.onOpenArtist,
+    this.onOpenAlbum,
   });
 
   @override
@@ -33,6 +35,7 @@ class ArtistDetailPage extends StatelessWidget {
         itemId: itemId,
         providerInstanceIdOrDomain: providerInstanceIdOrDomain,
         onOpenArtist: onOpenArtist,
+        onOpenAlbum: onOpenAlbum,
       );
     }
 
@@ -42,6 +45,7 @@ class ArtistDetailPage extends StatelessWidget {
       itemId: itemId,
       providerInstanceIdOrDomain: providerInstanceIdOrDomain,
       onOpenArtist: onOpenArtist,
+      onOpenAlbum: onOpenAlbum,
     );
   }
 }

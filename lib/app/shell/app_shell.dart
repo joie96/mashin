@@ -6,6 +6,7 @@ import '../config/app_config.dart';
 import '../../features/auth/login_screen.dart';
 import '../../features/shared/selection/selection_controller.dart';
 import '../../features/shared/selection/selection_overlay.dart';
+import '../../features/shared/widgets/media_link_text.dart';
 import '../../data/music_assistant/ma_auth_store.dart';
 import '../../data/music_assistant/ma_client.dart';
 import '../../data/music_assistant/ma_event_hub.dart';
@@ -30,24 +31,29 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   static const double _mobileSelectionOverlayBottomInset = 84;
   static const Duration _busyUiFallbackAfter = Duration(seconds: 3);
-  static const Duration _desktopSearchDebounceDuration = Duration(milliseconds: 320);
+  static const Duration _desktopSearchDebounceDuration = Duration(
+    milliseconds: 320,
+  );
 
   final AppNavigationController _navigation = AppNavigationController();
   bool _isDarkTheme = true;
   final AuthStore _authStore = AuthStore();
-  final SelectionController _selectionSessionController = SelectionController.instance;
+  final SelectionController _selectionSessionController =
+      SelectionController.instance;
   late final PlaybackCoordinator _playbackCoordinator;
 
   MusicAssistantClient? _musicAssistantClient;
   MusicAssistantEventHub? _musicAssistantEventHub;
   PlaybackState _playbackState = const PlaybackState();
-  PlaybackStateType _lastStablePlaybackStateType = PlaybackStateType.uninitialized;
+  PlaybackStateType _lastStablePlaybackStateType =
+      PlaybackStateType.uninitialized;
   DateTime? _busySince;
   bool _isQueueOverlayOpen = false;
   bool _isBootstrapping = true;
   String _baseUrl = AppConfig.defaultMusicAssistantUrl;
   String? _username;
-  final TextEditingController _desktopSearchController = TextEditingController();
+  final TextEditingController _desktopSearchController =
+      TextEditingController();
   Timer? _desktopSearchDebounce;
 
   // Getters for current Track and Queue state
@@ -83,7 +89,8 @@ class _AppShellState extends State<AppShell> {
       return 'Waehle einen Titel zum Starten';
     }
 
-    final artists = item.mediaItem?.artists
+    final artists =
+        item.mediaItem?.artists
             .map((artist) => artist.name.trim())
             .where((name) => name.isNotEmpty)
             .toList() ??
@@ -94,13 +101,18 @@ class _AppShellState extends State<AppShell> {
     return 'Unbekannte:r Interpret:in';
   }
 
+  Artist? get _currentTrackPrimaryArtist =>
+      _currentQueueItem?.mediaItem?.artists.firstOrNull;
+
   double get _currentTrackMaxSeconds {
-    final durationFromStateSeconds = ((_playbackState.durationMillis ?? 0) / 1000).toDouble();
+    final durationFromStateSeconds =
+        ((_playbackState.durationMillis ?? 0) / 1000).toDouble();
     if (durationFromStateSeconds > 0) {
       return durationFromStateSeconds;
     }
 
-    final seekMaxSeconds = ((_playbackState.seekMaxMillis ?? 0) / 1000).toDouble();
+    final seekMaxSeconds = ((_playbackState.seekMaxMillis ?? 0) / 1000)
+        .toDouble();
     if (seekMaxSeconds > 0) {
       return seekMaxSeconds;
     }
@@ -142,7 +154,8 @@ class _AppShellState extends State<AppShell> {
   }
 
   double get _currentTrackPositionSeconds {
-    final positionFromStateSeconds = ((_playbackState.positionMillis ?? 0) / 1000).toDouble();
+    final positionFromStateSeconds =
+        ((_playbackState.positionMillis ?? 0) / 1000).toDouble();
     if (positionFromStateSeconds > 0) {
       return positionFromStateSeconds;
     }
@@ -152,7 +165,8 @@ class _AppShellState extends State<AppShell> {
 
   PlaybackStateType get _effectivePlaybackStateType {
     final raw = _playbackState.playbackState;
-    final isBusy = raw == PlaybackStateType.buffering || raw == PlaybackStateType.seeking;
+    final isBusy =
+        raw == PlaybackStateType.buffering || raw == PlaybackStateType.seeking;
 
     if (!isBusy) {
       return raw;
@@ -163,7 +177,8 @@ class _AppShellState extends State<AppShell> {
       return raw;
     }
 
-    final isStaleBusy = DateTime.now().difference(busySince) > _busyUiFallbackAfter;
+    final isStaleBusy =
+        DateTime.now().difference(busySince) > _busyUiFallbackAfter;
     if (isStaleBusy) {
       return _lastStablePlaybackStateType;
     }
@@ -239,7 +254,9 @@ class _AppShellState extends State<AppShell> {
           body: SafeArea(
             top: false,
             bottom: false,
-            child: isDesktop ? _buildDesktopLayout(context) : _buildMobileLayout(context),
+            child: isDesktop
+                ? _buildDesktopLayout(context)
+                : _buildMobileLayout(context),
           ),
         );
       },
@@ -267,29 +284,34 @@ class _AppShellState extends State<AppShell> {
                           padding: const EdgeInsets.symmetric(horizontal: 22),
                           child: Text(
                             'Mashin',
-                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: colors.textPrimary,
-                            ),
+                            style: Theme.of(context).textTheme.titleLarge
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: colors.textPrimary,
+                                ),
                           ),
                         ),
                         const SizedBox(height: 22),
                         _DesktopNavItem(
                           label: 'Home',
                           icon: Icons.home_outlined,
-                          selected: _navigation.currentSection == AppSection.home,
+                          selected:
+                              _navigation.currentSection == AppSection.home,
                           onTap: () => _select(AppSection.home),
                         ),
                         _DesktopNavItem(
                           label: 'Entdecken',
                           icon: Icons.explore_outlined,
-                          selected: _navigation.currentSection == AppSection.explore,
+                          selected:
+                              _navigation.currentSection == AppSection.explore,
                           onTap: () => _select(AppSection.explore),
                         ),
                         _DesktopNavItem(
                           label: 'Favoriten',
                           icon: Icons.favorite_outlined,
-                          selected: _navigation.currentSection == AppSection.favorites,
+                          selected:
+                              _navigation.currentSection ==
+                              AppSection.favorites,
                           onTap: () => _select(AppSection.favorites),
                         ),
                       ],
@@ -329,9 +351,11 @@ class _AppShellState extends State<AppShell> {
             _DesktopPlayerBar(
               playStateType: _effectivePlaybackStateType,
               playbackState: _playbackState,
-              dontStopTheMusicEnabled: _playbackCoordinator.dontStopTheMusicEnabled ?? false,
+              dontStopTheMusicEnabled:
+                  _playbackCoordinator.dontStopTheMusicEnabled ?? false,
               trackTitle: _currentTrackTitle,
               trackSubtitle: _currentTrackSubtitle,
+              currentTrackArtist: _currentTrackPrimaryArtist,
               trackCoverUrl: _currentTrackCoverUrl,
               maxSeconds: _currentTrackMaxSeconds,
               currentSeconds: _currentTrackPositionSeconds,
@@ -345,6 +369,7 @@ class _AppShellState extends State<AppShell> {
               onSeek: _seek,
               onVolumeChanged: _setVolume,
               onOpenQueue: _openQueueOverlay,
+              onOpenArtist: _navigation.openArtist,
             ),
           ],
         ),
@@ -357,12 +382,15 @@ class _AppShellState extends State<AppShell> {
           trackCoverUrl: _currentTrackCoverUrl,
           queueTrackCountText: _queueTrackCountText,
           queueTotalDurationText: _queueTotalDurationText,
-          dontStopTheMusicEnabled: _playbackCoordinator.dontStopTheMusicEnabled ?? false,
+          dontStopTheMusicEnabled:
+              _playbackCoordinator.dontStopTheMusicEnabled ?? false,
           queueItems: _playbackCoordinator.queueItems,
           currentQueueIndex: _playbackCoordinator.currentQueueIndex,
           playbackCoordinator: _playbackCoordinator,
           onClose: _closeQueueOverlay,
           onToggleDontStopTheMusic: _toggleDontStopTheMusic,
+          onOpenArtist: _navigation.openArtist,
+          onOpenAlbum: _navigation.openAlbum,
         ),
       ],
     );
@@ -424,7 +452,8 @@ class _AppShellState extends State<AppShell> {
           trackCoverUrl: _currentTrackCoverUrl,
           queueTrackCountText: _queueTrackCountText,
           queueTotalDurationText: _queueTotalDurationText,
-          dontStopTheMusicEnabled: _playbackCoordinator.dontStopTheMusicEnabled ?? false,
+          dontStopTheMusicEnabled:
+              _playbackCoordinator.dontStopTheMusicEnabled ?? false,
           queueItems: _playbackCoordinator.queueItems,
           currentQueueIndex: _playbackCoordinator.currentQueueIndex,
           playbackCoordinator: _playbackCoordinator,
@@ -591,7 +620,10 @@ class _AppShellState extends State<AppShell> {
     final loginClient = MusicAssistantClient(baseUrl: baseUrl);
 
     try {
-      final token = await loginClient.login(username: username, password: password);
+      final token = await loginClient.login(
+        username: username,
+        password: password,
+      );
 
       final authenticatedClient = MusicAssistantClient(
         baseUrl: baseUrl,
@@ -763,7 +795,9 @@ class _AppShellState extends State<AppShell> {
 
     final nextPlaybackState = _playbackCoordinator.state;
     final nextType = nextPlaybackState.playbackState;
-    final isBusy = nextType == PlaybackStateType.buffering || nextType == PlaybackStateType.seeking;
+    final isBusy =
+        nextType == PlaybackStateType.buffering ||
+        nextType == PlaybackStateType.seeking;
 
     setState(() {
       _playbackState = nextPlaybackState;
@@ -856,7 +890,10 @@ class _DesktopTopBar extends StatelessWidget {
                       ),
                 filled: true,
                 fillColor: colors.bgSecondary,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 0,
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(20),
                   borderSide: BorderSide.none,
@@ -878,7 +915,11 @@ class _DesktopTopBar extends StatelessWidget {
           IconButton(
             tooltip: 'Theme wechseln',
             onPressed: onToggleTheme,
-            icon: Icon(isDarkTheme ? Icons.light_mode_outlined : Icons.dark_mode_outlined),
+            icon: Icon(
+              isDarkTheme
+                  ? Icons.light_mode_outlined
+                  : Icons.dark_mode_outlined,
+            ),
           ),
           const SizedBox(width: 12),
           CircleAvatar(
@@ -922,7 +963,11 @@ class _DesktopNavItem extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             child: Row(
               children: <Widget>[
-                Icon(icon, size: 20, color: selected ? colors.accent : colors.textSecondary),
+                Icon(
+                  icon,
+                  size: 20,
+                  color: selected ? colors.accent : colors.textSecondary,
+                ),
                 const SizedBox(width: 10),
                 Text(
                   label,
@@ -948,6 +993,7 @@ class _DesktopPlayerBar extends StatelessWidget {
   final bool dontStopTheMusicEnabled;
   final String trackTitle;
   final String trackSubtitle;
+  final Artist? currentTrackArtist;
   final String? trackCoverUrl;
   final double maxSeconds;
   final double currentSeconds;
@@ -961,6 +1007,7 @@ class _DesktopPlayerBar extends StatelessWidget {
   final Future<void> Function(double) onSeek;
   final ValueChanged<double> onVolumeChanged;
   final VoidCallback onOpenQueue;
+  final ValueChanged<Artist>? onOpenArtist;
 
   const _DesktopPlayerBar({
     required this.playStateType,
@@ -968,6 +1015,7 @@ class _DesktopPlayerBar extends StatelessWidget {
     required this.dontStopTheMusicEnabled,
     required this.trackTitle,
     required this.trackSubtitle,
+    this.currentTrackArtist,
     required this.trackCoverUrl,
     required this.maxSeconds,
     required this.currentSeconds,
@@ -981,24 +1029,31 @@ class _DesktopPlayerBar extends StatelessWidget {
     required this.onSeek,
     required this.onVolumeChanged,
     required this.onOpenQueue,
+    this.onOpenArtist,
   });
 
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
-    final bool hasPlaybackSession = playStateType != PlaybackStateType.uninitialized;
+    final bool hasPlaybackSession =
+        playStateType != PlaybackStateType.uninitialized;
     final bool isPlaying = playStateType == PlaybackStateType.playing;
-    final bool isBusy = playStateType == PlaybackStateType.buffering ||
-      playStateType == PlaybackStateType.seeking;
+    final bool isBusy =
+        playStateType == PlaybackStateType.buffering ||
+        playStateType == PlaybackStateType.seeking;
     final bool isShuffleActive = playbackState.shuffleEnabled == true;
     final RepeatMode repeatMode = playbackState.repeatMode ?? RepeatMode.off;
     final bool isRepeatOne = repeatMode == RepeatMode.one;
-    final IconData repeatIcon = isRepeatOne ? Icons.repeat_one_outlined : Icons.repeat_outlined;
-    final Color repeatColor = repeatMode == RepeatMode.off ? colors.textSecondary : colors.accent;
+    final IconData repeatIcon = isRepeatOne
+        ? Icons.repeat_one_outlined
+        : Icons.repeat_outlined;
+    final Color repeatColor = repeatMode == RepeatMode.off
+        ? colors.textSecondary
+        : colors.accent;
     final double clampedMaxSeconds = maxSeconds.clamp(0, 36000).toDouble();
     final double clampedCurrentSeconds = currentSeconds
-      .clamp(0, clampedMaxSeconds > 0 ? clampedMaxSeconds : 1)
-      .toDouble();
+        .clamp(0, clampedMaxSeconds > 0 ? clampedMaxSeconds : 1)
+        .toDouble();
 
     return Container(
       height: barHeight,
@@ -1028,10 +1083,16 @@ class _DesktopPlayerBar extends StatelessWidget {
                               trackCoverUrl!,
                               fit: BoxFit.cover,
                               errorBuilder: (_, _, _) {
-                                return Icon(Icons.music_note_outlined, color: colors.textSecondary);
+                                return Icon(
+                                  Icons.music_note_outlined,
+                                  color: colors.textSecondary,
+                                );
                               },
                             )
-                          : Icon(Icons.music_note_outlined, color: colors.textSecondary),
+                          : Icon(
+                              Icons.music_note_outlined,
+                              color: colors.textSecondary,
+                            ),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1044,13 +1105,24 @@ class _DesktopPlayerBar extends StatelessWidget {
                           trackTitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w600),
+                          style: TextStyle(
+                            color: colors.textPrimary,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                        Text(
-                          trackSubtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: colors.textSecondary, fontSize: 12),
+                        MediaLinkText(
+                          items: currentTrackArtist == null
+                              ? const <MediaItem>[]
+                              : <MediaItem>[currentTrackArtist!],
+                          fallbackText: trackSubtitle,
+                          onItemTap: onOpenArtist == null
+                              ? null
+                              : (MediaItem item) =>
+                                    onOpenArtist!(item as Artist),
+                          style: TextStyle(
+                            color: colors.textSecondary,
+                            fontSize: 12,
+                          ),
                         ),
                       ],
                     ),
@@ -1083,7 +1155,9 @@ class _DesktopPlayerBar extends StatelessWidget {
                         size: 32,
                         iconSize: 18,
                         onTap: hasPlaybackSession ? onToggleShuffle : null,
-                        color: isShuffleActive ? colors.accent : colors.textSecondary,
+                        color: isShuffleActive
+                            ? colors.accent
+                            : colors.textSecondary,
                       ),
                       const SizedBox(width: 12),
                       _TransportControlButton(
@@ -1107,7 +1181,8 @@ class _DesktopPlayerBar extends StatelessWidget {
                           shape: const CircleBorder(),
                           backgroundColor: colors.textPrimary,
                           foregroundColor: colors.bgPrimary,
-                          disabledBackgroundColor: colors.textPrimary.withValues(alpha: 0.45),
+                          disabledBackgroundColor: colors.textPrimary
+                              .withValues(alpha: 0.45),
                           disabledForegroundColor: colors.bgPrimary,
                           elevation: 0,
                         ),
@@ -1117,10 +1192,17 @@ class _DesktopPlayerBar extends StatelessWidget {
                                 height: 16,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(colors.bgPrimary),
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    colors.bgPrimary,
+                                  ),
                                 ),
                               )
-                            : Icon(isPlaying ? Icons.pause_sharp : Icons.play_arrow_sharp, size: 30),
+                            : Icon(
+                                isPlaying
+                                    ? Icons.pause_sharp
+                                    : Icons.play_arrow_sharp,
+                                size: 30,
+                              ),
                       ),
                       const SizedBox(width: 12),
                       _TransportControlButton(
@@ -1147,7 +1229,10 @@ class _DesktopPlayerBar extends StatelessWidget {
                       children: <Widget>[
                         Text(
                           _formatSeconds(clampedCurrentSeconds),
-                          style: TextStyle(color: colors.textTertiary, fontSize: 11),
+                          style: TextStyle(
+                            color: colors.textTertiary,
+                            fontSize: 11,
+                          ),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -1168,7 +1253,9 @@ class _DesktopPlayerBar extends StatelessWidget {
                             child: _SeekSlider(
                               value: clampedCurrentSeconds,
                               min: 0,
-                              max: clampedMaxSeconds > 0 ? clampedMaxSeconds : 1,
+                              max: clampedMaxSeconds > 0
+                                  ? clampedMaxSeconds
+                                  : 1,
                               enabled: hasPlaybackSession,
                               onSeek: onSeek,
                             ),
@@ -1177,7 +1264,10 @@ class _DesktopPlayerBar extends StatelessWidget {
                         const SizedBox(width: 10),
                         Text(
                           _formatSeconds(clampedMaxSeconds),
-                          style: TextStyle(color: colors.textTertiary, fontSize: 11),
+                          style: TextStyle(
+                            color: colors.textTertiary,
+                            fontSize: 11,
+                          ),
                         ),
                       ],
                     ),
@@ -1190,17 +1280,31 @@ class _DesktopPlayerBar extends StatelessWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: <Widget>[
-                  _PlayerBarIconButton(icon: Icons.queue_music_outlined, onTap: onOpenQueue, color: colors.textSecondary),
+                  _PlayerBarIconButton(
+                    icon: Icons.queue_music_outlined,
+                    onTap: onOpenQueue,
+                    color: colors.textSecondary,
+                  ),
                   _PlayerBarIconButton(
                     icon: Icons.cell_tower_outlined,
                     onTap: hasPlaybackSession ? onToggleDontStopTheMusic : null,
-                    color: dontStopTheMusicEnabled ? colors.accent : colors.textSecondary,
+                    color: dontStopTheMusicEnabled
+                        ? colors.accent
+                        : colors.textSecondary,
                   ),
-                  _PlayerBarIconButton(icon: Icons.devices_outlined, onTap: () {}, color: colors.textSecondary),
                   _PlayerBarIconButton(
-                    icon: playbackState.muted ? Icons.volume_off_outlined : Icons.volume_up_outlined,
+                    icon: Icons.devices_outlined,
+                    onTap: () {},
+                    color: colors.textSecondary,
+                  ),
+                  _PlayerBarIconButton(
+                    icon: playbackState.muted
+                        ? Icons.volume_off_outlined
+                        : Icons.volume_up_outlined,
                     onTap: onToggleMute,
-                    color: playbackState.muted ? colors.accent : colors.textSecondary,
+                    color: playbackState.muted
+                        ? colors.accent
+                        : colors.textSecondary,
                   ),
                   SizedBox(
                     width: 100,
@@ -1225,7 +1329,11 @@ class _DesktopPlayerBar extends StatelessWidget {
                       ),
                     ),
                   ),
-                  _PlayerBarIconButton(icon: Icons.tune_outlined, onTap: () {}, color: colors.textSecondary),
+                  _PlayerBarIconButton(
+                    icon: Icons.tune_outlined,
+                    onTap: () {},
+                    color: colors.textSecondary,
+                  ),
                 ],
               ),
             ),
@@ -1304,9 +1412,10 @@ class _SeekSliderState extends State<_SeekSlider> {
 
   @override
   Widget build(BuildContext context) {
-    final double effectiveValue = (_isDragging ? (_dragValue ?? widget.value) : widget.value)
-        .clamp(widget.min, widget.max)
-        .toDouble();
+    final double effectiveValue =
+        (_isDragging ? (_dragValue ?? widget.value) : widget.value)
+            .clamp(widget.min, widget.max)
+            .toDouble();
 
     return Slider(
       value: effectiveValue,
@@ -1350,7 +1459,8 @@ class _HoverScaleControlButton extends StatefulWidget {
   });
 
   @override
-  State<_HoverScaleControlButton> createState() => _HoverScaleControlButtonState();
+  State<_HoverScaleControlButton> createState() =>
+      _HoverScaleControlButtonState();
 }
 
 class _HoverScaleControlButtonState extends State<_HoverScaleControlButton> {
@@ -1408,7 +1518,11 @@ class _PlayerBarIconButton extends StatelessWidget {
       onPressed: onTap,
       splashRadius: 16,
       visualDensity: VisualDensity.compact,
-      icon: Icon(icon, size: 20, color: onTap == null ? color.withValues(alpha: 0.45) : color),
+      icon: Icon(
+        icon,
+        size: 20,
+        color: onTap == null ? color.withValues(alpha: 0.45) : color,
+      ),
       style: IconButton.styleFrom(
         backgroundColor: Colors.transparent,
         foregroundColor: colors.textSecondary,
@@ -1448,7 +1562,8 @@ class _MobilePlayerBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
     final bool isPlaying = playbackState == PlaybackStateType.playing;
-    final bool isBusy = playbackState == PlaybackStateType.buffering ||
+    final bool isBusy =
+        playbackState == PlaybackStateType.buffering ||
         playbackState == PlaybackStateType.seeking;
 
     return Container(
@@ -1475,16 +1590,25 @@ class _MobilePlayerBar extends StatelessWidget {
                   ? Image.network(
                       trackCoverUrl!,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => Icon(Icons.music_note_outlined, color: colors.textSecondary),
+                      errorBuilder: (_, _, _) => Icon(
+                        Icons.music_note_outlined,
+                        color: colors.textSecondary,
+                      ),
                     )
-                  : Icon(Icons.music_note_outlined, color: colors.textSecondary),
+                  : Icon(
+                      Icons.music_note_outlined,
+                      color: colors.textSecondary,
+                    ),
             ),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               trackTitle,
-              style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                color: colors.textPrimary,
+                fontWeight: FontWeight.w600,
+              ),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -1504,10 +1628,16 @@ class _MobilePlayerBar extends StatelessWidget {
                     height: 18,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(colors.textSecondary),
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        colors.textSecondary,
+                      ),
                     ),
                   )
-                : Icon(isPlaying ? Icons.pause_outlined : Icons.play_arrow_outlined),
+                : Icon(
+                    isPlaying
+                        ? Icons.pause_outlined
+                        : Icons.play_arrow_outlined,
+                  ),
           ),
           const SizedBox(width: 4),
         ],
@@ -1630,12 +1760,10 @@ class _MashinAppState extends State<MashinApp> {
       title: 'Mashin',
       debugShowCheckedModeBanner: false,
       themeMode: _themeMode,
-      theme: AppTheme.light(),  
+      theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
       builder: (BuildContext context, Widget? child) {
-        return ExcludeSemantics(
-          child: child ?? const SizedBox.shrink(),
-        );
+        return ExcludeSemantics(child: child ?? const SizedBox.shrink());
       },
       home: const AppShell(),
     );

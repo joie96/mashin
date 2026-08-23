@@ -14,6 +14,7 @@ class SearchScreen extends StatelessWidget {
   final bool desktopSearchDriven;
   final String desktopSearchQuery;
   final ValueChanged<Artist>? onOpenArtist;
+  final ValueChanged<Album>? onOpenAlbum;
 
   const SearchScreen({
     super.key,
@@ -22,12 +23,16 @@ class SearchScreen extends StatelessWidget {
     this.desktopSearchDriven = false,
     this.desktopSearchQuery = '',
     this.onOpenArtist,
+    this.onOpenAlbum,
   });
 
   @override
   Widget build(BuildContext context) {
     if (AppConfig.isMobile()) {
-      return SearchScreenMobile(client: client, playbackCoordinator: playbackCoordinator);
+      return SearchScreenMobile(
+        client: client,
+        playbackCoordinator: playbackCoordinator,
+      );
     }
 
     return SearchScreenDesktop(
@@ -36,6 +41,7 @@ class SearchScreen extends StatelessWidget {
       desktopSearchDriven: desktopSearchDriven,
       desktopSearchQuery: desktopSearchQuery,
       onOpenArtist: onOpenArtist,
+      onOpenAlbum: onOpenAlbum,
     );
   }
 }

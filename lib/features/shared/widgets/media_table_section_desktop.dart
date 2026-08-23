@@ -37,6 +37,7 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
   final DesktopRowFavoriteResolver<T>? isRowFavorite;
   final PlaybackCoordinator? playbackCoordinator;
   final ValueChanged<Artist>? onArtistTap;
+  final ValueChanged<Album>? onAlbumTap;
 
   const MediaTableSectionDesktop({
     super.key,
@@ -58,6 +59,7 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
     this.isRowFavorite,
     this.playbackCoordinator,
     this.onArtistTap,
+    this.onAlbumTap,
   });
 
   @override
@@ -1007,6 +1009,7 @@ class _MediaTableSectionDesktopState<T>
         onPointerDown: onPointerDown,
         onArtistTap: widget.onArtistTap,
         onArtistPointerDown: _suppressSelectionForPointer,
+        onAlbumTap: widget.onAlbumTap,
       );
     }
     if (typedItem is QueueItem) {
@@ -1342,6 +1345,7 @@ Widget _buildDesktopTableRowTrack({
   required ValueChanged<PointerDownEvent>? onPointerDown,
   ValueChanged<Artist>? onArtistTap,
   ValueChanged<int>? onArtistPointerDown,
+  ValueChanged<Album>? onAlbumTap,
 }) {
   return _buildDesktopTableRowBase(
     cells: <Widget>[
@@ -1381,10 +1385,9 @@ Widget _buildDesktopTableRowTrack({
       ),
       _buildDesktopTableSizedCell(
         flex: 3,
-        child: _buildDesktopBodyText(
-          _prefer(item.album?.name ?? '', '-'),
-          TextAlign.left,
-          DesktopTextTone.secondary,
+        child: _buildDesktopAlbumLinkCell(
+          album: item.album,
+          onAlbumTap: onAlbumTap,
         ),
       ),
       _buildDesktopTableSizedCell(
@@ -2427,6 +2430,29 @@ Widget _buildDesktopArtistLinkCell({
               ? null
               : (MediaItem media) => onArtistTap(media as Artist),
           onItemPointerDown: onArtistPointerDown,
+          style: textStyles.bodySecondary.copyWith(fontSize: 13),
+        ),
+      );
+    },
+  );
+}
+
+Widget _buildDesktopAlbumLinkCell({
+  required Album? album,
+  required ValueChanged<Album>? onAlbumTap,
+}) {
+  return Builder(
+    builder: (BuildContext context) {
+      final textStyles = context.mashinTableTextStyles;
+      final String name = _prefer(album?.name ?? '', '-');
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: MediaLinkText(
+          items: album == null ? const <MediaItem>[] : <MediaItem>[album],
+          fallbackText: name,
+          onItemTap: album == null || onAlbumTap == null
+              ? null
+              : (MediaItem media) => onAlbumTap(media as Album),
           style: textStyles.bodySecondary.copyWith(fontSize: 13),
         ),
       );

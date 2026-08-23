@@ -18,6 +18,8 @@ class QueueOverlayDesktop extends StatelessWidget {
   final int? currentQueueIndex;
   final PlaybackCoordinator playbackCoordinator;
   final Future<void> Function() onToggleDontStopTheMusic;
+  final ValueChanged<Artist>? onOpenArtist;
+  final ValueChanged<Album>? onOpenAlbum;
 
   const QueueOverlayDesktop({
     required this.trackTitle,
@@ -30,6 +32,8 @@ class QueueOverlayDesktop extends StatelessWidget {
     required this.currentQueueIndex,
     required this.playbackCoordinator,
     required this.onToggleDontStopTheMusic,
+    this.onOpenArtist,
+    this.onOpenAlbum,
     super.key,
   });
 
@@ -63,10 +67,18 @@ class QueueOverlayDesktop extends StatelessWidget {
                               trackCoverUrl!,
                               fit: BoxFit.cover,
                               errorBuilder: (_, _, _) {
-                                return Icon(Icons.music_note_outlined, size: 64, color: colors.textSecondary);
+                                return Icon(
+                                  Icons.music_note_outlined,
+                                  size: 64,
+                                  color: colors.textSecondary,
+                                );
                               },
                             )
-                          : Icon(Icons.music_note_outlined, size: 64, color: colors.textSecondary),
+                          : Icon(
+                              Icons.music_note_outlined,
+                              size: 64,
+                              color: colors.textSecondary,
+                            ),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -84,7 +96,11 @@ class QueueOverlayDesktop extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w700, fontSize: 16),
+                    style: TextStyle(
+                      color: colors.textPrimary,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   Text(
@@ -106,18 +122,30 @@ class QueueOverlayDesktop extends StatelessWidget {
                   children: <Widget>[
                     Text(
                       'Warteschlange',
-                      style: TextStyle(color: colors.textSecondary, fontWeight: FontWeight.w700),
+                      style: TextStyle(
+                        color: colors.textSecondary,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const SizedBox(width: 8),
                     Text('•', style: TextStyle(color: colors.textTertiary)),
                     const SizedBox(width: 8),
-                    Text(queueTrackCountText, style: TextStyle(color: colors.textTertiary)),
+                    Text(
+                      queueTrackCountText,
+                      style: TextStyle(color: colors.textTertiary),
+                    ),
                     const SizedBox(width: 8),
                     Text('•', style: TextStyle(color: colors.textTertiary)),
                     const SizedBox(width: 8),
-                    Text(queueTotalDurationText, style: TextStyle(color: colors.textTertiary)),
+                    Text(
+                      queueTotalDurationText,
+                      style: TextStyle(color: colors.textTertiary),
+                    ),
                     const Spacer(),
-                    Text('Automatische Empfehlungen:', style: TextStyle(color: colors.textSecondary)),
+                    Text(
+                      'Automatische Empfehlungen:',
+                      style: TextStyle(color: colors.textSecondary),
+                    ),
                     const SizedBox(width: 2),
                     Align(
                       alignment: Alignment.center,
@@ -144,6 +172,8 @@ class QueueOverlayDesktop extends StatelessWidget {
                     maxItemsPerPage: 0,
                     enableSelection: true,
                     playbackCoordinator: playbackCoordinator,
+                    onArtistTap: onOpenArtist,
+                    onAlbumTap: onOpenAlbum,
                   ),
                 ),
               ],

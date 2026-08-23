@@ -1,8 +1,8 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../data/music_assistant/ma_client.dart';
 import '../../data/music_assistant/ma_models.dart';
+import '../../features/album/album_detail_page.dart';
 import '../../features/artist/artist_detail_page.dart';
 import '../../features/home/home_screen.dart';
 import '../../features/playback/playback_coordinator.dart';
@@ -10,13 +10,7 @@ import '../../features/search/search_screen.dart';
 
 enum AppDetailType { artist, album, playlist }
 
-enum AppSection {
-  home,
-  explore,
-  favorites,
-  playlists,
-  search,
-}
+enum AppSection { home, explore, favorites, playlists, search }
 
 class AppDetailDestination {
   final AppDetailType type;
@@ -30,16 +24,30 @@ class AppDetailDestination {
   });
 }
 
+class _AppNavigationSnapshot {
+  const _AppNavigationSnapshot({
+    required this.section,
+    required this.desktopSearchQuery,
+    required this.detailStack,
+  });
+
+  final AppSection section;
+  final String desktopSearchQuery;
+  final List<AppDetailDestination> detailStack;
+}
+
 /// Single source of truth for in-app navigation state.
 class AppNavigationController extends ChangeNotifier {
   AppSection _currentSection = AppSection.home;
   String _desktopSearchQuery = '';
   final List<AppDetailDestination> _detailStack = <AppDetailDestination>[];
+  final List<_AppNavigationSnapshot> _history = <_AppNavigationSnapshot>[];
 
   AppSection get currentSection => _currentSection;
   String get desktopSearchQuery => _desktopSearchQuery;
-  AppDetailDestination? get activeDetail => _detailStack.isEmpty ? null : _detailStack.last;
-  bool get canGoBack => _detailStack.isNotEmpty;
+  AppDetailDestination? get activeDetail =>
+      _detailStack.isEmpty ? null : _detailStack.last;
+  bool get canGoBack => _history.isNotEmpty;
 
   void selectSection(AppSection section) {
     final bool isSameSection = _currentSection == section;
@@ -48,6 +56,7 @@ class AppNavigationController extends ChangeNotifier {
       return;
     }
 
+    _recordCurrentState();
     _currentSection = section;
     _detailStack.clear();
     notifyListeners();
@@ -58,6 +67,14 @@ class AppNavigationController extends ChangeNotifier {
       type: AppDetailType.artist,
       itemId: artist.itemId,
       providerInstanceIdOrDomain: artist.provider,
+    );
+  }
+
+  void openAlbum(Album album) {
+    openDetail(
+      type: AppDetailType.album,
+      itemId: album.itemId,
+      providerInstanceIdOrDomain: album.provider,
     );
   }
 
@@ -80,6 +97,7 @@ class AppNavigationController extends ChangeNotifier {
       return;
     }
 
+    _recordCurrentState();
     _detailStack.add(
       AppDetailDestination(
         type: type,
@@ -91,16 +109,22 @@ class AppNavigationController extends ChangeNotifier {
   }
 
   bool popDetail() {
-    if (_detailStack.isEmpty) {
-      return false;
-    }
-    _detailStack.removeLast();
-    notifyListeners();
-    return true;
+    return goBack();
   }
 
   bool goBack() {
-    return popDetail();
+    if (_history.isEmpty) {
+      return false;
+    }
+
+    final _AppNavigationSnapshot previous = _history.removeLast();
+    _currentSection = previous.section;
+    _desktopSearchQuery = previous.desktopSearchQuery;
+    _detailStack
+      ..clear()
+      ..addAll(previous.detailStack);
+    notifyListeners();
+    return true;
   }
 
   void clearDetail() {
@@ -114,9 +138,10 @@ class AppNavigationController extends ChangeNotifier {
   void onDesktopSearchChanged(String query) {
     final String trimmed = query.trim();
     _desktopSearchQuery = trimmed;
-    _detailStack.clear();
     if (trimmed.isNotEmpty && _currentSection != AppSection.search) {
+      _recordCurrentState();
       _currentSection = AppSection.search;
+      _detailStack.clear();
     }
     notifyListeners();
   }
@@ -127,6 +152,7 @@ class AppNavigationController extends ChangeNotifier {
       return;
     }
 
+    _recordCurrentState();
     _currentSection = AppSection.search;
     _detailStack.clear();
     notifyListeners();
@@ -134,18 +160,28 @@ class AppNavigationController extends ChangeNotifier {
 
   void submitDesktopSearch(String query) {
     final String trimmed = query.trim();
-    _desktopSearchQuery = trimmed;
-    _detailStack.clear();
-    if (trimmed.isNotEmpty) {
+    if (trimmed.isNotEmpty && _currentSection != AppSection.search) {
+      _recordCurrentState();
       _currentSection = AppSection.search;
+      _detailStack.clear();
     }
+    _desktopSearchQuery = trimmed;
     notifyListeners();
   }
 
   void clearDesktopSearch() {
     _desktopSearchQuery = '';
-    _detailStack.clear();
     notifyListeners();
+  }
+
+  void _recordCurrentState() {
+    _history.add(
+      _AppNavigationSnapshot(
+        section: _currentSection,
+        desktopSearchQuery: _desktopSearchQuery,
+        detailStack: List<AppDetailDestination>.of(_detailStack),
+      ),
+    );
   }
 
   Widget buildPage(
@@ -157,19 +193,35 @@ class AppNavigationController extends ChangeNotifier {
 
     if (detail != null && detail.type == AppDetailType.artist) {
       return ArtistDetailPage(
+        key: ValueKey<String>(
+          'artist:${detail.itemId}:${detail.providerInstanceIdOrDomain}',
+        ),
         client: client,
         playbackCoordinator: playbackCoordinator,
         itemId: detail.itemId,
         providerInstanceIdOrDomain: detail.providerInstanceIdOrDomain,
         onOpenArtist: openArtist,
+        onOpenAlbum: openAlbum,
+      );
+    }
+
+    if (detail != null && detail.type == AppDetailType.album) {
+      return AlbumDetailPage(
+        key: ValueKey<String>(
+          'album:${detail.itemId}:${detail.providerInstanceIdOrDomain}',
+        ),
+        client: client,
+        playbackCoordinator: playbackCoordinator,
+        itemId: detail.itemId,
+        providerInstanceIdOrDomain: detail.providerInstanceIdOrDomain,
+        onOpenArtist: openArtist,
+        onOpenAlbum: openAlbum,
       );
     }
 
     switch (currentSection) {
       case AppSection.home:
-        return HomeScreen(
-          client: client,
-        );
+        return HomeScreen(client: client);
       case AppSection.explore:
         return const _SectionPlaceholder(
           title: 'Entdecken',
@@ -195,6 +247,7 @@ class AppNavigationController extends ChangeNotifier {
           desktopSearchDriven: desktopSearchDriven,
           desktopSearchQuery: desktopSearchQuery,
           onOpenArtist: openArtist,
+          onOpenAlbum: openAlbum,
         );
     }
   }

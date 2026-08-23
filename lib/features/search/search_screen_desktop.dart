@@ -17,6 +17,7 @@ class SearchScreenDesktop extends StatefulWidget {
   final bool desktopSearchDriven;
   final String desktopSearchQuery;
   final ValueChanged<Artist>? onOpenArtist;
+  final ValueChanged<Album>? onOpenAlbum;
 
   const SearchScreenDesktop({
     super.key,
@@ -25,6 +26,7 @@ class SearchScreenDesktop extends StatefulWidget {
     this.desktopSearchDriven = false,
     this.desktopSearchQuery = '',
     this.onOpenArtist,
+    this.onOpenAlbum,
   });
 
   @override
@@ -37,7 +39,8 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
   @override
   void initState() {
     super.initState();
-    _controller = feature_search.SearchController(client: widget.client)..addListener(_onControllerChanged);
+    _controller = feature_search.SearchController(client: widget.client)
+      ..addListener(_onControllerChanged);
     unawaited(_controller.load());
 
     if (widget.desktopSearchDriven) {
@@ -80,7 +83,9 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
       children: <Widget>[
         Text(
           'Suche',
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+          style: Theme.of(
+            context,
+          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 20),
         if (!_controller.hasSearchRequest)
@@ -105,6 +110,7 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             maxItemsPerPage: 10,
             playbackCoordinator: widget.playbackCoordinator,
             onArtistTap: widget.onOpenArtist,
+            onAlbumTap: widget.onOpenAlbum,
           ),
           const SizedBox(height: 14),
           MediaRowSectionDesktop<Album>(
@@ -114,6 +120,7 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             emptyText: 'Keine Alben gefunden.',
             playbackCoordinator: widget.playbackCoordinator,
             onArtistTap: widget.onOpenArtist,
+            onAlbumTap: widget.onOpenAlbum,
           ),
           const SizedBox(height: 14),
           MediaRowSectionDesktop<Playlist>(
@@ -130,6 +137,7 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             items: _controller.artists,
             emptyText: 'Keine Artists gefunden.',
             playbackCoordinator: widget.playbackCoordinator,
+            onArtistTap: widget.onOpenArtist,
           ),
         ],
       ],

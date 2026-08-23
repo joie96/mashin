@@ -33,6 +33,7 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
   final ValueChanged<List<T>>? onSelectionChanged;
   final VoidCallback? onSelectionMenuTap;
   final ValueChanged<Artist>? onArtistTap;
+  final ValueChanged<Album>? onAlbumTap;
 
   const MediaRowSectionDesktop({
     super.key,
@@ -53,6 +54,7 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
     this.onSelectionChanged,
     this.onSelectionMenuTap,
     this.onArtistTap,
+    this.onAlbumTap,
   });
 
   @override
@@ -686,6 +688,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
             : null,
         onArtistTap: widget.onArtistTap,
         onArtistPointerDown: _suppressSelectionForPointer,
+        onAlbumTap: widget.onAlbumTap,
       );
     }
     if (item is Playlist) {
@@ -730,6 +733,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         onSelectPointerDown: widget.enableSelection
             ? onSelectPointerDown
             : null,
+        onArtistTap: widget.onArtistTap,
       );
     }
     if (item is Track) {
@@ -754,6 +758,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
             : null,
         onArtistTap: widget.onArtistTap,
         onArtistPointerDown: _suppressSelectionForPointer,
+        onAlbumTap: widget.onAlbumTap,
       );
     }
 
@@ -1382,6 +1387,7 @@ Widget _buildDesktopMediaRowAlbum({
   required ValueChanged<PointerDownEvent>? onSelectPointerDown,
   ValueChanged<Artist>? onArtistTap,
   ValueChanged<int>? onArtistPointerDown,
+  ValueChanged<Album>? onAlbumTap,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -1392,6 +1398,10 @@ Widget _buildDesktopMediaRowAlbum({
     secondaryArtists: item.artists,
     onArtistTap: onArtistTap,
     onArtistPointerDown: onArtistPointerDown,
+    titleLinkItem: item,
+    onTitleTap: onAlbumTap == null
+        ? null
+        : (MediaItem media) => onAlbumTap(media as Album),
     tertiaryText: _albumTertiary(item),
     coverUrl: item.imageUri ?? '',
     providerLabel: _providerLabelFromId(item.provider),
@@ -1455,12 +1465,17 @@ Widget _buildDesktopMediaRowArtist({
   required bool isSelected,
   required VoidCallback? onSelectTap,
   required ValueChanged<PointerDownEvent>? onSelectPointerDown,
+  ValueChanged<Artist>? onArtistTap,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
     coverSize: coverSize,
     icon: Icons.person_outlined,
     title: _prefer(item.name, 'Unknown Artist'),
+    titleLinkItem: item,
+    onTitleTap: onArtistTap == null
+        ? null
+        : (MediaItem media) => onArtistTap(media as Artist),
     secondaryText: 'Artist',
     tertiaryText: _artistTertiary(item),
     coverUrl: item.imageUri ?? '',
@@ -1493,6 +1508,7 @@ Widget _buildDesktopMediaRowTrack({
   required ValueChanged<PointerDownEvent>? onSelectPointerDown,
   ValueChanged<Artist>? onArtistTap,
   ValueChanged<int>? onArtistPointerDown,
+  ValueChanged<Album>? onAlbumTap,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -1504,6 +1520,8 @@ Widget _buildDesktopMediaRowTrack({
     onArtistTap: onArtistTap,
     onArtistPointerDown: onArtistPointerDown,
     tertiaryText: _trackTertiary(item),
+    tertiaryAlbum: item.album,
+    onAlbumTap: onAlbumTap,
     coverUrl: item.imageUri ?? '',
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
@@ -1573,6 +1591,10 @@ Widget _buildDesktopMediaRowItemBase({
   List<Artist>? secondaryArtists,
   ValueChanged<Artist>? onArtistTap,
   ValueChanged<int>? onArtistPointerDown,
+  Album? tertiaryAlbum,
+  ValueChanged<Album>? onAlbumTap,
+  MediaItem? titleLinkItem,
+  ValueChanged<MediaItem>? onTitleTap,
   bool showPlayOverlay = true,
   bool isCircularCover = false,
 }) {
@@ -1621,16 +1643,28 @@ Widget _buildDesktopMediaRowItemBase({
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text(
-                    title,
-                    maxLines: 1,
-                    textAlign: TextAlign.left,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w400,
-                      fontSize: 15,
-                    ),
-                  ),
+                  titleLinkItem == null
+                      ? Text(
+                          title,
+                          maxLines: 1,
+                          textAlign: TextAlign.left,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(
+                                fontWeight: FontWeight.w400,
+                                fontSize: 15,
+                              ),
+                        )
+                      : MediaLinkText(
+                          items: <MediaItem>[titleLinkItem],
+                          fallbackText: title,
+                          onItemTap: onTitleTap,
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(
+                                fontWeight: FontWeight.w400,
+                                fontSize: 15,
+                              ),
+                        ),
                   if (hasSecondary) ...<Widget>[
                     const SizedBox(height: 2),
                     hasArtistLinks
@@ -1660,16 +1694,29 @@ Widget _buildDesktopMediaRowItemBase({
                   ],
                   if (hasTertiary) ...<Widget>[
                     const SizedBox(height: 2),
-                    Text(
-                      tertiaryText,
-                      maxLines: 1,
-                      textAlign: TextAlign.left,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: colors.textTertiary,
-                        fontSize: 14,
-                      ),
-                    ),
+                    tertiaryAlbum == null
+                        ? Text(
+                            tertiaryText,
+                            maxLines: 1,
+                            textAlign: TextAlign.left,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: colors.textTertiary,
+                              fontSize: 14,
+                            ),
+                          )
+                        : MediaLinkText(
+                            items: <MediaItem>[tertiaryAlbum],
+                            fallbackText: tertiaryText,
+                            onItemTap: onAlbumTap == null
+                                ? null
+                                : (MediaItem media) =>
+                                      onAlbumTap(media as Album),
+                            style: TextStyle(
+                              color: colors.textTertiary,
+                              fontSize: 14,
+                            ),
+                          ),
                   ],
                 ],
               ),

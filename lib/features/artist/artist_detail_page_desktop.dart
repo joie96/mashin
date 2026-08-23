@@ -20,6 +20,7 @@ class ArtistDetailPageDesktop extends StatefulWidget {
   final String itemId;
   final String providerInstanceIdOrDomain;
   final ValueChanged<Artist>? onOpenArtist;
+  final ValueChanged<Album>? onOpenAlbum;
 
   const ArtistDetailPageDesktop({
     super.key,
@@ -28,6 +29,7 @@ class ArtistDetailPageDesktop extends StatefulWidget {
     required this.itemId,
     required this.providerInstanceIdOrDomain,
     this.onOpenArtist,
+    this.onOpenAlbum,
   });
 
   @override
@@ -67,11 +69,8 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
     super.dispose();
   }
 
-  // TODO(navigation): Ersetzen, sobald die Album-Detailseite existiert.
   void _openAlbum(Album album) {
-    debugPrint(
-      'TODO: Album-Detailseite öffnen: ${album.name} (${album.itemId})',
-    );
+    widget.onOpenAlbum?.call(album);
   }
 
   // TODO(playlists): Ersetzen, sobald die Playlist-Verwaltung existiert.
@@ -303,6 +302,7 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
                         (Album item, int index, Offset globalPosition) =>
                             _showItemMenuAtPosition(item, globalPosition),
                     onArtistTap: _openArtist,
+                    onAlbumTap: _openAlbum,
                   ),
                   const SizedBox(height: 24),
                   MediaRowSectionDesktop<Artist>(
@@ -321,6 +321,7 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
                     onRowContextMenu:
                         (Artist item, int index, Offset globalPosition) =>
                             _showItemMenuAtPosition(item, globalPosition),
+                    onArtistTap: widget.onOpenArtist,
                   ),
                   const SizedBox(height: 24),
                   MediaTableSectionDesktop<Track>(
@@ -341,6 +342,7 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
                         (Track item, int index, Offset globalPosition) =>
                             _showItemMenuAtPosition(item, globalPosition),
                     onArtistTap: _openArtist,
+                    onAlbumTap: _openAlbum,
                   ),
                 ],
               ),

@@ -42,6 +42,20 @@ class ArtistDetailController extends ChangeNotifier {
   bool _isArtistFavorite = false;
   final Map<String, bool> _favoriteOverrides = <String, bool>{};
   bool _isDescriptionExpanded = false;
+  bool _isDisposed = false;
+
+  @override
+  void notifyListeners() {
+    if (!_isDisposed) {
+      super.notifyListeners();
+    }
+  }
+
+  @override
+  void dispose() {
+    _isDisposed = true;
+    super.dispose();
+  }
 
   Artist? get artist => _artist;
   List<Album> get albums => _albums;

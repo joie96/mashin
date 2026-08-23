@@ -19,6 +19,7 @@ class ArtistDetailPageMobile extends StatefulWidget {
   final String itemId;
   final String providerInstanceIdOrDomain;
   final ValueChanged<Artist>? onOpenArtist;
+  final ValueChanged<Album>? onOpenAlbum;
 
   const ArtistDetailPageMobile({
     super.key,
@@ -27,6 +28,7 @@ class ArtistDetailPageMobile extends StatefulWidget {
     required this.itemId,
     required this.providerInstanceIdOrDomain,
     this.onOpenArtist,
+    this.onOpenAlbum,
   });
 
   @override

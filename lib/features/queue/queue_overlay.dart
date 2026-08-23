@@ -22,6 +22,8 @@ class QueueOverlay extends StatefulWidget {
     this.desktopBottomInset = 0,
     required this.onClose,
     required this.onToggleDontStopTheMusic,
+    this.onOpenArtist,
+    this.onOpenAlbum,
     super.key,
   });
 
@@ -39,6 +41,8 @@ class QueueOverlay extends StatefulWidget {
   final double desktopBottomInset;
   final VoidCallback onClose;
   final Future<void> Function() onToggleDontStopTheMusic;
+  final ValueChanged<Artist>? onOpenArtist;
+  final ValueChanged<Album>? onOpenAlbum;
 
   @override
   State<QueueOverlay> createState() => _QueueOverlayState();
@@ -62,14 +66,18 @@ class _QueueOverlayState extends State<QueueOverlay> {
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
     final bool interactable = widget.isOpen || _dragOffset > 0;
-    final double panelBottomInset = widget.isDesktop ? widget.desktopBottomInset : 0;
+    final double panelBottomInset = widget.isDesktop
+        ? widget.desktopBottomInset
+        : 0;
 
     return IgnorePointer(
       ignoring: !interactable,
       child: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints constraints) {
           final double viewportHeight = constraints.maxHeight;
-          final double panelHeight = (viewportHeight - panelBottomInset).clamp(0, viewportHeight).toDouble();
+          final double panelHeight = (viewportHeight - panelBottomInset)
+              .clamp(0, viewportHeight)
+              .toDouble();
 
           return Stack(
             children: <Widget>[
@@ -105,7 +113,9 @@ class _QueueOverlayState extends State<QueueOverlay> {
                                   return;
                                 }
 
-                                final double next = _dragOffset + (details.delta.dy * _dragResistance);
+                                final double next =
+                                    _dragOffset +
+                                    (details.delta.dy * _dragResistance);
                                 setState(() {
                                   _dragOffset = next < 0 ? 0 : next;
                                 });
@@ -128,7 +138,9 @@ class _QueueOverlayState extends State<QueueOverlay> {
                         child: Center(
                           child: Container(
                             constraints: BoxConstraints(
-                              maxWidth: widget.isDesktop ? 1400 : double.infinity,
+                              maxWidth: widget.isDesktop
+                                  ? 1400
+                                  : double.infinity,
                               minHeight: panelHeight,
                               maxHeight: panelHeight,
                             ),
@@ -136,7 +148,9 @@ class _QueueOverlayState extends State<QueueOverlay> {
                               color: colors.bgSecondary,
                               borderRadius: widget.isDesktop
                                   ? BorderRadius.zero
-                                  : const BorderRadius.vertical(top: Radius.circular(20)),
+                                  : const BorderRadius.vertical(
+                                      top: Radius.circular(20),
+                                    ),
                               border: Border(
                                 top: BorderSide(color: colors.border),
                               ),
@@ -146,23 +160,34 @@ class _QueueOverlayState extends State<QueueOverlay> {
                                     trackTitle: widget.trackTitle,
                                     trackSubtitle: widget.trackSubtitle,
                                     trackCoverUrl: widget.trackCoverUrl,
-                                    queueTrackCountText: widget.queueTrackCountText,
-                                    queueTotalDurationText: widget.queueTotalDurationText,
-                                    dontStopTheMusicEnabled: widget.dontStopTheMusicEnabled,
+                                    queueTrackCountText:
+                                        widget.queueTrackCountText,
+                                    queueTotalDurationText:
+                                        widget.queueTotalDurationText,
+                                    dontStopTheMusicEnabled:
+                                        widget.dontStopTheMusicEnabled,
                                     queueItems: widget.queueItems,
                                     currentQueueIndex: widget.currentQueueIndex,
-                                    playbackCoordinator: widget.playbackCoordinator,
-                                    onToggleDontStopTheMusic: widget.onToggleDontStopTheMusic,
+                                    playbackCoordinator:
+                                        widget.playbackCoordinator,
+                                    onToggleDontStopTheMusic:
+                                        widget.onToggleDontStopTheMusic,
+                                    onOpenArtist: widget.onOpenArtist,
+                                    onOpenAlbum: widget.onOpenAlbum,
                                   )
                                 : SafeArea(
                                     top: true,
                                     bottom: false,
                                     child: QueueOverlayMobile(
-                                      queueTrackCountText: widget.queueTrackCountText,
-                                      queueTotalDurationText: widget.queueTotalDurationText,
+                                      queueTrackCountText:
+                                          widget.queueTrackCountText,
+                                      queueTotalDurationText:
+                                          widget.queueTotalDurationText,
                                       queueItems: widget.queueItems,
-                                      currentQueueIndex: widget.currentQueueIndex,
-                                      playbackCoordinator: widget.playbackCoordinator,
+                                      currentQueueIndex:
+                                          widget.currentQueueIndex,
+                                      playbackCoordinator:
+                                          widget.playbackCoordinator,
                                       onClose: widget.onClose,
                                     ),
                                   ),

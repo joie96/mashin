@@ -1,0 +1,462 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import '../../app/theme/app_theme.dart';
+import '../../data/music_assistant/ma_client.dart';
+import '../../data/music_assistant/ma_models.dart';
+import '../playback/playback_coordinator.dart';
+import '../shared/context_menu/context_menu_controller.dart';
+import '../shared/widgets/media_link_text.dart';
+import '../shared/widgets/media_row_section_desktop.dart';
+import '../shared/widgets/media_table_section_desktop.dart';
+import 'album_detail_controller.dart';
+
+class AlbumDetailPageDesktop extends StatefulWidget {
+  const AlbumDetailPageDesktop({
+    super.key,
+    required this.client,
+    required this.playbackCoordinator,
+    required this.itemId,
+    required this.providerInstanceIdOrDomain,
+    this.onOpenArtist,
+    this.onOpenAlbum,
+  });
+
+  final MusicAssistantClient client;
+  final PlaybackCoordinator playbackCoordinator;
+  final String itemId;
+  final String providerInstanceIdOrDomain;
+  final ValueChanged<Artist>? onOpenArtist;
+  final ValueChanged<Album>? onOpenAlbum;
+
+  @override
+  State<AlbumDetailPageDesktop> createState() => _AlbumDetailPageDesktopState();
+}
+
+class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
+  static const double _coverSize = 200;
+
+  late final AlbumDetailController _controller;
+  final GlobalKey _headerMenuAnchorKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AlbumDetailController(
+      client: widget.client,
+      playbackCoordinator: widget.playbackCoordinator,
+      itemId: widget.itemId,
+      providerInstanceIdOrDomain: widget.providerInstanceIdOrDomain,
+    )..addListener(_onControllerChanged);
+    unawaited(_controller.loadAlbum());
+  }
+
+  @override
+  void dispose() {
+    _controller
+      ..removeListener(_onControllerChanged)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _onControllerChanged() {
+    if (mounted) setState(() {});
+  }
+
+  List<ContextMenuAction> _buildItemMenuActions(MediaItem item) {
+    final bool isFavorite = _controller.isItemFavorite(item);
+    return <ContextMenuAction>[
+      ContextMenuAction(
+        label: 'Abspielen',
+        icon: Icons.play_arrow,
+        onSelected: () =>
+            widget.playbackCoordinator.playMedia(<MediaItem>[item]),
+      ),
+      ContextMenuAction(
+        label: 'Radio starten',
+        icon: Icons.radio_outlined,
+        onSelected: () => item is Track
+            ? _controller.startTrackRadio(item)
+            : _controller.startItemRadio(item),
+      ),
+      ContextMenuAction(
+        label: 'Als Nächstes spielen',
+        icon: Icons.keyboard_return,
+        iconQuarterTurns: 2,
+        onSelected: () =>
+            widget.playbackCoordinator.playMediaNext(<MediaItem>[item]),
+      ),
+      ContextMenuAction(
+        label: 'Als Letztes spielen',
+        icon: Icons.last_page,
+        onSelected: () =>
+            widget.playbackCoordinator.playMediaLast(<MediaItem>[item]),
+      ),
+      const ContextMenuAction.separator(),
+      ContextMenuAction(
+        label: isFavorite
+            ? 'Aus Favoriten entfernen'
+            : 'Zu Favoriten hinzufügen',
+        icon: isFavorite
+            ? Icons.favorite_outlined
+            : Icons.favorite_border_outlined,
+        isDestructive: isFavorite,
+        onSelected: () => _controller.toggleItemFavorite(item),
+      ),
+    ];
+  }
+
+  List<ContextMenuAction> _buildHeaderMenuActions(Album album) {
+    return <ContextMenuAction>[
+      ContextMenuAction(
+        label: 'Als Nächstes spielen',
+        icon: Icons.keyboard_return,
+        iconQuarterTurns: 2,
+        onSelected: () =>
+            widget.playbackCoordinator.playMediaNext(<MediaItem>[album]),
+      ),
+      ContextMenuAction(
+        label: 'Als Letztes spielen',
+        icon: Icons.last_page,
+        onSelected: () =>
+            widget.playbackCoordinator.playMediaLast(<MediaItem>[album]),
+      ),
+      const ContextMenuAction.separator(),
+      ContextMenuAction(
+        label: _controller.isAlbumFavorite
+            ? 'Aus Favoriten entfernen'
+            : 'Zu Favoriten hinzufügen',
+        icon: _controller.isAlbumFavorite
+            ? Icons.favorite_outlined
+            : Icons.favorite_border_outlined,
+        isDestructive: _controller.isAlbumFavorite,
+        onSelected: _controller.toggleAlbumFavorite,
+      ),
+    ];
+  }
+
+  Future<void> _showItemMenu(MediaItem item, {BuildContext? anchorContext}) {
+    return const AppContextMenuController().show(
+      context: context,
+      anchorContext: anchorContext,
+      actions: _buildItemMenuActions(item),
+    );
+  }
+
+  Future<void> _showItemMenuAtPosition(MediaItem item, Offset position) {
+    return const AppContextMenuController().show(
+      context: context,
+      globalPosition: position,
+      actions: _buildItemMenuActions(item),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+    return Container(
+      color: colors.bgPrimary,
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            _buildHeader(context, colors),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  if (_controller.isLoadingMetadata ||
+                      _controller.hasDescription) ...<Widget>[
+                    const SizedBox(height: 24),
+                    _buildDescription(context, colors),
+                  ],
+                  const SizedBox(height: 24),
+                  MediaTableSectionDesktop<Track>(
+                    title: 'Titel',
+                    isLoading: _controller.isLoadingTracks,
+                    items: _controller.tracks,
+                    emptyText: 'Keine Titel gefunden.',
+                    maxItemsPerPage: 15,
+                    playbackCoordinator: widget.playbackCoordinator,
+                    isRowFavorite: (Track item, int _) =>
+                        _controller.isItemFavorite(item),
+                    onRowFavoriteTap: (Track item, int _) =>
+                        _controller.toggleItemFavorite(item),
+                    onRowMoreAnchorTap:
+                        (Track item, int _, BuildContext anchor) =>
+                            _showItemMenu(item, anchorContext: anchor),
+                    onRowContextMenu: (Track item, int _, Offset position) =>
+                        _showItemMenuAtPosition(item, position),
+                    onArtistTap: widget.onOpenArtist,
+                    onAlbumTap: widget.onOpenAlbum,
+                  ),
+                  const SizedBox(height: 24),
+                  MediaRowSectionDesktop<Album>(
+                    title: 'Weitere Alben von ${_controller.artistName}',
+                    isLoading: _controller.isLoadingOtherAlbums,
+                    items: _controller.otherAlbums,
+                    emptyText: 'Keine weiteren Alben gefunden.',
+                    playbackCoordinator: widget.playbackCoordinator,
+                    isRowFavorite: (Album item, int _) =>
+                        _controller.isItemFavorite(item),
+                    onRowFavoriteTap: (Album item, int _) =>
+                        _controller.toggleItemFavorite(item),
+                    onRowMoreAnchorTap:
+                        (Album item, int _, BuildContext anchor) =>
+                            _showItemMenu(item, anchorContext: anchor),
+                    onRowContextMenu: (Album item, int _, Offset position) =>
+                        _showItemMenuAtPosition(item, position),
+                    onArtistTap: widget.onOpenArtist,
+                    onAlbumTap: widget.onOpenAlbum,
+                  ),
+                  const SizedBox(height: 24),
+                  MediaRowSectionDesktop<Artist>(
+                    title: 'Ähnliche Interpreten',
+                    isLoading: _controller.isLoadingSimilarArtists,
+                    items: _controller.similarArtists,
+                    emptyText: 'Keine ähnlichen Interpreten gefunden.',
+                    playbackCoordinator: widget.playbackCoordinator,
+                    isRowFavorite: (Artist item, int _) =>
+                        _controller.isItemFavorite(item),
+                    onRowFavoriteTap: (Artist item, int _) =>
+                        _controller.toggleItemFavorite(item),
+                    onRowMoreAnchorTap:
+                        (Artist item, int _, BuildContext anchor) =>
+                            _showItemMenu(item, anchorContext: anchor),
+                    onRowContextMenu: (Artist item, int _, Offset position) =>
+                        _showItemMenuAtPosition(item, position),
+                    onArtistTap: widget.onOpenArtist,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(BuildContext context, MashinColors colors) {
+    final Album? album = _controller.album;
+    final bool isLoading = _controller.isLoadingMetadata;
+    return SizedBox(
+      height: _coverSize + 24,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            _buildCover(colors, album, isLoading),
+            const SizedBox(width: 30),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: <Widget>[
+                  Text(
+                    'ALBUM',
+                    style: TextStyle(
+                      color: colors.textSecondary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    _controller.albumName,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: <Widget>[
+                      Flexible(
+                        child: MediaLinkText(
+                          items:
+                              album?.artists.take(1).toList() ??
+                              const <Artist>[],
+                          fallbackText: _controller.artistName,
+                          onItemTap: widget.onOpenArtist == null
+                              ? null
+                              : (MediaItem item) =>
+                                    widget.onOpenArtist!(item as Artist),
+                          style: TextStyle(color: colors.textSecondary),
+                        ),
+                      ),
+                      Text(
+                        '${_controller.yearText.isEmpty ? '' : ' • ${_controller.yearText}'} • ${_controller.tracks.length} Titel',
+                        style: TextStyle(color: colors.textSecondary),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  if (!isLoading)
+                    Row(
+                      children: <Widget>[
+                        _HeaderActionButton(
+                          icon: Icons.play_arrow,
+                          label: 'Abspielen',
+                          onTap: _controller.playAlbum,
+                        ),
+                        const SizedBox(width: 12),
+                        _HeaderActionButton(
+                          icon: Icons.shuffle,
+                          label: 'Zufällig',
+                          onTap: _controller.shuffleAlbum,
+                        ),
+                        const SizedBox(width: 24),
+                        _HeaderIconButton(
+                          tooltip: _controller.isAlbumFavorite
+                              ? 'Favorit entfernen'
+                              : 'Zu Favoriten hinzufügen',
+                          icon: _controller.isAlbumFavorite
+                              ? Icons.favorite
+                              : Icons.favorite_border_outlined,
+                          onTap: _controller.toggleAlbumFavorite,
+                        ),
+                        const SizedBox(width: 12),
+                        _HeaderIconButton(
+                          key: _headerMenuAnchorKey,
+                          tooltip: 'Weitere Optionen',
+                          icon: Icons.more_horiz_outlined,
+                          onTap: album == null
+                              ? null
+                              : () => unawaited(
+                                  const AppContextMenuController().show(
+                                    context: context,
+                                    anchorContext:
+                                        _headerMenuAnchorKey.currentContext,
+                                    actions: _buildHeaderMenuActions(album),
+                                  ),
+                                ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCover(MashinColors colors, Album? album, bool isLoading) {
+    final String? uri = album?.imageUri;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: _coverSize,
+        height: _coverSize,
+        color: colors.bgTertiary,
+        child: isLoading
+            ? null
+            : uri == null || uri.trim().isEmpty
+            ? Icon(Icons.album_outlined, color: colors.accent, size: 72)
+            : Image.network(
+                uri,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) =>
+                    Icon(Icons.album_outlined, color: colors.accent, size: 72),
+              ),
+      ),
+    );
+  }
+
+  Widget _buildDescription(BuildContext context, MashinColors colors) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          'Über ${_controller.albumName}',
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 16),
+        GestureDetector(
+          onTap: _controller.toggleDescription,
+          child: Text(
+            _controller.description ?? '',
+            maxLines: _controller.descriptionMaxLines,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: colors.textSecondary),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _HeaderActionButton extends StatelessWidget {
+  const _HeaderActionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+    return Material(
+      color: colors.textPrimary,
+      borderRadius: BorderRadius.circular(26),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(26),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(icon, size: 20, color: colors.bgPrimary),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  color: colors.bgPrimary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HeaderIconButton extends StatelessWidget {
+  const _HeaderIconButton({
+    super.key,
+    required this.tooltip,
+    required this.icon,
+    required this.onTap,
+  });
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback? onTap;
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: SizedBox(
+          width: 28,
+          height: 28,
+          child: Icon(icon, size: 18, color: colors.textSecondary),
+        ),
+      ),
+    );
+  }
+}
