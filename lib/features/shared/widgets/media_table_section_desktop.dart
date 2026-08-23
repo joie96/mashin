@@ -81,7 +81,6 @@ class _MediaTableSectionDesktopState<T>
   final Object _selectionSessionOwner = Object();
   final SelectionController _selectionSessionController =
       SelectionController.instance;
-  final PageController _desktopChunkPageController = PageController();
   final Set<int> _suppressedSelectionPointers = <int>{};
   int? _selectionAnchorIndex;
   int _currentPage = 0;
@@ -120,19 +119,12 @@ class _MediaTableSectionDesktopState<T>
     final int lastPage = _pageCount > 0 ? _pageCount - 1 : 0;
     if (_currentPage > lastPage) {
       _currentPage = lastPage;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_desktopChunkPageController.hasClients) {
-          return;
-        }
-        _desktopChunkPageController.jumpToPage(_currentPage);
-      });
     }
   }
 
   @override
   void dispose() {
     _sectionFocusNode.dispose();
-    _desktopChunkPageController.dispose();
     _deactivateSelectionSession();
     super.dispose();
   }
@@ -499,10 +491,6 @@ class _MediaTableSectionDesktopState<T>
       return;
     }
 
-    if (_desktopChunkPageController.hasClients) {
-      _desktopChunkPageController.jumpToPage(targetPage);
-    }
-
     setState(() {
       _currentPage = targetPage;
       _isPageFading = false;
@@ -785,51 +773,12 @@ class _MediaTableSectionDesktopState<T>
             duration: _desktopPageFadeDuration,
             curve: Curves.easeOut,
             opacity: _isPageFading ? 0 : 1,
-            child: PageView.builder(
-              controller: _desktopChunkPageController,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: _pageCount,
-              onPageChanged: (int page) {
-                if (page == _currentPage) {
-                  return;
-                }
-                setState(() {
-                  _currentPage = page;
-                });
-              },
-              itemBuilder: (BuildContext context, int pageIndex) {
-                final int start = pageIndex * _chunkSize;
-                final int end = (start + _chunkSize).clamp(
-                  0,
-                  widget.items.length,
-                );
-                final List<T> chunkItems = widget.items.sublist(start, end);
-
-                return ListView.builder(
-                  primary: false,
-                  shrinkWrap: !useInternalScroll,
-                  physics: useInternalScroll
-                      ? const ClampingScrollPhysics()
-                      : const NeverScrollableScrollPhysics(),
-                  addAutomaticKeepAlives: false,
-                  addRepaintBoundaries: true,
-                  addSemanticIndexes: false,
-                  itemCount: chunkItems.length,
-                  itemExtent: _desktopRowExtent,
-                  itemBuilder: (BuildContext context, int index) {
-                    final int itemIndex = start + index;
-                    return _buildDesktopTypedRow(
-                      item: chunkItems[index],
-                      index: itemIndex,
-                      isFirst: index == 0,
-                      isSelected: _selectedIndexes.contains(itemIndex),
-                      onToggleSelected: () => _toggleSelectedIndex(itemIndex),
-                      onPointerDown: (PointerDownEvent event) =>
-                          _handleRowPointerDown(itemIndex, event),
-                    );
-                  },
-                );
-              },
+            child: KeyedSubtree(
+              key: ValueKey<int>(_currentPage),
+              child: _buildDesktopPageList(
+                pageIndex: _currentPage,
+                useInternalScroll: useInternalScroll,
+              ),
             ),
           )
         : expandedList;
@@ -868,11 +817,45 @@ class _MediaTableSectionDesktopState<T>
                 ),
               );
             },
-            child: expandedList,
+            child: _isExpanded ? expandedList : list,
           )
         else
           list,
       ],
+    );
+  }
+
+  Widget _buildDesktopPageList({
+    required int pageIndex,
+    required bool useInternalScroll,
+  }) {
+    final int start = pageIndex * _chunkSize;
+    final int end = math.min(start + _chunkSize, widget.items.length);
+    final List<T> chunkItems = widget.items.sublist(start, end);
+
+    return ListView.builder(
+      primary: false,
+      shrinkWrap: !useInternalScroll,
+      physics: useInternalScroll
+          ? const ClampingScrollPhysics()
+          : const NeverScrollableScrollPhysics(),
+      addAutomaticKeepAlives: false,
+      addRepaintBoundaries: true,
+      addSemanticIndexes: false,
+      itemCount: chunkItems.length,
+      itemExtent: _desktopRowExtent,
+      itemBuilder: (BuildContext context, int index) {
+        final int itemIndex = start + index;
+        return _buildDesktopTypedRow(
+          item: chunkItems[index],
+          index: itemIndex,
+          isFirst: index == 0,
+          isSelected: _selectedIndexes.contains(itemIndex),
+          onToggleSelected: () => _toggleSelectedIndex(itemIndex),
+          onPointerDown: (PointerDownEvent event) =>
+              _handleRowPointerDown(itemIndex, event),
+        );
+      },
     );
   }
 

@@ -322,7 +322,6 @@ class _AppShellState extends State<AppShell> {
                     child: Column(
                       children: <Widget>[
                         _DesktopTopBar(
-                          title: _titleForSection(_navigation.currentSection),
                           canGoBack: _navigation.canGoBack,
                           onBack: _onBack,
                           onToggleTheme: _toggleTheme,
@@ -536,21 +535,6 @@ class _AppShellState extends State<AppShell> {
 
   void _onBack() {
     _navigation.goBack();
-  }
-
-  String _titleForSection(AppSection section) {
-    switch (section) {
-      case AppSection.home:
-        return 'Home';
-      case AppSection.explore:
-        return 'Entdecken';
-      case AppSection.favorites:
-        return 'Favoriten';
-      case AppSection.playlists:
-        return 'Playlists';
-      case AppSection.search:
-        return 'Suche';
-    }
   }
 
   // Session & Login Management
@@ -830,7 +814,6 @@ class _AppShellState extends State<AppShell> {
 
 // Desktop UI Components
 class _DesktopTopBar extends StatelessWidget {
-  final String title;
   final bool canGoBack;
   final VoidCallback onBack;
   final VoidCallback onToggleTheme;
@@ -841,7 +824,6 @@ class _DesktopTopBar extends StatelessWidget {
   final VoidCallback onClearSearch;
 
   const _DesktopTopBar({
-    required this.title,
     required this.canGoBack,
     required this.onBack,
     required this.onToggleTheme,
@@ -857,7 +839,7 @@ class _DesktopTopBar extends StatelessWidget {
     final colors = context.mashinColors;
 
     return Container(
-      height: 84,
+      height: 62,
       decoration: BoxDecoration(
         color: colors.bgPrimary,
         border: Border(bottom: BorderSide(color: colors.border)),
@@ -884,58 +866,75 @@ class _DesktopTopBar extends StatelessWidget {
           ),
           const SizedBox(width: 18),
           Expanded(
-            child: TextField(
-              controller: searchController,
-              textInputAction: TextInputAction.search,
-              decoration: InputDecoration(
-                hintText: 'Kuenstler:innen, Songs, Alben ...',
-                hintStyle: TextStyle(color: colors.textTertiary),
-                prefixIcon: const Icon(Icons.search_outlined),
-                suffixIcon: searchController.text.trim().isEmpty
-                    ? null
-                    : IconButton(
-                        tooltip: 'Leeren',
-                        onPressed: onClearSearch,
-                        icon: const Icon(Icons.close_outlined),
-                      ),
-                filled: true,
-                fillColor: colors.bgSecondary,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 0,
+            child: SizedBox(
+              height: 36,
+              child: TextField(
+                controller: searchController,
+                textInputAction: TextInputAction.search,
+                style: const TextStyle(fontSize: 14),
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: 'Kuenstler:innen, Songs, Alben ...',
+                  hintStyle: TextStyle(
+                    color: colors.textTertiary,
+                    fontSize: 14,
+                  ),
+                  prefixIcon: const Icon(Icons.search_outlined, size: 18),
+                  prefixIconConstraints: const BoxConstraints(
+                    minWidth: 38,
+                    minHeight: 36,
+                  ),
+                  suffixIcon: searchController.text.trim().isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: 'Leeren',
+                          onPressed: onClearSearch,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minWidth: 36,
+                            minHeight: 36,
+                          ),
+                          icon: const Icon(Icons.close_outlined, size: 16),
+                        ),
+                  filled: true,
+                  fillColor: colors.bgSecondary,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 0,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(18),
+                    borderSide: BorderSide.none,
+                  ),
                 ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  borderSide: BorderSide.none,
-                ),
+                onChanged: onSearchChanged,
+                onSubmitted: onSearchSubmitted,
               ),
-              onChanged: onSearchChanged,
-              onSubmitted: onSearchSubmitted,
-            ),
-          ),
-          const SizedBox(width: 18),
-          Text(
-            title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: colors.textSecondary,
-              fontWeight: FontWeight.w600,
             ),
           ),
           const SizedBox(width: 14),
           IconButton(
             tooltip: 'Theme wechseln',
             onPressed: onToggleTheme,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            visualDensity: VisualDensity.compact,
             icon: Icon(
               isDarkTheme
                   ? Icons.light_mode_outlined
                   : Icons.dark_mode_outlined,
+              size: 18,
             ),
           ),
           const SizedBox(width: 12),
           CircleAvatar(
-            radius: 18,
+            radius: 16,
             backgroundColor: colors.bgTertiary,
-            child: Icon(Icons.person_outlined, color: colors.textSecondary),
+            child: Icon(
+              Icons.person_outlined,
+              size: 18,
+              color: colors.textSecondary,
+            ),
           ),
           const SizedBox(width: 24),
         ],
