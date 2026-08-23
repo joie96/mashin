@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -241,107 +242,151 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
   Widget _buildHeader(BuildContext context, MashinColors colors) {
     final Album? album = _controller.album;
     final bool isLoading = _controller.isLoadingMetadata;
+    final String? imageUri = album?.imageUri;
+    final bool showBlurredBackground =
+        !isLoading && imageUri != null && imageUri.trim().isNotEmpty;
     return SizedBox(
       height: _coverSize + 24,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            _buildCover(colors, album, isLoading),
-            const SizedBox(width: 30),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: <Widget>[
-                  Text(
-                    'ALBUM',
-                    style: TextStyle(
-                      color: colors.textSecondary,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    _controller.albumName,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: <Widget>[
-                      Flexible(
-                        child: MediaLinkText(
-                          items:
-                              album?.artists.take(1).toList() ??
-                              const <Artist>[],
-                          fallbackText: _controller.artistName,
-                          onItemTap: widget.onOpenArtist == null
-                              ? null
-                              : (MediaItem item) =>
-                                    widget.onOpenArtist!(item as Artist),
-                          style: TextStyle(color: colors.textSecondary),
-                        ),
-                      ),
-                      Text(
-                        '${_controller.yearText.isEmpty ? '' : ' • ${_controller.yearText}'} • ${_controller.tracks.length} Titel',
-                        style: TextStyle(color: colors.textSecondary),
-                      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          if (showBlurredBackground)
+            IgnorePointer(
+              child: ClipRect(
+                child: ShaderMask(
+                  blendMode: BlendMode.dstIn,
+                  shaderCallback: (Rect bounds) => const LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: <Color>[
+                      Colors.white,
+                      Colors.white,
+                      Colors.transparent,
                     ],
-                  ),
-                  const SizedBox(height: 16),
-                  if (!isLoading)
-                    Row(
-                      children: <Widget>[
-                        _HeaderActionButton(
-                          icon: Icons.play_arrow,
-                          label: 'Abspielen',
-                          onTap: _controller.playAlbum,
-                        ),
-                        const SizedBox(width: 12),
-                        _HeaderActionButton(
-                          icon: Icons.shuffle,
-                          label: 'Zufällig',
-                          onTap: _controller.shuffleAlbum,
-                        ),
-                        const SizedBox(width: 24),
-                        _HeaderIconButton(
-                          tooltip: _controller.isAlbumFavorite
-                              ? 'Favorit entfernen'
-                              : 'Zu Favoriten hinzufügen',
-                          icon: _controller.isAlbumFavorite
-                              ? Icons.favorite
-                              : Icons.favorite_border_outlined,
-                          onTap: _controller.toggleAlbumFavorite,
-                        ),
-                        const SizedBox(width: 12),
-                        _HeaderIconButton(
-                          key: _headerMenuAnchorKey,
-                          tooltip: 'Weitere Optionen',
-                          icon: Icons.more_horiz_outlined,
-                          onTap: album == null
-                              ? null
-                              : () => unawaited(
-                                  const AppContextMenuController().show(
-                                    context: context,
-                                    anchorContext:
-                                        _headerMenuAnchorKey.currentContext,
-                                    actions: _buildHeaderMenuActions(album),
-                                  ),
-                                ),
-                        ),
-                      ],
+                    stops: <double>[0, 0.42, 1],
+                  ).createShader(bounds),
+                  child: ImageFiltered(
+                    imageFilter: ui.ImageFilter.blur(sigmaX: 32, sigmaY: 32),
+                    child: Transform.scale(
+                      scale: 1.18,
+                      child: Image.network(
+                        imageUri,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => const SizedBox.expand(),
+                      ),
                     ),
-                ],
+                  ),
+                ),
               ),
             ),
-          ],
-        ),
+          if (showBlurredBackground)
+            IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: colors.bgPrimary.withValues(alpha: 0.68),
+                ),
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                _buildCover(colors, album, isLoading),
+                const SizedBox(width: 30),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: <Widget>[
+                      Text(
+                        'ALBUM',
+                        style: TextStyle(
+                          color: colors.textSecondary,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        _controller.albumName,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.headlineMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: <Widget>[
+                          Flexible(
+                            child: MediaLinkText(
+                              items:
+                                  album?.artists.take(1).toList() ??
+                                  const <Artist>[],
+                              fallbackText: _controller.artistName,
+                              onItemTap: widget.onOpenArtist == null
+                                  ? null
+                                  : (MediaItem item) =>
+                                        widget.onOpenArtist!(item as Artist),
+                              style: TextStyle(color: colors.textSecondary),
+                            ),
+                          ),
+                          Text(
+                            '${_controller.yearText.isEmpty ? '' : ' • ${_controller.yearText}'} • ${_controller.tracks.length} Titel',
+                            style: TextStyle(color: colors.textSecondary),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      if (!isLoading)
+                        Row(
+                          children: <Widget>[
+                            _HeaderActionButton(
+                              icon: Icons.play_arrow,
+                              label: 'Abspielen',
+                              onTap: _controller.playAlbum,
+                            ),
+                            const SizedBox(width: 12),
+                            _HeaderActionButton(
+                              icon: Icons.shuffle,
+                              label: 'Zufällig',
+                              onTap: _controller.shuffleAlbum,
+                            ),
+                            const SizedBox(width: 24),
+                            _HeaderIconButton(
+                              tooltip: _controller.isAlbumFavorite
+                                  ? 'Favorit entfernen'
+                                  : 'Zu Favoriten hinzufügen',
+                              icon: _controller.isAlbumFavorite
+                                  ? Icons.favorite
+                                  : Icons.favorite_border_outlined,
+                              onTap: _controller.toggleAlbumFavorite,
+                            ),
+                            const SizedBox(width: 12),
+                            _HeaderIconButton(
+                              key: _headerMenuAnchorKey,
+                              tooltip: 'Weitere Optionen',
+                              icon: Icons.more_horiz_outlined,
+                              onTap: album == null
+                                  ? null
+                                  : () => unawaited(
+                                      const AppContextMenuController().show(
+                                        context: context,
+                                        anchorContext:
+                                            _headerMenuAnchorKey.currentContext,
+                                        actions: _buildHeaderMenuActions(album),
+                                      ),
+                                    ),
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
