@@ -38,25 +38,30 @@ class MediaTableSectionMobile<T> extends StatefulWidget {
   });
 
   @override
-  State<MediaTableSectionMobile<T>> createState() => _MediaTableSectionMobileState<T>();
+  State<MediaTableSectionMobile<T>> createState() =>
+      _MediaTableSectionMobileState<T>();
 }
 
-class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>> {
+class _MediaTableSectionMobileState<T>
+    extends State<MediaTableSectionMobile<T>> {
   static const double _mobileRowExtent = 64;
   static const double _mobileChunkViewportFraction = 0.92;
   static const double _mobileChunkGap = 8;
 
   final Set<int> _selectedIndexes = <int>{};
   final Object _selectionSessionOwner = Object();
-  final SelectionController _selectionSessionController = SelectionController.instance;
-  final PageController _mobileChunkPageController =
-      PageController(viewportFraction: _mobileChunkViewportFraction);
+  final SelectionController _selectionSessionController =
+      SelectionController.instance;
+  final PageController _mobileChunkPageController = PageController(
+    viewportFraction: _mobileChunkViewportFraction,
+  );
 
   bool _isMobileSelectionMode = false;
 
   bool get _isChunkModeEnabled => widget.maxItemsPerPage > 0;
   int get _chunkSize => _isChunkModeEnabled ? widget.maxItemsPerPage : 0;
-  bool get _isAllSelected => widget.items.isNotEmpty && _selectedIndexes.length == widget.items.length;
+  bool get _isAllSelected =>
+      widget.items.isNotEmpty && _selectedIndexes.length == widget.items.length;
 
   MediaItem? _resolvePlayableMediaItem(Object? rawItem) {
     if (rawItem is QueueItem) {
@@ -73,7 +78,9 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
   }
 
   List<MediaItem> _playableItemsFromIndex(int startIndex) {
-    if (widget.items.isEmpty || startIndex < 0 || startIndex >= widget.items.length) {
+    if (widget.items.isEmpty ||
+        startIndex < 0 ||
+        startIndex >= widget.items.length) {
       return const <MediaItem>[];
     }
 
@@ -130,7 +137,9 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
   @override
   void didUpdateWidget(covariant MediaTableSectionMobile<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _selectedIndexes.removeWhere((int index) => index < 0 || index >= widget.items.length);
+    _selectedIndexes.removeWhere(
+      (int index) => index < 0 || index >= widget.items.length,
+    );
 
     if (_selectedIndexes.isEmpty) {
       _isMobileSelectionMode = false;
@@ -192,7 +201,9 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
       } else {
         _selectedIndexes
           ..clear()
-          ..addAll(List<int>.generate(widget.items.length, (int index) => index));
+          ..addAll(
+            List<int>.generate(widget.items.length, (int index) => index),
+          );
       }
     });
     _syncSelectionSession();
@@ -213,7 +224,10 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
   }
 
   void _toggleSelectedIndex(int index) {
-    if (!widget.enableSelection || !_isMobileSelectionMode || index < 0 || index >= widget.items.length) {
+    if (!widget.enableSelection ||
+        !_isMobileSelectionMode ||
+        index < 0 ||
+        index >= widget.items.length) {
       return;
     }
 
@@ -255,7 +269,8 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
         final bool hasBoundedHeight = constraints.maxHeight.isFinite;
         // Mirror desktop behavior: in non-paged mode, fill the constrained parent
         // and scroll inside the table viewport.
-        final bool fillScrollableViewport = hasBoundedHeight && !_isChunkModeEnabled;
+        final bool fillScrollableViewport =
+            hasBoundedHeight && !_isChunkModeEnabled;
 
         final Widget tableContent = _buildMobile(
           context,
@@ -270,10 +285,11 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
             if (hasTitle)
               Text(
                 widget.title,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
               ),
-            if (hasTitle)
-              const SizedBox(height: 10),
+            if (hasTitle) const SizedBox(height: 10),
             if (hasBoundedHeight)
               Expanded(child: ClipRect(child: tableContent))
             else
@@ -301,7 +317,9 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
       final Widget body = ListView.builder(
         primary: false,
         shrinkWrap: !useInternalScroll,
-        physics: useInternalScroll ? const ClampingScrollPhysics() : const NeverScrollableScrollPhysics(),
+        physics: useInternalScroll
+            ? const ClampingScrollPhysics()
+            : const NeverScrollableScrollPhysics(),
         addAutomaticKeepAlives: false,
         addRepaintBoundaries: true,
         addSemanticIndexes: false,
@@ -315,10 +333,7 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
       return Column(
         mainAxisSize: useInternalScroll ? MainAxisSize.max : MainAxisSize.min,
         children: <Widget>[
-          if (useInternalScroll)
-            Expanded(child: body)
-          else
-            body,
+          if (useInternalScroll) Expanded(child: body) else body,
         ],
       );
     }
@@ -329,10 +344,7 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
         padding: const EdgeInsets.all(16),
         child: Align(
           alignment: Alignment.centerLeft,
-          child: Text(
-            widget.emptyText,
-            style: textStyles.emptyState,
-          ),
+          child: Text(widget.emptyText, style: textStyles.emptyState),
         ),
       );
     }
@@ -376,7 +388,10 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
                       selectionEnabled: widget.enableSelection,
                       onToggleSelected: () => _toggleSelectedIndex(itemIndex),
                       onLongPressSelect: () => _enterSelectionMode(itemIndex),
-                      onTap: () => _onRowActivated(item: chunkItems[localIndex], index: itemIndex),
+                      onTap: () => _onRowActivated(
+                        item: chunkItems[localIndex],
+                        index: itemIndex,
+                      ),
                     ),
                   );
                 }),
@@ -390,7 +405,9 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
     final Widget list = ListView.builder(
       primary: false,
       shrinkWrap: !useInternalScroll,
-      physics: useInternalScroll ? const ClampingScrollPhysics() : const NeverScrollableScrollPhysics(),
+      physics: useInternalScroll
+          ? const ClampingScrollPhysics()
+          : const NeverScrollableScrollPhysics(),
       addAutomaticKeepAlives: false,
       addRepaintBoundaries: true,
       addSemanticIndexes: false,
@@ -407,7 +424,8 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
           selectionEnabled: widget.enableSelection,
           onToggleSelected: () => _toggleSelectedIndex(itemIndex),
           onLongPressSelect: () => _enterSelectionMode(itemIndex),
-          onTap: () => _onRowActivated(item: widget.items[index], index: itemIndex),
+          onTap: () =>
+              _onRowActivated(item: widget.items[index], index: itemIndex),
         );
       },
     );
@@ -522,7 +540,9 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
       coverUrl: item.imageUri,
       fallbackIcon: Icons.music_note_outlined,
       providerLabel: _providerLabelFromId(item.provider),
-      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(
+        item.provider,
+      ),
       isFirst: isFirst,
       isSelected: isSelected,
       selectionModeActive: selectionModeActive,
@@ -547,9 +567,10 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
     final String title = (item.mediaItem?.name.trim().isNotEmpty == true)
         ? item.mediaItem!.name.trim()
         : item.name.trim().isNotEmpty
-            ? item.name.trim()
-            : 'Unbekannter Titel';
-    final String subtitle = item.mediaItem?.artists
+        ? item.name.trim()
+        : 'Unbekannter Titel';
+    final String subtitle =
+        item.mediaItem?.artists
             .map((artist) => artist.name.trim())
             .where((name) => name.isNotEmpty)
             .join(', ') ??
@@ -590,7 +611,9 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
       coverUrl: item.imageUri,
       fallbackIcon: Icons.album_outlined,
       providerLabel: _providerLabelFromId(item.provider),
-      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(
+        item.provider,
+      ),
       isFirst: isFirst,
       isSelected: isSelected,
       selectionModeActive: selectionModeActive,
@@ -618,7 +641,9 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
       coverUrl: item.imageUri,
       fallbackIcon: Icons.queue_music_outlined,
       providerLabel: _providerLabelFromId(item.provider),
-      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(
+        item.provider,
+      ),
       isFirst: isFirst,
       isSelected: isSelected,
       selectionModeActive: selectionModeActive,
@@ -646,7 +671,9 @@ class _MediaTableSectionMobileState<T> extends State<MediaTableSectionMobile<T>>
       coverUrl: item.imageUri,
       fallbackIcon: Icons.person_outlined,
       providerLabel: _providerLabelFromId(item.provider),
-      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(
+        item.provider,
+      ),
       isFirst: isFirst,
       isSelected: isSelected,
       selectionModeActive: selectionModeActive,
@@ -751,7 +778,9 @@ class _MobileTableRowBaseState extends State<_MobileTableRowBase> {
           constraints: const BoxConstraints(minHeight: 64),
           decoration: BoxDecoration(
             color: rowBackground,
-            border: widget.isFirst ? null : Border(top: BorderSide(color: colors.border)),
+            border: widget.isFirst
+                ? null
+                : Border(top: BorderSide(color: colors.border)),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           child: Row(
@@ -873,7 +902,11 @@ class _MobileTableRowSkeleton extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
 
-    Widget skeletonBox({required double width, required double height, double radius = 6}) {
+    Widget skeletonBox({
+      required double width,
+      required double height,
+      double radius = 6,
+    }) {
       return Container(
         width: width,
         height: height,
@@ -911,17 +944,13 @@ class _MobileTableRowSkeleton extends StatelessWidget {
           const SizedBox(width: 10),
           SizedBox(
             width: 20,
-            child: Center(
-              child: skeletonBox(width: 16, height: 16, radius: 8),
-            ),
+            child: Center(child: skeletonBox(width: 16, height: 16, radius: 8)),
           ),
           const SizedBox(width: 10),
           SizedBox(
             width: 40,
             height: 40,
-            child: Center(
-              child: skeletonBox(width: 18, height: 18, radius: 9),
-            ),
+            child: Center(child: skeletonBox(width: 18, height: 18, radius: 9)),
           ),
         ],
       ),

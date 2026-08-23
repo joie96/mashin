@@ -746,6 +746,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
     if (item is Track) {
       return _buildDesktopMediaRowTrack(
         item: item,
+        playbackCoordinator: widget.playbackCoordinator,
         index: absoluteIndex,
         itemWidth: itemWidth,
         coverSize: coverSize,
@@ -1520,6 +1521,7 @@ Widget _buildDesktopMediaRowArtist({
 
 Widget _buildDesktopMediaRowTrack({
   required Track item,
+  required PlaybackCoordinator? playbackCoordinator,
   required int index,
   required double itemWidth,
   required double coverSize,
@@ -1558,6 +1560,8 @@ Widget _buildDesktopMediaRowTrack({
     isSelected: isSelected,
     onSelectTap: onSelectTap,
     onSelectPointerDown: onSelectPointerDown,
+    playbackCoordinator: playbackCoordinator,
+    playbackItem: item,
   );
 }
 
@@ -1622,6 +1626,8 @@ Widget _buildDesktopMediaRowItemBase({
   ValueChanged<MediaItem>? onTitleTap,
   bool showPlayOverlay = true,
   bool isCircularCover = false,
+  PlaybackCoordinator? playbackCoordinator,
+  MediaItem? playbackItem,
 }) {
   return Builder(
     builder: (BuildContext context) {
@@ -1668,28 +1674,48 @@ Widget _buildDesktopMediaRowItemBase({
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  titleLinkItem == null
-                      ? Text(
-                          title,
-                          maxLines: 1,
-                          textAlign: TextAlign.left,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleSmall
-                              ?.copyWith(
-                                fontWeight: FontWeight.w400,
-                                fontSize: 15,
-                              ),
-                        )
-                      : MediaLinkText(
-                          items: <MediaItem>[titleLinkItem],
-                          fallbackText: title,
-                          onItemTap: onTitleTap,
-                          style: Theme.of(context).textTheme.titleSmall
-                              ?.copyWith(
-                                fontWeight: FontWeight.w400,
-                                fontSize: 15,
-                              ),
+                  Row(
+                    children: <Widget>[
+                      SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: Center(
+                          child: DesktopPlaybackIndicator(
+                            coordinator: playbackCoordinator,
+                            item: playbackItem,
+                            fallback: null,
+                            width: 20,
+                          ),
                         ),
+                      ),
+                      if (playbackCoordinator != null && playbackItem != null)
+                        const SizedBox(width: 6),
+                      Expanded(
+                        child: titleLinkItem == null
+                            ? Text(
+                                title,
+                                maxLines: 1,
+                                textAlign: TextAlign.left,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleSmall
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w400,
+                                      fontSize: 15,
+                                    ),
+                              )
+                            : MediaLinkText(
+                                items: <MediaItem>[titleLinkItem],
+                                fallbackText: title,
+                                onItemTap: onTitleTap,
+                                style: Theme.of(context).textTheme.titleSmall
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w400,
+                                      fontSize: 15,
+                                    ),
+                              ),
+                      ),
+                    ],
+                  ),
                   if (hasSecondary) ...<Widget>[
                     const SizedBox(height: 2),
                     hasArtistLinks
@@ -2241,16 +2267,10 @@ Widget _buildDesktopMediaRowSkeletonBase({
         minWidth: 52,
       );
       final double? secondaryWidth = lineCount > 1
-          ? safeClamp(
-              preferred: math.min(safeItemWidth - 16, 92),
-              minWidth: 44,
-            )
+          ? safeClamp(preferred: math.min(safeItemWidth - 16, 92), minWidth: 44)
           : null;
       final double? tertiaryWidth = lineCount > 2
-          ? safeClamp(
-              preferred: math.min(safeItemWidth - 24, 74),
-              minWidth: 40,
-            )
+          ? safeClamp(preferred: math.min(safeItemWidth - 24, 74), minWidth: 40)
           : null;
 
       Widget line(double width) {

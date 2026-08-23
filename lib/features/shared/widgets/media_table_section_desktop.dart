@@ -8,6 +8,7 @@ import 'dart:math' as math;
 import '../../../app/theme/app_theme.dart';
 import '../../../data/music_assistant/ma_models.dart';
 import '../../playback/playback_coordinator.dart';
+import '../../playback/playback_models.dart';
 import '../selection/selection_controller.dart';
 import 'media_link_text.dart';
 
@@ -133,8 +134,9 @@ class _MediaTableSectionDesktopState<T>
   bool get _isPagingEnabled => widget.maxItemsPerPage > 0;
   bool get _isAllSelected =>
       widget.items.isNotEmpty && _selectedIndexes.length == widget.items.length;
-    int get _chunkSize =>
-      _isPagingEnabled ? math.min(widget.maxItemsPerPage, widget.items.length) : 0;
+  int get _chunkSize => _isPagingEnabled
+      ? math.min(widget.maxItemsPerPage, widget.items.length)
+      : 0;
 
   int get _pageSize {
     if (!_isPagingEnabled) {
@@ -984,6 +986,7 @@ class _MediaTableSectionDesktopState<T>
     if (typedItem is Track) {
       return _buildDesktopTableRowTrack(
         item: typedItem,
+        playbackCoordinator: widget.playbackCoordinator,
         index: index,
         isFirst: isFirst,
         isSelected: isSelected,
@@ -1007,6 +1010,7 @@ class _MediaTableSectionDesktopState<T>
     if (typedItem is QueueItem) {
       return _buildDesktopTableRowQueue(
         item: typedItem,
+        playbackCoordinator: widget.playbackCoordinator,
         index: index,
         isFirst: isFirst,
         isSelected: isSelected,
@@ -1121,7 +1125,7 @@ Widget _buildDesktopTableHeaderTrack({
     cells: <Widget>[
       _buildDesktopTableSizedCell(
         width: 40,
-        child: _buildDesktopHeaderText('#', TextAlign.left),
+        child: _buildDesktopHeaderText('#', TextAlign.center),
       ),
       _buildDesktopTableSizedCell(
         width: 48,
@@ -1325,6 +1329,7 @@ Widget _buildDesktopTableHeaderArtist({
 
 Widget _buildDesktopTableRowTrack({
   required Track item,
+  required PlaybackCoordinator? playbackCoordinator,
   required int index,
   required bool isFirst,
   required bool isSelected,
@@ -1344,10 +1349,12 @@ Widget _buildDesktopTableRowTrack({
     cells: <Widget>[
       _buildDesktopTableSizedCell(
         width: 40,
-        child: _buildDesktopBodyText(
-          '${index + 1}',
-          TextAlign.left,
-          DesktopTextTone.tertiary,
+        child: Center(
+          child: DesktopPlaybackIndicator(
+            coordinator: playbackCoordinator,
+            item: item,
+            fallback: '${index + 1}',
+          ),
         ),
       ),
       _buildDesktopTableSizedCell(
@@ -1692,6 +1699,7 @@ Widget _buildDesktopTableRowArtist({
 
 Widget _buildDesktopTableRowQueue({
   required QueueItem item,
+  required PlaybackCoordinator? playbackCoordinator,
   required int index,
   required bool isFirst,
   required bool isSelected,
@@ -1723,10 +1731,12 @@ Widget _buildDesktopTableRowQueue({
     cells: <Widget>[
       _buildDesktopTableSizedCell(
         width: 40,
-        child: _buildDesktopBodyText(
-          '${index + 1}',
-          TextAlign.left,
-          DesktopTextTone.tertiary,
+        child: Center(
+          child: DesktopPlaybackIndicator(
+            coordinator: playbackCoordinator,
+            item: item.mediaItem,
+            fallback: '${index + 1}',
+          ),
         ),
       ),
       _buildDesktopTableSizedCell(
@@ -2768,6 +2778,114 @@ class _ExpandRevealRowState extends State<_ExpandRevealRow> {
 }
 
 enum DesktopTextTone { primary, secondary, tertiary }
+
+class DesktopPlaybackIndicator extends StatelessWidget {
+  final PlaybackCoordinator? coordinator;
+  final MediaItem? item;
+  final String? fallback;
+  final double width;
+
+  const DesktopPlaybackIndicator({
+    super.key,
+    required this.coordinator,
+    required this.item,
+    required this.fallback,
+    this.width = 40,
+  });
+
+  bool _isSameTrack(MediaItem left, MediaItem right) {
+    final leftUri = left.uri?.trim() ?? '';
+    final rightUri = right.uri?.trim() ?? '';
+    if (leftUri.isNotEmpty && rightUri.isNotEmpty) {
+      return leftUri.toLowerCase() == rightUri.toLowerCase();
+    }
+
+    final leftItemId = left.itemId.trim();
+    final rightItemId = right.itemId.trim();
+    return leftItemId.isNotEmpty &&
+        rightItemId.isNotEmpty &&
+        leftItemId == rightItemId;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final playbackCoordinator = coordinator;
+    final mediaItem = item;
+    if (playbackCoordinator == null || mediaItem == null) {
+      return _fallback(context);
+    }
+
+    return ListenableBuilder(
+      listenable: playbackCoordinator,
+      builder: (BuildContext context, Widget? child) {
+        final currentIndex = playbackCoordinator.currentQueueIndex;
+        final queueItems = playbackCoordinator.queueItems;
+        final currentItem =
+            currentIndex != null &&
+                currentIndex >= 0 &&
+                currentIndex < queueItems.length
+            ? queueItems[currentIndex].mediaItem
+            : null;
+
+        if (currentItem == null || !_isSameTrack(mediaItem, currentItem)) {
+          return _fallback(context);
+        }
+
+        final state = playbackCoordinator.state.playbackState;
+        if (state == PlaybackStateType.buffering ||
+            state == PlaybackStateType.seeking) {
+          return SizedBox(
+            width: width,
+            height: 20,
+            child: Center(
+              child: SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: context.mashinColors.accent,
+                ),
+              ),
+            ),
+          );
+        }
+
+        return SizedBox(
+          width: width,
+          height: 20,
+          child: Center(
+            child: Icon(
+              state == PlaybackStateType.playing
+                  ? Icons.pause
+                  : Icons.play_arrow,
+              size: 16,
+              color: context.mashinColors.accent,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _fallback(BuildContext context) {
+    final fallbackText = fallback;
+    if (fallbackText == null) {
+      return const SizedBox.shrink();
+    }
+
+    return SizedBox(
+      width: width,
+      height: 20,
+      child: Center(
+        child: _buildDesktopBodyText(
+          fallbackText,
+          TextAlign.center,
+          DesktopTextTone.tertiary,
+        ),
+      ),
+    );
+  }
+}
 
 class MediaTableCover extends StatefulWidget {
   final String? coverUrl;

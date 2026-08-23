@@ -477,10 +477,10 @@ Widget _buildMobileMediaRowSkeletonBase({
       final double titleWidth = (itemWidth * 0.72)
           .clamp(48, itemWidth)
           .toDouble();
-        final double? secondaryWidth = lineCount > 1
+      final double? secondaryWidth = lineCount > 1
           ? (itemWidth * 0.56).clamp(42, itemWidth).toDouble()
           : null;
-        final double? tertiaryWidth = lineCount > 2
+      final double? tertiaryWidth = lineCount > 2
           ? (itemWidth * 0.46).clamp(36, itemWidth).toDouble()
           : null;
 
