@@ -69,7 +69,7 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
     return <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
-        icon: Icons.play_arrow_outlined,
+        icon: Icons.play_arrow,
         onSelected: () =>
             widget.playbackCoordinator.playMedia(<MediaItem>[item]),
       ),
@@ -93,13 +93,14 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
-        icon: Icons.queue_play_next_outlined,
+        icon: Icons.keyboard_return,
+        iconQuarterTurns: 2,
         onSelected: () =>
             widget.playbackCoordinator.playMediaNext(<MediaItem>[artist]),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
-        icon: Icons.playlist_add_outlined,
+        icon: Icons.last_page,
         onSelected: () =>
             widget.playbackCoordinator.playMediaLast(<MediaItem>[artist]),
       ),

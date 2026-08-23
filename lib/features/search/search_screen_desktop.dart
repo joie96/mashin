@@ -106,7 +106,7 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             playbackCoordinator: widget.playbackCoordinator,
             onArtistTap: widget.onOpenArtist,
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
           MediaRowSectionDesktop<Album>(
             title: 'Alben',
             isLoading: _controller.isLoadingAlbums,
@@ -115,7 +115,7 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             playbackCoordinator: widget.playbackCoordinator,
             onArtistTap: widget.onOpenArtist,
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
           MediaRowSectionDesktop<Playlist>(
             title: 'Playlists',
             isLoading: _controller.isLoadingPlaylists,
@@ -123,7 +123,7 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             emptyText: 'Keine Playlists gefunden.',
             playbackCoordinator: widget.playbackCoordinator,
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
           MediaRowSectionDesktop<Artist>(
             title: 'Artists',
             isLoading: _controller.isLoadingArtists,

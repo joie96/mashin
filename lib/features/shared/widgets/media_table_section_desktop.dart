@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'dart:async';
+import 'dart:math' as math;
 
 import '../../../app/theme/app_theme.dart';
 import '../../../data/music_assistant/ma_models.dart';
@@ -13,6 +14,8 @@ import 'media_link_text.dart';
 typedef DesktopRowAction<T> = void Function(T item, int index);
 typedef DesktopRowMoreAnchorAction<T> =
     void Function(T item, int index, BuildContext anchorContext);
+typedef DesktopRowContextMenuAction<T> =
+    void Function(T item, int index, Offset globalPosition);
 typedef DesktopRowFavoriteResolver<T> = bool Function(T item, int index);
 
 class MediaTableSectionDesktop<T> extends StatefulWidget {
@@ -28,6 +31,7 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
   final VoidCallback? onHeaderMoreTap;
   final DesktopRowAction<T>? onRowMoreTap;
   final DesktopRowMoreAnchorAction<T>? onRowMoreAnchorTap;
+  final DesktopRowContextMenuAction<T>? onRowContextMenu;
   final DesktopRowAction<T>? onRowFavoriteTap;
   final DesktopRowAction<T>? onRowDoubleTap;
   final DesktopRowFavoriteResolver<T>? isRowFavorite;
@@ -48,6 +52,7 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
     this.onHeaderMoreTap,
     this.onRowMoreTap,
     this.onRowMoreAnchorTap,
+    this.onRowContextMenu,
     this.onRowFavoriteTap,
     this.onRowDoubleTap,
     this.isRowFavorite,
@@ -77,6 +82,8 @@ class _MediaTableSectionDesktopState<T>
   int? _selectionAnchorIndex;
   int _currentPage = 0;
   bool _isPageFading = false;
+  bool _isExpanded = false;
+  int _expandedBaseCount = 0;
 
   @override
   void didUpdateWidget(covariant MediaTableSectionDesktop<T> oldWidget) {
@@ -100,6 +107,10 @@ class _MediaTableSectionDesktopState<T>
     if (!_isPagingEnabled) {
       _currentPage = 0;
       return;
+    }
+
+    if (_isExpanded && widget.items.length <= _pageSize) {
+      _isExpanded = false;
     }
 
     final int lastPage = _pageCount > 0 ? _pageCount - 1 : 0;
@@ -150,7 +161,38 @@ class _MediaTableSectionDesktopState<T>
     final DesktopRowMoreAnchorAction<T>? handler = widget.onRowMoreAnchorTap;
     return handler == null
         ? null
-        : (BuildContext anchorContext) => handler(item, index, anchorContext);
+        : (BuildContext anchorContext) {
+            _ensureItemSelectedForMenu(index);
+            handler(item, index, anchorContext);
+          };
+  }
+
+  /// Selects only the item whose context menu opens so the user can see which
+  /// entry the menu belongs to. Any existing selection is replaced.
+  void _ensureItemSelectedForMenu(int index) {
+    if (!widget.enableSelection ||
+        index < 0 ||
+        index >= widget.items.length ||
+        (_selectedIndexes.length == 1 && _selectedIndexes.contains(index))) {
+      return;
+    }
+
+    _requestSectionFocus();
+    _selectSingleIndex(index);
+  }
+
+  /// Right-click variant: keeps the current selection untouched when the
+  /// clicked item is already part of it; otherwise selects only that item.
+  void _selectItemForRightClickMenu(int index) {
+    if (!widget.enableSelection ||
+        index < 0 ||
+        index >= widget.items.length ||
+        _selectedIndexes.contains(index)) {
+      return;
+    }
+
+    _requestSectionFocus();
+    _selectSingleIndex(index);
   }
 
   MediaItem? _resolvePlayableMediaItem(Object? rawItem) {
@@ -190,17 +232,6 @@ class _MediaTableSectionDesktopState<T>
     final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
     if (coordinator == null || index < 0 || index >= widget.items.length) {
       return false;
-    }
-
-    if (widget.enableSelection) {
-      setState(() {
-        _selectedIndexes
-          ..clear()
-          ..add(index);
-        _selectionAnchorIndex = index;
-      });
-      _syncSelectionSession();
-      _emitSelectionChanged();
     }
 
     final Object? rawItem = item;
@@ -341,6 +372,17 @@ class _MediaTableSectionDesktopState<T>
   }
 
   void _handleRowPointerDown(int index, PointerDownEvent event) {
+    if (event.kind == PointerDeviceKind.mouse &&
+        (event.buttons & kSecondaryMouseButton) != 0) {
+      _suppressedSelectionPointers.remove(event.pointer);
+      final DesktopRowContextMenuAction<T>? handler = widget.onRowContextMenu;
+      if (handler != null && index >= 0 && index < widget.items.length) {
+        _selectItemForRightClickMenu(index);
+        handler(widget.items[index], index, event.position);
+      }
+      return;
+    }
+
     if (_suppressedSelectionPointers.remove(event.pointer)) {
       return;
     }
@@ -401,17 +443,36 @@ class _MediaTableSectionDesktopState<T>
   }
 
   void _goToPreviousPage() {
-    if (!_isPagingEnabled || _currentPage <= 0) {
+    if (_isExpanded || !_isPagingEnabled || _currentPage <= 0) {
       return;
     }
     _fadeToPage(_currentPage - 1);
   }
 
   void _goToNextPage() {
-    if (!_isPagingEnabled || _currentPage >= _pageCount - 1) {
+    if (_isExpanded || !_isPagingEnabled || _currentPage >= _pageCount - 1) {
       return;
     }
     _fadeToPage(_currentPage + 1);
+  }
+
+  bool get _canToggleExpand =>
+      _isPagingEnabled && widget.items.length > _pageSize;
+
+  void _toggleExpanded() {
+    if (!_canToggleExpand) {
+      return;
+    }
+
+    setState(() {
+      _isExpanded = !_isExpanded;
+      // Rows up to and including the current page keep their identity; only
+      // rows beyond that point animate in from above.
+      _expandedBaseCount = _isExpanded
+          ? math.min((_currentPage + 1) * _pageSize, widget.items.length)
+          : 0;
+      _currentPage = 0;
+    });
   }
 
   Future<void> _fadeToPage(int targetPage) async {
@@ -536,7 +597,9 @@ class _MediaTableSectionDesktopState<T>
                       onTap: _onShuffleAllTap,
                     ),
                   ],
-                  if (_isPagingEnabled && widget.items.isNotEmpty) ...<Widget>[
+                  if (_isPagingEnabled &&
+                      !_isExpanded &&
+                      widget.items.isNotEmpty) ...<Widget>[
                     const SizedBox(width: 4),
                     const SectionHeaderVerticalDivider(),
                     _buildPaginationControls(context),
@@ -549,6 +612,16 @@ class _MediaTableSectionDesktopState<T>
               Expanded(child: ClipRect(child: tableContent))
             else
               tableContent,
+            if (_canToggleExpand && !hasBoundedHeight)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Center(
+                  child: _ExpandToggleButton(
+                    isExpanded: _isExpanded,
+                    onTap: _toggleExpanded,
+                  ),
+                ),
+              ),
           ],
         );
       },
@@ -596,7 +669,9 @@ class _MediaTableSectionDesktopState<T>
     required bool fillScrollableViewport,
   }) {
     final bool useInternalScroll = fillScrollableViewport || constrainToHeight;
-    final double pagedContentHeight = _chunkSize * _desktopRowExtent;
+    final int visibleRowCount =
+        _isExpanded ? widget.items.length : _chunkSize;
+    final double pagedContentHeight = visibleRowCount * _desktopRowExtent;
 
     if (widget.isLoading) {
       final Widget body = ListView.builder(
@@ -641,7 +716,51 @@ class _MediaTableSectionDesktopState<T>
       );
     }
 
-    final Widget list = _isPagingEnabled
+    final Widget expandedList = ListView.builder(
+      // Keyed by expansion state so collapsing back to paged mode rebuilds
+      // the list structure, while expanding keeps row identities intact.
+      key: ValueKey<String>('table-rows-$T-paged-$_isExpanded'),
+      primary: false,
+      shrinkWrap: !useInternalScroll,
+      physics: useInternalScroll
+          ? const ClampingScrollPhysics()
+          : const NeverScrollableScrollPhysics(),
+      addAutomaticKeepAlives: false,
+      addRepaintBoundaries: true,
+      addSemanticIndexes: false,
+      itemCount: _isExpanded
+          ? widget.items.length
+          : math.min(widget.items.length, _pageSize),
+      itemExtent: _desktopRowExtent,
+      itemBuilder: (BuildContext context, int index) {
+        final int itemIndex = index;
+        final Widget row = _buildDesktopTypedRow(
+          item: widget.items[index],
+          index: itemIndex,
+          isFirst: index == 0,
+          isSelected: _selectedIndexes.contains(itemIndex),
+          onToggleSelected: () => _toggleSelectedIndex(itemIndex),
+          onPointerDown: (PointerDownEvent event) =>
+              _handleRowPointerDown(itemIndex, event),
+        );
+
+        // Rows of the page that was visible before expanding stay static;
+        // only newly appended rows slide in from above, staggered per page.
+        if (_isExpanded && index >= _expandedBaseCount) {
+          final int pageIndex =
+              (index - _expandedBaseCount) ~/ math.max(1, _pageSize);
+          return _ExpandRevealRow(
+            key: ValueKey<String>('table-expand-reveal-$index'),
+            delay: Duration(milliseconds: 70 * pageIndex),
+            child: row,
+          );
+        }
+
+        return row;
+      },
+    );
+
+    final Widget list = _isPagingEnabled && !_isExpanded
         ? AnimatedOpacity(
             duration: _desktopPageFadeDuration,
             curve: Curves.easeOut,
@@ -693,30 +812,7 @@ class _MediaTableSectionDesktopState<T>
               },
             ),
           )
-        : ListView.builder(
-            primary: false,
-            shrinkWrap: !useInternalScroll,
-            physics: useInternalScroll
-                ? const ClampingScrollPhysics()
-                : const NeverScrollableScrollPhysics(),
-            addAutomaticKeepAlives: false,
-            addRepaintBoundaries: true,
-            addSemanticIndexes: false,
-            itemCount: widget.items.length,
-            itemExtent: _desktopRowExtent,
-            itemBuilder: (BuildContext context, int index) {
-              final int itemIndex = index;
-              return _buildDesktopTypedRow(
-                item: widget.items[index],
-                index: itemIndex,
-                isFirst: index == 0,
-                isSelected: _selectedIndexes.contains(itemIndex),
-                onToggleSelected: () => _toggleSelectedIndex(itemIndex),
-                onPointerDown: (PointerDownEvent event) =>
-                    _handleRowPointerDown(itemIndex, event),
-              );
-            },
-          );
+        : expandedList;
 
     return Column(
       mainAxisSize: useInternalScroll ? MainAxisSize.max : MainAxisSize.min,
@@ -725,7 +821,35 @@ class _MediaTableSectionDesktopState<T>
         if (useInternalScroll)
           Expanded(child: list)
         else if (_isPagingEnabled)
-          SizedBox(height: pagedContentHeight, child: list)
+          // Animate the container height between one page and the full list.
+          // The list itself keeps its structure so existing rows are not
+          // rebuilt; only the rows beyond the previous page get the reveal
+          // animation when expanding.
+          TweenAnimationBuilder<double>(
+            tween: Tween<double>(
+              begin: _pageSize * _desktopRowExtent,
+              end: pagedContentHeight,
+            ),
+            duration: const Duration(milliseconds: 380),
+            curve: Curves.easeInOutCubic,
+            builder: (BuildContext context, double height, Widget? child) {
+              return SizedBox(
+                height: height,
+                child: ClipRect(
+                  child: OverflowBox(
+                    alignment: Alignment.topCenter,
+                    minHeight: 0,
+                    maxHeight: double.infinity,
+                    child: SizedBox(
+                      height: widget.items.length * _desktopRowExtent,
+                      child: child,
+                    ),
+                  ),
+                ),
+              );
+            },
+            child: expandedList,
+          )
         else
           list,
       ],
@@ -2024,6 +2148,16 @@ class _DesktopTableRowBaseState extends State<_DesktopTableRowBase> {
       return;
     }
 
+    // Right-clicks are forwarded from anywhere on the row so the context menu
+    // can also open above the trailing action columns.
+    final bool isSecondaryButton =
+        event.kind == PointerDeviceKind.mouse &&
+        (event.buttons & kSecondaryMouseButton) != 0;
+    if (isSecondaryButton) {
+      widget.onPointerDown!(event);
+      return;
+    }
+
     final RenderObject? renderObject = context.findRenderObject();
     if (renderObject is! RenderBox) {
       widget.onPointerDown!(event);
@@ -2458,6 +2592,129 @@ class _SelectAllIntent extends Intent {
 
 class _ClearSelectionIntent extends Intent {
   const _ClearSelectionIntent();
+}
+
+// Small circular toggle shown below a section to expand/collapse all items,
+// matching the MAUI TableView/RowView expand toggle styling.
+class _ExpandToggleButton extends StatefulWidget {
+  final bool isExpanded;
+  final VoidCallback onTap;
+
+  const _ExpandToggleButton({required this.isExpanded, required this.onTap});
+
+  @override
+  State<_ExpandToggleButton> createState() => _ExpandToggleButtonState();
+}
+
+class _ExpandToggleButtonState extends State<_ExpandToggleButton> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+
+    return Tooltip(
+      message: widget.isExpanded ? 'Weniger anzeigen' : 'Alle anzeigen',
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        child: Material(
+          color: _isHovered ? colors.hover : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            onTap: widget.onTap,
+            borderRadius: BorderRadius.circular(12),
+            hoverColor: colors.hover,
+            child: SizedBox(
+              width: 24,
+              height: 24,
+              child: AnimatedScale(
+                scale: _isHovered ? 1.08 : 1,
+                duration: const Duration(milliseconds: 120),
+                curve: Curves.easeOutCubic,
+                child: AnimatedRotation(
+                  turns: widget.isExpanded ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  child: Icon(
+                    Icons.expand_more_outlined,
+                    size: 14,
+                    color: colors.textSecondary,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Reveals a newly appended expanded-table row by fading and sliding it in
+/// from above, mirroring the row-section expand animation. Runs once on
+/// insert; the optional [delay] staggers rows page by page.
+class _ExpandRevealRow extends StatefulWidget {
+  final Widget child;
+  final Duration delay;
+
+  const _ExpandRevealRow({
+    super.key,
+    required this.child,
+    this.delay = Duration.zero,
+  });
+
+  @override
+  State<_ExpandRevealRow> createState() => _ExpandRevealRowState();
+}
+
+class _ExpandRevealRowState extends State<_ExpandRevealRow> {
+  bool _revealed = false;
+  Timer? _delayTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.delay == Duration.zero) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _startReveal());
+    } else {
+      _delayTimer = Timer(widget.delay, _startReveal);
+    }
+  }
+
+  void _startReveal() {
+    if (!mounted || _revealed) {
+      return;
+    }
+    setState(() {
+      _revealed = true;
+    });
+  }
+
+  @override
+  void dispose() {
+    _delayTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: _revealed ? 1 : 0),
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeInOutCubic,
+      builder: (BuildContext context, double value, Widget? child) {
+        return Opacity(
+          opacity: value,
+          child: Transform.translate(
+            offset: Offset(0, -50 * (1 - value)),
+            child: child,
+          ),
+        );
+      },
+      child: widget.child,
+    );
+  }
 }
 
 enum DesktopTextTone { primary, secondary, tertiary }

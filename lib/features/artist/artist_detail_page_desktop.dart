@@ -67,23 +67,142 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
     super.dispose();
   }
 
-  List<ContextMenuAction> _buildItemMenuActions(MediaItem item) {
-    final bool isFavorite = _controller.isItemFavorite(item);
+  // TODO(navigation): Ersetzen, sobald die Album-Detailseite existiert.
+  void _openAlbum(Album album) {
+    debugPrint(
+      'TODO: Album-Detailseite öffnen: ${album.name} (${album.itemId})',
+    );
+  }
+
+  // TODO(playlists): Ersetzen, sobald die Playlist-Verwaltung existiert.
+  // Lädt später _client.getLibraryPlaylists() und ruft
+  // _client.addPlaylistTracks(playlistId, uris) auf.
+  List<ContextMenuAction> _buildPlaylistSubmenu(MediaItem item) {
     return <ContextMenuAction>[
       ContextMenuAction(
-        label: 'Abspielen',
-        icon: Icons.play_arrow_outlined,
-        onSelected: () =>
-            widget.playbackCoordinator.playMedia(<MediaItem>[item]),
+        label: 'Playlist 1 (Dummy)',
+        icon: Icons.playlist_play_outlined,
+        onSelected: () {
+          debugPrint('TODO: Zu Playlist hinzufügen: ${item.name}');
+        },
       ),
       ContextMenuAction(
-        label: isFavorite ? 'Favorit entfernen' : 'Als Favorit markieren',
+        label: 'Playlist 2 (Dummy)',
+        icon: Icons.playlist_play_outlined,
+        onSelected: () {
+          debugPrint('TODO: Zu Playlist hinzufügen: ${item.name}');
+        },
+      ),
+    ];
+  }
+
+  List<ContextMenuAction> _buildItemMenuActions(MediaItem item) {
+    final bool isFavorite = _controller.isItemFavorite(item);
+    final PlaybackCoordinator coordinator = widget.playbackCoordinator;
+
+    final List<ContextMenuAction> actions = <ContextMenuAction>[
+      ContextMenuAction(
+        label: 'Abspielen',
+        icon: Icons.play_arrow,
+        onSelected: () => coordinator.playMedia(<MediaItem>[item]),
+      ),
+      ContextMenuAction(
+        label: 'Radio starten',
+        icon: Icons.radio_outlined,
+        onSelected: () => item is Track
+            ? _controller.startTrackRadio(item)
+            : _controller.startItemRadio(item),
+      ),
+      ContextMenuAction(
+        label: 'Als Nächstes spielen',
+        icon: Icons.keyboard_return,
+        iconQuarterTurns: 2,
+        onSelected: () => coordinator.playMediaNext(<MediaItem>[item]),
+      ),
+      ContextMenuAction(
+        label: 'Als Letztes spielen',
+        icon: Icons.last_page,
+        onSelected: () => coordinator.playMediaLast(<MediaItem>[item]),
+      ),
+    ];
+
+    // Single-target navigation entries, mirroring the MAUI context menus.
+    final Artist? primaryArtist = _primaryArtistOf(item);
+    final Album? primaryAlbum = item is Track
+        ? item.album
+        : (item is Album ? item : null);
+    final bool hasNavigation =
+        (primaryArtist != null && widget.onOpenArtist != null) ||
+        primaryAlbum != null ||
+        item is Artist;
+
+    if (hasNavigation) {
+      actions.add(const ContextMenuAction.separator());
+      if (item is Artist && widget.onOpenArtist != null) {
+        actions.add(
+          ContextMenuAction(
+            label: 'Künstler:in öffnen',
+            icon: Icons.person_outline,
+            onSelected: () => widget.onOpenArtist!(item),
+          ),
+        );
+      } else if (primaryArtist != null && widget.onOpenArtist != null) {
+        actions.add(
+          ContextMenuAction(
+            label: 'Künstler:in öffnen',
+            icon: Icons.person_outline,
+            onSelected: () => widget.onOpenArtist!(primaryArtist),
+          ),
+        );
+      }
+      if (primaryAlbum != null) {
+        actions.add(
+          ContextMenuAction(
+            label: 'Album öffnen',
+            icon: Icons.album_outlined,
+            onSelected: () => _openAlbum(primaryAlbum),
+          ),
+        );
+      }
+    }
+
+    actions.add(const ContextMenuAction.separator());
+    actions.add(
+      ContextMenuAction.submenu(
+        label: 'Zu Wiedergabeliste hinzufügen',
+        icon: Icons.playlist_add_outlined,
+        children: _buildPlaylistSubmenu(item),
+      ),
+    );
+    actions.add(const ContextMenuAction.separator());
+    actions.add(
+      ContextMenuAction(
+        label: isFavorite
+            ? 'Aus Favoriten entfernen'
+            : 'Zu Favoriten hinzufügen',
         icon: isFavorite
             ? Icons.favorite_outlined
             : Icons.favorite_border_outlined,
+        isDestructive: isFavorite,
         onSelected: () => _controller.toggleItemFavorite(item),
       ),
-    ];
+    );
+    return actions;
+  }
+
+  Artist? _primaryArtistOf(MediaItem item) {
+    final List<Artist> artists = switch (item) {
+      Track track => track.artists,
+      Album album => album.artists,
+      _ => const <Artist>[],
+    };
+    for (final Artist artist in artists) {
+      if (artist.itemId.trim().isNotEmpty &&
+          artist.provider.trim().isNotEmpty) {
+        return artist;
+      }
+    }
+    return null;
   }
 
   List<ContextMenuAction> _buildHeaderMenuActions(Artist artist) {
@@ -96,21 +215,26 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
-        icon: Icons.queue_play_next_outlined,
+        icon: Icons.keyboard_return,
+        iconQuarterTurns: 2,
         onSelected: () =>
             widget.playbackCoordinator.playMediaNext(<MediaItem>[artist]),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
-        icon: Icons.playlist_add_outlined,
+        icon: Icons.last_page,
         onSelected: () =>
             widget.playbackCoordinator.playMediaLast(<MediaItem>[artist]),
       ),
+      const ContextMenuAction.separator(),
       ContextMenuAction(
-        label: isFavorite ? 'Favorit entfernen' : 'Als Favorit markieren',
+        label: isFavorite
+            ? 'Aus Favoriten entfernen'
+            : 'Zu Favoriten hinzufügen',
         icon: isFavorite
             ? Icons.favorite_outlined
             : Icons.favorite_border_outlined,
+        isDestructive: isFavorite,
         onSelected: _controller.toggleArtistFavorite,
       ),
     ];
@@ -120,6 +244,14 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
     return const AppContextMenuController().show(
       context: context,
       anchorContext: anchorContext,
+      actions: _buildItemMenuActions(item),
+    );
+  }
+
+  Future<void> _showItemMenuAtPosition(MediaItem item, Offset globalPosition) {
+    return const AppContextMenuController().show(
+      context: context,
+      globalPosition: globalPosition,
       actions: _buildItemMenuActions(item),
     );
   }
@@ -150,10 +282,10 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
                 children: <Widget>[
                   if (_controller.isLoadingMetadata ||
                       _controller.hasDescription) ...<Widget>[
-                    const SizedBox(height: 32),
+                    const SizedBox(height: 24),
                     _buildDescription(context, colors),
                   ],
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 24),
                   MediaRowSectionDesktop<Album>(
                     title: 'Veröffentlichungen',
                     isLoading: _controller.isLoadingAlbums,
@@ -167,9 +299,12 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
                     onRowMoreAnchorTap:
                         (Album item, int index, BuildContext anchorContext) =>
                             _showItemMenu(item, anchorContext: anchorContext),
+                    onRowContextMenu:
+                        (Album item, int index, Offset globalPosition) =>
+                            _showItemMenuAtPosition(item, globalPosition),
                     onArtistTap: _openArtist,
                   ),
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 24),
                   MediaRowSectionDesktop<Artist>(
                     title: 'Ähnliche Interpreten',
                     isLoading: _controller.isLoadingSimilarArtists,
@@ -183,8 +318,11 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
                     onRowMoreAnchorTap:
                         (Artist item, int index, BuildContext anchorContext) =>
                             _showItemMenu(item, anchorContext: anchorContext),
+                    onRowContextMenu:
+                        (Artist item, int index, Offset globalPosition) =>
+                            _showItemMenuAtPosition(item, globalPosition),
                   ),
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 24),
                   MediaTableSectionDesktop<Track>(
                     title: 'Toplieder',
                     isLoading: _controller.isLoadingTopTracks,
@@ -199,6 +337,9 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
                     onRowMoreAnchorTap:
                         (Track item, int index, BuildContext anchorContext) =>
                             _showItemMenu(item, anchorContext: anchorContext),
+                    onRowContextMenu:
+                        (Track item, int index, Offset globalPosition) =>
+                            _showItemMenuAtPosition(item, globalPosition),
                     onArtistTap: _openArtist,
                   ),
                 ],

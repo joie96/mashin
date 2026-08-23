@@ -27,6 +27,7 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
   final bool enableSelection;
   final DesktopRowAction<T>? onRowMoreTap;
   final DesktopRowMoreAnchorAction<T>? onRowMoreAnchorTap;
+  final DesktopRowContextMenuAction<T>? onRowContextMenu;
   final DesktopRowAction<T>? onRowFavoriteTap;
   final DesktopRowFavoriteResolver<T>? isRowFavorite;
   final ValueChanged<List<T>>? onSelectionChanged;
@@ -46,6 +47,7 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
     this.enableSelection = true,
     this.onRowMoreTap,
     this.onRowMoreAnchorTap,
+    this.onRowContextMenu,
     this.onRowFavoriteTap,
     this.isRowFavorite,
     this.onSelectionChanged,
@@ -71,6 +73,10 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
   bool _isAnimatingOut = false;
   bool _isAnimatingIn = false;
   int _transitionRunId = 0;
+  bool _isExpanded = false;
+  int _expandedItemCount = 0;
+  int _expandLoadRunId = 0;
+  int _expandedBaseCount = 0;
 
   final FocusNode _sectionFocusNode = FocusNode(
     debugLabel: 'MediaRowDesktopSectionFocus',
@@ -101,6 +107,10 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
       _syncSelectionSession();
     }
 
+    if (_isExpanded) {
+      _expandedItemCount = _expandedItemCount.clamp(0, widget.items.length);
+    }
+
     if (widget.items.isEmpty) {
       _pageStartIndex = 0;
       return;
@@ -129,7 +139,38 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
     final DesktopRowMoreAnchorAction<T>? handler = widget.onRowMoreAnchorTap;
     return handler == null
         ? null
-        : (BuildContext anchorContext) => handler(item, index, anchorContext);
+        : (BuildContext anchorContext) {
+            _ensureItemSelectedForMenu(index);
+            handler(item, index, anchorContext);
+          };
+  }
+
+  /// Selects only the item whose context menu opens so the user can see which
+  /// entry the menu belongs to. Any existing selection is replaced.
+  void _ensureItemSelectedForMenu(int index) {
+    if (!widget.enableSelection ||
+        index < 0 ||
+        index >= widget.items.length ||
+        (_selectedIndexes.length == 1 && _selectedIndexes.contains(index))) {
+      return;
+    }
+
+    _requestSectionFocus();
+    _selectSingleIndex(index);
+  }
+
+  /// Right-click variant: keeps the current selection untouched when the
+  /// clicked item is already part of it; otherwise selects only that item.
+  void _selectItemForRightClickMenu(int index) {
+    if (!widget.enableSelection ||
+        index < 0 ||
+        index >= widget.items.length ||
+        _selectedIndexes.contains(index)) {
+      return;
+    }
+
+    _requestSectionFocus();
+    _selectSingleIndex(index);
   }
 
   bool _isItemSelected(int index) {
@@ -293,6 +334,17 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
   }
 
   void _handleItemPointerDown(int index, PointerDownEvent event) {
+    if (event.kind == PointerDeviceKind.mouse &&
+        (event.buttons & kSecondaryMouseButton) != 0) {
+      _suppressedSelectionPointers.remove(event.pointer);
+      final DesktopRowContextMenuAction<T>? handler = widget.onRowContextMenu;
+      if (handler != null && index >= 0 && index < widget.items.length) {
+        _selectItemForRightClickMenu(index);
+        handler(widget.items[index], index, event.position);
+      }
+      return;
+    }
+
     if (_suppressedSelectionPointers.remove(event.pointer)) {
       return;
     }
@@ -550,140 +602,271 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
       visibleCount: visibleCount,
     );
 
-    return ListView.separated(
+    return _buildItemListView(
+      items: visibleItems,
+      startIndex: startIndex,
+      resolvedItemWidth: resolvedItemWidth,
+      resolvedCoverSize: resolvedCoverSize,
       key: ValueKey<int>(startIndex),
+    );
+  }
+
+  Widget _buildItemListView({
+    required List<T> items,
+    required int startIndex,
+    required double resolvedItemWidth,
+    required double resolvedCoverSize,
+    Key? key,
+  }) {
+    return ListView.separated(
+      key: key,
       scrollDirection: Axis.horizontal,
       physics: const NeverScrollableScrollPhysics(),
-      itemCount: visibleItems.length,
+      itemCount: items.length,
       separatorBuilder: (_, _) => SizedBox(width: widget.itemSpacing),
       itemBuilder: (BuildContext context, int index) {
         final int absoluteIndex = startIndex + index;
-        final Object? item = visibleItems[index];
-        final bool isSelected = _isItemSelected(absoluteIndex);
-        void onSelectTap() => _toggleSelectedIndex(absoluteIndex);
-        void onSelectPointerDown(PointerDownEvent event) =>
-            _handleItemPointerDown(absoluteIndex, event);
-
-        if (item is Album) {
-          return _buildDesktopMediaRowAlbum(
-            item: item,
-            index: absoluteIndex,
-            itemWidth: resolvedItemWidth,
-            coverSize: resolvedCoverSize,
-            onPlayTap: () => _onPlayTap(absoluteIndex),
-            isFavorite: _isItemFavorite(item as T, absoluteIndex),
-            onFavoriteTap: widget.onRowFavoriteTap == null
-                ? null
-                : () => widget.onRowFavoriteTap!(item as T, absoluteIndex),
-            onMoreTap: widget.onRowMoreTap == null
-                ? null
-                : () => widget.onRowMoreTap!(item as T, absoluteIndex),
-            onMoreAnchorTap: _moreAnchorHandler(item as T, absoluteIndex),
-            isSelected: isSelected,
-            onSelectTap: widget.enableSelection ? onSelectTap : null,
-            onSelectPointerDown: widget.enableSelection
-                ? onSelectPointerDown
-                : null,
-            onArtistTap: widget.onArtistTap,
-            onArtistPointerDown: _suppressSelectionForPointer,
-          );
-        }
-        if (item is Playlist) {
-          return _buildDesktopMediaRowPlaylist(
-            item: item,
-            index: absoluteIndex,
-            itemWidth: resolvedItemWidth,
-            coverSize: resolvedCoverSize,
-            onPlayTap: () => _onPlayTap(absoluteIndex),
-            isFavorite: _isItemFavorite(item as T, absoluteIndex),
-            onFavoriteTap: widget.onRowFavoriteTap == null
-                ? null
-                : () => widget.onRowFavoriteTap!(item as T, absoluteIndex),
-            onMoreTap: widget.onRowMoreTap == null
-                ? null
-                : () => widget.onRowMoreTap!(item as T, absoluteIndex),
-            onMoreAnchorTap: _moreAnchorHandler(item as T, absoluteIndex),
-            isSelected: isSelected,
-            onSelectTap: widget.enableSelection ? onSelectTap : null,
-            onSelectPointerDown: widget.enableSelection
-                ? onSelectPointerDown
-                : null,
-          );
-        }
-        if (item is Artist) {
-          return _buildDesktopMediaRowArtist(
-            item: item,
-            index: absoluteIndex,
-            itemWidth: resolvedItemWidth,
-            coverSize: resolvedCoverSize,
-            onPlayTap: () => _onPlayTap(absoluteIndex),
-            isFavorite: _isItemFavorite(item as T, absoluteIndex),
-            onFavoriteTap: widget.onRowFavoriteTap == null
-                ? null
-                : () => widget.onRowFavoriteTap!(item as T, absoluteIndex),
-            onMoreTap: widget.onRowMoreTap == null
-                ? null
-                : () => widget.onRowMoreTap!(item as T, absoluteIndex),
-            onMoreAnchorTap: _moreAnchorHandler(item as T, absoluteIndex),
-            isSelected: isSelected,
-            onSelectTap: widget.enableSelection ? onSelectTap : null,
-            onSelectPointerDown: widget.enableSelection
-                ? onSelectPointerDown
-                : null,
-          );
-        }
-        if (item is Track) {
-          return _buildDesktopMediaRowTrack(
-            item: item,
-            index: absoluteIndex,
-            itemWidth: resolvedItemWidth,
-            coverSize: resolvedCoverSize,
-            onPlayTap: () => _onPlayTap(absoluteIndex),
-            isFavorite: _isItemFavorite(item as T, absoluteIndex),
-            onFavoriteTap: widget.onRowFavoriteTap == null
-                ? null
-                : () => widget.onRowFavoriteTap!(item as T, absoluteIndex),
-            onMoreTap: widget.onRowMoreTap == null
-                ? null
-                : () => widget.onRowMoreTap!(item as T, absoluteIndex),
-            onMoreAnchorTap: _moreAnchorHandler(item as T, absoluteIndex),
-            isSelected: isSelected,
-            onSelectTap: widget.enableSelection ? onSelectTap : null,
-            onSelectPointerDown: widget.enableSelection
-                ? onSelectPointerDown
-                : null,
-            onArtistTap: widget.onArtistTap,
-            onArtistPointerDown: _suppressSelectionForPointer,
-          );
-        }
-
-        return _buildDesktopMediaRowUnknown(
-          index: absoluteIndex,
+        return _buildRowItem(
+          item: items[index],
+          absoluteIndex: absoluteIndex,
           itemWidth: resolvedItemWidth,
           coverSize: resolvedCoverSize,
-          onPlayTap: () => _onPlayTap(absoluteIndex),
-          isFavorite: _isItemFavorite(visibleItems[index], absoluteIndex),
-          onFavoriteTap: widget.onRowFavoriteTap == null
-              ? null
-              : () => widget.onRowFavoriteTap!(
-                  visibleItems[index],
-                  absoluteIndex,
-                ),
-          onMoreTap: widget.onRowMoreTap == null
-              ? null
-              : () => widget.onRowMoreTap!(visibleItems[index], absoluteIndex),
-          onMoreAnchorTap: _moreAnchorHandler(
-            visibleItems[index],
-            absoluteIndex,
-          ),
-          isSelected: isSelected,
-          onSelectTap: widget.enableSelection ? onSelectTap : null,
-          onSelectPointerDown: widget.enableSelection
-              ? onSelectPointerDown
-              : null,
         );
       },
     );
+  }
+
+  Widget _buildRowItem({
+    required T item,
+    required int absoluteIndex,
+    required double itemWidth,
+    required double coverSize,
+  }) {
+    final bool isSelected = _isItemSelected(absoluteIndex);
+    void onSelectTap() => _toggleSelectedIndex(absoluteIndex);
+    void onSelectPointerDown(PointerDownEvent event) =>
+        _handleItemPointerDown(absoluteIndex, event);
+
+    if (item is Album) {
+      return _buildDesktopMediaRowAlbum(
+        item: item,
+        index: absoluteIndex,
+        itemWidth: itemWidth,
+        coverSize: coverSize,
+        onPlayTap: () => _onPlayTap(absoluteIndex),
+        isFavorite: _isItemFavorite(item as T, absoluteIndex),
+        onFavoriteTap: widget.onRowFavoriteTap == null
+            ? null
+            : () => widget.onRowFavoriteTap!(item as T, absoluteIndex),
+        onMoreTap: widget.onRowMoreTap == null
+            ? null
+            : () => widget.onRowMoreTap!(item as T, absoluteIndex),
+        onMoreAnchorTap: _moreAnchorHandler(item as T, absoluteIndex),
+        isSelected: isSelected,
+        onSelectTap: widget.enableSelection ? onSelectTap : null,
+        onSelectPointerDown: widget.enableSelection ? onSelectPointerDown : null,
+        onArtistTap: widget.onArtistTap,
+        onArtistPointerDown: _suppressSelectionForPointer,
+      );
+    }
+    if (item is Playlist) {
+      return _buildDesktopMediaRowPlaylist(
+        item: item,
+        index: absoluteIndex,
+        itemWidth: itemWidth,
+        coverSize: coverSize,
+        onPlayTap: () => _onPlayTap(absoluteIndex),
+        isFavorite: _isItemFavorite(item as T, absoluteIndex),
+        onFavoriteTap: widget.onRowFavoriteTap == null
+            ? null
+            : () => widget.onRowFavoriteTap!(item as T, absoluteIndex),
+        onMoreTap: widget.onRowMoreTap == null
+            ? null
+            : () => widget.onRowMoreTap!(item as T, absoluteIndex),
+        onMoreAnchorTap: _moreAnchorHandler(item as T, absoluteIndex),
+        isSelected: isSelected,
+        onSelectTap: widget.enableSelection ? onSelectTap : null,
+        onSelectPointerDown: widget.enableSelection ? onSelectPointerDown : null,
+      );
+    }
+    if (item is Artist) {
+      return _buildDesktopMediaRowArtist(
+        item: item,
+        index: absoluteIndex,
+        itemWidth: itemWidth,
+        coverSize: coverSize,
+        onPlayTap: () => _onPlayTap(absoluteIndex),
+        isFavorite: _isItemFavorite(item as T, absoluteIndex),
+        onFavoriteTap: widget.onRowFavoriteTap == null
+            ? null
+            : () => widget.onRowFavoriteTap!(item as T, absoluteIndex),
+        onMoreTap: widget.onRowMoreTap == null
+            ? null
+            : () => widget.onRowMoreTap!(item as T, absoluteIndex),
+        onMoreAnchorTap: _moreAnchorHandler(item as T, absoluteIndex),
+        isSelected: isSelected,
+        onSelectTap: widget.enableSelection ? onSelectTap : null,
+        onSelectPointerDown: widget.enableSelection ? onSelectPointerDown : null,
+      );
+    }
+    if (item is Track) {
+      return _buildDesktopMediaRowTrack(
+        item: item,
+        index: absoluteIndex,
+        itemWidth: itemWidth,
+        coverSize: coverSize,
+        onPlayTap: () => _onPlayTap(absoluteIndex),
+        isFavorite: _isItemFavorite(item as T, absoluteIndex),
+        onFavoriteTap: widget.onRowFavoriteTap == null
+            ? null
+            : () => widget.onRowFavoriteTap!(item as T, absoluteIndex),
+        onMoreTap: widget.onRowMoreTap == null
+            ? null
+            : () => widget.onRowMoreTap!(item as T, absoluteIndex),
+        onMoreAnchorTap: _moreAnchorHandler(item as T, absoluteIndex),
+        isSelected: isSelected,
+        onSelectTap: widget.enableSelection ? onSelectTap : null,
+        onSelectPointerDown: widget.enableSelection ? onSelectPointerDown : null,
+        onArtistTap: widget.onArtistTap,
+        onArtistPointerDown: _suppressSelectionForPointer,
+      );
+    }
+
+    return _buildDesktopMediaRowUnknown(
+      index: absoluteIndex,
+      itemWidth: itemWidth,
+      coverSize: coverSize,
+      onPlayTap: () => _onPlayTap(absoluteIndex),
+      isFavorite: _isItemFavorite(item, absoluteIndex),
+      onFavoriteTap: widget.onRowFavoriteTap == null
+          ? null
+          : () => widget.onRowFavoriteTap!(item, absoluteIndex),
+      onMoreTap: widget.onRowMoreTap == null
+          ? null
+          : () => widget.onRowMoreTap!(item, absoluteIndex),
+      onMoreAnchorTap: _moreAnchorHandler(item, absoluteIndex),
+      isSelected: isSelected,
+      onSelectTap: widget.enableSelection ? onSelectTap : null,
+      onSelectPointerDown: widget.enableSelection ? onSelectPointerDown : null,
+    );
+  }
+
+  Widget _buildExpandedGrid({
+    required double resolvedItemWidth,
+    required double resolvedCoverSize,
+    required double sectionHeight,
+    required int itemsPerRow,
+  }) {
+    final int itemCount = math.min(_expandedItemCount, widget.items.length);
+    final List<T> items = widget.items.take(itemCount).toList(growable: false);
+
+    return SizedBox(
+      width: double.infinity,
+      child: Wrap(
+        spacing: widget.itemSpacing,
+        runSpacing: widget.itemSpacing,
+        children: <Widget>[
+          for (int index = 0; index < items.length; index++)
+            _buildExpandedRowItem(
+              item: items[index],
+              absoluteIndex: index,
+              itemWidth: resolvedItemWidth,
+              coverSize: resolvedCoverSize,
+              itemsPerRow: itemsPerRow,
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Wraps an item in the expanded view. Items that were already visible on
+  /// the current page appear instantly; newly appended rows slide in from
+  /// above with a per-row stagger so the grid grows downwards row by row.
+  Widget _buildExpandedRowItem({
+    required T item,
+    required int absoluteIndex,
+    required double itemWidth,
+    required double coverSize,
+    required int itemsPerRow,
+  }) {
+    final Widget child = _buildRowItem(
+      item: item,
+      absoluteIndex: absoluteIndex,
+      itemWidth: itemWidth,
+      coverSize: coverSize,
+    );
+
+    if (absoluteIndex < _expandedBaseCount) {
+      return child;
+    }
+
+    final int rowIndex =
+        (absoluteIndex - _expandedBaseCount) ~/ math.max(1, itemsPerRow);
+
+    return _ExpandRevealItem(
+      key: ValueKey<String>('expand-reveal-$absoluteIndex'),
+      delay: Duration(milliseconds: 70 * rowIndex),
+      child: child,
+    );
+  }
+
+  bool get _canToggleExpand =>
+      !widget.isLoading &&
+      widget.items.length >
+          math.max(1, _lastVisibleCount ?? _pageStartIndex + 1);
+
+  /// Last computed number of items fitting on one page; updated during build.
+  int? _lastVisibleCount;
+
+  void _toggleExpanded() {
+    if (!_canToggleExpand) {
+      return;
+    }
+
+    if (_isExpanded) {
+      setState(() {
+        _isExpanded = false;
+        _expandLoadRunId++;
+      });
+      return;
+    }
+
+    setState(() {
+      _isExpanded = true;
+      _finishRunningTransitionImmediately();
+      // Keep the currently visible page content static; only the appended
+      // items animate in from above, row by row.
+      _expandedItemCount = math.min(
+        math.max(_pageStartIndex + (_lastVisibleCount ?? 1), 1),
+        widget.items.length,
+      );
+      _expandedBaseCount = _expandedItemCount;
+    });
+
+    _loadExpandedItemsIncrementally();
+  }
+
+  Future<void> _loadExpandedItemsIncrementally() async {
+    final int runId = ++_expandLoadRunId;
+    final int pageSize = math.max(1, _lastVisibleCount ?? 1);
+
+    while (mounted && _isExpanded && runId == _expandLoadRunId) {
+      if (_expandedItemCount >= widget.items.length) {
+        return;
+      }
+
+      await Future<void>.delayed(const Duration(milliseconds: 220));
+      if (!mounted || !_isExpanded || runId != _expandLoadRunId) {
+        return;
+      }
+
+      setState(() {
+        _expandedItemCount = math.min(
+          _expandedItemCount + pageSize,
+          widget.items.length,
+        );
+      });
+    }
   }
 
   // Typed desktop row skeleton dispatch
@@ -764,6 +947,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
           constraints.maxWidth,
         );
         final int visibleCount = metrics.visibleCount;
+        _lastVisibleCount = visibleCount;
         final double resolvedItemWidth = metrics.computedItemWidth;
         final double resolvedCoverSize = _resolveCoverSize(resolvedItemWidth);
         final double sectionHeight = math.max(
@@ -781,6 +965,136 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
             hasTitle ||
             (hasPlayableContent &&
                 (isPagingEnabled || widget.playbackCoordinator != null));
+        final bool canToggleExpand = _canToggleExpand;
+        final Widget collapsedContent = SizedBox(
+          height: sectionHeight,
+          child: widget.isLoading
+              ? ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: widget.skeletonCount,
+                  separatorBuilder: (_, _) =>
+                      SizedBox(width: widget.itemSpacing),
+                  itemBuilder: (_, _) => _buildDesktopTypedRowSkeleton(
+                    itemWidth: resolvedItemWidth,
+                    coverSize: resolvedCoverSize,
+                  ),
+                )
+              : widget.items.isEmpty
+              ? Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: colors.border),
+                    color: colors.bgSecondary,
+                  ),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      widget.emptyText,
+                      style: TextStyle(color: colors.textSecondary),
+                    ),
+                  ),
+                )
+              : ClipRect(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: <Widget>[
+                      if (_isAnimatingOut && _outgoingStartIndex != null)
+                        TweenAnimationBuilder<double>(
+                          key: ValueKey<int>(_outgoingStartIndex!),
+                          tween: Tween<double>(begin: 0, end: 1),
+                          duration: _pageOutDuration,
+                          curve: _pageTransitionCurve,
+                          builder:
+                              (
+                                BuildContext context,
+                                double value,
+                                Widget? child,
+                              ) {
+                                final double dx =
+                                    (_navigationDirection >= 0 ? -1 : 1) *
+                                    _chunkTranslatePx *
+                                    value;
+                                return Opacity(
+                                  opacity: 1 - value,
+                                  child: Transform.translate(
+                                    offset: Offset(dx, 0),
+                                    child: child,
+                                  ),
+                                );
+                              },
+                          child: _buildSlideList(
+                            startIndex: _outgoingStartIndex!,
+                            visibleCount: visibleCount,
+                            resolvedItemWidth: resolvedItemWidth,
+                            resolvedCoverSize: resolvedCoverSize,
+                          ),
+                        )
+                      else if (_isAnimatingIn && _incomingStartIndex != null)
+                        TweenAnimationBuilder<double>(
+                          key: ValueKey<int>(_incomingStartIndex!),
+                          tween: Tween<double>(begin: 0, end: 1),
+                          duration: _pageInDuration,
+                          curve: _pageTransitionCurve,
+                          builder:
+                              (
+                                BuildContext context,
+                                double value,
+                                Widget? child,
+                              ) {
+                                final double dx =
+                                    (_navigationDirection >= 0 ? 1 : -1) *
+                                    _chunkTranslatePx *
+                                    (1 - value);
+                                return Opacity(
+                                  opacity: value,
+                                  child: Transform.translate(
+                                    offset: Offset(dx, 0),
+                                    child: child,
+                                  ),
+                                );
+                              },
+                          child: _buildSlideList(
+                            startIndex: _incomingStartIndex!,
+                            visibleCount: visibleCount,
+                            resolvedItemWidth: resolvedItemWidth,
+                            resolvedCoverSize: resolvedCoverSize,
+                          ),
+                        )
+                      else
+                        _buildSlideList(
+                          startIndex: _pageStartIndex,
+                          visibleCount: visibleCount,
+                          resolvedItemWidth: resolvedItemWidth,
+                          resolvedCoverSize: resolvedCoverSize,
+                        ),
+                    ],
+                  ),
+                ),
+        );
+        final Widget bodyContent = AnimatedSize(
+          duration: const Duration(milliseconds: 380),
+          curve: Curves.easeInOutCubic,
+          alignment: Alignment.topCenter,
+          clipBehavior: Clip.hardEdge,
+          child: _isExpanded
+              ? SizedBox(
+                  key: const ValueKey<String>('row-expanded'),
+                  width: double.infinity,
+                  child: _buildExpandedGrid(
+                    resolvedItemWidth: resolvedItemWidth,
+                    resolvedCoverSize: resolvedCoverSize,
+                    sectionHeight: sectionHeight,
+                    itemsPerRow: visibleCount,
+                  ),
+                )
+              : SizedBox(
+                  key: const ValueKey<String>('row-collapsed'),
+                  width: double.infinity,
+                  child: collapsedContent,
+                ),
+        );
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -816,7 +1130,9 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
                       onTap: _onShuffleAllTap,
                     ),
                   ],
-                  if (isPagingEnabled && hasPlayableContent) ...<Widget>[
+                  if (isPagingEnabled &&
+                      hasPlayableContent &&
+                      !_isExpanded) ...<Widget>[
                     const SizedBox(width: 4),
                     const SectionHeaderVerticalDivider(),
                     _buildPaginationControls(
@@ -828,114 +1144,17 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
                 ],
               ),
             if (showHeaderRow) const SizedBox(height: 10),
-            SizedBox(
-              height: sectionHeight,
-              child: widget.isLoading
-                  ? ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: widget.skeletonCount,
-                      separatorBuilder: (_, _) =>
-                          SizedBox(width: widget.itemSpacing),
-                      itemBuilder: (_, _) => _buildDesktopTypedRowSkeleton(
-                        itemWidth: resolvedItemWidth,
-                        coverSize: resolvedCoverSize,
-                      ),
-                    )
-                  : widget.items.isEmpty
-                  ? Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: colors.border),
-                        color: colors.bgSecondary,
-                      ),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          widget.emptyText,
-                          style: TextStyle(color: colors.textSecondary),
-                        ),
-                      ),
-                    )
-                  : ClipRect(
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: <Widget>[
-                          if (_isAnimatingOut && _outgoingStartIndex != null)
-                            TweenAnimationBuilder<double>(
-                              key: ValueKey<int>(_outgoingStartIndex!),
-                              tween: Tween<double>(begin: 0, end: 1),
-                              duration: _pageOutDuration,
-                              curve: _pageTransitionCurve,
-                              builder:
-                                  (
-                                    BuildContext context,
-                                    double value,
-                                    Widget? child,
-                                  ) {
-                                    final double dx =
-                                        (_navigationDirection >= 0 ? -1 : 1) *
-                                        _chunkTranslatePx *
-                                        value;
-                                    return Opacity(
-                                      opacity: 1 - value,
-                                      child: Transform.translate(
-                                        offset: Offset(dx, 0),
-                                        child: child,
-                                      ),
-                                    );
-                                  },
-                              child: _buildSlideList(
-                                startIndex: _outgoingStartIndex!,
-                                visibleCount: visibleCount,
-                                resolvedItemWidth: resolvedItemWidth,
-                                resolvedCoverSize: resolvedCoverSize,
-                              ),
-                            )
-                          else if (_isAnimatingIn &&
-                              _incomingStartIndex != null)
-                            TweenAnimationBuilder<double>(
-                              key: ValueKey<int>(_incomingStartIndex!),
-                              tween: Tween<double>(begin: 0, end: 1),
-                              duration: _pageInDuration,
-                              curve: _pageTransitionCurve,
-                              builder:
-                                  (
-                                    BuildContext context,
-                                    double value,
-                                    Widget? child,
-                                  ) {
-                                    final double dx =
-                                        (_navigationDirection >= 0 ? 1 : -1) *
-                                        _chunkTranslatePx *
-                                        (1 - value);
-                                    return Opacity(
-                                      opacity: value,
-                                      child: Transform.translate(
-                                        offset: Offset(dx, 0),
-                                        child: child,
-                                      ),
-                                    );
-                                  },
-                              child: _buildSlideList(
-                                startIndex: _incomingStartIndex!,
-                                visibleCount: visibleCount,
-                                resolvedItemWidth: resolvedItemWidth,
-                                resolvedCoverSize: resolvedCoverSize,
-                              ),
-                            )
-                          else
-                            _buildSlideList(
-                              startIndex: _pageStartIndex,
-                              visibleCount: visibleCount,
-                              resolvedItemWidth: resolvedItemWidth,
-                              resolvedCoverSize: resolvedCoverSize,
-                            ),
-                        ],
-                      ),
-                    ),
-            ),
+            bodyContent,
+            if (canToggleExpand)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Center(
+                  child: _ExpandToggleButton(
+                    isExpanded: _isExpanded,
+                    onTap: _toggleExpanded,
+                  ),
+                ),
+              ),
           ],
         );
       },
@@ -983,6 +1202,130 @@ class _SelectAllIntent extends Intent {
 
 class _ClearSelectionIntent extends Intent {
   const _ClearSelectionIntent();
+}
+
+// Small circular toggle shown below a section to expand/collapse all items,
+// matching the MAUI TableView/RowView expand toggle styling.
+class _ExpandToggleButton extends StatefulWidget {
+  final bool isExpanded;
+  final VoidCallback onTap;
+
+  const _ExpandToggleButton({required this.isExpanded, required this.onTap});
+
+  @override
+  State<_ExpandToggleButton> createState() => _ExpandToggleButtonState();
+}
+
+class _ExpandToggleButtonState extends State<_ExpandToggleButton> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+
+    return Tooltip(
+      message: widget.isExpanded ? 'Weniger anzeigen' : 'Alle anzeigen',
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        child: Material(
+          color: _isHovered ? colors.hover : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            onTap: widget.onTap,
+            borderRadius: BorderRadius.circular(12),
+            hoverColor: colors.hover,
+            child: SizedBox(
+              width: 24,
+              height: 24,
+              child: AnimatedScale(
+                scale: _isHovered ? 1.08 : 1,
+                duration: const Duration(milliseconds: 120),
+                curve: Curves.easeOutCubic,
+                child: AnimatedRotation(
+                  turns: widget.isExpanded ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  child: Icon(
+                    Icons.expand_more_outlined,
+                    size: 14,
+                    color: colors.textSecondary,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Reveals a newly appended expanded-grid item by fading and sliding it in
+/// from above, matching the MAUI RowView page-extension animation
+/// (TranslateY -50 + FadeIn). Runs once on insert; the optional [delay]
+/// staggers items row by row.
+class _ExpandRevealItem extends StatefulWidget {
+  final Widget child;
+  final Duration delay;
+
+  const _ExpandRevealItem({
+    super.key,
+    required this.child,
+    this.delay = Duration.zero,
+  });
+
+  @override
+  State<_ExpandRevealItem> createState() => _ExpandRevealItemState();
+}
+
+class _ExpandRevealItemState extends State<_ExpandRevealItem> {
+  bool _revealed = false;
+  Timer? _delayTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.delay == Duration.zero) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _startReveal());
+    } else {
+      _delayTimer = Timer(widget.delay, _startReveal);
+    }
+  }
+
+  void _startReveal() {
+    if (!mounted || _revealed) {
+      return;
+    }
+    setState(() {
+      _revealed = true;
+    });
+  }
+
+  @override
+  void dispose() {
+    _delayTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: _revealed ? 1 : 0),
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeInOutCubic,
+      builder: (BuildContext context, double value, Widget? child) {
+        return Opacity(
+          opacity: value,
+          child: Transform.translate(
+            offset: Offset(0, -50 * (1 - value)),
+            child: child,
+          ),
+        );
+      },
+      child: widget.child,
+    );
+  }
 }
 
 class _RowLayoutMetrics {

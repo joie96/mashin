@@ -515,4 +515,50 @@ class ArtistDetailController extends ChangeNotifier {
       // Ignore playback failures to keep the UI responsive.
     }
   }
+
+  /// Starts radio for an arbitrary media item (similar artist, album, ...).
+  /// Mirrors MAUI's artist context menu: play the item, then queue radio next.
+  Future<void> startItemRadio(MediaItem item) async {
+    if (item.itemId.trim().isEmpty || item.provider.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      await playbackCoordinator.playMedia(<MediaItem>[item]);
+      await playbackCoordinator.playMediaRadioNext(<MediaItem>[item]);
+    } catch (_) {
+      // Ignore playback failures to keep the UI responsive.
+    }
+  }
+
+  /// Starts radio from a track. Mirrors MAUI's track context menu: play the
+  /// track, queue radio next, then remove the duplicate queue entry that the
+  /// radio command creates right after the played track.
+  Future<void> startTrackRadio(Track track) async {
+    if (track.itemId.trim().isEmpty || track.provider.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      await playbackCoordinator.playMedia(<MediaItem>[track]);
+      await playbackCoordinator.playMediaRadioNext(<MediaItem>[track]);
+
+      // The radio command inserts a duplicate of the seed track directly after
+      // the played one; remove it once it shows up in the queue.
+      const int duplicateIndex = 1;
+      for (int attempt = 0; attempt < 10; attempt++) {
+        final List<QueueItem> queueItems = playbackCoordinator.queueItems;
+        if (queueItems.length > duplicateIndex) {
+          final String queueItemId = queueItems[duplicateIndex].queueItemId;
+          if (queueItemId.trim().isNotEmpty) {
+            await playbackCoordinator.deleteQueueItem(queueItemId);
+            return;
+          }
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      }
+    } catch (_) {
+      // Ignore playback failures to keep the UI responsive.
+    }
+  }
 }
