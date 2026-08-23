@@ -1402,7 +1402,7 @@ Widget _buildDesktopTableRowTrack({
       _buildDesktopTableSizedCell(
         flex: 1,
         child: _buildDesktopBodyText(
-          '-',
+          item.album?.year?.toString() ?? '-',
           TextAlign.left,
           DesktopTextTone.tertiary,
         ),

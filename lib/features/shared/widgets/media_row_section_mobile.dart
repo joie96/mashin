@@ -7,6 +7,8 @@ import '../../playback/playback_coordinator.dart';
 import 'media_table_section_desktop.dart';
 
 class MediaRowSectionMobile<T> extends StatelessWidget {
+  static const double _artistHeight = 142;
+
   final String title;
   final bool isLoading;
   final List<T> items;
@@ -72,6 +74,7 @@ class MediaRowSectionMobile<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
     final bool hasTitle = title.trim().isNotEmpty;
+    final double sectionHeight = T == Artist ? _artistHeight : height;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -85,7 +88,7 @@ class MediaRowSectionMobile<T> extends StatelessWidget {
           ),
         if (hasTitle) const SizedBox(height: 10),
         SizedBox(
-          height: height,
+          height: sectionHeight,
           child: isLoading
               ? ListView.separated(
                   scrollDirection: Axis.horizontal,
@@ -246,8 +249,8 @@ Widget _buildMobileMediaRowArtist({
     coverSize: coverSize,
     icon: Icons.person_outlined,
     title: _prefer(item.name, 'Unknown Artist'),
-    secondaryText: 'Artist',
-    tertiaryText: _artistTertiary(item),
+    secondaryText: null,
+    tertiaryText: null,
     coverUrl: item.imageUri ?? '',
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
@@ -439,6 +442,7 @@ Widget _buildMobileMediaRowArtistSkeleton({
   return _buildMobileMediaRowSkeletonBase(
     itemWidth: itemWidth,
     coverSize: coverSize,
+    lineCount: 1,
   );
 }
 
@@ -465,6 +469,7 @@ Widget _buildMobileMediaRowUnknownSkeleton({
 Widget _buildMobileMediaRowSkeletonBase({
   required double itemWidth,
   required double coverSize,
+  int lineCount = 3,
 }) {
   return Builder(
     builder: (BuildContext context) {
@@ -472,12 +477,12 @@ Widget _buildMobileMediaRowSkeletonBase({
       final double titleWidth = (itemWidth * 0.72)
           .clamp(48, itemWidth)
           .toDouble();
-      final double secondaryWidth = (itemWidth * 0.56)
-          .clamp(42, itemWidth)
-          .toDouble();
-      final double tertiaryWidth = (itemWidth * 0.46)
-          .clamp(36, itemWidth)
-          .toDouble();
+        final double? secondaryWidth = lineCount > 1
+          ? (itemWidth * 0.56).clamp(42, itemWidth).toDouble()
+          : null;
+        final double? tertiaryWidth = lineCount > 2
+          ? (itemWidth * 0.46).clamp(36, itemWidth).toDouble()
+          : null;
 
       Widget line(double width) {
         return Container(
@@ -534,10 +539,14 @@ Widget _buildMobileMediaRowSkeletonBase({
             ),
             const SizedBox(height: 8),
             line(titleWidth),
-            const SizedBox(height: 6),
-            line(secondaryWidth),
-            const SizedBox(height: 6),
-            line(tertiaryWidth),
+            if (secondaryWidth != null) ...<Widget>[
+              const SizedBox(height: 6),
+              line(secondaryWidth),
+            ],
+            if (tertiaryWidth != null) ...<Widget>[
+              const SizedBox(height: 6),
+              line(tertiaryWidth),
+            ],
           ],
         ),
       );

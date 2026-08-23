@@ -115,7 +115,28 @@ class AlbumDetailController extends ChangeNotifier {
         itemId,
         providerInstanceIdOrDomain,
       );
-      _tracks = List<Track>.unmodifiable(loaded);
+      final Album? loadedAlbum = _album;
+      _tracks = List<Track>.unmodifiable(
+        loadedAlbum == null
+            ? loaded
+            : loaded
+                  .map(
+                    (Track track) => Track(
+                      itemId: track.itemId,
+                      provider: track.provider,
+                      name: track.name,
+                      duration: track.duration,
+                      artists: track.artists,
+                      sortName: track.sortName,
+                      uri: track.uri,
+                      album: loadedAlbum,
+                      providerMappings: track.providerMappings,
+                      metadata: track.metadata,
+                      favorite: track.favorite,
+                    ),
+                  )
+                  .toList(growable: false),
+      );
     } catch (_) {
       _tracks = const <Track>[];
     } finally {

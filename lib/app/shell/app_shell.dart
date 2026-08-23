@@ -389,8 +389,8 @@ class _AppShellState extends State<AppShell> {
           playbackCoordinator: _playbackCoordinator,
           onClose: _closeQueueOverlay,
           onToggleDontStopTheMusic: _toggleDontStopTheMusic,
-          onOpenArtist: _navigation.openArtist,
-          onOpenAlbum: _navigation.openAlbum,
+          onOpenArtist: _openArtistFromQueue,
+          onOpenAlbum: _openAlbumFromQueue,
         ),
       ],
     );
@@ -477,6 +477,16 @@ class _AppShellState extends State<AppShell> {
     setState(() {
       _isQueueOverlayOpen = false;
     });
+  }
+
+  void _openArtistFromQueue(Artist artist) {
+    _closeQueueOverlay();
+    _navigation.openArtist(artist);
+  }
+
+  void _openAlbumFromQueue(Album album) {
+    _closeQueueOverlay();
+    _navigation.openAlbum(album);
   }
 
   void _select(AppSection section) {

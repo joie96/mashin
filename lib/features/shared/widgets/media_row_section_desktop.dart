@@ -14,6 +14,8 @@ import 'media_table_section_desktop.dart';
 class MediaRowSectionDesktop<T> extends StatefulWidget {
   static const double _defaultHeight = 226;
   static const double _reservedTextHeight = 80;
+  static const double _artistDefaultHeight = 184;
+  static const double _artistReservedTextHeight = 40;
   static const double _minItemWidth = 150;
 
   final String title;
@@ -980,9 +982,15 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         _lastVisibleCount = visibleCount;
         final double resolvedItemWidth = metrics.computedItemWidth;
         final double resolvedCoverSize = _resolveCoverSize(resolvedItemWidth);
+        final bool isArtistSection = T == Artist;
         final double sectionHeight = math.max(
-          MediaRowSectionDesktop._defaultHeight,
-          resolvedCoverSize + MediaRowSectionDesktop._reservedTextHeight,
+          isArtistSection
+              ? MediaRowSectionDesktop._artistDefaultHeight
+              : MediaRowSectionDesktop._defaultHeight,
+          resolvedCoverSize +
+              (isArtistSection
+                  ? MediaRowSectionDesktop._artistReservedTextHeight
+                  : MediaRowSectionDesktop._reservedTextHeight),
         );
         final int pageCount = widget.items.isEmpty
             ? 1
@@ -1476,8 +1484,8 @@ Widget _buildDesktopMediaRowArtist({
     onTitleTap: onArtistTap == null
         ? null
         : (MediaItem media) => onArtistTap(media as Artist),
-    secondaryText: 'Artist',
-    tertiaryText: _artistTertiary(item),
+    secondaryText: null,
+    tertiaryText: null,
     coverUrl: item.imageUri ?? '',
     isCircularCover: true,
     providerLabel: _providerLabelFromId(item.provider),
@@ -2165,6 +2173,7 @@ Widget _buildDesktopMediaRowArtistSkeleton({
     itemWidth: itemWidth,
     coverSize: coverSize,
     isCircularCover: true,
+    lineCount: 1,
   );
 }
 
@@ -2192,6 +2201,7 @@ Widget _buildDesktopMediaRowSkeletonBase({
   required double itemWidth,
   required double coverSize,
   bool isCircularCover = false,
+  int lineCount = 3,
 }) {
   return Builder(
     builder: (BuildContext context) {
@@ -2212,14 +2222,18 @@ Widget _buildDesktopMediaRowSkeletonBase({
         preferred: math.min(safeItemWidth - 8, 118),
         minWidth: 52,
       );
-      final double secondaryWidth = safeClamp(
-        preferred: math.min(safeItemWidth - 16, 92),
-        minWidth: 44,
-      );
-      final double tertiaryWidth = safeClamp(
-        preferred: math.min(safeItemWidth - 24, 74),
-        minWidth: 40,
-      );
+      final double? secondaryWidth = lineCount > 1
+          ? safeClamp(
+              preferred: math.min(safeItemWidth - 16, 92),
+              minWidth: 44,
+            )
+          : null;
+      final double? tertiaryWidth = lineCount > 2
+          ? safeClamp(
+              preferred: math.min(safeItemWidth - 24, 74),
+              minWidth: 40,
+            )
+          : null;
 
       Widget line(double width) {
         return Container(
@@ -2253,10 +2267,14 @@ Widget _buildDesktopMediaRowSkeletonBase({
                     ),
               const SizedBox(height: 12),
               line(titleWidth),
-              const SizedBox(height: 6),
-              line(secondaryWidth),
-              const SizedBox(height: 6),
-              line(tertiaryWidth),
+              if (secondaryWidth != null) ...<Widget>[
+                const SizedBox(height: 6),
+                line(secondaryWidth),
+              ],
+              if (tertiaryWidth != null) ...<Widget>[
+                const SizedBox(height: 6),
+                line(tertiaryWidth),
+              ],
             ],
           ),
         ),
