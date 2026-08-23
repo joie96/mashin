@@ -358,6 +358,7 @@ class _AppShellState extends State<AppShell> {
               trackCoverUrl: _currentTrackCoverUrl,
               maxSeconds: _currentTrackMaxSeconds,
               currentSeconds: _currentTrackPositionSeconds,
+              isQueueOpen: _isQueueOverlayOpen,
               onTogglePlayPause: _togglePlayPause,
               onPrevious: _playPrevious,
               onNext: _playNext,
@@ -1006,6 +1007,7 @@ class _DesktopPlayerBar extends StatelessWidget {
   final String? trackCoverUrl;
   final double maxSeconds;
   final double currentSeconds;
+  final bool isQueueOpen;
   final Future<void> Function() onTogglePlayPause;
   final Future<void> Function() onPrevious;
   final Future<void> Function() onNext;
@@ -1028,6 +1030,7 @@ class _DesktopPlayerBar extends StatelessWidget {
     required this.trackCoverUrl,
     required this.maxSeconds,
     required this.currentSeconds,
+    required this.isQueueOpen,
     required this.onTogglePlayPause,
     required this.onPrevious,
     required this.onNext,
@@ -1292,7 +1295,7 @@ class _DesktopPlayerBar extends StatelessWidget {
                   _PlayerBarIconButton(
                     icon: Icons.queue_music_outlined,
                     onTap: onOpenQueue,
-                    color: colors.textSecondary,
+                    color: isQueueOpen ? colors.accent : colors.textSecondary,
                   ),
                   _PlayerBarIconButton(
                     icon: Icons.cell_tower_outlined,
