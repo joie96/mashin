@@ -11,6 +11,7 @@ import '../../playback/playback_coordinator.dart';
 import '../../playback/playback_models.dart';
 import '../selection/selection_controller.dart';
 import 'media_link_text.dart';
+import 'media_image.dart';
 
 typedef DesktopRowAction<T> = void Function(T item, int index);
 typedef DesktopRowMoreAnchorAction<T> =
@@ -1360,7 +1361,7 @@ Widget _buildDesktopTableRowTrack({
       _buildDesktopTableSizedCell(
         width: 48,
         child: MediaTableCover(
-          coverUrl: item.imageUri,
+          coverUrl: item.imageUriForSize(80),
           fallbackIcon: Icons.music_note_outlined,
           size: 48,
           radius: 8,
@@ -1463,7 +1464,7 @@ Widget _buildDesktopTableRowAlbum({
       _buildDesktopTableSizedCell(
         width: 62,
         child: MediaTableCover(
-          coverUrl: item.imageUri,
+          coverUrl: item.imageUriForSize(80),
           fallbackIcon: Icons.album_outlined,
           size: 48,
           radius: 8,
@@ -1559,7 +1560,7 @@ Widget _buildDesktopTableRowPlaylist({
       _buildDesktopTableSizedCell(
         width: 62,
         child: MediaTableCover(
-          coverUrl: item.imageUri,
+          coverUrl: item.imageUriForSize(80),
           fallbackIcon: Icons.queue_music_outlined,
           size: 48,
           radius: 8,
@@ -1645,7 +1646,7 @@ Widget _buildDesktopTableRowArtist({
       _buildDesktopTableSizedCell(
         width: 62,
         child: MediaTableCover(
-          coverUrl: item.imageUri,
+          coverUrl: item.imageUriForSize(80),
           fallbackIcon: Icons.person_outlined,
           size: 48,
           radius: 8,
@@ -1742,7 +1743,7 @@ Widget _buildDesktopTableRowQueue({
       _buildDesktopTableSizedCell(
         width: 48,
         child: MediaTableCover(
-          coverUrl: item.mediaItem?.imageUri,
+          coverUrl: item.mediaItem?.imageUriForSize(80),
           fallbackIcon: Icons.music_note_outlined,
           size: 48,
           radius: 8,
@@ -2950,10 +2951,10 @@ class _MediaTableCoverState extends State<MediaTableCover> {
               Container(
                 color: colors.bgTertiary,
                 child: hasCover
-                    ? Image.network(
-                        trimmedCover,
+                    ? MediaImage(
+                        source: trimmedCover,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => Icon(
+                        fallback: Icon(
                           widget.fallbackIcon,
                           color: colors.accent,
                           size: widget.size * 0.5,

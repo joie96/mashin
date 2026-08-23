@@ -18,6 +18,8 @@ import '../../features/queue/queue_overlay.dart';
 import '../../features/playback/sendspin/sendspin_player.dart';
 import '../../features/playback/sendspin/sendspin_rust_backend.dart';
 import '../../features/playback/sendspin/sendspin_rust_bridge_ffi.dart';
+import '../../features/shared/userdata_controller.dart';
+import '../../features/shared/widgets/media_image.dart';
 import '../navigation/app_navigation_controller.dart';
 import '../theme/app_theme.dart';
 
@@ -52,9 +54,16 @@ class _AppShellState extends State<AppShell> {
   bool _isBootstrapping = true;
   String _baseUrl = AppConfig.defaultMusicAssistantUrl;
   String? _username;
+    UserDataController? _userDataController;
   final TextEditingController _desktopSearchController =
       TextEditingController();
   Timer? _desktopSearchDebounce;
+
+    List<Playlist> get _sidebarPlaylists =>
+      _userDataController?.playlists ?? const <Playlist>[];
+
+    bool get _isLoadingSidebarPlaylists =>
+      _userDataController?.isLoadingPreferences ?? false;
 
   // Getters for current Track and Queue state
   QueueItem? get _currentQueueItem {
@@ -126,7 +135,7 @@ class _AppShellState extends State<AppShell> {
   }
 
   String? get _currentTrackCoverUrl {
-    final url = _currentQueueItem?.mediaItem?.imageUri?.trim() ?? '';
+    final url = _currentQueueItem?.mediaItem?.imageUriForSize(80)?.trim() ?? '';
     return url.isEmpty ? null : url;
   }
 
@@ -218,6 +227,7 @@ class _AppShellState extends State<AppShell> {
     _playbackCoordinator.removeListener(_onPlaybackChanged);
     unawaited(_playbackCoordinator.shutdown());
     _playbackCoordinator.dispose();
+    _disposeUserDataController();
     unawaited(_musicAssistantEventHub?.dispose());
     _musicAssistantClient?.dispose();
     super.dispose();
@@ -314,6 +324,65 @@ class _AppShellState extends State<AppShell> {
                               AppSection.favorites,
                           onTap: () => _select(AppSection.favorites),
                         ),
+                        _DesktopNavItem(
+                          label: 'Playlists',
+                          icon: Icons.queue_music_outlined,
+                          selected:
+                              _navigation.currentSection ==
+                              AppSection.playlists,
+                          onTap: () => _select(AppSection.playlists),
+                        ),
+                        const SizedBox(height: 14),
+                        Divider(height: 1, color: colors.border),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(22, 14, 22, 10),
+                          child: Row(
+                            children: <Widget>[
+                              Expanded(
+                                child: Text(
+                                  'Playlists',
+                                  style: Theme.of(context).textTheme.labelLarge
+                                      ?.copyWith(
+                                        color: colors.textSecondary,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                ),
+                              ),
+                              if (_isLoadingSidebarPlaylists)
+                                SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: colors.textSecondary,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: ListView.builder(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 0,
+                            ),
+                            itemCount: _sidebarPlaylists.length,
+                            itemBuilder: (BuildContext context, int index) {
+                              final Playlist playlist = _sidebarPlaylists[index];
+                              final AppDetailDestination? activeDetail =
+                                  _navigation.activeDetail;
+                              final bool selected =
+                                  activeDetail?.type == AppDetailType.playlist &&
+                                  activeDetail?.itemId == playlist.itemId;
+
+                              return _DesktopSidebarPlaylistItem(
+                                playlist: playlist,
+                                selected: selected,
+                                onTap: () => _navigation.openPlaylist(playlist),
+                              );
+                            },
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -338,6 +407,7 @@ class _AppShellState extends State<AppShell> {
                               _musicAssistantClient!,
                               _playbackCoordinator,
                               desktopSearchDriven: true,
+                              userDataController: _userDataController,
                             ),
                           ),
                         ),
@@ -409,6 +479,7 @@ class _AppShellState extends State<AppShell> {
                 child: _navigation.buildPage(
                   _musicAssistantClient!,
                   _playbackCoordinator,
+                  userDataController: _userDataController,
                 ),
               ),
             ),
@@ -556,6 +627,7 @@ class _AppShellState extends State<AppShell> {
     );
 
     if (candidateToken == null || candidateToken.isEmpty) {
+      _disposeUserDataController();
       unawaited(_musicAssistantEventHub?.dispose());
       if (!mounted) {
         return;
@@ -584,6 +656,10 @@ class _AppShellState extends State<AppShell> {
         baseUrl: candidateBaseUrl,
         authToken: candidateToken,
       );
+      await _attachUserDataController(
+        client: candidateClient,
+        username: candidateUsername,
+      );
       setState(() {
         _musicAssistantClient = candidateClient;
         _musicAssistantEventHub = eventHub;
@@ -593,6 +669,7 @@ class _AppShellState extends State<AppShell> {
     }
 
     candidateClient.dispose();
+  _disposeUserDataController();
     await _authStore.clear();
     unawaited(_musicAssistantEventHub?.dispose());
 
@@ -654,6 +731,11 @@ class _AppShellState extends State<AppShell> {
       _musicAssistantClient?.dispose();
       unawaited(_musicAssistantEventHub?.dispose());
 
+      await _attachUserDataController(
+        client: authenticatedClient,
+        username: username,
+      );
+
       setState(() {
         _musicAssistantClient = authenticatedClient;
         _musicAssistantEventHub = authenticatedEventHub;
@@ -706,6 +788,44 @@ class _AppShellState extends State<AppShell> {
     } catch (error) {
       debugPrint('Startup bootstrap failed: $error');
     }
+  }
+
+  Future<void> _attachUserDataController({
+    required MusicAssistantClient client,
+    required String? username,
+  }) async {
+    _disposeUserDataController();
+
+    final UserDataController controller = UserDataController(
+      client: client,
+      configuredUsername: username,
+    );
+    controller.addListener(_onUserDataChanged);
+    _userDataController = controller;
+
+    if (mounted) {
+      setState(() {});
+    }
+
+    await controller.loadPreferences();
+  }
+
+  void _disposeUserDataController() {
+    final UserDataController? controller = _userDataController;
+    if (controller == null) {
+      return;
+    }
+
+    controller.removeListener(_onUserDataChanged);
+    controller.dispose();
+    _userDataController = null;
+  }
+
+  void _onUserDataChanged() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
   }
 
   Future<void> _togglePlayPause() async {
@@ -995,6 +1115,66 @@ class _DesktopNavItem extends StatelessWidget {
   }
 }
 
+class _DesktopSidebarPlaylistItem extends StatelessWidget {
+  const _DesktopSidebarPlaylistItem({
+    required this.playlist,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final Playlist playlist;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+    final String title = playlist.name.trim().isEmpty
+        ? 'Unknown Playlist'
+        : playlist.name.trim();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Material(
+        color: selected ? colors.hover : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: <Widget>[
+                Icon(
+                  Icons.queue_music_outlined,
+                  size: 18,
+                  color: selected ? colors.accent : colors.textSecondary,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: selected
+                          ? colors.textPrimary
+                          : colors.textSecondary,
+                      fontWeight: selected
+                          ? FontWeight.w600
+                          : FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _DesktopPlayerBar extends StatelessWidget {
   static const double barHeight = 90;
 
@@ -1091,15 +1271,13 @@ class _DesktopPlayerBar extends StatelessWidget {
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(4),
                       child: trackCoverUrl != null
-                          ? Image.network(
-                              trackCoverUrl!,
+                          ? MediaImage(
+                              source: trackCoverUrl!,
                               fit: BoxFit.cover,
-                              errorBuilder: (_, _, _) {
-                                return Icon(
-                                  Icons.music_note_outlined,
-                                  color: colors.textSecondary,
-                                );
-                              },
+                              fallback: Icon(
+                                Icons.music_note_outlined,
+                                color: colors.textSecondary,
+                              ),
                             )
                           : Icon(
                               Icons.music_note_outlined,
@@ -1599,10 +1777,10 @@ class _MobilePlayerBar extends StatelessWidget {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: trackCoverUrl != null
-                  ? Image.network(
-                      trackCoverUrl!,
+                  ? MediaImage(
+                      source: trackCoverUrl!,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => Icon(
+                      fallback: Icon(
                         Icons.music_note_outlined,
                         color: colors.textSecondary,
                       ),

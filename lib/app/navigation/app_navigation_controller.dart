@@ -8,6 +8,7 @@ import '../../features/home/home_screen.dart';
 import '../../features/playback/playback_coordinator.dart';
 import '../../features/playlist/playlist_detail_page.dart';
 import '../../features/search/search_screen.dart';
+import '../../features/shared/userdata_controller.dart';
 
 enum AppDetailType { artist, album, playlist }
 
@@ -197,6 +198,7 @@ class AppNavigationController extends ChangeNotifier {
     MusicAssistantClient client,
     PlaybackCoordinator playbackCoordinator, {
     bool desktopSearchDriven = false,
+    UserDataController? userDataController,
   }) {
     final AppDetailDestination? detail = activeDetail;
 
@@ -209,6 +211,7 @@ class AppNavigationController extends ChangeNotifier {
         playbackCoordinator: playbackCoordinator,
         itemId: detail.itemId,
         providerInstanceIdOrDomain: detail.providerInstanceIdOrDomain,
+        userDataController: userDataController,
         onOpenArtist: openArtist,
         onOpenAlbum: openAlbum,
       );
@@ -237,6 +240,7 @@ class AppNavigationController extends ChangeNotifier {
         playbackCoordinator: playbackCoordinator,
         itemId: detail.itemId,
         providerInstanceIdOrDomain: detail.providerInstanceIdOrDomain,
+        userDataController: userDataController,
         onOpenArtist: openArtist,
         onOpenAlbum: openAlbum,
       );

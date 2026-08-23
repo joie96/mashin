@@ -9,6 +9,7 @@ import '../../../data/music_assistant/ma_models.dart';
 import '../../playback/playback_coordinator.dart';
 import '../selection/selection_controller.dart';
 import 'media_link_text.dart';
+import 'media_image.dart';
 import 'media_table_section_desktop.dart';
 
 class MediaRowSectionDesktop<T> extends StatefulWidget {
@@ -1424,7 +1425,7 @@ Widget _buildDesktopMediaRowAlbum({
         ? null
         : (MediaItem media) => onAlbumTap(media as Album),
     tertiaryText: _albumTertiary(item),
-    coverUrl: item.imageUri ?? '',
+    coverUrl: item.imageUriForSize(256) ?? '',
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
     onPlayTap: onPlayTap,
@@ -1464,7 +1465,7 @@ Widget _buildDesktopMediaRowPlaylist({
         : (MediaItem media) => onPlaylistTap(media as Playlist),
     secondaryText: _playlistSubtitle(item),
     tertiaryText: null,
-    coverUrl: item.imageUri ?? '',
+    coverUrl: item.imageUriForSize(256) ?? '',
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
     onPlayTap: onPlayTap,
@@ -1504,7 +1505,7 @@ Widget _buildDesktopMediaRowArtist({
         : (MediaItem media) => onArtistTap(media as Artist),
     secondaryText: null,
     tertiaryText: null,
-    coverUrl: item.imageUri ?? '',
+    coverUrl: item.imageUriForSize(256) ?? '',
     isCircularCover: true,
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
@@ -1549,7 +1550,7 @@ Widget _buildDesktopMediaRowTrack({
     tertiaryText: _trackTertiary(item),
     tertiaryAlbum: item.album,
     onAlbumTap: onAlbumTap,
-    coverUrl: item.imageUri ?? '',
+    coverUrl: item.imageUriForSize(256) ?? '',
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
     onPlayTap: onPlayTap,
@@ -1923,10 +1924,10 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
                     child: Container(
                       color: colors.bgTertiary,
                       child: hasCover
-                          ? Image.network(
-                              widget.coverUrl!,
+                          ? MediaImage(
+                              source: widget.coverUrl!,
                               fit: BoxFit.cover,
-                              errorBuilder: (_, _, _) => Icon(
+                              fallback: Icon(
                                 widget.icon,
                                 color: colors.accent,
                                 size: 34,
@@ -1938,10 +1939,10 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
                 : Container(
                     color: colors.bgTertiary,
                     child: hasCover
-                        ? Image.network(
-                            widget.coverUrl!,
+                        ? MediaImage(
+                            source: widget.coverUrl!,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) => Icon(
+                            fallback: Icon(
                               widget.icon,
                               color: colors.accent,
                               size: 34,

@@ -537,7 +537,7 @@ class _MediaTableSectionMobileState<T>
       title: _prefer(item.name, 'Unknown Track'),
       subtitle: _trackSubtitle(item),
       trailing: _formatDuration(item.duration),
-      coverUrl: item.imageUri,
+      coverUrl: item.imageUriForSize(80),
       fallbackIcon: Icons.music_note_outlined,
       providerLabel: _providerLabelFromId(item.provider),
       providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(
@@ -580,7 +580,7 @@ class _MediaTableSectionMobileState<T>
       title: title,
       subtitle: subtitle.isEmpty ? '-' : subtitle,
       trailing: _formatQueueDuration((item.duration ?? 0).toDouble()),
-      coverUrl: item.mediaItem?.imageUri,
+      coverUrl: item.mediaItem?.imageUriForSize(80),
       fallbackIcon: Icons.music_note_outlined,
       providerLabel: _providerLabelFromId(provider),
       providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(provider),
@@ -608,7 +608,7 @@ class _MediaTableSectionMobileState<T>
       title: _prefer(item.name, 'Unknown Album'),
       subtitle: _albumSubtitle(item),
       trailing: item.year != null && item.year! > 0 ? '${item.year}' : '-',
-      coverUrl: item.imageUri,
+      coverUrl: item.imageUriForSize(80),
       fallbackIcon: Icons.album_outlined,
       providerLabel: _providerLabelFromId(item.provider),
       providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(
@@ -638,7 +638,7 @@ class _MediaTableSectionMobileState<T>
       title: _prefer(item.name, 'Unknown Playlist'),
       subtitle: _playlistSubtitle(item),
       trailing: item.isEditable ? 'Editierbar' : 'Readonly',
-      coverUrl: item.imageUri,
+      coverUrl: item.imageUriForSize(80),
       fallbackIcon: Icons.queue_music_outlined,
       providerLabel: _providerLabelFromId(item.provider),
       providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(
@@ -668,7 +668,7 @@ class _MediaTableSectionMobileState<T>
       title: _prefer(item.name, 'Unknown Artist'),
       subtitle: 'Artist',
       trailing: _artistTertiary(item),
-      coverUrl: item.imageUri,
+      coverUrl: item.imageUriForSize(80),
       fallbackIcon: Icons.person_outlined,
       providerLabel: _providerLabelFromId(item.provider),
       providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(

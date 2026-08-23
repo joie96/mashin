@@ -7,7 +7,9 @@ import '../../data/music_assistant/ma_client.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../playback/playback_coordinator.dart';
 import '../shared/context_menu/context_menu_controller.dart';
+import '../shared/userdata_controller.dart';
 import '../shared/widgets/media_table_section_mobile.dart';
+import '../shared/widgets/media_image.dart';
 import 'playlist_detail_controller.dart';
 
 /// Mobile playlist detail page: pinned banner header with centered actions and
@@ -19,6 +21,7 @@ class PlaylistDetailPageMobile extends StatefulWidget {
     required this.playbackCoordinator,
     required this.itemId,
     required this.providerInstanceIdOrDomain,
+    this.userDataController,
     this.onOpenArtist,
     this.onOpenAlbum,
   });
@@ -27,6 +30,7 @@ class PlaylistDetailPageMobile extends StatefulWidget {
   final PlaybackCoordinator playbackCoordinator;
   final String itemId;
   final String providerInstanceIdOrDomain;
+  final UserDataController? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
 
@@ -48,6 +52,7 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
       playbackCoordinator: widget.playbackCoordinator,
       itemId: widget.itemId,
       providerInstanceIdOrDomain: widget.providerInstanceIdOrDomain,
+      userDataController: widget.userDataController,
     )..addListener(_onChanged);
     unawaited(_controller.loadPlaylist());
   }
@@ -174,10 +179,10 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
                         color: colors.accent,
                         size: 72,
                       )
-                    : Image.network(
-                        imageUri,
+                    : MediaImage(
+                        source: imageUri,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => Icon(
+                        fallback: Icon(
                           Icons.queue_music_outlined,
                           color: colors.accent,
                           size: 72,

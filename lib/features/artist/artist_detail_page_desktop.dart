@@ -8,8 +8,10 @@ import '../../data/music_assistant/ma_client.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../playback/playback_coordinator.dart';
 import '../shared/context_menu/context_menu_controller.dart';
+import '../shared/userdata_controller.dart';
 import '../shared/widgets/media_row_section_desktop.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
+import '../shared/widgets/media_image.dart';
 import 'artist_detail_controller.dart';
 
 /// Desktop artist detail page: header with cover/name/actions, description and
@@ -19,6 +21,7 @@ class ArtistDetailPageDesktop extends StatefulWidget {
   final PlaybackCoordinator playbackCoordinator;
   final String itemId;
   final String providerInstanceIdOrDomain;
+  final UserDataController? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
 
@@ -28,6 +31,7 @@ class ArtistDetailPageDesktop extends StatefulWidget {
     required this.playbackCoordinator,
     required this.itemId,
     required this.providerInstanceIdOrDomain,
+    this.userDataController,
     this.onOpenArtist,
     this.onOpenAlbum,
   });
@@ -73,26 +77,24 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
     widget.onOpenAlbum?.call(album);
   }
 
-  // TODO(playlists): Ersetzen, sobald die Playlist-Verwaltung existiert.
-  // Lädt später _client.getLibraryPlaylists() und ruft
-  // _client.addPlaylistTracks(playlistId, uris) auf.
   List<ContextMenuAction> _buildPlaylistSubmenu(MediaItem item) {
-    return <ContextMenuAction>[
-      ContextMenuAction(
-        label: 'Playlist 1 (Dummy)',
-        icon: Icons.playlist_play_outlined,
-        onSelected: () {
-          debugPrint('TODO: Zu Playlist hinzufügen: ${item.name}');
-        },
-      ),
-      ContextMenuAction(
-        label: 'Playlist 2 (Dummy)',
-        icon: Icons.playlist_play_outlined,
-        onSelected: () {
-          debugPrint('TODO: Zu Playlist hinzufügen: ${item.name}');
-        },
-      ),
-    ];
+    final UserDataController? controller = widget.userDataController;
+    if (controller == null || item is! Track) {
+      return const <ContextMenuAction>[];
+    }
+
+    return controller.playlists
+        .map(
+          (Playlist playlist) => ContextMenuAction(
+            label: playlist.name,
+            icon: Icons.playlist_play_outlined,
+            onSelected: () => controller.addPlaylistTracks(
+              playlist.itemId,
+              <Track>[item],
+            ),
+          ),
+        )
+        .toList(growable: false);
   }
 
   List<ContextMenuAction> _buildItemMenuActions(MediaItem item) {
@@ -165,14 +167,17 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
       }
     }
 
-    actions.add(const ContextMenuAction.separator());
-    actions.add(
-      ContextMenuAction.submenu(
-        label: 'Zu Wiedergabeliste hinzufügen',
-        icon: Icons.playlist_add_outlined,
-        children: _buildPlaylistSubmenu(item),
-      ),
-    );
+    final List<ContextMenuAction> playlistActions = _buildPlaylistSubmenu(item);
+    if (playlistActions.isNotEmpty) {
+      actions.add(const ContextMenuAction.separator());
+      actions.add(
+        ContextMenuAction.submenu(
+          label: 'Zu Wiedergabeliste hinzufügen',
+          icon: Icons.playlist_add_outlined,
+          children: playlistActions,
+        ),
+      );
+    }
     actions.add(const ContextMenuAction.separator());
     actions.add(
       ContextMenuAction(
@@ -388,10 +393,10 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
                     imageFilter: ui.ImageFilter.blur(sigmaX: 32, sigmaY: 32),
                     child: Transform.scale(
                       scale: 1.18,
-                      child: Image.network(
-                        imageUri,
+                      child: MediaImage(
+                        source: imageUri,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => const SizedBox.expand(),
+                        fallback: const SizedBox.expand(),
                       ),
                     ),
                   ),
@@ -541,11 +546,14 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
         color: colors.bgTertiary,
         child: imageUri == null || imageUri.trim().isEmpty
             ? Icon(Icons.person_outlined, color: colors.accent, size: 72)
-            : Image.network(
-                imageUri,
+            : MediaImage(
+                source: imageUri,
                 fit: BoxFit.cover,
-                errorBuilder: (_, _, _) =>
-                    Icon(Icons.person_outlined, color: colors.accent, size: 72),
+                fallback: Icon(
+                  Icons.person_outlined,
+                  color: colors.accent,
+                  size: 72,
+                ),
               ),
       ),
     );

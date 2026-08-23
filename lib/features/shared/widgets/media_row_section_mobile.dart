@@ -5,6 +5,7 @@ import '../../../app/theme/app_theme.dart';
 import '../../../data/music_assistant/ma_models.dart';
 import '../../playback/playback_coordinator.dart';
 import 'media_table_section_desktop.dart';
+import 'media_image.dart';
 
 class MediaRowSectionMobile<T> extends StatelessWidget {
   static const double _artistHeight = 142;
@@ -211,7 +212,7 @@ Widget _buildMobileMediaRowAlbum({
     title: _prefer(item.name, 'Unknown Album'),
     secondaryText: _albumSubtitle(item),
     tertiaryText: _albumTertiary(item),
-    coverUrl: item.imageUri ?? '',
+    coverUrl: item.imageUriForSize(256) ?? '',
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
     onPlayTap: onPlayTap,
@@ -231,7 +232,7 @@ Widget _buildMobileMediaRowPlaylist({
     title: _prefer(item.name, 'Unknown Playlist'),
     secondaryText: _playlistSubtitle(item),
     tertiaryText: _playlistTertiary(item),
-    coverUrl: item.imageUri ?? '',
+    coverUrl: item.imageUriForSize(256) ?? '',
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
     onPlayTap: onPlayTap,
@@ -251,7 +252,7 @@ Widget _buildMobileMediaRowArtist({
     title: _prefer(item.name, 'Unknown Artist'),
     secondaryText: null,
     tertiaryText: null,
-    coverUrl: item.imageUri ?? '',
+    coverUrl: item.imageUriForSize(256) ?? '',
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
     onPlayTap: onPlayTap,
@@ -271,7 +272,7 @@ Widget _buildMobileMediaRowTrack({
     title: _prefer(item.name, 'Unknown Track'),
     secondaryText: _trackSubtitle(item),
     tertiaryText: _trackTertiary(item),
-    coverUrl: item.imageUri ?? '',
+    coverUrl: item.imageUriForSize(256) ?? '',
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
     onPlayTap: onPlayTap,
@@ -332,11 +333,14 @@ Widget _buildMobileMediaRowItemBase({
                     height: coverSize,
                     color: colors.bgTertiary,
                     child: coverUrl != null && coverUrl.trim().isNotEmpty
-                        ? Image.network(
-                            coverUrl,
+                        ? MediaImage(
+                            source: coverUrl,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) =>
-                                Icon(icon, color: colors.accent, size: 28),
+                            fallback: Icon(
+                              icon,
+                              color: colors.accent,
+                              size: 28,
+                            ),
                           )
                         : Icon(icon, color: colors.accent, size: 28),
                   ),

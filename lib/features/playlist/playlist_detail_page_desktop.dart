@@ -8,7 +8,9 @@ import '../../data/music_assistant/ma_client.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../playback/playback_coordinator.dart';
 import '../shared/context_menu/context_menu_controller.dart';
+import '../shared/userdata_controller.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
+import '../shared/widgets/media_image.dart';
 import 'playlist_detail_controller.dart';
 
 /// Desktop playlist detail page: the header stays pinned (expandable/collapsible)
@@ -20,6 +22,7 @@ class PlaylistDetailPageDesktop extends StatefulWidget {
     required this.playbackCoordinator,
     required this.itemId,
     required this.providerInstanceIdOrDomain,
+    this.userDataController,
     this.onOpenArtist,
     this.onOpenAlbum,
   });
@@ -28,6 +31,7 @@ class PlaylistDetailPageDesktop extends StatefulWidget {
   final PlaybackCoordinator playbackCoordinator;
   final String itemId;
   final String providerInstanceIdOrDomain;
+  final UserDataController? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
 
@@ -52,6 +56,7 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
       playbackCoordinator: widget.playbackCoordinator,
       itemId: widget.itemId,
       providerInstanceIdOrDomain: widget.providerInstanceIdOrDomain,
+      userDataController: widget.userDataController,
     )..addListener(_onControllerChanged);
     unawaited(_controller.loadPlaylist());
   }
@@ -452,10 +457,10 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
                 imageFilter: ui.ImageFilter.blur(sigmaX: 32, sigmaY: 32),
                 child: Transform.scale(
                   scale: 1.18,
-                  child: Image.network(
-                    imageUri,
+                  child: MediaImage(
+                    source: imageUri,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, _, _) => const SizedBox.expand(),
+                    fallback: const SizedBox.expand(),
                   ),
                 ),
               ),
@@ -492,10 +497,10 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
                 color: colors.accent,
                 size: size * 0.36,
               )
-            : Image.network(
-                imageUri,
+            : MediaImage(
+                source: imageUri,
                 fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => Icon(
+                fallback: Icon(
                   Icons.queue_music_outlined,
                   color: colors.accent,
                   size: size * 0.36,

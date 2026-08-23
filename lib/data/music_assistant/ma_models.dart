@@ -629,6 +629,84 @@ class Playlist implements MediaItem {
   }
 }
 
+extension MediaItemImageSizing on MediaItem {
+  String? imageUriForSize(int requestedSize) {
+    final int normalizedSize = MediaItemImage.mapToAllowedSize(requestedSize);
+
+    if (this is Track) {
+      final Track track = this as Track;
+      final MediaItemImage? albumImage = track.album?.primaryImage;
+      if (albumImage != null) {
+        return albumImage.getProxyPath(
+          checksum: track.album?.metadata?.cacheChecksum,
+          size: normalizedSize,
+        );
+      }
+
+      final MediaItemImage? trackImage = track.primaryImage;
+      if (trackImage == null) {
+        return null;
+      }
+
+      return trackImage.getProxyPath(
+        checksum: track.metadata?.cacheChecksum,
+        size: normalizedSize,
+      );
+    }
+
+    if (this is Album) {
+      final Album album = this as Album;
+      final MediaItemImage? image = album.primaryImage;
+      if (image == null) {
+        return null;
+      }
+
+      return image.getProxyPath(
+        checksum: album.metadata?.cacheChecksum,
+        size: normalizedSize,
+      );
+    }
+
+    if (this is Artist) {
+      final Artist artist = this as Artist;
+      final MediaItemImage? image = artist.primaryImage;
+      if (image == null) {
+        return null;
+      }
+
+      return image.getProxyPath(
+        checksum: artist.metadata?.cacheChecksum,
+        size: normalizedSize,
+      );
+    }
+
+    if (this is Playlist) {
+      final Playlist playlist = this as Playlist;
+      final MediaItemImage? image = playlist.primaryImage;
+      if (image == null) {
+        return null;
+      }
+
+      return image.getProxyPath(
+        checksum: playlist.metadata?.cacheChecksum,
+        size: normalizedSize,
+      );
+    }
+
+    final MediaItemMetadata? meta = metadata;
+    final MediaItemImage? image =
+        (meta == null || meta.images.isEmpty) ? null : meta.images.first;
+    if (image == null) {
+      return null;
+    }
+
+    return image.getProxyPath(
+      checksum: meta?.cacheChecksum,
+      size: normalizedSize,
+    );
+  }
+}
+
 // #endregion
 
 // #region Queue/Player Models

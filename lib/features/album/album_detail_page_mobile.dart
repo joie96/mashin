@@ -9,6 +9,7 @@ import '../playback/playback_coordinator.dart';
 import '../shared/context_menu/context_menu_controller.dart';
 import '../shared/widgets/media_row_section_mobile.dart';
 import '../shared/widgets/media_table_section_mobile.dart';
+import '../shared/widgets/media_image.dart';
 import 'album_detail_controller.dart';
 
 class AlbumDetailPageMobile extends StatefulWidget {
@@ -111,10 +112,10 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
                           color: colors.accent,
                           size: 72,
                         )
-                      : Image.network(
-                          imageUri,
+                      : MediaImage(
+                          source: imageUri,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => Icon(
+                          fallback: Icon(
                             Icons.album_outlined,
                             color: colors.accent,
                             size: 72,

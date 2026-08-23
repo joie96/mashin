@@ -4,6 +4,7 @@ import '../../app/config/app_config.dart';
 import '../../data/music_assistant/ma_client.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../playback/playback_coordinator.dart';
+import '../shared/userdata_controller.dart';
 import 'playlist_detail_page_desktop.dart';
 import 'playlist_detail_page_mobile.dart';
 
@@ -15,6 +16,7 @@ class PlaylistDetailPage extends StatelessWidget {
     required this.playbackCoordinator,
     required this.itemId,
     required this.providerInstanceIdOrDomain,
+    this.userDataController,
     this.onOpenArtist,
     this.onOpenAlbum,
   });
@@ -23,6 +25,7 @@ class PlaylistDetailPage extends StatelessWidget {
   final PlaybackCoordinator playbackCoordinator;
   final String itemId;
   final String providerInstanceIdOrDomain;
+  final UserDataController? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
 
@@ -34,6 +37,7 @@ class PlaylistDetailPage extends StatelessWidget {
         playbackCoordinator: playbackCoordinator,
         itemId: itemId,
         providerInstanceIdOrDomain: providerInstanceIdOrDomain,
+        userDataController: userDataController,
         onOpenArtist: onOpenArtist,
         onOpenAlbum: onOpenAlbum,
       );
@@ -44,6 +48,7 @@ class PlaylistDetailPage extends StatelessWidget {
       playbackCoordinator: playbackCoordinator,
       itemId: itemId,
       providerInstanceIdOrDomain: providerInstanceIdOrDomain,
+      userDataController: userDataController,
       onOpenArtist: onOpenArtist,
       onOpenAlbum: onOpenAlbum,
     );

@@ -7,9 +7,11 @@ import '../../data/music_assistant/ma_client.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../playback/playback_coordinator.dart';
 import '../shared/context_menu/context_menu_controller.dart';
+import '../shared/userdata_controller.dart';
 import '../shared/widgets/media_row_section_mobile.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
 import '../shared/widgets/media_table_section_mobile.dart';
+import '../shared/widgets/media_image.dart';
 import 'artist_detail_controller.dart';
 
 /// Mobile artist detail page: image banner header, centered actions, description and stacked album/similar-artist/top-track sections
@@ -18,6 +20,7 @@ class ArtistDetailPageMobile extends StatefulWidget {
   final PlaybackCoordinator playbackCoordinator;
   final String itemId;
   final String providerInstanceIdOrDomain;
+  final UserDataController? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
 
@@ -27,6 +30,7 @@ class ArtistDetailPageMobile extends StatefulWidget {
     required this.playbackCoordinator,
     required this.itemId,
     required this.providerInstanceIdOrDomain,
+    this.userDataController,
     this.onOpenArtist,
     this.onOpenAlbum,
   });
@@ -67,26 +71,29 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
   }
 
   List<ContextMenuAction> _buildPlaylistSubmenu(MediaItem item) {
-    return <ContextMenuAction>[
-      ContextMenuAction(
-        label: 'Playlist 1 (Dummy)',
-        icon: Icons.playlist_play_outlined,
-        onSelected: () {
-          debugPrint('TODO: Zu Playlist hinzufügen: ${item.name}');
-        },
-      ),
-      ContextMenuAction(
-        label: 'Playlist 2 (Dummy)',
-        icon: Icons.playlist_play_outlined,
-        onSelected: () {
-          debugPrint('TODO: Zu Playlist hinzufügen: ${item.name}');
-        },
-      ),
-    ];
+    final UserDataController? controller = widget.userDataController;
+    if (controller == null || item is! Track) {
+      return const <ContextMenuAction>[];
+    }
+
+    return controller.playlists
+        .map(
+          (Playlist playlist) => ContextMenuAction(
+            label: playlist.name,
+            icon: Icons.playlist_play_outlined,
+            onSelected: () => controller.addPlaylistTracks(
+              playlist.itemId,
+              <Track>[item],
+            ),
+          ),
+        )
+        .toList(growable: false);
   }
 
   List<ContextMenuAction> _buildItemMenuActions(MediaItem item) {
     final bool isFavorite = _controller.isItemFavorite(item);
+    final List<ContextMenuAction> playlistActions =
+        _buildPlaylistSubmenu(item);
     return <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
@@ -114,12 +121,14 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
         onSelected: () =>
             widget.playbackCoordinator.playMediaLast(<MediaItem>[item]),
       ),
-      const ContextMenuAction.separator(),
-      ContextMenuAction.submenu(
-        label: 'Zu Wiedergabeliste hinzufügen',
-        icon: Icons.playlist_add_outlined,
-        children: _buildPlaylistSubmenu(item),
-      ),
+      if (playlistActions.isNotEmpty) ...<ContextMenuAction>[
+        const ContextMenuAction.separator(),
+        ContextMenuAction.submenu(
+          label: 'Zu Wiedergabeliste hinzufügen',
+          icon: Icons.playlist_add_outlined,
+          children: playlistActions,
+        ),
+      ],
       const ContextMenuAction.separator(),
       ContextMenuAction(
         label: isFavorite
@@ -262,10 +271,10 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
         child: Container(
           color: colors.bgTertiary,
           child: hasImage
-              ? Image.network(
-                  imageUri,
+              ? MediaImage(
+                  source: imageUri,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => Icon(
+                  fallback: Icon(
                     Icons.person_outlined,
                     color: colors.accent,
                     size: 72,

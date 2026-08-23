@@ -6,6 +6,7 @@ import '../../app/theme/app_theme.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../playback/playback_coordinator.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
+import '../shared/widgets/media_image.dart';
 
 class QueueOverlayDesktop extends StatelessWidget {
   final String trackTitle;
@@ -63,16 +64,14 @@ class QueueOverlayDesktop extends StatelessWidget {
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(6),
                       child: trackCoverUrl != null
-                          ? Image.network(
-                              trackCoverUrl!,
+                          ? MediaImage(
+                              source: trackCoverUrl!,
                               fit: BoxFit.cover,
-                              errorBuilder: (_, _, _) {
-                                return Icon(
-                                  Icons.music_note_outlined,
-                                  size: 64,
-                                  color: colors.textSecondary,
-                                );
-                              },
+                              fallback: Icon(
+                                Icons.music_note_outlined,
+                                size: 64,
+                                color: colors.textSecondary,
+                              ),
                             )
                           : Icon(
                               Icons.music_note_outlined,

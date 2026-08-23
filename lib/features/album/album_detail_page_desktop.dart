@@ -11,6 +11,7 @@ import '../shared/context_menu/context_menu_controller.dart';
 import '../shared/widgets/media_link_text.dart';
 import '../shared/widgets/media_row_section_desktop.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
+import '../shared/widgets/media_image.dart';
 import 'album_detail_controller.dart';
 
 class AlbumDetailPageDesktop extends StatefulWidget {
@@ -269,10 +270,10 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
                     imageFilter: ui.ImageFilter.blur(sigmaX: 32, sigmaY: 32),
                     child: Transform.scale(
                       scale: 1.18,
-                      child: Image.network(
-                        imageUri,
+                      child: MediaImage(
+                        source: imageUri,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => const SizedBox.expand(),
+                        fallback: const SizedBox.expand(),
                       ),
                     ),
                   ),
@@ -403,11 +404,14 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
             ? null
             : uri == null || uri.trim().isEmpty
             ? Icon(Icons.album_outlined, color: colors.accent, size: 72)
-            : Image.network(
-                uri,
+            : MediaImage(
+                source: uri,
                 fit: BoxFit.cover,
-                errorBuilder: (_, _, _) =>
-                    Icon(Icons.album_outlined, color: colors.accent, size: 72),
+                fallback: Icon(
+                  Icons.album_outlined,
+                  color: colors.accent,
+                  size: 72,
+                ),
               ),
       ),
     );

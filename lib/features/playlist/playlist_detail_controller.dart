@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../../data/music_assistant/ma_client.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../playback/playback_coordinator.dart';
+import '../shared/userdata_controller.dart';
 
 /// Loads and holds the data of a playlist detail page (metadata + tracks) and
 /// exposes the playback/favorite/edit actions used by the desktop and mobile pages.
@@ -14,12 +15,14 @@ class PlaylistDetailController extends ChangeNotifier {
     required this.playbackCoordinator,
     required this.itemId,
     required this.providerInstanceIdOrDomain,
+    this.userDataController,
   });
 
   final MusicAssistantClient client;
   final PlaybackCoordinator playbackCoordinator;
   final String itemId;
   final String providerInstanceIdOrDomain;
+  final UserDataController? userDataController;
 
   Playlist? _playlist;
   List<Track> _tracks = const <Track>[];
@@ -91,39 +94,93 @@ class PlaylistDetailController extends ChangeNotifier {
     _isLoadingTracks = true;
     notifyListeners();
 
-    await _loadMetadata();
-    await _loadTracks();
+    try {
+      final Playlist? local = _resolvePlaylistFromUserData(
+        itemId,
+        providerInstanceIdOrDomain,
+      );
+
+      if (local != null) {
+        final bool isUserPlaylist = local.provider.trim().toLowerCase() ==
+            UserDataController.localPlaylistProvider;
+        final List<Track> storedTracks = userDataController
+                ?.tracksForPlaylist(local.itemId)
+                .toList(growable: false) ??
+            const <Track>[];
+
+        // User playlists always come from local storage.
+        // Favorited online playlists may exist locally without tracks and
+        // should still load online to get fresh content.
+        if (isUserPlaylist || storedTracks.isNotEmpty) {
+          _loadLocalPlaylist(local, storedTracks);
+          return;
+        }
+      }
+
+      await _loadMetadata();
+      await _loadTracks();
+    } finally {
+      _isLoadingMetadata = false;
+      _isLoadingTracks = false;
+      notifyListeners();
+    }
+  }
+
+  void _loadLocalPlaylist(Playlist playlist, List<Track> storedTracks) {
+    _playlist = _copyPlaylist(
+      playlist,
+      favorite: userDataController?.isFavorite(playlist) ?? playlist.favorite,
+    );
+
+    _tracks = List<Track>.unmodifiable(
+      storedTracks.map((Track track) {
+        final bool isFavorite = userDataController?.isFavorite(track) ??
+            track.favorite;
+        _favoriteOverrides[_favoriteKey(track)] = isFavorite;
+        return _copyTrack(track, favorite: isFavorite);
+      }).toList(growable: false),
+    );
+
+    _isPlaylistFavorite = _playlist?.favorite ?? false;
   }
 
   Future<void> _loadMetadata() async {
     try {
-      _playlist = await client.getPlaylist(
+      final Playlist? online = await client.getPlaylist(
         itemId,
         providerInstanceIdOrDomain,
       );
+      if (online != null) {
+        final bool isFavorite = userDataController?.isFavorite(online) ??
+            online.favorite;
+        _playlist = _copyPlaylist(online, favorite: isFavorite);
+      } else {
+        _playlist = null;
+      }
       _isPlaylistFavorite = _playlist?.favorite ?? false;
     } catch (_) {
       _playlist = null;
-    } finally {
-      _isLoadingMetadata = false;
-      notifyListeners();
     }
   }
 
   Future<void> _loadTracks() async {
     try {
+      final List<Track> loaded = await client.getPlaylistTracks(
+        itemId,
+        providerInstanceIdOrDomain,
+        forceRefresh: true,
+      );
+
       _tracks = List<Track>.unmodifiable(
-        await client.getPlaylistTracks(
-          itemId,
-          providerInstanceIdOrDomain,
-          forceRefresh: true,
-        ),
+        loaded.map((Track track) {
+          final bool isFavorite = userDataController?.isFavorite(track) ??
+              track.favorite;
+          _favoriteOverrides[_favoriteKey(track)] = isFavorite;
+          return _copyTrack(track, favorite: isFavorite);
+        }).toList(growable: false),
       );
     } catch (_) {
       _tracks = const <Track>[];
-    } finally {
-      _isLoadingTracks = false;
-      notifyListeners();
     }
   }
 
@@ -168,16 +225,20 @@ class PlaylistDetailController extends ChangeNotifier {
     _favoriteOverrides[key] = next;
     notifyListeners();
     try {
-      if (next) {
-        final String uri = item.uri ?? '';
-        if (uri.isNotEmpty) {
-          await client.addFavorite(uri);
-        }
+      if (userDataController != null) {
+        await userDataController!.setFavorite(<MediaItem>[item], next);
       } else {
-        await client.removeFavorite(
-          mediaType: item.mediaType,
-          libraryItemId: item.itemId,
-        );
+        if (next) {
+          final String uri = item.uri ?? '';
+          if (uri.isNotEmpty) {
+            await client.addFavorite(uri);
+          }
+        } else {
+          await client.removeFavorite(
+            mediaType: item.mediaType,
+            libraryItemId: item.itemId,
+          );
+        }
       }
     } catch (_) {
       _favoriteOverrides[key] = !next;
@@ -194,16 +255,20 @@ class PlaylistDetailController extends ChangeNotifier {
     _isPlaylistFavorite = next;
     notifyListeners();
     try {
-      if (next) {
-        final String uri = current.uri ?? '';
-        if (uri.isNotEmpty) {
-          await client.addFavorite(uri);
-        }
+      if (userDataController != null) {
+        await userDataController!.setFavorite(<MediaItem>[current], next);
       } else {
-        await client.removeFavorite(
-          mediaType: MediaType.playlist,
-          libraryItemId: current.itemId,
-        );
+        if (next) {
+          final String uri = current.uri ?? '';
+          if (uri.isNotEmpty) {
+            await client.addFavorite(uri);
+          }
+        } else {
+          await client.removeFavorite(
+            mediaType: MediaType.playlist,
+            libraryItemId: current.itemId,
+          );
+        }
       }
     } catch (_) {
       _isPlaylistFavorite = !next;
@@ -226,8 +291,18 @@ class PlaylistDetailController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // The API positions are 1-based.
-      await client.removePlaylistTracks(current.itemId, <int>[position + 1]);
+      final bool isUserPlaylist = current.provider.trim().toLowerCase() ==
+          UserDataController.localPlaylistProvider;
+
+      if (isUserPlaylist && userDataController != null) {
+        await userDataController!.removePlaylistTracks(
+          current.itemId,
+          <Track>[track],
+        );
+      } else {
+        // The API positions are 1-based.
+        await client.removePlaylistTracks(current.itemId, <int>[position + 1]);
+      }
     } catch (_) {
       _tracks = previous;
       notifyListeners();
@@ -245,7 +320,83 @@ class PlaylistDetailController extends ChangeNotifier {
     if (playlistId.trim().isEmpty || uris.isEmpty) {
       return;
     }
+
+    final Playlist? current = _playlist;
+    final bool isUserPlaylist =
+        current?.provider.trim().toLowerCase() ==
+        UserDataController.localPlaylistProvider;
+
+    if (isUserPlaylist && userDataController != null) {
+      final List<Track> tracks = items.whereType<Track>().toList(growable: false);
+      if (tracks.isEmpty) {
+        return;
+      }
+
+      await userDataController!.addPlaylistTracks(playlistId, tracks);
+      return;
+    }
+
     await client.addPlaylistTracks(playlistId, uris);
+  }
+
+  Playlist? _resolvePlaylistFromUserData(
+    String targetItemId,
+    String targetProvider,
+  ) {
+    final List<Playlist> playlists = userDataController?.playlists ??
+        const <Playlist>[];
+    if (playlists.isEmpty) {
+      return null;
+    }
+
+    final String normalizedItemId = targetItemId.trim().toLowerCase();
+    final String normalizedProvider = targetProvider.trim().toLowerCase();
+
+    for (final Playlist playlist in playlists) {
+      if (playlist.itemId.trim().toLowerCase() == normalizedItemId &&
+          playlist.provider.trim().toLowerCase() == normalizedProvider) {
+        return playlist;
+      }
+    }
+
+    for (final Playlist playlist in playlists) {
+      if (playlist.itemId.trim().toLowerCase() == normalizedItemId) {
+        return playlist;
+      }
+    }
+
+    return null;
+  }
+
+  Playlist _copyPlaylist(Playlist source, {required bool favorite}) {
+    return Playlist(
+      itemId: source.itemId,
+      provider: source.provider,
+      name: source.name,
+      isEditable: source.isEditable,
+      sortName: source.sortName,
+      uri: source.uri,
+      owner: source.owner,
+      providerMappings: source.providerMappings,
+      metadata: source.metadata,
+      favorite: favorite,
+    );
+  }
+
+  Track _copyTrack(Track source, {required bool favorite}) {
+    return Track(
+      itemId: source.itemId,
+      provider: source.provider,
+      name: source.name,
+      duration: source.duration,
+      artists: source.artists,
+      sortName: source.sortName,
+      uri: source.uri,
+      album: source.album,
+      providerMappings: source.providerMappings,
+      metadata: source.metadata,
+      favorite: favorite,
+    );
   }
 
   String _favoriteKey(MediaItem item) =>
