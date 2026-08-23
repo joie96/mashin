@@ -48,37 +48,20 @@ class MediaRowSectionMobile<T> extends StatelessWidget {
     return item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty;
   }
 
-  List<MediaItem> _playableItemsFromIndex(int startIndex) {
-    if (items.isEmpty || startIndex < 0 || startIndex >= items.length) {
-      return const <MediaItem>[];
-    }
-
-    final List<MediaItem> playItems = <MediaItem>[];
-    for (int i = startIndex; i < items.length; i++) {
-      final MediaItem? resolved = _resolvePlayableMediaItem(items[i]);
-      if (resolved == null || !_isValidPlayable(resolved)) {
-        continue;
-      }
-      playItems.add(resolved);
-    }
-
-    return playItems;
-  }
-
-  void _onPlayTap(int absoluteIndex) {
+  void _onPlayTap(int index) {
     final PlaybackCoordinator? coordinator = playbackCoordinator;
-    if (coordinator == null) {
+    if (coordinator == null || index < 0 || index >= items.length) {
       return;
     }
 
-    final List<MediaItem> playItems = _playableItemsFromIndex(absoluteIndex);
-    if (playItems.isEmpty) {
+    final MediaItem? item = _resolvePlayableMediaItem(items[index]);
+    if (item == null || !_isValidPlayable(item)) {
       return;
     }
 
     unawaited(() async {
       try {
-        await coordinator.playMedia(playItems);
+        await coordinator.playMedia(<MediaItem>[item]);
       } catch (_) {
         // Ignore failures to keep row interactions responsive.
       }
@@ -96,10 +79,11 @@ class MediaRowSectionMobile<T> extends StatelessWidget {
         if (hasTitle)
           Text(
             title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
           ),
-        if (hasTitle)
-          const SizedBox(height: 10),
+        if (hasTitle) const SizedBox(height: 10),
         SizedBox(
           height: height,
           child: isLoading
@@ -140,68 +124,70 @@ class MediaRowSectionMobile<T> extends StatelessWidget {
                   },
                 )
               : items.isEmpty
-                  ? Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: colors.border),
-                        color: colors.bgSecondary,
-                      ),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          emptyText,
-                          style: TextStyle(color: colors.textSecondary),
-                        ),
-                      ),
-                    )
-                  : ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: items.length > maxVisibleItems ? maxVisibleItems : items.length,
-                      separatorBuilder: (_, _) => SizedBox(width: itemSpacing),
-                      itemBuilder: (BuildContext context, int index) {
-                        final Object? item = items[index];
-                        if (item is Album) {
-                          return _buildMobileMediaRowAlbum(
-                            item: item,
-                            itemWidth: itemWidth,
-                            coverSize: coverSize,
-                            onPlayTap: () => _onPlayTap(index),
-                          );
-                        }
-                        if (item is Playlist) {
-                          return _buildMobileMediaRowPlaylist(
-                            item: item,
-                            itemWidth: itemWidth,
-                            coverSize: coverSize,
-                            onPlayTap: () => _onPlayTap(index),
-                          );
-                        }
-                        if (item is Artist) {
-                          return _buildMobileMediaRowArtist(
-                            item: item,
-                            itemWidth: itemWidth,
-                            coverSize: coverSize,
-                            onPlayTap: () => _onPlayTap(index),
-                          );
-                        }
-                        if (item is Track) {
-                          return _buildMobileMediaRowTrack(
-                            item: item,
-                            itemWidth: itemWidth,
-                            coverSize: coverSize,
-                            onPlayTap: () => _onPlayTap(index),
-                          );
-                        }
-
-                        return _buildMobileMediaRowUnknown(
-                          itemWidth: itemWidth,
-                          coverSize: coverSize,
-                          onPlayTap: () => _onPlayTap(index),
-                        );
-                      },
+              ? Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: colors.border),
+                    color: colors.bgSecondary,
+                  ),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      emptyText,
+                      style: TextStyle(color: colors.textSecondary),
                     ),
+                  ),
+                )
+              : ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: items.length > maxVisibleItems
+                      ? maxVisibleItems
+                      : items.length,
+                  separatorBuilder: (_, _) => SizedBox(width: itemSpacing),
+                  itemBuilder: (BuildContext context, int index) {
+                    final Object? item = items[index];
+                    if (item is Album) {
+                      return _buildMobileMediaRowAlbum(
+                        item: item,
+                        itemWidth: itemWidth,
+                        coverSize: coverSize,
+                        onPlayTap: () => _onPlayTap(index),
+                      );
+                    }
+                    if (item is Playlist) {
+                      return _buildMobileMediaRowPlaylist(
+                        item: item,
+                        itemWidth: itemWidth,
+                        coverSize: coverSize,
+                        onPlayTap: () => _onPlayTap(index),
+                      );
+                    }
+                    if (item is Artist) {
+                      return _buildMobileMediaRowArtist(
+                        item: item,
+                        itemWidth: itemWidth,
+                        coverSize: coverSize,
+                        onPlayTap: () => _onPlayTap(index),
+                      );
+                    }
+                    if (item is Track) {
+                      return _buildMobileMediaRowTrack(
+                        item: item,
+                        itemWidth: itemWidth,
+                        coverSize: coverSize,
+                        onPlayTap: () => _onPlayTap(index),
+                      );
+                    }
+
+                    return _buildMobileMediaRowUnknown(
+                      itemWidth: itemWidth,
+                      coverSize: coverSize,
+                      onPlayTap: () => _onPlayTap(index),
+                    );
+                  },
+                ),
         ),
       ],
     );
@@ -324,8 +310,10 @@ Widget _buildMobileMediaRowItemBase({
   return Builder(
     builder: (BuildContext context) {
       final colors = context.mashinColors;
-      final bool hasSecondary = secondaryText != null && secondaryText.trim().isNotEmpty;
-      final bool hasTertiary = tertiaryText != null && tertiaryText.trim().isNotEmpty;
+      final bool hasSecondary =
+          secondaryText != null && secondaryText.trim().isNotEmpty;
+      final bool hasTertiary =
+          tertiaryText != null && tertiaryText.trim().isNotEmpty;
 
       return SizedBox(
         width: itemWidth,
@@ -344,7 +332,8 @@ Widget _buildMobileMediaRowItemBase({
                         ? Image.network(
                             coverUrl,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) => Icon(icon, color: colors.accent, size: 28),
+                            errorBuilder: (_, _, _) =>
+                                Icon(icon, color: colors.accent, size: 28),
                           )
                         : Icon(icon, color: colors.accent, size: 28),
                   ),
@@ -369,7 +358,9 @@ Widget _buildMobileMediaRowItemBase({
                         width: 40,
                         height: 40,
                         decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.9),
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.surface.withValues(alpha: 0.9),
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(color: colors.border),
                         ),
@@ -389,7 +380,9 @@ Widget _buildMobileMediaRowItemBase({
               maxLines: 1,
               textAlign: TextAlign.center,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
             ),
             if (hasSecondary) ...<Widget>[
               const SizedBox(height: 2),
@@ -423,35 +416,50 @@ Widget _buildMobileMediaRowAlbumSkeleton({
   required double itemWidth,
   required double coverSize,
 }) {
-  return _buildMobileMediaRowSkeletonBase(itemWidth: itemWidth, coverSize: coverSize);
+  return _buildMobileMediaRowSkeletonBase(
+    itemWidth: itemWidth,
+    coverSize: coverSize,
+  );
 }
 
 Widget _buildMobileMediaRowPlaylistSkeleton({
   required double itemWidth,
   required double coverSize,
 }) {
-  return _buildMobileMediaRowSkeletonBase(itemWidth: itemWidth, coverSize: coverSize);
+  return _buildMobileMediaRowSkeletonBase(
+    itemWidth: itemWidth,
+    coverSize: coverSize,
+  );
 }
 
 Widget _buildMobileMediaRowArtistSkeleton({
   required double itemWidth,
   required double coverSize,
 }) {
-  return _buildMobileMediaRowSkeletonBase(itemWidth: itemWidth, coverSize: coverSize);
+  return _buildMobileMediaRowSkeletonBase(
+    itemWidth: itemWidth,
+    coverSize: coverSize,
+  );
 }
 
 Widget _buildMobileMediaRowTrackSkeleton({
   required double itemWidth,
   required double coverSize,
 }) {
-  return _buildMobileMediaRowSkeletonBase(itemWidth: itemWidth, coverSize: coverSize);
+  return _buildMobileMediaRowSkeletonBase(
+    itemWidth: itemWidth,
+    coverSize: coverSize,
+  );
 }
 
 Widget _buildMobileMediaRowUnknownSkeleton({
   required double itemWidth,
   required double coverSize,
 }) {
-  return _buildMobileMediaRowSkeletonBase(itemWidth: itemWidth, coverSize: coverSize);
+  return _buildMobileMediaRowSkeletonBase(
+    itemWidth: itemWidth,
+    coverSize: coverSize,
+  );
 }
 
 Widget _buildMobileMediaRowSkeletonBase({
@@ -461,9 +469,15 @@ Widget _buildMobileMediaRowSkeletonBase({
   return Builder(
     builder: (BuildContext context) {
       final colors = context.mashinColors;
-      final double titleWidth = (itemWidth * 0.72).clamp(48, itemWidth).toDouble();
-      final double secondaryWidth = (itemWidth * 0.56).clamp(42, itemWidth).toDouble();
-      final double tertiaryWidth = (itemWidth * 0.46).clamp(36, itemWidth).toDouble();
+      final double titleWidth = (itemWidth * 0.72)
+          .clamp(48, itemWidth)
+          .toDouble();
+      final double secondaryWidth = (itemWidth * 0.56)
+          .clamp(42, itemWidth)
+          .toDouble();
+      final double tertiaryWidth = (itemWidth * 0.46)
+          .clamp(36, itemWidth)
+          .toDouble();
 
       Widget line(double width) {
         return Container(

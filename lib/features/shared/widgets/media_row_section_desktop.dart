@@ -194,6 +194,8 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
     return item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty;
   }
 
+  bool get _isTrackSection => T == Track;
+
   List<MediaItem> _playableItemsFromIndex(int startIndex) {
     if (widget.items.isEmpty ||
         startIndex < 0 ||
@@ -202,8 +204,10 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
     }
 
     final List<MediaItem> playItems = <MediaItem>[];
-    for (int i = startIndex; i < widget.items.length; i++) {
-      final MediaItem? resolved = _resolvePlayableMediaItem(widget.items[i]);
+    for (int index = startIndex; index < widget.items.length; index++) {
+      final MediaItem? resolved = _resolvePlayableMediaItem(
+        widget.items[index],
+      );
       if (resolved == null || !_isValidPlayable(resolved)) {
         continue;
       }
@@ -532,18 +536,22 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
   // Playback actions
   void _onPlayTap(int absoluteIndex) {
     final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
-    if (coordinator == null) {
+    if (coordinator == null ||
+        absoluteIndex < 0 ||
+        absoluteIndex >= widget.items.length) {
       return;
     }
 
-    final List<MediaItem> playItems = _playableItemsFromIndex(absoluteIndex);
-    if (playItems.isEmpty) {
+    final MediaItem? item = _resolvePlayableMediaItem(
+      widget.items[absoluteIndex],
+    );
+    if (item == null || !_isValidPlayable(item)) {
       return;
     }
 
     unawaited(() async {
       try {
-        await coordinator.playMedia(playItems);
+        await coordinator.playMedia(<MediaItem>[item]);
       } catch (_) {
         // Ignore failures to keep row interactions responsive.
       }
@@ -563,7 +571,9 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
 
     unawaited(() async {
       try {
-        await coordinator.playMedia(playItems);
+        await coordinator.playMedia(
+          _isTrackSection ? playItems : <MediaItem>[playItems.first],
+        );
       } catch (_) {
         // Ignore failures to keep header interactions responsive.
       }
@@ -583,7 +593,14 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
 
     unawaited(() async {
       try {
-        await coordinator.shufflePlayMedia(playItems);
+        if (_isTrackSection) {
+          await coordinator.shufflePlayMedia(playItems);
+          return;
+        }
+
+        final MediaItem item =
+            playItems[math.Random().nextInt(playItems.length)];
+        await coordinator.playMedia(<MediaItem>[item]);
       } catch (_) {
         // Ignore failures to keep header interactions responsive.
       }
@@ -664,7 +681,9 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         onMoreAnchorTap: _moreAnchorHandler(item as T, absoluteIndex),
         isSelected: isSelected,
         onSelectTap: widget.enableSelection ? onSelectTap : null,
-        onSelectPointerDown: widget.enableSelection ? onSelectPointerDown : null,
+        onSelectPointerDown: widget.enableSelection
+            ? onSelectPointerDown
+            : null,
         onArtistTap: widget.onArtistTap,
         onArtistPointerDown: _suppressSelectionForPointer,
       );
@@ -686,7 +705,9 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         onMoreAnchorTap: _moreAnchorHandler(item as T, absoluteIndex),
         isSelected: isSelected,
         onSelectTap: widget.enableSelection ? onSelectTap : null,
-        onSelectPointerDown: widget.enableSelection ? onSelectPointerDown : null,
+        onSelectPointerDown: widget.enableSelection
+            ? onSelectPointerDown
+            : null,
       );
     }
     if (item is Artist) {
@@ -706,7 +727,9 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         onMoreAnchorTap: _moreAnchorHandler(item as T, absoluteIndex),
         isSelected: isSelected,
         onSelectTap: widget.enableSelection ? onSelectTap : null,
-        onSelectPointerDown: widget.enableSelection ? onSelectPointerDown : null,
+        onSelectPointerDown: widget.enableSelection
+            ? onSelectPointerDown
+            : null,
       );
     }
     if (item is Track) {
@@ -726,7 +749,9 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         onMoreAnchorTap: _moreAnchorHandler(item as T, absoluteIndex),
         isSelected: isSelected,
         onSelectTap: widget.enableSelection ? onSelectTap : null,
-        onSelectPointerDown: widget.enableSelection ? onSelectPointerDown : null,
+        onSelectPointerDown: widget.enableSelection
+            ? onSelectPointerDown
+            : null,
         onArtistTap: widget.onArtistTap,
         onArtistPointerDown: _suppressSelectionForPointer,
       );

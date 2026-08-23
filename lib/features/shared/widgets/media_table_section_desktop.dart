@@ -209,6 +209,8 @@ class _MediaTableSectionDesktopState<T>
     return item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty;
   }
 
+  bool get _isTrackSection => T == Track;
+
   List<MediaItem> _playableItemsFromIndex(int startIndex) {
     if (widget.items.isEmpty ||
         startIndex < 0 ||
@@ -516,7 +518,9 @@ class _MediaTableSectionDesktopState<T>
 
     unawaited(() async {
       try {
-        await coordinator.playMedia(playItems);
+        await coordinator.playMedia(
+          _isTrackSection ? playItems : <MediaItem>[playItems.first],
+        );
       } catch (_) {
         // Ignore failures to keep header interactions responsive.
       }
@@ -536,7 +540,14 @@ class _MediaTableSectionDesktopState<T>
 
     unawaited(() async {
       try {
-        await coordinator.shufflePlayMedia(playItems);
+        if (_isTrackSection) {
+          await coordinator.shufflePlayMedia(playItems);
+          return;
+        }
+
+        final MediaItem item =
+            playItems[math.Random().nextInt(playItems.length)];
+        await coordinator.playMedia(<MediaItem>[item]);
       } catch (_) {
         // Ignore failures to keep header interactions responsive.
       }
@@ -669,8 +680,7 @@ class _MediaTableSectionDesktopState<T>
     required bool fillScrollableViewport,
   }) {
     final bool useInternalScroll = fillScrollableViewport || constrainToHeight;
-    final int visibleRowCount =
-        _isExpanded ? widget.items.length : _chunkSize;
+    final int visibleRowCount = _isExpanded ? widget.items.length : _chunkSize;
     final double pagedContentHeight = visibleRowCount * _desktopRowExtent;
 
     if (widget.isLoading) {

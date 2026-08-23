@@ -64,6 +64,25 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
     super.dispose();
   }
 
+  List<ContextMenuAction> _buildPlaylistSubmenu(MediaItem item) {
+    return <ContextMenuAction>[
+      ContextMenuAction(
+        label: 'Playlist 1 (Dummy)',
+        icon: Icons.playlist_play_outlined,
+        onSelected: () {
+          debugPrint('TODO: Zu Playlist hinzufügen: ${item.name}');
+        },
+      ),
+      ContextMenuAction(
+        label: 'Playlist 2 (Dummy)',
+        icon: Icons.playlist_play_outlined,
+        onSelected: () {
+          debugPrint('TODO: Zu Playlist hinzufügen: ${item.name}');
+        },
+      ),
+    ];
+  }
+
   List<ContextMenuAction> _buildItemMenuActions(MediaItem item) {
     final bool isFavorite = _controller.isItemFavorite(item);
     return <ContextMenuAction>[
@@ -74,7 +93,36 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
             widget.playbackCoordinator.playMedia(<MediaItem>[item]),
       ),
       ContextMenuAction(
-        label: isFavorite ? 'Favorit entfernen' : 'Als Favorit markieren',
+        label: 'Radio starten',
+        icon: Icons.radio_outlined,
+        onSelected: () => item is Track
+            ? _controller.startTrackRadio(item)
+            : _controller.startItemRadio(item),
+      ),
+      ContextMenuAction(
+        label: 'Als Nächstes spielen',
+        icon: Icons.keyboard_return,
+        iconQuarterTurns: 2,
+        onSelected: () =>
+            widget.playbackCoordinator.playMediaNext(<MediaItem>[item]),
+      ),
+      ContextMenuAction(
+        label: 'Als Letztes spielen',
+        icon: Icons.last_page,
+        onSelected: () =>
+            widget.playbackCoordinator.playMediaLast(<MediaItem>[item]),
+      ),
+      const ContextMenuAction.separator(),
+      ContextMenuAction.submenu(
+        label: 'Zu Wiedergabeliste hinzufügen',
+        icon: Icons.playlist_add_outlined,
+        children: _buildPlaylistSubmenu(item),
+      ),
+      const ContextMenuAction.separator(),
+      ContextMenuAction(
+        label: isFavorite
+            ? 'Aus Favoriten entfernen'
+            : 'Zu Favoriten hinzufügen',
         icon: isFavorite
             ? Icons.favorite_outlined
             : Icons.favorite_border_outlined,

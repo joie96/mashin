@@ -51,13 +51,17 @@ class SendspinPlayer implements PlaybackPlayer {
   // Connection and Activation
   @override
   Future<void> activate({String? targetPlayerId}) async {
-    _logger.info('Sendspin activate requested. TargetPlayerId=${targetPlayerId ?? ''}');
+    _logger.info(
+      'Sendspin activate requested. TargetPlayerId=${targetPlayerId ?? ''}',
+    );
     await _ensureStateSubscription();
     await transportBackend.activate(targetPlayerId: targetPlayerId);
     await _ensureQueueEventSubscription();
     await getState();
     await _refreshQueueFromServer();
-    _logger.info('Sendspin activate completed. QueueId=${_queueState.queueId ?? ''}');
+    _logger.info(
+      'Sendspin activate completed. QueueId=${_queueState.queueId ?? ''}',
+    );
   }
 
   @override
@@ -81,7 +85,9 @@ class SendspinPlayer implements PlaybackPlayer {
     await _ensureQueueEventSubscription();
     await getState();
     await _refreshQueueFromServer();
-    _logger.info('Sendspin connect completed. QueueId=${_queueState.queueId ?? ''}');
+    _logger.info(
+      'Sendspin connect completed. QueueId=${_queueState.queueId ?? ''}',
+    );
   }
 
   Future<void> reconnect() => transportBackend.reconnect();
@@ -125,7 +131,9 @@ class SendspinPlayer implements PlaybackPlayer {
   Future<void> transportSeek(double seconds) async {
     final client = clientResolver();
     if (client == null) {
-      _logger.warn('Sendspin seek skipped because MusicAssistant client is null.');
+      _logger.warn(
+        'Sendspin seek skipped because MusicAssistant client is null.',
+      );
       return;
     }
 
@@ -144,7 +152,9 @@ class SendspinPlayer implements PlaybackPlayer {
     );
     _emitPlaybackState();
 
-    _logger.info('Sendspin seek requested via MusicAssistant. PlayerId=$playerId, Seconds=$position');
+    _logger.info(
+      'Sendspin seek requested via MusicAssistant. PlayerId=$playerId, Seconds=$position',
+    );
     await client.playerSeek(playerId, position);
   }
 
@@ -256,20 +266,13 @@ class SendspinPlayer implements PlaybackPlayer {
       return;
     }
 
-    final shuffled = mediaItems.toList(growable: true);
-    for (int i = shuffled.length - 1; i > 0; i--) {
-      final int j = math.Random().nextInt(i + 1);
-      final MediaItem temp = shuffled[i];
-      shuffled[i] = shuffled[j];
-      shuffled[j] = temp;
-    }
-
     final String queueId = await _resolveQueueId();
     await client.playMedia(
       queueId,
-      shuffled,
+      mediaItems,
       option: QueueOption.replace,
       radioMode: false,
+      shuffle: true,
       sortBy: 'original',
     );
   }
@@ -418,15 +421,17 @@ class SendspinPlayer implements PlaybackPlayer {
       // Reset anchor when not playing.
       _resetPositionAnchor();
       if (_positionInterpolationTimer != null) {
-        _logger.debug('Sendspin interpolation stopped. State=${next.playbackState.name}');
+        _logger.debug(
+          'Sendspin interpolation stopped. State=${next.playbackState.name}',
+        );
       }
       _positionInterpolationTimer?.cancel();
       _positionInterpolationTimer = null;
     }
 
-    if (previous.playbackState != next.playbackState
-        || previous.positionMillis != _playbackState.positionMillis
-        || previous.durationMillis != next.durationMillis) {
+    if (previous.playbackState != next.playbackState ||
+        previous.positionMillis != _playbackState.positionMillis ||
+        previous.durationMillis != next.durationMillis) {
       _logger.debug(
         'Sendspin playback state applied. State=${next.playbackState.name}, PositionMillis=${_playbackState.positionMillis}, DurationMillis=${next.durationMillis}',
       );
@@ -457,7 +462,9 @@ class SendspinPlayer implements PlaybackPlayer {
 
     _positionInterpolationTimer = Timer.periodic(_positionTickInterval, (_) {
       if (_playbackState.playbackState != PlaybackStateType.playing) {
-        _logger.debug('Sendspin interpolation canceled because state is ${_playbackState.playbackState.name}.');
+        _logger.debug(
+          'Sendspin interpolation canceled because state is ${_playbackState.playbackState.name}.',
+        );
         _positionInterpolationTimer?.cancel();
         _positionInterpolationTimer = null;
         return;
@@ -469,7 +476,9 @@ class SendspinPlayer implements PlaybackPlayer {
         return;
       }
 
-      final int elapsedMillis = DateTime.now().difference(anchorUpdatedAt).inMilliseconds;
+      final int elapsedMillis = DateTime.now()
+          .difference(anchorUpdatedAt)
+          .inMilliseconds;
       var nextPosition = anchorMillis + elapsedMillis;
 
       final int? durationMillis = _playbackState.durationMillis;
@@ -517,27 +526,30 @@ class SendspinPlayer implements PlaybackPlayer {
   Future<void> _ensureQueueEventSubscription() async {
     final hub = eventHubResolver();
     if (hub == null) {
-      _logger.warn('Queue event subscription skipped because event hub resolver returned null.');
+      _logger.warn(
+        'Queue event subscription skipped because event hub resolver returned null.',
+      );
       return;
     }
 
     if (!hub.isConnected) {
-      _logger.debug('Event hub is disconnected, connecting before queue subscription.');
+      _logger.debug(
+        'Event hub is disconnected, connecting before queue subscription.',
+      );
       await hub.connect();
     }
 
     await _queueEventSubscription?.cancel();
     _queueEventSubscription = hub.queueEvents.listen((event) {
-      _queueEventProcessing = _queueEventProcessing.then((_) => _onQueueEvent(event)).catchError((
-        Object error,
-        StackTrace stackTrace,
-      ) {
-        _logger.error(
-          'Queue event processing failed. Event=${event.event}, Error=$error',
-          error: error,
-          stackTrace: stackTrace,
-        );
-      });
+      _queueEventProcessing = _queueEventProcessing
+          .then((_) => _onQueueEvent(event))
+          .catchError((Object error, StackTrace stackTrace) {
+            _logger.error(
+              'Queue event processing failed. Event=${event.event}, Error=$error',
+              error: error,
+              stackTrace: stackTrace,
+            );
+          });
     });
     _logger.debug('Queue event subscription initialized.');
   }
@@ -547,10 +559,14 @@ class SendspinPlayer implements PlaybackPlayer {
   // - project queue metadata/settings
   // - take progress anchor from queue timing
   Future<void> _onQueueEvent(MusicAssistantQueueEvent event) async {
-    final String expectedQueueId = (_queueState.queueId ?? AppConfig.maAppId).trim();
-    final String eventQueueId = (event.queueId ?? event.queue?.queueId ?? '').trim();
+    final String expectedQueueId = (_queueState.queueId ?? AppConfig.maAppId)
+        .trim();
+    final String eventQueueId = (event.queueId ?? event.queue?.queueId ?? '')
+        .trim();
 
-    if (expectedQueueId.isNotEmpty && eventQueueId.isNotEmpty && eventQueueId != expectedQueueId) {
+    if (expectedQueueId.isNotEmpty &&
+        eventQueueId.isNotEmpty &&
+        eventQueueId != expectedQueueId) {
       _logger.debug(
         'Queue event ignored due to queue mismatch. Event=${event.event}, EventQueueId=$eventQueueId, ExpectedQueueId=$expectedQueueId',
       );
@@ -566,7 +582,9 @@ class SendspinPlayer implements PlaybackPlayer {
           _queueState = _queueState.copyWith(
             queueId: queue.queueId.isNotEmpty
                 ? queue.queueId
-                : (eventQueueId.isNotEmpty ? eventQueueId : _queueState.queueId),
+                : (eventQueueId.isNotEmpty
+                      ? eventQueueId
+                      : _queueState.queueId),
             currentIndex: queue.currentIndex,
             clearCurrentIndex: queue.currentIndex == null,
             shuffleEnabled: queue.shuffleEnabled,
@@ -611,7 +629,9 @@ class SendspinPlayer implements PlaybackPlayer {
           queueId: eventQueueId.isNotEmpty ? eventQueueId : _queueState.queueId,
           shuffleEnabled: settings.shuffleEnabled ?? _queueState.shuffleEnabled,
           repeatMode: settings.repeatMode ?? _queueState.repeatMode,
-          dontStopTheMusicEnabled: settings.dontStopTheMusicEnabled ?? _queueState.dontStopTheMusicEnabled,
+          dontStopTheMusicEnabled:
+              settings.dontStopTheMusicEnabled ??
+              _queueState.dontStopTheMusicEnabled,
         );
         _emitQueueState();
         return;
@@ -634,7 +654,10 @@ class SendspinPlayer implements PlaybackPlayer {
         // Set position/progress from queue_time_updated.
         final int? elapsedMillis = _extractElapsedMillis(event);
         if (elapsedMillis != null) {
-          _applyQueueTimingProgress(elapsedMillis, source: 'queue_time_updated');
+          _applyQueueTimingProgress(
+            elapsedMillis,
+            source: 'queue_time_updated',
+          );
         } else {
           _logger.debug(
             'Queue timing update ignored because elapsed time is missing. QueueId=$eventQueueId, Event=${event.event}',
@@ -644,7 +667,6 @@ class SendspinPlayer implements PlaybackPlayer {
         return;
     }
   }
-
 
   void _applyQueueTimingProgress(int positionMillis, {required String source}) {
     final int clampedPosition = positionMillis < 0 ? 0 : positionMillis;
@@ -663,7 +685,6 @@ class SendspinPlayer implements PlaybackPlayer {
       'Queue timing progress applied. Source=$source, PositionMillis=$clampedPosition, DurationMillis=${_playbackState.durationMillis}',
     );
   }
-
 
   int? _extractElapsedMillis(MusicAssistantQueueEvent event) {
     final double? eventElapsedSeconds = event.elapsedTimeSeconds;
@@ -691,7 +712,9 @@ class SendspinPlayer implements PlaybackPlayer {
   Future<void> _refreshQueueFromServer() async {
     final client = clientResolver();
     if (client == null) {
-      _logger.warn('Queue refresh skipped because MusicAssistant client is null.');
+      _logger.warn(
+        'Queue refresh skipped because MusicAssistant client is null.',
+      );
       return;
     }
 
@@ -702,8 +725,13 @@ class SendspinPlayer implements PlaybackPlayer {
       return;
     }
 
-    final int limit = queue.itemCount <= 0 ? 500 : math.max(100, queue.itemCount);
-    final List<QueueItem> items = await client.getQueueItems(queueId, limit: limit);
+    final int limit = queue.itemCount <= 0
+        ? 500
+        : math.max(100, queue.itemCount);
+    final List<QueueItem> items = await client.getQueueItems(
+      queueId,
+      limit: limit,
+    );
 
     _queueState = _queueState.copyWith(
       queueId: queue.queueId.isNotEmpty ? queue.queueId : queueId,
@@ -741,7 +769,9 @@ class SendspinPlayer implements PlaybackPlayer {
   Future<void> _refreshQueueItemsFromServer(String queueId) async {
     final client = clientResolver();
     if (client == null) {
-      _logger.warn('Queue item refresh skipped because MusicAssistant client is null.');
+      _logger.warn(
+        'Queue item refresh skipped because MusicAssistant client is null.',
+      );
       return;
     }
 
@@ -753,9 +783,13 @@ class SendspinPlayer implements PlaybackPlayer {
 
     final int itemCount = _queueState.items.length;
     final int limit = itemCount <= 0 ? 500 : math.max(100, itemCount);
-    final List<QueueItem> items = await client.getQueueItems(normalizedQueueId, limit: limit);
+    final List<QueueItem> items = await client.getQueueItems(
+      normalizedQueueId,
+      limit: limit,
+    );
 
-    final String activeQueueId = (_queueState.queueId ?? AppConfig.maAppId).trim();
+    final String activeQueueId = (_queueState.queueId ?? AppConfig.maAppId)
+        .trim();
     if (activeQueueId.isNotEmpty && normalizedQueueId != activeQueueId) {
       _logger.debug(
         'Queue item refresh ignored due to queue mismatch. IncomingQueueId=$normalizedQueueId, ActiveQueueId=$activeQueueId',
@@ -768,7 +802,9 @@ class SendspinPlayer implements PlaybackPlayer {
       items: items,
     );
     _emitQueueState();
-    _logger.debug('Queue items refresh applied. QueueId=$normalizedQueueId, Items=${items.length}');
+    _logger.debug(
+      'Queue items refresh applied. QueueId=$normalizedQueueId, Items=${items.length}',
+    );
   }
 
   // Emits the current queue snapshot to the coordinator.
