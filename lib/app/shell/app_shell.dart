@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' hide RepeatMode;
 
 import '../config/app_config.dart';
@@ -50,25 +51,117 @@ class _AppShellState extends State<AppShell> {
   PlaybackStateType _lastStablePlaybackStateType =
       PlaybackStateType.uninitialized;
   DateTime? _busySince;
+  PlaybackQueueSnapshot _playbackQueueSnapshot = const PlaybackQueueSnapshot();
+  final ValueNotifier<int> _queueUiRevision = ValueNotifier<int>(0);
   bool _isQueueOverlayOpen = false;
   bool _isBootstrapping = true;
   String _baseUrl = AppConfig.defaultMusicAssistantUrl;
   String? _username;
-    UserDataController? _userDataController;
+  UserDataController? _userDataController;
   final TextEditingController _desktopSearchController =
       TextEditingController();
   Timer? _desktopSearchDebounce;
 
-    List<Playlist> get _sidebarPlaylists =>
+  List<Playlist> get _sidebarPlaylists =>
       _userDataController?.playlists ?? const <Playlist>[];
 
-    bool get _isLoadingSidebarPlaylists =>
+  bool get _isLoadingSidebarPlaylists =>
       _userDataController?.isLoadingPreferences ?? false;
+
+  // Playback State Synchronization (to prevent unnecessary UI rebuilds)
+  bool _syncPlaybackSnapshot() {
+    final previousQueueSnapshot = _playbackQueueSnapshot;
+    final nextPlaybackState = _playbackCoordinator.state;
+    final nextType = nextPlaybackState.playbackState;
+    final isBusy =
+        nextType == PlaybackStateType.buffering ||
+        nextType == PlaybackStateType.seeking;
+
+    _playbackState = nextPlaybackState;
+    _playbackQueueSnapshot = PlaybackQueueSnapshot(
+      items: _playbackCoordinator.queueItems,
+      currentIndex: _playbackCoordinator.currentQueueIndex,
+      shuffleEnabled: _playbackCoordinator.shuffleEnabled,
+      repeatMode: _playbackCoordinator.repeatMode,
+      dontStopTheMusicEnabled: _playbackCoordinator.dontStopTheMusicEnabled,
+    );
+    if (isBusy) {
+      _busySince ??= DateTime.now();
+    } else {
+      _busySince = null;
+      _lastStablePlaybackStateType = nextType;
+    }
+
+    return !_areQueueSnapshotsUiEqual(
+      previousQueueSnapshot,
+      _playbackQueueSnapshot,
+    );
+  }
+
+  bool _areQueueSnapshotsUiEqual(
+    PlaybackQueueSnapshot previous,
+    PlaybackQueueSnapshot next,
+  ) {
+    if (previous.currentIndex != next.currentIndex ||
+        previous.shuffleEnabled != next.shuffleEnabled ||
+        previous.repeatMode != next.repeatMode ||
+        previous.dontStopTheMusicEnabled != next.dontStopTheMusicEnabled ||
+        previous.items.length != next.items.length) {
+      return false;
+    }
+
+    for (var index = 0; index < previous.items.length; index += 1) {
+      if (!_areQueueItemsUiEqual(previous.items[index], next.items[index])) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  bool _areQueueItemsUiEqual(QueueItem previous, QueueItem next) {
+    final previousMediaItem = previous.mediaItem;
+    final nextMediaItem = next.mediaItem;
+
+    return previous.queueId == next.queueId &&
+        previous.queueItemId == next.queueItemId &&
+        previous.name == next.name &&
+        previous.duration == next.duration &&
+        previous.sortIndex == next.sortIndex &&
+        previous.available == next.available &&
+        previousMediaItem?.itemId == nextMediaItem?.itemId &&
+        previousMediaItem?.provider == nextMediaItem?.provider &&
+        previousMediaItem?.name == nextMediaItem?.name &&
+        previousMediaItem?.imageUri == nextMediaItem?.imageUri &&
+        _areArtistsUiEqual(
+          previousMediaItem?.artists ?? const <Artist>[],
+          nextMediaItem?.artists ?? const <Artist>[],
+        );
+  }
+
+  bool _areArtistsUiEqual(List<Artist> previous, List<Artist> next) {
+    if (previous.length != next.length) {
+      return false;
+    }
+
+    for (var index = 0; index < previous.length; index += 1) {
+      final previousArtist = previous[index];
+      final nextArtist = next[index];
+      if (previousArtist.itemId != nextArtist.itemId ||
+          previousArtist.provider != nextArtist.provider ||
+          previousArtist.name != nextArtist.name) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
 
   // Getters for current Track and Queue state
   QueueItem? get _currentQueueItem {
-    final items = _playbackCoordinator.queueItems;
-    final index = _playbackCoordinator.currentQueueIndex;
+    final items = _playbackQueueSnapshot.items;
+    final index = _playbackQueueSnapshot.currentIndex;
     if (index == null || index < 0 || index >= items.length) {
       return null;
     }
@@ -139,13 +232,13 @@ class _AppShellState extends State<AppShell> {
     return url.isEmpty ? null : url;
   }
 
-  int get _queueTrackCount => _playbackCoordinator.queueItems.length;
+  int get _queueTrackCount => _playbackQueueSnapshot.items.length;
 
   String get _queueTrackCountText => '$_queueTrackCount Tracks';
 
   String get _queueTotalDurationText {
     int totalSeconds = 0;
-    for (final item in _playbackCoordinator.queueItems) {
+    for (final item in _playbackQueueSnapshot.items) {
       final int duration = item.duration ?? 0;
       if (duration > 0) {
         totalSeconds += duration;
@@ -222,6 +315,7 @@ class _AppShellState extends State<AppShell> {
   void dispose() {
     _desktopSearchDebounce?.cancel();
     _desktopSearchController.dispose();
+    _queueUiRevision.dispose();
     _navigation.removeListener(_onNavigationChanged);
     _navigation.dispose();
     _playbackCoordinator.removeListener(_onPlaybackChanged);
@@ -368,11 +462,13 @@ class _AppShellState extends State<AppShell> {
                             ),
                             itemCount: _sidebarPlaylists.length,
                             itemBuilder: (BuildContext context, int index) {
-                              final Playlist playlist = _sidebarPlaylists[index];
+                              final Playlist playlist =
+                                  _sidebarPlaylists[index];
                               final AppDetailDestination? activeDetail =
                                   _navigation.activeDetail;
                               final bool selected =
-                                  activeDetail?.type == AppDetailType.playlist &&
+                                  activeDetail?.type ==
+                                      AppDetailType.playlist &&
                                   activeDetail?.itemId == playlist.itemId;
 
                               return _DesktopSidebarPlaylistItem(
@@ -417,50 +513,64 @@ class _AppShellState extends State<AppShell> {
                 ],
               ),
             ),
-            _DesktopPlayerBar(
-              playStateType: _effectivePlaybackStateType,
-              playbackState: _playbackState,
-              dontStopTheMusicEnabled:
-                  _playbackCoordinator.dontStopTheMusicEnabled ?? false,
-              trackTitle: _currentTrackTitle,
-              trackSubtitle: _currentTrackSubtitle,
-              currentTrackArtist: _currentTrackPrimaryArtist,
-              trackCoverUrl: _currentTrackCoverUrl,
-              maxSeconds: _currentTrackMaxSeconds,
-              currentSeconds: _currentTrackPositionSeconds,
-              isQueueOpen: _isQueueOverlayOpen,
-              onTogglePlayPause: _togglePlayPause,
-              onPrevious: _playPrevious,
-              onNext: _playNext,
-              onToggleShuffle: _toggleShuffle,
-              onToggleRepeatMode: _toggleRepeatMode,
-              onToggleDontStopTheMusic: _toggleDontStopTheMusic,
-              onToggleMute: _toggleMute,
-              onSeek: _seek,
-              onVolumeChanged: _setVolume,
-              onOpenQueue: _openQueueOverlay,
-              onOpenArtist: _navigation.openArtist,
+            _PlaybackScope(
+              playbackCoordinator: _playbackCoordinator,
+              child: _QueueUiScope(
+                queueUiRevision: _queueUiRevision,
+                builder: (BuildContext context) => _DesktopCurrentTrackInfo(
+                  trackTitle: _currentTrackTitle,
+                  trackSubtitle: _currentTrackSubtitle,
+                  currentTrackArtist: _currentTrackPrimaryArtist,
+                  trackCoverUrl: _currentTrackCoverUrl,
+                  onOpenArtist: _navigation.openArtist,
+                ),
+              ),
+              builder: (BuildContext context, Widget? currentTrackInfo) =>
+                  _DesktopPlayerBar(
+                    currentTrackInfo:
+                        currentTrackInfo ?? const SizedBox.shrink(),
+                    playStateType: _effectivePlaybackStateType,
+                    playbackState: _playbackState,
+                    dontStopTheMusicEnabled:
+                        _playbackQueueSnapshot.dontStopTheMusicEnabled ?? false,
+                    maxSeconds: _currentTrackMaxSeconds,
+                    currentSeconds: _currentTrackPositionSeconds,
+                    isQueueOpen: _isQueueOverlayOpen,
+                    onTogglePlayPause: _togglePlayPause,
+                    onPrevious: _playPrevious,
+                    onNext: _playNext,
+                    onToggleShuffle: _toggleShuffle,
+                    onToggleRepeatMode: _toggleRepeatMode,
+                    onToggleDontStopTheMusic: _toggleDontStopTheMusic,
+                    onToggleMute: _toggleMute,
+                    onSeek: _seek,
+                    onVolumeChanged: _setVolume,
+                    onOpenQueue: _openQueueOverlay,
+                  ),
             ),
           ],
         ),
-        QueueOverlay(
-          isOpen: _isQueueOverlayOpen,
-          isDesktop: true,
-          desktopBottomInset: _DesktopPlayerBar.barHeight,
-          trackTitle: _currentTrackTitle,
-          trackSubtitle: _currentTrackSubtitle,
-          trackCoverUrl: _currentTrackCoverUrl,
-          queueTrackCountText: _queueTrackCountText,
-          queueTotalDurationText: _queueTotalDurationText,
-          dontStopTheMusicEnabled:
-              _playbackCoordinator.dontStopTheMusicEnabled ?? false,
-          queueItems: _playbackCoordinator.queueItems,
-          currentQueueIndex: _playbackCoordinator.currentQueueIndex,
-          playbackCoordinator: _playbackCoordinator,
-          onClose: _closeQueueOverlay,
-          onToggleDontStopTheMusic: _toggleDontStopTheMusic,
-          onOpenArtist: _openArtistFromQueue,
-          onOpenAlbum: _openAlbumFromQueue,
+        _QueueUiScope(
+          queueUiRevision: _queueUiRevision,
+          builder: (BuildContext context) => QueueOverlay(
+            isOpen: _isQueueOverlayOpen,
+            isDesktop: true,
+            desktopBottomInset: _DesktopPlayerBar.barHeight,
+            trackTitle: _currentTrackTitle,
+            trackSubtitle: _currentTrackSubtitle,
+            trackCoverUrl: _currentTrackCoverUrl,
+            queueTrackCountText: _queueTrackCountText,
+            queueTotalDurationText: _queueTotalDurationText,
+            dontStopTheMusicEnabled:
+                _playbackQueueSnapshot.dontStopTheMusicEnabled ?? false,
+            queueItems: _playbackQueueSnapshot.items,
+            currentQueueIndex: _playbackQueueSnapshot.currentIndex,
+            playbackCoordinator: _playbackCoordinator,
+            onClose: _closeQueueOverlay,
+            onToggleDontStopTheMusic: _toggleDontStopTheMusic,
+            onOpenArtist: _openArtistFromQueue,
+            onOpenAlbum: _openAlbumFromQueue,
+          ),
         ),
       ],
     );
@@ -483,12 +593,23 @@ class _AppShellState extends State<AppShell> {
                 ),
               ),
             ),
-            _MobilePlayerBar(
-              playbackState: _effectivePlaybackStateType,
-              trackTitle: _currentTrackTitle,
-              trackCoverUrl: _currentTrackCoverUrl,
-              onTogglePlayPause: _togglePlayPause,
-              onOpenQueue: _openQueueOverlay,
+            _PlaybackScope(
+              playbackCoordinator: _playbackCoordinator,
+              child: _QueueUiScope(
+                queueUiRevision: _queueUiRevision,
+                builder: (BuildContext context) => _MobileCurrentTrackInfo(
+                  trackTitle: _currentTrackTitle,
+                  trackCoverUrl: _currentTrackCoverUrl,
+                ),
+              ),
+              builder: (BuildContext context, Widget? currentTrackInfo) =>
+                  _MobilePlayerBar(
+                    currentTrackInfo:
+                        currentTrackInfo ?? const SizedBox.shrink(),
+                    playbackState: _effectivePlaybackStateType,
+                    onTogglePlayPause: _togglePlayPause,
+                    onOpenQueue: _openQueueOverlay,
+                  ),
             ),
             _MobileBottomNav(
               currentSection: _navigation.currentSection,
@@ -515,21 +636,24 @@ class _AppShellState extends State<AppShell> {
             );
           },
         ),
-        QueueOverlay(
-          isOpen: _isQueueOverlayOpen,
-          isDesktop: false,
-          trackTitle: _currentTrackTitle,
-          trackSubtitle: _currentTrackSubtitle,
-          trackCoverUrl: _currentTrackCoverUrl,
-          queueTrackCountText: _queueTrackCountText,
-          queueTotalDurationText: _queueTotalDurationText,
-          dontStopTheMusicEnabled:
-              _playbackCoordinator.dontStopTheMusicEnabled ?? false,
-          queueItems: _playbackCoordinator.queueItems,
-          currentQueueIndex: _playbackCoordinator.currentQueueIndex,
-          playbackCoordinator: _playbackCoordinator,
-          onClose: _closeQueueOverlay,
-          onToggleDontStopTheMusic: _toggleDontStopTheMusic,
+        _QueueUiScope(
+          queueUiRevision: _queueUiRevision,
+          builder: (BuildContext context) => QueueOverlay(
+            isOpen: _isQueueOverlayOpen,
+            isDesktop: false,
+            trackTitle: _currentTrackTitle,
+            trackSubtitle: _currentTrackSubtitle,
+            trackCoverUrl: _currentTrackCoverUrl,
+            queueTrackCountText: _queueTrackCountText,
+            queueTotalDurationText: _queueTotalDurationText,
+            dontStopTheMusicEnabled:
+                _playbackQueueSnapshot.dontStopTheMusicEnabled ?? false,
+            queueItems: _playbackQueueSnapshot.items,
+            currentQueueIndex: _playbackQueueSnapshot.currentIndex,
+            playbackCoordinator: _playbackCoordinator,
+            onClose: _closeQueueOverlay,
+            onToggleDontStopTheMusic: _toggleDontStopTheMusic,
+          ),
         ),
       ],
     );
@@ -669,7 +793,7 @@ class _AppShellState extends State<AppShell> {
     }
 
     candidateClient.dispose();
-  _disposeUserDataController();
+    _disposeUserDataController();
     await _authStore.clear();
     unawaited(_musicAssistantEventHub?.dispose());
 
@@ -763,7 +887,7 @@ class _AppShellState extends State<AppShell> {
       }
 
       setState(() {
-        _playbackState = _playbackCoordinator.state;
+        _syncPlaybackSnapshot();
         _lastStablePlaybackStateType = _playbackState.playbackState;
       });
     } catch (error) {
@@ -908,21 +1032,10 @@ class _AppShellState extends State<AppShell> {
       return;
     }
 
-    final nextPlaybackState = _playbackCoordinator.state;
-    final nextType = nextPlaybackState.playbackState;
-    final isBusy =
-        nextType == PlaybackStateType.buffering ||
-        nextType == PlaybackStateType.seeking;
-
-    setState(() {
-      _playbackState = nextPlaybackState;
-      if (isBusy) {
-        _busySince ??= DateTime.now();
-      } else {
-        _busySince = null;
-        _lastStablePlaybackStateType = nextType;
-      }
-    });
+    final queueUiChanged = _syncPlaybackSnapshot();
+    if (queueUiChanged) {
+      _queueUiRevision.value += 1;
+    }
   }
 
   void _onNavigationChanged() {
@@ -930,6 +1043,44 @@ class _AppShellState extends State<AppShell> {
       return;
     }
     setState(() {});
+  }
+}
+
+// Playback and Queue State Scopes (to prevent unnecessary UI rebuilds)
+class _PlaybackScope extends StatelessWidget {
+  const _PlaybackScope({
+    required this.playbackCoordinator,
+    required this.builder,
+    this.child,
+  });
+
+  final PlaybackCoordinator playbackCoordinator;
+  final TransitionBuilder builder;
+  final Widget? child;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: playbackCoordinator,
+      builder: builder,
+      child: child,
+    );
+  }
+}
+
+class _QueueUiScope extends StatelessWidget {
+  const _QueueUiScope({required this.queueUiRevision, required this.builder});
+
+  final ValueListenable<int> queueUiRevision;
+  final WidgetBuilder builder;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: queueUiRevision,
+      builder: (BuildContext context, int revision, Widget? child) =>
+          builder(context),
+    );
   }
 }
 
@@ -1160,9 +1311,7 @@ class _DesktopSidebarPlaylistItem extends StatelessWidget {
                       color: selected
                           ? colors.textPrimary
                           : colors.textSecondary,
-                      fontWeight: selected
-                          ? FontWeight.w600
-                          : FontWeight.w500,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                     ),
                   ),
                 ),
@@ -1178,13 +1327,10 @@ class _DesktopSidebarPlaylistItem extends StatelessWidget {
 class _DesktopPlayerBar extends StatelessWidget {
   static const double barHeight = 90;
 
+  final Widget currentTrackInfo;
   final PlaybackStateType playStateType;
   final PlaybackState playbackState;
   final bool dontStopTheMusicEnabled;
-  final String trackTitle;
-  final String trackSubtitle;
-  final Artist? currentTrackArtist;
-  final String? trackCoverUrl;
   final double maxSeconds;
   final double currentSeconds;
   final bool isQueueOpen;
@@ -1198,16 +1344,12 @@ class _DesktopPlayerBar extends StatelessWidget {
   final Future<void> Function(double) onSeek;
   final ValueChanged<double> onVolumeChanged;
   final VoidCallback onOpenQueue;
-  final ValueChanged<Artist>? onOpenArtist;
 
   const _DesktopPlayerBar({
+    required this.currentTrackInfo,
     required this.playStateType,
     required this.playbackState,
     required this.dontStopTheMusicEnabled,
-    required this.trackTitle,
-    required this.trackSubtitle,
-    this.currentTrackArtist,
-    required this.trackCoverUrl,
     required this.maxSeconds,
     required this.currentSeconds,
     required this.isQueueOpen,
@@ -1221,7 +1363,6 @@ class _DesktopPlayerBar extends StatelessWidget {
     required this.onSeek,
     required this.onVolumeChanged,
     required this.onOpenQueue,
-    this.onOpenArtist,
   });
 
   @override
@@ -1257,79 +1398,7 @@ class _DesktopPlayerBar extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 20),
         child: Row(
           children: <Widget>[
-            SizedBox(
-              width: 300,
-              child: Row(
-                children: <Widget>[
-                  Container(
-                    width: 60,
-                    height: 60,
-                    decoration: BoxDecoration(
-                      color: colors.bgTertiary,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: trackCoverUrl != null
-                          ? MediaImage(
-                              source: trackCoverUrl!,
-                              fit: BoxFit.cover,
-                              fallback: Icon(
-                                Icons.music_note_outlined,
-                                color: colors.textSecondary,
-                              ),
-                            )
-                          : Icon(
-                              Icons.music_note_outlined,
-                              color: colors.textSecondary,
-                            ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          trackTitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: colors.textPrimary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        MediaLinkText(
-                          items: currentTrackArtist == null
-                              ? const <MediaItem>[]
-                              : <MediaItem>[currentTrackArtist!],
-                          fallbackText: trackSubtitle,
-                          onItemTap: onOpenArtist == null
-                              ? null
-                              : (MediaItem item) =>
-                                    onOpenArtist!(item as Artist),
-                          style: TextStyle(
-                            color: colors.textSecondary,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  _PlayerBarIconButton(
-                    icon: Icons.favorite_border_outlined,
-                    onTap: () {},
-                    color: colors.textSecondary,
-                  ),
-                  _PlayerBarIconButton(
-                    icon: Icons.add_outlined,
-                    onTap: () {},
-                    color: colors.textSecondary,
-                  ),
-                ],
-              ),
-            ),
+            currentTrackInfo,
             Expanded(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.start,
@@ -1529,6 +1598,97 @@ class _DesktopPlayerBar extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _DesktopCurrentTrackInfo extends StatelessWidget {
+  const _DesktopCurrentTrackInfo({
+    required this.trackTitle,
+    required this.trackSubtitle,
+    required this.currentTrackArtist,
+    required this.trackCoverUrl,
+    required this.onOpenArtist,
+  });
+
+  final String trackTitle;
+  final String trackSubtitle;
+  final Artist? currentTrackArtist;
+  final String? trackCoverUrl;
+  final ValueChanged<Artist>? onOpenArtist;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+
+    return SizedBox(
+      width: 300,
+      child: Row(
+        children: <Widget>[
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              color: colors.bgTertiary,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: trackCoverUrl != null
+                  ? MediaImage(
+                      source: trackCoverUrl!,
+                      fit: BoxFit.cover,
+                      fallback: Icon(
+                        Icons.music_note_outlined,
+                        color: colors.textSecondary,
+                      ),
+                    )
+                  : Icon(
+                      Icons.music_note_outlined,
+                      color: colors.textSecondary,
+                    ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  trackTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: colors.textPrimary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                MediaLinkText(
+                  items: currentTrackArtist == null
+                      ? const <MediaItem>[]
+                      : <MediaItem>[currentTrackArtist!],
+                  fallbackText: trackSubtitle,
+                  onItemTap: onOpenArtist == null
+                      ? null
+                      : (MediaItem item) => onOpenArtist!(item as Artist),
+                  style: TextStyle(color: colors.textSecondary, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          _PlayerBarIconButton(
+            icon: Icons.favorite_border_outlined,
+            onTap: () {},
+            color: colors.textSecondary,
+          ),
+          _PlayerBarIconButton(
+            icon: Icons.add_outlined,
+            onTap: () {},
+            color: colors.textSecondary,
+          ),
+        ],
       ),
     );
   }
@@ -1734,16 +1894,14 @@ String _formatSeconds(double seconds) {
 
 // Mobile UI Components
 class _MobilePlayerBar extends StatelessWidget {
+  final Widget currentTrackInfo;
   final PlaybackStateType playbackState;
-  final String trackTitle;
-  final String? trackCoverUrl;
   final Future<void> Function() onTogglePlayPause;
   final VoidCallback onOpenQueue;
 
   const _MobilePlayerBar({
+    required this.currentTrackInfo,
     required this.playbackState,
-    required this.trackTitle,
-    required this.trackCoverUrl,
     required this.onTogglePlayPause,
     required this.onOpenQueue,
   });
@@ -1764,6 +1922,57 @@ class _MobilePlayerBar extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: colors.border),
       ),
+      child: Row(
+        children: <Widget>[
+          currentTrackInfo,
+          IconButton(
+            onPressed: onOpenQueue,
+            icon: const Icon(Icons.queue_music_outlined),
+          ),
+          IconButton(
+            onPressed: isBusy
+                ? null
+                : () {
+                    onTogglePlayPause();
+                  },
+            icon: isBusy
+                ? SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        colors.textSecondary,
+                      ),
+                    ),
+                  )
+                : Icon(
+                    isPlaying
+                        ? Icons.pause_outlined
+                        : Icons.play_arrow_outlined,
+                  ),
+          ),
+          const SizedBox(width: 4),
+        ],
+      ),
+    );
+  }
+}
+
+class _MobileCurrentTrackInfo extends StatelessWidget {
+  const _MobileCurrentTrackInfo({
+    required this.trackTitle,
+    required this.trackCoverUrl,
+  });
+
+  final String trackTitle;
+  final String? trackCoverUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+
+    return Expanded(
       child: Row(
         children: <Widget>[
           const SizedBox(width: 10),
@@ -1802,34 +2011,6 @@ class _MobilePlayerBar extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          IconButton(
-            onPressed: onOpenQueue,
-            icon: const Icon(Icons.queue_music_outlined),
-          ),
-          IconButton(
-            onPressed: isBusy
-                ? null
-                : () {
-                    onTogglePlayPause();
-                  },
-            icon: isBusy
-                ? SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        colors.textSecondary,
-                      ),
-                    ),
-                  )
-                : Icon(
-                    isPlaying
-                        ? Icons.pause_outlined
-                        : Icons.play_arrow_outlined,
-                  ),
-          ),
-          const SizedBox(width: 4),
         ],
       ),
     );
