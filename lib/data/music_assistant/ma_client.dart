@@ -120,14 +120,18 @@ class MusicAssistantClient {
     List<String>? providerFilter,
   }) async {
     final args = <String, dynamic>{};
-    if (userId != null && userId.trim().isNotEmpty)
+    if (userId != null && userId.trim().isNotEmpty) {
       args['user_id'] = userId.trim();
-    if (username != null && username.trim().isNotEmpty)
+    }
+    if (username != null && username.trim().isNotEmpty) {
       args['username'] = username.trim();
-    if (displayName != null && displayName.trim().isNotEmpty)
+    }
+    if (displayName != null && displayName.trim().isNotEmpty) {
       args['display_name'] = displayName.trim();
-    if (avatarUrl != null && avatarUrl.trim().isNotEmpty)
+    }
+    if (avatarUrl != null && avatarUrl.trim().isNotEmpty) {
       args['avatar_url'] = avatarUrl.trim();
+    }
     if (password != null && password.isNotEmpty) args['password'] = password;
     if (role != null && role.trim().isNotEmpty) args['role'] = role.trim();
     if (preferences != null) args['preferences'] = preferences;
@@ -251,12 +255,14 @@ class MusicAssistantClient {
   }) async {
     final args = <String, dynamic>{'library_items_only': libraryItemsOnly};
     if (favorite != null) args['favorite'] = favorite;
-    if (search != null && search.trim().isNotEmpty)
+    if (search != null && search.trim().isNotEmpty) {
       args['search'] = search.trim();
+    }
     if (limit != null) args['limit'] = limit;
     if (offset != null) args['offset'] = offset;
-    if (orderBy != null && orderBy.trim().isNotEmpty)
+    if (orderBy != null && orderBy.trim().isNotEmpty) {
       args['order_by'] = orderBy.trim();
+    }
 
     final result = await _sendCommand(
       'music/artists/library_items',
@@ -393,12 +399,14 @@ class MusicAssistantClient {
   }) async {
     final args = <String, dynamic>{'library_items_only': libraryItemsOnly};
     if (favorite != null) args['favorite'] = favorite;
-    if (search != null && search.trim().isNotEmpty)
+    if (search != null && search.trim().isNotEmpty) {
       args['search'] = search.trim();
+    }
     if (limit != null) args['limit'] = limit;
     if (offset != null) args['offset'] = offset;
-    if (orderBy != null && orderBy.trim().isNotEmpty)
+    if (orderBy != null && orderBy.trim().isNotEmpty) {
       args['order_by'] = orderBy.trim();
+    }
     if (albumTypes != null && albumTypes.isNotEmpty) {
       args['album_types'] = albumTypes.map((e) => e.name).toList();
     }
@@ -478,12 +486,14 @@ class MusicAssistantClient {
   }) async {
     final args = <String, dynamic>{'library_items_only': libraryItemsOnly};
     if (favorite != null) args['favorite'] = favorite;
-    if (search != null && search.trim().isNotEmpty)
+    if (search != null && search.trim().isNotEmpty) {
       args['search'] = search.trim();
+    }
     if (limit != null) args['limit'] = limit;
     if (offset != null) args['offset'] = offset;
-    if (orderBy != null && orderBy.trim().isNotEmpty)
+    if (orderBy != null && orderBy.trim().isNotEmpty) {
       args['order_by'] = orderBy.trim();
+    }
 
     final result = await _sendCommand('music/tracks/library_items', args: args);
     return _mapList(result, Track.fromJson);
@@ -594,12 +604,14 @@ class MusicAssistantClient {
   }) async {
     final args = <String, dynamic>{'library_items_only': libraryItemsOnly};
     if (favorite != null) args['favorite'] = favorite;
-    if (search != null && search.trim().isNotEmpty)
+    if (search != null && search.trim().isNotEmpty) {
       args['search'] = search.trim();
+    }
     if (limit != null) args['limit'] = limit;
     if (offset != null) args['offset'] = offset;
-    if (orderBy != null && orderBy.trim().isNotEmpty)
+    if (orderBy != null && orderBy.trim().isNotEmpty) {
       args['order_by'] = orderBy.trim();
+    }
 
     final result = await _sendCommand(
       'music/playlists/library_items',
@@ -720,12 +732,14 @@ class MusicAssistantClient {
   }) async {
     final args = <String, dynamic>{'library_items_only': libraryItemsOnly};
     if (favorite != null) args['favorite'] = favorite;
-    if (search != null && search.trim().isNotEmpty)
+    if (search != null && search.trim().isNotEmpty) {
       args['search'] = search.trim();
+    }
     if (limit != null) args['limit'] = limit;
     if (offset != null) args['offset'] = offset;
-    if (orderBy != null && orderBy.trim().isNotEmpty)
+    if (orderBy != null && orderBy.trim().isNotEmpty) {
       args['order_by'] = orderBy.trim();
+    }
 
     final result = await _sendCommand('music/radios/library_items', args: args);
     return _mapList(result, mediaItemFromJson);
@@ -763,12 +777,14 @@ class MusicAssistantClient {
   }) async {
     final args = <String, dynamic>{'library_items_only': libraryItemsOnly};
     if (favorite != null) args['favorite'] = favorite;
-    if (search != null && search.trim().isNotEmpty)
+    if (search != null && search.trim().isNotEmpty) {
       args['search'] = search.trim();
+    }
     if (limit != null) args['limit'] = limit;
     if (offset != null) args['offset'] = offset;
-    if (orderBy != null && orderBy.trim().isNotEmpty)
+    if (orderBy != null && orderBy.trim().isNotEmpty) {
       args['order_by'] = orderBy.trim();
+    }
 
     final result = await _sendCommand(
       'music/podcasts/library_items',
@@ -871,13 +887,16 @@ class MusicAssistantClient {
     if (mediaTypes != null && mediaTypes.isNotEmpty) {
       args['media_types'] = mediaTypes.map(mediaTypeToJson).toList();
     }
-    if (userId != null && userId.trim().isNotEmpty)
+    if (userId != null && userId.trim().isNotEmpty) {
       args['user_id'] = userId.trim();
-    if (queueId != null && queueId.trim().isNotEmpty)
+    }
+    if (queueId != null && queueId.trim().isNotEmpty) {
       args['queue_id'] = queueId.trim();
+    }
     if (fullyPlayedOnly != null) args['fully_played_only'] = fullyPlayedOnly;
-    if (userInitiatedOnly != null)
+    if (userInitiatedOnly != null) {
       args['user_initiated_only'] = userInitiatedOnly;
+    }
 
     final result = await _sendCommand(
       'music/recently_played_items',

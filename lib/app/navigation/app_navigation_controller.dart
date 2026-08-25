@@ -4,6 +4,7 @@ import '../../data/music_assistant/ma_client.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../../features/album/album_detail_page.dart';
 import '../../features/artist/artist_detail_page.dart';
+import '../../features/favorites/favorites_screen.dart';
 import '../../features/home/home_screen.dart';
 import '../../features/playback/playback_coordinator.dart';
 import '../../features/playlist/playlist_detail_page.dart';
@@ -256,10 +257,20 @@ class AppNavigationController extends ChangeNotifier {
           icon: Icons.explore_outlined,
         );
       case AppSection.favorites:
-        return const _SectionPlaceholder(
-          title: 'Favoriten',
-          subtitle: 'Deine favorisierten Tracks, Alben und Artists',
-          icon: Icons.favorite_outlined,
+        if (userDataController == null) {
+          return const _SectionPlaceholder(
+            title: 'Favoriten',
+            subtitle: 'Deine favorisierten Tracks, Alben und Artists',
+            icon: Icons.favorite_outlined,
+          );
+        }
+        return FavoritesScreen(
+          client: client,
+          playbackCoordinator: playbackCoordinator,
+          userDataController: userDataController,
+          onOpenArtist: openArtist,
+          onOpenAlbum: openAlbum,
+          onOpenPlaylist: openPlaylist,
         );
       case AppSection.playlists:
         return const _SectionPlaceholder(

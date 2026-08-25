@@ -1,0 +1,199 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import '../../data/music_assistant/ma_client.dart';
+import '../../data/music_assistant/ma_models.dart';
+import '../playback/playback_coordinator.dart';
+import '../shared/context_menu/context_menu_controller.dart';
+import '../shared/userdata_controller.dart';
+import '../shared/widgets/media_row_section_mobile.dart';
+import '../shared/widgets/media_table_section_mobile.dart';
+import 'favorites_controller.dart';
+
+/// Mobile favorites page: stacked track table plus album/playlist/artist rows.
+/// Only tracks expose a tap-to-open context menu, mirroring the other migrated
+/// mobile detail pages (album/artist/playlist).
+class FavoritesScreenMobile extends StatefulWidget {
+  final MusicAssistantClient client;
+  final PlaybackCoordinator playbackCoordinator;
+  final UserDataController userDataController;
+  final ValueChanged<Artist>? onOpenArtist;
+  final ValueChanged<Album>? onOpenAlbum;
+  final ValueChanged<Playlist>? onOpenPlaylist;
+
+  const FavoritesScreenMobile({
+    super.key,
+    required this.client,
+    required this.playbackCoordinator,
+    required this.userDataController,
+    this.onOpenArtist,
+    this.onOpenAlbum,
+    this.onOpenPlaylist,
+  });
+
+  @override
+  State<FavoritesScreenMobile> createState() => _FavoritesScreenMobileState();
+}
+
+class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
+  late final FavoritesController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = FavoritesController(
+      client: widget.client,
+      playbackCoordinator: widget.playbackCoordinator,
+      userDataController: widget.userDataController,
+    )..addListener(_onControllerChanged);
+  }
+
+  void _onControllerChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_onControllerChanged);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Artist? _primaryArtistOf(Track track) {
+    for (final Artist artist in track.artists) {
+      if (artist.itemId.trim().isNotEmpty && artist.provider.trim().isNotEmpty) {
+        return artist;
+      }
+    }
+    return null;
+  }
+
+  List<ContextMenuAction> _buildPlaylistSubmenu(Track track) {
+    return _controller.playlistsForAdding
+        .map(
+          (Playlist playlist) => ContextMenuAction(
+            label: playlist.name,
+            icon: Icons.playlist_play_outlined,
+            onSelected: () => _controller.addTracksToPlaylist(playlist.itemId, <Track>[track]),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  List<ContextMenuAction> _buildTrackMenuActions(Track track) {
+    final bool isFavorite = _controller.isItemFavorite(track);
+    final Artist? primaryArtist = _primaryArtistOf(track);
+    final Album? primaryAlbum = track.album;
+    final List<ContextMenuAction> playlistActions = _buildPlaylistSubmenu(track);
+
+    return <ContextMenuAction>[
+      ContextMenuAction(
+        label: 'Abspielen',
+        icon: Icons.play_arrow,
+        onSelected: () => widget.playbackCoordinator.playMedia(<MediaItem>[track]),
+      ),
+      ContextMenuAction(
+        label: 'Radio starten',
+        icon: Icons.radio_outlined,
+        onSelected: () => _controller.startTrackRadio(track),
+      ),
+      ContextMenuAction(
+        label: 'Als Nächstes spielen',
+        icon: Icons.keyboard_return,
+        iconQuarterTurns: 2,
+        onSelected: () => widget.playbackCoordinator.playMediaNext(<MediaItem>[track]),
+      ),
+      ContextMenuAction(
+        label: 'Als Letztes spielen',
+        icon: Icons.last_page,
+        onSelected: () => widget.playbackCoordinator.playMediaLast(<MediaItem>[track]),
+      ),
+      if (primaryArtist != null || primaryAlbum != null) ...<ContextMenuAction>[
+        const ContextMenuAction.separator(),
+        if (primaryArtist != null && widget.onOpenArtist != null)
+          ContextMenuAction(
+            label: 'Künstler:in öffnen',
+            icon: Icons.person_outline,
+            onSelected: () => widget.onOpenArtist!(primaryArtist),
+          ),
+        if (primaryAlbum != null && widget.onOpenAlbum != null)
+          ContextMenuAction(
+            label: 'Album öffnen',
+            icon: Icons.album_outlined,
+            onSelected: () => widget.onOpenAlbum!(primaryAlbum),
+          ),
+      ],
+      if (playlistActions.isNotEmpty) ...<ContextMenuAction>[
+        const ContextMenuAction.separator(),
+        ContextMenuAction.submenu(
+          label: 'Zu Wiedergabeliste hinzufügen',
+          icon: Icons.playlist_add_outlined,
+          children: playlistActions,
+        ),
+      ],
+      const ContextMenuAction.separator(),
+      ContextMenuAction(
+        label: isFavorite ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen',
+        icon: isFavorite ? Icons.favorite_outlined : Icons.favorite_border_outlined,
+        onSelected: () => _controller.setFavorite(track, !isFavorite),
+      ),
+    ];
+  }
+
+  Future<void> _showTrackMenu(Track track) {
+    return const AppContextMenuController().show(
+      context: context,
+      actions: _buildTrackMenuActions(track),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
+      children: <Widget>[
+        Text(
+          'Favoriten',
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 20),
+        MediaTableSectionMobile<Track>(
+          title: 'Titel',
+          items: _controller.tracks,
+          isLoading: _controller.isLoading,
+          emptyText: 'Keine favorisierten Titel.',
+          maxItemsPerPage: 3,
+          playbackCoordinator: widget.playbackCoordinator,
+          onRowTap: (Track item, int _) => unawaited(_showTrackMenu(item)),
+        ),
+        const SizedBox(height: 18),
+        MediaRowSectionMobile<Album>(
+          title: 'Alben',
+          isLoading: _controller.isLoading,
+          items: _controller.albums,
+          emptyText: 'Keine favorisierten Alben.',
+          playbackCoordinator: widget.playbackCoordinator,
+        ),
+        const SizedBox(height: 18),
+        MediaRowSectionMobile<Playlist>(
+          title: 'Playlists',
+          isLoading: _controller.isLoading,
+          items: _controller.playlists,
+          emptyText: 'Keine favorisierten Playlists.',
+          playbackCoordinator: widget.playbackCoordinator,
+        ),
+        const SizedBox(height: 18),
+        MediaRowSectionMobile<Artist>(
+          title: 'Artists',
+          isLoading: _controller.isLoading,
+          items: _controller.artists,
+          emptyText: 'Keine favorisierten Artists.',
+          playbackCoordinator: widget.playbackCoordinator,
+        ),
+      ],
+    );
+  }
+}

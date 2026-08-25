@@ -460,7 +460,7 @@ class _DesktopContextMenuActionTileState
       return;
     }
 
-    final OverlayState? overlay = Overlay.of(context);
+    final OverlayState overlay = Overlay.of(context);
     final RenderBox overlayBox =
         overlay?.context.findRenderObject() as RenderBox? ??
         Navigator.of(context).overlay!.context.findRenderObject()! as RenderBox;
