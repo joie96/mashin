@@ -2817,7 +2817,10 @@ class DesktopPlaybackIndicator extends StatelessWidget {
     }
 
     return ListenableBuilder(
-      listenable: playbackCoordinator,
+      listenable: Listenable.merge(<Listenable>[
+        playbackCoordinator.playbackStateChanges,
+        playbackCoordinator.playbackQueueChanges,
+      ]),
       builder: (BuildContext context, Widget? child) {
         final currentIndex = playbackCoordinator.currentQueueIndex;
         final queueItems = playbackCoordinator.queueItems;
@@ -2832,9 +2835,9 @@ class DesktopPlaybackIndicator extends StatelessWidget {
           return _fallback(context);
         }
 
-        final state = playbackCoordinator.state.playbackState;
-        if (state == PlaybackStateType.buffering ||
-            state == PlaybackStateType.seeking) {
+        final playbackStateType = playbackCoordinator.playbackState.playbackState;
+        if (playbackStateType == PlaybackStateType.buffering ||
+            playbackStateType == PlaybackStateType.seeking) {
           return SizedBox(
             width: width,
             height: 20,
@@ -2856,7 +2859,7 @@ class DesktopPlaybackIndicator extends StatelessWidget {
           height: 20,
           child: Center(
             child: Icon(
-              state == PlaybackStateType.playing
+              playbackStateType == PlaybackStateType.playing
                   ? Icons.pause
                   : Icons.play_arrow,
               size: 16,

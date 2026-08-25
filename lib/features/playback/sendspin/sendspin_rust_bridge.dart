@@ -4,7 +4,7 @@ import '../../../data/music_assistant/ma_models.dart';
 import 'sendspin_player_models.dart';
 
 abstract class SendspinRustBridge {
-  Stream<SendspinPlayerState> get states;
+  Stream<SendspinPlayerState> get playbackStates;
   Stream<Map<String, dynamic>> get events;
 
   Future<void> engineInit();
@@ -51,7 +51,7 @@ abstract class SendspinRustBridge {
 
   Future<void> senderSendMessageJson(String messageJson);
 
-  Future<SendspinPlayerState> getState();
+  Future<SendspinPlayerState> getPlaybackState();
 
   Future<void> dispose();
 }

@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' hide RepeatMode;
 
 import '../config/app_config.dart';
@@ -33,7 +32,6 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   static const double _mobileSelectionOverlayBottomInset = 84;
-  static const Duration _busyUiFallbackAfter = Duration(seconds: 3);
   static const Duration _desktopSearchDebounceDuration = Duration(
     milliseconds: 320,
   );
@@ -47,12 +45,6 @@ class _AppShellState extends State<AppShell> {
 
   MusicAssistantClient? _musicAssistantClient;
   MusicAssistantEventHub? _musicAssistantEventHub;
-  PlaybackState _playbackState = const PlaybackState();
-  PlaybackStateType _lastStablePlaybackStateType =
-      PlaybackStateType.uninitialized;
-  DateTime? _busySince;
-  PlaybackQueueSnapshot _playbackQueueSnapshot = const PlaybackQueueSnapshot();
-  final ValueNotifier<int> _queueUiRevision = ValueNotifier<int>(0);
   bool _isQueueOverlayOpen = false;
   bool _isBootstrapping = true;
   String _baseUrl = AppConfig.defaultMusicAssistantUrl;
@@ -68,100 +60,10 @@ class _AppShellState extends State<AppShell> {
   bool get _isLoadingSidebarPlaylists =>
       _userDataController?.isLoadingPreferences ?? false;
 
-  // Playback State Synchronization (to prevent unnecessary UI rebuilds)
-  bool _syncPlaybackSnapshot() {
-    final previousQueueSnapshot = _playbackQueueSnapshot;
-    final nextPlaybackState = _playbackCoordinator.state;
-    final nextType = nextPlaybackState.playbackState;
-    final isBusy =
-        nextType == PlaybackStateType.buffering ||
-        nextType == PlaybackStateType.seeking;
-
-    _playbackState = nextPlaybackState;
-    _playbackQueueSnapshot = PlaybackQueueSnapshot(
-      items: _playbackCoordinator.queueItems,
-      currentIndex: _playbackCoordinator.currentQueueIndex,
-      shuffleEnabled: _playbackCoordinator.shuffleEnabled,
-      repeatMode: _playbackCoordinator.repeatMode,
-      dontStopTheMusicEnabled: _playbackCoordinator.dontStopTheMusicEnabled,
-    );
-    if (isBusy) {
-      _busySince ??= DateTime.now();
-    } else {
-      _busySince = null;
-      _lastStablePlaybackStateType = nextType;
-    }
-
-    return !_areQueueSnapshotsUiEqual(
-      previousQueueSnapshot,
-      _playbackQueueSnapshot,
-    );
-  }
-
-  bool _areQueueSnapshotsUiEqual(
-    PlaybackQueueSnapshot previous,
-    PlaybackQueueSnapshot next,
-  ) {
-    if (previous.currentIndex != next.currentIndex ||
-        previous.shuffleEnabled != next.shuffleEnabled ||
-        previous.repeatMode != next.repeatMode ||
-        previous.dontStopTheMusicEnabled != next.dontStopTheMusicEnabled ||
-        previous.items.length != next.items.length) {
-      return false;
-    }
-
-    for (var index = 0; index < previous.items.length; index += 1) {
-      if (!_areQueueItemsUiEqual(previous.items[index], next.items[index])) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  bool _areQueueItemsUiEqual(QueueItem previous, QueueItem next) {
-    final previousMediaItem = previous.mediaItem;
-    final nextMediaItem = next.mediaItem;
-
-    return previous.queueId == next.queueId &&
-        previous.queueItemId == next.queueItemId &&
-        previous.name == next.name &&
-        previous.duration == next.duration &&
-        previous.sortIndex == next.sortIndex &&
-        previous.available == next.available &&
-        previousMediaItem?.itemId == nextMediaItem?.itemId &&
-        previousMediaItem?.provider == nextMediaItem?.provider &&
-        previousMediaItem?.name == nextMediaItem?.name &&
-        previousMediaItem?.imageUri == nextMediaItem?.imageUri &&
-        _areArtistsUiEqual(
-          previousMediaItem?.artists ?? const <Artist>[],
-          nextMediaItem?.artists ?? const <Artist>[],
-        );
-  }
-
-  bool _areArtistsUiEqual(List<Artist> previous, List<Artist> next) {
-    if (previous.length != next.length) {
-      return false;
-    }
-
-    for (var index = 0; index < previous.length; index += 1) {
-      final previousArtist = previous[index];
-      final nextArtist = next[index];
-      if (previousArtist.itemId != nextArtist.itemId ||
-          previousArtist.provider != nextArtist.provider ||
-          previousArtist.name != nextArtist.name) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-
   // Getters for current Track and Queue state
   QueueItem? get _currentQueueItem {
-    final items = _playbackQueueSnapshot.items;
-    final index = _playbackQueueSnapshot.currentIndex;
+    final items = _playbackCoordinator.playbackQueue.items;
+    final index = _playbackCoordinator.playbackQueue.currentIndex;
     if (index == null || index < 0 || index >= items.length) {
       return null;
     }
@@ -208,13 +110,15 @@ class _AppShellState extends State<AppShell> {
 
   double get _currentTrackMaxSeconds {
     final durationFromStateSeconds =
-        ((_playbackState.durationMillis ?? 0) / 1000).toDouble();
+        ((_playbackCoordinator.playbackState.durationMillis ?? 0) / 1000)
+            .toDouble();
     if (durationFromStateSeconds > 0) {
       return durationFromStateSeconds;
     }
 
-    final seekMaxSeconds = ((_playbackState.seekMaxMillis ?? 0) / 1000)
-        .toDouble();
+    final seekMaxSeconds =
+        ((_playbackCoordinator.playbackState.seekMaxMillis ?? 0) / 1000)
+            .toDouble();
     if (seekMaxSeconds > 0) {
       return seekMaxSeconds;
     }
@@ -232,13 +136,13 @@ class _AppShellState extends State<AppShell> {
     return url.isEmpty ? null : url;
   }
 
-  int get _queueTrackCount => _playbackQueueSnapshot.items.length;
+  int get _queueTrackCount => _playbackCoordinator.playbackQueue.items.length;
 
   String get _queueTrackCountText => '$_queueTrackCount Tracks';
 
   String get _queueTotalDurationText {
     int totalSeconds = 0;
-    for (final item in _playbackQueueSnapshot.items) {
+    for (final item in _playbackCoordinator.playbackQueue.items) {
       final int duration = item.duration ?? 0;
       if (duration > 0) {
         totalSeconds += duration;
@@ -257,35 +161,13 @@ class _AppShellState extends State<AppShell> {
 
   double get _currentTrackPositionSeconds {
     final positionFromStateSeconds =
-        ((_playbackState.positionMillis ?? 0) / 1000).toDouble();
+        ((_playbackCoordinator.playbackState.positionMillis ?? 0) / 1000)
+            .toDouble();
     if (positionFromStateSeconds > 0) {
       return positionFromStateSeconds;
     }
 
     return 0;
-  }
-
-  PlaybackStateType get _effectivePlaybackStateType {
-    final raw = _playbackState.playbackState;
-    final isBusy =
-        raw == PlaybackStateType.buffering || raw == PlaybackStateType.seeking;
-
-    if (!isBusy) {
-      return raw;
-    }
-
-    final busySince = _busySince;
-    if (busySince == null) {
-      return raw;
-    }
-
-    final isStaleBusy =
-        DateTime.now().difference(busySince) > _busyUiFallbackAfter;
-    if (isStaleBusy) {
-      return _lastStablePlaybackStateType;
-    }
-
-    return raw;
   }
 
   // Initialization and Lifecycle
@@ -306,7 +188,6 @@ class _AppShellState extends State<AppShell> {
       initialOutputMode: PlaybackOutputMode.localSendspin,
     );
 
-    _playbackCoordinator.addListener(_onPlaybackChanged);
     _navigation.addListener(_onNavigationChanged);
     unawaited(_bootstrapStartup());
   }
@@ -315,10 +196,8 @@ class _AppShellState extends State<AppShell> {
   void dispose() {
     _desktopSearchDebounce?.cancel();
     _desktopSearchController.dispose();
-    _queueUiRevision.dispose();
     _navigation.removeListener(_onNavigationChanged);
     _navigation.dispose();
-    _playbackCoordinator.removeListener(_onPlaybackChanged);
     unawaited(_playbackCoordinator.shutdown());
     _playbackCoordinator.dispose();
     _disposeUserDataController();
@@ -514,9 +393,9 @@ class _AppShellState extends State<AppShell> {
               ),
             ),
             _PlaybackScope(
-              playbackCoordinator: _playbackCoordinator,
+              playbackChanges: _playbackCoordinator.playbackStateChanges,
               child: _QueueUiScope(
-                queueUiRevision: _queueUiRevision,
+                queueChanges: _playbackCoordinator.playbackQueueChanges,
                 builder: (BuildContext context) => _DesktopCurrentTrackInfo(
                   trackTitle: _currentTrackTitle,
                   trackSubtitle: _currentTrackSubtitle,
@@ -529,10 +408,14 @@ class _AppShellState extends State<AppShell> {
                   _DesktopPlayerBar(
                     currentTrackInfo:
                         currentTrackInfo ?? const SizedBox.shrink(),
-                    playStateType: _effectivePlaybackStateType,
-                    playbackState: _playbackState,
+                    playStateType:
+                        _playbackCoordinator.playbackState.playbackState,
+                    playbackState: _playbackCoordinator.playbackState,
                     dontStopTheMusicEnabled:
-                        _playbackQueueSnapshot.dontStopTheMusicEnabled ?? false,
+                        _playbackCoordinator
+                            .playbackQueue
+                            .dontStopTheMusicEnabled ??
+                        false,
                     maxSeconds: _currentTrackMaxSeconds,
                     currentSeconds: _currentTrackPositionSeconds,
                     isQueueOpen: _isQueueOverlayOpen,
@@ -551,7 +434,7 @@ class _AppShellState extends State<AppShell> {
           ],
         ),
         _QueueUiScope(
-          queueUiRevision: _queueUiRevision,
+          queueChanges: _playbackCoordinator.playbackQueueChanges,
           builder: (BuildContext context) => QueueOverlay(
             isOpen: _isQueueOverlayOpen,
             isDesktop: true,
@@ -562,9 +445,10 @@ class _AppShellState extends State<AppShell> {
             queueTrackCountText: _queueTrackCountText,
             queueTotalDurationText: _queueTotalDurationText,
             dontStopTheMusicEnabled:
-                _playbackQueueSnapshot.dontStopTheMusicEnabled ?? false,
-            queueItems: _playbackQueueSnapshot.items,
-            currentQueueIndex: _playbackQueueSnapshot.currentIndex,
+                _playbackCoordinator.playbackQueue.dontStopTheMusicEnabled ??
+                false,
+            queueItems: _playbackCoordinator.playbackQueue.items,
+            currentQueueIndex: _playbackCoordinator.playbackQueue.currentIndex,
             playbackCoordinator: _playbackCoordinator,
             onClose: _closeQueueOverlay,
             onToggleDontStopTheMusic: _toggleDontStopTheMusic,
@@ -594,9 +478,9 @@ class _AppShellState extends State<AppShell> {
               ),
             ),
             _PlaybackScope(
-              playbackCoordinator: _playbackCoordinator,
+              playbackChanges: _playbackCoordinator.playbackStateChanges,
               child: _QueueUiScope(
-                queueUiRevision: _queueUiRevision,
+                queueChanges: _playbackCoordinator.playbackQueueChanges,
                 builder: (BuildContext context) => _MobileCurrentTrackInfo(
                   trackTitle: _currentTrackTitle,
                   trackCoverUrl: _currentTrackCoverUrl,
@@ -606,7 +490,8 @@ class _AppShellState extends State<AppShell> {
                   _MobilePlayerBar(
                     currentTrackInfo:
                         currentTrackInfo ?? const SizedBox.shrink(),
-                    playbackState: _effectivePlaybackStateType,
+                    playbackState:
+                        _playbackCoordinator.playbackState.playbackState,
                     onTogglePlayPause: _togglePlayPause,
                     onOpenQueue: _openQueueOverlay,
                   ),
@@ -637,7 +522,7 @@ class _AppShellState extends State<AppShell> {
           },
         ),
         _QueueUiScope(
-          queueUiRevision: _queueUiRevision,
+          queueChanges: _playbackCoordinator.playbackQueueChanges,
           builder: (BuildContext context) => QueueOverlay(
             isOpen: _isQueueOverlayOpen,
             isDesktop: false,
@@ -647,9 +532,10 @@ class _AppShellState extends State<AppShell> {
             queueTrackCountText: _queueTrackCountText,
             queueTotalDurationText: _queueTotalDurationText,
             dontStopTheMusicEnabled:
-                _playbackQueueSnapshot.dontStopTheMusicEnabled ?? false,
-            queueItems: _playbackQueueSnapshot.items,
-            currentQueueIndex: _playbackQueueSnapshot.currentIndex,
+                _playbackCoordinator.playbackQueue.dontStopTheMusicEnabled ??
+                false,
+            queueItems: _playbackCoordinator.playbackQueue.items,
+            currentQueueIndex: _playbackCoordinator.playbackQueue.currentIndex,
             playbackCoordinator: _playbackCoordinator,
             onClose: _closeQueueOverlay,
             onToggleDontStopTheMusic: _toggleDontStopTheMusic,
@@ -885,21 +771,10 @@ class _AppShellState extends State<AppShell> {
       if (!mounted) {
         return;
       }
-
-      setState(() {
-        _syncPlaybackSnapshot();
-        _lastStablePlaybackStateType = _playbackState.playbackState;
-      });
     } catch (error) {
       if (!mounted) {
         return;
       }
-
-      setState(() {
-        _playbackState = const PlaybackState(
-          playbackState: PlaybackStateType.error,
-        );
-      });
 
       debugPrint('Sendspin startup connection failed: $error');
     }
@@ -979,7 +854,9 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _toggleShuffle() async {
     try {
-      await _playbackCoordinator.toggleShuffle(_playbackState.shuffleEnabled);
+      await _playbackCoordinator.toggleShuffle(
+        _playbackCoordinator.playbackState.shuffleEnabled,
+      );
     } catch (_) {
       // Ignore playback command failures in shell-level controls.
     }
@@ -987,7 +864,9 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _toggleRepeatMode() async {
     try {
-      await _playbackCoordinator.toggleRepeatMode(_playbackState.repeatMode);
+      await _playbackCoordinator.toggleRepeatMode(
+        _playbackCoordinator.playbackState.repeatMode,
+      );
     } catch (_) {
       // Ignore playback command failures in shell-level controls.
     }
@@ -1004,7 +883,9 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _toggleMute() async {
     try {
-      await _playbackCoordinator.setMuted(!_playbackState.muted);
+      await _playbackCoordinator.setMuted(
+        !_playbackCoordinator.playbackState.muted,
+      );
     } catch (_) {
       // Ignore playback command failures in shell-level controls.
     }
@@ -1027,17 +908,6 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  void _onPlaybackChanged() {
-    if (!mounted) {
-      return;
-    }
-
-    final queueUiChanged = _syncPlaybackSnapshot();
-    if (queueUiChanged) {
-      _queueUiRevision.value += 1;
-    }
-  }
-
   void _onNavigationChanged() {
     if (!mounted) {
       return;
@@ -1049,19 +919,19 @@ class _AppShellState extends State<AppShell> {
 // Playback and Queue State Scopes (to prevent unnecessary UI rebuilds)
 class _PlaybackScope extends StatelessWidget {
   const _PlaybackScope({
-    required this.playbackCoordinator,
+    required this.playbackChanges,
     required this.builder,
     this.child,
   });
 
-  final PlaybackCoordinator playbackCoordinator;
+  final Listenable playbackChanges;
   final TransitionBuilder builder;
   final Widget? child;
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: playbackCoordinator,
+      animation: playbackChanges,
       builder: builder,
       child: child,
     );
@@ -1069,17 +939,16 @@ class _PlaybackScope extends StatelessWidget {
 }
 
 class _QueueUiScope extends StatelessWidget {
-  const _QueueUiScope({required this.queueUiRevision, required this.builder});
+  const _QueueUiScope({required this.queueChanges, required this.builder});
 
-  final ValueListenable<int> queueUiRevision;
+  final Listenable queueChanges;
   final WidgetBuilder builder;
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<int>(
-      valueListenable: queueUiRevision,
-      builder: (BuildContext context, int revision, Widget? child) =>
-          builder(context),
+    return ListenableBuilder(
+      listenable: queueChanges,
+      builder: (BuildContext context, Widget? child) => builder(context),
     );
   }
 }

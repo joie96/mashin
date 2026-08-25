@@ -1,14 +1,13 @@
 import '../../data/music_assistant/ma_models.dart';
 import 'playback_models.dart';
 
-
 // Interface for players
 abstract class PlaybackPlayer {
   PlaybackOutputMode get outputMode;
 
-  Stream<PlaybackState> get states;
+  Stream<PlaybackState> get playbackStates;
 
-  Stream<PlaybackQueueSnapshot> get queueStates;
+  Stream<PlaybackQueue> get queueStates;
 
   Future<void> activate({String? targetPlayerId});
 
@@ -58,7 +57,7 @@ abstract class PlaybackPlayer {
 
   Future<void> setDontStopTheMusic(bool enabled);
 
-  Future<PlaybackState> getState();
+  Future<PlaybackState> getPlaybackState();
 
-  Future<PlaybackQueueSnapshot> getQueueState();
+  Future<PlaybackQueue> getQueueState();
 }

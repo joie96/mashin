@@ -5,16 +5,15 @@ import 'sendspin_player_models.dart';
 import 'sendspin_rust_bridge.dart';
 
 class SendspinRustBackend {
-  SendspinRustBackend({
-    required this.bridge,
-  });
+  SendspinRustBackend({required this.bridge});
 
   final SendspinRustBridge bridge;
 
   PlaybackOutputMode get outputMode => PlaybackOutputMode.localSendspin;
 
-  Stream<PlaybackState> get states =>
-      bridge.states.map((SendspinPlayerState state) => state.toPlaybackState());
+  Stream<PlaybackState> get playbackStates => bridge.playbackStates.map(
+    (SendspinPlayerState playbackState) => playbackState.toPlaybackState(),
+  );
 
   Future<void> activate({String? targetPlayerId}) async {
     await bridge.engineInit();
@@ -51,8 +50,8 @@ class SendspinRustBackend {
 
   Future<void> setMuted(bool muted) => bridge.setMuted(muted);
 
-  Future<PlaybackState> getState() async {
-    final state = await bridge.getState();
-    return state.toPlaybackState();
+  Future<PlaybackState> getPlaybackState() async {
+    final SendspinPlayerState playbackState = await bridge.getPlaybackState();
+    return playbackState.toPlaybackState();
   }
 }

@@ -24,14 +24,14 @@ class SendspinPlayer implements PlaybackPlayer {
   final MusicAssistantClient? Function() clientResolver;
   final MusicAssistantEventHub? Function() eventHubResolver;
 
-  final StreamController<PlaybackQueueSnapshot> _queueStateController =
-      StreamController<PlaybackQueueSnapshot>.broadcast();
-  final StreamController<PlaybackState> _stateController =
+  final StreamController<PlaybackQueue> _queueStateController =
+      StreamController<PlaybackQueue>.broadcast();
+  final StreamController<PlaybackState> _playbackStateController =
       StreamController<PlaybackState>.broadcast();
 
   PlaybackState _playbackState = const PlaybackState();
-  PlaybackQueueSnapshot _queueState = const PlaybackQueueSnapshot();
-  StreamSubscription<PlaybackState>? _transportStateSubscription;
+  PlaybackQueue _queueState = const PlaybackQueue();
+  StreamSubscription<PlaybackState>? _transportPlaybackStateSubscription;
   StreamSubscription<MusicAssistantQueueEvent>? _queueEventSubscription;
   Timer? _positionInterpolationTimer;
   int? _positionAnchorMillis;
@@ -43,10 +43,10 @@ class SendspinPlayer implements PlaybackPlayer {
   PlaybackOutputMode get outputMode => transportBackend.outputMode;
 
   @override
-  Stream<PlaybackState> get states => _stateController.stream;
+  Stream<PlaybackState> get playbackStates => _playbackStateController.stream;
 
   @override
-  Stream<PlaybackQueueSnapshot> get queueStates => _queueStateController.stream;
+  Stream<PlaybackQueue> get queueStates => _queueStateController.stream;
 
   // Connection and Activation
   @override
@@ -54,10 +54,10 @@ class SendspinPlayer implements PlaybackPlayer {
     _logger.info(
       'Sendspin activate requested. TargetPlayerId=${targetPlayerId ?? ''}',
     );
-    await _ensureStateSubscription();
+    await _ensurePlaybackStateSubscription();
     await transportBackend.activate(targetPlayerId: targetPlayerId);
     await _ensureQueueEventSubscription();
-    await getState();
+    await getPlaybackState();
     await _refreshQueueFromServer();
     _logger.info(
       'Sendspin activate completed. QueueId=${_queueState.queueId ?? ''}',
@@ -69,8 +69,8 @@ class SendspinPlayer implements PlaybackPlayer {
     _logger.info('Sendspin deactivate requested.');
     _positionInterpolationTimer?.cancel();
     _positionInterpolationTimer = null;
-    await _transportStateSubscription?.cancel();
-    _transportStateSubscription = null;
+    await _transportPlaybackStateSubscription?.cancel();
+    _transportPlaybackStateSubscription = null;
     await _queueEventSubscription?.cancel();
     _queueEventSubscription = null;
     await transportBackend.deactivate();
@@ -80,10 +80,10 @@ class SendspinPlayer implements PlaybackPlayer {
   @override
   Future<void> connect() async {
     _logger.info('Sendspin connect requested.');
-    await _ensureStateSubscription();
+    await _ensurePlaybackStateSubscription();
     await transportBackend.connect();
     await _ensureQueueEventSubscription();
-    await getState();
+    await getPlaybackState();
     await _refreshQueueFromServer();
     _logger.info(
       'Sendspin connect completed. QueueId=${_queueState.queueId ?? ''}',
@@ -100,12 +100,12 @@ class SendspinPlayer implements PlaybackPlayer {
     _logger.info('Sendspin terminate requested.');
     _positionInterpolationTimer?.cancel();
     _positionInterpolationTimer = null;
-    await _transportStateSubscription?.cancel();
-    _transportStateSubscription = null;
+    await _transportPlaybackStateSubscription?.cancel();
+    _transportPlaybackStateSubscription = null;
     await _queueEventSubscription?.cancel();
     _queueEventSubscription = null;
-    if (!_stateController.isClosed) {
-      await _stateController.close();
+    if (!_playbackStateController.isClosed) {
+      await _playbackStateController.close();
     }
     if (!_queueStateController.isClosed) {
       await _queueStateController.close();
@@ -265,7 +265,6 @@ class SendspinPlayer implements PlaybackPlayer {
     if (client == null) {
       return;
     }
-
     final String queueId = await _resolveQueueId();
     await client.playMedia(
       queueId,
@@ -355,64 +354,66 @@ class SendspinPlayer implements PlaybackPlayer {
   }
 
   @override
-  Future<PlaybackState> getState() async {
-    await _ensureStateSubscription();
-    final PlaybackState next = await transportBackend.getState();
-    _applyPlaybackState(next, emit: true);
+  Future<PlaybackState> getPlaybackState() async {
+    await _ensurePlaybackStateSubscription();
+    final PlaybackState nextPlaybackState = await transportBackend
+        .getPlaybackState();
+    _applyPlaybackState(nextPlaybackState, emit: true);
     _logger.debug(
-      'Sendspin getState applied. State=${_playbackState.playbackState.name}, PositionMillis=${_playbackState.positionMillis}, DurationMillis=${_playbackState.durationMillis}',
+      'Sendspin getPlaybackState applied. PlaybackState=${_playbackState.playbackState.name}, PositionMillis=${_playbackState.positionMillis}, DurationMillis=${_playbackState.durationMillis}',
     );
     return _playbackState;
   }
 
   @override
-  Future<PlaybackQueueSnapshot> getQueueState() async {
+  Future<PlaybackQueue> getQueueState() async {
     return _queueState;
   }
 
   // Playback state stream subscription.
-  Future<void> _ensureStateSubscription() async {
-    if (_transportStateSubscription != null) {
+  Future<void> _ensurePlaybackStateSubscription() async {
+    if (_transportPlaybackStateSubscription != null) {
       return;
     }
 
-    _logger.debug('Sendspin state subscription initialized.');
+    _logger.debug('Sendspin playback state subscription initialized.');
 
-    _transportStateSubscription = transportBackend.states.listen(
-      (PlaybackState next) {
-        _applyPlaybackState(next, emit: true);
-      },
-      onError: (Object error, StackTrace stackTrace) {
-        _logger.error(
-          'Sendspin state stream error. Error=$error',
-          error: error,
-          stackTrace: stackTrace,
+    _transportPlaybackStateSubscription = transportBackend.playbackStates
+        .listen(
+          (PlaybackState nextPlaybackState) {
+            _applyPlaybackState(nextPlaybackState, emit: true);
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            _logger.error(
+              'Sendspin playback state stream error. Error=$error',
+              error: error,
+              stackTrace: stackTrace,
+            );
+          },
         );
-      },
-    );
   }
 
   // Apply playback state
   // - update playback flags (state/volume/mute/repeat/shuffle)
   // - keep duration from metadata
   // - do not overwrite position anchor from this stream
-  void _applyPlaybackState(PlaybackState next, {required bool emit}) {
-    final PlaybackState previous = _playbackState;
+  void _applyPlaybackState(PlaybackState nextPlaybackState, {required bool emit}) {
+    final PlaybackState previousPlaybackState = _playbackState;
     _playbackState = _playbackState.copyWith(
-      playbackState: next.playbackState,
-      volume: next.volume,
-      muted: next.muted,
-      repeatMode: next.repeatMode,
-      clearRepeatMode: next.repeatMode == null,
-      shuffleEnabled: next.shuffleEnabled,
-      clearShuffleEnabled: next.shuffleEnabled == null,
-      seekMaxMillis: next.seekMaxMillis,
-      clearSeekMaxMillis: next.seekMaxMillis == null,
-      durationMillis: next.durationMillis,
-      clearDurationMillis: next.durationMillis == null,
+      playbackState: nextPlaybackState.playbackState,
+      volume: nextPlaybackState.volume,
+      muted: nextPlaybackState.muted,
+      repeatMode: nextPlaybackState.repeatMode,
+      clearRepeatMode: nextPlaybackState.repeatMode == null,
+      shuffleEnabled: nextPlaybackState.shuffleEnabled,
+      clearShuffleEnabled: nextPlaybackState.shuffleEnabled == null,
+      seekMaxMillis: nextPlaybackState.seekMaxMillis,
+      clearSeekMaxMillis: nextPlaybackState.seekMaxMillis == null,
+      durationMillis: nextPlaybackState.durationMillis,
+      clearDurationMillis: nextPlaybackState.durationMillis == null,
     );
 
-    if (next.playbackState == PlaybackStateType.playing) {
+    if (nextPlaybackState.playbackState == PlaybackStateType.playing) {
       // Only interpolate position when playing.
       _positionAnchorMillis ??= _playbackState.positionMillis;
       _positionAnchorUpdatedAt ??= DateTime.now();
@@ -422,18 +423,18 @@ class SendspinPlayer implements PlaybackPlayer {
       _resetPositionAnchor();
       if (_positionInterpolationTimer != null) {
         _logger.debug(
-          'Sendspin interpolation stopped. State=${next.playbackState.name}',
+          'Sendspin interpolation stopped. PlaybackState=${nextPlaybackState.playbackState.name}',
         );
       }
       _positionInterpolationTimer?.cancel();
       _positionInterpolationTimer = null;
     }
 
-    if (previous.playbackState != next.playbackState ||
-        previous.positionMillis != _playbackState.positionMillis ||
-        previous.durationMillis != next.durationMillis) {
+    if (previousPlaybackState.playbackState != nextPlaybackState.playbackState ||
+        previousPlaybackState.positionMillis != _playbackState.positionMillis ||
+        previousPlaybackState.durationMillis != nextPlaybackState.durationMillis) {
       _logger.debug(
-        'Sendspin playback state applied. State=${next.playbackState.name}, PositionMillis=${_playbackState.positionMillis}, DurationMillis=${next.durationMillis}',
+        'Sendspin playback state applied. PlaybackState=${nextPlaybackState.playbackState.name}, PositionMillis=${_playbackState.positionMillis}, DurationMillis=${nextPlaybackState.durationMillis}',
       );
     }
 
@@ -463,7 +464,7 @@ class SendspinPlayer implements PlaybackPlayer {
     _positionInterpolationTimer = Timer.periodic(_positionTickInterval, (_) {
       if (_playbackState.playbackState != PlaybackStateType.playing) {
         _logger.debug(
-          'Sendspin interpolation canceled because state is ${_playbackState.playbackState.name}.',
+          'Sendspin interpolation canceled because playback state is ${_playbackState.playbackState.name}.',
         );
         _positionInterpolationTimer?.cancel();
         _positionInterpolationTimer = null;
@@ -497,10 +498,10 @@ class SendspinPlayer implements PlaybackPlayer {
 
   // Emit playback state to the coordinator
   void _emitPlaybackState() {
-    if (_stateController.isClosed) {
+    if (_playbackStateController.isClosed) {
       return;
     }
-    _stateController.add(_playbackState);
+    _playbackStateController.add(_playbackState);
   }
 
   // Queue ID Helper

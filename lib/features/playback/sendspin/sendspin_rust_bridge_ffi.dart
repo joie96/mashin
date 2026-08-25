@@ -60,16 +60,16 @@ class FfiSendspinRustBridge implements SendspinRustBridge {
 
   final _RustBindings _bindings;
   late final ffi.NativeCallable<_NativeEventCallbackFn> _nativeEventCallback;
-  final StreamController<SendspinPlayerState> _stateController =
+  final StreamController<SendspinPlayerState> _playbackStateController =
       StreamController<SendspinPlayerState>.broadcast();
   final StreamController<Map<String, dynamic>> _eventController =
       StreamController<Map<String, dynamic>>.broadcast();
-  SendspinPlayerState _state = const SendspinPlayerState();
-  String _stateHash = '';
+  SendspinPlayerState _playbackState = const SendspinPlayerState();
+  String _playbackStateHash = '';
   bool _disposed = false;
 
   @override
-  Stream<SendspinPlayerState> get states => _stateController.stream;
+  Stream<SendspinPlayerState> get playbackStates => _playbackStateController.stream;
 
   @override
   Stream<Map<String, dynamic>> get events => _eventController.stream;
@@ -264,9 +264,9 @@ class FfiSendspinRustBridge implements SendspinRustBridge {
   }
 
   @override
-  Future<SendspinPlayerState> getState() async {
+  Future<SendspinPlayerState> getPlaybackState() async {
     await _pullState();
-    return _state;
+    return _playbackState;
   }
 
   @override
@@ -280,7 +280,7 @@ class FfiSendspinRustBridge implements SendspinRustBridge {
     _bindings.registerEventCallback(ffi.nullptr);
     _nativeEventCallback.close();
     await _eventController.close();
-    await _stateController.close();
+    await _playbackStateController.close();
   }
 
   static void _dispatchNativeEvent(ffi.Pointer<Utf8> pointer) {
@@ -316,13 +316,13 @@ class FfiSendspinRustBridge implements SendspinRustBridge {
 
       final nextState = SendspinPlayerState.fromJson(statePayload);
       final nextHash = nextState.toJsonString();
-      if (nextHash == _stateHash) {
+      if (nextHash == _playbackStateHash) {
         return;
       }
 
-      _state = nextState;
-      _stateHash = nextHash;
-      _stateController.add(nextState);
+      _playbackState = nextState;
+      _playbackStateHash = nextHash;
+      _playbackStateController.add(nextState);
     } catch (_) {
       return;
     }
@@ -346,9 +346,9 @@ class FfiSendspinRustBridge implements SendspinRustBridge {
       }
 
       final nextState = SendspinPlayerState.fromJson(decoded);
-      _state = nextState;
-      _stateHash = nextState.toJsonString();
-      _stateController.add(nextState);
+      _playbackState = nextState;
+      _playbackStateHash = nextState.toJsonString();
+      _playbackStateController.add(nextState);
     } finally {
       _bindings.freeRustString(pointer);
     }

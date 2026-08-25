@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 
 /// Displays either a remote image URL or an inline data URI.
 class MediaImage extends StatelessWidget {
+  static const int _dataUriCacheLimit = 8;
+  static final Map<String, Uint8List> _dataUriCache = <String, Uint8List>{};
+
   const MediaImage({
     super.key,
     required this.source,
@@ -17,6 +20,11 @@ class MediaImage extends StatelessWidget {
   final Widget fallback;
 
   Uint8List? _decodeDataUri(String value) {
+    final Uint8List? cached = _dataUriCache[value];
+    if (cached != null) {
+      return cached;
+    }
+
     final int separator = value.indexOf(',');
     if (separator < 0) {
       return null;
@@ -28,7 +36,16 @@ class MediaImage extends StatelessWidget {
     }
 
     try {
-      return base64Decode(value.substring(separator + 1));
+      final Uint8List decoded = base64Decode(value.substring(separator + 1));
+      if (decoded.isEmpty) {
+        return null;
+      }
+
+      if (_dataUriCache.length >= _dataUriCacheLimit) {
+        _dataUriCache.remove(_dataUriCache.keys.first);
+      }
+      _dataUriCache[value] = decoded;
+      return decoded;
     } on FormatException {
       return null;
     }
@@ -42,17 +59,20 @@ class MediaImage extends StatelessWidget {
       return Image.memory(
         bytes,
         fit: fit,
+        gaplessPlayback: true,
         errorBuilder: (_, _, _) => fallback,
       );
     }
 
-    if (trimmedSource.isEmpty || trimmedSource.toLowerCase().startsWith('data:')) {
+    if (trimmedSource.isEmpty ||
+        trimmedSource.toLowerCase().startsWith('data:')) {
       return fallback;
     }
 
     return Image.network(
       trimmedSource,
       fit: fit,
+      gaplessPlayback: true,
       errorBuilder: (_, _, _) => fallback,
     );
   }

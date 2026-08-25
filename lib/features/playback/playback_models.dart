@@ -22,7 +22,7 @@ enum PlaybackStateType {
 }
 
 // Queue State
-class PlaybackQueueSnapshot {
+class PlaybackQueue {
   final String? queueId;
   final List<QueueItem> items;
   final int? currentIndex;
@@ -30,7 +30,7 @@ class PlaybackQueueSnapshot {
   final RepeatMode? repeatMode;
   final bool? dontStopTheMusicEnabled;
 
-  const PlaybackQueueSnapshot({
+  const PlaybackQueue({
     this.queueId,
     this.items = const <QueueItem>[],
     this.currentIndex,
@@ -39,7 +39,7 @@ class PlaybackQueueSnapshot {
     this.dontStopTheMusicEnabled,
   });
 
-  PlaybackQueueSnapshot copyWith({
+  PlaybackQueue copyWith({
     String? queueId,
     bool clearQueueId = false,
     List<QueueItem>? items,
@@ -52,7 +52,7 @@ class PlaybackQueueSnapshot {
     bool? dontStopTheMusicEnabled,
     bool clearDontStopTheMusicEnabled = false,
   }) {
-    return PlaybackQueueSnapshot(
+    return PlaybackQueue(
       queueId: clearQueueId ? null : (queueId ?? this.queueId),
       items: items ?? this.items,
       currentIndex: clearCurrentIndex ? null : (currentIndex ?? this.currentIndex),
