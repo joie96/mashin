@@ -304,7 +304,7 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
           onArtistTap: widget.onOpenArtist,
           onAlbumTap: widget.onOpenAlbum,
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 20),
         MediaRowSectionDesktop<Album>(
           title: 'Alben',
           isLoading: _controller.isLoading,
@@ -320,7 +320,7 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
           onArtistTap: widget.onOpenArtist,
           onAlbumTap: widget.onOpenAlbum,
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 20),
         MediaRowSectionDesktop<Playlist>(
           title: 'Playlists',
           isLoading: _controller.isLoading,
@@ -335,7 +335,7 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
               _showMenu(context, globalPosition: position, actions: _buildPlaylistMenuActions(item)),
           onPlaylistTap: widget.onOpenPlaylist,
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 20),
         MediaRowSectionDesktop<Artist>(
           title: 'Artists',
           isLoading: _controller.isLoading,

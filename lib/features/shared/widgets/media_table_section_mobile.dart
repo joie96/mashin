@@ -264,6 +264,7 @@ class _MediaTableSectionMobileState<T>
   @override
   Widget build(BuildContext context) {
     final bool hasTitle = widget.title.trim().isNotEmpty;
+
     final Widget section = LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final bool hasBoundedHeight = constraints.maxHeight.isFinite;
@@ -339,13 +340,9 @@ class _MediaTableSectionMobileState<T>
     }
 
     if (widget.items.isEmpty) {
-      final textStyles = context.mashinTableTextStyles;
-      return Padding(
-        padding: const EdgeInsets.all(16),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: Text(widget.emptyText, style: textStyles.emptyState),
-        ),
+      return Text(
+        widget.emptyText,
+        style: context.mashinTableTextStyles.emptyState,
       );
     }
 
@@ -550,6 +547,8 @@ class _MediaTableSectionMobileState<T>
       onToggleSelected: onToggleSelected,
       onLongPressSelect: onLongPressSelect,
       onTap: onTap,
+      playbackCoordinator: widget.playbackCoordinator,
+      playbackItem: item,
     );
   }
 
@@ -591,6 +590,8 @@ class _MediaTableSectionMobileState<T>
       onToggleSelected: onToggleSelected,
       onLongPressSelect: onLongPressSelect,
       onTap: onTap,
+      playbackCoordinator: widget.playbackCoordinator,
+      playbackItem: item.mediaItem,
     );
   }
 
@@ -728,6 +729,8 @@ class _MobileTableRowBase extends StatefulWidget {
   final VoidCallback onToggleSelected;
   final VoidCallback onLongPressSelect;
   final VoidCallback? onTap;
+  final PlaybackCoordinator? playbackCoordinator;
+  final MediaItem? playbackItem;
 
   const _MobileTableRowBase({
     required this.title,
@@ -744,6 +747,8 @@ class _MobileTableRowBase extends StatefulWidget {
     required this.onToggleSelected,
     required this.onLongPressSelect,
     this.onTap,
+    this.playbackCoordinator,
+    this.playbackItem,
   });
 
   @override
@@ -797,11 +802,19 @@ class _MobileTableRowBaseState extends State<_MobileTableRowBase> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: <Widget>[
-                    Text(
-                      widget.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: textStyles.mobileTitle,
+                    PlaybackAwareBuilder(
+                      coordinator: widget.playbackCoordinator,
+                      item: widget.playbackItem,
+                      builder: (BuildContext context, bool isCurrent) {
+                        return Text(
+                          widget.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: textStyles.mobileTitle.copyWith(
+                            color: isCurrent ? colors.accent : null,
+                          ),
+                        );
+                      },
                     ),
                     const SizedBox(height: 1),
                     Text(
@@ -874,6 +887,8 @@ Widget _buildMobileTableRowBase({
   required VoidCallback onToggleSelected,
   required VoidCallback onLongPressSelect,
   required VoidCallback? onTap,
+  PlaybackCoordinator? playbackCoordinator,
+  MediaItem? playbackItem,
 }) {
   return _MobileTableRowBase(
     title: title,
@@ -890,6 +905,8 @@ Widget _buildMobileTableRowBase({
     onToggleSelected: onToggleSelected,
     onLongPressSelect: onLongPressSelect,
     onTap: onTap,
+    playbackCoordinator: playbackCoordinator,
+    playbackItem: playbackItem,
   );
 }
 

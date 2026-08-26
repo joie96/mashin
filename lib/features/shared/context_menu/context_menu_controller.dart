@@ -462,7 +462,7 @@ class _DesktopContextMenuActionTileState
 
     final OverlayState overlay = Overlay.of(context);
     final RenderBox overlayBox =
-        overlay?.context.findRenderObject() as RenderBox? ??
+        overlay.context.findRenderObject() as RenderBox? ??
         Navigator.of(context).overlay!.context.findRenderObject()! as RenderBox;
 
     const double submenuWidth = AppContextMenuController._desktopMenuWidth;
@@ -530,7 +530,7 @@ class _DesktopContextMenuActionTileState
       },
     );
 
-    overlay?.insert(_submenuEntry!);
+    overlay.insert(_submenuEntry!);
     _isSubmenuClosing = false;
     _submenuAnimationController.forward(from: 0);
   }

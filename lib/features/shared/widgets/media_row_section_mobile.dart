@@ -88,111 +88,98 @@ class MediaRowSectionMobile<T> extends StatelessWidget {
             ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
           ),
         if (hasTitle) const SizedBox(height: 10),
-        SizedBox(
-          height: sectionHeight,
-          child: isLoading
-              ? ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: skeletonCount,
-                  separatorBuilder: (_, _) => SizedBox(width: itemSpacing),
-                  itemBuilder: (_, _) {
-                    if (T == Album) {
-                      return _buildMobileMediaRowAlbumSkeleton(
-                        itemWidth: itemWidth,
-                        coverSize: coverSize,
-                      );
-                    }
-                    if (T == Playlist) {
-                      return _buildMobileMediaRowPlaylistSkeleton(
-                        itemWidth: itemWidth,
-                        coverSize: coverSize,
-                      );
-                    }
-                    if (T == Artist) {
-                      return _buildMobileMediaRowArtistSkeleton(
-                        itemWidth: itemWidth,
-                        coverSize: coverSize,
-                      );
-                    }
-                    if (T == Track) {
-                      return _buildMobileMediaRowTrackSkeleton(
-                        itemWidth: itemWidth,
-                        coverSize: coverSize,
-                      );
-                    }
+        if (!isLoading && items.isEmpty)
+          Text(emptyText, style: TextStyle(color: colors.textSecondary))
+        else
+          SizedBox(
+            height: sectionHeight,
+            child: isLoading
+                ? ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: skeletonCount,
+                    separatorBuilder: (_, _) => SizedBox(width: itemSpacing),
+                    itemBuilder: (_, _) {
+                      if (T == Album) {
+                        return _buildMobileMediaRowAlbumSkeleton(
+                          itemWidth: itemWidth,
+                          coverSize: coverSize,
+                        );
+                      }
+                      if (T == Playlist) {
+                        return _buildMobileMediaRowPlaylistSkeleton(
+                          itemWidth: itemWidth,
+                          coverSize: coverSize,
+                        );
+                      }
+                      if (T == Artist) {
+                        return _buildMobileMediaRowArtistSkeleton(
+                          itemWidth: itemWidth,
+                          coverSize: coverSize,
+                        );
+                      }
+                      if (T == Track) {
+                        return _buildMobileMediaRowTrackSkeleton(
+                          itemWidth: itemWidth,
+                          coverSize: coverSize,
+                        );
+                      }
 
-                    return _buildMobileMediaRowUnknownSkeleton(
-                      itemWidth: itemWidth,
-                      coverSize: coverSize,
-                    );
-                  },
-                )
-              : items.isEmpty
-              ? Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: colors.border),
-                    color: colors.bgSecondary,
-                  ),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      emptyText,
-                      style: TextStyle(color: colors.textSecondary),
-                    ),
-                  ),
-                )
-              : ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: items.length > maxVisibleItems
-                      ? maxVisibleItems
-                      : items.length,
-                  separatorBuilder: (_, _) => SizedBox(width: itemSpacing),
-                  itemBuilder: (BuildContext context, int index) {
-                    final Object? item = items[index];
-                    if (item is Album) {
-                      return _buildMobileMediaRowAlbum(
-                        item: item,
+                      return _buildMobileMediaRowUnknownSkeleton(
                         itemWidth: itemWidth,
                         coverSize: coverSize,
-                        onPlayTap: () => _onPlayTap(index),
                       );
-                    }
-                    if (item is Playlist) {
-                      return _buildMobileMediaRowPlaylist(
-                        item: item,
-                        itemWidth: itemWidth,
-                        coverSize: coverSize,
-                        onPlayTap: () => _onPlayTap(index),
-                      );
-                    }
-                    if (item is Artist) {
-                      return _buildMobileMediaRowArtist(
-                        item: item,
-                        itemWidth: itemWidth,
-                        coverSize: coverSize,
-                        onPlayTap: () => _onPlayTap(index),
-                      );
-                    }
-                    if (item is Track) {
-                      return _buildMobileMediaRowTrack(
-                        item: item,
-                        itemWidth: itemWidth,
-                        coverSize: coverSize,
-                        onPlayTap: () => _onPlayTap(index),
-                      );
-                    }
+                    },
+                  )
+                : ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: items.length > maxVisibleItems
+                        ? maxVisibleItems
+                        : items.length,
+                    separatorBuilder: (_, _) => SizedBox(width: itemSpacing),
+                    itemBuilder: (BuildContext context, int index) {
+                      final Object? item = items[index];
+                      if (item is Album) {
+                        return _buildMobileMediaRowAlbum(
+                          item: item,
+                          itemWidth: itemWidth,
+                          coverSize: coverSize,
+                          onPlayTap: () => _onPlayTap(index),
+                        );
+                      }
+                      if (item is Playlist) {
+                        return _buildMobileMediaRowPlaylist(
+                          item: item,
+                          itemWidth: itemWidth,
+                          coverSize: coverSize,
+                          onPlayTap: () => _onPlayTap(index),
+                        );
+                      }
+                      if (item is Artist) {
+                        return _buildMobileMediaRowArtist(
+                          item: item,
+                          itemWidth: itemWidth,
+                          coverSize: coverSize,
+                          onPlayTap: () => _onPlayTap(index),
+                        );
+                      }
+                      if (item is Track) {
+                        return _buildMobileMediaRowTrack(
+                          item: item,
+                          itemWidth: itemWidth,
+                          coverSize: coverSize,
+                          onPlayTap: () => _onPlayTap(index),
+                          playbackCoordinator: playbackCoordinator,
+                        );
+                      }
 
-                    return _buildMobileMediaRowUnknown(
-                      itemWidth: itemWidth,
-                      coverSize: coverSize,
-                      onPlayTap: () => _onPlayTap(index),
-                    );
-                  },
-                ),
-        ),
+                      return _buildMobileMediaRowUnknown(
+                        itemWidth: itemWidth,
+                        coverSize: coverSize,
+                        onPlayTap: () => _onPlayTap(index),
+                      );
+                    },
+                  ),
+          ),
       ],
     );
   }
@@ -264,6 +251,7 @@ Widget _buildMobileMediaRowTrack({
   required double itemWidth,
   required double coverSize,
   required VoidCallback? onPlayTap,
+  PlaybackCoordinator? playbackCoordinator,
 }) {
   return _buildMobileMediaRowItemBase(
     itemWidth: itemWidth,
@@ -276,6 +264,8 @@ Widget _buildMobileMediaRowTrack({
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
     onPlayTap: onPlayTap,
+    playbackCoordinator: playbackCoordinator,
+    playbackItem: item,
   );
 }
 
@@ -310,6 +300,8 @@ Widget _buildMobileMediaRowItemBase({
   required String? providerIconSvg,
   required VoidCallback? onPlayTap,
   bool showPlayOverlay = true,
+  PlaybackCoordinator? playbackCoordinator,
+  MediaItem? playbackItem,
 }) {
   return Builder(
     builder: (BuildContext context) {
@@ -382,14 +374,21 @@ Widget _buildMobileMediaRowItemBase({
               ],
             ),
             const SizedBox(height: 8),
-            Text(
-              title,
-              maxLines: 1,
-              textAlign: TextAlign.center,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(
-                context,
-              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            PlaybackAwareBuilder(
+              coordinator: playbackCoordinator,
+              item: playbackItem,
+              builder: (BuildContext context, bool isCurrent) {
+                return Text(
+                  title,
+                  maxLines: 1,
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: isCurrent ? colors.accent : null,
+                  ),
+                );
+              },
             ),
             if (hasSecondary) ...<Widget>[
               const SizedBox(height: 2),

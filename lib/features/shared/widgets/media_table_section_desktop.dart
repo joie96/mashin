@@ -89,6 +89,10 @@ class _MediaTableSectionDesktopState<T>
   bool _isPageFading = false;
   bool _isExpanded = false;
   int _expandedBaseCount = 0;
+  // Height changes only animate while an explicit expand/collapse is in
+  // flight; it stays zero otherwise so unrelated rebuilds (data refresh,
+  // scrolling, ...) resize the section instantly without a shrink animation.
+  Duration _pageHeightAnimationDuration = Duration.zero;
 
   @override
   void didUpdateWidget(covariant MediaTableSectionDesktop<T> oldWidget) {
@@ -474,6 +478,7 @@ class _MediaTableSectionDesktopState<T>
           ? math.min((_currentPage + 1) * _pageSize, widget.items.length)
           : 0;
       _currentPage = 0;
+      _pageHeightAnimationDuration = const Duration(milliseconds: 380);
     });
   }
 
@@ -573,7 +578,9 @@ class _MediaTableSectionDesktopState<T>
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: hasBoundedHeight ? MainAxisSize.max : MainAxisSize.min,
           children: <Widget>[
-            if (hasTitle || (_isPagingEnabled && widget.items.isNotEmpty))
+            if (hasTitle ||
+                _isPagingEnabled ||
+                widget.playbackCoordinator != null)
               Row(
                 children: <Widget>[
                   if (hasTitle)
@@ -590,35 +597,36 @@ class _MediaTableSectionDesktopState<T>
                   const SizedBox(width: 16),
                   const Expanded(child: SectionHeaderDivider()),
                   const SizedBox(width: 16),
-                  if (widget.playbackCoordinator != null &&
-                      widget.items.isNotEmpty) ...<Widget>[
+                  if (widget.playbackCoordinator != null) ...<Widget>[
                     SectionHeaderIconButton(
                       icon: Icons.play_arrow,
                       tooltip: 'Abspielen',
-                      onTap: _onPlayAllTap,
+                      onTap: widget.items.isEmpty ? null : _onPlayAllTap,
                     ),
                     const SizedBox(width: 8),
                     SectionHeaderIconButton(
                       icon: Icons.shuffle,
                       tooltip: 'Zufällig',
-                      onTap: _onShuffleAllTap,
+                      onTap: widget.items.isEmpty ? null : _onShuffleAllTap,
                     ),
                   ],
-                  if (_isPagingEnabled &&
-                      !_isExpanded &&
-                      widget.items.isNotEmpty) ...<Widget>[
+                  if (_isPagingEnabled && !_isExpanded) ...<Widget>[
                     const SizedBox(width: 4),
                     const SectionHeaderVerticalDivider(),
                     _buildPaginationControls(context),
                   ],
                 ],
               ),
-            if (hasTitle || (_isPagingEnabled && widget.items.isNotEmpty))
+            if (hasTitle ||
+                _isPagingEnabled ||
+                widget.playbackCoordinator != null)
               const SizedBox(height: 10),
             if (hasBoundedHeight)
               Expanded(child: ClipRect(child: tableContent))
             else
               tableContent,
+            // Always reserve the toggle's space so sections without one
+            // line up visually with sections that have it.
             if (!hasBoundedHeight)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
@@ -711,19 +719,11 @@ class _MediaTableSectionDesktopState<T>
     }
 
     if (widget.items.isEmpty) {
-      final textStyles = context.mashinTableTextStyles;
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          _buildDesktopTypedHeader(),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(widget.emptyText, style: textStyles.emptyState),
-            ),
-          ),
-        ],
+      // No column header for empty state; the section header (title,
+      // divider, disabled buttons) is rendered by build() above this.
+      return Text(
+        widget.emptyText,
+        style: context.mashinTableTextStyles.emptyState,
       );
     }
 
@@ -793,34 +793,28 @@ class _MediaTableSectionDesktopState<T>
         if (useInternalScroll)
           Expanded(child: list)
         else if (_isPagingEnabled)
-          // Animate the container height between one page and the full list.
-          // The list itself keeps its structure so existing rows are not
-          // rebuilt; only the rows beyond the previous page get the reveal
-          // animation when expanding.
-          TweenAnimationBuilder<double>(
-            tween: Tween<double>(
-              begin: _pageSize * _desktopRowExtent,
-              end: pagedContentHeight,
-            ),
-            duration: const Duration(milliseconds: 380),
+          // Only animates while _pageHeightAnimationDuration is non-zero, i.e.
+          // during an explicit expand/collapse; otherwise resizes instantly.
+          AnimatedContainer(
+            duration: _pageHeightAnimationDuration,
             curve: Curves.easeInOutCubic,
-            builder: (BuildContext context, double height, Widget? child) {
-              return SizedBox(
-                height: height,
-                child: ClipRect(
-                  child: OverflowBox(
-                    alignment: Alignment.topCenter,
-                    minHeight: 0,
-                    maxHeight: double.infinity,
-                    child: SizedBox(
-                      height: widget.items.length * _desktopRowExtent,
-                      child: child,
-                    ),
-                  ),
-                ),
-              );
+            height: pagedContentHeight,
+            onEnd: () {
+              if (_pageHeightAnimationDuration != Duration.zero) {
+                setState(() => _pageHeightAnimationDuration = Duration.zero);
+              }
             },
-            child: _isExpanded ? expandedList : list,
+            child: ClipRect(
+              child: OverflowBox(
+                alignment: Alignment.topCenter,
+                minHeight: 0,
+                maxHeight: double.infinity,
+                child: SizedBox(
+                  height: widget.items.length * _desktopRowExtent,
+                  child: _isExpanded ? expandedList : list,
+                ),
+              ),
+            ),
           )
         else
           list,
@@ -1370,10 +1364,10 @@ Widget _buildDesktopTableRowTrack({
       ),
       _buildDesktopTableSizedCell(
         flex: 5,
-        child: _buildDesktopBodyText(
-          _prefer(item.name, 'Unknown Track'),
-          TextAlign.left,
-          DesktopTextTone.primary,
+        child: _buildDesktopTrackTitleCell(
+          playbackCoordinator: playbackCoordinator,
+          playbackItem: item,
+          title: _prefer(item.name, 'Unknown Track'),
         ),
       ),
       _buildDesktopTableSizedCell(
@@ -1752,10 +1746,10 @@ Widget _buildDesktopTableRowQueue({
       ),
       _buildDesktopTableSizedCell(
         flex: 5,
-        child: _buildDesktopBodyText(
-          title,
-          TextAlign.left,
-          DesktopTextTone.primary,
+        child: _buildDesktopTrackTitleCell(
+          playbackCoordinator: playbackCoordinator,
+          playbackItem: item.mediaItem,
+          title: title,
         ),
       ),
       _buildDesktopTableSizedCell(
@@ -2415,6 +2409,36 @@ Widget _buildDesktopBodyText(
   );
 }
 
+// Colors the title accent when it matches the currently playing track.
+Widget _buildDesktopTrackTitleCell({
+  required PlaybackCoordinator? playbackCoordinator,
+  required MediaItem? playbackItem,
+  required String title,
+}) {
+  return PlaybackAwareBuilder(
+    coordinator: playbackCoordinator,
+    item: playbackItem,
+    builder: (BuildContext context, bool isCurrent) {
+      final textStyles = context.mashinTableTextStyles;
+      final colors = context.mashinColors;
+
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.left,
+          style: textStyles.bodyPrimary.copyWith(
+            fontSize: 13,
+            color: isCurrent ? colors.accent : null,
+          ),
+        ),
+      );
+    },
+  );
+}
+
 Widget _buildDesktopArtistLinkCell({
   required List<Artist> artists,
   required String fallbackText,
@@ -2794,20 +2818,6 @@ class DesktopPlaybackIndicator extends StatelessWidget {
     this.width = 40,
   });
 
-  bool _isSameTrack(MediaItem left, MediaItem right) {
-    final leftUri = left.uri?.trim() ?? '';
-    final rightUri = right.uri?.trim() ?? '';
-    if (leftUri.isNotEmpty && rightUri.isNotEmpty) {
-      return leftUri.toLowerCase() == rightUri.toLowerCase();
-    }
-
-    final leftItemId = left.itemId.trim();
-    final rightItemId = right.itemId.trim();
-    return leftItemId.isNotEmpty &&
-        rightItemId.isNotEmpty &&
-        leftItemId == rightItemId;
-  }
-
   @override
   Widget build(BuildContext context) {
     final playbackCoordinator = coordinator;
@@ -2831,11 +2841,13 @@ class DesktopPlaybackIndicator extends StatelessWidget {
             ? queueItems[currentIndex].mediaItem
             : null;
 
-        if (currentItem == null || !_isSameTrack(mediaItem, currentItem)) {
+        if (currentItem == null ||
+            !isSamePlaybackTrack(mediaItem, currentItem)) {
           return _fallback(context);
         }
 
-        final playbackStateType = playbackCoordinator.playbackState.playbackState;
+        final playbackStateType =
+            playbackCoordinator.playbackState.playbackState;
         if (playbackStateType == PlaybackStateType.buffering ||
             playbackStateType == PlaybackStateType.seeking) {
           return SizedBox(
@@ -2887,6 +2899,67 @@ class DesktopPlaybackIndicator extends StatelessWidget {
           DesktopTextTone.tertiary,
         ),
       ),
+    );
+  }
+}
+
+/// Compares two media items by uri (or item id as fallback) to determine if
+/// they refer to the same playback track.
+bool isSamePlaybackTrack(MediaItem left, MediaItem right) {
+  final String leftUri = left.uri?.trim() ?? '';
+  final String rightUri = right.uri?.trim() ?? '';
+  if (leftUri.isNotEmpty && rightUri.isNotEmpty) {
+    return leftUri.toLowerCase() == rightUri.toLowerCase();
+  }
+
+  final String leftItemId = left.itemId.trim();
+  final String rightItemId = right.itemId.trim();
+  return leftItemId.isNotEmpty &&
+      rightItemId.isNotEmpty &&
+      leftItemId == rightItemId;
+}
+
+/// Rebuilds [builder] with whether [item] is the currently active playback
+/// track, so callers can style it (e.g. accent-colored title) without
+/// showing a separate indicator icon.
+class PlaybackAwareBuilder extends StatelessWidget {
+  final PlaybackCoordinator? coordinator;
+  final MediaItem? item;
+  final Widget Function(BuildContext context, bool isCurrent) builder;
+
+  const PlaybackAwareBuilder({
+    super.key,
+    required this.coordinator,
+    required this.item,
+    required this.builder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final PlaybackCoordinator? playbackCoordinator = coordinator;
+    final MediaItem? mediaItem = item;
+    if (playbackCoordinator == null || mediaItem == null) {
+      return builder(context, false);
+    }
+
+    return ListenableBuilder(
+      listenable: Listenable.merge(<Listenable>[
+        playbackCoordinator.playbackStateChanges,
+        playbackCoordinator.playbackQueueChanges,
+      ]),
+      builder: (BuildContext context, Widget? child) {
+        final int? currentIndex = playbackCoordinator.currentQueueIndex;
+        final List<QueueItem> queueItems = playbackCoordinator.queueItems;
+        final MediaItem? currentItem =
+            currentIndex != null &&
+                currentIndex >= 0 &&
+                currentIndex < queueItems.length
+            ? queueItems[currentIndex].mediaItem
+            : null;
+        final bool isCurrent =
+            currentItem != null && isSamePlaybackTrack(mediaItem, currentItem);
+        return builder(context, isCurrent);
+      },
     );
   }
 }
@@ -3109,6 +3182,7 @@ class _SectionHeaderIconButtonState extends State<SectionHeaderIconButton> {
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
+    final bool isDisabled = widget.onTap == null;
 
     final Widget button = MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
@@ -3116,18 +3190,23 @@ class _SectionHeaderIconButtonState extends State<SectionHeaderIconButton> {
       child: GestureDetector(
         onTap: widget.onTap,
         behavior: HitTestBehavior.opaque,
-        child: Container(
-          width: 28,
-          height: 28,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: _isHovered ? colors.hover : Colors.transparent,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Icon(
-            widget.icon,
-            size: widget.iconSize,
-            color: colors.textSecondary,
+        child: Opacity(
+          opacity: isDisabled ? 0.4 : 1,
+          child: Container(
+            width: 28,
+            height: 28,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: _isHovered && !isDisabled
+                  ? colors.hover
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(
+              widget.icon,
+              size: widget.iconSize,
+              color: colors.textSecondary,
+            ),
           ),
         ),
       ),

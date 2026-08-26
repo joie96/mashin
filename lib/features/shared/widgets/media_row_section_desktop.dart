@@ -428,10 +428,13 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
     final int visibleCount = math.min(itemCount, fitByMinSize);
     final double computedWidth =
         (maxWidth - ((visibleCount - 1) * spacing)) / visibleCount;
+    // Cap item width so a small number of items doesn't stretch across the
+    // full section width (e.g. a single item spanning the whole window).
+    final double maxItemWidth = minItemWidth * 1.5;
 
     return _RowLayoutMetrics(
       visibleCount: visibleCount,
-      computedItemWidth: math.max(minItemWidth, computedWidth),
+      computedItemWidth: computedWidth.clamp(minItemWidth, maxItemWidth),
     );
   }
 
@@ -1002,9 +1005,10 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
             : isPlaylistSection
             ? MediaRowSectionDesktop._playlistReservedTextHeight
             : MediaRowSectionDesktop._reservedTextHeight;
-        final double sectionHeight = math.max(
-          minSectionHeight,
-          resolvedCoverSize + reservedTextHeight,
+        final double maxSectionHeight = minSectionHeight * 1.5;
+        final double sectionHeight = math.min(
+          maxSectionHeight,
+          math.max(minSectionHeight, resolvedCoverSize + reservedTextHeight),
         );
         final int pageCount = widget.items.isEmpty
             ? 1
@@ -1014,14 +1018,12 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         final bool hasPlayableContent =
             !widget.isLoading && widget.items.isNotEmpty;
         final bool showHeaderRow =
-            hasTitle ||
-            (hasPlayableContent &&
-                (isPagingEnabled || widget.playbackCoordinator != null));
+            hasTitle || widget.playbackCoordinator != null || isPagingEnabled;
         final bool canToggleExpand = _canToggleExpand;
-        final Widget collapsedContent = SizedBox(
-          height: sectionHeight,
-          child: widget.isLoading
-              ? ListView.separated(
+        final Widget collapsedContent = widget.isLoading
+            ? SizedBox(
+                height: sectionHeight,
+                child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: widget.skeletonCount,
                   separatorBuilder: (_, _) =>
@@ -1030,25 +1032,16 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
                     itemWidth: resolvedItemWidth,
                     coverSize: resolvedCoverSize,
                   ),
-                )
-              : widget.items.isEmpty
-              ? Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: colors.border),
-                    color: colors.bgSecondary,
-                  ),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      widget.emptyText,
-                      style: TextStyle(color: colors.textSecondary),
-                    ),
-                  ),
-                )
-              : ClipRect(
+                ),
+              )
+            : widget.items.isEmpty
+            ? Text(
+                widget.emptyText,
+                style: TextStyle(color: colors.textSecondary),
+              )
+            : SizedBox(
+                height: sectionHeight,
+                child: ClipRect(
                   child: Stack(
                     fit: StackFit.expand,
                     children: <Widget>[
@@ -1124,7 +1117,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
                     ],
                   ),
                 ),
-        );
+              );
         final Widget bodyContent = AnimatedSize(
           duration: const Duration(milliseconds: 380),
           curve: Curves.easeInOutCubic,
@@ -1168,23 +1161,20 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
                   const SizedBox(width: 16),
                   const Expanded(child: SectionHeaderDivider()),
                   const SizedBox(width: 16),
-                  if (hasPlayableContent &&
-                      widget.playbackCoordinator != null) ...<Widget>[
+                  if (widget.playbackCoordinator != null) ...<Widget>[
                     SectionHeaderIconButton(
                       icon: Icons.play_arrow,
                       tooltip: 'Abspielen',
-                      onTap: _onPlayAllTap,
+                      onTap: hasPlayableContent ? _onPlayAllTap : null,
                     ),
                     const SizedBox(width: 8),
                     SectionHeaderIconButton(
                       icon: Icons.shuffle,
                       tooltip: 'Zufällig',
-                      onTap: _onShuffleAllTap,
+                      onTap: hasPlayableContent ? _onShuffleAllTap : null,
                     ),
                   ],
-                  if (isPagingEnabled &&
-                      hasPlayableContent &&
-                      !_isExpanded) ...<Widget>[
+                  if (isPagingEnabled && !_isExpanded) ...<Widget>[
                     const SizedBox(width: 4),
                     const SectionHeaderVerticalDivider(),
                     _buildPaginationControls(
@@ -1197,16 +1187,22 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
               ),
             if (showHeaderRow) const SizedBox(height: 10),
             bodyContent,
-            if (canToggleExpand)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Center(
-                  child: _ExpandToggleButton(
-                    isExpanded: _isExpanded,
-                    onTap: _toggleExpanded,
-                  ),
-                ),
+            // Always reserve the toggle's space so sections without one
+            // line up visually with sections that have it.
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: SizedBox(
+                height: 24,
+                child: canToggleExpand
+                    ? Center(
+                        child: _ExpandToggleButton(
+                          isExpanded: _isExpanded,
+                          onTap: _toggleExpanded,
+                        ),
+                      )
+                    : const SizedBox.shrink(),
               ),
+            ),
           ],
         );
       },
@@ -1675,47 +1671,34 @@ Widget _buildDesktopMediaRowItemBase({
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Row(
-                    children: <Widget>[
-                      SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: Center(
-                          child: DesktopPlaybackIndicator(
-                            coordinator: playbackCoordinator,
-                            item: playbackItem,
-                            fallback: null,
-                            width: 20,
-                          ),
-                        ),
-                      ),
-                      if (playbackCoordinator != null && playbackItem != null)
-                        const SizedBox(width: 6),
-                      Expanded(
-                        child: titleLinkItem == null
-                            ? Text(
-                                title,
-                                maxLines: 1,
-                                textAlign: TextAlign.left,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleSmall
-                                    ?.copyWith(
-                                      fontWeight: FontWeight.w400,
-                                      fontSize: 15,
-                                    ),
-                              )
-                            : MediaLinkText(
-                                items: <MediaItem>[titleLinkItem],
-                                fallbackText: title,
-                                onItemTap: onTitleTap,
-                                style: Theme.of(context).textTheme.titleSmall
-                                    ?.copyWith(
-                                      fontWeight: FontWeight.w400,
-                                      fontSize: 15,
-                                    ),
-                              ),
-                      ),
-                    ],
+                  PlaybackAwareBuilder(
+                    coordinator: playbackCoordinator,
+                    item: playbackItem,
+                    builder: (BuildContext context, bool isCurrent) {
+                      final TextStyle? titleStyle = Theme.of(context)
+                          .textTheme
+                          .titleSmall
+                          ?.copyWith(
+                            fontWeight: FontWeight.w400,
+                            fontSize: 15,
+                            color: isCurrent ? colors.accent : null,
+                          );
+
+                      return titleLinkItem == null
+                          ? Text(
+                              title,
+                              maxLines: 1,
+                              textAlign: TextAlign.left,
+                              overflow: TextOverflow.ellipsis,
+                              style: titleStyle,
+                            )
+                          : MediaLinkText(
+                              items: <MediaItem>[titleLinkItem],
+                              fallbackText: title,
+                              onItemTap: onTitleTap,
+                              style: titleStyle,
+                            );
+                    },
                   ),
                   if (hasSecondary) ...<Widget>[
                     const SizedBox(height: 2),
