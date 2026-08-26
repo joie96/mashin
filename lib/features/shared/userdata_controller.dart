@@ -197,6 +197,23 @@ class UserDataController extends ChangeNotifier {
     }
   }
 
+  T withFavoriteStatus<T extends MediaItem>(T item) {
+    final bool favorite = isFavorite(item);
+    if (item is Track) {
+      return _asTrack(item, favorite) as T;
+    }
+    if (item is Album) {
+      return _asAlbum(item, favorite) as T;
+    }
+    if (item is Artist) {
+      return _asArtist(item, favorite) as T;
+    }
+    if (item is Playlist) {
+      return _asPlaylist(item, favorite) as T;
+    }
+    return item;
+  }
+
   Future<void> setFavorite(
     Iterable<MediaItem> mediaItems,
     bool favorite,

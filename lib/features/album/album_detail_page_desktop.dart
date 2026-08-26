@@ -8,6 +8,7 @@ import '../../data/music_assistant/ma_client.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../playback/playback_coordinator.dart';
 import '../shared/context_menu/context_menu_controller.dart';
+import '../shared/userdata_controller.dart';
 import '../shared/widgets/media_link_text.dart';
 import '../shared/widgets/media_row_section_desktop.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
@@ -21,6 +22,7 @@ class AlbumDetailPageDesktop extends StatefulWidget {
     required this.playbackCoordinator,
     required this.itemId,
     required this.providerInstanceIdOrDomain,
+    this.userDataController,
     this.onOpenArtist,
     this.onOpenAlbum,
   });
@@ -29,6 +31,7 @@ class AlbumDetailPageDesktop extends StatefulWidget {
   final PlaybackCoordinator playbackCoordinator;
   final String itemId;
   final String providerInstanceIdOrDomain;
+  final UserDataController? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
 
@@ -50,6 +53,7 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
       playbackCoordinator: widget.playbackCoordinator,
       itemId: widget.itemId,
       providerInstanceIdOrDomain: widget.providerInstanceIdOrDomain,
+      userDataController: widget.userDataController,
     )..addListener(_onControllerChanged);
     unawaited(_controller.loadAlbum());
   }

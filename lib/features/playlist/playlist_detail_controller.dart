@@ -55,6 +55,9 @@ class PlaylistDetailController extends ChangeNotifier {
   bool get isPlaylistFavorite => _isPlaylistFavorite;
   bool get isHeaderCollapsed => _isHeaderCollapsed;
   bool get isEditable => _playlist?.isEditable ?? false;
+  bool get isLocalPlaylist =>
+      _playlist?.provider.trim().toLowerCase() ==
+      UserDataController.localPlaylistProvider;
 
   String get playlistName {
     final String name = _playlist?.name.trim() ?? '';
@@ -127,17 +130,14 @@ class PlaylistDetailController extends ChangeNotifier {
   }
 
   void _loadLocalPlaylist(Playlist playlist, List<Track> storedTracks) {
-    _playlist = _copyPlaylist(
-      playlist,
-      favorite: userDataController?.isFavorite(playlist) ?? playlist.favorite,
-    );
+    _playlist = userDataController?.withFavoriteStatus(playlist) ?? playlist;
 
     _tracks = List<Track>.unmodifiable(
       storedTracks.map((Track track) {
-        final bool isFavorite = userDataController?.isFavorite(track) ??
-            track.favorite;
-        _favoriteOverrides[_favoriteKey(track)] = isFavorite;
-        return _copyTrack(track, favorite: isFavorite);
+        final Track withFavorite =
+            userDataController?.withFavoriteStatus(track) ?? track;
+        _favoriteOverrides[_favoriteKey(track)] = withFavorite.favorite;
+        return withFavorite;
       }).toList(growable: false),
     );
 
@@ -151,9 +151,7 @@ class PlaylistDetailController extends ChangeNotifier {
         providerInstanceIdOrDomain,
       );
       if (online != null) {
-        final bool isFavorite = userDataController?.isFavorite(online) ??
-            online.favorite;
-        _playlist = _copyPlaylist(online, favorite: isFavorite);
+        _playlist = userDataController?.withFavoriteStatus(online) ?? online;
       } else {
         _playlist = null;
       }
@@ -173,10 +171,10 @@ class PlaylistDetailController extends ChangeNotifier {
 
       _tracks = List<Track>.unmodifiable(
         loaded.map((Track track) {
-          final bool isFavorite = userDataController?.isFavorite(track) ??
-              track.favorite;
-          _favoriteOverrides[_favoriteKey(track)] = isFavorite;
-          return _copyTrack(track, favorite: isFavorite);
+          final Track withFavorite =
+              userDataController?.withFavoriteStatus(track) ?? track;
+          _favoriteOverrides[_favoriteKey(track)] = withFavorite.favorite;
+          return withFavorite;
         }).toList(growable: false),
       );
     } catch (_) {
@@ -225,21 +223,13 @@ class PlaylistDetailController extends ChangeNotifier {
     _favoriteOverrides[key] = next;
     notifyListeners();
     try {
-      if (userDataController != null) {
-        await userDataController!.setFavorite(<MediaItem>[item], next);
-      } else {
-        if (next) {
-          final String uri = item.uri ?? '';
-          if (uri.isNotEmpty) {
-            await client.addFavorite(uri);
-          }
-        } else {
-          await client.removeFavorite(
-            mediaType: item.mediaType,
-            libraryItemId: item.itemId,
-          );
-        }
+      final UserDataController? controller = userDataController;
+      if (controller == null) {
+        _favoriteOverrides.remove(key);
+        notifyListeners();
+        return;
       }
+      await controller.setFavorite(<MediaItem>[item], next);
     } catch (_) {
       _favoriteOverrides[key] = !next;
       notifyListeners();
@@ -255,21 +245,13 @@ class PlaylistDetailController extends ChangeNotifier {
     _isPlaylistFavorite = next;
     notifyListeners();
     try {
-      if (userDataController != null) {
-        await userDataController!.setFavorite(<MediaItem>[current], next);
-      } else {
-        if (next) {
-          final String uri = current.uri ?? '';
-          if (uri.isNotEmpty) {
-            await client.addFavorite(uri);
-          }
-        } else {
-          await client.removeFavorite(
-            mediaType: MediaType.playlist,
-            libraryItemId: current.itemId,
-          );
-        }
+      final UserDataController? controller = userDataController;
+      if (controller == null) {
+        _isPlaylistFavorite = !next;
+        notifyListeners();
+        return;
       }
+      await controller.setFavorite(<MediaItem>[current], next);
     } catch (_) {
       _isPlaylistFavorite = !next;
       notifyListeners();
@@ -366,37 +348,6 @@ class PlaylistDetailController extends ChangeNotifier {
     }
 
     return null;
-  }
-
-  Playlist _copyPlaylist(Playlist source, {required bool favorite}) {
-    return Playlist(
-      itemId: source.itemId,
-      provider: source.provider,
-      name: source.name,
-      isEditable: source.isEditable,
-      sortName: source.sortName,
-      uri: source.uri,
-      owner: source.owner,
-      providerMappings: source.providerMappings,
-      metadata: source.metadata,
-      favorite: favorite,
-    );
-  }
-
-  Track _copyTrack(Track source, {required bool favorite}) {
-    return Track(
-      itemId: source.itemId,
-      provider: source.provider,
-      name: source.name,
-      duration: source.duration,
-      artists: source.artists,
-      sortName: source.sortName,
-      uri: source.uri,
-      album: source.album,
-      providerMappings: source.providerMappings,
-      metadata: source.metadata,
-      favorite: favorite,
-    );
   }
 
   String _favoriteKey(MediaItem item) =>

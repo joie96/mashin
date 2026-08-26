@@ -187,17 +187,19 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
         onSelected: () =>
             widget.playbackCoordinator.playMediaLast(<MediaItem>[playlist]),
       ),
-      const ContextMenuAction.separator(),
-      ContextMenuAction(
-        label: _controller.isPlaylistFavorite
-            ? 'Aus Favoriten entfernen'
-            : 'Zu Favoriten hinzufügen',
-        icon: _controller.isPlaylistFavorite
-            ? Icons.favorite_outlined
-            : Icons.favorite_border_outlined,
-        isDestructive: _controller.isPlaylistFavorite,
-        onSelected: _controller.togglePlaylistFavorite,
-      ),
+      if (!_controller.isLocalPlaylist) ...<ContextMenuAction>[
+        const ContextMenuAction.separator(),
+        ContextMenuAction(
+          label: _controller.isPlaylistFavorite
+              ? 'Aus Favoriten entfernen'
+              : 'Zu Favoriten hinzufügen',
+          icon: _controller.isPlaylistFavorite
+              ? Icons.favorite_outlined
+              : Icons.favorite_border_outlined,
+          isDestructive: _controller.isPlaylistFavorite,
+          onSelected: _controller.togglePlaylistFavorite,
+        ),
+      ],
     ];
   }
 
@@ -417,16 +419,18 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
           onTap: _controller.shufflePlaylist,
         ),
         const SizedBox(width: 24),
-        _HeaderIconButton(
-          tooltip: _controller.isPlaylistFavorite
-              ? 'Favorit entfernen'
-              : 'Zu Favoriten hinzufügen',
-          icon: _controller.isPlaylistFavorite
-              ? Icons.favorite
-              : Icons.favorite_border_outlined,
-          onTap: _controller.togglePlaylistFavorite,
-        ),
-        const SizedBox(width: 12),
+        if (!_controller.isLocalPlaylist) ...<Widget>[
+          _HeaderIconButton(
+            tooltip: _controller.isPlaylistFavorite
+                ? 'Favorit entfernen'
+                : 'Zu Favoriten hinzufügen',
+            icon: _controller.isPlaylistFavorite
+                ? Icons.favorite
+                : Icons.favorite_border_outlined,
+            onTap: _controller.togglePlaylistFavorite,
+          ),
+          const SizedBox(width: 12),
+        ],
         _HeaderIconButton(
           key: anchorKey,
           tooltip: 'Weitere Optionen',

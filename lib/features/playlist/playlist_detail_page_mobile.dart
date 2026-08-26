@@ -142,15 +142,16 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
         onSelected: () =>
             widget.playbackCoordinator.playMediaLast(<MediaItem>[playlist]),
       ),
-      ContextMenuAction(
-        label: _controller.isPlaylistFavorite
-            ? 'Aus Favoriten entfernen'
-            : 'Zu Favoriten hinzufügen',
-        icon: _controller.isPlaylistFavorite
-            ? Icons.favorite_outlined
-            : Icons.favorite_border_outlined,
-        onSelected: _controller.togglePlaylistFavorite,
-      ),
+      if (!_controller.isLocalPlaylist)
+        ContextMenuAction(
+          label: _controller.isPlaylistFavorite
+              ? 'Aus Favoriten entfernen'
+              : 'Zu Favoriten hinzufügen',
+          icon: _controller.isPlaylistFavorite
+              ? Icons.favorite_outlined
+              : Icons.favorite_border_outlined,
+          onSelected: _controller.togglePlaylistFavorite,
+        ),
     ];
   }
 
@@ -223,15 +224,16 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
                 tooltip: 'Zufällig',
                 icon: const Icon(Icons.shuffle),
               ),
-              IconButton(
-                onPressed: _controller.togglePlaylistFavorite,
-                tooltip: 'Favorit',
-                icon: Icon(
-                  _controller.isPlaylistFavorite
-                      ? Icons.favorite
-                      : Icons.favorite_border_outlined,
+              if (!_controller.isLocalPlaylist)
+                IconButton(
+                  onPressed: _controller.togglePlaylistFavorite,
+                  tooltip: 'Favorit',
+                  icon: Icon(
+                    _controller.isPlaylistFavorite
+                        ? Icons.favorite
+                        : Icons.favorite_border_outlined,
+                  ),
                 ),
-              ),
               IconButton(
                 onPressed: playlist == null
                     ? null

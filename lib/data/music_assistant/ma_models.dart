@@ -174,7 +174,7 @@ class MediaItem {
               .toList() ??
           const <ProviderMapping>[],
       metadata: metadata,
-      favorite: json['favorite'] == true,
+      favorite: false,
     );
   }
 }
@@ -375,7 +375,7 @@ class Artist implements MediaItem {
               .toList() ??
           const <ProviderMapping>[],
       metadata: metadata,
-      favorite: json['favorite'] == true,
+      favorite: false,
     );
   }
 }
@@ -456,7 +456,7 @@ class Album implements MediaItem {
               .toList() ??
           const <ProviderMapping>[],
       metadata: metadata,
-      favorite: json['favorite'] == true,
+      favorite: false,
     );
   }
 }
@@ -550,7 +550,7 @@ class Track implements MediaItem {
               .toList() ??
           const <ProviderMapping>[],
       metadata: metadata,
-      favorite: json['favorite'] == true,
+      favorite: false,
     );
   }
 }
@@ -624,7 +624,7 @@ class Playlist implements MediaItem {
               .toList() ??
           const <ProviderMapping>[],
       metadata: metadata,
-      favorite: json['favorite'] == true,
+      favorite: false,
     );
   }
 }

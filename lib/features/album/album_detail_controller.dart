@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../../data/music_assistant/ma_client.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../playback/playback_coordinator.dart';
+import '../shared/userdata_controller.dart';
 
 class AlbumDetailController extends ChangeNotifier {
   AlbumDetailController({
@@ -12,12 +13,14 @@ class AlbumDetailController extends ChangeNotifier {
     required this.playbackCoordinator,
     required this.itemId,
     required this.providerInstanceIdOrDomain,
+    this.userDataController,
   });
 
   final MusicAssistantClient client;
   final PlaybackCoordinator playbackCoordinator;
   final String itemId;
   final String providerInstanceIdOrDomain;
+  final UserDataController? userDataController;
 
   Album? _album;
   List<Track> _tracks = const <Track>[];
@@ -99,8 +102,15 @@ class AlbumDetailController extends ChangeNotifier {
 
   Future<void> _loadMetadata() async {
     try {
-      _album = await client.getAlbum(itemId, providerInstanceIdOrDomain);
-      _isAlbumFavorite = _album?.favorite ?? false;
+      final Album? loaded = await client.getAlbum(
+        itemId,
+        providerInstanceIdOrDomain,
+      );
+      _album = loaded == null
+          ? null
+          : (userDataController?.withFavoriteStatus(loaded) ?? loaded);
+      final Album? album = _album;
+      _isAlbumFavorite = album != null && isItemFavorite(album);
     } catch (_) {
       _album = null;
     } finally {
@@ -117,11 +127,10 @@ class AlbumDetailController extends ChangeNotifier {
       );
       final Album? loadedAlbum = _album;
       _tracks = List<Track>.unmodifiable(
-        loadedAlbum == null
-            ? loaded
-            : loaded
-                  .map(
-                    (Track track) => Track(
+        loaded.map((Track track) {
+          final Track withAlbum = loadedAlbum == null
+              ? track
+              : Track(
                       itemId: track.itemId,
                       provider: track.provider,
                       name: track.name,
@@ -132,10 +141,11 @@ class AlbumDetailController extends ChangeNotifier {
                       album: loadedAlbum,
                       providerMappings: track.providerMappings,
                       metadata: track.metadata,
-                      favorite: track.favorite,
-                    ),
-                  )
-                  .toList(growable: false),
+                      favorite: false,
+                    );
+          return userDataController?.withFavoriteStatus(withAlbum) ??
+              withAlbum;
+        }).toList(growable: false),
       );
     } catch (_) {
       _tracks = const <Track>[];
@@ -161,7 +171,11 @@ class AlbumDetailController extends ChangeNotifier {
       );
       _otherAlbums = List<Album>.unmodifiable(
         loaded
-            .where((Album item) => item.itemId != itemId)
+          .where((Album item) => item.itemId != itemId)
+          .map(
+            (Album item) =>
+              userDataController?.withFavoriteStatus(item) ?? item,
+          )
             .toList(growable: false)
           ..sort(
             (Album left, Album right) =>
@@ -231,7 +245,14 @@ class AlbumDetailController extends ChangeNotifier {
           enriched.add(artist);
         }
       }
-      _similarArtists = List<Artist>.unmodifiable(enriched);
+      _similarArtists = List<Artist>.unmodifiable(
+        enriched
+        .map(
+          (Artist artist) =>
+          userDataController?.withFavoriteStatus(artist) ?? artist,
+        )
+        .toList(growable: false),
+      );
     } catch (_) {
       _similarArtists = const <Artist>[];
     } finally {
@@ -249,17 +270,13 @@ class AlbumDetailController extends ChangeNotifier {
     _favoriteOverrides[key] = next;
     notifyListeners();
     try {
-      if (next) {
-        final String uri = item.uri ?? '';
-        if (uri.isNotEmpty) {
-          await client.addFavorite(uri);
-        }
-      } else {
-        await client.removeFavorite(
-          mediaType: item.mediaType,
-          libraryItemId: item.itemId,
-        );
+      final UserDataController? controller = userDataController;
+      if (controller == null) {
+        _favoriteOverrides.remove(key);
+        notifyListeners();
+        return;
       }
+      await controller.setFavorite(<MediaItem>[item], next);
     } catch (_) {
       _favoriteOverrides[key] = !next;
       notifyListeners();
@@ -275,17 +292,13 @@ class AlbumDetailController extends ChangeNotifier {
     _isAlbumFavorite = next;
     notifyListeners();
     try {
-      if (next) {
-        final String uri = current.uri ?? '';
-        if (uri.isNotEmpty) {
-          await client.addFavorite(uri);
-        }
-      } else {
-        await client.removeFavorite(
-          mediaType: MediaType.album,
-          libraryItemId: current.itemId,
-        );
+      final UserDataController? controller = userDataController;
+      if (controller == null) {
+        _isAlbumFavorite = !next;
+        notifyListeners();
+        return;
       }
+      await controller.setFavorite(<MediaItem>[current], next);
     } catch (_) {
       _isAlbumFavorite = !next;
       notifyListeners();

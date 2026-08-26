@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import '../../data/music_assistant/ma_client.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../playback/playback_coordinator.dart';
+import '../shared/userdata_controller.dart';
 
 /// Loads and holds all data required by the artist detail page (metadata, albums,
 /// similar artists, top tracks) and exposes the playback/favorite/description actions
@@ -21,12 +22,14 @@ class ArtistDetailController extends ChangeNotifier {
   final PlaybackCoordinator playbackCoordinator;
   final String itemId;
   final String providerInstanceIdOrDomain;
+  final UserDataController? userDataController;
 
   ArtistDetailController({
     required this.client,
     required this.playbackCoordinator,
     required this.itemId,
     required this.providerInstanceIdOrDomain,
+    this.userDataController,
   });
 
   Artist? _artist;
@@ -105,8 +108,15 @@ class ArtistDetailController extends ChangeNotifier {
     _isLoadingMetadata = true;
     notifyListeners();
     try {
-      _artist = await client.getArtist(itemId, providerInstanceIdOrDomain);
-      _isArtistFavorite = _artist?.favorite ?? false;
+      final Artist? loaded = await client.getArtist(
+        itemId,
+        providerInstanceIdOrDomain,
+      );
+      _artist = loaded == null
+          ? null
+          : (userDataController?.withFavoriteStatus(loaded) ?? loaded);
+      final Artist? artist = _artist;
+      _isArtistFavorite = artist != null && isItemFavorite(artist);
       await _loadDeezerBiographyIfNeeded();
     } catch (_) {
       _artist = null;
@@ -125,7 +135,13 @@ class ArtistDetailController extends ChangeNotifier {
         providerInstanceIdOrDomain,
       );
       _albums = List<Album>.unmodifiable(
-        <Album>[...albums]..sort((Album left, Album right) {
+        albums
+            .map(
+              (Album album) =>
+                  userDataController?.withFavoriteStatus(album) ?? album,
+            )
+            .toList(growable: false)
+          ..sort((Album left, Album right) {
           return (right.year ?? 0).compareTo(left.year ?? 0);
         }),
       );
@@ -149,7 +165,14 @@ class ArtistDetailController extends ChangeNotifier {
       if (artists.isEmpty) {
         artists = await _loadSimilarArtistsFromTracks();
       }
-      _similarArtists = List<Artist>.unmodifiable(artists);
+      _similarArtists = List<Artist>.unmodifiable(
+        artists
+        .map(
+          (Artist artist) =>
+          userDataController?.withFavoriteStatus(artist) ?? artist,
+        )
+        .toList(growable: false),
+      );
     } catch (_) {
       _similarArtists = const <Artist>[];
     } finally {
@@ -167,7 +190,13 @@ class ArtistDetailController extends ChangeNotifier {
         providerInstanceIdOrDomain,
       );
       _topTracks = List<Track>.unmodifiable(
-        tracks.map(_withAlbumYear).toList(growable: false),
+        tracks
+            .map(_withAlbumYear)
+            .map(
+              (Track track) =>
+                  userDataController?.withFavoriteStatus(track) ?? track,
+            )
+            .toList(growable: false),
       );
     } catch (_) {
       _topTracks = const <Track>[];
@@ -427,17 +456,13 @@ class ArtistDetailController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      if (nextFavorite) {
-        final String uri = item.uri ?? '';
-        if (uri.isNotEmpty) {
-          await client.addFavorite(uri);
-        }
-      } else {
-        await client.removeFavorite(
-          mediaType: item.mediaType,
-          libraryItemId: item.itemId,
-        );
+      final UserDataController? controller = userDataController;
+      if (controller == null) {
+        _favoriteOverrides.remove(key);
+        notifyListeners();
+        return;
       }
+      await controller.setFavorite(<MediaItem>[item], nextFavorite);
     } catch (_) {
       // Revert the optimistic update on failure.
       _favoriteOverrides[key] = !nextFavorite;
@@ -456,17 +481,13 @@ class ArtistDetailController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      if (nextFavorite) {
-        final String uri = current.uri ?? '';
-        if (uri.isNotEmpty) {
-          await client.addFavorite(uri);
-        }
-      } else {
-        await client.removeFavorite(
-          mediaType: MediaType.artist,
-          libraryItemId: current.itemId,
-        );
+      final UserDataController? controller = userDataController;
+      if (controller == null) {
+        _isArtistFavorite = !nextFavorite;
+        notifyListeners();
+        return;
       }
+      await controller.setFavorite(<MediaItem>[current], nextFavorite);
     } catch (_) {
       _isArtistFavorite = !nextFavorite;
       notifyListeners();

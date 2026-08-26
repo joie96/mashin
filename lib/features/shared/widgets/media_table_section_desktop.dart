@@ -158,7 +158,14 @@ class _MediaTableSectionDesktopState<T>
   }
 
   bool _isItemFavorite(T item, int index) {
-    return widget.isRowFavorite?.call(item, index) ?? false;
+    final DesktopRowFavoriteResolver<T>? resolver = widget.isRowFavorite;
+    if (resolver != null) {
+      return resolver(item, index);
+    }
+    if (item is QueueItem) {
+      return item.mediaItem?.favorite ?? false;
+    }
+    return (item as MediaItem?)?.favorite ?? false;
   }
 
   ValueChanged<BuildContext>? _moreAnchorHandler(T item, int index) {

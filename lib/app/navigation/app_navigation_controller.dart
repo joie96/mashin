@@ -227,6 +227,7 @@ class AppNavigationController extends ChangeNotifier {
         playbackCoordinator: playbackCoordinator,
         itemId: detail.itemId,
         providerInstanceIdOrDomain: detail.providerInstanceIdOrDomain,
+        userDataController: userDataController,
         onOpenArtist: openArtist,
         onOpenAlbum: openAlbum,
       );
@@ -282,6 +283,7 @@ class AppNavigationController extends ChangeNotifier {
         return SearchScreen(
           client: client,
           playbackCoordinator: playbackCoordinator,
+          userDataController: userDataController,
           desktopSearchDriven: desktopSearchDriven,
           desktopSearchQuery: desktopSearchQuery,
           onOpenArtist: openArtist,

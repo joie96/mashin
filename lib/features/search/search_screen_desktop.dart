@@ -6,6 +6,7 @@ import '../../app/theme/app_theme.dart';
 import '../../data/music_assistant/ma_client.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../playback/playback_coordinator.dart';
+import '../shared/userdata_controller.dart';
 import '../shared/widgets/media_row_section_desktop.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
 import 'search_controller.dart' as feature_search;
@@ -14,6 +15,7 @@ import 'search_controller.dart' as feature_search;
 class SearchScreenDesktop extends StatefulWidget {
   final MusicAssistantClient client;
   final PlaybackCoordinator playbackCoordinator;
+  final UserDataController? userDataController;
   final bool desktopSearchDriven;
   final String desktopSearchQuery;
   final ValueChanged<Artist>? onOpenArtist;
@@ -24,6 +26,7 @@ class SearchScreenDesktop extends StatefulWidget {
     super.key,
     required this.client,
     required this.playbackCoordinator,
+    this.userDataController,
     this.desktopSearchDriven = false,
     this.desktopSearchQuery = '',
     this.onOpenArtist,
@@ -41,8 +44,12 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
   @override
   void initState() {
     super.initState();
-    _controller = feature_search.SearchController(client: widget.client)
+    _controller = feature_search.SearchController(
+      client: widget.client,
+      userDataController: widget.userDataController,
+    )
       ..addListener(_onControllerChanged);
+    widget.userDataController?.addListener(_onUserDataChanged);
     unawaited(_controller.load());
 
     if (widget.desktopSearchDriven) {
@@ -73,7 +80,27 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
   void dispose() {
     _controller.removeListener(_onControllerChanged);
     _controller.dispose();
+    widget.userDataController?.removeListener(_onUserDataChanged);
     super.dispose();
+  }
+
+  void _onUserDataChanged() {
+    _controller.refreshFavoriteStatuses();
+  }
+
+  bool _isItemFavorite(MediaItem item) => item.favorite;
+
+  void _toggleFavorite(MediaItem item) {
+    final UserDataController? userDataController = widget.userDataController;
+    if (userDataController == null) {
+      return;
+    }
+    unawaited(
+      userDataController.setFavorite(
+        <MediaItem>[item],
+        !_isItemFavorite(item),
+      ),
+    );
   }
 
   @override
@@ -111,6 +138,10 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             emptyText: 'Keine Tracks gefunden.',
             maxItemsPerPage: 10,
             playbackCoordinator: widget.playbackCoordinator,
+            isRowFavorite: (Track item, int _) => _isItemFavorite(item),
+            onRowFavoriteTap: widget.userDataController == null
+              ? null
+              : (Track item, int _) => _toggleFavorite(item),
             onArtistTap: widget.onOpenArtist,
             onAlbumTap: widget.onOpenAlbum,
           ),
@@ -121,6 +152,10 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             items: _controller.albums,
             emptyText: 'Keine Alben gefunden.',
             playbackCoordinator: widget.playbackCoordinator,
+            isRowFavorite: (Album item, int _) => _isItemFavorite(item),
+            onRowFavoriteTap: widget.userDataController == null
+              ? null
+              : (Album item, int _) => _toggleFavorite(item),
             onArtistTap: widget.onOpenArtist,
             onAlbumTap: widget.onOpenAlbum,
           ),
@@ -131,6 +166,10 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             items: _controller.playlists,
             emptyText: 'Keine Playlists gefunden.',
             playbackCoordinator: widget.playbackCoordinator,
+            isRowFavorite: (Playlist item, int _) => _isItemFavorite(item),
+            onRowFavoriteTap: widget.userDataController == null
+              ? null
+              : (Playlist item, int _) => _toggleFavorite(item),
             onPlaylistTap: widget.onOpenPlaylist,
           ),
           const SizedBox(height: 20),
@@ -140,6 +179,10 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             items: _controller.artists,
             emptyText: 'Keine Artists gefunden.',
             playbackCoordinator: widget.playbackCoordinator,
+            isRowFavorite: (Artist item, int _) => _isItemFavorite(item),
+            onRowFavoriteTap: widget.userDataController == null
+              ? null
+              : (Artist item, int _) => _toggleFavorite(item),
             onArtistTap: widget.onOpenArtist,
           ),
         ],

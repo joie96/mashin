@@ -56,6 +56,7 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
       playbackCoordinator: widget.playbackCoordinator,
       itemId: widget.itemId,
       providerInstanceIdOrDomain: widget.providerInstanceIdOrDomain,
+      userDataController: widget.userDataController,
     )..addListener(_onControllerChanged);
     unawaited(_controller.loadArtist());
   }

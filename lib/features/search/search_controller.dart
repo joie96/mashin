@@ -2,12 +2,14 @@ import 'package:flutter/foundation.dart';
 
 import '../../data/music_assistant/ma_client.dart';
 import '../../data/music_assistant/ma_models.dart';
+import '../shared/userdata_controller.dart';
 
 /// Holds search state and loading logic for tracks, albums, playlists and artists.
 class SearchController extends ChangeNotifier {
   final MusicAssistantClient client;
+  final UserDataController? userDataController;
 
-  SearchController({required this.client});
+  SearchController({required this.client, this.userDataController});
 
   int _requestId = 0;
   bool _isDisposed = false;
@@ -33,6 +35,14 @@ class SearchController extends ChangeNotifier {
   List<Album> get albums => _albums;
   List<Playlist> get playlists => _playlists;
   List<Artist> get artists => _artists;
+
+  void refreshFavoriteStatuses() {
+    _tracks = _withFavoriteStatuses(_tracks);
+    _albums = _withFavoriteStatuses(_albums);
+    _playlists = _withFavoriteStatuses(_playlists);
+    _artists = _withFavoriteStatuses(_artists);
+    _notifyListenersIfAlive();
+  }
 
   Future<void> load() async {
     try {
@@ -99,16 +109,18 @@ class SearchController extends ChangeNotifier {
 
       switch (mediaType) {
         case MediaType.track:
-          _tracks = result?.tracks ?? const <Track>[];
+          _tracks = _withFavoriteStatuses(result?.tracks ?? const <Track>[]);
           break;
         case MediaType.album:
-          _albums = result?.albums ?? const <Album>[];
+          _albums = _withFavoriteStatuses(result?.albums ?? const <Album>[]);
           break;
         case MediaType.playlist:
-          _playlists = result?.playlists ?? const <Playlist>[];
+          _playlists = _withFavoriteStatuses(
+            result?.playlists ?? const <Playlist>[],
+          );
           break;
         case MediaType.artist:
-          _artists = result?.artists ?? const <Artist>[];
+          _artists = _withFavoriteStatuses(result?.artists ?? const <Artist>[]);
           break;
         default:
           break;
@@ -162,6 +174,16 @@ class SearchController extends ChangeNotifier {
       return;
     }
     notifyListeners();
+  }
+
+  List<T> _withFavoriteStatuses<T extends MediaItem>(List<T> items) {
+    final UserDataController? controller = userDataController;
+    if (controller == null) {
+      return items;
+    }
+    return items
+        .map((T item) => controller.withFavoriteStatus(item))
+        .toList(growable: false);
   }
 
   @override

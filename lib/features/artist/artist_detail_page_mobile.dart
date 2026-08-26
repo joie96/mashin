@@ -53,6 +53,7 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
       playbackCoordinator: widget.playbackCoordinator,
       itemId: widget.itemId,
       providerInstanceIdOrDomain: widget.providerInstanceIdOrDomain,
+      userDataController: widget.userDataController,
     )..addListener(_onControllerChanged);
     unawaited(_controller.loadArtist());
   }

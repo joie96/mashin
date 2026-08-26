@@ -122,7 +122,7 @@ class FavoritesController extends ChangeNotifier {
   }
 
   // Favorites
-  bool isItemFavorite(MediaItem item) => userDataController.isFavorite(item);
+  bool isItemFavorite(MediaItem item) => item.favorite;
 
   Future<void> setFavorite(MediaItem item, bool favorite) async {
     await userDataController.setFavorite(<MediaItem>[item], favorite);
