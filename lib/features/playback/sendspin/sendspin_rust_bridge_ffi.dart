@@ -84,8 +84,6 @@ class FfiSendspinRustBridge implements SendspinRustBridge {
       'clientName': AppConfig.appName,
       'bufferCapacityBytes': AppConfig.sendspinBufferCapacityBytes,
       'preferredCodec': AppConfig.sendspinPreferredCodec,
-      'initialVolume': AppConfig.sendspinInitialVolume,
-      'initialMuted': AppConfig.sendspinInitialMuted,
     };
 
     final pointer = jsonEncode(config).toNativeUtf8();

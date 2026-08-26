@@ -69,8 +69,17 @@ struct RuntimeConfig {
     client_name: String,
     buffer_capacity_bytes: u64,
     preferred_codec: String,
-    initial_volume: u8,
-    initial_muted: bool,
+}
+
+// Sendspin always connects with a fixed initial volume/mute state; volume/mute are
+// then handled locally by the audio renderer and never negotiated with the server.
+const SENDSPIN_INITIAL_VOLUME: u8 = 100;
+const SENDSPIN_INITIAL_MUTED: bool = false;
+
+// Volume/mute commands are applied directly to the local audio renderer and are not sent to the server.
+enum LocalPlayerCommand {
+    SetVolume(u8),
+    SetMuted(bool),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -143,6 +152,7 @@ struct SendspinEngine {
     sender: Option<WsSender>,
     guard: Option<ConnectionGuard>,
     io_task: Option<JoinHandle<()>>,
+    local_player_command_tx: Option<tokio::sync::mpsc::UnboundedSender<LocalPlayerCommand>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -221,6 +231,7 @@ impl SendspinEngine {
             sender: None,
             guard: None,
             io_task: None,
+            local_player_command_tx: None,
         }
     }
 
@@ -243,8 +254,8 @@ impl SendspinEngine {
             snapshot.metadata_track_progress_millis = None;
             snapshot.metadata_track_duration_millis = None;
             snapshot.metadata_playback_speed_millis = None;
-            snapshot.volume = parsed.initial_volume.clamp(0, 100);
-            snapshot.muted = parsed.initial_muted;
+            snapshot.volume = SENDSPIN_INITIAL_VOLUME;
+            snapshot.muted = SENDSPIN_INITIAL_MUTED;
             snapshot.repeat_mode = None;
             snapshot.shuffle_enabled = None;
             snapshot.seek_max_millis = None;
@@ -284,6 +295,8 @@ impl SendspinEngine {
         }
 
         let snapshot = Arc::clone(&self.snapshot);
+        let (local_player_command_tx, mut local_player_command_rx) =
+            tokio::sync::mpsc::unbounded_channel::<LocalPlayerCommand>();
 
         let (controller, sender, guard, io_task, server_name) = self.runtime.block_on(async {
             let builder = ProtocolClientBuilder::builder()
@@ -297,8 +310,8 @@ impl SendspinEngine {
                     supported_commands: vec!["volume".to_string(), "mute".to_string()],
                 })
                 .initial_player_state(PlayerState {
-                    volume: Some(config.initial_volume.clamp(0, 100)),
-                    muted: Some(config.initial_muted),
+                    volume: Some(SENDSPIN_INITIAL_VOLUME),
+                    muted: Some(SENDSPIN_INITIAL_MUTED),
                     ..Default::default()
                 })
                 .metadata()
@@ -478,6 +491,21 @@ impl SendspinEngine {
                                 emit_snapshot_event_from_shared(&snapshot_for_task);
                             }
                         }
+                        command = local_player_command_rx.recv() => {
+                            match command {
+                                Some(LocalPlayerCommand::SetVolume(volume)) => {
+                                    if let Some(player) = synced_player.as_ref() {
+                                        player.set_volume(volume);
+                                    }
+                                }
+                                Some(LocalPlayerCommand::SetMuted(muted)) => {
+                                    if let Some(player) = synced_player.as_ref() {
+                                        player.set_mute(muted);
+                                    }
+                                }
+                                None => {}
+                            }
+                        }
                         chunk = audio.recv() => {
                             let Some(chunk) = chunk else {
                                 break;
@@ -623,6 +651,7 @@ impl SendspinEngine {
         self.sender = Some(sender);
         self.guard = Some(guard);
         self.io_task = Some(io_task);
+        self.local_player_command_tx = Some(local_player_command_tx);
 
         self.set_snapshot(|state| {
             state.connection_state = "online".to_string();
@@ -648,6 +677,7 @@ impl SendspinEngine {
 
         self.controller = None;
         self.sender = None;
+        self.local_player_command_tx = None;
 
         self.runtime.block_on(async {
             if let Some(task) = previous_task {
@@ -850,18 +880,15 @@ impl SendspinEngine {
     }
 
     fn set_volume(&mut self, volume: i32) -> Result<(), String> {
-        let controller = self
-            .controller
+        let command_tx = self
+            .local_player_command_tx
             .clone()
-            .ok_or_else(|| "controller is not connected".to_string())?;
+            .ok_or_else(|| "player is not connected".to_string())?;
         let clamped = volume.clamp(0, 100) as u8;
 
-        self.runtime.block_on(async {
-            controller
-                .set_volume(clamped)
-                .await
-                .map_err(|err| err.to_string())
-        })?;
+        command_tx
+            .send(LocalPlayerCommand::SetVolume(clamped))
+            .map_err(|_| "player command channel closed".to_string())?;
 
         self.set_snapshot(|snapshot| {
             snapshot.volume = clamped;
@@ -871,13 +898,14 @@ impl SendspinEngine {
     }
 
     fn set_muted(&mut self, muted: bool) -> Result<(), String> {
-        let controller = self
-            .controller
+        let command_tx = self
+            .local_player_command_tx
             .clone()
-            .ok_or_else(|| "controller is not connected".to_string())?;
+            .ok_or_else(|| "player is not connected".to_string())?;
 
-        self.runtime
-            .block_on(async { controller.set_mute(muted).await.map_err(|err| err.to_string()) })?;
+        command_tx
+            .send(LocalPlayerCommand::SetMuted(muted))
+            .map_err(|_| "player command channel closed".to_string())?;
 
         self.set_snapshot(|snapshot| {
             snapshot.muted = muted;

@@ -11,8 +11,6 @@ class AppConfig {
 
   static const int sendspinBufferCapacityBytes = 52428800;
   static const String sendspinPreferredCodec = 'pcm';
-  static const int sendspinInitialVolume = 50;
-  static const bool sendspinInitialMuted = false;
 
   static const String _musicAssistantUrlKey = 'ma.base_url';
   static const String _sendspinUrlKey = 'ma.sendspin_url';
