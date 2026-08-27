@@ -6,6 +6,7 @@ import '../config/app_config.dart';
 import '../../features/auth/login_screen.dart';
 import '../../features/shared/selection/selection_controller.dart';
 import '../../features/shared/selection/selection_overlay.dart';
+import '../../features/shared/context_menu/context_menu_controller.dart';
 import '../../features/shared/widgets/media_link_text.dart';
 import '../../data/music_assistant/ma_auth_store.dart';
 import '../../data/music_assistant/ma_client.dart';
@@ -32,9 +33,6 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   static const double _mobileSelectionOverlayBottomInset = 84;
-  static const Duration _desktopSearchDebounceDuration = Duration(
-    milliseconds: 320,
-  );
 
   final AppNavigationController _navigation = AppNavigationController();
   bool _isDarkTheme = true;
@@ -52,7 +50,6 @@ class _AppShellState extends State<AppShell> {
   UserDataController? _userDataController;
   final TextEditingController _desktopSearchController =
       TextEditingController();
-  Timer? _desktopSearchDebounce;
 
   List<Playlist> get _sidebarPlaylists =>
       _userDataController?.playlists ?? const <Playlist>[];
@@ -108,6 +105,11 @@ class _AppShellState extends State<AppShell> {
   Artist? get _currentTrackPrimaryArtist =>
       _currentQueueItem?.mediaItem?.artists.firstOrNull;
 
+  Track? get _currentTrack {
+    final MediaItem? mediaItem = _currentQueueItem?.mediaItem;
+    return mediaItem is Track ? mediaItem : null;
+  }
+
   double get _currentTrackMaxSeconds {
     final durationFromStateSeconds =
         ((_playbackCoordinator.playbackState.durationMillis ?? 0) / 1000)
@@ -133,6 +135,11 @@ class _AppShellState extends State<AppShell> {
 
   String? get _currentTrackCoverUrl {
     final url = _currentQueueItem?.mediaItem?.imageUriForSize(80)?.trim() ?? '';
+    return url.isEmpty ? null : url;
+  }
+
+  String? get _currentQueueCoverUrl {
+    final url = _currentQueueItem?.mediaItem?.imageUriForSize(512)?.trim() ?? '';
     return url.isEmpty ? null : url;
   }
 
@@ -194,7 +201,6 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
-    _desktopSearchDebounce?.cancel();
     _desktopSearchController.dispose();
     _navigation.removeListener(_onNavigationChanged);
     _navigation.dispose();
@@ -248,6 +254,7 @@ class _AppShellState extends State<AppShell> {
 
   Widget _buildDesktopLayout(BuildContext context) {
     final colors = context.mashinColors;
+    final bool isShowingDetail = _navigation.activeDetail != null;
 
     return Stack(
       children: <Widget>[
@@ -279,6 +286,7 @@ class _AppShellState extends State<AppShell> {
                           label: 'Home',
                           icon: Icons.home_outlined,
                           selected:
+                              !isShowingDetail &&
                               _navigation.currentSection == AppSection.home,
                           onTap: () => _select(AppSection.home),
                         ),
@@ -286,6 +294,7 @@ class _AppShellState extends State<AppShell> {
                           label: 'Entdecken',
                           icon: Icons.explore_outlined,
                           selected:
+                              !isShowingDetail &&
                               _navigation.currentSection == AppSection.explore,
                           onTap: () => _select(AppSection.explore),
                         ),
@@ -293,17 +302,10 @@ class _AppShellState extends State<AppShell> {
                           label: 'Favoriten',
                           icon: Icons.favorite_outlined,
                           selected:
+                              !isShowingDetail &&
                               _navigation.currentSection ==
-                              AppSection.favorites,
+                                  AppSection.favorites,
                           onTap: () => _select(AppSection.favorites),
-                        ),
-                        _DesktopNavItem(
-                          label: 'Playlists',
-                          icon: Icons.queue_music_outlined,
-                          selected:
-                              _navigation.currentSection ==
-                              AppSection.playlists,
-                          onTap: () => _select(AppSection.playlists),
                         ),
                         const SizedBox(height: 14),
                         Divider(height: 1, color: colors.border),
@@ -343,16 +345,14 @@ class _AppShellState extends State<AppShell> {
                             itemBuilder: (BuildContext context, int index) {
                               final Playlist playlist =
                                   _sidebarPlaylists[index];
-                              final AppDetailDestination? activeDetail =
-                                  _navigation.activeDetail;
-                              final bool selected =
-                                  activeDetail?.type ==
-                                      AppDetailType.playlist &&
-                                  activeDetail?.itemId == playlist.itemId;
 
                               return _DesktopSidebarPlaylistItem(
                                 playlist: playlist,
-                                selected: selected,
+                                tracks:
+                                    _userDataController?.tracksForPlaylist(
+                                      playlist.itemId,
+                                    ) ??
+                                    const <Track>[],
                                 onTap: () => _navigation.openPlaylist(playlist),
                               );
                             },
@@ -401,6 +401,8 @@ class _AppShellState extends State<AppShell> {
                   trackSubtitle: _currentTrackSubtitle,
                   currentTrackArtist: _currentTrackPrimaryArtist,
                   trackCoverUrl: _currentTrackCoverUrl,
+                  currentTrack: _currentTrack,
+                  userDataController: _userDataController,
                   onOpenArtist: _navigation.openArtist,
                 ),
               ),
@@ -441,7 +443,7 @@ class _AppShellState extends State<AppShell> {
             desktopBottomInset: _DesktopPlayerBar.barHeight,
             trackTitle: _currentTrackTitle,
             trackSubtitle: _currentTrackSubtitle,
-            trackCoverUrl: _currentTrackCoverUrl,
+            trackCoverUrl: _currentQueueCoverUrl,
             queueTrackCountText: _queueTrackCountText,
             queueTotalDurationText: _queueTotalDurationText,
             dontStopTheMusicEnabled:
@@ -450,6 +452,7 @@ class _AppShellState extends State<AppShell> {
             queueItems: _playbackCoordinator.playbackQueue.items,
             currentQueueIndex: _playbackCoordinator.playbackQueue.currentIndex,
             playbackCoordinator: _playbackCoordinator,
+            userDataController: _userDataController,
             onClose: _closeQueueOverlay,
             onToggleDontStopTheMusic: _toggleDontStopTheMusic,
             onOpenArtist: _openArtistFromQueue,
@@ -497,7 +500,9 @@ class _AppShellState extends State<AppShell> {
                   ),
             ),
             _MobileBottomNav(
-              currentSection: _navigation.currentSection,
+              selectedSection: _navigation.activeDetail == null
+                  ? _navigation.currentSection
+                  : null,
               onSelected: _select,
             ),
           ],
@@ -537,6 +542,7 @@ class _AppShellState extends State<AppShell> {
             queueItems: _playbackCoordinator.playbackQueue.items,
             currentQueueIndex: _playbackCoordinator.playbackQueue.currentIndex,
             playbackCoordinator: _playbackCoordinator,
+            userDataController: _userDataController,
             onClose: _closeQueueOverlay,
             onToggleDontStopTheMusic: _toggleDontStopTheMusic,
           ),
@@ -560,13 +566,21 @@ class _AppShellState extends State<AppShell> {
     });
   }
 
-  void _openArtistFromQueue(Artist artist) {
+  Future<void> _openArtistFromQueue(Artist artist) async {
     _closeQueueOverlay();
+    await Future<void>.delayed(QueueOverlay.animationDuration);
+    if (!mounted) {
+      return;
+    }
     _navigation.openArtist(artist);
   }
 
-  void _openAlbumFromQueue(Album album) {
+  Future<void> _openAlbumFromQueue(Album album) async {
     _closeQueueOverlay();
+    await Future<void>.delayed(QueueOverlay.animationDuration);
+    if (!mounted) {
+      return;
+    }
     _navigation.openAlbum(album);
   }
 
@@ -575,31 +589,16 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _onDesktopSearchChanged(String value) {
-    final trimmed = value.trim();
-
-    _desktopSearchDebounce?.cancel();
-
-    _navigation.ensureSearchSectionForInput(trimmed);
     // Rebuild keeps clear button visibility in sync while typing.
     setState(() {});
-
-    _desktopSearchDebounce = Timer(_desktopSearchDebounceDuration, () {
-      if (!mounted) {
-        return;
-      }
-
-      _navigation.onDesktopSearchChanged(trimmed);
-    });
   }
 
   void _submitDesktopSearch(String value) {
     final trimmed = value.trim();
-    _desktopSearchDebounce?.cancel();
     _navigation.submitDesktopSearch(trimmed);
   }
 
   void _clearDesktopSearch() {
-    _desktopSearchDebounce?.cancel();
     _desktopSearchController.clear();
     _navigation.clearDesktopSearch();
     setState(() {});
@@ -1025,9 +1024,11 @@ class _DesktopTopBar extends StatelessWidget {
                     minWidth: 38,
                     minHeight: 36,
                   ),
-                  suffixIcon: searchController.text.trim().isEmpty
-                      ? null
-                      : IconButton(
+                  suffixIcon: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      if (searchController.text.trim().isNotEmpty)
+                        IconButton(
                           tooltip: 'Leeren',
                           onPressed: onClearSearch,
                           padding: EdgeInsets.zero,
@@ -1037,6 +1038,20 @@ class _DesktopTopBar extends StatelessWidget {
                           ),
                           icon: const Icon(Icons.close_outlined, size: 16),
                         ),
+                      IconButton(
+                        tooltip: 'Suchen',
+                        onPressed: () =>
+                            onSearchSubmitted(searchController.text),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 36,
+                          minHeight: 36,
+                        ),
+                        icon: const Icon(Icons.search_outlined, size: 16),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                  ),
                   filled: true,
                   fillColor: colors.bgSecondary,
                   contentPadding: const EdgeInsets.symmetric(
@@ -1084,7 +1099,7 @@ class _DesktopTopBar extends StatelessWidget {
   }
 }
 
-class _DesktopNavItem extends StatelessWidget {
+class _DesktopNavItem extends StatefulWidget {
   final String label;
   final IconData icon;
   final bool selected;
@@ -1098,32 +1113,59 @@ class _DesktopNavItem extends StatelessWidget {
   });
 
   @override
+  State<_DesktopNavItem> createState() => _DesktopNavItemState();
+}
+
+class _DesktopNavItemState extends State<_DesktopNavItem> {
+  bool _isHovered = false;
+
+  void _setHovered(bool value) {
+    if (_isHovered == value) {
+      return;
+    }
+    setState(() {
+      _isHovered = value;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-      child: Material(
-        color: selected ? colors.hover : Colors.transparent,
-        borderRadius: BorderRadius.circular(10),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(10),
-          onTap: onTap,
-          child: Padding(
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => _setHovered(true),
+        onExit: (_) => _setHovered(false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            curve: Curves.easeOut,
+            decoration: BoxDecoration(
+              color: _isHovered ? colors.hover : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+            ),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             child: Row(
               children: <Widget>[
                 Icon(
-                  icon,
+                  widget.icon,
                   size: 20,
-                  color: selected ? colors.accent : colors.textSecondary,
+                  color: widget.selected ? colors.accent : colors.textSecondary,
                 ),
                 const SizedBox(width: 10),
                 Text(
-                  label,
+                  widget.label,
                   style: TextStyle(
-                    color: selected ? colors.textPrimary : colors.textSecondary,
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                    color: widget.selected
+                        ? colors.accent
+                        : colors.textSecondary,
+                    fontWeight: widget.selected
+                        ? FontWeight.w600
+                        : FontWeight.w500,
                   ),
                 ),
               ],
@@ -1135,53 +1177,117 @@ class _DesktopNavItem extends StatelessWidget {
   }
 }
 
-class _DesktopSidebarPlaylistItem extends StatelessWidget {
+class _DesktopSidebarPlaylistItem extends StatefulWidget {
   const _DesktopSidebarPlaylistItem({
     required this.playlist,
-    required this.selected,
+    required this.tracks,
     required this.onTap,
   });
 
   final Playlist playlist;
-  final bool selected;
+  final List<Track> tracks;
   final VoidCallback onTap;
+
+  @override
+  State<_DesktopSidebarPlaylistItem> createState() =>
+      _DesktopSidebarPlaylistItemState();
+}
+
+class _DesktopSidebarPlaylistItemState
+    extends State<_DesktopSidebarPlaylistItem> {
+  bool _isHovered = false;
+
+  void _setHovered(bool value) {
+    if (_isHovered == value) {
+      return;
+    }
+    setState(() {
+      _isHovered = value;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
+    final Playlist playlist = widget.playlist;
+    final List<Track> tracks = widget.tracks;
     final String title = playlist.name.trim().isEmpty
         ? 'Unknown Playlist'
         : playlist.name.trim();
+    final String? coverUrl = playlist.imageUriForSize(40)?.trim();
+    final int totalSeconds = tracks.fold<int>(
+      0,
+      (int sum, Track track) => sum + track.duration,
+    );
+    final int hours = totalSeconds ~/ 3600;
+    final int minutes = (totalSeconds % 3600) ~/ 60;
+    final String totalDurationText = hours > 0
+        ? '$hours Std. $minutes Min.'
+        : '$minutes Min.';
+    final String tracksCountText = tracks.length == 1
+        ? '1 Titel'
+        : '${tracks.length} Titel';
+    final String metadataText = '$tracksCountText • $totalDurationText';
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Material(
-        color: selected ? colors.hover : Colors.transparent,
-        borderRadius: BorderRadius.circular(10),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(10),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => _setHovered(true),
+        onExit: (_) => _setHovered(false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            curve: Curves.easeOut,
+            decoration: BoxDecoration(
+              color: _isHovered ? colors.hover : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             child: Row(
               children: <Widget>[
-                Icon(
-                  Icons.queue_music_outlined,
-                  size: 18,
-                  color: selected ? colors.accent : colors.textSecondary,
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(2),
+                  child: SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: coverUrl == null || coverUrl.isEmpty
+                        ? ColoredBox(color: colors.bgTertiary)
+                        : MediaImage(
+                            source: coverUrl,
+                            fit: BoxFit.cover,
+                            fallback: ColoredBox(color: colors.bgTertiary),
+                          ),
+                  ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: selected
-                          ? colors.textPrimary
-                          : colors.textSecondary,
-                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                    ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: colors.textPrimary,
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        metadataText,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: colors.textTertiary,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -1478,6 +1584,8 @@ class _DesktopCurrentTrackInfo extends StatelessWidget {
     required this.trackSubtitle,
     required this.currentTrackArtist,
     required this.trackCoverUrl,
+    required this.currentTrack,
+    required this.userDataController,
     required this.onOpenArtist,
   });
 
@@ -1485,7 +1593,31 @@ class _DesktopCurrentTrackInfo extends StatelessWidget {
   final String trackSubtitle;
   final Artist? currentTrackArtist;
   final String? trackCoverUrl;
+  final Track? currentTrack;
+  final UserDataController? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
+
+  Future<void> _showAddToPlaylistMenu(BuildContext context, Track track) {
+    final UserDataController? controller = userDataController;
+    if (controller == null) {
+      return Future<void>.value();
+    }
+    return const AppContextMenuController().show(
+      context: context,
+      actions: controller.playlists
+          .map(
+            (Playlist playlist) => ContextMenuAction(
+              label: playlist.name,
+              icon: Icons.playlist_play_outlined,
+              onSelected: () => controller.addPlaylistTracks(
+                playlist.itemId,
+                <Track>[track],
+              ),
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1547,15 +1679,39 @@ class _DesktopCurrentTrackInfo extends StatelessWidget {
               ],
             ),
           ),
-          _PlayerBarIconButton(
-            icon: Icons.favorite_border_outlined,
-            onTap: () {},
-            color: colors.textSecondary,
+          Builder(
+            builder: (BuildContext buttonContext) {
+              final Track? track = currentTrack;
+              final bool isFavorite =
+                  track != null &&
+                  (userDataController?.isFavorite(track) ?? track.favorite);
+              return _PlayerBarIconButton(
+                icon: isFavorite
+                    ? Icons.favorite_outlined
+                    : Icons.favorite_border_outlined,
+                onTap: track == null || userDataController == null
+                    ? null
+                    : () => userDataController!.setFavorite(
+                        <Track>[track],
+                        !isFavorite,
+                      ),
+                color: colors.textSecondary,
+              );
+            },
           ),
-          _PlayerBarIconButton(
-            icon: Icons.add_outlined,
-            onTap: () {},
-            color: colors.textSecondary,
+          Builder(
+            builder: (BuildContext buttonContext) {
+              final Track? track = currentTrack;
+              final bool hasPlaylists =
+                  userDataController?.playlists.isNotEmpty ?? false;
+              return _PlayerBarIconButton(
+                icon: Icons.add_outlined,
+                onTap: track == null || !hasPlaylists
+                    ? null
+                    : () => _showAddToPlaylistMenu(buttonContext, track),
+                color: colors.textSecondary,
+              );
+            },
           ),
         ],
       ),
@@ -1887,11 +2043,11 @@ class _MobileCurrentTrackInfo extends StatelessWidget {
 }
 
 class _MobileBottomNav extends StatelessWidget {
-  final AppSection currentSection;
+  final AppSection? selectedSection;
   final ValueChanged<AppSection> onSelected;
 
   const _MobileBottomNav({
-    required this.currentSection,
+    required this.selectedSection,
     required this.onSelected,
   });
 
@@ -1911,27 +2067,27 @@ class _MobileBottomNav extends StatelessWidget {
         children: <Widget>[
           _MobileNavButton(
             icon: Icons.home_outlined,
-            selected: currentSection == AppSection.home,
+            selected: selectedSection == AppSection.home,
             onTap: () => onSelected(AppSection.home),
           ),
           _MobileNavButton(
             icon: Icons.explore_outlined,
-            selected: currentSection == AppSection.explore,
+            selected: selectedSection == AppSection.explore,
             onTap: () => onSelected(AppSection.explore),
           ),
           _MobileNavButton(
             icon: Icons.favorite_outlined,
-            selected: currentSection == AppSection.favorites,
+            selected: selectedSection == AppSection.favorites,
             onTap: () => onSelected(AppSection.favorites),
           ),
           _MobileNavButton(
             icon: Icons.queue_music_outlined,
-            selected: currentSection == AppSection.playlists,
+            selected: selectedSection == AppSection.playlists,
             onTap: () => onSelected(AppSection.playlists),
           ),
           _MobileNavButton(
             icon: Icons.search_outlined,
-            selected: currentSection == AppSection.search,
+            selected: selectedSection == AppSection.search,
             onTap: () => onSelected(AppSection.search),
           ),
         ],

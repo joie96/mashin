@@ -100,13 +100,38 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
       ),
     ];
 
+    if (item is Track) {
+      final List<Playlist> playlists =
+          widget.userDataController?.playlists ?? const <Playlist>[];
+      if (playlists.isNotEmpty) {
+        actions.add(const ContextMenuAction.separator());
+        actions.add(
+          ContextMenuAction.submenu(
+            label: 'Zu Wiedergabeliste hinzufügen',
+            icon: Icons.playlist_add_outlined,
+            children: playlists
+                .map(
+                  (Playlist playlist) => ContextMenuAction(
+                    label: playlist.name,
+                    icon: Icons.playlist_play_outlined,
+                    onSelected: () => _controller.addTracksToPlaylist(
+                      playlist.itemId,
+                      <Track>[item],
+                    ),
+                  ),
+                )
+                .toList(growable: false),
+          ),
+        );
+      }
+    }
+
     if (item is Track && _controller.isEditable) {
       actions.add(const ContextMenuAction.separator());
       actions.add(
         ContextMenuAction(
           label: 'Aus Wiedergabeliste entfernen',
           icon: Icons.playlist_remove_outlined,
-          isDestructive: true,
           onSelected: () => _controller.removeTrack(item),
         ),
       );
@@ -214,28 +239,28 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: <Widget>[
-              IconButton(
-                onPressed: _controller.playPlaylist,
-                tooltip: 'Abspielen',
-                icon: const Icon(Icons.play_arrow),
+              _MobileActionButton(
+                icon: Icons.play_arrow,
+                onTap: _controller.playPlaylist,
               ),
-              IconButton(
-                onPressed: _controller.shufflePlaylist,
-                tooltip: 'Zufällig',
-                icon: const Icon(Icons.shuffle),
+              const SizedBox(width: 14),
+              _MobileActionButton(
+                icon: Icons.shuffle,
+                onTap: _controller.shufflePlaylist,
               ),
-              if (!_controller.isLocalPlaylist)
-                IconButton(
-                  onPressed: _controller.togglePlaylistFavorite,
-                  tooltip: 'Favorit',
-                  icon: Icon(
-                    _controller.isPlaylistFavorite
-                        ? Icons.favorite
-                        : Icons.favorite_border_outlined,
-                  ),
+              if (!_controller.isLocalPlaylist) ...<Widget>[
+                const SizedBox(width: 14),
+                _MobileActionButton(
+                  icon: _controller.isPlaylistFavorite
+                      ? Icons.favorite
+                      : Icons.favorite_border_outlined,
+                  onTap: _controller.togglePlaylistFavorite,
                 ),
-              IconButton(
-                onPressed: playlist == null
+              ],
+              const SizedBox(width: 14),
+              _MobileActionButton(
+                icon: Icons.more_vert_outlined,
+                onTap: playlist == null
                     ? null
                     : () => unawaited(
                         const AppContextMenuController().show(
@@ -243,8 +268,6 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
                           actions: _buildHeaderMenuActions(playlist),
                         ),
                       ),
-                tooltip: 'Weitere Optionen',
-                icon: const Icon(Icons.more_vert_outlined),
               ),
             ],
           ),
@@ -270,6 +293,35 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _MobileActionButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  const _MobileActionButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+
+    return Material(
+      color: colors.bgSecondary,
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        hoverColor: colors.hover,
+        highlightColor: colors.selection,
+        splashColor: colors.selection,
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: Icon(icon, color: colors.textPrimary, size: 20),
+        ),
       ),
     );
   }

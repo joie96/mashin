@@ -150,27 +150,26 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
-                IconButton(
-                  onPressed: _controller.playAlbum,
-                  tooltip: 'Abspielen',
-                  icon: const Icon(Icons.play_arrow),
+                _MobileActionButton(
+                  icon: Icons.play_arrow,
+                  onTap: _controller.playAlbum,
                 ),
-                IconButton(
-                  onPressed: _controller.shuffleAlbum,
-                  tooltip: 'Zufällig',
-                  icon: const Icon(Icons.shuffle),
+                const SizedBox(width: 14),
+                _MobileActionButton(
+                  icon: Icons.shuffle,
+                  onTap: _controller.shuffleAlbum,
                 ),
-                IconButton(
-                  onPressed: _controller.toggleAlbumFavorite,
-                  tooltip: 'Favorit',
-                  icon: Icon(
-                    _controller.isAlbumFavorite
-                        ? Icons.favorite
-                        : Icons.favorite_border_outlined,
-                  ),
+                const SizedBox(width: 14),
+                _MobileActionButton(
+                  icon: _controller.isAlbumFavorite
+                      ? Icons.favorite
+                      : Icons.favorite_border_outlined,
+                  onTap: _controller.toggleAlbumFavorite,
                 ),
-                IconButton(
-                  onPressed: album == null
+                const SizedBox(width: 14),
+                _MobileActionButton(
+                  icon: Icons.more_vert_outlined,
+                  onTap: album == null
                       ? null
                       : () => unawaited(
                           const AppContextMenuController().show(
@@ -178,8 +177,6 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
                             actions: _buildHeaderMenu(album),
                           ),
                         ),
-                  tooltip: 'Weitere Optionen',
-                  icon: const Icon(Icons.more_vert_outlined),
                 ),
               ],
             ),
@@ -231,6 +228,35 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileActionButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  const _MobileActionButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+
+    return Material(
+      color: colors.bgSecondary,
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        hoverColor: colors.hover,
+        highlightColor: colors.selection,
+        splashColor: colors.selection,
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: Icon(icon, color: colors.textPrimary, size: 20),
         ),
       ),
     );

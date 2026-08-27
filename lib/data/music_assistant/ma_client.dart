@@ -1,9 +1,13 @@
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show compute;
 import 'package:http/http.dart' as http;
 
 import 'ma_models.dart';
+
+/// Runs off the UI isolate via [compute] so large responses don't jank the UI thread.
+dynamic _decodeJsonBody(String body) => jsonDecode(body);
 
 class UnauthorizedException implements Exception {
   final String message;
@@ -1562,7 +1566,11 @@ class MusicAssistantClient {
     }
 
     try {
-      return jsonDecode(response.body);
+      // Small responses aren't worth the isolate hop; only offload larger payloads.
+      if (response.bodyBytes.length < 32 * 1024) {
+        return jsonDecode(response.body);
+      }
+      return await compute(_decodeJsonBody, response.body);
     } catch (_) {
       throw RequestException('Antwort fuer $command ist kein gueltiges JSON');
     }

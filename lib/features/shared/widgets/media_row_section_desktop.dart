@@ -437,7 +437,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         (maxWidth - ((visibleCount - 1) * spacing)) / visibleCount;
     // Cap item width so a small number of items doesn't stretch across the
     // full section width (e.g. a single item spanning the whole window).
-    final double maxItemWidth = minItemWidth * 1.5;
+    final double maxItemWidth = minItemWidth * 1.2;
 
     return _RowLayoutMetrics(
       visibleCount: visibleCount,
@@ -1012,7 +1012,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
             : isPlaylistSection
             ? MediaRowSectionDesktop._playlistReservedTextHeight
             : MediaRowSectionDesktop._reservedTextHeight;
-        final double maxSectionHeight = minSectionHeight * 1.5;
+        final double maxSectionHeight = minSectionHeight * 1.2;
         final double sectionHeight = math.min(
           maxSectionHeight,
           math.max(minSectionHeight, resolvedCoverSize + reservedTextHeight),

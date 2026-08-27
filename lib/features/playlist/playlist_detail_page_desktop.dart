@@ -129,13 +129,38 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
       }
     }
 
+    if (item is Track) {
+      final List<Playlist> playlists =
+          widget.userDataController?.playlists ?? const <Playlist>[];
+      if (playlists.isNotEmpty) {
+        actions.add(const ContextMenuAction.separator());
+        actions.add(
+          ContextMenuAction.submenu(
+            label: 'Zu Wiedergabeliste hinzufügen',
+            icon: Icons.playlist_add_outlined,
+            children: playlists
+                .map(
+                  (Playlist playlist) => ContextMenuAction(
+                    label: playlist.name,
+                    icon: Icons.playlist_play_outlined,
+                    onSelected: () => _controller.addTracksToPlaylist(
+                      playlist.itemId,
+                      <Track>[item],
+                    ),
+                  ),
+                )
+                .toList(growable: false),
+          ),
+        );
+      }
+    }
+
     if (item is Track && _controller.isEditable) {
       actions.add(const ContextMenuAction.separator());
       actions.add(
         ContextMenuAction(
           label: 'Aus Wiedergabeliste entfernen',
           icon: Icons.playlist_remove_outlined,
-          isDestructive: true,
           onSelected: () => _controller.removeTrack(item),
         ),
       );
@@ -150,7 +175,6 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
         icon: isFavorite
             ? Icons.favorite_outlined
             : Icons.favorite_border_outlined,
-        isDestructive: isFavorite,
         onSelected: () => _controller.toggleItemFavorite(item),
       ),
     );
@@ -196,7 +220,6 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
           icon: _controller.isPlaylistFavorite
               ? Icons.favorite_outlined
               : Icons.favorite_border_outlined,
-          isDestructive: _controller.isPlaylistFavorite,
           onSelected: _controller.togglePlaylistFavorite,
         ),
       ],
@@ -570,6 +593,8 @@ class _HeaderActionButton extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(26),
+        hoverColor: colors.bgPrimary.withValues(alpha: 0.45),
+        splashColor: colors.bgPrimary.withValues(alpha: 0.55),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
@@ -609,13 +634,19 @@ class _HeaderIconButton extends StatelessWidget {
     final MashinColors colors = context.mashinColors;
     return Tooltip(
       message: tooltip,
-      child: InkWell(
-        onTap: onTap,
+      child: Material(
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(14),
-        child: SizedBox(
-          width: 28,
-          height: 28,
-          child: Icon(icon, size: 18, color: colors.textSecondary),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          hoverColor: colors.hover,
+          splashColor: colors.hover,
+          child: SizedBox(
+            width: 28,
+            height: 28,
+            child: Icon(icon, size: 18, color: colors.textSecondary),
+          ),
         ),
       ),
     );

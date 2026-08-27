@@ -568,6 +568,9 @@ class _MediaTableSectionDesktopState<T>
     final colors = context.mashinColors;
     final bool hasTitle = widget.title.trim().isNotEmpty;
 
+    // Ohne Titel entfällt die komplette Kopfzeile (Trenner, Play/Shuffle, Paging).
+    final bool showHeaderRow = hasTitle;
+
     final Widget content = LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final bool hasBoundedHeight = constraints.maxHeight.isFinite;
@@ -585,9 +588,7 @@ class _MediaTableSectionDesktopState<T>
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: hasBoundedHeight ? MainAxisSize.max : MainAxisSize.min,
           children: <Widget>[
-            if (hasTitle ||
-                _isPagingEnabled ||
-                widget.playbackCoordinator != null)
+            if (showHeaderRow)
               Row(
                 children: <Widget>[
                   if (hasTitle)
@@ -624,10 +625,7 @@ class _MediaTableSectionDesktopState<T>
                   ],
                 ],
               ),
-            if (hasTitle ||
-                _isPagingEnabled ||
-                widget.playbackCoordinator != null)
-              const SizedBox(height: 10),
+            if (showHeaderRow) const SizedBox(height: 10),
             if (hasBoundedHeight)
               Expanded(child: ClipRect(child: tableContent))
             else

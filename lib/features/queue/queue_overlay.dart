@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/theme/app_theme.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../playback/playback_coordinator.dart';
+import '../shared/userdata_controller.dart';
 import 'queue_overlay_desktop.dart';
 import 'queue_overlay_mobile.dart';
 
@@ -19,6 +20,7 @@ class QueueOverlay extends StatefulWidget {
     required this.queueItems,
     required this.currentQueueIndex,
     required this.playbackCoordinator,
+    this.userDataController,
     this.desktopBottomInset = 0,
     required this.onClose,
     required this.onToggleDontStopTheMusic,
@@ -38,11 +40,15 @@ class QueueOverlay extends StatefulWidget {
   final List<QueueItem> queueItems;
   final int? currentQueueIndex;
   final PlaybackCoordinator playbackCoordinator;
+  final UserDataController? userDataController;
   final double desktopBottomInset;
   final VoidCallback onClose;
   final Future<void> Function() onToggleDontStopTheMusic;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
+
+  /// Public so callers can wait for the close animation before navigating away.
+  static const Duration animationDuration = Duration(milliseconds: 260);
 
   @override
   State<QueueOverlay> createState() => _QueueOverlayState();
@@ -51,7 +57,7 @@ class QueueOverlay extends StatefulWidget {
 class _QueueOverlayState extends State<QueueOverlay> {
   static const double _mobileDismissThreshold = 120;
   static const double _dragResistance = 0.92;
-  static const Duration _overlayAnimationDuration = Duration(milliseconds: 260);
+  static const Duration _overlayAnimationDuration = QueueOverlay.animationDuration;
   double _dragOffset = 0;
 
   @override
@@ -170,6 +176,9 @@ class _QueueOverlayState extends State<QueueOverlay> {
                                     currentQueueIndex: widget.currentQueueIndex,
                                     playbackCoordinator:
                                         widget.playbackCoordinator,
+                                    userDataController:
+                                      widget.userDataController,
+                                    onClose: widget.onClose,
                                     onToggleDontStopTheMusic:
                                         widget.onToggleDontStopTheMusic,
                                     onOpenArtist: widget.onOpenArtist,

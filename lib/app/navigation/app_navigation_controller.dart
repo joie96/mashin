@@ -146,32 +146,10 @@ class AppNavigationController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void onDesktopSearchChanged(String query) {
-    final String trimmed = query.trim();
-    _desktopSearchQuery = trimmed;
-    if (trimmed.isNotEmpty && _currentSection != AppSection.search) {
-      _recordCurrentState();
-      _currentSection = AppSection.search;
-      _detailStack.clear();
-    }
-    notifyListeners();
-  }
-
-  void ensureSearchSectionForInput(String query) {
-    final String trimmed = query.trim();
-    if (trimmed.isEmpty || _currentSection == AppSection.search) {
-      return;
-    }
-
-    _recordCurrentState();
-    _currentSection = AppSection.search;
-    _detailStack.clear();
-    notifyListeners();
-  }
-
   void submitDesktopSearch(String query) {
     final String trimmed = query.trim();
-    if (trimmed.isNotEmpty && _currentSection != AppSection.search) {
+    if (trimmed.isNotEmpty &&
+        (_currentSection != AppSection.search || activeDetail != null)) {
       _recordCurrentState();
       _currentSection = AppSection.search;
       _detailStack.clear();

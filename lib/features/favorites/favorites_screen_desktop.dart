@@ -141,7 +141,6 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
       ContextMenuAction(
         label: isFavorite ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen',
         icon: isFavorite ? Icons.favorite_outlined : Icons.favorite_border_outlined,
-        isDestructive: isFavorite,
         onSelected: () => _controller.setFavorite(track, !isFavorite),
       ),
     ];
@@ -188,7 +187,6 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
       ContextMenuAction(
         label: isFavorite ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen',
         icon: isFavorite ? Icons.favorite_outlined : Icons.favorite_border_outlined,
-        isDestructive: isFavorite,
         onSelected: () => _controller.setFavorite(album, !isFavorite),
       ),
     ];
@@ -219,7 +217,6 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
       ContextMenuAction(
         label: isFavorite ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen',
         icon: isFavorite ? Icons.favorite_outlined : Icons.favorite_border_outlined,
-        isDestructive: isFavorite,
         onSelected: () => _controller.setFavorite(playlist, !isFavorite),
       ),
     ];
@@ -263,7 +260,6 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
       ContextMenuAction(
         label: isFavorite ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen',
         icon: isFavorite ? Icons.favorite_outlined : Icons.favorite_border_outlined,
-        isDestructive: isFavorite,
         onSelected: () => _controller.setFavorite(artist, !isFavorite),
       ),
     ];

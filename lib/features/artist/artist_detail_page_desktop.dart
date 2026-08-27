@@ -188,7 +188,6 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
         icon: isFavorite
             ? Icons.favorite_outlined
             : Icons.favorite_border_outlined,
-        isDestructive: isFavorite,
         onSelected: () => _controller.toggleItemFavorite(item),
       ),
     );
@@ -239,7 +238,6 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
         icon: isFavorite
             ? Icons.favorite_outlined
             : Icons.favorite_border_outlined,
-        isDestructive: isFavorite,
         onSelected: _controller.toggleArtistFavorite,
       ),
     ];

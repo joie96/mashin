@@ -70,14 +70,34 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
     if (mounted) setState(() {});
   }
 
+  List<ContextMenuAction> _buildPlaylistSubmenu(MediaItem item) {
+    final UserDataController? controller = widget.userDataController;
+    if (controller == null || item is! Track) {
+      return const <ContextMenuAction>[];
+    }
+
+    return controller.playlists
+        .map(
+          (Playlist playlist) => ContextMenuAction(
+            label: playlist.name,
+            icon: Icons.playlist_play_outlined,
+            onSelected: () => controller.addPlaylistTracks(
+              playlist.itemId,
+              <Track>[item],
+            ),
+          ),
+        )
+        .toList(growable: false);
+  }
+
   List<ContextMenuAction> _buildItemMenuActions(MediaItem item) {
     final bool isFavorite = _controller.isItemFavorite(item);
-    return <ContextMenuAction>[
+    final PlaybackCoordinator coordinator = widget.playbackCoordinator;
+    final List<ContextMenuAction> actions = <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () =>
-            widget.playbackCoordinator.playMedia(<MediaItem>[item]),
+        onSelected: () => coordinator.playMedia(<MediaItem>[item]),
       ),
       ContextMenuAction(
         label: 'Radio starten',
@@ -90,16 +110,68 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () =>
-            widget.playbackCoordinator.playMediaNext(<MediaItem>[item]),
+        onSelected: () => coordinator.playMediaNext(<MediaItem>[item]),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () =>
-            widget.playbackCoordinator.playMediaLast(<MediaItem>[item]),
+        onSelected: () => coordinator.playMediaLast(<MediaItem>[item]),
       ),
-      const ContextMenuAction.separator(),
+    ];
+
+    final Artist? primaryArtist = _primaryArtistOf(item);
+    final Album? primaryAlbum = item is Track
+        ? item.album
+        : (item is Album ? item : null);
+    final bool hasNavigation =
+        (primaryArtist != null && widget.onOpenArtist != null) ||
+        primaryAlbum != null ||
+        item is Artist;
+
+    if (hasNavigation) {
+      actions.add(const ContextMenuAction.separator());
+      if (item is Artist && widget.onOpenArtist != null) {
+        actions.add(
+          ContextMenuAction(
+            label: 'Künstler:in öffnen',
+            icon: Icons.person_outline,
+            onSelected: () => widget.onOpenArtist!(item),
+          ),
+        );
+      } else if (primaryArtist != null && widget.onOpenArtist != null) {
+        actions.add(
+          ContextMenuAction(
+            label: 'Künstler:in öffnen',
+            icon: Icons.person_outline,
+            onSelected: () => widget.onOpenArtist!(primaryArtist),
+          ),
+        );
+      }
+      if (primaryAlbum != null) {
+        actions.add(
+          ContextMenuAction(
+            label: 'Album öffnen',
+            icon: Icons.album_outlined,
+            onSelected: () => widget.onOpenAlbum?.call(primaryAlbum),
+          ),
+        );
+      }
+    }
+
+    final List<ContextMenuAction> playlistActions = _buildPlaylistSubmenu(item);
+    if (playlistActions.isNotEmpty) {
+      actions.add(const ContextMenuAction.separator());
+      actions.add(
+        ContextMenuAction.submenu(
+          label: 'Zu Wiedergabeliste hinzufügen',
+          icon: Icons.playlist_add_outlined,
+          children: playlistActions,
+        ),
+      );
+    }
+
+    actions.add(const ContextMenuAction.separator());
+    actions.add(
       ContextMenuAction(
         label: isFavorite
             ? 'Aus Favoriten entfernen'
@@ -107,10 +179,25 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
         icon: isFavorite
             ? Icons.favorite_outlined
             : Icons.favorite_border_outlined,
-        isDestructive: isFavorite,
         onSelected: () => _controller.toggleItemFavorite(item),
       ),
-    ];
+    );
+    return actions;
+  }
+
+  Artist? _primaryArtistOf(MediaItem item) {
+    final List<Artist> artists = switch (item) {
+      Track track => track.artists,
+      Album album => album.artists,
+      _ => const <Artist>[],
+    };
+    for (final Artist artist in artists) {
+      if (artist.itemId.trim().isNotEmpty &&
+          artist.provider.trim().isNotEmpty) {
+        return artist;
+      }
+    }
+    return null;
   }
 
   List<ContextMenuAction> _buildHeaderMenuActions(Album album) {
@@ -136,7 +223,6 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
         icon: _controller.isAlbumFavorite
             ? Icons.favorite_outlined
             : Icons.favorite_border_outlined,
-        isDestructive: _controller.isAlbumFavorite,
         onSelected: _controller.toggleAlbumFavorite,
       ),
     ];
@@ -464,6 +550,8 @@ class _HeaderActionButton extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(26),
+        hoverColor: colors.bgPrimary.withValues(alpha: 0.45),
+        splashColor: colors.bgPrimary.withValues(alpha: 0.55),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
@@ -501,13 +589,19 @@ class _HeaderIconButton extends StatelessWidget {
     final colors = context.mashinColors;
     return Tooltip(
       message: tooltip,
-      child: InkWell(
-        onTap: onTap,
+      child: Material(
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(14),
-        child: SizedBox(
-          width: 28,
-          height: 28,
-          child: Icon(icon, size: 18, color: colors.textSecondary),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          hoverColor: colors.hover,
+          splashColor: colors.hover,
+          child: SizedBox(
+            width: 28,
+            height: 28,
+            child: Icon(icon, size: 18, color: colors.textSecondary),
+          ),
         ),
       ),
     );
