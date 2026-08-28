@@ -52,6 +52,8 @@ class SendspinRustBackend {
 
   Future<void> requestCodec(String codec) => bridge.requestCodec(codec);
 
+  Future<SendspinPlayerState> getPlayerState() => bridge.getPlaybackState();
+
   Future<PlaybackState> getPlaybackState() async {
     final SendspinPlayerState playbackState = await bridge.getPlaybackState();
     return playbackState.toPlaybackState();

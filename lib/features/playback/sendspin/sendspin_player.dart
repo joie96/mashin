@@ -8,6 +8,7 @@ import '../../../data/music_assistant/ma_client.dart';
 import '../../../data/music_assistant/ma_event_hub.dart';
 import '../playback_models.dart';
 import '../playback_player.dart';
+import 'sendspin_player_models.dart';
 import 'sendspin_rust_backend.dart';
 
 class SendspinPlayer implements PlaybackPlayer {
@@ -18,6 +19,10 @@ class SendspinPlayer implements PlaybackPlayer {
   });
 
   static const Duration _positionTickInterval = Duration(milliseconds: 250);
+  static const int _codecSwitchPlayRetryAttempts = 10;
+  static const Duration _codecSwitchPlayRetryDelay = Duration(
+    milliseconds: 500,
+  );
   static const String _logName = 'SendspinPlayer';
 
   final SendspinRustBackend transportBackend;
@@ -171,8 +176,14 @@ class SendspinPlayer implements PlaybackPlayer {
     }
 
     await AppConfig.setSendspinPreferredCodec(normalized);
+    final initialState = await transportBackend.getPlayerState();
+    if (initialState.connectionState != SendspinConnectionState.online) {
+      return;
+    }
+
     final wasPlaying =
         _playbackState.playbackState == PlaybackStateType.playing;
+
     if (wasPlaying) {
       await transportBackend.transportPause();
     }
@@ -182,10 +193,49 @@ class SendspinPlayer implements PlaybackPlayer {
     );
     _emitPlaybackState();
 
-    await transportBackend.requestCodec(normalized);
+    var codecRequestSucceeded = false;
+    try {
+      await transportBackend.requestCodec(normalized);
+      codecRequestSucceeded = true;
+    } catch (_) {
+      // Keep the MAUI behavior: still attempt to resume playback.
+    }
 
-    if (wasPlaying) {
-      await transportBackend.transportPlay();
+    if (!wasPlaying) {
+      return;
+    }
+
+    SendspinPlayerState? resumedState;
+    var attempts = 0;
+    for (var attempt = 1; attempt <= _codecSwitchPlayRetryAttempts; attempt++) {
+      attempts = attempt;
+      try {
+        await transportBackend.transportPlay();
+      } catch (_) {
+        // Retry after the server finishes applying the format change.
+      }
+
+      await Future<void>.delayed(_codecSwitchPlayRetryDelay);
+      final state = await transportBackend.getPlayerState();
+        final targetCodecActive =
+          state.activeCodec?.toLowerCase() == normalized;
+        final resumed = targetCodecActive &&
+          (state.playbackState == PlaybackStateType.playing ||
+            state.playbackState == PlaybackStateType.buffering);
+      if (resumed) {
+        resumedState = state;
+        break;
+      }
+    }
+
+    _logger.info(
+      'Sendspin codec switch completed. RequestedCodec=$normalized, CodecRequestSucceeded=$codecRequestSucceeded, Resumed=${resumedState != null}, Attempts=$attempts, ActiveCodec=${resumedState?.activeCodec ?? ''}, PlaybackState=${resumedState?.playbackState.name ?? PlaybackStateType.idle.name}',
+    );
+
+    if (resumedState == null) {
+      throw StateError(
+        'Failed to resume playback after Sendspin codec change.',
+      );
     }
   }
 
