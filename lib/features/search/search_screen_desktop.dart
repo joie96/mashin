@@ -48,8 +48,7 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
     _controller = feature_search.SearchController(
       client: widget.client,
       userDataController: widget.userDataController,
-    )
-      ..addListener(_onControllerChanged);
+    )..addListener(_onControllerChanged);
     widget.userDataController?.addListener(_onUserDataChanged);
     unawaited(_controller.load());
 
@@ -97,10 +96,7 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
       return;
     }
     unawaited(
-      userDataController.setFavorite(
-        <MediaItem>[item],
-        !_isItemFavorite(item),
-      ),
+      userDataController.setFavorite(<MediaItem>[item], !_isItemFavorite(item)),
     );
   }
 
@@ -119,7 +115,7 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
     return null;
   }
 
-  List<ContextMenuAction> _buildPlaylistSubmenu(Track track) {
+  List<ContextMenuAction> _buildPlaylistSubmenu(List<Track> tracks) {
     final UserDataController? controller = widget.userDataController;
     if (controller == null) {
       return const <ContextMenuAction>[];
@@ -130,51 +126,52 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
           (Playlist playlist) => ContextMenuAction(
             label: playlist.name,
             icon: Icons.playlist_play_outlined,
-            onSelected: () => controller.addPlaylistTracks(
-              playlist.itemId,
-              <Track>[track],
-            ),
+            onSelected: () =>
+                controller.addPlaylistTracks(playlist.itemId, tracks),
           ),
         )
         .toList(growable: false);
   }
 
-  List<ContextMenuAction> _buildTrackMenuActions(Track track) {
+  List<ContextMenuAction> _buildTrackMenuActions(
+    Track track, [
+    List<Track> selectedTracks = const <Track>[],
+  ]) {
+    final List<Track> tracks = selectedTracks.isEmpty
+        ? <Track>[track]
+        : selectedTracks;
     final bool isFavorite = _isItemFavorite(track);
     final Artist? primaryArtist = _primaryArtistOf(track);
     final Album? primaryAlbum = track.album;
     final List<ContextMenuAction> playlistActions = _buildPlaylistSubmenu(
-      track,
+      tracks,
     );
 
     return <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () =>
-            widget.playbackCoordinator.playMedia(<MediaItem>[track]),
+        onSelected: () => widget.playbackCoordinator.playMedia(tracks),
       ),
       ContextMenuAction(
         label: 'Radio starten',
         icon: Icons.radio_outlined,
-        onSelected: () =>
-            widget.playbackCoordinator.playMediaRadioNext(<MediaItem>[track]),
+        onSelected: () => widget.playbackCoordinator.playMediaRadioNext(tracks),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () =>
-            widget.playbackCoordinator.playMediaNext(<MediaItem>[track]),
+        onSelected: () => widget.playbackCoordinator.playMediaNext(tracks),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () =>
-            widget.playbackCoordinator.playMediaLast(<MediaItem>[track]),
+        onSelected: () => widget.playbackCoordinator.playMediaLast(tracks),
       ),
       if ((primaryArtist != null && widget.onOpenArtist != null) ||
-          (primaryAlbum != null && widget.onOpenAlbum != null)) ...<ContextMenuAction>[
+          (primaryAlbum != null &&
+              widget.onOpenAlbum != null)) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
         if (primaryArtist != null && widget.onOpenArtist != null)
           ContextMenuAction(
@@ -199,11 +196,17 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
       ],
       const ContextMenuAction.separator(),
       ContextMenuAction(
-        label: isFavorite ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen',
+        label: isFavorite
+            ? 'Aus Favoriten entfernen'
+            : 'Zu Favoriten hinzufügen',
         icon: isFavorite
             ? Icons.favorite_outlined
             : Icons.favorite_border_outlined,
-        onSelected: () => _toggleFavorite(track),
+        onSelected: () async {
+          for (final Track selectedTrack in tracks) {
+            _toggleFavorite(selectedTrack);
+          }
+        },
       ),
     ];
   }
@@ -250,7 +253,9 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
       ],
       const ContextMenuAction.separator(),
       ContextMenuAction(
-        label: isFavorite ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen',
+        label: isFavorite
+            ? 'Aus Favoriten entfernen'
+            : 'Zu Favoriten hinzufügen',
         icon: isFavorite
             ? Icons.favorite_outlined
             : Icons.favorite_border_outlined,
@@ -292,7 +297,9 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
       ],
       const ContextMenuAction.separator(),
       ContextMenuAction(
-        label: isFavorite ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen',
+        label: isFavorite
+            ? 'Aus Favoriten entfernen'
+            : 'Zu Favoriten hinzufügen',
         icon: isFavorite
             ? Icons.favorite_outlined
             : Icons.favorite_border_outlined,
@@ -340,7 +347,9 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
       ],
       const ContextMenuAction.separator(),
       ContextMenuAction(
-        label: isFavorite ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen',
+        label: isFavorite
+            ? 'Aus Favoriten entfernen'
+            : 'Zu Favoriten hinzufügen',
         icon: isFavorite
             ? Icons.favorite_outlined
             : Icons.favorite_border_outlined,
@@ -400,8 +409,8 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             playbackCoordinator: widget.playbackCoordinator,
             isRowFavorite: (Track item, int _) => _isItemFavorite(item),
             onRowFavoriteTap: widget.userDataController == null
-              ? null
-              : (Track item, int _) => _toggleFavorite(item),
+                ? null
+                : (Track item, int _) => _toggleFavorite(item),
             onRowMoreAnchorTap:
                 (Track item, int _, BuildContext anchorContext) => _showMenu(
                   context,
@@ -413,6 +422,12 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
                   context,
                   globalPosition: globalPosition,
                   actions: _buildTrackMenuActions(item),
+                ),
+            onRowSelectionContextMenu:
+                (List<Track> items, Offset globalPosition) => _showMenu(
+                  context,
+                  globalPosition: globalPosition,
+                  actions: _buildTrackMenuActions(items.first, items),
                 ),
             onArtistTap: widget.onOpenArtist,
             onAlbumTap: widget.onOpenAlbum,
@@ -426,8 +441,8 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             playbackCoordinator: widget.playbackCoordinator,
             isRowFavorite: (Album item, int _) => _isItemFavorite(item),
             onRowFavoriteTap: widget.userDataController == null
-              ? null
-              : (Album item, int _) => _toggleFavorite(item),
+                ? null
+                : (Album item, int _) => _toggleFavorite(item),
             onRowMoreAnchorTap:
                 (Album item, int _, BuildContext anchorContext) => _showMenu(
                   context,
@@ -452,16 +467,16 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             playbackCoordinator: widget.playbackCoordinator,
             isRowFavorite: (Playlist item, int _) => _isItemFavorite(item),
             onRowFavoriteTap: widget.userDataController == null
-              ? null
-              : (Playlist item, int _) => _toggleFavorite(item),
+                ? null
+                : (Playlist item, int _) => _toggleFavorite(item),
             onRowMoreAnchorTap:
                 (Playlist item, int _, BuildContext anchorContext) => _showMenu(
                   context,
                   anchorContext: anchorContext,
                   actions: _buildPlaylistMenuActions(item),
                 ),
-            onRowContextMenu:
-                (Playlist item, int _, Offset globalPosition) => _showMenu(
+            onRowContextMenu: (Playlist item, int _, Offset globalPosition) =>
+                _showMenu(
                   context,
                   globalPosition: globalPosition,
                   actions: _buildPlaylistMenuActions(item),
@@ -477,8 +492,8 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             playbackCoordinator: widget.playbackCoordinator,
             isRowFavorite: (Artist item, int _) => _isItemFavorite(item),
             onRowFavoriteTap: widget.userDataController == null
-              ? null
-              : (Artist item, int _) => _toggleFavorite(item),
+                ? null
+                : (Artist item, int _) => _toggleFavorite(item),
             onRowMoreAnchorTap:
                 (Artist item, int _, BuildContext anchorContext) => _showMenu(
                   context,

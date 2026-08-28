@@ -18,6 +18,8 @@ typedef DesktopRowMoreAnchorAction<T> =
     void Function(T item, int index, BuildContext anchorContext);
 typedef DesktopRowContextMenuAction<T> =
     void Function(T item, int index, Offset globalPosition);
+typedef DesktopRowSelectionContextMenuAction<T> =
+    void Function(List<T> items, Offset globalPosition);
 typedef DesktopRowFavoriteResolver<T> = bool Function(T item, int index);
 
 class MediaTableSectionDesktop<T> extends StatefulWidget {
@@ -34,6 +36,7 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
   final DesktopRowAction<T>? onRowMoreTap;
   final DesktopRowMoreAnchorAction<T>? onRowMoreAnchorTap;
   final DesktopRowContextMenuAction<T>? onRowContextMenu;
+  final DesktopRowSelectionContextMenuAction<T>? onRowSelectionContextMenu;
   final DesktopRowAction<T>? onRowFavoriteTap;
   final DesktopRowAction<T>? onRowDoubleTap;
   final DesktopRowFavoriteResolver<T>? isRowFavorite;
@@ -57,6 +60,7 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
     this.onRowMoreTap,
     this.onRowMoreAnchorTap,
     this.onRowContextMenu,
+    this.onRowSelectionContextMenu,
     this.onRowFavoriteTap,
     this.onRowDoubleTap,
     this.isRowFavorite,
@@ -389,9 +393,22 @@ class _MediaTableSectionDesktopState<T>
         (event.buttons & kSecondaryMouseButton) != 0) {
       _suppressedSelectionPointers.remove(event.pointer);
       final DesktopRowContextMenuAction<T>? handler = widget.onRowContextMenu;
-      if (handler != null && index >= 0 && index < widget.items.length) {
+      final DesktopRowSelectionContextMenuAction<T>? selectionHandler =
+          widget.onRowSelectionContextMenu;
+      if (index >= 0 && index < widget.items.length) {
         _selectItemForRightClickMenu(index);
-        handler(widget.items[index], index, event.position);
+        final List<T> selectedItems = _selectedIndexes
+            .where(
+              (int selectedIndex) =>
+                  selectedIndex >= 0 && selectedIndex < widget.items.length,
+            )
+            .map((int selectedIndex) => widget.items[selectedIndex])
+            .toList(growable: false);
+        if (selectionHandler != null && selectedItems.isNotEmpty) {
+          selectionHandler(selectedItems, event.position);
+        } else {
+          handler?.call(widget.items[index], index, event.position);
+        }
       }
       return;
     }

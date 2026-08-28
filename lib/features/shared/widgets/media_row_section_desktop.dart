@@ -33,6 +33,7 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
   final DesktopRowAction<T>? onRowMoreTap;
   final DesktopRowMoreAnchorAction<T>? onRowMoreAnchorTap;
   final DesktopRowContextMenuAction<T>? onRowContextMenu;
+  final DesktopRowSelectionContextMenuAction<T>? onRowSelectionContextMenu;
   final DesktopRowAction<T>? onRowFavoriteTap;
   final DesktopRowFavoriteResolver<T>? isRowFavorite;
   final ValueChanged<List<T>>? onSelectionChanged;
@@ -55,6 +56,7 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
     this.onRowMoreTap,
     this.onRowMoreAnchorTap,
     this.onRowContextMenu,
+    this.onRowSelectionContextMenu,
     this.onRowFavoriteTap,
     this.isRowFavorite,
     this.onSelectionChanged,
@@ -358,9 +360,22 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         (event.buttons & kSecondaryMouseButton) != 0) {
       _suppressedSelectionPointers.remove(event.pointer);
       final DesktopRowContextMenuAction<T>? handler = widget.onRowContextMenu;
-      if (handler != null && index >= 0 && index < widget.items.length) {
+      final DesktopRowSelectionContextMenuAction<T>? selectionHandler =
+          widget.onRowSelectionContextMenu;
+      if (index >= 0 && index < widget.items.length) {
         _selectItemForRightClickMenu(index);
-        handler(widget.items[index], index, event.position);
+        final List<T> selectedItems = _selectedIndexes
+            .where(
+              (int selectedIndex) =>
+                  selectedIndex >= 0 && selectedIndex < widget.items.length,
+            )
+            .map((int selectedIndex) => widget.items[selectedIndex])
+            .toList(growable: false);
+        if (selectionHandler != null && selectedItems.isNotEmpty) {
+          selectionHandler(selectedItems, event.position);
+        } else {
+          handler?.call(widget.items[index], index, event.position);
+        }
       }
       return;
     }

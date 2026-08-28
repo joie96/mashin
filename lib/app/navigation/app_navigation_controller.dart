@@ -178,6 +178,7 @@ class AppNavigationController extends ChangeNotifier {
     PlaybackCoordinator playbackCoordinator, {
     bool desktopSearchDriven = false,
     UserDataController? userDataController,
+    VoidCallback? onPlaylistDeleted,
   }) {
     final AppDetailDestination? detail = activeDetail;
 
@@ -223,6 +224,7 @@ class AppNavigationController extends ChangeNotifier {
         userDataController: userDataController,
         onOpenArtist: openArtist,
         onOpenAlbum: openAlbum,
+        onPlaylistDeleted: onPlaylistDeleted,
       );
     }
 

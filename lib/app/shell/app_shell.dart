@@ -19,6 +19,7 @@ import '../../features/queue/queue_overlay.dart';
 import '../../features/playback/sendspin/sendspin_player.dart';
 import '../../features/playback/sendspin/sendspin_rust_backend.dart';
 import '../../features/playback/sendspin/sendspin_rust_bridge_ffi.dart';
+import '../../features/playlist/playlist_name_dialog.dart';
 import '../../features/shared/userdata_controller.dart';
 import '../../features/shared/widgets/media_image.dart';
 import '../navigation/app_navigation_controller.dart';
@@ -139,7 +140,8 @@ class _AppShellState extends State<AppShell> {
   }
 
   String? get _currentQueueCoverUrl {
-    final url = _currentQueueItem?.mediaItem?.imageUriForSize(512)?.trim() ?? '';
+    final url =
+        _currentQueueItem?.mediaItem?.imageUriForSize(512)?.trim() ?? '';
     return url.isEmpty ? null : url;
   }
 
@@ -310,7 +312,7 @@ class _AppShellState extends State<AppShell> {
                         const SizedBox(height: 14),
                         Divider(height: 1, color: colors.border),
                         Padding(
-                          padding: const EdgeInsets.fromLTRB(22, 14, 22, 10),
+                          padding: const EdgeInsets.fromLTRB(22, 14, 8, 10),
                           child: Row(
                             children: <Widget>[
                               Expanded(
@@ -332,6 +334,25 @@ class _AppShellState extends State<AppShell> {
                                     color: colors.textSecondary,
                                   ),
                                 ),
+                              if (_isLoadingSidebarPlaylists)
+                                const SizedBox(width: 4),
+                              Transform.translate(
+                                offset: const Offset(0, 0),
+                                child: SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: IconButton(
+                                    tooltip: 'Wiedergabeliste erstellen',
+                                    onPressed: _createPlaylist,
+                                    padding: EdgeInsets.zero,
+                                    icon: const Icon(Icons.add, size: 15),
+                                    constraints: const BoxConstraints.tightFor(
+                                      width: 24,
+                                      height: 24,
+                                    ),
+                                  ),
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -354,6 +375,12 @@ class _AppShellState extends State<AppShell> {
                                     ) ??
                                     const <Track>[],
                                 onTap: () => _navigation.openPlaylist(playlist),
+                                onPlay: () => _playSidebarPlaylist(playlist),
+                                onContextMenu: (Offset position) =>
+                                    _showSidebarPlaylistMenu(
+                                      playlist,
+                                      position,
+                                    ),
                               );
                             },
                           ),
@@ -383,6 +410,7 @@ class _AppShellState extends State<AppShell> {
                               _playbackCoordinator,
                               desktopSearchDriven: true,
                               userDataController: _userDataController,
+                              onPlaylistDeleted: _navigation.goBack,
                             ),
                           ),
                         ),
@@ -477,6 +505,7 @@ class _AppShellState extends State<AppShell> {
                   _musicAssistantClient!,
                   _playbackCoordinator,
                   userDataController: _userDataController,
+                  onPlaylistDeleted: _navigation.goBack,
                 ),
               ),
             ),
@@ -602,6 +631,123 @@ class _AppShellState extends State<AppShell> {
     _desktopSearchController.clear();
     _navigation.clearDesktopSearch();
     setState(() {});
+  }
+
+  Future<void> _createPlaylist() async {
+    final UserDataController? controller = _userDataController;
+    if (controller == null || !mounted) {
+      return;
+    }
+
+    final String? name = await showPlaylistNameDialog(context: context);
+    if (name != null) {
+      await controller.createLocalPlaylist(name);
+    }
+  }
+
+  Future<void> _renamePlaylist(Playlist playlist) async {
+    final UserDataController? controller = _userDataController;
+    if (controller == null || !mounted || !playlist.isEditable) {
+      return;
+    }
+
+    final String? name = await showPlaylistNameDialog(
+      context: context,
+      playlist: playlist,
+    );
+    if (name != null) {
+      await controller.renamePlaylist(playlist, name);
+    }
+  }
+
+  Future<void> _showSidebarPlaylistMenu(
+    Playlist playlist,
+    Offset position,
+  ) async {
+    if (!playlist.isEditable) {
+      return;
+    }
+    await const AppContextMenuController().show(
+      context: context,
+      globalPosition: position,
+      actions: <ContextMenuAction>[
+        ContextMenuAction(
+          label: 'Abspielen',
+          icon: Icons.play_arrow,
+          onSelected: () => _playSidebarPlaylist(playlist),
+          isEnabled: _playlistTracks(playlist).isNotEmpty,
+        ),
+        ContextMenuAction(
+          label: 'Zufällig abspielen',
+          icon: Icons.shuffle_outlined,
+          onSelected: () => _shuffleSidebarPlaylist(playlist),
+          isEnabled: _playlistTracks(playlist).isNotEmpty,
+        ),
+        ContextMenuAction(
+          label: 'Als Nächstes spielen',
+          icon: Icons.keyboard_return,
+          iconQuarterTurns: 2,
+          onSelected: () => _playSidebarPlaylistNext(playlist),
+          isEnabled: _playlistTracks(playlist).isNotEmpty,
+        ),
+        ContextMenuAction(
+          label: 'Als Letztes spielen',
+          icon: Icons.last_page,
+          onSelected: () => _playSidebarPlaylistLast(playlist),
+          isEnabled: _playlistTracks(playlist).isNotEmpty,
+        ),
+        const ContextMenuAction.separator(),
+        ContextMenuAction(
+          label: 'Umbenennen',
+          icon: Icons.edit_outlined,
+          onSelected: () => _renamePlaylist(playlist),
+          isEnabled: playlist.isEditable,
+        ),
+        ContextMenuAction(
+          label: 'Löschen',
+          icon: Icons.delete_outline,
+          onSelected: () => _deleteSidebarPlaylist(playlist),
+          isEnabled: playlist.isEditable,
+          isDestructive: true,
+        ),
+      ],
+    );
+  }
+
+  List<Track> _playlistTracks(Playlist playlist) {
+    return _userDataController?.tracksForPlaylist(playlist.itemId) ??
+        const <Track>[];
+  }
+
+  Future<void> _playSidebarPlaylist(Playlist playlist) async {
+    final List<Track> tracks = _playlistTracks(playlist);
+    if (tracks.isNotEmpty) await _playbackCoordinator.playMedia(tracks);
+  }
+
+  Future<void> _shuffleSidebarPlaylist(Playlist playlist) async {
+    final List<Track> tracks = _playlistTracks(playlist);
+    if (tracks.isNotEmpty) await _playbackCoordinator.shufflePlayMedia(tracks);
+  }
+
+  Future<void> _playSidebarPlaylistNext(Playlist playlist) async {
+    final List<Track> tracks = _playlistTracks(playlist);
+    if (tracks.isNotEmpty) await _playbackCoordinator.playMediaNext(tracks);
+  }
+
+  Future<void> _playSidebarPlaylistLast(Playlist playlist) async {
+    final List<Track> tracks = _playlistTracks(playlist);
+    if (tracks.isNotEmpty) await _playbackCoordinator.playMediaLast(tracks);
+  }
+
+  Future<void> _deleteSidebarPlaylist(Playlist playlist) async {
+    final UserDataController? controller = _userDataController;
+    if (controller == null || !playlist.isEditable || !mounted) return;
+
+    final bool confirmed = await showDeletePlaylistDialog(
+      context: context,
+      playlistName: playlist.name,
+    );
+    if (confirmed) await controller.removePlaylist(playlist);
   }
 
   void _toggleTheme() {
@@ -1182,11 +1328,15 @@ class _DesktopSidebarPlaylistItem extends StatefulWidget {
     required this.playlist,
     required this.tracks,
     required this.onTap,
+    required this.onPlay,
+    required this.onContextMenu,
   });
 
   final Playlist playlist;
   final List<Track> tracks;
   final VoidCallback onTap;
+  final VoidCallback onPlay;
+  final ValueChanged<Offset> onContextMenu;
 
   @override
   State<_DesktopSidebarPlaylistItem> createState() =>
@@ -1196,6 +1346,7 @@ class _DesktopSidebarPlaylistItem extends StatefulWidget {
 class _DesktopSidebarPlaylistItemState
     extends State<_DesktopSidebarPlaylistItem> {
   bool _isHovered = false;
+  bool _isPlayHovered = false;
 
   void _setHovered(bool value) {
     if (_isHovered == value) {
@@ -1203,6 +1354,15 @@ class _DesktopSidebarPlaylistItemState
     }
     setState(() {
       _isHovered = value;
+    });
+  }
+
+  void _setPlayHovered(bool value) {
+    if (_isPlayHovered == value) {
+      return;
+    }
+    setState(() {
+      _isPlayHovered = value;
     });
   }
 
@@ -1238,6 +1398,8 @@ class _DesktopSidebarPlaylistItemState
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: widget.onTap,
+          onSecondaryTapUp: (TapUpDetails details) =>
+              widget.onContextMenu(details.globalPosition),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
             curve: Curves.easeOut,
@@ -1253,13 +1415,54 @@ class _DesktopSidebarPlaylistItemState
                   child: SizedBox(
                     width: 40,
                     height: 40,
-                    child: coverUrl == null || coverUrl.isEmpty
-                        ? ColoredBox(color: colors.bgTertiary)
-                        : MediaImage(
-                            source: coverUrl,
-                            fit: BoxFit.cover,
-                            fallback: ColoredBox(color: colors.bgTertiary),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: <Widget>[
+                        coverUrl == null || coverUrl.isEmpty
+                            ? ColoredBox(color: colors.bgTertiary)
+                            : MediaImage(
+                                source: coverUrl,
+                                fit: BoxFit.cover,
+                                fallback: ColoredBox(color: colors.bgTertiary),
+                              ),
+                        if (tracks.isNotEmpty)
+                          Positioned.fill(
+                            child: Center(
+                              child: AnimatedOpacity(
+                                opacity: _isHovered ? 1 : 0,
+                                duration: const Duration(milliseconds: 140),
+                                child: MouseRegion(
+                                  onEnter: (_) => _setPlayHovered(true),
+                                  onExit: (_) => _setPlayHovered(false),
+                                  child: AnimatedScale(
+                                    scale: _isPlayHovered ? 1.08 : 1,
+                                    duration: const Duration(milliseconds: 140),
+                                    curve: Curves.easeOutCubic,
+                                    child: GestureDetector(
+                                      onTap: widget.onPlay,
+                                      child: Container(
+                                        width: 32,
+                                        height: 32,
+                                        decoration: BoxDecoration(
+                                          color: colors.textPrimary,
+                                          borderRadius: BorderRadius.circular(
+                                            16,
+                                          ),
+                                        ),
+                                        child: Icon(
+                                          Icons.play_arrow_sharp,
+                                          size: 20,
+                                          color: colors.bgPrimary,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -1609,10 +1812,8 @@ class _DesktopCurrentTrackInfo extends StatelessWidget {
             (Playlist playlist) => ContextMenuAction(
               label: playlist.name,
               icon: Icons.playlist_play_outlined,
-              onSelected: () => controller.addPlaylistTracks(
-                playlist.itemId,
-                <Track>[track],
-              ),
+              onSelected: () =>
+                  controller.addPlaylistTracks(playlist.itemId, <Track>[track]),
             ),
           )
           .toList(growable: false),
@@ -1691,10 +1892,9 @@ class _DesktopCurrentTrackInfo extends StatelessWidget {
                     : Icons.favorite_border_outlined,
                 onTap: track == null || userDataController == null
                     ? null
-                    : () => userDataController!.setFavorite(
-                        <Track>[track],
-                        !isFavorite,
-                      ),
+                    : () => userDataController!.setFavorite(<Track>[
+                        track,
+                      ], !isFavorite),
                 color: colors.textSecondary,
               );
             },

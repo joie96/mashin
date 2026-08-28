@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
 
 import '../../data/music_assistant/ma_client.dart';
 import '../../data/music_assistant/ma_models.dart';
@@ -11,14 +14,15 @@ class UserDataController extends ChangeNotifier {
   static const String favoritesRootKey = 'mashin.favorites';
   static const String playlistsRootKey = 'mashin.playlists';
   static const String localPlaylistProvider = 'mashin';
+  static const int _playlistCollageSize = 500;
+  static const int _playlistCollageTileCount = 4;
+  static const int _playlistCollageJpegQuality = 85;
 
-  UserDataController({
-    required this.client,
-    required this.configuredUsername,
-  });
+  UserDataController({required this.client, required this.configuredUsername});
 
   final MusicAssistantClient client;
   final String? configuredUsername;
+  final http.Client _httpClient = http.Client();
 
   bool _isDisposed = false;
   bool _isLoadingPreferences = false;
@@ -50,6 +54,7 @@ class UserDataController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
+    _httpClient.close();
     super.dispose();
   }
 
@@ -235,21 +240,37 @@ class UserDataController extends ChangeNotifier {
         switch (item.mediaType) {
           case MediaType.track:
             changed =
-                _updateFavoriteList<Track>(tracks, uri, favorite, () => _asTrack(item, true)) ||
+                _updateFavoriteList<Track>(
+                  tracks,
+                  uri,
+                  favorite,
+                  () => _asTrack(item, true),
+                ) ||
                 changed;
             break;
           case MediaType.album:
             changed =
-                _updateFavoriteList<Album>(albums, uri, favorite, () => _asAlbum(item, true)) ||
+                _updateFavoriteList<Album>(
+                  albums,
+                  uri,
+                  favorite,
+                  () => _asAlbum(item, true),
+                ) ||
                 changed;
             break;
           case MediaType.artist:
             changed =
-                _updateFavoriteList<Artist>(artists, uri, favorite, () => _asArtist(item, true)) ||
+                _updateFavoriteList<Artist>(
+                  artists,
+                  uri,
+                  favorite,
+                  () => _asArtist(item, true),
+                ) ||
                 changed;
             break;
           case MediaType.playlist:
-            changed = _updateFavoriteList<Playlist>(
+            changed =
+                _updateFavoriteList<Playlist>(
                   playlists,
                   uri,
                   favorite,
@@ -279,8 +300,9 @@ class UserDataController extends ChangeNotifier {
 
   Future<Playlist> addPlaylist(Playlist playlist) async {
     final Playlist stored = await _withStateLock(() async {
-      final String normalizedItemId =
-          playlist.itemId.trim().isEmpty ? _generateNextLocalPlaylistId() : playlist.itemId.trim();
+      final String normalizedItemId = playlist.itemId.trim().isEmpty
+          ? _generateNextLocalPlaylistId()
+          : playlist.itemId.trim();
 
       final Playlist localPlaylist = Playlist(
         itemId: normalizedItemId,
@@ -304,8 +326,8 @@ class UserDataController extends ChangeNotifier {
       _playlists = List<Playlist>.unmodifiable(next);
       _playlistTracksByPlaylistId = <String, List<Track>>{
         ..._playlistTracksByPlaylistId,
-        normalizedItemId: _playlistTracksByPlaylistId[normalizedItemId] ??
-            const <Track>[],
+        normalizedItemId:
+            _playlistTracksByPlaylistId[normalizedItemId] ?? const <Track>[],
       };
 
       notifyListeners();
@@ -314,6 +336,45 @@ class UserDataController extends ChangeNotifier {
 
     queuePreferencesPush();
     return stored;
+  }
+
+  Future<Playlist?> createLocalPlaylist(String name) async {
+    final String normalizedName = name.trim();
+    if (normalizedName.isEmpty) {
+      return null;
+    }
+
+    return addPlaylist(
+      Playlist(
+        itemId: '',
+        provider: localPlaylistProvider,
+        name: normalizedName,
+        sortName: normalizedName,
+        isEditable: true,
+      ),
+    );
+  }
+
+  Future<bool> renamePlaylist(Playlist playlist, String name) async {
+    final String normalizedName = name.trim();
+    if (normalizedName.isEmpty || playlist.itemId.trim().isEmpty) {
+      return false;
+    }
+
+    return updatePlaylist(
+      Playlist(
+        itemId: playlist.itemId,
+        provider: playlist.provider,
+        name: normalizedName,
+        sortName: normalizedName,
+        isEditable: playlist.isEditable,
+        uri: playlist.uri,
+        owner: playlist.owner,
+        providerMappings: playlist.providerMappings,
+        metadata: playlist.metadata,
+        favorite: playlist.favorite,
+      ),
+    );
   }
 
   Future<bool> updatePlaylist(Playlist playlist) async {
@@ -369,16 +430,22 @@ class UserDataController extends ChangeNotifier {
 
     final bool removed = await _withStateLock(() async {
       final List<Playlist> next = _playlists
-          .where((Playlist existing) => existing.itemId.toLowerCase() != id.toLowerCase())
+          .where(
+            (Playlist existing) =>
+                existing.itemId.toLowerCase() != id.toLowerCase(),
+          )
           .toList(growable: true);
 
       if (next.length == _playlists.length) {
         return false;
       }
 
-      final Map<String, List<Track>> nextTracks =
-          <String, List<Track>>{..._playlistTracksByPlaylistId};
-      nextTracks.removeWhere((String key, List<Track> _) => key.toLowerCase() == id.toLowerCase());
+      final Map<String, List<Track>> nextTracks = <String, List<Track>>{
+        ..._playlistTracksByPlaylistId,
+      };
+      nextTracks.removeWhere(
+        (String key, List<Track> _) => key.toLowerCase() == id.toLowerCase(),
+      );
 
       _playlists = List<Playlist>.unmodifiable(next);
       _playlistTracksByPlaylistId = nextTracks;
@@ -421,14 +488,41 @@ class UserDataController extends ChangeNotifier {
       }
 
       final String actualId = _playlists[playlistIndex].itemId;
-      final List<Track> existing =
-          List<Track>.of(_playlistTracksByPlaylistId[actualId] ?? const <Track>[]);
+      final List<Track> existing = List<Track>.of(
+        _playlistTracksByPlaylistId[actualId] ?? const <Track>[],
+      );
       existing.addAll(tracksToAdd);
+
+      final Playlist currentPlaylist = _playlists[playlistIndex];
+      final MediaItemMetadata? collageMetadata =
+          await _buildPlaylistCollageMetadata(
+            existing,
+            currentPlaylist.metadata,
+          );
+      final Playlist updatedPlaylist = collageMetadata == null
+          ? currentPlaylist
+          : Playlist(
+              itemId: currentPlaylist.itemId,
+              provider: currentPlaylist.provider,
+              name: currentPlaylist.name,
+              isEditable: currentPlaylist.isEditable,
+              sortName: currentPlaylist.sortName,
+              uri: currentPlaylist.uri,
+              owner: currentPlaylist.owner,
+              providerMappings: currentPlaylist.providerMappings,
+              metadata: collageMetadata,
+              favorite: currentPlaylist.favorite,
+            );
 
       _playlistTracksByPlaylistId = <String, List<Track>>{
         ..._playlistTracksByPlaylistId,
         actualId: List<Track>.unmodifiable(existing),
       };
+      if (collageMetadata != null) {
+        final List<Playlist> nextPlaylists = List<Playlist>.of(_playlists);
+        nextPlaylists[playlistIndex] = updatedPlaylist;
+        _playlists = List<Playlist>.unmodifiable(nextPlaylists);
+      }
 
       notifyListeners();
       return true;
@@ -468,8 +562,9 @@ class UserDataController extends ChangeNotifier {
       }
 
       final String actualId = _playlists[playlistIndex].itemId;
-      final List<Track> existing =
-          List<Track>.of(_playlistTracksByPlaylistId[actualId] ?? const <Track>[]);
+      final List<Track> existing = List<Track>.of(
+        _playlistTracksByPlaylistId[actualId] ?? const <Track>[],
+      );
       final int before = existing.length;
 
       existing.removeWhere((Track track) {
@@ -481,10 +576,33 @@ class UserDataController extends ChangeNotifier {
         return false;
       }
 
+      final Playlist currentPlaylist = _playlists[playlistIndex];
+      final MediaItemMetadata? collageMetadata =
+          await _buildPlaylistCollageMetadata(
+            existing,
+            currentPlaylist.metadata,
+          );
+
       _playlistTracksByPlaylistId = <String, List<Track>>{
         ..._playlistTracksByPlaylistId,
         actualId: List<Track>.unmodifiable(existing),
       };
+      if (collageMetadata != null) {
+        final List<Playlist> nextPlaylists = List<Playlist>.of(_playlists);
+        nextPlaylists[playlistIndex] = Playlist(
+          itemId: currentPlaylist.itemId,
+          provider: currentPlaylist.provider,
+          name: currentPlaylist.name,
+          isEditable: currentPlaylist.isEditable,
+          sortName: currentPlaylist.sortName,
+          uri: currentPlaylist.uri,
+          owner: currentPlaylist.owner,
+          providerMappings: currentPlaylist.providerMappings,
+          metadata: collageMetadata,
+          favorite: currentPlaylist.favorite,
+        );
+        _playlists = List<Playlist>.unmodifiable(nextPlaylists);
+      }
 
       notifyListeners();
       return true;
@@ -495,6 +613,122 @@ class UserDataController extends ChangeNotifier {
     }
 
     return changed;
+  }
+
+  Future<MediaItemMetadata?> _buildPlaylistCollageMetadata(
+    List<Track> tracks,
+    MediaItemMetadata? previousMetadata,
+  ) async {
+    final List<String> imageSources = tracks
+        .map((Track track) {
+          final MediaItemImage? image =
+              track.album?.primaryImage ?? track.primaryImage;
+          return image?.getProxyPath(
+            checksum:
+                track.album?.metadata?.cacheChecksum ??
+                track.metadata?.cacheChecksum,
+            size: 256,
+          );
+        })
+        .whereType<String>()
+        .where((String source) => source.trim().isNotEmpty)
+        .toSet()
+        .take(_playlistCollageTileCount)
+        .toList(growable: false);
+
+    if (imageSources.isEmpty) {
+      return tracks.isEmpty ? null : previousMetadata;
+    }
+
+    final List<img.Image> images = <img.Image>[];
+    try {
+      for (final String source in imageSources) {
+        final Uint8List? bytes = await _loadImageBytes(source);
+        if (bytes == null || bytes.isEmpty) {
+          continue;
+        }
+        final img.Image? decoded = img.decodeImage(bytes);
+        if (decoded != null) {
+          images.add(decoded);
+        }
+      }
+
+      if (images.isEmpty) {
+        return tracks.isEmpty ? null : previousMetadata;
+      }
+
+      while (images.length < _playlistCollageTileCount) {
+        images.add(img.Image.from(images[images.length % images.length]));
+      }
+
+      final int tileSize = _playlistCollageSize ~/ 2;
+      final img.Image collage = img.Image(
+        width: _playlistCollageSize,
+        height: _playlistCollageSize,
+      );
+      for (int index = 0; index < _playlistCollageTileCount; index++) {
+        final img.Image tile = img.copyResizeCropSquare(
+          images[index],
+          size: tileSize,
+        );
+        img.compositeImage(
+          collage,
+          tile,
+          dstX: (index % 2) * tileSize,
+          dstY: (index ~/ 2) * tileSize,
+        );
+      }
+
+      final Uint8List jpeg = Uint8List.fromList(
+        img.encodeJpg(collage, quality: _playlistCollageJpegQuality),
+      );
+      final String dataUri = 'data:image/jpeg;base64,${base64Encode(jpeg)}';
+      return MediaItemMetadata(
+        images: <MediaItemImage>[
+          MediaItemImage(
+            type: 'thumb',
+            path: dataUri,
+            provider: localPlaylistProvider,
+            remotelyAccessible: false,
+          ),
+        ],
+        genres: const <String>[],
+      );
+    } finally {
+      images.clear();
+    }
+  }
+
+  Future<Uint8List?> _loadImageBytes(String source) async {
+    final String trimmedSource = source.trim();
+    if (trimmedSource.toLowerCase().startsWith('data:')) {
+      final int separator = trimmedSource.indexOf(',');
+      if (separator < 0 ||
+          !trimmedSource.substring(0, separator).contains(';base64')) {
+        return null;
+      }
+      try {
+        return Uint8List.fromList(
+          base64Decode(trimmedSource.substring(separator + 1)),
+        );
+      } on FormatException {
+        return null;
+      }
+    }
+
+    final Uri? uri = Uri.tryParse(trimmedSource);
+    if (uri == null || !uri.hasScheme) {
+      return null;
+    }
+    try {
+      final http.Response response = await _httpClient.get(uri);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return null;
+      }
+      return response.bodyBytes;
+    } on Exception {
+      return null;
+    }
   }
 
   // Snapshot loading
@@ -546,8 +780,13 @@ class UserDataController extends ChangeNotifier {
     final List<Playlist> parsedPlaylists = <Playlist>[];
     final Map<String, List<Track>> parsedTracks = <String, List<Track>>{};
 
-    for (final Map<String, dynamic> playlistMap in _toMapList(map['playlists'])) {
-      final Playlist playlist = _asPlaylist(Playlist.fromJson(playlistMap), false);
+    for (final Map<String, dynamic> playlistMap in _toMapList(
+      map['playlists'],
+    )) {
+      final Playlist playlist = _asPlaylist(
+        Playlist.fromJson(playlistMap),
+        false,
+      );
       parsedPlaylists.add(playlist);
 
       final List<Track> items = _readPlaylistTrackList(playlistMap['items']);
@@ -573,15 +812,17 @@ class UserDataController extends ChangeNotifier {
     };
 
     _preferences[playlistsRootKey] = <String, dynamic>{
-      'playlists': _playlists.map((Playlist playlist) {
-        final String id = playlist.itemId;
-        final List<Track> items =
-            _playlistTracksByPlaylistId[id] ?? const <Track>[];
-        return <String, dynamic>{
-          ..._playlistToJson(playlist),
-          'items': items.map(_trackToJson).toList(growable: false),
-        };
-      }).toList(growable: false),
+      'playlists': _playlists
+          .map((Playlist playlist) {
+            final String id = playlist.itemId;
+            final List<Track> items =
+                _playlistTracksByPlaylistId[id] ?? const <Track>[];
+            return <String, dynamic>{
+              ..._playlistToJson(playlist),
+              'items': items.map(_trackToJson).toList(growable: false),
+            };
+          })
+          .toList(growable: false),
     };
   }
 
@@ -716,9 +957,7 @@ class UserDataController extends ChangeNotifier {
     bool favorite,
     T Function() create,
   ) {
-    final int index = list.indexWhere(
-      (T item) => _equalsUri(item.uri, uri),
-    );
+    final int index = list.indexWhere((T item) => _equalsUri(item.uri, uri));
 
     if (favorite) {
       if (index >= 0) {
@@ -747,10 +986,14 @@ class UserDataController extends ChangeNotifier {
   }
 
   String _generateNextLocalPlaylistId() {
-    final int next = _playlists
+    final int next =
+        _playlists
             .map((Playlist p) => int.tryParse(p.itemId.trim()) ?? 0)
             .where((int id) => id > 0)
-            .fold<int>(0, (int maxValue, int value) => value > maxValue ? value : maxValue) +
+            .fold<int>(
+              0,
+              (int maxValue, int value) => value > maxValue ? value : maxValue,
+            ) +
         1;
     return next.toString();
   }
@@ -771,8 +1014,7 @@ class UserDataController extends ChangeNotifier {
 
   List<T> _readModelList<T extends MediaItem>(
     dynamic value,
-    T Function(Map<String, dynamic>) factory,
-    {
+    T Function(Map<String, dynamic>) factory, {
     required bool favorite,
   }) {
     final List<T> result = <T>[];
@@ -804,12 +1046,18 @@ class UserDataController extends ChangeNotifier {
 
     return value
         .whereType<Map>()
-        .map((Map entry) => entry.map(
-              (dynamic key, dynamic nestedValue) =>
-                  MapEntry(key.toString(), _normalizeValue(nestedValue)),
-            ))
-        .map((Map<String, dynamic> entry) =>
-            entry..removeWhere((String _, dynamic nestedValue) => nestedValue == null))
+        .map(
+          (Map entry) => entry.map(
+            (dynamic key, dynamic nestedValue) =>
+                MapEntry(key.toString(), _normalizeValue(nestedValue)),
+          ),
+        )
+        .map(
+          (Map<String, dynamic> entry) => entry
+            ..removeWhere(
+              (String _, dynamic nestedValue) => nestedValue == null,
+            ),
+        )
         .toList(growable: false);
   }
 

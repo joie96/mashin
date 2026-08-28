@@ -66,53 +66,63 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
       _ => const <Artist>[],
     };
     for (final Artist artist in candidates) {
-      if (artist.itemId.trim().isNotEmpty && artist.provider.trim().isNotEmpty) {
+      if (artist.itemId.trim().isNotEmpty &&
+          artist.provider.trim().isNotEmpty) {
         return artist;
       }
     }
     return null;
   }
 
-  List<ContextMenuAction> _buildPlaylistSubmenu(Track track) {
+  List<ContextMenuAction> _buildPlaylistSubmenu(List<Track> tracks) {
     return _controller.playlistsForAdding
         .map(
           (Playlist playlist) => ContextMenuAction(
             label: playlist.name,
             icon: Icons.playlist_play_outlined,
-            onSelected: () => _controller.addTracksToPlaylist(playlist.itemId, <Track>[track]),
+            onSelected: () =>
+                _controller.addTracksToPlaylist(playlist.itemId, tracks),
           ),
         )
         .toList(growable: false);
   }
 
-  List<ContextMenuAction> _buildTrackMenuActions(Track track) {
+  List<ContextMenuAction> _buildTrackMenuActions(
+    Track track, [
+    List<Track> selectedTracks = const <Track>[],
+  ]) {
+    final List<Track> tracks = selectedTracks.isEmpty
+        ? <Track>[track]
+        : selectedTracks;
     final bool isFavorite = _controller.isItemFavorite(track);
     final PlaybackCoordinator coordinator = widget.playbackCoordinator;
     final Artist? primaryArtist = _primaryArtistOf(track);
     final Album? primaryAlbum = track.album;
-    final List<ContextMenuAction> playlistActions = _buildPlaylistSubmenu(track);
+    final List<ContextMenuAction> playlistActions = _buildPlaylistSubmenu(
+      tracks,
+    );
 
     return <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () => coordinator.playMedia(<MediaItem>[track]),
+        onSelected: () => coordinator.playMedia(tracks),
       ),
       ContextMenuAction(
         label: 'Radio starten',
         icon: Icons.radio_outlined,
-        onSelected: () => _controller.startTrackRadio(track),
+        onSelected: () => coordinator.playMediaRadioNext(tracks),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => coordinator.playMediaNext(<MediaItem>[track]),
+        onSelected: () => coordinator.playMediaNext(tracks),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => coordinator.playMediaLast(<MediaItem>[track]),
+        onSelected: () => coordinator.playMediaLast(tracks),
       ),
       if (primaryArtist != null || primaryAlbum != null) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
@@ -139,9 +149,17 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
       ],
       const ContextMenuAction.separator(),
       ContextMenuAction(
-        label: isFavorite ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen',
-        icon: isFavorite ? Icons.favorite_outlined : Icons.favorite_border_outlined,
-        onSelected: () => _controller.setFavorite(track, !isFavorite),
+        label: isFavorite
+            ? 'Aus Favoriten entfernen'
+            : 'Zu Favoriten hinzufügen',
+        icon: isFavorite
+            ? Icons.favorite_outlined
+            : Icons.favorite_border_outlined,
+        onSelected: () async {
+          for (final Track selectedTrack in tracks) {
+            await _controller.setFavorite(selectedTrack, !isFavorite);
+          }
+        },
       ),
     ];
   }
@@ -168,7 +186,8 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
         icon: Icons.last_page,
         onSelected: () => coordinator.playMediaLast(<MediaItem>[album]),
       ),
-      if ((primaryArtist != null && widget.onOpenArtist != null) || widget.onOpenAlbum != null) ...<ContextMenuAction>[
+      if ((primaryArtist != null && widget.onOpenArtist != null) ||
+          widget.onOpenAlbum != null) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
         if (primaryArtist != null && widget.onOpenArtist != null)
           ContextMenuAction(
@@ -185,8 +204,12 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
       ],
       const ContextMenuAction.separator(),
       ContextMenuAction(
-        label: isFavorite ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen',
-        icon: isFavorite ? Icons.favorite_outlined : Icons.favorite_border_outlined,
+        label: isFavorite
+            ? 'Aus Favoriten entfernen'
+            : 'Zu Favoriten hinzufügen',
+        icon: isFavorite
+            ? Icons.favorite_outlined
+            : Icons.favorite_border_outlined,
         onSelected: () => _controller.setFavorite(album, !isFavorite),
       ),
     ];
@@ -215,8 +238,12 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
       ),
       const ContextMenuAction.separator(),
       ContextMenuAction(
-        label: isFavorite ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen',
-        icon: isFavorite ? Icons.favorite_outlined : Icons.favorite_border_outlined,
+        label: isFavorite
+            ? 'Aus Favoriten entfernen'
+            : 'Zu Favoriten hinzufügen',
+        icon: isFavorite
+            ? Icons.favorite_outlined
+            : Icons.favorite_border_outlined,
         onSelected: () => _controller.setFavorite(playlist, !isFavorite),
       ),
     ];
@@ -258,14 +285,23 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
       ],
       const ContextMenuAction.separator(),
       ContextMenuAction(
-        label: isFavorite ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen',
-        icon: isFavorite ? Icons.favorite_outlined : Icons.favorite_border_outlined,
+        label: isFavorite
+            ? 'Aus Favoriten entfernen'
+            : 'Zu Favoriten hinzufügen',
+        icon: isFavorite
+            ? Icons.favorite_outlined
+            : Icons.favorite_border_outlined,
         onSelected: () => _controller.setFavorite(artist, !isFavorite),
       ),
     ];
   }
 
-  Future<void> _showMenu(BuildContext context, {BuildContext? anchorContext, Offset? globalPosition, required List<ContextMenuAction> actions}) {
+  Future<void> _showMenu(
+    BuildContext context, {
+    BuildContext? anchorContext,
+    Offset? globalPosition,
+    required List<ContextMenuAction> actions,
+  }) {
     return const AppContextMenuController().show(
       context: context,
       anchorContext: anchorContext,
@@ -281,7 +317,9 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
       children: <Widget>[
         Text(
           'Favoriten',
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+          style: Theme.of(
+            context,
+          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 20),
         MediaTableSectionDesktop<Track>(
@@ -291,12 +329,27 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
           emptyText: 'Keine favorisierten Titel.',
           maxItemsPerPage: 10,
           playbackCoordinator: widget.playbackCoordinator,
-          isRowFavorite: (Track item, int _) => _controller.isItemFavorite(item),
-          onRowFavoriteTap: (Track item, int _) => _controller.setFavorite(item, !_controller.isItemFavorite(item)),
+          isRowFavorite: (Track item, int _) =>
+              _controller.isItemFavorite(item),
+          onRowFavoriteTap: (Track item, int _) =>
+              _controller.setFavorite(item, !_controller.isItemFavorite(item)),
           onRowMoreAnchorTap: (Track item, int _, BuildContext anchor) =>
-              _showMenu(context, anchorContext: anchor, actions: _buildTrackMenuActions(item)),
-          onRowContextMenu: (Track item, int _, Offset position) =>
-              _showMenu(context, globalPosition: position, actions: _buildTrackMenuActions(item)),
+              _showMenu(
+                context,
+                anchorContext: anchor,
+                actions: _buildTrackMenuActions(item),
+              ),
+          onRowContextMenu: (Track item, int _, Offset position) => _showMenu(
+            context,
+            globalPosition: position,
+            actions: _buildTrackMenuActions(item),
+          ),
+          onRowSelectionContextMenu: (List<Track> items, Offset position) =>
+              _showMenu(
+                context,
+                globalPosition: position,
+                actions: _buildTrackMenuActions(items.first, items),
+              ),
           onArtistTap: widget.onOpenArtist,
           onAlbumTap: widget.onOpenAlbum,
         ),
@@ -307,12 +360,21 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
           items: _controller.albums,
           emptyText: 'Keine favorisierten Alben.',
           playbackCoordinator: widget.playbackCoordinator,
-          isRowFavorite: (Album item, int _) => _controller.isItemFavorite(item),
-          onRowFavoriteTap: (Album item, int _) => _controller.setFavorite(item, !_controller.isItemFavorite(item)),
+          isRowFavorite: (Album item, int _) =>
+              _controller.isItemFavorite(item),
+          onRowFavoriteTap: (Album item, int _) =>
+              _controller.setFavorite(item, !_controller.isItemFavorite(item)),
           onRowMoreAnchorTap: (Album item, int _, BuildContext anchor) =>
-              _showMenu(context, anchorContext: anchor, actions: _buildAlbumMenuActions(item)),
-          onRowContextMenu: (Album item, int _, Offset position) =>
-              _showMenu(context, globalPosition: position, actions: _buildAlbumMenuActions(item)),
+              _showMenu(
+                context,
+                anchorContext: anchor,
+                actions: _buildAlbumMenuActions(item),
+              ),
+          onRowContextMenu: (Album item, int _, Offset position) => _showMenu(
+            context,
+            globalPosition: position,
+            actions: _buildAlbumMenuActions(item),
+          ),
           onArtistTap: widget.onOpenArtist,
           onAlbumTap: widget.onOpenAlbum,
         ),
@@ -323,12 +385,22 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
           items: _controller.playlists,
           emptyText: 'Keine favorisierten Playlists.',
           playbackCoordinator: widget.playbackCoordinator,
-          isRowFavorite: (Playlist item, int _) => _controller.isItemFavorite(item),
-          onRowFavoriteTap: (Playlist item, int _) => _controller.setFavorite(item, !_controller.isItemFavorite(item)),
+          isRowFavorite: (Playlist item, int _) =>
+              _controller.isItemFavorite(item),
+          onRowFavoriteTap: (Playlist item, int _) =>
+              _controller.setFavorite(item, !_controller.isItemFavorite(item)),
           onRowMoreAnchorTap: (Playlist item, int _, BuildContext anchor) =>
-              _showMenu(context, anchorContext: anchor, actions: _buildPlaylistMenuActions(item)),
+              _showMenu(
+                context,
+                anchorContext: anchor,
+                actions: _buildPlaylistMenuActions(item),
+              ),
           onRowContextMenu: (Playlist item, int _, Offset position) =>
-              _showMenu(context, globalPosition: position, actions: _buildPlaylistMenuActions(item)),
+              _showMenu(
+                context,
+                globalPosition: position,
+                actions: _buildPlaylistMenuActions(item),
+              ),
           onPlaylistTap: widget.onOpenPlaylist,
         ),
         const SizedBox(height: 20),
@@ -338,12 +410,21 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
           items: _controller.artists,
           emptyText: 'Keine favorisierten Artists.',
           playbackCoordinator: widget.playbackCoordinator,
-          isRowFavorite: (Artist item, int _) => _controller.isItemFavorite(item),
-          onRowFavoriteTap: (Artist item, int _) => _controller.setFavorite(item, !_controller.isItemFavorite(item)),
+          isRowFavorite: (Artist item, int _) =>
+              _controller.isItemFavorite(item),
+          onRowFavoriteTap: (Artist item, int _) =>
+              _controller.setFavorite(item, !_controller.isItemFavorite(item)),
           onRowMoreAnchorTap: (Artist item, int _, BuildContext anchor) =>
-              _showMenu(context, anchorContext: anchor, actions: _buildArtistMenuActions(item)),
-          onRowContextMenu: (Artist item, int _, Offset position) =>
-              _showMenu(context, globalPosition: position, actions: _buildArtistMenuActions(item)),
+              _showMenu(
+                context,
+                anchorContext: anchor,
+                actions: _buildArtistMenuActions(item),
+              ),
+          onRowContextMenu: (Artist item, int _, Offset position) => _showMenu(
+            context,
+            globalPosition: position,
+            actions: _buildArtistMenuActions(item),
+          ),
           onArtistTap: widget.onOpenArtist,
         ),
       ],

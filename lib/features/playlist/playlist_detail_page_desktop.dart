@@ -12,6 +12,7 @@ import '../shared/userdata_controller.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
 import '../shared/widgets/media_image.dart';
 import 'playlist_detail_controller.dart';
+import 'playlist_name_dialog.dart';
 
 /// Desktop playlist detail page: the header stays pinned (expandable/collapsible)
 /// while only the track table scrolls internally.
@@ -25,6 +26,7 @@ class PlaylistDetailPageDesktop extends StatefulWidget {
     this.userDataController,
     this.onOpenArtist,
     this.onOpenAlbum,
+    this.onPlaylistDeleted,
   });
 
   final MusicAssistantClient client;
@@ -34,6 +36,7 @@ class PlaylistDetailPageDesktop extends StatefulWidget {
   final UserDataController? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
+  final VoidCallback? onPlaylistDeleted;
 
   @override
   State<PlaylistDetailPageDesktop> createState() =>
@@ -74,7 +77,13 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
   }
 
   // Context menus
-  List<ContextMenuAction> _buildItemMenuActions(MediaItem item) {
+  List<ContextMenuAction> _buildItemMenuActions(
+    MediaItem item, [
+    List<Track> selectedTracks = const <Track>[],
+  ]) {
+    final List<Track> tracks = selectedTracks.isEmpty && item is Track
+        ? <Track>[item]
+        : selectedTracks;
     final bool isFavorite = _controller.isItemFavorite(item);
     final PlaybackCoordinator coordinator = widget.playbackCoordinator;
     final Artist? primaryArtist = _primaryArtistOf(item);
@@ -84,25 +93,32 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () => coordinator.playMedia(<MediaItem>[item]),
+        onSelected: () =>
+            coordinator.playMedia(tracks.isEmpty ? <MediaItem>[item] : tracks),
       ),
       ContextMenuAction(
         label: 'Radio starten',
         icon: Icons.radio_outlined,
         onSelected: () => item is Track
-            ? _controller.startTrackRadio(item)
+            ? coordinator.playMediaRadioNext(
+                tracks.isEmpty ? <MediaItem>[item] : tracks,
+              )
             : _controller.startItemRadio(item),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => coordinator.playMediaNext(<MediaItem>[item]),
+        onSelected: () => coordinator.playMediaNext(
+          tracks.isEmpty ? <MediaItem>[item] : tracks,
+        ),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => coordinator.playMediaLast(<MediaItem>[item]),
+        onSelected: () => coordinator.playMediaLast(
+          tracks.isEmpty ? <MediaItem>[item] : tracks,
+        ),
       ),
     ];
 
@@ -145,7 +161,7 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
                     icon: Icons.playlist_play_outlined,
                     onSelected: () => _controller.addTracksToPlaylist(
                       playlist.itemId,
-                      <Track>[item],
+                      tracks,
                     ),
                   ),
                 )
@@ -156,12 +172,18 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
     }
 
     if (item is Track && _controller.isEditable) {
-      actions.add(const ContextMenuAction.separator());
+      if (widget.userDataController?.playlists.isEmpty ?? true) {
+        actions.add(const ContextMenuAction.separator());
+      }
       actions.add(
         ContextMenuAction(
           label: 'Aus Wiedergabeliste entfernen',
           icon: Icons.playlist_remove_outlined,
-          onSelected: () => _controller.removeTrack(item),
+          onSelected: () async {
+            for (final Track selectedTrack in tracks) {
+              await _controller.removeTrack(selectedTrack);
+            }
+          },
         ),
       );
     }
@@ -175,7 +197,15 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
         icon: isFavorite
             ? Icons.favorite_outlined
             : Icons.favorite_border_outlined,
-        onSelected: () => _controller.toggleItemFavorite(item),
+        onSelected: () async {
+          if (tracks.isEmpty) {
+            await _controller.toggleItemFavorite(item);
+            return;
+          }
+          for (final Track selectedTrack in tracks) {
+            await _controller.toggleItemFavorite(selectedTrack);
+          }
+        },
       ),
     );
     return actions;
@@ -223,7 +253,58 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
           onSelected: _controller.togglePlaylistFavorite,
         ),
       ],
+      if (_controller.isLocalPlaylist) ...<ContextMenuAction>[
+        const ContextMenuAction.separator(),
+        ContextMenuAction(
+          label: 'Umbenennen',
+          icon: Icons.edit_outlined,
+          onSelected: _renamePlaylist,
+        ),
+        ContextMenuAction(
+          label: 'Löschen',
+          icon: Icons.delete_outline,
+          isDestructive: true,
+          onSelected: _deletePlaylist,
+        ),
+      ],
     ];
+  }
+
+  Future<void> _renamePlaylist() async {
+    final Playlist? playlist = _controller.playlist;
+    final UserDataController? userData = widget.userDataController;
+    if (playlist == null || userData == null || !_controller.isLocalPlaylist) {
+      return;
+    }
+
+    final String? name = await showPlaylistNameDialog(
+      context: context,
+      playlist: playlist,
+    );
+    if (name != null) {
+      await userData.renamePlaylist(playlist, name);
+      await _controller.loadPlaylist();
+    }
+  }
+
+  Future<void> _deletePlaylist() async {
+    final Playlist? playlist = _controller.playlist;
+    final UserDataController? userData = widget.userDataController;
+    if (playlist == null || userData == null || !_controller.isLocalPlaylist) {
+      return;
+    }
+
+    final bool confirmed = await showDeletePlaylistDialog(
+      context: context,
+      playlistName: _controller.playlistName,
+    );
+    if (!confirmed || !mounted) {
+      return;
+    }
+
+    if (await userData.removePlaylist(playlist)) {
+      widget.onPlaylistDeleted?.call();
+    }
   }
 
   Future<void> _showItemMenu(MediaItem item, {BuildContext? anchorContext}) {
@@ -234,11 +315,15 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
     );
   }
 
-  Future<void> _showItemMenuAtPosition(MediaItem item, Offset position) {
+  Future<void> _showItemMenuAtPosition(
+    MediaItem item,
+    Offset position, [
+    List<Track> selectedTracks = const <Track>[],
+  ]) {
     return const AppContextMenuController().show(
       context: context,
       globalPosition: position,
-      actions: _buildItemMenuActions(item),
+      actions: _buildItemMenuActions(item, selectedTracks),
     );
   }
 
@@ -292,6 +377,9 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
                     _showItemMenu(item, anchorContext: anchor),
                 onRowContextMenu: (Track item, int _, Offset position) =>
                     _showItemMenuAtPosition(item, position),
+                onRowSelectionContextMenu:
+                    (List<Track> items, Offset position) =>
+                        _showItemMenuAtPosition(items.first, position, items),
                 onArtistTap: widget.onOpenArtist,
                 onAlbumTap: widget.onOpenAlbum,
               ),

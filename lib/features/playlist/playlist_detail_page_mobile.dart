@@ -11,6 +11,7 @@ import '../shared/userdata_controller.dart';
 import '../shared/widgets/media_table_section_mobile.dart';
 import '../shared/widgets/media_image.dart';
 import 'playlist_detail_controller.dart';
+import 'playlist_name_dialog.dart';
 
 /// Mobile playlist detail page: pinned banner header with centered actions and
 /// an internally scrolling track table.
@@ -24,6 +25,7 @@ class PlaylistDetailPageMobile extends StatefulWidget {
     this.userDataController,
     this.onOpenArtist,
     this.onOpenAlbum,
+    this.onPlaylistDeleted,
   });
 
   final MusicAssistantClient client;
@@ -33,6 +35,7 @@ class PlaylistDetailPageMobile extends StatefulWidget {
   final UserDataController? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
+  final VoidCallback? onPlaylistDeleted;
 
   @override
   State<PlaylistDetailPageMobile> createState() =>
@@ -177,7 +180,55 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
               : Icons.favorite_border_outlined,
           onSelected: _controller.togglePlaylistFavorite,
         ),
+      if (_controller.isLocalPlaylist) ...<ContextMenuAction>[
+        const ContextMenuAction.separator(),
+        ContextMenuAction(
+          label: 'Umbenennen',
+          icon: Icons.edit_outlined,
+          onSelected: _renamePlaylist,
+        ),
+        ContextMenuAction(
+          label: 'Löschen',
+          icon: Icons.delete_outline,
+          isDestructive: true,
+          onSelected: _deletePlaylist,
+        ),
+      ],
     ];
+  }
+
+  Future<void> _renamePlaylist() async {
+    final Playlist? playlist = _controller.playlist;
+    final UserDataController? userData = widget.userDataController;
+    if (playlist == null || userData == null || !_controller.isLocalPlaylist) {
+      return;
+    }
+    final String? name = await showPlaylistNameDialog(
+      context: context,
+      playlist: playlist,
+    );
+    if (name != null) {
+      await userData.renamePlaylist(playlist, name);
+      await _controller.loadPlaylist();
+    }
+  }
+
+  Future<void> _deletePlaylist() async {
+    final Playlist? playlist = _controller.playlist;
+    final UserDataController? userData = widget.userDataController;
+    if (playlist == null || userData == null || !_controller.isLocalPlaylist) {
+      return;
+    }
+    final bool confirmed = await showDeletePlaylistDialog(
+      context: context,
+      playlistName: _controller.playlistName,
+    );
+    if (!confirmed || !mounted) {
+      return;
+    }
+    if (await userData.removePlaylist(playlist)) {
+      widget.onPlaylistDeleted?.call();
+    }
   }
 
   @override

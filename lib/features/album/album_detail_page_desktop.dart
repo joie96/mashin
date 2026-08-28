@@ -70,9 +70,9 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
     if (mounted) setState(() {});
   }
 
-  List<ContextMenuAction> _buildPlaylistSubmenu(MediaItem item) {
+  List<ContextMenuAction> _buildPlaylistSubmenu(List<Track> tracks) {
     final UserDataController? controller = widget.userDataController;
-    if (controller == null || item is! Track) {
+    if (controller == null || tracks.isEmpty) {
       return const <ContextMenuAction>[];
     }
 
@@ -81,41 +81,52 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
           (Playlist playlist) => ContextMenuAction(
             label: playlist.name,
             icon: Icons.playlist_play_outlined,
-            onSelected: () => controller.addPlaylistTracks(
-              playlist.itemId,
-              <Track>[item],
-            ),
+            onSelected: () =>
+                controller.addPlaylistTracks(playlist.itemId, tracks),
           ),
         )
         .toList(growable: false);
   }
 
-  List<ContextMenuAction> _buildItemMenuActions(MediaItem item) {
+  List<ContextMenuAction> _buildItemMenuActions(
+    MediaItem item, [
+    List<Track> selectedTracks = const <Track>[],
+  ]) {
+    final List<Track> tracks = selectedTracks.isEmpty && item is Track
+        ? <Track>[item]
+        : selectedTracks;
     final bool isFavorite = _controller.isItemFavorite(item);
     final PlaybackCoordinator coordinator = widget.playbackCoordinator;
     final List<ContextMenuAction> actions = <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () => coordinator.playMedia(<MediaItem>[item]),
+        onSelected: () =>
+            coordinator.playMedia(tracks.isEmpty ? <MediaItem>[item] : tracks),
       ),
       ContextMenuAction(
         label: 'Radio starten',
         icon: Icons.radio_outlined,
         onSelected: () => item is Track
-            ? _controller.startTrackRadio(item)
+            ? coordinator.playMediaRadioNext(
+                tracks.isEmpty ? <MediaItem>[item] : tracks,
+              )
             : _controller.startItemRadio(item),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => coordinator.playMediaNext(<MediaItem>[item]),
+        onSelected: () => coordinator.playMediaNext(
+          tracks.isEmpty ? <MediaItem>[item] : tracks,
+        ),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => coordinator.playMediaLast(<MediaItem>[item]),
+        onSelected: () => coordinator.playMediaLast(
+          tracks.isEmpty ? <MediaItem>[item] : tracks,
+        ),
       ),
     ];
 
@@ -158,7 +169,9 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
       }
     }
 
-    final List<ContextMenuAction> playlistActions = _buildPlaylistSubmenu(item);
+    final List<ContextMenuAction> playlistActions = _buildPlaylistSubmenu(
+      tracks,
+    );
     if (playlistActions.isNotEmpty) {
       actions.add(const ContextMenuAction.separator());
       actions.add(
@@ -236,11 +249,15 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
     );
   }
 
-  Future<void> _showItemMenuAtPosition(MediaItem item, Offset position) {
+  Future<void> _showItemMenuAtPosition(
+    MediaItem item,
+    Offset position, [
+    List<Track> selectedTracks = const <Track>[],
+  ]) {
     return const AppContextMenuController().show(
       context: context,
       globalPosition: position,
-      actions: _buildItemMenuActions(item),
+      actions: _buildItemMenuActions(item, selectedTracks),
     );
   }
 
@@ -281,6 +298,13 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
                             _showItemMenu(item, anchorContext: anchor),
                     onRowContextMenu: (Track item, int _, Offset position) =>
                         _showItemMenuAtPosition(item, position),
+                    onRowSelectionContextMenu:
+                        (List<Track> items, Offset position) =>
+                            _showItemMenuAtPosition(
+                              items.first,
+                              position,
+                              items,
+                            ),
                     onArtistTap: widget.onOpenArtist,
                     onAlbumTap: widget.onOpenAlbum,
                   ),

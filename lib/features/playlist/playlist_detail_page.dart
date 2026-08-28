@@ -19,6 +19,7 @@ class PlaylistDetailPage extends StatelessWidget {
     this.userDataController,
     this.onOpenArtist,
     this.onOpenAlbum,
+    this.onPlaylistDeleted,
   });
 
   final MusicAssistantClient client;
@@ -28,6 +29,7 @@ class PlaylistDetailPage extends StatelessWidget {
   final UserDataController? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
+  final VoidCallback? onPlaylistDeleted;
 
   @override
   Widget build(BuildContext context) {
@@ -40,6 +42,7 @@ class PlaylistDetailPage extends StatelessWidget {
         userDataController: userDataController,
         onOpenArtist: onOpenArtist,
         onOpenAlbum: onOpenAlbum,
+        onPlaylistDeleted: onPlaylistDeleted,
       );
     }
 
@@ -51,6 +54,7 @@ class PlaylistDetailPage extends StatelessWidget {
       userDataController: userDataController,
       onOpenArtist: onOpenArtist,
       onOpenAlbum: onOpenAlbum,
+      onPlaylistDeleted: onPlaylistDeleted,
     );
   }
 }
