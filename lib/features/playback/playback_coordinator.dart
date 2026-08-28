@@ -56,6 +56,8 @@ class PlaybackCoordinator {
 
   PlaybackOutputMode? get outputMode => _outputMode;
 
+  PlaybackPlayer? get activePlayer => _activePlayer;
+
   PlaybackState get playbackState => _playbackState;
 
   PlaybackQueue get playbackQueue => _queueState;

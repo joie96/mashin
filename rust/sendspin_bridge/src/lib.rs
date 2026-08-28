@@ -164,13 +164,14 @@ struct StreamFormatsRequest {
 }
 
 fn build_supported_audio_formats(preferred_codec: &str) -> Vec<AudioFormatSpec> {
-    let mut seen = HashSet::<(u32, u8, u8)>::new();
+    let mut seen = HashSet::<(String, u32, u8, u8)>::new();
     let mut formats = Vec::<AudioFormatSpec>::new();
 
-    let mut push_spec = |sample_rate: u32, channels: u8, bit_depth: u8| {
-        if seen.insert((sample_rate, channels, bit_depth)) {
+    let codec_order = [preferred_codec, "opus", "flac", "pcm"];
+    let mut push_spec = |codec: &str, sample_rate: u32, channels: u8, bit_depth: u8| {
+        if seen.insert((codec.to_string(), sample_rate, channels, bit_depth)) {
             formats.push(AudioFormatSpec {
-                codec: preferred_codec.to_string(),
+                codec: codec.to_string(),
                 channels,
                 sample_rate,
                 bit_depth,
@@ -181,18 +182,33 @@ fn build_supported_audio_formats(preferred_codec: &str) -> Vec<AudioFormatSpec> 
     // Put the active Windows default endpoint profile first because some
     // servers prefer the first format and WASAPI shared mode is strict.
     if let Some((_name, sample_rate, channels)) = detect_default_output_profile() {
-        push_spec(sample_rate, channels, 24);
-        push_spec(sample_rate, channels, 16);
+        for codec in codec_order {
+            push_spec(
+                codec,
+                sample_rate,
+                channels,
+                if codec == "opus" { 16 } else { 24 },
+            );
+            if codec != "opus" {
+                push_spec(codec, sample_rate, channels, 16);
+            }
+        }
     }
 
     // Keep the previous default near the front as a stable server fallback.
-    push_spec(48_000, 2, 24);
+    for codec in codec_order {
+        push_spec(codec, 48_000, 2, if codec == "opus" { 16 } else { 24 });
+    }
 
     // Add common shared-mode fallback formats used by consumer audio devices.
     for sample_rate in [48_000_u32, 44_100_u32] {
         for channels in [2_u8, 1_u8] {
             for bit_depth in [24_u8, 16_u8] {
-                push_spec(sample_rate, channels, bit_depth);
+                for codec in codec_order {
+                    if codec != "opus" || bit_depth == 16 {
+                        push_spec(codec, sample_rate, channels, bit_depth);
+                    }
+                }
             }
         }
     }
@@ -914,6 +930,30 @@ impl SendspinEngine {
         Ok(())
     }
 
+    fn request_codec(&mut self, codec: &str) -> Result<(), String> {
+        let normalized = codec.trim().to_ascii_lowercase();
+        if !matches!(normalized.as_str(), "opus" | "flac" | "pcm") {
+            return Err(format!("unsupported codec: {normalized}"));
+        }
+
+        let sender = self
+            .sender
+            .clone()
+            .ok_or_else(|| "sender is not connected".to_string())?;
+
+        self.runtime.block_on(async {
+            sender
+                .request_player_format(PlayerFormatRequest {
+                    codec: Some(normalized),
+                    channels: None,
+                    sample_rate: None,
+                    bit_depth: if codec == "opus" { Some(16) } else { None },
+                })
+                .await
+                .map_err(|err| err.to_string())
+        })
+    }
+
     fn sender_send_sync_state(&mut self, state: &str) -> Result<(), String> {
         let sender = self
             .sender
@@ -1595,6 +1635,21 @@ pub extern "C" fn mashin_sendspin_set_muted(muted: i32) -> i32 {
     };
 
     as_i32_result(engine.set_muted(muted != 0))
+}
+
+#[no_mangle]
+pub extern "C" fn mashin_sendspin_request_codec(codec: *const c_char) -> i32 {
+    let codec = match read_utf8(codec, "codec") {
+        Ok(value) => value,
+        Err(err) => return as_i32_result(Err(err)),
+    };
+
+    let mut engine = match ENGINE.lock() {
+        Ok(lock) => lock,
+        Err(_) => return as_i32_result(Err("engine lock poisoned".to_string())),
+    };
+
+    as_i32_result(engine.request_codec(&codec))
 }
 
 #[no_mangle]

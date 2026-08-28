@@ -14,6 +14,8 @@ class AppConfig {
 
   static const String _musicAssistantUrlKey = 'ma.base_url';
   static const String _sendspinUrlKey = 'ma.sendspin_url';
+  static const String _sendspinPreferredCodecKey =
+      'ma.sendspin_preferred_codec';
 
   static bool isMobile() {
     // Temporary: decide mobile/desktop by viewport width.
@@ -52,13 +54,39 @@ class AppConfig {
     }
 
     final musicAssistantUrl =
-        prefs.getString(_musicAssistantUrlKey)?.trim() ?? defaultMusicAssistantUrl;
+        prefs.getString(_musicAssistantUrlKey)?.trim() ??
+        defaultMusicAssistantUrl;
     final derived = _deriveSendspinUrlFromMusicAssistantUrl(musicAssistantUrl);
     await prefs.setString(_sendspinUrlKey, derived);
     return derived;
   }
 
-  static String _deriveSendspinUrlFromMusicAssistantUrl(String musicAssistantUrl) {
+  static Future<String> getSendspinPreferredCodec() async {
+    final prefs = await SharedPreferences.getInstance();
+    final configured =
+        prefs.getString(_sendspinPreferredCodecKey)?.trim().toLowerCase() ?? '';
+    return _isSupportedSendspinCodec(configured)
+        ? configured
+        : sendspinPreferredCodec;
+  }
+
+  static Future<void> setSendspinPreferredCodec(String codec) async {
+    final normalized = codec.trim().toLowerCase();
+    if (!_isSupportedSendspinCodec(normalized)) {
+      throw ArgumentError.value(codec, 'codec', 'Unsupported Sendspin codec.');
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_sendspinPreferredCodecKey, normalized);
+  }
+
+  static bool _isSupportedSendspinCodec(String codec) {
+    return codec == 'opus' || codec == 'flac' || codec == 'pcm';
+  }
+
+  static String _deriveSendspinUrlFromMusicAssistantUrl(
+    String musicAssistantUrl,
+  ) {
     final fallback = Uri.parse(defaultMusicAssistantUrl);
     final source = Uri.tryParse(musicAssistantUrl.trim());
 
@@ -113,7 +141,9 @@ class AppConfig {
       return '';
     }
 
-    final pattern = preserveHyphen ? RegExp(r'[^a-z0-9-]') : RegExp(r'[^a-z0-9]');
+    final pattern = preserveHyphen
+        ? RegExp(r'[^a-z0-9-]')
+        : RegExp(r'[^a-z0-9]');
     return lower.replaceAll(pattern, '');
   }
 }

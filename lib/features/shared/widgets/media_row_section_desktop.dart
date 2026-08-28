@@ -2379,16 +2379,6 @@ String _playlistSubtitle(Playlist playlist) {
   return 'Playlist';
 }
 
-String _artistTertiary(Artist artist) {
-  final provider = _stripOrEmpty(artist.provider);
-  if (provider.isEmpty) {
-    return '-';
-  }
-
-  final cut = provider.split('--').first.trim();
-  return cut.isEmpty ? provider : cut;
-}
-
 String _mediaTypeLabel(String? rawType) {
   final value = rawType?.trim().toLowerCase() ?? '';
   if (value.isEmpty) {

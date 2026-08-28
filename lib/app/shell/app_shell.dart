@@ -46,6 +46,7 @@ class _AppShellState extends State<AppShell> {
   MusicAssistantEventHub? _musicAssistantEventHub;
   bool _isQueueOverlayOpen = false;
   bool _isBootstrapping = true;
+  String _preferredCodec = AppConfig.sendspinPreferredCodec;
   String _baseUrl = AppConfig.defaultMusicAssistantUrl;
   String? _username;
   UserDataController? _userDataController;
@@ -459,6 +460,7 @@ class _AppShellState extends State<AppShell> {
                     onSeek: _seek,
                     onVolumeChanged: _setVolume,
                     onOpenQueue: _openQueueOverlay,
+                    onOpenAudioOptions: _showAudioOptions,
                   ),
             ),
           ],
@@ -927,6 +929,7 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _bootstrapStartup() async {
     try {
+      _preferredCodec = await AppConfig.getSendspinPreferredCodec();
       await _restoreSession();
       await _initializePlaybackCoordinator();
     } catch (error) {
@@ -1042,6 +1045,40 @@ class _AppShellState extends State<AppShell> {
       await _playbackCoordinator.setVolume(safeVolume);
     } catch (error) {
       debugPrint('Set volume failed: $error');
+    }
+  }
+
+  Future<void> _showAudioOptions(BuildContext anchorContext) async {
+    await const AppContextMenuController().showCustom(
+      context: context,
+      anchorContext: anchorContext,
+      width: 240,
+      height: 230,
+      child: _AudioOptionsMenu(
+        selectedCodec: _preferredCodec,
+        onSelected: _setPreferredAudioCodec,
+      ),
+    );
+  }
+
+  Future<void> _setPreferredAudioCodec(String codec) async {
+    Navigator.of(context).pop();
+    final player = _playbackCoordinator.activePlayer;
+    if (player is! SendspinPlayer || codec == _preferredCodec) {
+      return;
+    }
+
+    try {
+      await player.setPreferredAudioCodec(codec);
+      if (mounted) {
+        setState(() => _preferredCodec = codec);
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Codecwechsel fehlgeschlagen: $error')),
+        );
+      }
     }
   }
 
@@ -1522,6 +1559,7 @@ class _DesktopPlayerBar extends StatelessWidget {
   final Future<void> Function(double) onSeek;
   final ValueChanged<double> onVolumeChanged;
   final VoidCallback onOpenQueue;
+  final ValueChanged<BuildContext> onOpenAudioOptions;
 
   const _DesktopPlayerBar({
     required this.currentTrackInfo,
@@ -1541,6 +1579,7 @@ class _DesktopPlayerBar extends StatelessWidget {
     required this.onSeek,
     required this.onVolumeChanged,
     required this.onOpenQueue,
+    required this.onOpenAudioOptions,
   });
 
   @override
@@ -1766,10 +1805,13 @@ class _DesktopPlayerBar extends StatelessWidget {
                       ),
                     ),
                   ),
-                  _PlayerBarIconButton(
-                    icon: Icons.tune_outlined,
-                    onTap: () {},
-                    color: colors.textSecondary,
+                  Builder(
+                    builder: (BuildContext buttonContext) =>
+                        _PlayerBarIconButton(
+                          icon: Icons.tune_outlined,
+                          onTap: () => onOpenAudioOptions(buttonContext),
+                          color: colors.textSecondary,
+                        ),
                   ),
                 ],
               ),
@@ -1777,6 +1819,90 @@ class _DesktopPlayerBar extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _AudioOptionsMenu extends StatelessWidget {
+  const _AudioOptionsMenu({
+    required this.selectedCodec,
+    required this.onSelected,
+  });
+
+  final String selectedCodec;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+
+    return Material(
+      color: colors.bgSecondary,
+      elevation: 12,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: RadioGroup<String>(
+          groupValue: selectedCodec,
+          onChanged: (String? value) {
+            if (value != null) {
+              onSelected(value);
+            }
+          },
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+                child: Text(
+                  'Klangqualität',
+                  style: TextStyle(
+                    color: colors.textPrimary,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Divider(height: 1, color: colors.border),
+              _AudioCodecOption(
+                value: 'opus',
+                title: 'Standard',
+                subtitle: 'Opus 256 kb/s',
+              ),
+              _AudioCodecOption(
+                value: 'flac',
+                title: 'High Fidelity',
+                subtitle: 'FLAC',
+              ),
+              _AudioCodecOption(value: 'pcm', title: 'Studio', subtitle: 'PCM'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AudioCodecOption extends StatelessWidget {
+  const _AudioCodecOption({
+    required this.value,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String value;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+    return RadioListTile<String>(
+      value: value,
+      dense: true,
+      title: Text(title, style: TextStyle(color: colors.textPrimary)),
+      subtitle: Text(subtitle, style: TextStyle(color: colors.textSecondary)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
     );
   }
 }

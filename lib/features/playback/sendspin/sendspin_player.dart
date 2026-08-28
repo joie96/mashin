@@ -164,6 +164,31 @@ class SendspinPlayer implements PlaybackPlayer {
   @override
   Future<void> setMuted(bool muted) => transportBackend.setMuted(muted);
 
+  Future<void> setPreferredAudioCodec(String codec) async {
+    final normalized = codec.trim().toLowerCase();
+    if (normalized != 'opus' && normalized != 'flac' && normalized != 'pcm') {
+      throw ArgumentError.value(codec, 'codec', 'Unsupported Sendspin codec.');
+    }
+
+    await AppConfig.setSendspinPreferredCodec(normalized);
+    final wasPlaying =
+        _playbackState.playbackState == PlaybackStateType.playing;
+    if (wasPlaying) {
+      await transportBackend.transportPause();
+    }
+
+    _playbackState = _playbackState.copyWith(
+      playbackState: PlaybackStateType.buffering,
+    );
+    _emitPlaybackState();
+
+    await transportBackend.requestCodec(normalized);
+
+    if (wasPlaying) {
+      await transportBackend.transportPlay();
+    }
+  }
+
   // Play Media and Queue Management
   @override
   Future<void> playMedia(List<MediaItem> mediaItems) async {
@@ -397,7 +422,10 @@ class SendspinPlayer implements PlaybackPlayer {
   // - update playback flags (state/volume/mute/repeat/shuffle)
   // - keep duration from metadata
   // - do not overwrite position anchor from this stream
-  void _applyPlaybackState(PlaybackState nextPlaybackState, {required bool emit}) {
+  void _applyPlaybackState(
+    PlaybackState nextPlaybackState, {
+    required bool emit,
+  }) {
     final PlaybackState previousPlaybackState = _playbackState;
     _playbackState = _playbackState.copyWith(
       playbackState: nextPlaybackState.playbackState,
@@ -430,9 +458,11 @@ class SendspinPlayer implements PlaybackPlayer {
       _positionInterpolationTimer = null;
     }
 
-    if (previousPlaybackState.playbackState != nextPlaybackState.playbackState ||
+    if (previousPlaybackState.playbackState !=
+            nextPlaybackState.playbackState ||
         previousPlaybackState.positionMillis != _playbackState.positionMillis ||
-        previousPlaybackState.durationMillis != nextPlaybackState.durationMillis) {
+        previousPlaybackState.durationMillis !=
+            nextPlaybackState.durationMillis) {
       _logger.debug(
         'Sendspin playback state applied. PlaybackState=${nextPlaybackState.playbackState.name}, PositionMillis=${_playbackState.positionMillis}, DurationMillis=${nextPlaybackState.durationMillis}',
       );

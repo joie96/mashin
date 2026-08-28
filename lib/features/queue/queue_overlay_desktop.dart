@@ -478,7 +478,7 @@ class _TrackActionIcon extends StatelessWidget {
   final VoidCallback? onPressed;
   final Color? color;
 
-  const _TrackActionIcon({required this.icon, this.onPressed, this.color});
+  const _TrackActionIcon({required this.icon, this.onPressed}) : color = null;
 
   @override
   Widget build(BuildContext context) {

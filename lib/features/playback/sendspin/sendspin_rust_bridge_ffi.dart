@@ -30,6 +30,8 @@ typedef _DartVolumeFn = int Function(int);
 
 typedef _NativeMutedFn = ffi.Int32 Function(ffi.Int32);
 typedef _DartMutedFn = int Function(int);
+typedef _NativeCodecFn = ffi.Int32 Function(ffi.Pointer<Utf8>);
+typedef _DartCodecFn = int Function(ffi.Pointer<Utf8>);
 
 typedef _NativeGetStringFn = ffi.Pointer<Utf8> Function();
 typedef _DartGetStringFn = ffi.Pointer<Utf8> Function();
@@ -69,7 +71,8 @@ class FfiSendspinRustBridge implements SendspinRustBridge {
   bool _disposed = false;
 
   @override
-  Stream<SendspinPlayerState> get playbackStates => _playbackStateController.stream;
+  Stream<SendspinPlayerState> get playbackStates =>
+      _playbackStateController.stream;
 
   @override
   Stream<Map<String, dynamic>> get events => _eventController.stream;
@@ -83,7 +86,7 @@ class FfiSendspinRustBridge implements SendspinRustBridge {
       'clientId': AppConfig.appId,
       'clientName': AppConfig.appName,
       'bufferCapacityBytes': AppConfig.sendspinBufferCapacityBytes,
-      'preferredCodec': AppConfig.sendspinPreferredCodec,
+      'preferredCodec': await AppConfig.getSendspinPreferredCodec(),
     };
 
     final pointer = jsonEncode(config).toNativeUtf8();
@@ -201,6 +204,17 @@ class FfiSendspinRustBridge implements SendspinRustBridge {
   Future<void> setMuted(bool muted) async {
     final code = _bindings.setMuted(muted ? 1 : 0);
     _throwIfError(code, 'setMuted');
+  }
+
+  @override
+  Future<void> requestCodec(String codec) async {
+    final pointer = codec.toNativeUtf8();
+    try {
+      final code = _bindings.requestCodec(pointer);
+      _throwIfError(code, 'requestCodec');
+    } finally {
+      calloc.free(pointer);
+    }
   }
 
   @override
@@ -503,6 +517,9 @@ class _RustBindings {
       setMuted = library.lookupFunction<_NativeMutedFn, _DartMutedFn>(
         'mashin_sendspin_set_muted',
       ),
+      requestCodec = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
+        'mashin_sendspin_request_codec',
+      ),
       senderSendSyncState = library
           .lookupFunction<_NativeDisconnectFn, _DartDisconnectFn>(
             'mashin_sendspin_sender_send_sync_state',
@@ -558,6 +575,7 @@ class _RustBindings {
   final _DartVoidFn transportSwitchGroup;
   final _DartVolumeFn setVolume;
   final _DartMutedFn setMuted;
+  final _DartCodecFn requestCodec;
   final _DartDisconnectFn senderSendSyncState;
   final _DartVoidFn senderEnterExternalSource;
   final _DartDisconnectFn senderExitExternalSource;

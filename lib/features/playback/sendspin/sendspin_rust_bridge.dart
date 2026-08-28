@@ -41,6 +41,8 @@ abstract class SendspinRustBridge {
 
   Future<void> setMuted(bool muted);
 
+  Future<void> requestCodec(String codec);
+
   Future<void> senderSendSyncState(String state);
 
   Future<void> senderEnterExternalSource();

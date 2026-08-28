@@ -118,6 +118,69 @@ class AppContextMenuController {
     );
   }
 
+  Future<void> showCustom({
+    required BuildContext context,
+    required BuildContext anchorContext,
+    required Widget child,
+    required double width,
+    required double height,
+  }) async {
+    if (AppConfig.isMobile()) {
+      await showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        builder: (_) => SafeArea(child: child),
+      );
+      return;
+    }
+
+    final RenderBox overlayBox =
+        Navigator.of(context).overlay!.context.findRenderObject()! as RenderBox;
+    final RenderBox anchorBox = anchorContext.findRenderObject()! as RenderBox;
+    final Offset anchorCenter = anchorBox.localToGlobal(
+      anchorBox.size.center(Offset.zero),
+      ancestor: overlayBox,
+    );
+
+    double left = anchorCenter.dx - width - _desktopMenuAnchorGap;
+    double top = anchorCenter.dy - height - _desktopMenuAnchorGap;
+    if (left < _desktopMenuViewportInset) {
+      left = anchorCenter.dx + _desktopMenuAnchorGap;
+    }
+    if (top < _desktopMenuViewportInset) {
+      top = anchorCenter.dy + _desktopMenuAnchorGap;
+    }
+    left = left.clamp(
+      _desktopMenuViewportInset,
+      overlayBox.size.width - width - _desktopMenuViewportInset,
+    );
+    top = top.clamp(
+      _desktopMenuViewportInset,
+      overlayBox.size.height - height - _desktopMenuViewportInset,
+    );
+
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Kontextmenü schließen',
+      barrierColor: Colors.transparent,
+      transitionDuration: _desktopMenuTransitionDuration,
+      transitionBuilder: (_, animation, _, dialogChild) =>
+          _buildDesktopMenuFade(animation, dialogChild),
+      pageBuilder: (_, _, _) => Stack(
+        children: <Widget>[
+          Positioned(
+            left: left,
+            top: top,
+            width: width,
+            height: height,
+            child: child,
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _showDesktop({
     required BuildContext context,
     required BuildContext anchorContext,
