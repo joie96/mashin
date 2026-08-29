@@ -96,7 +96,15 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
         onSelected: () =>
             widget.playbackCoordinator.playMedia(<MediaItem>[item]),
       ),
-      ContextMenuAction(
+      if (item is Album || item is Playlist)
+        ContextMenuAction(
+          label: 'Zufällig abspielen',
+          icon: Icons.shuffle_outlined,
+          onSelected: () =>
+              widget.playbackCoordinator.shufflePlayMedia(<MediaItem>[item]),
+        ),
+      if (item is! Playlist)
+        ContextMenuAction(
         label: 'Radio starten',
         icon: Icons.radio_outlined,
         onSelected: () =>
@@ -175,7 +183,7 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
             ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 18),
-          MediaSlideSectionDesktop<MediaItem>(
+          MediaSlideSectionDesktop<Track>(
             title: 'Unsere Empfehlungen für dich',
             isLoading: _controller.isLoadingRecommendations,
             items: _controller.recommendationItems,
@@ -203,6 +211,8 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
             maxItems: 9,
             playbackCoordinator: widget.playbackCoordinator,
             onItemTap: widget.onOpenPlaylist,
+            onItemContextMenu: (Playlist item, int _, Offset position) =>
+                _showItemMenuAtPosition(item, position),
           ),
           const SizedBox(height: 24),
           MediaRowSectionDesktop<Playlist>(
@@ -222,6 +232,7 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
             onRowContextMenu: (Playlist item, int _, Offset position) =>
                 _showItemMenuAtPosition(item, position),
             onPlaylistTap: widget.onOpenPlaylist,
+            showPlaylistDetails: false,
           ),
           const SizedBox(height: 24),
           MediaRowSectionDesktop<Track>(
@@ -261,6 +272,30 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
             onRowContextMenu: (Artist item, int _, Offset position) =>
                 _showItemMenuAtPosition(item, position),
             onArtistTap: widget.onOpenArtist,
+          ),
+          ..._controller.similarArtistSections.map(
+            (HomeSimilarArtistSection section) => Column(
+              children: <Widget>[
+                const SizedBox(height: 24),
+                MediaRowSectionDesktop<Artist>(
+                  title: section.title,
+                  isLoading: _controller.isLoadingSimilarArtists,
+                  items: section.artists,
+                  emptyText: 'Keine ähnlichen Künstler:innen verfügbar.',
+                  playbackCoordinator: widget.playbackCoordinator,
+                  isRowFavorite: (Artist item, int _) =>
+                      _controller.isItemFavorite(item),
+                  onRowFavoriteTap: (Artist item, int _) => _controller
+                      .setFavorite(item, !_controller.isItemFavorite(item)),
+                  onRowMoreAnchorTap:
+                      (Artist item, int _, BuildContext anchor) =>
+                          _showItemMenu(item, anchorContext: anchor),
+                  onRowContextMenu: (Artist item, int _, Offset position) =>
+                      _showItemMenuAtPosition(item, position),
+                  onArtistTap: widget.onOpenArtist,
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 24),
           MediaRowSectionDesktop<Track>(

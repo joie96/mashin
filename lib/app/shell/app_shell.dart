@@ -1324,9 +1324,7 @@ class _DesktopNavItemState extends State<_DesktopNavItem> {
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: widget.onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
-            curve: Curves.easeOut,
+          child: Container(
             decoration: BoxDecoration(
               color: _isHovered ? colors.hover : Colors.transparent,
               borderRadius: BorderRadius.circular(10),
@@ -1383,6 +1381,7 @@ class _DesktopSidebarPlaylistItem extends StatefulWidget {
 class _DesktopSidebarPlaylistItemState
     extends State<_DesktopSidebarPlaylistItem> {
   bool _isHovered = false;
+  bool _isCoverHovered = false;
   bool _isPlayHovered = false;
 
   void _setHovered(bool value) {
@@ -1400,6 +1399,18 @@ class _DesktopSidebarPlaylistItemState
     }
     setState(() {
       _isPlayHovered = value;
+    });
+  }
+
+  void _setCoverHovered(bool value) {
+    if (_isCoverHovered == value && (value || !_isPlayHovered)) {
+      return;
+    }
+    setState(() {
+      _isCoverHovered = value;
+      if (!value) {
+        _isPlayHovered = false;
+      }
     });
   }
 
@@ -1437,9 +1448,7 @@ class _DesktopSidebarPlaylistItemState
           onTap: widget.onTap,
           onSecondaryTapUp: (TapUpDetails details) =>
               widget.onContextMenu(details.globalPosition),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
-            curve: Curves.easeOut,
+          child: Container(
             decoration: BoxDecoration(
               color: _isHovered ? colors.hover : Colors.transparent,
               borderRadius: BorderRadius.circular(10),
@@ -1447,14 +1456,17 @@ class _DesktopSidebarPlaylistItemState
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             child: Row(
               children: <Widget>[
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(2),
-                  child: SizedBox(
-                    width: 40,
-                    height: 40,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: <Widget>[
+                MouseRegion(
+                  onEnter: (_) => _setCoverHovered(true),
+                  onExit: (_) => _setCoverHovered(false),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: SizedBox(
+                      width: 40,
+                      height: 40,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: <Widget>[
                         coverUrl == null || coverUrl.isEmpty
                             ? ColoredBox(color: colors.bgTertiary)
                             : MediaImage(
@@ -1464,32 +1476,43 @@ class _DesktopSidebarPlaylistItemState
                               ),
                         if (tracks.isNotEmpty)
                           Positioned.fill(
-                            child: Center(
+                            child: IgnorePointer(
+                              ignoring: !_isCoverHovered,
                               child: AnimatedOpacity(
-                                opacity: _isHovered ? 1 : 0,
+                                opacity: _isCoverHovered ? 1 : 0,
                                 duration: const Duration(milliseconds: 140),
-                                child: MouseRegion(
-                                  onEnter: (_) => _setPlayHovered(true),
-                                  onExit: (_) => _setPlayHovered(false),
-                                  child: AnimatedScale(
-                                    scale: _isPlayHovered ? 1.08 : 1,
-                                    duration: const Duration(milliseconds: 140),
-                                    curve: Curves.easeOutCubic,
-                                    child: GestureDetector(
-                                      onTap: widget.onPlay,
-                                      child: Container(
-                                        width: 32,
-                                        height: 32,
-                                        decoration: BoxDecoration(
-                                          color: colors.textPrimary,
-                                          borderRadius: BorderRadius.circular(
-                                            16,
-                                          ),
+                                child: ColoredBox(
+                                  color: Colors.black.withValues(
+                                    alpha: colors.coverHoverOverlayOpacity,
+                                  ),
+                                  child: Center(
+                                    child: MouseRegion(
+                                      onEnter: (_) => _setPlayHovered(true),
+                                      onExit: (_) => _setPlayHovered(false),
+                                      child: AnimatedScale(
+                                        scale: _isPlayHovered ? 1.08 : 1,
+                                        duration: const Duration(
+                                          milliseconds: 140,
                                         ),
-                                        child: Icon(
-                                          Icons.play_arrow_sharp,
-                                          size: 20,
-                                          color: colors.bgPrimary,
+                                        curve: Curves.easeOutCubic,
+                                        child: GestureDetector(
+                                          onTap: widget.onPlay,
+                                          child: Container(
+                                            width: 28,
+                                            height: 28,
+                                            decoration: BoxDecoration(
+                                              color: colors
+                                                  .overlayPlayButtonBackground,
+                                              borderRadius:
+                                                  BorderRadius.circular(14),
+                                            ),
+                                            child: Icon(
+                                              Icons.play_arrow_sharp,
+                                              size: 18,
+                                              color: colors
+                                                  .overlayPlayButtonForeground,
+                                            ),
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -1498,7 +1521,8 @@ class _DesktopSidebarPlaylistItemState
                               ),
                             ),
                           ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),

@@ -344,6 +344,10 @@ class _MediaSlideSectionDesktopState<T>
               ),
             ),
           ),
+        const Padding(
+          padding: EdgeInsets.only(top: 8),
+          child: SizedBox(height: 24),
+        ),
       ],
     );
   }
@@ -440,6 +444,15 @@ class _DesktopSlideCardState<T> extends State<_DesktopSlideCard<T>> {
                                     size: 46,
                                   ),
                           ),
+                            Positioned(
+                              left: 6,
+                              top: 6,
+                              child: MediaProviderIcon(
+                                providerLabel: data.providerLabel,
+                                iconSvg: data.providerIconSvg,
+                                size: 18,
+                              ),
+                            ),
                           Positioned.fill(
                             child: AnimatedOpacity(
                               duration: const Duration(milliseconds: 140),

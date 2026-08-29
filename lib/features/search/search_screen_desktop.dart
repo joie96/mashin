@@ -223,6 +223,12 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             widget.playbackCoordinator.playMedia(<MediaItem>[album]),
       ),
       ContextMenuAction(
+        label: 'Zufällig abspielen',
+        icon: Icons.shuffle_outlined,
+        onSelected: () =>
+        widget.playbackCoordinator.shufflePlayMedia(<MediaItem>[album]),
+      ),
+      ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
@@ -273,6 +279,12 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
         icon: Icons.play_arrow,
         onSelected: () =>
             widget.playbackCoordinator.playMedia(<MediaItem>[playlist]),
+      ),
+      ContextMenuAction(
+        label: 'Zufällig abspielen',
+        icon: Icons.shuffle_outlined,
+        onSelected: () =>
+        widget.playbackCoordinator.shufflePlayMedia(<MediaItem>[playlist]),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',

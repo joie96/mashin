@@ -176,6 +176,11 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
         onSelected: () => coordinator.playMedia(<MediaItem>[album]),
       ),
       ContextMenuAction(
+        label: 'Zufällig abspielen',
+        icon: Icons.shuffle_outlined,
+        onSelected: () => coordinator.shufflePlayMedia(<MediaItem>[album]),
+      ),
+      ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
@@ -224,6 +229,11 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
         label: 'Abspielen',
         icon: Icons.play_arrow,
         onSelected: () => coordinator.playMedia(<MediaItem>[playlist]),
+      ),
+      ContextMenuAction(
+        label: 'Zufällig abspielen',
+        icon: Icons.shuffle_outlined,
+        onSelected: () => coordinator.shufflePlayMedia(<MediaItem>[playlist]),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',

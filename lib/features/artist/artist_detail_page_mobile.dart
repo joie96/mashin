@@ -102,7 +102,15 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
         onSelected: () =>
             widget.playbackCoordinator.playMedia(<MediaItem>[item]),
       ),
-      ContextMenuAction(
+      if (item is Album || item is Playlist)
+        ContextMenuAction(
+          label: 'Zufällig abspielen',
+          icon: Icons.shuffle_outlined,
+          onSelected: () =>
+              widget.playbackCoordinator.shufflePlayMedia(<MediaItem>[item]),
+        ),
+      if (item is! Playlist)
+        ContextMenuAction(
         label: 'Radio starten',
         icon: Icons.radio_outlined,
         onSelected: () => item is Track

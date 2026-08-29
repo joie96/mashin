@@ -41,6 +41,7 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
   final ValueChanged<Artist>? onArtistTap;
   final ValueChanged<Album>? onAlbumTap;
   final ValueChanged<Playlist>? onPlaylistTap;
+  final bool showPlaylistDetails;
 
   const MediaRowSectionDesktop({
     super.key,
@@ -64,6 +65,7 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
     this.onArtistTap,
     this.onAlbumTap,
     this.onPlaylistTap,
+    this.showPlaylistDetails = true,
   });
 
   @override
@@ -744,6 +746,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
             ? onSelectPointerDown
             : null,
         onPlaylistTap: widget.onPlaylistTap,
+        showDetails: widget.showPlaylistDetails,
       );
     }
     if (item is Artist) {
@@ -1016,16 +1019,20 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         final double resolvedCoverSize = _resolveCoverSize(resolvedItemWidth);
         final bool isArtistSection = T == Artist;
         final bool isPlaylistSection = T == Playlist;
-        // Artists render one text line, playlists two, everything else three.
+        // Artists and compact playlists render one text line.
         final double minSectionHeight = isArtistSection
             ? MediaRowSectionDesktop._artistDefaultHeight
             : isPlaylistSection
-            ? MediaRowSectionDesktop._playlistDefaultHeight
+          ? widget.showPlaylistDetails
+              ? MediaRowSectionDesktop._playlistDefaultHeight
+              : MediaRowSectionDesktop._artistDefaultHeight
             : MediaRowSectionDesktop._defaultHeight;
         final double reservedTextHeight = isArtistSection
             ? MediaRowSectionDesktop._artistReservedTextHeight
             : isPlaylistSection
-            ? MediaRowSectionDesktop._playlistReservedTextHeight
+          ? widget.showPlaylistDetails
+              ? MediaRowSectionDesktop._playlistReservedTextHeight
+              : MediaRowSectionDesktop._artistReservedTextHeight
             : MediaRowSectionDesktop._reservedTextHeight;
         final double maxSectionHeight = minSectionHeight * 1.2;
         final double sectionHeight = math.min(
@@ -1471,6 +1478,7 @@ Widget _buildDesktopMediaRowPlaylist({
   required VoidCallback? onSelectTap,
   required ValueChanged<PointerDownEvent>? onSelectPointerDown,
   ValueChanged<Playlist>? onPlaylistTap,
+  required bool showDetails,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
@@ -1481,7 +1489,7 @@ Widget _buildDesktopMediaRowPlaylist({
     onTitleTap: onPlaylistTap == null
         ? null
         : (MediaItem media) => onPlaylistTap(media as Playlist),
-    secondaryText: _playlistSubtitle(item),
+    secondaryText: showDetails ? _playlistSubtitle(item) : null,
     tertiaryText: null,
     coverUrl: item.imageUriForSize(256) ?? '',
     providerLabel: _providerLabelFromId(item.provider),
@@ -1961,31 +1969,39 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
           Positioned(
             left: 6,
             top: 6,
-            child: MediaProviderIcon(
-              providerLabel: widget.providerLabel,
-              iconSvg: widget.providerIconSvg,
-              size: 18,
+            child: IgnorePointer(
+              child: MediaProviderIcon(
+                providerLabel: widget.providerLabel,
+                iconSvg: widget.providerIconSvg,
+                size: 18,
+              ),
             ),
           ),
           if (showHoverPlay || showOverlayActions)
             Positioned.fill(
-              child: AnimatedOpacity(
-                duration: _hoverFadeDuration,
-                opacity: isCoverHovered ? 1 : 0,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: <Widget>[
+              child: IgnorePointer(
+                ignoring: !isCoverHovered,
+                child: AnimatedOpacity(
+                  duration: _hoverFadeDuration,
+                  opacity: isCoverHovered ? 1 : 0,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: <Widget>[
                     widget.isCircularCover
-                        ? ClipOval(
+                        ? IgnorePointer(
+                            child: ClipOval(
+                              child: ColoredBox(
+                                color: Colors.black.withValues(
+                                  alpha: colors.coverHoverOverlayOpacity,
+                                ),
+                              ),
+                            ),
+                          )
+                        : IgnorePointer(
                             child: ColoredBox(
                               color: Colors.black.withValues(
                                 alpha: colors.coverHoverOverlayOpacity,
                               ),
-                            ),
-                          )
-                        : ColoredBox(
-                            color: Colors.black.withValues(
-                              alpha: colors.coverHoverOverlayOpacity,
                             ),
                           ),
                     if (showHoverPlay)
@@ -2047,7 +2063,8 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
                           ],
                         ),
                       ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),

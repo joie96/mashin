@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
@@ -17,6 +18,7 @@ class MediaListSectionDesktop<T extends MediaItem> extends StatelessWidget {
   final int maxItems;
   final PlaybackCoordinator? playbackCoordinator;
   final ValueChanged<T>? onItemTap;
+  final DesktopRowContextMenuAction<T>? onItemContextMenu;
 
   const MediaListSectionDesktop({
     super.key,
@@ -27,6 +29,7 @@ class MediaListSectionDesktop<T extends MediaItem> extends StatelessWidget {
     this.maxItems = 9,
     this.playbackCoordinator,
     this.onItemTap,
+    this.onItemContextMenu,
   });
 
   List<MediaItem> _playableItems() {
@@ -135,11 +138,22 @@ class MediaListSectionDesktop<T extends MediaItem> extends StatelessWidget {
                     item: items[index],
                     playbackCoordinator: playbackCoordinator,
                     onItemTap: onItemTap,
+                    onContextMenu: onItemContextMenu == null
+                        ? null
+                        : (Offset position) => onItemContextMenu!(
+                            items[index],
+                            index,
+                            position,
+                          ),
                   );
                 },
               );
             },
           ),
+        const Padding(
+          padding: EdgeInsets.only(top: 8),
+          child: SizedBox(height: 24),
+        ),
       ],
     );
   }
@@ -158,11 +172,13 @@ class _MediaListTile<T extends MediaItem> extends StatefulWidget {
   final T item;
   final PlaybackCoordinator? playbackCoordinator;
   final ValueChanged<T>? onItemTap;
+  final ValueChanged<Offset>? onContextMenu;
 
   const _MediaListTile({
     required this.item,
     required this.playbackCoordinator,
     required this.onItemTap,
+    required this.onContextMenu,
   });
 
   @override
@@ -200,24 +216,31 @@ class _MediaListTileState<T extends MediaItem>
         _isHovered = false;
         _isPlayHovered = false;
       }),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        decoration: BoxDecoration(
-          color: colors.bgSecondary,
-          borderRadius: BorderRadius.circular(5),
-          boxShadow: _isHovered
-              ? <BoxShadow>[
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.20),
-                    blurRadius: 8,
-                    offset: const Offset(0, 4),
-                  ),
-                ]
-              : null,
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Stack(
-          children: <Widget>[
+      child: Listener(
+        onPointerDown: (PointerDownEvent event) {
+          if (event.kind == PointerDeviceKind.mouse &&
+              (event.buttons & kSecondaryMouseButton) != 0) {
+            widget.onContextMenu?.call(event.position);
+          }
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          decoration: BoxDecoration(
+            color: colors.bgSecondary,
+            borderRadius: BorderRadius.circular(5),
+            boxShadow: _isHovered
+                ? <BoxShadow>[
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.20),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    ),
+                  ]
+                : null,
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Stack(
+            children: <Widget>[
             Positioned(
               top: 0,
               bottom: 0,
@@ -281,7 +304,8 @@ class _MediaListTileState<T extends MediaItem>
                 ),
               ),
             ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -96,7 +96,14 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
         onSelected: () =>
             coordinator.playMedia(tracks.isEmpty ? <MediaItem>[item] : tracks),
       ),
-      ContextMenuAction(
+      if (item is Album || item is Playlist)
+        ContextMenuAction(
+          label: 'Zufällig abspielen',
+          icon: Icons.shuffle_outlined,
+          onSelected: () => coordinator.shufflePlayMedia(<MediaItem>[item]),
+        ),
+      if (item is! Playlist)
+        ContextMenuAction(
         label: 'Radio starten',
         icon: Icons.radio_outlined,
         onSelected: () => item is Track

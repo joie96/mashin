@@ -3268,7 +3268,9 @@ class MediaProviderIcon extends StatelessWidget {
     }
 
     // Provider manifests may deliver raw XML, XML with declaration, or URL-encoded XML.
-    final String decoded = _maybeDecodeSvgPayload(trimmed);
+    final String decoded = _inlineSvgClassFillColors(
+      _maybeDecodeSvgPayload(trimmed),
+    );
     final bool isInlineSvg =
         decoded.startsWith('<svg') ||
         decoded.startsWith('<?xml') ||
@@ -3312,6 +3314,24 @@ String _maybeDecodeSvgPayload(String raw) {
   } catch (_) {
     return raw;
   }
+}
+
+String _inlineSvgClassFillColors(String svg) {
+  final RegExp classRule = RegExp(
+    r'\.([\w-]+)\s*\{[^}]*fill\s*:\s*([^;}\s]+)[^}]*\}',
+  );
+  String normalized = svg;
+
+  for (final Match rule in classRule.allMatches(svg)) {
+    final String className = rule.group(1)!;
+    final String fillColor = rule.group(2)!;
+    final RegExp classAttribute = RegExp(
+      'class\\s*=\\s*(["\\\'])${RegExp.escape(className)}\\1',
+    );
+    normalized = normalized.replaceAll(classAttribute, 'fill="$fillColor"');
+  }
+
+  return normalized;
 }
 
 // Helper Functions

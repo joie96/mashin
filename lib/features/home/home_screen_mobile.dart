@@ -144,6 +144,20 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
           emptyText: 'Keine Top-Artists verfügbar.',
           playbackCoordinator: widget.playbackCoordinator,
         ),
+        ..._controller.similarArtistSections.map(
+          (HomeSimilarArtistSection section) => Column(
+            children: <Widget>[
+              const SizedBox(height: 18),
+              MediaRowSectionMobile<Artist>(
+                title: section.title,
+                isLoading: _controller.isLoadingSimilarArtists,
+                items: section.artists,
+                emptyText: 'Keine ähnlichen Künstler:innen verfügbar.',
+                playbackCoordinator: widget.playbackCoordinator,
+              ),
+            ],
+          ),
+        ),
         const SizedBox(height: 18),
         MediaRowSectionMobile<Track>(
           title: 'Kürzlich gespielt',
