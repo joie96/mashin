@@ -1701,7 +1701,7 @@ Widget _buildDesktopMediaRowItemBase({
                           .textTheme
                           .titleSmall
                           ?.copyWith(
-                            fontWeight: FontWeight.w400,
+                            fontWeight: FontWeight.w600,
                             fontSize: 15,
                             color: isCurrent ? colors.accent : null,
                           );
@@ -1759,7 +1759,7 @@ Widget _buildDesktopMediaRowItemBase({
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: colors.textTertiary,
-                              fontSize: 14,
+                              fontSize: 13,
                             ),
                           )
                         : MediaLinkText(
@@ -1771,7 +1771,7 @@ Widget _buildDesktopMediaRowItemBase({
                                       onAlbumTap(media as Album),
                             style: TextStyle(
                               color: colors.textTertiary,
-                              fontSize: 14,
+                              fontSize: 13,
                             ),
                           ),
                   ],
@@ -1886,6 +1886,7 @@ class _DesktopMediaCover extends StatefulWidget {
 class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
   static const Duration _hoverFadeDuration = Duration(milliseconds: 140);
   static const Duration _buttonScaleDuration = Duration(milliseconds: 140);
+  bool _isCoverHovered = false;
   bool _isPlayHovered = false;
 
   bool _isPrimaryActivationPointer(PointerDownEvent event) {
@@ -1911,6 +1912,7 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
         widget.coverUrl != null && widget.coverUrl!.trim().isNotEmpty;
     final bool showHoverPlay =
         widget.showPlayOverlay && widget.onPlayTap != null;
+    final bool isCoverHovered = _isCoverHovered;
     const bool showSelectControl = true;
     final bool showSelectControlVisible = widget.isHovered || widget.isSelected;
     const bool showOverlayActions = true;
@@ -1956,20 +1958,6 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
                         : Icon(widget.icon, color: colors.accent, size: 34),
                   ),
           ),
-          if (showHoverPlay)
-            IgnorePointer(
-              child: AnimatedOpacity(
-                duration: _hoverFadeDuration,
-                opacity: widget.isHovered ? 1 : 0,
-                child: widget.isCircularCover
-                    ? ClipOval(
-                        child: Container(
-                          color: Colors.black.withValues(alpha: 0.34),
-                        ),
-                      )
-                    : Container(color: Colors.black.withValues(alpha: 0.34)),
-              ),
-            ),
           Positioned(
             left: 6,
             top: 6,
@@ -1979,71 +1967,86 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
               size: 18,
             ),
           ),
-          if (showHoverPlay)
+          if (showHoverPlay || showOverlayActions)
             Positioned.fill(
-              child: Center(
-                child: AnimatedOpacity(
-                  duration: _hoverFadeDuration,
-                  opacity: widget.isHovered ? 1 : 0,
-                  child: MouseRegion(
-                    onEnter: (_) => _setPlayHovered(true),
-                    onExit: (_) => _setPlayHovered(false),
-                    child: AnimatedScale(
-                      scale: _isPlayHovered ? 1.08 : 1,
-                      duration: _buttonScaleDuration,
-                      curve: Curves.easeOutCubic,
-                      child: Listener(
-                        onPointerDown: (PointerDownEvent event) {
-                          if (_isPrimaryActivationPointer(event)) {
-                            widget.onPlayTap?.call();
-                          }
-                        },
-                        child: Container(
-                          width: 56,
-                          height: 56,
-                          decoration: BoxDecoration(
-                            color: colors.textPrimary,
-                            borderRadius: BorderRadius.circular(28),
+              child: AnimatedOpacity(
+                duration: _hoverFadeDuration,
+                opacity: isCoverHovered ? 1 : 0,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: <Widget>[
+                    widget.isCircularCover
+                        ? ClipOval(
+                            child: ColoredBox(
+                              color: Colors.black.withValues(
+                                alpha: colors.coverHoverOverlayOpacity,
+                              ),
+                            ),
+                          )
+                        : ColoredBox(
+                            color: Colors.black.withValues(
+                              alpha: colors.coverHoverOverlayOpacity,
+                            ),
                           ),
-                          child: Icon(
-                            Icons.play_arrow_sharp,
-                            size: 30,
-                            color: colors.bgPrimary,
+                    if (showHoverPlay)
+                      Center(
+                        child: MouseRegion(
+                          onEnter: (_) => _setPlayHovered(true),
+                          onExit: (_) => _setPlayHovered(false),
+                          child: AnimatedScale(
+                            scale: _isPlayHovered ? 1.08 : 1,
+                            duration: _buttonScaleDuration,
+                            curve: Curves.easeOutCubic,
+                            child: Listener(
+                              onPointerDown: (PointerDownEvent event) {
+                                if (_isPrimaryActivationPointer(event)) {
+                                  widget.onPlayTap?.call();
+                                }
+                              },
+                              child: Container(
+                                width: 56,
+                                height: 56,
+                                decoration: BoxDecoration(
+                                  color: colors.overlayPlayButtonBackground,
+                                  borderRadius: BorderRadius.circular(28),
+                                ),
+                                child: Icon(
+                                  Icons.play_arrow_sharp,
+                                  size: 30,
+                                  color: colors.overlayPlayButtonForeground,
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          if (showOverlayActions)
-            Positioned(
-              left: 2,
-              right: 2,
-              bottom: 2,
-              child: AnimatedOpacity(
-                duration: _hoverFadeDuration,
-                opacity: widget.isHovered ? 1 : 0,
-                child: Row(
-                  children: <Widget>[
-                    const Spacer(),
-                    _DesktopCoverOverlayIconButton(
-                      icon: widget.isFavorite
-                          ? Icons.favorite_outlined
-                          : Icons.favorite_border_outlined,
-                      onTap: widget.onFavoriteTap,
-                      baseColor: colors.textPrimary,
-                      hoverColor: colors.textSecondary,
-                    ),
-                    const SizedBox(width: 4),
-                    _DesktopCoverOverlayIconButton(
-                      icon: Icons.more_horiz_outlined,
-                      onTap: widget.onMoreTap,
-                      onAnchorTap: widget.onMoreAnchorTap,
-                      baseColor: colors.textPrimary,
-                      hoverColor: colors.textSecondary,
-                    ),
+                    if (showOverlayActions)
+                      Positioned(
+                        left: 2,
+                        right: 2,
+                        bottom: 2,
+                        child: Row(
+                          children: <Widget>[
+                            const Spacer(),
+                            _DesktopCoverOverlayIconButton(
+                              icon: widget.isFavorite
+                                  ? Icons.favorite_outlined
+                                  : Icons.favorite_border_outlined,
+                              onTap: widget.onFavoriteTap,
+                              baseColor: colors.overlayIcon,
+                              hoverColor: colors.overlayIcon,
+                            ),
+                            const SizedBox(width: 4),
+                            _DesktopCoverOverlayIconButton(
+                              icon: Icons.more_horiz_outlined,
+                              onTap: widget.onMoreTap,
+                              onAnchorTap: widget.onMoreAnchorTap,
+                              baseColor: colors.overlayIcon,
+                              hoverColor: colors.overlayIcon,
+                            ),
+                          ],
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -2070,7 +2073,14 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
       child: clippedContent,
     );
 
-    return shapedContent;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isCoverHovered = true),
+      onExit: (_) => setState(() {
+        _isCoverHovered = false;
+        _isPlayHovered = false;
+      }),
+      child: shapedContent,
+    );
   }
 }
 

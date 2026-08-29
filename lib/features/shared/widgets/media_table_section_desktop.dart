@@ -3071,7 +3071,9 @@ class _MediaTableCoverState extends State<MediaTableCover> {
                     curve: Curves.easeOut,
                     opacity: _isHovered ? 1 : 0,
                     child: Container(
-                      color: Colors.black.withValues(alpha: 0.34),
+                      color: Colors.black.withValues(
+                        alpha: colors.coverHoverOverlayOpacity,
+                      ),
                     ),
                   ),
                 ),
@@ -3099,13 +3101,13 @@ class _MediaTableCoverState extends State<MediaTableCover> {
                               width: 35,
                               height: 35,
                               decoration: BoxDecoration(
-                                color: colors.textPrimary,
+                                color: colors.overlayPlayButtonBackground,
                                 borderRadius: BorderRadius.circular(18),
                               ),
                               child: Icon(
                                 Icons.play_arrow_sharp,
                                 size: 24,
-                                color: colors.bgPrimary,
+                                color: colors.overlayPlayButtonForeground,
                               ),
                             ),
                           ),

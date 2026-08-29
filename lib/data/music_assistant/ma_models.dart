@@ -18,35 +18,13 @@ enum MediaType {
   unknown,
 }
 
-enum AlbumType {
-  album,
-  single,
-  compilation,
-  ep,
-  unknown,
-}
+enum AlbumType { album, single, compilation, ep, unknown }
 
-enum QueueOption {
-  play,
-  replace,
-  next,
-  replaceNext,
-  add,
-}
+enum QueueOption { play, replace, next, replaceNext, add }
 
-enum RepeatMode {
-  off,
-  one,
-  all,
-}
+enum RepeatMode { off, one, all }
 
-enum PlayerPlaybackState {
-  idle,
-  playing,
-  paused,
-  buffering,
-  unknown,
-}
+enum PlayerPlaybackState { idle, playing, paused, buffering, unknown }
 
 // #endregion
 
@@ -159,7 +137,9 @@ class MediaItem {
 
   factory MediaItem.fromJson(Map<String, dynamic> json) {
     final metadataJson = json['metadata'];
-    final metadata = metadataJson is Map<String, dynamic> ? MediaItemMetadata.fromJson(metadataJson) : null;
+    final metadata = metadataJson is Map<String, dynamic>
+        ? MediaItemMetadata.fromJson(metadataJson)
+        : null;
 
     return MediaItem(
       itemId: (json['item_id'] as String?)?.trim() ?? '',
@@ -168,7 +148,8 @@ class MediaItem {
       sortName: (json['sort_name'] as String?)?.trim(),
       uri: (json['uri'] as String?)?.trim(),
       mediaType: mediaTypeFromJson(json['media_type'] as String?),
-      providerMappings: (json['provider_mappings'] as List?)
+      providerMappings:
+          (json['provider_mappings'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .map(ProviderMapping.fromJson)
               .toList() ??
@@ -299,12 +280,15 @@ class MediaItemMetadata {
   factory MediaItemMetadata.fromJson(Map<String, dynamic> json) {
     return MediaItemMetadata(
       description: (json['description'] as String?)?.trim(),
-      images: (json['images'] as List?)
+      images:
+          (json['images'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .map(MediaItemImage.fromJson)
               .toList() ??
           const <MediaItemImage>[],
-      genres: (json['genres'] as List?)?.whereType<String>().toList() ?? const <String>[],
+      genres:
+          (json['genres'] as List?)?.whereType<String>().toList() ??
+          const <String>[],
       label: (json['label'] as String?)?.trim(),
       popularity: (json['popularity'] as num?)?.toInt(),
       cacheChecksum: (json['cache_checksum'] as String?)?.trim(),
@@ -361,7 +345,9 @@ class Artist implements MediaItem {
 
   factory Artist.fromJson(Map<String, dynamic> json) {
     final metadataJson = json['metadata'];
-    final metadata = metadataJson is Map<String, dynamic> ? MediaItemMetadata.fromJson(metadataJson) : null;
+    final metadata = metadataJson is Map<String, dynamic>
+        ? MediaItemMetadata.fromJson(metadataJson)
+        : null;
 
     return Artist(
       itemId: (json['item_id'] as String?)?.trim() ?? '',
@@ -369,7 +355,8 @@ class Artist implements MediaItem {
       name: (json['name'] as String?)?.trim() ?? 'Unknown Artist',
       sortName: (json['sort_name'] as String?)?.trim(),
       uri: (json['uri'] as String?)?.trim(),
-      providerMappings: (json['provider_mappings'] as List?)
+      providerMappings:
+          (json['provider_mappings'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .map(ProviderMapping.fromJson)
               .toList() ??
@@ -435,7 +422,9 @@ class Album implements MediaItem {
 
   factory Album.fromJson(Map<String, dynamic> json) {
     final metadataJson = json['metadata'];
-    final metadata = metadataJson is Map<String, dynamic> ? MediaItemMetadata.fromJson(metadataJson) : null;
+    final metadata = metadataJson is Map<String, dynamic>
+        ? MediaItemMetadata.fromJson(metadataJson)
+        : null;
 
     return Album(
       itemId: (json['item_id'] as String?)?.trim() ?? '',
@@ -445,12 +434,14 @@ class Album implements MediaItem {
       uri: (json['uri'] as String?)?.trim(),
       year: (json['year'] as num?)?.toInt(),
       albumType: (json['album_type'] as String?)?.trim(),
-      artists: (json['artists'] as List?)
+      artists:
+          (json['artists'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .map(Artist.fromJson)
               .toList() ??
           const <Artist>[],
-      providerMappings: (json['provider_mappings'] as List?)
+      providerMappings:
+          (json['provider_mappings'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .map(ProviderMapping.fromJson)
               .toList() ??
@@ -529,7 +520,9 @@ class Track implements MediaItem {
   factory Track.fromJson(Map<String, dynamic> json) {
     final albumJson = json['album'];
     final metadataJson = json['metadata'];
-    final metadata = metadataJson is Map<String, dynamic> ? MediaItemMetadata.fromJson(metadataJson) : null;
+    final metadata = metadataJson is Map<String, dynamic>
+        ? MediaItemMetadata.fromJson(metadataJson)
+        : null;
 
     return Track(
       itemId: (json['item_id'] as String?)?.trim() ?? '',
@@ -538,13 +531,17 @@ class Track implements MediaItem {
       sortName: (json['sort_name'] as String?)?.trim(),
       uri: (json['uri'] as String?)?.trim(),
       duration: (json['duration'] as num?)?.toInt() ?? 0,
-      artists: (json['artists'] as List?)
+      artists:
+          (json['artists'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .map(Artist.fromJson)
               .toList() ??
           const <Artist>[],
-      album: albumJson is Map<String, dynamic> ? Album.fromJson(albumJson) : null,
-      providerMappings: (json['provider_mappings'] as List?)
+      album: albumJson is Map<String, dynamic>
+          ? Album.fromJson(albumJson)
+          : null,
+      providerMappings:
+          (json['provider_mappings'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .map(ProviderMapping.fromJson)
               .toList() ??
@@ -608,7 +605,9 @@ class Playlist implements MediaItem {
 
   factory Playlist.fromJson(Map<String, dynamic> json) {
     final metadataJson = json['metadata'];
-    final metadata = metadataJson is Map<String, dynamic> ? MediaItemMetadata.fromJson(metadataJson) : null;
+    final metadata = metadataJson is Map<String, dynamic>
+        ? MediaItemMetadata.fromJson(metadataJson)
+        : null;
 
     return Playlist(
       itemId: (json['item_id'] as String?)?.trim() ?? '',
@@ -618,7 +617,8 @@ class Playlist implements MediaItem {
       uri: (json['uri'] as String?)?.trim(),
       owner: (json['owner'] as String?)?.trim(),
       isEditable: json['is_editable'] == true,
-      providerMappings: (json['provider_mappings'] as List?)
+      providerMappings:
+          (json['provider_mappings'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .map(ProviderMapping.fromJson)
               .toList() ??
@@ -694,8 +694,9 @@ extension MediaItemImageSizing on MediaItem {
     }
 
     final MediaItemMetadata? meta = metadata;
-    final MediaItemImage? image =
-        (meta == null || meta.images.isEmpty) ? null : meta.images.first;
+    final MediaItemImage? image = (meta == null || meta.images.isEmpty)
+        ? null
+        : meta.images.first;
     if (image == null) {
       return null;
     }
@@ -739,7 +740,9 @@ class QueueItem {
       duration: (json['duration'] as num?)?.toInt(),
       sortIndex: (json['sort_index'] as num?)?.toInt(),
       available: json['available'] as bool?,
-      mediaItem: mediaItemJson is Map<String, dynamic> ? Track.fromJson(mediaItemJson) : null,
+      mediaItem: mediaItemJson is Map<String, dynamic>
+          ? Track.fromJson(mediaItemJson)
+          : null,
     );
   }
 }
@@ -787,7 +790,9 @@ class PlayerQueue {
       currentIndex: (json['current_index'] as num?)?.toInt(),
       elapsedTime: (json['elapsed_time'] as num?)?.toDouble(),
       state: _playbackStateFromJson(json['state'] as String?),
-      currentItem: currentItemJson is Map<String, dynamic> ? QueueItem.fromJson(currentItemJson) : null,
+      currentItem: currentItemJson is Map<String, dynamic>
+          ? QueueItem.fromJson(currentItemJson)
+          : null,
     );
   }
 }
@@ -849,8 +854,12 @@ class Player {
       powered: json['powered'] as bool?,
       provider: (json['provider'] as String?)?.trim() ?? '',
       type: (json['type'] as String?)?.trim() ?? 'player',
-      supportedFeatures: (json['supported_features'] as List?)?.whereType<String>().toList() ?? const <String>[],
-      groupChilds: (json['group_childs'] as List?)?.whereType<String>().toList() ?? const <String>[],
+      supportedFeatures:
+          (json['supported_features'] as List?)?.whereType<String>().toList() ??
+          const <String>[],
+      groupChilds:
+          (json['group_childs'] as List?)?.whereType<String>().toList() ??
+          const <String>[],
       activeSource: (json['active_source'] as String?)?.trim(),
     );
   }
@@ -885,7 +894,9 @@ class AuthUser {
       avatarUrl: (json['avatar_url'] as String?)?.trim(),
       role: (json['role'] as String?)?.trim(),
       preferences: json['preferences'] is Map<String, dynamic>
-          ? Map<String, dynamic>.from(json['preferences'] as Map<String, dynamic>)
+          ? Map<String, dynamic>.from(
+              json['preferences'] as Map<String, dynamic>,
+            )
           : null,
     );
   }
@@ -917,7 +928,8 @@ class ServerInfo {
       version: (json['version'] as String?)?.trim(),
       serverVersion: (json['server_version'] as String?)?.trim(),
       schemaVersion: (json['schema_version'] as num?)?.toInt(),
-      minSupportedSchemaVersion: (json['min_supported_schema_version'] as num?)?.toInt(),
+      minSupportedSchemaVersion: (json['min_supported_schema_version'] as num?)
+          ?.toInt(),
       homeAssistantAddon: json['homeassistant_addon'] as bool?,
     );
   }
@@ -967,7 +979,8 @@ class ProviderManifest {
 }
 
 class ProviderManifestRegistry {
-  static final Map<String, ProviderManifest> _byDomain = <String, ProviderManifest>{};
+  static final Map<String, ProviderManifest> _byDomain =
+      <String, ProviderManifest>{};
 
   static void registerAll(Iterable<ProviderManifest> manifests) {
     for (final manifest in manifests) {
@@ -997,7 +1010,9 @@ class ProviderManifestRegistry {
       return null;
     }
 
-    if (raw.startsWith('http://') || raw.startsWith('https://') || raw.startsWith('data:image/')) {
+    if (raw.startsWith('http://') ||
+        raw.startsWith('https://') ||
+        raw.startsWith('data:image/')) {
       return raw;
     }
 
@@ -1023,11 +1038,15 @@ class ProviderManifestRegistry {
 }
 
 class RecommendationFolder {
+  final String itemId;
+  final String provider;
   final String title;
   final String? subtitle;
   final List<MediaItem> items;
 
   const RecommendationFolder({
+    required this.itemId,
+    required this.provider,
     required this.title,
     this.subtitle,
     required this.items,
@@ -1035,9 +1054,17 @@ class RecommendationFolder {
 
   factory RecommendationFolder.fromJson(Map<String, dynamic> json) {
     return RecommendationFolder(
-      title: (json['title'] as String?)?.trim() ?? (json['name'] as String?)?.trim() ?? 'Empfehlungen',
-      subtitle: (json['subtitle'] as String?)?.trim() ?? (json['description'] as String?)?.trim(),
-      items: (json['items'] as List?)
+      itemId: (json['item_id'] as String?)?.trim() ?? '',
+      provider: (json['provider'] as String?)?.trim() ?? '',
+      title:
+          (json['title'] as String?)?.trim() ??
+          (json['name'] as String?)?.trim() ??
+          'Empfehlungen',
+      subtitle:
+          (json['subtitle'] as String?)?.trim() ??
+          (json['description'] as String?)?.trim(),
+      items:
+          (json['items'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .map(mediaItemFromJson)
               .toList() ??
@@ -1063,27 +1090,32 @@ class SearchResults {
 
   factory SearchResults.fromJson(Map<String, dynamic> json) {
     return SearchResults(
-      artists: (json['artists'] as List?)
+      artists:
+          (json['artists'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .map(Artist.fromJson)
               .toList() ??
           const <Artist>[],
-      albums: (json['albums'] as List?)
+      albums:
+          (json['albums'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .map(Album.fromJson)
               .toList() ??
           const <Album>[],
-      tracks: (json['tracks'] as List?)
+      tracks:
+          (json['tracks'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .map(Track.fromJson)
               .toList() ??
           const <Track>[],
-      playlists: (json['playlists'] as List?)
+      playlists:
+          (json['playlists'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .map(Playlist.fromJson)
               .toList() ??
           const <Playlist>[],
-      radio: (json['radio'] as List?)
+      radio:
+          (json['radio'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .map(mediaItemFromJson)
               .toList() ??

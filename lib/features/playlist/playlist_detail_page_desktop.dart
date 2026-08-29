@@ -410,7 +410,13 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                _buildCover(colors, imageUri, isLoading, _coverSize),
+                _buildCover(
+                  colors,
+                  imageUri,
+                  isLoading,
+                  _coverSize,
+                  showShadow: showBlurredBackground,
+                ),
                 const SizedBox(width: 30),
                 Expanded(
                   child: Column(
@@ -582,7 +588,9 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
             ),
             DecoratedBox(
               decoration: BoxDecoration(
-                color: colors.bgPrimary.withValues(alpha: 0.68),
+                color: colors.bgPrimary.withValues(
+                  alpha: colors.blurredImageOverlayOpacity,
+                ),
               ),
             ),
           ],
@@ -597,30 +605,45 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
     bool isLoading,
     double size, {
     double borderRadius = 8,
+    bool showShadow = false,
   }) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(borderRadius),
-      child: Container(
-        width: size,
-        height: size,
-        color: colors.bgTertiary,
-        child: isLoading
-            ? null
-            : imageUri == null || imageUri.trim().isEmpty
-            ? Icon(
-                Icons.queue_music_outlined,
-                color: colors.accent,
-                size: size * 0.36,
-              )
-            : MediaImage(
-                source: imageUri,
-                fit: BoxFit.cover,
-                fallback: Icon(
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(borderRadius),
+        boxShadow: showShadow
+            ? <BoxShadow>[
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.28),
+                  blurRadius: 14,
+                  offset: const Offset(0, 4),
+                ),
+              ]
+            : null,
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(borderRadius),
+        child: Container(
+          width: size,
+          height: size,
+          color: colors.bgTertiary,
+          child: isLoading
+              ? null
+              : imageUri == null || imageUri.trim().isEmpty
+              ? Icon(
                   Icons.queue_music_outlined,
                   color: colors.accent,
                   size: size * 0.36,
+                )
+              : MediaImage(
+                  source: imageUri,
+                  fit: BoxFit.cover,
+                  fallback: Icon(
+                    Icons.queue_music_outlined,
+                    color: colors.accent,
+                    size: size * 0.36,
+                  ),
                 ),
-              ),
+        ),
       ),
     );
   }

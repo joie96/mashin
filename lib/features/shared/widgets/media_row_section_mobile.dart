@@ -357,16 +357,13 @@ Widget _buildMobileMediaRowItemBase({
                         width: 40,
                         height: 40,
                         decoration: BoxDecoration(
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.surface.withValues(alpha: 0.9),
+                          color: colors.overlayPlayButtonBackground,
                           borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: colors.border),
                         ),
                         child: Icon(
                           Icons.play_arrow_outlined,
                           size: 20,
-                          color: Theme.of(context).colorScheme.onSurface,
+                          color: colors.overlayPlayButtonForeground,
                         ),
                       ),
                     ),
@@ -384,7 +381,7 @@ Widget _buildMobileMediaRowItemBase({
                   textAlign: TextAlign.center,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                     color: isCurrent ? colors.accent : null,
                   ),
                 );
@@ -397,7 +394,7 @@ Widget _buildMobileMediaRowItemBase({
                 maxLines: 1,
                 textAlign: TextAlign.center,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: colors.textSecondary, fontSize: 11),
+                style: TextStyle(color: colors.textSecondary, fontSize: 12),
               ),
             ],
             if (hasTertiary) ...<Widget>[
@@ -407,7 +404,7 @@ Widget _buildMobileMediaRowItemBase({
                 maxLines: 1,
                 textAlign: TextAlign.center,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: colors.textSecondary, fontSize: 11),
+                style: TextStyle(color: colors.textTertiary, fontSize: 11),
               ),
             ],
           ],

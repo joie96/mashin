@@ -63,3 +63,4 @@ app.*.map.json
 /windows/native/*.pdb
 
 mashin-maui
+feishin-development

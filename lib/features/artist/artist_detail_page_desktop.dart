@@ -430,7 +430,9 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
             IgnorePointer(
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: colors.bgPrimary.withValues(alpha: 0.68),
+                  color: colors.bgPrimary.withValues(
+                    alpha: colors.blurredImageOverlayOpacity,
+                  ),
                 ),
               ),
             ),
@@ -562,22 +564,34 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
     }
 
     final String? imageUri = artist?.imageUri;
-    return ClipOval(
-      child: Container(
-        width: _coverSize,
-        height: _coverSize,
-        color: colors.bgTertiary,
-        child: imageUri == null || imageUri.trim().isEmpty
-            ? Icon(Icons.person_outlined, color: colors.accent, size: 72)
-            : MediaImage(
-                source: imageUri,
-                fit: BoxFit.cover,
-                fallback: Icon(
-                  Icons.person_outlined,
-                  color: colors.accent,
-                  size: 72,
+    return Container(
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.28),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ClipOval(
+        child: Container(
+          width: _coverSize,
+          height: _coverSize,
+          color: colors.bgTertiary,
+          child: imageUri == null || imageUri.trim().isEmpty
+              ? Icon(Icons.person_outlined, color: colors.accent, size: 72)
+              : MediaImage(
+                  source: imageUri,
+                  fit: BoxFit.cover,
+                  fallback: Icon(
+                    Icons.person_outlined,
+                    color: colors.accent,
+                    size: 72,
+                  ),
                 ),
-              ),
+        ),
       ),
     );
   }

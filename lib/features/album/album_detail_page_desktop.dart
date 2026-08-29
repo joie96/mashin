@@ -398,7 +398,9 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
             IgnorePointer(
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: colors.bgPrimary.withValues(alpha: 0.68),
+                  color: colors.bgPrimary.withValues(
+                    alpha: colors.blurredImageOverlayOpacity,
+                  ),
                 ),
               ),
             ),
@@ -508,25 +510,37 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
 
   Widget _buildCover(MashinColors colors, Album? album, bool isLoading) {
     final String? uri = album?.imageUri;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        width: _coverSize,
-        height: _coverSize,
-        color: colors.bgTertiary,
-        child: isLoading
-            ? null
-            : uri == null || uri.trim().isEmpty
-            ? Icon(Icons.album_outlined, color: colors.accent, size: 72)
-            : MediaImage(
-                source: uri,
-                fit: BoxFit.cover,
-                fallback: Icon(
-                  Icons.album_outlined,
-                  color: colors.accent,
-                  size: 72,
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.28),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          width: _coverSize,
+          height: _coverSize,
+          color: colors.bgTertiary,
+          child: isLoading
+              ? null
+              : uri == null || uri.trim().isEmpty
+              ? Icon(Icons.album_outlined, color: colors.accent, size: 72)
+              : MediaImage(
+                  source: uri,
+                  fit: BoxFit.cover,
+                  fallback: Icon(
+                    Icons.album_outlined,
+                    color: colors.accent,
+                    size: 72,
+                  ),
                 ),
-              ),
+        ),
       ),
     );
   }

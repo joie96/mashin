@@ -230,7 +230,14 @@ class AppNavigationController extends ChangeNotifier {
 
     switch (currentSection) {
       case AppSection.home:
-        return HomeScreen(client: client);
+        return HomeScreen(
+          client: client,
+          playbackCoordinator: playbackCoordinator,
+          userDataController: userDataController,
+          onOpenArtist: openArtist,
+          onOpenAlbum: openAlbum,
+          onOpenPlaylist: openPlaylist,
+        );
       case AppSection.explore:
         return const _SectionPlaceholder(
           title: 'Entdecken',
