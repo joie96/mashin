@@ -106,8 +106,6 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
           isLoading: _controller.isLoadingRecommendations,
           items: _controller.recommendationItems,
           emptyText: 'Keine ListenBrainz-Empfehlungen verfügbar.',
-          itemHeight: 145,
-          coverSize: 145,
           playbackCoordinator: widget.playbackCoordinator,
           onItemTap: _openRecommendation,
         ),
@@ -127,6 +125,7 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
           items: _controller.artistPlaylists,
           emptyText: 'Keine Artist-Playlists verfügbar.',
           playbackCoordinator: widget.playbackCoordinator,
+          onItemTap: widget.onOpenPlaylist,
         ),
         const SizedBox(height: 18),
         MediaRowSectionMobile<Track>(
@@ -135,6 +134,7 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
           items: _controller.topTracks,
           emptyText: 'Keine Top-Tracks verfügbar.',
           playbackCoordinator: widget.playbackCoordinator,
+          onItemTap: _openRecommendation,
         ),
         const SizedBox(height: 18),
         MediaRowSectionMobile<Artist>(
@@ -143,6 +143,7 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
           items: _controller.topArtists,
           emptyText: 'Keine Top-Artists verfügbar.',
           playbackCoordinator: widget.playbackCoordinator,
+          onItemTap: widget.onOpenArtist,
         ),
         ..._controller.similarArtistSections.map(
           (HomeSimilarArtistSection section) => Column(
@@ -154,6 +155,7 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
                 items: section.artists,
                 emptyText: 'Keine ähnlichen Künstler:innen verfügbar.',
                 playbackCoordinator: widget.playbackCoordinator,
+                onItemTap: widget.onOpenArtist,
               ),
             ],
           ),
@@ -165,6 +167,7 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
           items: _controller.recentListens,
           emptyText: 'Keine kürzlich gehörten Tracks verfügbar.',
           playbackCoordinator: widget.playbackCoordinator,
+          onItemTap: _openRecommendation,
         ),
       ],
     );

@@ -37,6 +37,9 @@ class SearchScreen extends StatelessWidget {
       return SearchScreenMobile(
         client: client,
         playbackCoordinator: playbackCoordinator,
+        onOpenArtist: onOpenArtist,
+        onOpenAlbum: onOpenAlbum,
+        onOpenPlaylist: onOpenPlaylist,
       );
     }
 

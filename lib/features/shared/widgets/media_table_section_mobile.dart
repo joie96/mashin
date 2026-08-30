@@ -62,6 +62,7 @@ class _MediaTableSectionMobileState<T>
   int get _chunkSize => _isChunkModeEnabled ? widget.maxItemsPerPage : 0;
   bool get _isAllSelected =>
       widget.items.isNotEmpty && _selectedIndexes.length == widget.items.length;
+  bool get _isTrackSection => T == Track;
 
   MediaItem? _resolvePlayableMediaItem(Object? rawItem) {
     if (rawItem is QueueItem) {
@@ -96,6 +97,55 @@ class _MediaTableSectionMobileState<T>
     return playItems;
   }
 
+  void _onPlayAllTap() {
+    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
+    if (coordinator == null) {
+      return;
+    }
+
+    final List<MediaItem> playItems = _playableItemsFromIndex(0);
+    if (playItems.isEmpty) {
+      return;
+    }
+
+    unawaited(() async {
+      try {
+        await coordinator.playMedia(
+          _isTrackSection ? playItems : <MediaItem>[playItems.first],
+        );
+      } catch (_) {
+        // Ignore failures to keep header interactions responsive.
+      }
+    }());
+  }
+
+  void _onShuffleAllTap() {
+    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
+    if (coordinator == null) {
+      return;
+    }
+
+    final List<MediaItem> playItems = _playableItemsFromIndex(0);
+    if (playItems.isEmpty) {
+      return;
+    }
+
+    unawaited(() async {
+      try {
+        if (_isTrackSection) {
+          await coordinator.shufflePlayMedia(playItems);
+          return;
+        }
+
+        final MediaItem item =
+            playItems[math.Random().nextInt(playItems.length)];
+        await coordinator.playMedia(<MediaItem>[item]);
+      } catch (_) {
+        // Ignore failures to keep header interactions responsive.
+      }
+    }());
+  }
+
   Future<bool> _handleRowActivate({required T item, required int index}) async {
     final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
     if (coordinator == null || index < 0 || index >= widget.items.length) {
@@ -126,10 +176,16 @@ class _MediaTableSectionMobileState<T>
   }
 
   void _onRowActivated({required T item, required int index}) {
+    final DesktopRowAction<T>? onRowTap = widget.onRowTap;
+    if (onRowTap != null) {
+      onRowTap(item, index);
+      return;
+    }
+
     unawaited(() async {
       final bool handled = await _handleRowActivate(item: item, index: index);
       if (!handled) {
-        widget.onRowTap?.call(item, index);
+        return;
       }
     }());
   }
@@ -264,6 +320,8 @@ class _MediaTableSectionMobileState<T>
   @override
   Widget build(BuildContext context) {
     final bool hasTitle = widget.title.trim().isNotEmpty;
+    final bool hasPlayableContent =
+        !widget.isLoading && _playableItemsFromIndex(0).isNotEmpty;
 
     final Widget section = LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
@@ -284,11 +342,35 @@ class _MediaTableSectionMobileState<T>
           mainAxisSize: hasBoundedHeight ? MainAxisSize.max : MainAxisSize.min,
           children: <Widget>[
             if (hasTitle)
-              Text(
-                widget.title,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              Row(
+                children: <Widget>[
+                  Text(
+                    widget.title,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (!widget.isLoading && widget.items.isNotEmpty) ...<Widget>[
+                    const SizedBox(width: 10),
+                    SectionCountBadge(count: widget.items.length),
+                  ],
+                  const SizedBox(width: 16),
+                  const Expanded(child: SectionHeaderDivider()),
+                  const SizedBox(width: 16),
+                  if (widget.playbackCoordinator != null) ...<Widget>[
+                    SectionHeaderIconButton(
+                      icon: Icons.play_arrow,
+                      tooltip: 'Abspielen',
+                      onTap: hasPlayableContent ? _onPlayAllTap : null,
+                    ),
+                    const SizedBox(width: 8),
+                    SectionHeaderIconButton(
+                      icon: Icons.shuffle,
+                      tooltip: 'Zufällig',
+                      onTap: hasPlayableContent ? _onShuffleAllTap : null,
+                    ),
+                  ],
+                ],
               ),
             if (hasTitle) const SizedBox(height: 10),
             if (hasBoundedHeight)

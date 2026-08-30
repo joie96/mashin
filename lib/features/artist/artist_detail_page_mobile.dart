@@ -82,10 +82,8 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
           (Playlist playlist) => ContextMenuAction(
             label: playlist.name,
             icon: Icons.playlist_play_outlined,
-            onSelected: () => controller.addPlaylistTracks(
-              playlist.itemId,
-              <Track>[item],
-            ),
+            onSelected: () =>
+                controller.addPlaylistTracks(playlist.itemId, <Track>[item]),
           ),
         )
         .toList(growable: false);
@@ -93,8 +91,7 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
 
   List<ContextMenuAction> _buildItemMenuActions(MediaItem item) {
     final bool isFavorite = _controller.isItemFavorite(item);
-    final List<ContextMenuAction> playlistActions =
-        _buildPlaylistSubmenu(item);
+    final List<ContextMenuAction> playlistActions = _buildPlaylistSubmenu(item);
     return <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
@@ -111,12 +108,12 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
         ),
       if (item is! Playlist)
         ContextMenuAction(
-        label: 'Radio starten',
-        icon: Icons.radio_outlined,
-        onSelected: () => item is Track
-            ? _controller.startTrackRadio(item)
-            : _controller.startItemRadio(item),
-      ),
+          label: 'Radio starten',
+          icon: Icons.radio_outlined,
+          onSelected: () => item is Track
+              ? _controller.startTrackRadio(item)
+              : _controller.startItemRadio(item),
+        ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
@@ -229,6 +226,7 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
                 items: _controller.albums,
                 emptyText: 'Keine Veröffentlichungen gefunden.',
                 playbackCoordinator: widget.playbackCoordinator,
+                onItemTap: widget.onOpenAlbum,
               ),
             ),
             const SizedBox(height: 16),
@@ -240,6 +238,7 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
                 items: _controller.similarArtists,
                 emptyText: 'Keine ähnlichen Interpreten gefunden.',
                 playbackCoordinator: widget.playbackCoordinator,
+                onItemTap: widget.onOpenArtist,
               ),
             ),
             const SizedBox(height: 16),

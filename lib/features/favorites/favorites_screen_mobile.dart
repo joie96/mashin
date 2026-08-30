@@ -64,7 +64,8 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
 
   Artist? _primaryArtistOf(Track track) {
     for (final Artist artist in track.artists) {
-      if (artist.itemId.trim().isNotEmpty && artist.provider.trim().isNotEmpty) {
+      if (artist.itemId.trim().isNotEmpty &&
+          artist.provider.trim().isNotEmpty) {
         return artist;
       }
     }
@@ -77,7 +78,10 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
           (Playlist playlist) => ContextMenuAction(
             label: playlist.name,
             icon: Icons.playlist_play_outlined,
-            onSelected: () => _controller.addTracksToPlaylist(playlist.itemId, <Track>[track]),
+            onSelected: () => _controller.addTracksToPlaylist(
+              playlist.itemId,
+              <Track>[track],
+            ),
           ),
         )
         .toList(growable: false);
@@ -87,13 +91,16 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
     final bool isFavorite = _controller.isItemFavorite(track);
     final Artist? primaryArtist = _primaryArtistOf(track);
     final Album? primaryAlbum = track.album;
-    final List<ContextMenuAction> playlistActions = _buildPlaylistSubmenu(track);
+    final List<ContextMenuAction> playlistActions = _buildPlaylistSubmenu(
+      track,
+    );
 
     return <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () => widget.playbackCoordinator.playMedia(<MediaItem>[track]),
+        onSelected: () =>
+            widget.playbackCoordinator.playMedia(<MediaItem>[track]),
       ),
       ContextMenuAction(
         label: 'Radio starten',
@@ -104,12 +111,14 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => widget.playbackCoordinator.playMediaNext(<MediaItem>[track]),
+        onSelected: () =>
+            widget.playbackCoordinator.playMediaNext(<MediaItem>[track]),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => widget.playbackCoordinator.playMediaLast(<MediaItem>[track]),
+        onSelected: () =>
+            widget.playbackCoordinator.playMediaLast(<MediaItem>[track]),
       ),
       if (primaryArtist != null || primaryAlbum != null) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
@@ -136,8 +145,12 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
       ],
       const ContextMenuAction.separator(),
       ContextMenuAction(
-        label: isFavorite ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen',
-        icon: isFavorite ? Icons.favorite_outlined : Icons.favorite_border_outlined,
+        label: isFavorite
+            ? 'Aus Favoriten entfernen'
+            : 'Zu Favoriten hinzufügen',
+        icon: isFavorite
+            ? Icons.favorite_outlined
+            : Icons.favorite_border_outlined,
         onSelected: () => _controller.setFavorite(track, !isFavorite),
       ),
     ];
@@ -157,7 +170,9 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
       children: <Widget>[
         Text(
           'Favoriten',
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+          style: Theme.of(
+            context,
+          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 20),
         MediaTableSectionMobile<Track>(
@@ -176,6 +191,7 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
           items: _controller.albums,
           emptyText: 'Keine favorisierten Alben.',
           playbackCoordinator: widget.playbackCoordinator,
+          onItemTap: widget.onOpenAlbum,
         ),
         const SizedBox(height: 18),
         MediaRowSectionMobile<Playlist>(
@@ -184,6 +200,7 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
           items: _controller.playlists,
           emptyText: 'Keine favorisierten Playlists.',
           playbackCoordinator: widget.playbackCoordinator,
+          onItemTap: widget.onOpenPlaylist,
         ),
         const SizedBox(height: 18),
         MediaRowSectionMobile<Artist>(
@@ -192,6 +209,7 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
           items: _controller.artists,
           emptyText: 'Keine favorisierten Artists.',
           playbackCoordinator: widget.playbackCoordinator,
+          onItemTap: widget.onOpenArtist,
         ),
       ],
     );

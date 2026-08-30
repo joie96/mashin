@@ -11,11 +11,13 @@ class AppConfig {
 
   static const int sendspinBufferCapacityBytes = 52428800;
   static const String sendspinPreferredCodec = 'pcm';
+  static const int defaultLocalVolume = 100;
 
   static const String _musicAssistantUrlKey = 'ma.base_url';
   static const String _sendspinUrlKey = 'ma.sendspin_url';
   static const String _sendspinPreferredCodecKey =
       'ma.sendspin_preferred_codec';
+  static const String _localVolumeKey = 'ma.local_volume';
 
   static bool isMobile() {
     // Temporary: decide mobile/desktop by viewport width.
@@ -78,6 +80,23 @@ class AppConfig {
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_sendspinPreferredCodecKey, normalized);
+  }
+
+  static Future<int> getLocalVolume() async {
+    if (isMobile()) {
+      return defaultLocalVolume;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    return (prefs.getInt(_localVolumeKey) ?? defaultLocalVolume).clamp(
+      0,
+      100,
+    );
+  }
+
+  static Future<void> setLocalVolume(int volume) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_localVolumeKey, volume.clamp(0, 100));
   }
 
   static bool _isSupportedSendspinCodec(String codec) {

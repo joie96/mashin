@@ -14,11 +14,17 @@ import 'search_controller.dart' as feature_search;
 class SearchScreenMobile extends StatefulWidget {
   final MusicAssistantClient client;
   final PlaybackCoordinator playbackCoordinator;
+  final ValueChanged<Artist>? onOpenArtist;
+  final ValueChanged<Album>? onOpenAlbum;
+  final ValueChanged<Playlist>? onOpenPlaylist;
 
   const SearchScreenMobile({
     super.key,
     required this.client,
     required this.playbackCoordinator,
+    this.onOpenArtist,
+    this.onOpenAlbum,
+    this.onOpenPlaylist,
   });
 
   @override
@@ -34,7 +40,8 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
   @override
   void initState() {
     super.initState();
-    _controller = feature_search.SearchController(client: widget.client)..addListener(_onControllerChanged);
+    _controller = feature_search.SearchController(client: widget.client)
+      ..addListener(_onControllerChanged);
     unawaited(_controller.load());
   }
 
@@ -62,7 +69,9 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
       children: <Widget>[
         Text(
           'Suche',
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+          style: Theme.of(
+            context,
+          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 12),
         TextField(
@@ -122,6 +131,7 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
             items: _controller.albums,
             emptyText: 'Keine Alben gefunden.',
             playbackCoordinator: widget.playbackCoordinator,
+            onItemTap: widget.onOpenAlbum,
           ),
           const SizedBox(height: 18),
           MediaRowSectionMobile<Playlist>(
@@ -130,6 +140,7 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
             items: _controller.playlists,
             emptyText: 'Keine Playlists gefunden.',
             playbackCoordinator: widget.playbackCoordinator,
+            onItemTap: widget.onOpenPlaylist,
           ),
           const SizedBox(height: 18),
           MediaRowSectionMobile<Artist>(
@@ -138,6 +149,7 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
             items: _controller.artists,
             emptyText: 'Keine Artists gefunden.',
             playbackCoordinator: widget.playbackCoordinator,
+            onItemTap: widget.onOpenArtist,
           ),
         ],
       ],

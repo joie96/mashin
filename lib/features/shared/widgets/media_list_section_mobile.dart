@@ -6,12 +6,10 @@ import 'package:flutter/material.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../data/music_assistant/ma_models.dart';
 import '../../playback/playback_coordinator.dart';
-import 'media_link_text.dart';
 import 'media_list_section_desktop.dart';
+import 'media_table_section_desktop.dart';
 
 class MediaListSectionMobile<T extends MediaItem> extends StatefulWidget {
-  static const int _pageSize = 9;
-
   final String title;
   final List<T> items;
   final bool isLoading;
@@ -38,51 +36,101 @@ class MediaListSectionMobile<T extends MediaItem> extends StatefulWidget {
 
 class _MediaListSectionMobileState<T extends MediaItem>
     extends State<MediaListSectionMobile<T>> {
-  int _loadedItemCount = MediaListSectionMobile._pageSize;
+  static const double _mobileChunkViewportFraction = 0.92;
+  static const double _mobileChunkGap = 8;
+
+  final PageController _mobileChunkPageController = PageController(
+    viewportFraction: _mobileChunkViewportFraction,
+  );
 
   @override
-  void didUpdateWidget(covariant MediaListSectionMobile<T> oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!identical(oldWidget.items, widget.items)) {
-      _loadedItemCount = MediaListSectionMobile._pageSize;
-    }
-    _loadedItemCount = _loadedItemCount.clamp(
-      0,
-      math.max(widget.items.length, 0),
-    );
-    if (widget.items.isNotEmpty && _loadedItemCount == 0) {
-      _loadedItemCount = math.min(
-        MediaListSectionMobile._pageSize,
-        widget.items.length,
-      );
-    }
+  void dispose() {
+    _mobileChunkPageController.dispose();
+    super.dispose();
   }
 
-  bool get _hasMoreItems => _loadedItemCount < widget.items.length;
+  List<MediaItem> _playableItems() {
+    return widget.items.where(_isValidPlayable).toList(growable: false);
+  }
 
-  void _loadMore() {
-    setState(() {
-      _loadedItemCount = math.min(
-        _loadedItemCount + MediaListSectionMobile._pageSize,
-        widget.items.length,
-      );
-    });
+  bool _isValidPlayable(MediaItem item) {
+    return item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty;
+  }
+
+  void _onPlayAllTap() {
+    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
+    final List<MediaItem> playItems = _playableItems();
+    if (coordinator == null || playItems.isEmpty) {
+      return;
+    }
+
+    unawaited(() async {
+      try {
+        await coordinator.playMedia(<MediaItem>[playItems.first]);
+      } catch (_) {
+        // Playback failures should not block header actions.
+      }
+    }());
+  }
+
+  void _onShuffleAllTap() {
+    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
+    final List<MediaItem> playItems = _playableItems();
+    if (coordinator == null || playItems.isEmpty) {
+      return;
+    }
+
+    unawaited(() async {
+      try {
+        final MediaItem item =
+            playItems[math.Random().nextInt(playItems.length)];
+        await coordinator.playMedia(<MediaItem>[item]);
+      } catch (_) {
+        // Playback failures should not block header actions.
+      }
+    }());
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
     final bool hasTitle = widget.title.trim().isNotEmpty;
+    final bool hasPlayableContent =
+        !widget.isLoading && _playableItems().isNotEmpty;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         if (hasTitle)
-          Text(
-            widget.title,
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          Row(
+            children: <Widget>[
+              Text(
+                widget.title,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              if (!widget.isLoading && widget.items.isNotEmpty) ...<Widget>[
+                const SizedBox(width: 10),
+                SectionCountBadge(count: widget.items.length),
+              ],
+              const SizedBox(width: 16),
+              const Expanded(child: SectionHeaderDivider()),
+              const SizedBox(width: 16),
+              if (widget.playbackCoordinator != null) ...<Widget>[
+                SectionHeaderIconButton(
+                  icon: Icons.play_arrow,
+                  tooltip: 'Abspielen',
+                  onTap: hasPlayableContent ? _onPlayAllTap : null,
+                ),
+                const SizedBox(width: 8),
+                SectionHeaderIconButton(
+                  icon: Icons.shuffle,
+                  tooltip: 'Zufällig abspielen',
+                  onTap: hasPlayableContent ? _onShuffleAllTap : null,
+                ),
+              ],
+            ],
           ),
         if (hasTitle) const SizedBox(height: 10),
         if (widget.isLoading)
@@ -92,22 +140,24 @@ class _MediaListSectionMobileState<T extends MediaItem>
         else
           SizedBox(
             height: 166,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: _visibleColumnCount + (_hasMoreItems ? 1 : 0),
-              separatorBuilder: (_, _) => const SizedBox(width: 8),
+            child: PageView.builder(
+              controller: _mobileChunkPageController,
+              padEnds: false,
+              physics: const PageScrollPhysics(parent: BouncingScrollPhysics()),
+              itemCount: _visibleColumnCount,
               itemBuilder: (BuildContext context, int columnIndex) {
-                if (columnIndex >= _visibleColumnCount) {
-                  return _MobileLoadMoreTile(onTap: _loadMore);
-                }
+                final bool isLastPage = columnIndex == _visibleColumnCount - 1;
 
-                return SizedBox(
-                  width: widget.itemWidth,
+                return Padding(
+                  padding: EdgeInsets.only(
+                    right: isLastPage ? 0 : _mobileChunkGap,
+                  ),
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
                       for (int row = 0; row < 3; row++)
                         if ((columnIndex * 3) + row <
-                            _visibleItemCount) ...<Widget>[
+                            widget.items.length) ...<Widget>[
                           if (row > 0) const SizedBox(height: 8),
                           _MobileListTile<T>(
                             item: widget.items[(columnIndex * 3) + row],
@@ -125,8 +175,7 @@ class _MediaListSectionMobileState<T extends MediaItem>
     );
   }
 
-  int get _visibleItemCount => math.min(_loadedItemCount, widget.items.length);
-  int get _visibleColumnCount => (_visibleItemCount / 3).ceil();
+  int get _visibleColumnCount => (widget.items.length / 3).ceil();
 }
 
 class _MobileListTile<T extends MediaItem> extends StatelessWidget {
@@ -164,51 +213,53 @@ class _MobileListTile<T extends MediaItem> extends StatelessWidget {
         ? 'Unbekannt'
         : item.name.trim();
 
-    return Container(
-      height: 50,
-      decoration: BoxDecoration(
-        color: colors.bgSecondary,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Row(
-        children: <Widget>[
-          Container(width: 10, color: accentColorFromText(title)),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: MediaLinkText(
-                items: <MediaItem>[item],
-                fallbackText: title,
-                onItemTap: onItemTap == null
-                    ? null
-                    : (MediaItem mediaItem) => onItemTap!(mediaItem as T),
-                style: TextStyle(
-                  color: colors.textSecondary,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14,
+    return GestureDetector(
+      onTap: onItemTap == null ? null : () => onItemTap!(item),
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        height: 50,
+        decoration: BoxDecoration(
+          color: colors.bgSecondary,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Row(
+          children: <Widget>[
+            Container(width: 10, color: accentColorFromText(title)),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: colors.textSecondary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
                 ),
               ),
             ),
-          ),
-          GestureDetector(
-            onTap: _play,
-            child: Container(
-              width: 28,
-              height: 28,
-              margin: const EdgeInsets.only(right: 4),
-              decoration: BoxDecoration(
-                color: colors.overlayPlayButtonBackground,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Icon(
-                Icons.play_arrow_sharp,
-                size: 18,
-                color: colors.overlayPlayButtonForeground,
+            GestureDetector(
+              onTap: _play,
+              child: Container(
+                width: 28,
+                height: 28,
+                margin: const EdgeInsets.only(right: 4),
+                decoration: BoxDecoration(
+                  color: colors.overlayPlayButtonBackground,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(
+                  Icons.play_arrow_sharp,
+                  size: 18,
+                  color: colors.overlayPlayButtonForeground,
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -225,14 +276,16 @@ class _MobileListSkeletonGrid extends StatelessWidget {
 
     return SizedBox(
       height: 166,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
+      child: PageView.builder(
+        controller: PageController(viewportFraction: 0.92),
+        padEnds: false,
+        physics: const PageScrollPhysics(parent: BouncingScrollPhysics()),
         itemCount: 3,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (BuildContext context, int columnIndex) {
-          return SizedBox(
-            width: itemWidth,
+          return Padding(
+            padding: EdgeInsets.only(right: columnIndex == 2 ? 0 : 8),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 for (int row = 0; row < 3; row++) ...<Widget>[
                   if (row > 0) const SizedBox(height: 8),
@@ -262,44 +315,6 @@ class _MobileListSkeletonGrid extends StatelessWidget {
             ),
           );
         },
-      ),
-    );
-  }
-}
-
-class _MobileLoadMoreTile extends StatelessWidget {
-  final VoidCallback onTap;
-
-  const _MobileLoadMoreTile({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.mashinColors;
-
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 166,
-        height: 166,
-        decoration: BoxDecoration(
-          color: colors.hover,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Icon(Icons.chevron_right, size: 30, color: colors.textPrimary),
-            const SizedBox(height: 8),
-            Text(
-              'Mehr',
-              style: TextStyle(
-                color: colors.textSecondary,
-                fontSize: 13,
-                fontFamily: 'PoppinsRegular',
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

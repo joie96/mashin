@@ -102,6 +102,11 @@ class FfiSendspinRustBridge implements SendspinRustBridge {
   Future<void> engineConnect() async {
     final code = _bindings.engineConnect();
     _throwIfError(code, 'engineConnect');
+
+    final volumeCode = _bindings.setVolume(
+      await AppConfig.getLocalVolume(),
+    );
+    _throwIfError(volumeCode, 'restoreVolume');
   }
 
   @override
@@ -196,6 +201,7 @@ class FfiSendspinRustBridge implements SendspinRustBridge {
   @override
   Future<void> setVolume(int volume) async {
     final clamped = volume.clamp(0, 100);
+    await AppConfig.setLocalVolume(clamped);
     final code = _bindings.setVolume(clamped);
     _throwIfError(code, 'setVolume');
   }

@@ -474,20 +474,7 @@ impl SendspinEngine {
                                 Message::ServerCommand(command) => {
                                     if let Some(player_command) = &command.player {
                                         match player_command.command {
-                                            PlayerCommandType::Volume => {
-                                                if let Some(volume) = player_command.volume {
-                                                    if let Some(player) = synced_player.as_ref() {
-                                                        player.set_volume(volume);
-                                                    }
-                                                }
-                                            }
-                                            PlayerCommandType::Mute => {
-                                                if let Some(mute) = player_command.mute {
-                                                    if let Some(player) = synced_player.as_ref() {
-                                                        player.set_mute(mute);
-                                                    }
-                                                }
-                                            }
+                                            PlayerCommandType::Volume | PlayerCommandType::Mute => {}
                                             PlayerCommandType::SetStaticDelay => {
                                                 if let Some(delay) = player_command.static_delay_ms {
                                                     static_delay_ms = delay;
@@ -1098,15 +1085,6 @@ fn apply_message_to_snapshot(snapshot: &Arc<Mutex<Snapshot>>, message: &Message)
     match message {
         Message::ServerState(server_state) => {
             if let Some(controller) = &server_state.controller {
-                if state.volume != controller.volume {
-                    state.volume = controller.volume;
-                    changed = true;
-                }
-                if state.muted != controller.muted {
-                    state.muted = controller.muted;
-                    changed = true;
-                }
-
                 let next_repeat = controller.repeat.as_ref().map(repeat_mode_to_string);
                 if state.repeat_mode != next_repeat {
                     state.repeat_mode = next_repeat;
@@ -1194,22 +1172,7 @@ fn apply_message_to_snapshot(snapshot: &Arc<Mutex<Snapshot>>, message: &Message)
         Message::ServerCommand(command) => {
             if let Some(player_command) = &command.player {
                 match player_command.command {
-                    PlayerCommandType::Volume => {
-                        if let Some(volume) = player_command.volume {
-                            if state.volume != volume {
-                                state.volume = volume;
-                                changed = true;
-                            }
-                        }
-                    }
-                    PlayerCommandType::Mute => {
-                        if let Some(mute) = player_command.mute {
-                            if state.muted != mute {
-                                state.muted = mute;
-                                changed = true;
-                            }
-                        }
-                    }
+                    PlayerCommandType::Volume | PlayerCommandType::Mute => {}
                     PlayerCommandType::SetStaticDelay | PlayerCommandType::Unknown => {}
                 }
             }

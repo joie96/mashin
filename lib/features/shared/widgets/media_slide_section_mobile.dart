@@ -10,8 +10,6 @@ import 'media_image.dart';
 import 'media_table_section_desktop.dart';
 
 class MediaSlideSectionMobile<T> extends StatefulWidget {
-  static const int _pageSize = 10;
-
   final String title;
   final List<T> items;
   final bool isLoading;
@@ -31,8 +29,8 @@ class MediaSlideSectionMobile<T> extends StatefulWidget {
     required this.isLoading,
     required this.emptyText,
     this.itemWidth = 320,
-    this.itemHeight = 145,
-    this.coverSize = 145,
+    this.itemHeight = 112,
+    this.coverSize = 112,
     this.itemSpacing = 8,
     this.skeletonCount = 4,
     this.playbackCoordinator,
@@ -48,39 +46,17 @@ class MediaSlideSectionMobile<T> extends StatefulWidget {
 
 class _MediaSlideSectionMobileState<T>
     extends State<MediaSlideSectionMobile<T>> {
-  int _loadedItemCount = MediaSlideSectionMobile._pageSize;
+  static const double _mobileChunkViewportFraction = 0.92;
+  static const double _mobileChunkGap = 8;
+
+  final PageController _mobileChunkPageController = PageController(
+    viewportFraction: _mobileChunkViewportFraction,
+  );
 
   @override
-  void didUpdateWidget(covariant MediaSlideSectionMobile<T> oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!identical(oldWidget.items, widget.items)) {
-      _loadedItemCount = MediaSlideSectionMobile._pageSize;
-    }
-    _loadedItemCount = _loadedItemCount.clamp(
-      0,
-      math.max(widget.items.length, 0),
-    );
-    if (widget.items.isNotEmpty && _loadedItemCount == 0) {
-      _loadedItemCount = math.min(
-        MediaSlideSectionMobile._pageSize,
-        widget.items.length,
-      );
-    }
-  }
-
-  bool get _hasMoreItems => _loadedItemCount < widget.items.length;
-
-  void _loadMore() {
-    if (!_hasMoreItems) {
-      return;
-    }
-
-    setState(() {
-      _loadedItemCount = math.min(
-        _loadedItemCount + MediaSlideSectionMobile._pageSize,
-        widget.items.length,
-      );
-    });
+  void dispose() {
+    _mobileChunkPageController.dispose();
+    super.dispose();
   }
 
   void _playItem(int index) {
@@ -103,20 +79,108 @@ class _MediaSlideSectionMobileState<T>
     }());
   }
 
+  bool get _isTrackSection => T == Track;
+
+  List<MediaItem> _playableItems() {
+    final List<MediaItem> playItems = <MediaItem>[];
+    for (final T item in widget.items) {
+      final MediaItem? mediaItem = resolvePlayableMediaItem(item);
+      if (mediaItem != null && isValidPlayable(mediaItem)) {
+        playItems.add(mediaItem);
+      }
+    }
+    return playItems;
+  }
+
+  void _playAll() {
+    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
+    if (coordinator == null) {
+      return;
+    }
+
+    final List<MediaItem> playItems = _playableItems();
+    if (playItems.isEmpty) {
+      return;
+    }
+
+    unawaited(() async {
+      try {
+        await coordinator.playMedia(
+          _isTrackSection ? playItems : <MediaItem>[playItems.first],
+        );
+      } catch (_) {
+        // Keep header interactions responsive when playback rejects an item.
+      }
+    }());
+  }
+
+  void _shufflePlayAll() {
+    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
+    if (coordinator == null) {
+      return;
+    }
+
+    final List<MediaItem> playItems = _playableItems();
+    if (playItems.isEmpty) {
+      return;
+    }
+
+    unawaited(() async {
+      try {
+        if (_isTrackSection) {
+          await coordinator.shufflePlayMedia(playItems);
+          return;
+        }
+
+        final MediaItem item =
+            playItems[math.Random().nextInt(playItems.length)];
+        await coordinator.playMedia(<MediaItem>[item]);
+      } catch (_) {
+        // Keep header interactions responsive when playback rejects an item.
+      }
+    }());
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
     final bool hasTitle = widget.title.trim().isNotEmpty;
+    final bool hasPlayableContent =
+        !widget.isLoading && _playableItems().isNotEmpty;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         if (hasTitle)
-          Text(
-            widget.title,
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          Row(
+            children: <Widget>[
+              Text(
+                widget.title,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              if (!widget.isLoading && widget.items.isNotEmpty) ...<Widget>[
+                const SizedBox(width: 10),
+                SectionCountBadge(count: widget.items.length),
+              ],
+              const SizedBox(width: 16),
+              const Expanded(child: SectionHeaderDivider()),
+              const SizedBox(width: 16),
+              if (widget.playbackCoordinator != null) ...<Widget>[
+                SectionHeaderIconButton(
+                  icon: Icons.play_arrow,
+                  tooltip: 'Abspielen',
+                  onTap: hasPlayableContent ? _playAll : null,
+                ),
+                const SizedBox(width: 8),
+                SectionHeaderIconButton(
+                  icon: Icons.shuffle,
+                  tooltip: 'Zufällig abspielen',
+                  onTap: hasPlayableContent ? _shufflePlayAll : null,
+                ),
+              ],
+            ],
           ),
         if (hasTitle) const SizedBox(height: 10),
         if (!widget.isLoading && widget.items.isEmpty)
@@ -131,40 +195,46 @@ class _MediaSlideSectionMobileState<T>
   }
 
   Widget _buildSkeletonList() {
-    return ListView.separated(
-      scrollDirection: Axis.horizontal,
+    return PageView.builder(
+      controller: _mobileChunkPageController,
+      padEnds: false,
+      physics: const PageScrollPhysics(parent: BouncingScrollPhysics()),
       itemCount: widget.skeletonCount,
-      separatorBuilder: (_, _) => SizedBox(width: widget.itemSpacing),
-      itemBuilder: (_, _) => _MobileSlideSkeleton(
-        itemWidth: widget.itemWidth,
-        coverSize: widget.coverSize,
-      ),
+      itemBuilder: (BuildContext context, int index) {
+        return Padding(
+          padding: EdgeInsets.only(
+            right: index == widget.skeletonCount - 1 ? 0 : _mobileChunkGap,
+          ),
+          child: _MobileSlideSkeleton(
+            itemWidth: double.infinity,
+            coverSize: widget.coverSize,
+          ),
+        );
+      },
     );
   }
 
   Widget _buildItemList() {
-    final int visibleCount = math.min(_loadedItemCount, widget.items.length);
-    return ListView.separated(
-      scrollDirection: Axis.horizontal,
-      itemCount: visibleCount + (_hasMoreItems ? 1 : 0),
-      separatorBuilder: (_, _) => SizedBox(width: widget.itemSpacing),
+    return PageView.builder(
+      controller: _mobileChunkPageController,
+      padEnds: false,
+      physics: const PageScrollPhysics(parent: BouncingScrollPhysics()),
+      itemCount: widget.items.length,
       itemBuilder: (BuildContext context, int index) {
-        if (index >= visibleCount) {
-          return _MobileSlideLoadMoreCard(
-            size: widget.coverSize,
-            onTap: _loadMore,
-          );
-        }
+        final bool isLastPage = index == widget.items.length - 1;
 
-        return _MobileSlideCard<T>(
-          item: widget.items[index],
-          itemWidth: widget.itemWidth,
-          coverSize: widget.coverSize,
-          playbackCoordinator: widget.playbackCoordinator,
-          onPlayTap: () => _playItem(index),
-          onTap: widget.onItemTap == null
-              ? null
-              : () => widget.onItemTap!(widget.items[index]),
+        return Padding(
+          padding: EdgeInsets.only(right: isLastPage ? 0 : _mobileChunkGap),
+          child: _MobileSlideCard<T>(
+            item: widget.items[index],
+            itemWidth: double.infinity,
+            coverSize: widget.coverSize,
+            playbackCoordinator: widget.playbackCoordinator,
+            onPlayTap: () => _playItem(index),
+            onTap: widget.onItemTap == null
+                ? null
+                : () => widget.onItemTap!(widget.items[index]),
+          ),
         );
       },
     );
@@ -246,15 +316,15 @@ class _MobileSlideCard<T> extends StatelessWidget {
                             onTap: onPlayTap,
                             behavior: HitTestBehavior.opaque,
                             child: Container(
-                              width: 28,
-                              height: 28,
+                              width: 40,
+                              height: 40,
                               decoration: BoxDecoration(
                                 color: colors.overlayPlayButtonBackground,
-                                borderRadius: BorderRadius.circular(14),
+                                borderRadius: BorderRadius.circular(20),
                               ),
                               child: Icon(
-                                Icons.play_arrow_outlined,
-                                size: 16,
+                                Icons.play_arrow_sharp,
+                                size: 20,
                                 color: colors.overlayPlayButtonForeground,
                               ),
                             ),
@@ -316,45 +386,6 @@ class _MobileSlideCard<T> extends StatelessWidget {
 const List<Shadow> _artworkTextShadows = <Shadow>[
   Shadow(color: Color(0x99000000), blurRadius: 8),
 ];
-
-class _MobileSlideLoadMoreCard extends StatelessWidget {
-  final double size;
-  final VoidCallback onTap;
-
-  const _MobileSlideLoadMoreCard({required this.size, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.mashinColors;
-
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          color: colors.hover,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Icon(Icons.chevron_right, size: 30, color: colors.textPrimary),
-            const SizedBox(height: 8),
-            Text(
-              'Mehr',
-              style: TextStyle(
-                fontFamily: 'PoppinsRegular',
-                color: colors.textSecondary,
-                fontSize: 13,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 class _MobileSlideSkeleton extends StatelessWidget {
   final double itemWidth;
