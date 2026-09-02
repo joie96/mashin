@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_theme.dart';
@@ -22,6 +24,7 @@ class QueueOverlay extends StatefulWidget {
     required this.playbackCoordinator,
     this.userDataController,
     this.desktopBottomInset = 0,
+    this.mobileOpenProgress = 0,
     required this.onClose,
     required this.onToggleDontStopTheMusic,
     this.onOpenArtist,
@@ -42,6 +45,7 @@ class QueueOverlay extends StatefulWidget {
   final PlaybackCoordinator playbackCoordinator;
   final UserDataController? userDataController;
   final double desktopBottomInset;
+  final double mobileOpenProgress;
   final VoidCallback onClose;
   final Future<void> Function() onToggleDontStopTheMusic;
   final ValueChanged<Artist>? onOpenArtist;
@@ -57,21 +61,62 @@ class QueueOverlay extends StatefulWidget {
 class _QueueOverlayState extends State<QueueOverlay> {
   static const double _mobileDismissThreshold = 120;
   static const double _dragResistance = 0.92;
-  static const Duration _overlayAnimationDuration = QueueOverlay.animationDuration;
+  static const Duration _overlayAnimationDuration =
+      QueueOverlay.animationDuration;
   double _dragOffset = 0;
+  Duration _dragOffsetAnimationDuration = Duration.zero;
+
+  void _handleMobileDismissDragUpdate(double downwardDelta) {
+    if (!widget.isOpen || widget.isDesktop || downwardDelta <= 0) {
+      return;
+    }
+
+    setState(() {
+      _dragOffsetAnimationDuration = Duration.zero;
+      _dragOffset = math.max(0, _dragOffset + downwardDelta * _dragResistance);
+    });
+  }
+
+  void _handleMobileDismissDragEnd(double primaryVelocity) {
+    if (!widget.isOpen || widget.isDesktop) {
+      return;
+    }
+
+    if (_dragOffset <= 0) {
+      return;
+    }
+
+    if (_dragOffset >= _mobileDismissThreshold || primaryVelocity > 700) {
+      setState(() {
+        _dragOffsetAnimationDuration = Duration.zero;
+      });
+      widget.onClose();
+      return;
+    }
+
+    setState(() {
+      _dragOffsetAnimationDuration = _overlayAnimationDuration;
+      _dragOffset = 0;
+    });
+  }
 
   @override
   void didUpdateWidget(covariant QueueOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!widget.isOpen && _dragOffset != 0) {
-      _dragOffset = 0;
+      _dragOffsetAnimationDuration = Duration.zero;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
-    final bool interactable = widget.isOpen || _dragOffset > 0;
+    final double effectiveOpenProgress = widget.isOpen
+        ? 1
+        : widget.mobileOpenProgress.clamp(0, 1).toDouble();
+    final bool isInteractivelyOpening =
+        !widget.isOpen && effectiveOpenProgress > 0;
+    final bool interactable = effectiveOpenProgress > 0 || _dragOffset > 0;
     final double panelBottomInset = widget.isDesktop
         ? widget.desktopBottomInset
         : 0;
@@ -90,9 +135,11 @@ class _QueueOverlayState extends State<QueueOverlay> {
               Positioned.fill(
                 bottom: panelBottomInset,
                 child: AnimatedOpacity(
-                  duration: _overlayAnimationDuration,
+                  duration: isInteractivelyOpening
+                      ? Duration.zero
+                      : _overlayAnimationDuration,
                   curve: Curves.easeOutCubic,
-                  opacity: widget.isOpen ? 1 : 0,
+                  opacity: effectiveOpenProgress,
                   child: GestureDetector(
                     onTap: widget.onClose,
                     child: Container(color: Colors.black54),
@@ -106,101 +153,92 @@ class _QueueOverlayState extends State<QueueOverlay> {
                 height: panelHeight,
                 child: ClipRect(
                   child: AnimatedSlide(
-                    duration: _overlayAnimationDuration,
+                    duration: isInteractivelyOpening
+                        ? Duration.zero
+                        : _overlayAnimationDuration,
                     curve: Curves.easeOutCubic,
-                    offset: widget.isOpen ? Offset.zero : const Offset(0, 1),
-                    child: Transform.translate(
-                      offset: Offset(0, _dragOffset),
-                      child: GestureDetector(
-                        onVerticalDragUpdate: widget.isDesktop
-                            ? null
-                            : (details) {
-                                if (!widget.isOpen) {
-                                  return;
-                                }
-
-                                final double next =
-                                    _dragOffset +
-                                    (details.delta.dy * _dragResistance);
-                                setState(() {
-                                  _dragOffset = next < 0 ? 0 : next;
-                                });
-                              },
-                        onVerticalDragEnd: widget.isDesktop
-                            ? null
-                            : (_) {
-                                if (_dragOffset >= _mobileDismissThreshold) {
-                                  setState(() {
-                                    _dragOffset = 0;
-                                  });
-                                  widget.onClose();
-                                  return;
-                                }
-
-                                setState(() {
-                                  _dragOffset = 0;
-                                });
-                              },
-                        child: Center(
-                          child: Container(
-                            constraints: BoxConstraints(
-                              maxWidth: widget.isDesktop
-                                  ? 1400
-                                  : double.infinity,
-                              minHeight: panelHeight,
-                              maxHeight: panelHeight,
+                    offset: Offset(0, 1 - effectiveOpenProgress),
+                    onEnd: () {
+                      if (!widget.isOpen && _dragOffset != 0) {
+                        setState(() {
+                          _dragOffsetAnimationDuration = Duration.zero;
+                          _dragOffset = 0;
+                        });
+                      }
+                    },
+                    child: AnimatedSlide(
+                      duration: _dragOffsetAnimationDuration,
+                      curve: Curves.easeOutCubic,
+                      offset: Offset(
+                        0,
+                        panelHeight <= 0 ? 0 : _dragOffset / panelHeight,
+                      ),
+                      onEnd: () {
+                        if (_dragOffsetAnimationDuration != Duration.zero) {
+                          setState(() {
+                            _dragOffsetAnimationDuration = Duration.zero;
+                          });
+                        }
+                      },
+                      child: Center(
+                        child: Container(
+                          constraints: BoxConstraints(
+                            maxWidth: widget.isDesktop ? 1400 : double.infinity,
+                            minHeight: panelHeight,
+                            maxHeight: panelHeight,
+                          ),
+                          decoration: BoxDecoration(
+                            color: colors.bgSecondary,
+                            borderRadius: widget.isDesktop
+                                ? BorderRadius.zero
+                                : const BorderRadius.vertical(
+                                    top: Radius.circular(20),
+                                  ),
+                            border: Border(
+                              top: BorderSide(color: colors.border),
                             ),
-                            decoration: BoxDecoration(
-                              color: colors.bgSecondary,
-                              borderRadius: widget.isDesktop
-                                  ? BorderRadius.zero
-                                  : const BorderRadius.vertical(
-                                      top: Radius.circular(20),
-                                    ),
-                              border: Border(
-                                top: BorderSide(color: colors.border),
-                              ),
-                            ),
-                            child: widget.isDesktop
-                                ? QueueOverlayDesktop(
-                                    trackTitle: widget.trackTitle,
-                                    trackSubtitle: widget.trackSubtitle,
-                                    trackCoverUrl: widget.trackCoverUrl,
+                          ),
+                          child: widget.isDesktop
+                              ? QueueOverlayDesktop(
+                                  trackTitle: widget.trackTitle,
+                                  trackSubtitle: widget.trackSubtitle,
+                                  trackCoverUrl: widget.trackCoverUrl,
+                                  queueTrackCountText:
+                                      widget.queueTrackCountText,
+                                  queueTotalDurationText:
+                                      widget.queueTotalDurationText,
+                                  dontStopTheMusicEnabled:
+                                      widget.dontStopTheMusicEnabled,
+                                  queueItems: widget.queueItems,
+                                  currentQueueIndex: widget.currentQueueIndex,
+                                  playbackCoordinator:
+                                      widget.playbackCoordinator,
+                                  userDataController: widget.userDataController,
+                                  onClose: widget.onClose,
+                                  onToggleDontStopTheMusic:
+                                      widget.onToggleDontStopTheMusic,
+                                  onOpenArtist: widget.onOpenArtist,
+                                  onOpenAlbum: widget.onOpenAlbum,
+                                )
+                              : SafeArea(
+                                  top: true,
+                                  bottom: false,
+                                  child: QueueOverlayMobile(
                                     queueTrackCountText:
                                         widget.queueTrackCountText,
                                     queueTotalDurationText:
                                         widget.queueTotalDurationText,
-                                    dontStopTheMusicEnabled:
-                                        widget.dontStopTheMusicEnabled,
                                     queueItems: widget.queueItems,
                                     currentQueueIndex: widget.currentQueueIndex,
                                     playbackCoordinator:
                                         widget.playbackCoordinator,
-                                    userDataController:
-                                      widget.userDataController,
                                     onClose: widget.onClose,
-                                    onToggleDontStopTheMusic:
-                                        widget.onToggleDontStopTheMusic,
-                                    onOpenArtist: widget.onOpenArtist,
-                                    onOpenAlbum: widget.onOpenAlbum,
-                                  )
-                                : SafeArea(
-                                    top: true,
-                                    bottom: false,
-                                    child: QueueOverlayMobile(
-                                      queueTrackCountText:
-                                          widget.queueTrackCountText,
-                                      queueTotalDurationText:
-                                          widget.queueTotalDurationText,
-                                      queueItems: widget.queueItems,
-                                      currentQueueIndex:
-                                          widget.currentQueueIndex,
-                                      playbackCoordinator:
-                                          widget.playbackCoordinator,
-                                      onClose: widget.onClose,
-                                    ),
+                                    onDismissDragUpdate:
+                                        _handleMobileDismissDragUpdate,
+                                    onDismissDragEnd:
+                                        _handleMobileDismissDragEnd,
                                   ),
-                          ),
+                                ),
                         ),
                       ),
                     ),

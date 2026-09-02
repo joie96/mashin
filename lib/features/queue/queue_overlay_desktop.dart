@@ -49,7 +49,10 @@ class QueueOverlayDesktop extends StatefulWidget {
 }
 
 class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
+  static const double _queueRowExtent = 64;
   List<QueueItem> _selectedItems = const <QueueItem>[];
+  final ScrollController _queueScrollController = ScrollController();
+  int? _lastCurrentQueueIndex;
 
   String get trackTitle => widget.trackTitle;
   String get trackSubtitle => widget.trackSubtitle;
@@ -66,6 +69,51 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
       widget.onToggleDontStopTheMusic;
   ValueChanged<Artist>? get onOpenArtist => widget.onOpenArtist;
   ValueChanged<Album>? get onOpenAlbum => widget.onOpenAlbum;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollToCurrentItem();
+  }
+
+  @override
+  void didUpdateWidget(covariant QueueOverlayDesktop oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentQueueIndex != widget.currentQueueIndex ||
+        oldWidget.queueItems.length != widget.queueItems.length) {
+      _scrollToCurrentItem();
+    }
+  }
+
+  @override
+  void dispose() {
+    _queueScrollController.dispose();
+    super.dispose();
+  }
+
+  void _scrollToCurrentItem() {
+    final int? index = widget.currentQueueIndex;
+    if (index == null ||
+        index < 0 ||
+        index >= widget.queueItems.length ||
+        index == _lastCurrentQueueIndex) {
+      return;
+    }
+    _lastCurrentQueueIndex = index;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_queueScrollController.hasClients) {
+        return;
+      }
+      final double target = (index * _queueRowExtent - _queueRowExtent)
+          .clamp(0, _queueScrollController.position.maxScrollExtent)
+          .toDouble();
+      _queueScrollController.animateTo(
+        target,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
 
   Track? get _currentTrack {
     final int? index = currentQueueIndex;
@@ -88,10 +136,8 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
             (Playlist playlist) => ContextMenuAction(
               label: playlist.name,
               icon: Icons.playlist_play_outlined,
-              onSelected: () => controller.addPlaylistTracks(
-                playlist.itemId,
-                <Track>[track],
-              ),
+              onSelected: () =>
+                  controller.addPlaylistTracks(playlist.itemId, <Track>[track]),
             ),
           )
           .toList(growable: false),
@@ -129,7 +175,10 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
       }
       final int positionShift = insertPosition - currentPosition;
       if (positionShift != 0) {
-        await playbackCoordinator.moveQueueItem(itemId, posShift: positionShift);
+        await playbackCoordinator.moveQueueItem(
+          itemId,
+          posShift: positionShift,
+        );
       }
       itemOrder
         ..removeAt(currentPosition)
@@ -155,7 +204,10 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
       final int targetPosition = itemOrder.length - 1;
       final int positionShift = targetPosition - currentPosition;
       if (positionShift != 0) {
-        await playbackCoordinator.moveQueueItem(itemId, posShift: positionShift);
+        await playbackCoordinator.moveQueueItem(
+          itemId,
+          posShift: positionShift,
+        );
       }
       itemOrder
         ..removeAt(currentPosition)
@@ -171,9 +223,12 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
         .toList(growable: false);
     final Track? track = tracks.length == 1 ? tracks.single : null;
     final UserDataController? controller = userDataController;
-    final bool areAllFavorites = tracks.isNotEmpty &&
-        tracks.every((Track queueTrack) =>
-            controller?.isFavorite(queueTrack) ?? queueTrack.favorite);
+    final bool areAllFavorites =
+        tracks.isNotEmpty &&
+        tracks.every(
+          (Track queueTrack) =>
+              controller?.isFavorite(queueTrack) ?? queueTrack.favorite,
+        );
 
     return <ContextMenuAction>[
       ContextMenuAction(
@@ -181,9 +236,12 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
         icon: Icons.play_arrow,
         onSelected: () {
           final int index = queueItems.indexWhere(
-            (QueueItem queueItem) => queueItem.queueItemId == targets.first.queueItemId,
+            (QueueItem queueItem) =>
+                queueItem.queueItemId == targets.first.queueItemId,
           );
-          return index < 0 ? Future<void>.value() : playbackCoordinator.playQueueIndex(index);
+          return index < 0
+              ? Future<void>.value()
+              : playbackCoordinator.playQueueIndex(index);
         },
       ),
       ContextMenuAction(
@@ -208,7 +266,8 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
           }
         },
       ),
-      if (track != null && (onOpenArtist != null || onOpenAlbum != null)) ...<ContextMenuAction>[
+      if (track != null &&
+          (onOpenArtist != null || onOpenAlbum != null)) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
         if (track.artists.isNotEmpty && onOpenArtist != null)
           ContextMenuAction(
@@ -223,7 +282,9 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
             onSelected: () => onOpenAlbum!(track.album!),
           ),
       ],
-      if (tracks.isNotEmpty && controller != null && controller.playlists.isNotEmpty) ...<ContextMenuAction>[
+      if (tracks.isNotEmpty &&
+          controller != null &&
+          controller.playlists.isNotEmpty) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
         ContextMenuAction.submenu(
           label: 'Zu Wiedergabeliste hinzufügen',
@@ -233,10 +294,8 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
                 (Playlist playlist) => ContextMenuAction(
                   label: playlist.name,
                   icon: Icons.playlist_play_outlined,
-                  onSelected: () => controller.addPlaylistTracks(
-                    playlist.itemId,
-                    tracks,
-                  ),
+                  onSelected: () =>
+                      controller.addPlaylistTracks(playlist.itemId, tracks),
                 ),
               )
               .toList(growable: false),
@@ -328,12 +387,12 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
                             icon: isFavorite
                                 ? Icons.favorite_outlined
                                 : Icons.favorite_border_outlined,
-                            onPressed: track == null || userDataController == null
+                            onPressed:
+                                track == null || userDataController == null
                                 ? null
-                                : () => userDataController!.setFavorite(
-                                    <Track>[track],
-                                    !isFavorite,
-                                  ),
+                                : () => userDataController!.setFavorite(<Track>[
+                                    track,
+                                  ], !isFavorite),
                           );
                         },
                       ),
@@ -342,8 +401,7 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
                         builder: (BuildContext context) {
                           final Track? track = _currentTrack;
                           final bool hasPlaylists =
-                              userDataController?.playlists.isNotEmpty ??
-                              false;
+                              userDataController?.playlists.isNotEmpty ?? false;
                           return _TrackActionIcon(
                             icon: Icons.add_outlined,
                             onPressed: track == null || !hasPlaylists
@@ -441,6 +499,7 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
                     maxItemsPerPage: 0,
                     enableSelection: true,
                     playbackCoordinator: playbackCoordinator,
+                    scrollController: _queueScrollController,
                     onSelectionChanged: (List<QueueItem> items) {
                       setState(() {
                         _selectedItems = items;

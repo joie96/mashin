@@ -104,14 +104,14 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
         ),
       if (item is! Playlist)
         ContextMenuAction(
-        label: 'Radio starten',
-        icon: Icons.radio_outlined,
-        onSelected: () => item is Track
-            ? coordinator.playMediaRadioNext(
-                tracks.isEmpty ? <MediaItem>[item] : tracks,
-              )
-            : _controller.startItemRadio(item),
-      ),
+          label: 'Radio starten',
+          icon: Icons.radio_outlined,
+          onSelected: () => item is Track
+              ? coordinator.playMediaRadioNext(
+                  tracks.isEmpty ? <MediaItem>[item] : tracks,
+                )
+              : _controller.startItemRadio(item),
+        ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
@@ -675,7 +675,8 @@ class _CollapseToggleButton extends StatelessWidget {
           onTap: onTap,
           customBorder: const CircleBorder(),
           hoverColor: colors.hover,
-          splashColor: colors.hover,
+          splashColor: Colors.transparent,
+          highlightColor: Colors.transparent,
           child: SizedBox(
             width: 32,
             height: 32,
@@ -712,7 +713,8 @@ class _HeaderActionButton extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(26),
         hoverColor: colors.bgPrimary.withValues(alpha: 0.45),
-        splashColor: colors.bgPrimary.withValues(alpha: 0.55),
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
@@ -759,7 +761,8 @@ class _HeaderIconButton extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(14),
           hoverColor: colors.hover,
-          splashColor: colors.hover,
+          splashColor: Colors.transparent,
+          highlightColor: Colors.transparent,
           child: SizedBox(
             width: 28,
             height: 28,

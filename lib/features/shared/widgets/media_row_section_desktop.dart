@@ -1023,16 +1023,16 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         final double minSectionHeight = isArtistSection
             ? MediaRowSectionDesktop._artistDefaultHeight
             : isPlaylistSection
-          ? widget.showPlaylistDetails
-              ? MediaRowSectionDesktop._playlistDefaultHeight
-              : MediaRowSectionDesktop._artistDefaultHeight
+            ? widget.showPlaylistDetails
+                  ? MediaRowSectionDesktop._playlistDefaultHeight
+                  : MediaRowSectionDesktop._artistDefaultHeight
             : MediaRowSectionDesktop._defaultHeight;
         final double reservedTextHeight = isArtistSection
             ? MediaRowSectionDesktop._artistReservedTextHeight
             : isPlaylistSection
-          ? widget.showPlaylistDetails
-              ? MediaRowSectionDesktop._playlistReservedTextHeight
-              : MediaRowSectionDesktop._artistReservedTextHeight
+            ? widget.showPlaylistDetails
+                  ? MediaRowSectionDesktop._playlistReservedTextHeight
+                  : MediaRowSectionDesktop._artistReservedTextHeight
             : MediaRowSectionDesktop._reservedTextHeight;
         final double maxSectionHeight = minSectionHeight * 1.2;
         final double sectionHeight = math.min(
@@ -1312,6 +1312,8 @@ class _ExpandToggleButtonState extends State<_ExpandToggleButton> {
             onTap: widget.onTap,
             borderRadius: BorderRadius.circular(12),
             hoverColor: colors.hover,
+            splashColor: Colors.transparent,
+            highlightColor: Colors.transparent,
             child: SizedBox(
               width: 24,
               height: 24,
@@ -1987,82 +1989,82 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
                   child: Stack(
                     fit: StackFit.expand,
                     children: <Widget>[
-                    widget.isCircularCover
-                        ? IgnorePointer(
-                            child: ClipOval(
+                      widget.isCircularCover
+                          ? IgnorePointer(
+                              child: ClipOval(
+                                child: ColoredBox(
+                                  color: Colors.black.withValues(
+                                    alpha: colors.coverHoverOverlayOpacity,
+                                  ),
+                                ),
+                              ),
+                            )
+                          : IgnorePointer(
                               child: ColoredBox(
                                 color: Colors.black.withValues(
                                   alpha: colors.coverHoverOverlayOpacity,
                                 ),
                               ),
                             ),
-                          )
-                        : IgnorePointer(
-                            child: ColoredBox(
-                              color: Colors.black.withValues(
-                                alpha: colors.coverHoverOverlayOpacity,
-                              ),
-                            ),
-                          ),
-                    if (showHoverPlay)
-                      Center(
-                        child: MouseRegion(
-                          onEnter: (_) => _setPlayHovered(true),
-                          onExit: (_) => _setPlayHovered(false),
-                          child: AnimatedScale(
-                            scale: _isPlayHovered ? 1.08 : 1,
-                            duration: _buttonScaleDuration,
-                            curve: Curves.easeOutCubic,
-                            child: Listener(
-                              onPointerDown: (PointerDownEvent event) {
-                                if (_isPrimaryActivationPointer(event)) {
-                                  widget.onPlayTap?.call();
-                                }
-                              },
-                              child: Container(
-                                width: 56,
-                                height: 56,
-                                decoration: BoxDecoration(
-                                  color: colors.overlayPlayButtonBackground,
-                                  borderRadius: BorderRadius.circular(28),
-                                ),
-                                child: Icon(
-                                  Icons.play_arrow_sharp,
-                                  size: 30,
-                                  color: colors.overlayPlayButtonForeground,
+                      if (showHoverPlay)
+                        Center(
+                          child: MouseRegion(
+                            onEnter: (_) => _setPlayHovered(true),
+                            onExit: (_) => _setPlayHovered(false),
+                            child: AnimatedScale(
+                              scale: _isPlayHovered ? 1.08 : 1,
+                              duration: _buttonScaleDuration,
+                              curve: Curves.easeOutCubic,
+                              child: Listener(
+                                onPointerDown: (PointerDownEvent event) {
+                                  if (_isPrimaryActivationPointer(event)) {
+                                    widget.onPlayTap?.call();
+                                  }
+                                },
+                                child: Container(
+                                  width: 56,
+                                  height: 56,
+                                  decoration: BoxDecoration(
+                                    color: colors.overlayPlayButtonBackground,
+                                    borderRadius: BorderRadius.circular(28),
+                                  ),
+                                  child: Icon(
+                                    Icons.play_arrow_sharp,
+                                    size: 30,
+                                    color: colors.overlayPlayButtonForeground,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                    if (showOverlayActions)
-                      Positioned(
-                        left: 2,
-                        right: 2,
-                        bottom: 2,
-                        child: Row(
-                          children: <Widget>[
-                            const Spacer(),
-                            _DesktopCoverOverlayIconButton(
-                              icon: widget.isFavorite
-                                  ? Icons.favorite_outlined
-                                  : Icons.favorite_border_outlined,
-                              onTap: widget.onFavoriteTap,
-                              baseColor: colors.overlayIcon,
-                              hoverColor: colors.overlayIcon,
-                            ),
-                            const SizedBox(width: 4),
-                            _DesktopCoverOverlayIconButton(
-                              icon: Icons.more_horiz_outlined,
-                              onTap: widget.onMoreTap,
-                              onAnchorTap: widget.onMoreAnchorTap,
-                              baseColor: colors.overlayIcon,
-                              hoverColor: colors.overlayIcon,
-                            ),
-                          ],
+                      if (showOverlayActions)
+                        Positioned(
+                          left: 2,
+                          right: 2,
+                          bottom: 2,
+                          child: Row(
+                            children: <Widget>[
+                              const Spacer(),
+                              _DesktopCoverOverlayIconButton(
+                                icon: widget.isFavorite
+                                    ? Icons.favorite_outlined
+                                    : Icons.favorite_border_outlined,
+                                onTap: widget.onFavoriteTap,
+                                baseColor: colors.overlayIcon,
+                                hoverColor: colors.overlayIcon,
+                              ),
+                              const SizedBox(width: 4),
+                              _DesktopCoverOverlayIconButton(
+                                icon: Icons.more_horiz_outlined,
+                                onTap: widget.onMoreTap,
+                                onAnchorTap: widget.onMoreAnchorTap,
+                                baseColor: colors.overlayIcon,
+                                hoverColor: colors.overlayIcon,
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
                     ],
                   ),
                 ),

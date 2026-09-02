@@ -175,16 +175,26 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
           ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 20),
-        MediaTableSectionMobile<Track>(
-          title: 'Titel',
-          items: _controller.tracks,
-          isLoading: _controller.isLoading,
-          emptyText: 'Keine favorisierten Titel.',
-          maxItemsPerPage: 3,
-          playbackCoordinator: widget.playbackCoordinator,
-          onRowTap: (Track item, int _) => unawaited(_showTrackMenu(item)),
+        SizedBox(
+          height: 234,
+          child: CustomScrollView(
+            primary: false,
+            physics: const NeverScrollableScrollPhysics(),
+            slivers: <Widget>[
+              MediaTableSectionMobile<Track>(
+                title: 'Titel',
+                items: _controller.tracks,
+                isLoading: _controller.isLoading,
+                emptyText: 'Keine favorisierten Titel.',
+                maxItemsPerPage: 3,
+                playbackCoordinator: widget.playbackCoordinator,
+                onRowTap: (Track item, int _) =>
+                    unawaited(_showTrackMenu(item)),
+              ),
+            ],
+          ),
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 28),
         MediaRowSectionMobile<Album>(
           title: 'Alben',
           isLoading: _controller.isLoading,
@@ -193,7 +203,7 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
           playbackCoordinator: widget.playbackCoordinator,
           onItemTap: widget.onOpenAlbum,
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 28),
         MediaRowSectionMobile<Playlist>(
           title: 'Playlists',
           isLoading: _controller.isLoading,
@@ -202,7 +212,7 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
           playbackCoordinator: widget.playbackCoordinator,
           onItemTap: widget.onOpenPlaylist,
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 28),
         MediaRowSectionMobile<Artist>(
           title: 'Artists',
           isLoading: _controller.isLoading,

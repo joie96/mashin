@@ -645,6 +645,8 @@ class _DesktopContextMenuActionTileState
               ? () => widget.onSelected(widget.action)
               : null,
           hoverColor: colors.hover,
+          splashColor: Colors.transparent,
+          highlightColor: Colors.transparent,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14),
             child: Row(

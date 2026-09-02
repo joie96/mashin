@@ -6,8 +6,9 @@ import 'package:flutter/material.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../data/music_assistant/ma_models.dart';
 import '../../playback/playback_coordinator.dart';
+import '../selection/mobile_section_selection.dart';
 import 'media_list_section_desktop.dart';
-import 'media_table_section_desktop.dart';
+import 'mobile_section_header.dart';
 
 class MediaListSectionMobile<T extends MediaItem> extends StatefulWidget {
   final String title;
@@ -42,11 +43,35 @@ class _MediaListSectionMobileState<T extends MediaItem>
   final PageController _mobileChunkPageController = PageController(
     viewportFraction: _mobileChunkViewportFraction,
   );
+  final MobileSectionSelectionState _selectionController =
+      MobileSectionSelectionState(itemType: T);
+
+  @override
+  void initState() {
+    super.initState();
+    _selectionController.addListener(_onSelectionChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant MediaListSectionMobile<T> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _selectionController.updateItemCount(widget.items.length);
+  }
 
   @override
   void dispose() {
     _mobileChunkPageController.dispose();
+    _selectionController
+      ..removeListener(_onSelectionChanged)
+      ..disposeSelection()
+      ..dispose();
     super.dispose();
+  }
+
+  void _onSelectionChanged() {
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   List<MediaItem> _playableItems() {
@@ -102,35 +127,15 @@ class _MediaListSectionMobileState<T extends MediaItem>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         if (hasTitle)
-          Row(
-            children: <Widget>[
-              Text(
-                widget.title,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-              ),
-              if (!widget.isLoading && widget.items.isNotEmpty) ...<Widget>[
-                const SizedBox(width: 10),
-                SectionCountBadge(count: widget.items.length),
-              ],
-              const SizedBox(width: 16),
-              const Expanded(child: SectionHeaderDivider()),
-              const SizedBox(width: 16),
-              if (widget.playbackCoordinator != null) ...<Widget>[
-                SectionHeaderIconButton(
-                  icon: Icons.play_arrow,
-                  tooltip: 'Abspielen',
-                  onTap: hasPlayableContent ? _onPlayAllTap : null,
-                ),
-                const SizedBox(width: 8),
-                SectionHeaderIconButton(
-                  icon: Icons.shuffle,
-                  tooltip: 'Zufällig abspielen',
-                  onTap: hasPlayableContent ? _onShuffleAllTap : null,
-                ),
-              ],
-            ],
+          MobileSectionHeader(
+            title: widget.title,
+            itemCount: !widget.isLoading && widget.items.isNotEmpty
+                ? widget.items.length
+                : null,
+            showPlaybackActions: widget.playbackCoordinator != null,
+            onPlayTap: hasPlayableContent ? _onPlayAllTap : null,
+            onShuffleTap: hasPlayableContent ? _onShuffleAllTap : null,
+            shuffleTooltip: 'Zufällig abspielen',
           ),
         if (hasTitle) const SizedBox(height: 10),
         if (widget.isLoading)
@@ -159,10 +164,31 @@ class _MediaListSectionMobileState<T extends MediaItem>
                         if ((columnIndex * 3) + row <
                             widget.items.length) ...<Widget>[
                           if (row > 0) const SizedBox(height: 8),
-                          _MobileListTile<T>(
-                            item: widget.items[(columnIndex * 3) + row],
-                            playbackCoordinator: widget.playbackCoordinator,
-                            onItemTap: widget.onItemTap,
+                          MobileSelectableSectionItem(
+                            selectionModeActive:
+                                _selectionController.isSelectionModeActive,
+                            isSelected: _selectionController.isSelected(
+                              (columnIndex * 3) + row,
+                            ),
+                            onLongPress: () => _selectionController.select(
+                              (columnIndex * 3) + row,
+                              widget.items.length,
+                            ),
+                            onToggleSelection: () =>
+                                _selectionController.toggle(
+                                  (columnIndex * 3) + row,
+                                  widget.items.length,
+                                ),
+                            onTap: widget.onItemTap == null
+                                ? null
+                                : () => widget.onItemTap!(
+                                    widget.items[(columnIndex * 3) + row],
+                                  ),
+                            child: _MobileListTile<T>(
+                              item: widget.items[(columnIndex * 3) + row],
+                              playbackCoordinator: widget.playbackCoordinator,
+                              onItemTap: null,
+                            ),
                           ),
                         ],
                     ],
@@ -248,8 +274,10 @@ class _MobileListTile<T extends MediaItem> extends StatelessWidget {
                 height: 28,
                 margin: const EdgeInsets.only(right: 4),
                 decoration: BoxDecoration(
-                  color: colors.overlayPlayButtonBackground,
-                  borderRadius: BorderRadius.circular(14),
+                  color: colors.overlayPlayButtonBackground.withValues(
+                    alpha: 0.88,
+                  ),
+                  borderRadius: BorderRadius.circular(24),
                 ),
                 child: Icon(
                   Icons.play_arrow_sharp,

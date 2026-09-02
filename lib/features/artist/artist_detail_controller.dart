@@ -23,6 +23,10 @@ class ArtistDetailController extends ChangeNotifier {
   final String itemId;
   final String providerInstanceIdOrDomain;
   final UserDataController? userDataController;
+  final ChangeNotifier _metadataNotifier = ChangeNotifier();
+  final ChangeNotifier _albumsNotifier = ChangeNotifier();
+  final ChangeNotifier _similarArtistsNotifier = ChangeNotifier();
+  final ChangeNotifier _topTracksNotifier = ChangeNotifier();
 
   ArtistDetailController({
     required this.client,
@@ -89,6 +93,10 @@ class ArtistDetailController extends ChangeNotifier {
   bool get isDescriptionExpanded => _isDescriptionExpanded;
   int get descriptionMaxLines =>
       _isDescriptionExpanded ? 1000 : descriptionCollapsedMaxLines;
+  Listenable get metadataListenable => _metadataNotifier;
+  Listenable get albumsListenable => _albumsNotifier;
+  Listenable get similarArtistsListenable => _similarArtistsNotifier;
+  Listenable get topTracksListenable => _topTracksNotifier;
 
   // Data Loading
   Future<void> loadArtist() async {
@@ -122,6 +130,7 @@ class ArtistDetailController extends ChangeNotifier {
       _artist = null;
     } finally {
       _isLoadingMetadata = false;
+      _metadataNotifier.notifyListeners();
       notifyListeners();
     }
   }
@@ -142,13 +151,14 @@ class ArtistDetailController extends ChangeNotifier {
             )
             .toList(growable: false)
           ..sort((Album left, Album right) {
-          return (right.year ?? 0).compareTo(left.year ?? 0);
-        }),
+            return (right.year ?? 0).compareTo(left.year ?? 0);
+          }),
       );
     } catch (_) {
       _albums = const <Album>[];
     } finally {
       _isLoadingAlbums = false;
+      _albumsNotifier.notifyListeners();
       notifyListeners();
     }
   }
@@ -167,16 +177,17 @@ class ArtistDetailController extends ChangeNotifier {
       }
       _similarArtists = List<Artist>.unmodifiable(
         artists
-        .map(
-          (Artist artist) =>
-          userDataController?.withFavoriteStatus(artist) ?? artist,
-        )
-        .toList(growable: false),
+            .map(
+              (Artist artist) =>
+                  userDataController?.withFavoriteStatus(artist) ?? artist,
+            )
+            .toList(growable: false),
       );
     } catch (_) {
       _similarArtists = const <Artist>[];
     } finally {
       _isLoadingSimilarArtists = false;
+      _similarArtistsNotifier.notifyListeners();
       notifyListeners();
     }
   }
@@ -202,6 +213,7 @@ class ArtistDetailController extends ChangeNotifier {
       _topTracks = const <Track>[];
     } finally {
       _isLoadingTopTracks = false;
+      _topTracksNotifier.notifyListeners();
       notifyListeners();
     }
   }
@@ -453,20 +465,20 @@ class ArtistDetailController extends ChangeNotifier {
     final String key = _favoriteKey(item);
     final bool nextFavorite = !isItemFavorite(item);
     _favoriteOverrides[key] = nextFavorite;
-    notifyListeners();
+    _notifyContentSections();
 
     try {
       final UserDataController? controller = userDataController;
       if (controller == null) {
         _favoriteOverrides.remove(key);
-        notifyListeners();
+        _notifyContentSections();
         return;
       }
       await controller.setFavorite(<MediaItem>[item], nextFavorite);
     } catch (_) {
       // Revert the optimistic update on failure.
       _favoriteOverrides[key] = !nextFavorite;
-      notifyListeners();
+      _notifyContentSections();
     }
   }
 
@@ -478,26 +490,33 @@ class ArtistDetailController extends ChangeNotifier {
 
     final bool nextFavorite = !_isArtistFavorite;
     _isArtistFavorite = nextFavorite;
-    notifyListeners();
+    _metadataNotifier.notifyListeners();
 
     try {
       final UserDataController? controller = userDataController;
       if (controller == null) {
         _isArtistFavorite = !nextFavorite;
-        notifyListeners();
+        _metadataNotifier.notifyListeners();
         return;
       }
       await controller.setFavorite(<MediaItem>[current], nextFavorite);
     } catch (_) {
       _isArtistFavorite = !nextFavorite;
-      notifyListeners();
+      _metadataNotifier.notifyListeners();
     }
   }
 
   // Description
   void toggleDescription() {
     _isDescriptionExpanded = !_isDescriptionExpanded;
+    _metadataNotifier.notifyListeners();
     notifyListeners();
+  }
+
+  void _notifyContentSections() {
+    _albumsNotifier.notifyListeners();
+    _similarArtistsNotifier.notifyListeners();
+    _topTracksNotifier.notifyListeners();
   }
 
   // Playback

@@ -3,30 +3,38 @@ import 'dart:async';
 import 'package:flutter/material.dart' hide RepeatMode;
 
 import '../config/app_config.dart';
-import '../../features/auth/login_screen.dart';
 import '../../features/shared/selection/selection_controller.dart';
 import '../../features/shared/selection/selection_overlay.dart';
 import '../../features/shared/context_menu/context_menu_controller.dart';
 import '../../features/shared/widgets/media_link_text.dart';
-import '../../data/music_assistant/ma_auth_store.dart';
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_event_hub.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../../features/playback/playback_coordinator.dart';
 import '../../features/playback/playback_models.dart';
-import '../../features/playback/playback_player.dart';
+import '../../features/playerbar/playerbar_overlay.dart';
 import '../../features/queue/queue_overlay.dart';
 import '../../features/playback/sendspin/sendspin_player.dart';
-import '../../features/playback/sendspin/sendspin_rust_backend.dart';
-import '../../features/playback/sendspin/sendspin_rust_bridge_ffi.dart';
 import '../../features/playlist/playlist_name_dialog.dart';
 import '../../features/shared/userdata_controller.dart';
 import '../../features/shared/widgets/media_image.dart';
-import '../navigation/app_navigation_controller.dart';
+import 'package:go_router/go_router.dart';
+
+import '../navigation/app_router.dart';
+import '../session/app_session_controller.dart';
 import '../theme/app_theme.dart';
 
 class AppShell extends StatefulWidget {
-  const AppShell({super.key});
+  const AppShell({
+    super.key,
+    required this.session,
+    required this.navigatorKey,
+    required this.navigationObserver,
+    required this.child,
+  });
+
+  final AppSessionController session;
+  final GlobalKey<NavigatorState> navigatorKey;
+  final ShellNavigationObserver navigationObserver;
+  final Widget child;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -35,23 +43,23 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   static const double _mobileSelectionOverlayBottomInset = 84;
 
-  final AppNavigationController _navigation = AppNavigationController();
   bool _isDarkTheme = true;
-  final AuthStore _authStore = AuthStore();
   final SelectionController _selectionSessionController =
       SelectionController.instance;
-  late final PlaybackCoordinator _playbackCoordinator;
-
-  MusicAssistantClient? _musicAssistantClient;
-  MusicAssistantEventHub? _musicAssistantEventHub;
   bool _isQueueOverlayOpen = false;
-  bool _isBootstrapping = true;
-  String _preferredCodec = AppConfig.sendspinPreferredCodec;
-  String _baseUrl = AppConfig.defaultMusicAssistantUrl;
-  String? _username;
-  UserDataController? _userDataController;
+  bool _isMobilePlayerOverlayOpen = false;
+  double _mobilePlayerOverlayOpenProgress = 0;
+  double _mobileQueueOverlayOpenProgress = 0;
+  bool _isNavigationRefreshScheduled = false;
   final TextEditingController _desktopSearchController =
       TextEditingController();
+
+  PlaybackCoordinator get _playbackCoordinator =>
+      widget.session.playbackCoordinator;
+  UserDataController? get _userDataController =>
+      widget.session.userDataController;
+  String get _preferredCodec => widget.session.preferredCodec;
+  bool get _canGoBack => widget.navigatorKey.currentState?.canPop() ?? false;
 
   List<Playlist> get _sidebarPlaylists =>
       _userDataController?.playlists ?? const <Playlist>[];
@@ -59,7 +67,7 @@ class _AppShellState extends State<AppShell> {
   bool get _isLoadingSidebarPlaylists =>
       _userDataController?.isLoadingPreferences ?? false;
 
-  // Getters for current Track and Queue state
+  /// Current playback and queue state
   QueueItem? get _currentQueueItem {
     final items = _playbackCoordinator.playbackQueue.items;
     final index = _playbackCoordinator.playbackQueue.currentIndex;
@@ -180,75 +188,51 @@ class _AppShellState extends State<AppShell> {
     return 0;
   }
 
-  // Initialization and Lifecycle
+  /// Initialization and lifecycle
   @override
   void initState() {
     super.initState();
-
-    _playbackCoordinator = PlaybackCoordinator(
-      players: <PlaybackPlayer>[
-        SendspinPlayer(
-          transportBackend: SendspinRustBackend(
-            bridge: FfiSendspinRustBridge(),
-          ),
-          clientResolver: () => _musicAssistantClient,
-          eventHubResolver: () => _musicAssistantEventHub,
-        ),
-      ],
-      initialOutputMode: PlaybackOutputMode.localSendspin,
-    );
-
-    _navigation.addListener(_onNavigationChanged);
-    unawaited(_bootstrapStartup());
+    widget.session.addListener(_onSessionChanged);
+    widget.navigationObserver.addListener(_onNavigationChanged);
   }
 
   @override
   void dispose() {
     _desktopSearchController.dispose();
-    _navigation.removeListener(_onNavigationChanged);
-    _navigation.dispose();
-    unawaited(_playbackCoordinator.shutdown());
-    _playbackCoordinator.dispose();
-    _disposeUserDataController();
-    unawaited(_musicAssistantEventHub?.dispose());
-    _musicAssistantClient?.dispose();
+    widget.session.removeListener(_onSessionChanged);
+    widget.navigationObserver.removeListener(_onNavigationChanged);
     super.dispose();
   }
 
-  // Building the UI
+  /// Shell layout
   @override
   Widget build(BuildContext context) {
-    if (_isBootstrapping) {
-      return Scaffold(
-        backgroundColor: context.mashinColors.bgPrimary,
-        body: const Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    if (_musicAssistantClient == null) {
-      return Scaffold(
-        backgroundColor: context.mashinColors.bgPrimary,
-        body: SafeArea(
-          child: LoginScreen(
-            initialBaseUrl: _baseUrl,
-            initialUsername: _username,
-            onSubmit: _handleLogin,
-          ),
-        ),
-      );
-    }
-
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final isDesktop = !AppConfig.isMobile();
-        return Scaffold(
-          backgroundColor: context.mashinColors.bgPrimary,
-          body: SafeArea(
-            top: false,
-            bottom: false,
-            child: isDesktop
-                ? _buildDesktopLayout(context)
-                : _buildMobileLayout(context),
+        final bool hasMobileBackAction =
+            _isQueueOverlayOpen ||
+            _mobileQueueOverlayOpenProgress > 0 ||
+            _isMobilePlayerOverlayOpen ||
+            _mobilePlayerOverlayOpenProgress > 0 ||
+            _selectionSessionController.isVisible ||
+            _canGoBack;
+        return PopScope<void>(
+          canPop: isDesktop || !hasMobileBackAction,
+          onPopInvokedWithResult: (bool didPop, void _) {
+            if (!didPop && !isDesktop) {
+              _handleMobileBack();
+            }
+          },
+          child: Scaffold(
+            backgroundColor: context.mashinColors.bgPrimary,
+            body: SafeArea(
+              top: false,
+              bottom: false,
+              child: isDesktop
+                  ? _buildDesktopLayout(context)
+                  : _buildMobileLayout(context),
+            ),
           ),
         );
       },
@@ -257,7 +241,10 @@ class _AppShellState extends State<AppShell> {
 
   Widget _buildDesktopLayout(BuildContext context) {
     final colors = context.mashinColors;
-    final bool isShowingDetail = _navigation.activeDetail != null;
+    final AppSection? currentSection = AppRoutes.sectionForLocation(
+      GoRouterState.of(context).uri.path,
+    );
+    final bool isShowingDetail = currentSection == null;
 
     return Stack(
       children: <Widget>[
@@ -290,7 +277,7 @@ class _AppShellState extends State<AppShell> {
                           icon: Icons.home_outlined,
                           selected:
                               !isShowingDetail &&
-                              _navigation.currentSection == AppSection.home,
+                              currentSection == AppSection.home,
                           onTap: () => _select(AppSection.home),
                         ),
                         _DesktopNavItem(
@@ -298,7 +285,7 @@ class _AppShellState extends State<AppShell> {
                           icon: Icons.explore_outlined,
                           selected:
                               !isShowingDetail &&
-                              _navigation.currentSection == AppSection.explore,
+                              currentSection == AppSection.explore,
                           onTap: () => _select(AppSection.explore),
                         ),
                         _DesktopNavItem(
@@ -306,8 +293,7 @@ class _AppShellState extends State<AppShell> {
                           icon: Icons.favorite_outlined,
                           selected:
                               !isShowingDetail &&
-                              _navigation.currentSection ==
-                                  AppSection.favorites,
+                              currentSection == AppSection.favorites,
                           onTap: () => _select(AppSection.favorites),
                         ),
                         const SizedBox(height: 14),
@@ -375,7 +361,7 @@ class _AppShellState extends State<AppShell> {
                                       playlist.itemId,
                                     ) ??
                                     const <Track>[],
-                                onTap: () => _navigation.openPlaylist(playlist),
+                                onTap: () => _openPlaylist(playlist),
                                 onPlay: () => _playSidebarPlaylist(playlist),
                                 onContextMenu: (Offset position) =>
                                     _showSidebarPlaylistMenu(
@@ -394,7 +380,7 @@ class _AppShellState extends State<AppShell> {
                     child: Column(
                       children: <Widget>[
                         _DesktopTopBar(
-                          canGoBack: _navigation.canGoBack,
+                          canGoBack: _canGoBack,
                           onBack: _onBack,
                           onToggleTheme: _toggleTheme,
                           isDarkTheme: _isDarkTheme,
@@ -406,13 +392,7 @@ class _AppShellState extends State<AppShell> {
                         Expanded(
                           child: Container(
                             color: colors.bgPrimary,
-                            child: _navigation.buildPage(
-                              _musicAssistantClient!,
-                              _playbackCoordinator,
-                              desktopSearchDriven: true,
-                              userDataController: _userDataController,
-                              onPlaylistDeleted: _navigation.goBack,
-                            ),
+                            child: widget.child,
                           ),
                         ),
                       ],
@@ -432,7 +412,7 @@ class _AppShellState extends State<AppShell> {
                   trackCoverUrl: _currentTrackCoverUrl,
                   currentTrack: _currentTrack,
                   userDataController: _userDataController,
-                  onOpenArtist: _navigation.openArtist,
+                  onOpenArtist: _openArtist,
                 ),
               ),
               builder: (BuildContext context, Widget? currentTrackInfo) =>
@@ -501,15 +481,7 @@ class _AppShellState extends State<AppShell> {
         Column(
           children: <Widget>[
             Expanded(
-              child: Container(
-                color: colors.bgPrimary,
-                child: _navigation.buildPage(
-                  _musicAssistantClient!,
-                  _playbackCoordinator,
-                  userDataController: _userDataController,
-                  onPlaylistDeleted: _navigation.goBack,
-                ),
-              ),
+              child: Container(color: colors.bgPrimary, child: widget.child),
             ),
             _PlaybackScope(
               playbackChanges: _playbackCoordinator.playbackStateChanges,
@@ -517,6 +489,7 @@ class _AppShellState extends State<AppShell> {
                 queueChanges: _playbackCoordinator.playbackQueueChanges,
                 builder: (BuildContext context) => _MobileCurrentTrackInfo(
                   trackTitle: _currentTrackTitle,
+                  trackSubtitle: _currentTrackSubtitle,
                   trackCoverUrl: _currentTrackCoverUrl,
                 ),
               ),
@@ -526,14 +499,18 @@ class _AppShellState extends State<AppShell> {
                         currentTrackInfo ?? const SizedBox.shrink(),
                     playbackState:
                         _playbackCoordinator.playbackState.playbackState,
+                    currentSeconds: _currentTrackPositionSeconds,
+                    maxSeconds: _currentTrackMaxSeconds,
                     onTogglePlayPause: _togglePlayPause,
-                    onOpenQueue: _openQueueOverlay,
+                    onOpenPlayerOverlay: _openMobilePlayerOverlay,
+                    onPlayerOverlayDragUpdate: _updateMobilePlayerOverlayDrag,
+                    onPlayerOverlayDragEnd: _endMobilePlayerOverlayDrag,
                   ),
             ),
             _MobileBottomNav(
-              selectedSection: _navigation.activeDetail == null
-                  ? _navigation.currentSection
-                  : null,
+              selectedSection: AppRoutes.sectionForLocation(
+                GoRouterState.of(context).uri.path,
+              ),
               onSelected: _select,
             ),
           ],
@@ -547,9 +524,11 @@ class _AppShellState extends State<AppShell> {
 
             return Positioned(
               right: 8,
-              bottom: _mobileSelectionOverlayBottomInset,
+              bottom: _mobileSelectionOverlayBottomInset + 72,
               child: SelectionActionsOverlay(
                 allSelected: _selectionSessionController.allSelected,
+                selectedCount: _selectionSessionController.selectedCount,
+                itemTypeLabel: _selectionSessionController.itemTypeLabel,
                 onToggleAll: _selectionSessionController.onToggleAll,
                 onMenuTap: _selectionSessionController.onMenuTap,
                 onClose: _selectionSessionController.onClose,
@@ -559,9 +538,46 @@ class _AppShellState extends State<AppShell> {
         ),
         _QueueUiScope(
           queueChanges: _playbackCoordinator.playbackQueueChanges,
+          builder: (BuildContext context) => _PlaybackScope(
+            playbackChanges: _playbackCoordinator.playbackStateChanges,
+            builder: (BuildContext context, Widget? child) => PlayerBarOverlay(
+              isOpen: _isMobilePlayerOverlayOpen,
+              openProgress: _mobilePlayerOverlayOpenProgress,
+              trackTitle: _currentTrackTitle,
+              trackSubtitle: _currentTrackSubtitle,
+              trackCoverUrl: _currentQueueCoverUrl,
+              currentTrack: _currentTrack,
+              playbackStateType:
+                  _playbackCoordinator.playbackState.playbackState,
+              playbackState: _playbackCoordinator.playbackState,
+              maxSeconds: _currentTrackMaxSeconds,
+              currentSeconds: _currentTrackPositionSeconds,
+              dontStopTheMusicEnabled:
+                  _playbackCoordinator.playbackQueue.dontStopTheMusicEnabled ??
+                  false,
+              userDataController: _userDataController,
+              onClose: _closeMobilePlayerOverlay,
+              onOpenQueue: _openQueueFromMobilePlayerOverlay,
+              onQueueDragUpdate: _updateMobileQueueOverlayDrag,
+              onQueueDragEnd: _endMobileQueueOverlayDrag,
+              onTogglePlayPause: _togglePlayPause,
+              onPrevious: _playPrevious,
+              onNext: _playNext,
+              onToggleShuffle: _toggleShuffle,
+              onToggleRepeatMode: _toggleRepeatMode,
+              onToggleDontStopTheMusic: _toggleDontStopTheMusic,
+              onToggleMute: _toggleMute,
+              onSeek: _seek,
+              onOpenAudioOptions: _showAudioOptions,
+            ),
+          ),
+        ),
+        _QueueUiScope(
+          queueChanges: _playbackCoordinator.playbackQueueChanges,
           builder: (BuildContext context) => QueueOverlay(
             isOpen: _isQueueOverlayOpen,
             isDesktop: false,
+            mobileOpenProgress: _mobileQueueOverlayOpenProgress,
             trackTitle: _currentTrackTitle,
             trackSubtitle: _currentTrackSubtitle,
             trackCoverUrl: _currentTrackCoverUrl,
@@ -585,15 +601,121 @@ class _AppShellState extends State<AppShell> {
   void _openQueueOverlay() {
     setState(() {
       _isQueueOverlayOpen = !_isQueueOverlayOpen;
+      if (_isQueueOverlayOpen) {
+        _isMobilePlayerOverlayOpen = false;
+      }
     });
   }
 
-  void _closeQueueOverlay() {
-    if (!_isQueueOverlayOpen) {
+  void _openMobilePlayerOverlay() {
+    if (_isMobilePlayerOverlayOpen) {
       return;
     }
     setState(() {
       _isQueueOverlayOpen = false;
+      _mobilePlayerOverlayOpenProgress = 0;
+      _mobileQueueOverlayOpenProgress = 0;
+      _isMobilePlayerOverlayOpen = true;
+    });
+  }
+
+  void _updateMobilePlayerOverlayDrag(
+    double upwardDelta,
+    double viewportHeight,
+  ) {
+    if (_isMobilePlayerOverlayOpen || viewportHeight <= 0) {
+      return;
+    }
+
+    setState(() {
+      _isQueueOverlayOpen = false;
+      _mobileQueueOverlayOpenProgress = 0;
+      _mobilePlayerOverlayOpenProgress =
+          (_mobilePlayerOverlayOpenProgress + (upwardDelta / viewportHeight))
+              .clamp(0, 1)
+              .toDouble();
+    });
+  }
+
+  void _endMobilePlayerOverlayDrag(double primaryVelocity) {
+    if (_isMobilePlayerOverlayOpen && _mobilePlayerOverlayOpenProgress == 0) {
+      return;
+    }
+
+    final bool shouldOpen =
+        _mobilePlayerOverlayOpenProgress >= 0.22 || primaryVelocity < -450;
+    setState(() {
+      _mobilePlayerOverlayOpenProgress = 0;
+      if (shouldOpen) {
+        _isQueueOverlayOpen = false;
+        _isMobilePlayerOverlayOpen = true;
+      }
+    });
+  }
+
+  void _closeMobilePlayerOverlay() {
+    if (!_isMobilePlayerOverlayOpen &&
+        _mobilePlayerOverlayOpenProgress == 0 &&
+        _mobileQueueOverlayOpenProgress == 0) {
+      return;
+    }
+    setState(() {
+      _isMobilePlayerOverlayOpen = false;
+      _mobilePlayerOverlayOpenProgress = 0;
+      _mobileQueueOverlayOpenProgress = 0;
+    });
+  }
+
+  void _openQueueFromMobilePlayerOverlay() {
+    setState(() {
+      _isMobilePlayerOverlayOpen = true;
+      _mobilePlayerOverlayOpenProgress = 0;
+      _mobileQueueOverlayOpenProgress = 0;
+      _isQueueOverlayOpen = true;
+    });
+  }
+
+  void _updateMobileQueueOverlayDrag(
+    double upwardDelta,
+    double viewportHeight,
+  ) {
+    if (!_isMobilePlayerOverlayOpen ||
+        _isQueueOverlayOpen ||
+        viewportHeight <= 0) {
+      return;
+    }
+
+    setState(() {
+      _mobileQueueOverlayOpenProgress =
+          (_mobileQueueOverlayOpenProgress + (upwardDelta / viewportHeight))
+              .clamp(0, 1)
+              .toDouble();
+    });
+  }
+
+  void _endMobileQueueOverlayDrag(double primaryVelocity) {
+    if (_isQueueOverlayOpen && _mobileQueueOverlayOpenProgress == 0) {
+      return;
+    }
+
+    final bool shouldOpen =
+        _mobileQueueOverlayOpenProgress >= 0.22 || primaryVelocity < -450;
+    setState(() {
+      _mobileQueueOverlayOpenProgress = 0;
+      if (shouldOpen) {
+        _isMobilePlayerOverlayOpen = true;
+        _isQueueOverlayOpen = true;
+      }
+    });
+  }
+
+  void _closeQueueOverlay() {
+    if (!_isQueueOverlayOpen && _mobileQueueOverlayOpenProgress == 0) {
+      return;
+    }
+    setState(() {
+      _isQueueOverlayOpen = false;
+      _mobileQueueOverlayOpenProgress = 0;
     });
   }
 
@@ -603,7 +725,7 @@ class _AppShellState extends State<AppShell> {
     if (!mounted) {
       return;
     }
-    _navigation.openArtist(artist);
+    _openArtist(artist);
   }
 
   Future<void> _openAlbumFromQueue(Album album) async {
@@ -612,12 +734,54 @@ class _AppShellState extends State<AppShell> {
     if (!mounted) {
       return;
     }
-    _navigation.openAlbum(album);
+    _openAlbum(album);
+  }
+
+  void _openArtist(Artist artist) {
+    context.push(AppRoutes.artist(artist));
+  }
+
+  void _openAlbum(Album album) {
+    context.push(AppRoutes.album(album));
+  }
+
+  void _openPlaylist(Playlist playlist) {
+    context.push(AppRoutes.playlist(playlist));
   }
 
   void _select(AppSection section) {
-    _navigation.selectSection(section);
+    final String destination = AppRoutes.locationFor(section);
+    if (GoRouterState.of(context).uri.path == destination) {
+      return;
+    }
+
+    context.push(destination);
   }
+
+  void _handleMobileBack() {
+    if (_isQueueOverlayOpen || _mobileQueueOverlayOpenProgress > 0) {
+      _closeQueueOverlay();
+      return;
+    }
+
+    if (_isMobilePlayerOverlayOpen || _mobilePlayerOverlayOpenProgress > 0) {
+      _closeMobilePlayerOverlay();
+      return;
+    }
+
+    if (_selectionSessionController.isVisible) {
+      _selectionSessionController.onClose();
+      return;
+    }
+
+    _popNavigationRoute();
+  }
+
+  void _popNavigationRoute() {
+    unawaited(widget.navigatorKey.currentState?.maybePop() ?? Future.value());
+  }
+
+  /// Desktop search and playlist actions
 
   void _onDesktopSearchChanged(String value) {
     // Rebuild keeps clear button visibility in sync while typing.
@@ -626,13 +790,17 @@ class _AppShellState extends State<AppShell> {
 
   void _submitDesktopSearch(String value) {
     final trimmed = value.trim();
-    _navigation.submitDesktopSearch(trimmed);
+    context.go(
+      Uri(
+        path: AppRoutes.search,
+        queryParameters: <String, String>{if (trimmed.isNotEmpty) 'q': trimmed},
+      ).toString(),
+    );
   }
 
   void _clearDesktopSearch() {
     _desktopSearchController.clear();
-    _navigation.clearDesktopSearch();
-    setState(() {});
+    context.go(AppRoutes.search);
   }
 
   Future<void> _createPlaylist() async {
@@ -763,217 +931,10 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _onBack() {
-    _navigation.goBack();
+    _popNavigationRoute();
   }
 
-  // Session & Login Management
-  Future<void> _restoreSession() async {
-    final stored = await _authStore.read();
-
-    final candidateBaseUrl = stored?.baseUrl ?? _baseUrl;
-    final candidateSendspinUrl = stored?.sendspinUrl;
-    final candidateToken = stored?.token;
-    final candidateUsername = stored?.username;
-
-    _baseUrl = candidateBaseUrl;
-    _username = candidateUsername;
-
-    await _authStore.writeSendspinUrl(
-      baseUrl: _baseUrl,
-      sendspinUrl: candidateSendspinUrl,
-    );
-
-    if (candidateToken == null || candidateToken.isEmpty) {
-      _disposeUserDataController();
-      unawaited(_musicAssistantEventHub?.dispose());
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _musicAssistantEventHub = null;
-        _isBootstrapping = false;
-      });
-      return;
-    }
-
-    final candidateClient = MusicAssistantClient(
-      baseUrl: candidateBaseUrl,
-      authToken: candidateToken,
-    );
-
-    final isValid = await candidateClient.hasValidSession();
-    if (!mounted) {
-      candidateClient.dispose();
-      return;
-    }
-
-    if (isValid) {
-      final eventHub = MusicAssistantEventHub(
-        baseUrl: candidateBaseUrl,
-        authToken: candidateToken,
-      );
-      await _attachUserDataController(
-        client: candidateClient,
-        username: candidateUsername,
-      );
-      setState(() {
-        _musicAssistantClient = candidateClient;
-        _musicAssistantEventHub = eventHub;
-        _isBootstrapping = false;
-      });
-      return;
-    }
-
-    candidateClient.dispose();
-    _disposeUserDataController();
-    await _authStore.clear();
-    unawaited(_musicAssistantEventHub?.dispose());
-
-    setState(() {
-      _musicAssistantClient = null;
-      _musicAssistantEventHub = null;
-      _isBootstrapping = false;
-    });
-  }
-
-  Future<String?> _handleLogin({
-    required String baseUrl,
-    required String username,
-    required String password,
-  }) async {
-    _baseUrl = baseUrl;
-    final sendspinUrl = await _authStore.readSendspinUrl(baseUrl: baseUrl);
-    _username = username;
-
-    final loginClient = MusicAssistantClient(baseUrl: baseUrl);
-
-    try {
-      final token = await loginClient.login(
-        username: username,
-        password: password,
-      );
-
-      final authenticatedClient = MusicAssistantClient(
-        baseUrl: baseUrl,
-        authToken: token,
-      );
-
-      final authenticatedEventHub = MusicAssistantEventHub(
-        baseUrl: baseUrl,
-        authToken: token,
-      );
-
-      final valid = await authenticatedClient.hasValidSession();
-      if (!valid) {
-        authenticatedClient.dispose();
-        return 'Anmeldung fehlgeschlagen. Bitte Eingaben pruefen.';
-      }
-
-      await _authStore.write(
-        AuthSession(
-          baseUrl: baseUrl,
-          sendspinUrl: sendspinUrl,
-          username: username,
-          token: token,
-        ),
-      );
-
-      if (!mounted) {
-        authenticatedClient.dispose();
-        await authenticatedEventHub.dispose();
-        return null;
-      }
-
-      _musicAssistantClient?.dispose();
-      unawaited(_musicAssistantEventHub?.dispose());
-
-      await _attachUserDataController(
-        client: authenticatedClient,
-        username: username,
-      );
-
-      setState(() {
-        _musicAssistantClient = authenticatedClient;
-        _musicAssistantEventHub = authenticatedEventHub;
-      });
-      _navigation.selectSection(AppSection.home);
-
-      return null;
-    } on UnauthorizedException {
-      return 'Benutzername oder Passwort ist ungueltig.';
-    } on RequestException catch (ex) {
-      return ex.message;
-    } catch (_) {
-      return 'Verbindung fehlgeschlagen. Bitte Server-URL pruefen.';
-    } finally {
-      loginClient.dispose();
-    }
-  }
-
-  // Bootstrap and Playback Initialization
-  Future<void> _initializePlaybackCoordinator() async {
-    try {
-      await _playbackCoordinator.initialize();
-      if (!mounted) {
-        return;
-      }
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      debugPrint('Sendspin startup connection failed: $error');
-    }
-  }
-
-  Future<void> _bootstrapStartup() async {
-    try {
-      _preferredCodec = await AppConfig.getSendspinPreferredCodec();
-      await _restoreSession();
-      await _initializePlaybackCoordinator();
-    } catch (error) {
-      debugPrint('Startup bootstrap failed: $error');
-    }
-  }
-
-  Future<void> _attachUserDataController({
-    required MusicAssistantClient client,
-    required String? username,
-  }) async {
-    _disposeUserDataController();
-
-    final UserDataController controller = UserDataController(
-      client: client,
-      configuredUsername: username,
-    );
-    controller.addListener(_onUserDataChanged);
-    _userDataController = controller;
-
-    if (mounted) {
-      setState(() {});
-    }
-
-    await controller.loadPreferences();
-  }
-
-  void _disposeUserDataController() {
-    final UserDataController? controller = _userDataController;
-    if (controller == null) {
-      return;
-    }
-
-    controller.removeListener(_onUserDataChanged);
-    controller.dispose();
-    _userDataController = null;
-  }
-
-  void _onUserDataChanged() {
-    if (!mounted) {
-      return;
-    }
-    setState(() {});
-  }
+  /// Playback command handlers
 
   Future<void> _togglePlayPause() async {
     try {
@@ -983,7 +944,6 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  // Playback Control Handlers
   Future<void> _playPrevious() async {
     try {
       await _playbackCoordinator.previous();
@@ -1069,10 +1029,7 @@ class _AppShellState extends State<AppShell> {
     }
 
     try {
-      await player.setPreferredAudioCodec(codec);
-      if (mounted) {
-        setState(() => _preferredCodec = codec);
-      }
+      await widget.session.setPreferredCodec(codec);
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1090,15 +1047,29 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  void _onNavigationChanged() {
+  void _onSessionChanged() {
     if (!mounted) {
       return;
     }
     setState(() {});
   }
+
+  void _onNavigationChanged() {
+    if (!mounted || _isNavigationRefreshScheduled) {
+      return;
+    }
+
+    _isNavigationRefreshScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _isNavigationRefreshScheduled = false;
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
 }
 
-// Playback and Queue State Scopes (to prevent unnecessary UI rebuilds)
+/// Playback and queue state scopes
 class _PlaybackScope extends StatelessWidget {
   const _PlaybackScope({
     required this.playbackChanges,
@@ -1135,7 +1106,7 @@ class _QueueUiScope extends StatelessWidget {
   }
 }
 
-// Desktop UI Components
+/// Desktop UI components
 class _DesktopTopBar extends StatelessWidget {
   final bool canGoBack;
   final VoidCallback onBack;
@@ -1176,7 +1147,8 @@ class _DesktopTopBar extends StatelessWidget {
             child: InkWell(
               borderRadius: BorderRadius.circular(10),
               hoverColor: colors.hover,
-              splashColor: colors.hover,
+              splashColor: Colors.transparent,
+              highlightColor: Colors.transparent,
               onTap: canGoBack ? onBack : null,
               child: Padding(
                 padding: const EdgeInsets.all(8),
@@ -2269,18 +2241,27 @@ String _formatSeconds(double seconds) {
   return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
 }
 
-// Mobile UI Components
+/// Mobile UI components
 class _MobilePlayerBar extends StatelessWidget {
   final Widget currentTrackInfo;
   final PlaybackStateType playbackState;
+  final double currentSeconds;
+  final double maxSeconds;
   final Future<void> Function() onTogglePlayPause;
-  final VoidCallback onOpenQueue;
+  final VoidCallback onOpenPlayerOverlay;
+  final void Function(double upwardDelta, double viewportHeight)
+  onPlayerOverlayDragUpdate;
+  final ValueChanged<double> onPlayerOverlayDragEnd;
 
   const _MobilePlayerBar({
     required this.currentTrackInfo,
     required this.playbackState,
+    this.currentSeconds = 0,
+    this.maxSeconds = 0,
     required this.onTogglePlayPause,
-    required this.onOpenQueue,
+    required this.onOpenPlayerOverlay,
+    required this.onPlayerOverlayDragUpdate,
+    required this.onPlayerOverlayDragEnd,
   });
 
   @override
@@ -2290,43 +2271,73 @@ class _MobilePlayerBar extends StatelessWidget {
     final bool isBusy =
         playbackState == PlaybackStateType.buffering ||
         playbackState == PlaybackStateType.seeking;
+    final double progress = maxSeconds > 0
+        ? (currentSeconds / maxSeconds).clamp(0.0, 1.0)
+        : 0.0;
 
-    return Container(
-      height: 68,
-      margin: const EdgeInsets.fromLTRB(10, 0, 10, 8),
-      decoration: BoxDecoration(
-        color: colors.bgSecondary,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.border),
-      ),
-      child: Row(
-        children: <Widget>[
-          currentTrackInfo,
-          IconButton(
-            onPressed: onOpenQueue,
-            icon: const Icon(Icons.queue_music_outlined),
-          ),
-          IconButton(
-            onPressed: isBusy
-                ? null
-                : () {
-                    onTogglePlayPause();
-                  },
-            icon: isBusy
-                ? SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        colors.textSecondary,
-                      ),
-                    ),
-                  )
-                : Icon(isPlaying ? Icons.pause : Icons.play_arrow),
-          ),
-          const SizedBox(width: 4),
-        ],
+    return GestureDetector(
+      onTap: onOpenPlayerOverlay,
+      onVerticalDragUpdate: (DragUpdateDetails details) {
+        if (details.delta.dy < 0) {
+          onPlayerOverlayDragUpdate(
+            -details.delta.dy * 0.92,
+            MediaQuery.sizeOf(context).height,
+          );
+        }
+      },
+      onVerticalDragEnd: (DragEndDetails details) {
+        onPlayerOverlayDragEnd(details.primaryVelocity ?? 0);
+      },
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        height: 64,
+        margin: const EdgeInsets.fromLTRB(10, 6, 10, 4),
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: colors.bgSecondary,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colors.border),
+        ),
+        child: Stack(
+          children: <Widget>[
+            Positioned.fill(
+              left: 64,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: FractionallySizedBox(
+                  widthFactor: progress,
+                  heightFactor: 1,
+                  child: ColoredBox(color: colors.selection),
+                ),
+              ),
+            ),
+            Row(
+              children: <Widget>[
+                currentTrackInfo,
+                IconButton(
+                  onPressed: isBusy
+                      ? null
+                      : () {
+                          onTogglePlayPause();
+                        },
+                  icon: isBusy
+                      ? SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              colors.textSecondary,
+                            ),
+                          ),
+                        )
+                      : Icon(isPlaying ? Icons.pause : Icons.play_arrow),
+                ),
+                const SizedBox(width: 4),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2335,10 +2346,12 @@ class _MobilePlayerBar extends StatelessWidget {
 class _MobileCurrentTrackInfo extends StatelessWidget {
   const _MobileCurrentTrackInfo({
     required this.trackTitle,
+    required this.trackSubtitle,
     required this.trackCoverUrl,
   });
 
   final String trackTitle;
+  final String trackSubtitle;
   final String? trackCoverUrl;
 
   @override
@@ -2348,16 +2361,14 @@ class _MobileCurrentTrackInfo extends StatelessWidget {
     return Expanded(
       child: Row(
         children: <Widget>[
-          const SizedBox(width: 10),
           Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
-              color: colors.bgTertiary,
-              borderRadius: BorderRadius.circular(8),
-            ),
+            width: 64,
+            height: 64,
+            color: colors.bgTertiary,
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: const BorderRadius.horizontal(
+                left: Radius.circular(11),
+              ),
               child: trackCoverUrl != null
                   ? MediaImage(
                       source: trackCoverUrl!,
@@ -2375,13 +2386,23 @@ class _MobileCurrentTrackInfo extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(
-              trackTitle,
-              style: TextStyle(
-                color: colors.textPrimary,
-                fontWeight: FontWeight.w600,
-              ),
-              overflow: TextOverflow.ellipsis,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  trackTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: colors.textPrimary, fontSize: 13),
+                ),
+                Text(
+                  trackSubtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: colors.textSecondary, fontSize: 11),
+                ),
+              ],
             ),
           ),
         ],
@@ -2404,8 +2425,8 @@ class _MobileBottomNav extends StatelessWidget {
     final colors = context.mashinColors;
 
     return Container(
-      height: 80,
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 16),
+      height: 72,
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
       decoration: BoxDecoration(
         color: colors.bgSecondary,
         border: Border(top: BorderSide(color: colors.border)),
@@ -2415,26 +2436,31 @@ class _MobileBottomNav extends StatelessWidget {
         children: <Widget>[
           _MobileNavButton(
             icon: Icons.home_outlined,
+            selectedIcon: Icons.home,
             selected: selectedSection == AppSection.home,
             onTap: () => onSelected(AppSection.home),
           ),
           _MobileNavButton(
             icon: Icons.explore_outlined,
+            selectedIcon: Icons.explore,
             selected: selectedSection == AppSection.explore,
             onTap: () => onSelected(AppSection.explore),
           ),
           _MobileNavButton(
-            icon: Icons.favorite_outlined,
+            icon: Icons.favorite_border_outlined,
+            selectedIcon: Icons.favorite,
             selected: selectedSection == AppSection.favorites,
             onTap: () => onSelected(AppSection.favorites),
           ),
           _MobileNavButton(
             icon: Icons.queue_music_outlined,
+            selectedIcon: Icons.queue_music,
             selected: selectedSection == AppSection.playlists,
             onTap: () => onSelected(AppSection.playlists),
           ),
           _MobileNavButton(
             icon: Icons.search_outlined,
+            selectedIcon: Icons.search,
             selected: selectedSection == AppSection.search,
             onTap: () => onSelected(AppSection.search),
           ),
@@ -2446,11 +2472,13 @@ class _MobileBottomNav extends StatelessWidget {
 
 class _MobileNavButton extends StatelessWidget {
   final IconData icon;
+  final IconData selectedIcon;
   final bool selected;
   final VoidCallback onTap;
 
   const _MobileNavButton({
     required this.icon,
+    required this.selectedIcon,
     required this.selected,
     required this.onTap,
   });
@@ -2459,24 +2487,53 @@ class _MobileNavButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
 
-    return InkResponse(
-      radius: 24,
-      onTap: onTap,
-      child: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: selected ? colors.hover : Colors.transparent,
+    return SizedBox(
+      width: 60,
+      height: 42,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
           borderRadius: BorderRadius.circular(21),
-        ),
-        child: Icon(
-          icon,
-          color: selected ? colors.accent : colors.textSecondary,
+          hoverColor: Colors.transparent,
+          splashColor: Colors.transparent,
+          highlightColor: Colors.transparent,
+          onTap: onTap,
+          child: Center(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              width: selected ? 56 : 42,
+              height: 34,
+              decoration: BoxDecoration(
+                color: selected ? colors.hover : Colors.transparent,
+                borderRadius: BorderRadius.circular(17),
+              ),
+              alignment: Alignment.center,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                transitionBuilder: (Widget child, Animation<double> animation) {
+                  return FadeTransition(
+                    opacity: animation,
+                    child: ScaleTransition(scale: animation, child: child),
+                  );
+                },
+                child: Icon(
+                  selected ? selectedIcon : icon,
+                  key: ValueKey<bool>(selected),
+                  color: selected ? colors.accent : colors.textSecondary,
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
   }
 }
+
+/// App root
 
 class MashinApp extends StatefulWidget {
   const MashinApp({super.key});
@@ -2487,6 +2544,23 @@ class MashinApp extends StatefulWidget {
 
 class _MashinAppState extends State<MashinApp> {
   ThemeMode _themeMode = ThemeMode.dark;
+  late final AppSessionController _session;
+  late final AppRouter _appRouter;
+
+  @override
+  void initState() {
+    super.initState();
+    _session = AppSessionController();
+    _appRouter = AppRouter(_session);
+    unawaited(_session.initialize());
+  }
+
+  @override
+  void dispose() {
+    _appRouter.router.dispose();
+    _session.dispose();
+    super.dispose();
+  }
 
   void setThemeMode(ThemeMode mode) {
     if (_themeMode == mode) {
@@ -2500,7 +2574,8 @@ class _MashinAppState extends State<MashinApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return MaterialApp.router(
+      routerConfig: _appRouter.router,
       title: 'Mashin',
       debugShowCheckedModeBanner: false,
       themeMode: _themeMode,
@@ -2509,7 +2584,6 @@ class _MashinAppState extends State<MashinApp> {
       builder: (BuildContext context, Widget? child) {
         return ExcludeSemantics(child: child ?? const SizedBox.shrink());
       },
-      home: const AppShell(),
     );
   }
 }

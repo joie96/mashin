@@ -21,6 +21,9 @@ class AlbumDetailController extends ChangeNotifier {
   final String itemId;
   final String providerInstanceIdOrDomain;
   final UserDataController? userDataController;
+  final ChangeNotifier _metadataNotifier = ChangeNotifier();
+  final ChangeNotifier _tracksNotifier = ChangeNotifier();
+  final ChangeNotifier _relatedNotifier = ChangeNotifier();
 
   Album? _album;
   List<Track> _tracks = const <Track>[];
@@ -60,6 +63,9 @@ class AlbumDetailController extends ChangeNotifier {
   bool get isLoadingSimilarArtists => _isLoadingSimilarArtists;
   bool get isAlbumFavorite => _isAlbumFavorite;
   bool get isDescriptionExpanded => _isDescriptionExpanded;
+  Listenable get metadataListenable => _metadataNotifier;
+  Listenable get tracksListenable => _tracksNotifier;
+  Listenable get relatedListenable => _relatedNotifier;
   bool get hasDescription => description != null;
   int get descriptionMaxLines => _isDescriptionExpanded ? 1000 : 4;
 
@@ -115,6 +121,7 @@ class AlbumDetailController extends ChangeNotifier {
       _album = null;
     } finally {
       _isLoadingMetadata = false;
+      _metadataNotifier.notifyListeners();
       notifyListeners();
     }
   }
@@ -127,10 +134,11 @@ class AlbumDetailController extends ChangeNotifier {
       );
       final Album? loadedAlbum = _album;
       _tracks = List<Track>.unmodifiable(
-        loaded.map((Track track) {
-          final Track withAlbum = loadedAlbum == null
-              ? track
-              : Track(
+        loaded
+            .map((Track track) {
+              final Track withAlbum = loadedAlbum == null
+                  ? track
+                  : Track(
                       itemId: track.itemId,
                       provider: track.provider,
                       name: track.name,
@@ -143,14 +151,16 @@ class AlbumDetailController extends ChangeNotifier {
                       metadata: track.metadata,
                       favorite: false,
                     );
-          return userDataController?.withFavoriteStatus(withAlbum) ??
-              withAlbum;
-        }).toList(growable: false),
+              return userDataController?.withFavoriteStatus(withAlbum) ??
+                  withAlbum;
+            })
+            .toList(growable: false),
       );
     } catch (_) {
       _tracks = const <Track>[];
     } finally {
       _isLoadingTracks = false;
+      _tracksNotifier.notifyListeners();
       notifyListeners();
     }
   }
@@ -160,6 +170,7 @@ class AlbumDetailController extends ChangeNotifier {
     if (artist == null) {
       _otherAlbums = const <Album>[];
       _isLoadingOtherAlbums = false;
+      _relatedNotifier.notifyListeners();
       notifyListeners();
       return;
     }
@@ -171,11 +182,11 @@ class AlbumDetailController extends ChangeNotifier {
       );
       _otherAlbums = List<Album>.unmodifiable(
         loaded
-          .where((Album item) => item.itemId != itemId)
-          .map(
-            (Album item) =>
-              userDataController?.withFavoriteStatus(item) ?? item,
-          )
+            .where((Album item) => item.itemId != itemId)
+            .map(
+              (Album item) =>
+                  userDataController?.withFavoriteStatus(item) ?? item,
+            )
             .toList(growable: false)
           ..sort(
             (Album left, Album right) =>
@@ -186,6 +197,7 @@ class AlbumDetailController extends ChangeNotifier {
       _otherAlbums = const <Album>[];
     } finally {
       _isLoadingOtherAlbums = false;
+      _relatedNotifier.notifyListeners();
       notifyListeners();
     }
   }
@@ -195,6 +207,7 @@ class AlbumDetailController extends ChangeNotifier {
     if (seed == null) {
       _similarArtists = const <Artist>[];
       _isLoadingSimilarArtists = false;
+      _relatedNotifier.notifyListeners();
       notifyListeners();
       return;
     }
@@ -247,16 +260,17 @@ class AlbumDetailController extends ChangeNotifier {
       }
       _similarArtists = List<Artist>.unmodifiable(
         enriched
-        .map(
-          (Artist artist) =>
-          userDataController?.withFavoriteStatus(artist) ?? artist,
-        )
-        .toList(growable: false),
+            .map(
+              (Artist artist) =>
+                  userDataController?.withFavoriteStatus(artist) ?? artist,
+            )
+            .toList(growable: false),
       );
     } catch (_) {
       _similarArtists = const <Artist>[];
     } finally {
       _isLoadingSimilarArtists = false;
+      _relatedNotifier.notifyListeners();
       notifyListeners();
     }
   }
@@ -268,18 +282,21 @@ class AlbumDetailController extends ChangeNotifier {
     final String key = _favoriteKey(item);
     final bool next = !isItemFavorite(item);
     _favoriteOverrides[key] = next;
-    notifyListeners();
+    _tracksNotifier.notifyListeners();
+    _relatedNotifier.notifyListeners();
     try {
       final UserDataController? controller = userDataController;
       if (controller == null) {
         _favoriteOverrides.remove(key);
-        notifyListeners();
+        _tracksNotifier.notifyListeners();
+        _relatedNotifier.notifyListeners();
         return;
       }
       await controller.setFavorite(<MediaItem>[item], next);
     } catch (_) {
       _favoriteOverrides[key] = !next;
-      notifyListeners();
+      _tracksNotifier.notifyListeners();
+      _relatedNotifier.notifyListeners();
     }
   }
 
@@ -290,24 +307,24 @@ class AlbumDetailController extends ChangeNotifier {
     }
     final bool next = !_isAlbumFavorite;
     _isAlbumFavorite = next;
-    notifyListeners();
+    _metadataNotifier.notifyListeners();
     try {
       final UserDataController? controller = userDataController;
       if (controller == null) {
         _isAlbumFavorite = !next;
-        notifyListeners();
+        _metadataNotifier.notifyListeners();
         return;
       }
       await controller.setFavorite(<MediaItem>[current], next);
     } catch (_) {
       _isAlbumFavorite = !next;
-      notifyListeners();
+      _metadataNotifier.notifyListeners();
     }
   }
 
   void toggleDescription() {
     _isDescriptionExpanded = !_isDescriptionExpanded;
-    notifyListeners();
+    _metadataNotifier.notifyListeners();
   }
 
   Future<void> playAlbum() async {

@@ -95,118 +95,148 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
     final colors = context.mashinColors;
     final Album? album = _controller.album;
     final String? imageUri = album?.imageUri;
+    final bool hasImage = imageUri != null && imageUri.trim().isNotEmpty;
     return Container(
       color: colors.bgPrimary,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: Column(
-          children: <Widget>[
-            SizedBox(
-              height: 220,
-              width: double.infinity,
-              child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(
-                  bottom: Radius.circular(16),
-                ),
-                child: Container(
-                  color: colors.bgTertiary,
-                  child: imageUri == null || imageUri.trim().isEmpty
-                      ? Icon(
-                          Icons.album_outlined,
-                          color: colors.accent,
-                          size: 72,
-                        )
-                      : MediaImage(
-                          source: imageUri,
-                          fit: BoxFit.cover,
-                          fallback: Icon(
-                            Icons.album_outlined,
-                            color: colors.accent,
-                            size: 72,
-                          ),
+      child: CustomScrollView(
+        slivers: <Widget>[
+          SliverPadding(
+            padding: const EdgeInsets.only(bottom: 12),
+            sliver: SliverToBoxAdapter(
+              child: Column(
+                children: <Widget>[
+                  SizedBox(
+                    height: 220,
+                    width: double.infinity,
+                    child: ClipRRect(
+                      borderRadius: const BorderRadius.vertical(
+                        bottom: Radius.circular(16),
+                      ),
+                      child: Container(
+                        color: colors.bgPrimary,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: <Widget>[
+                            !hasImage
+                                ? Icon(
+                                    Icons.album_outlined,
+                                    color: colors.textSecondary,
+                                    size: 72,
+                                  )
+                                : MediaImage(
+                                    source: imageUri,
+                                    fit: BoxFit.cover,
+                                    fallback: Icon(
+                                      Icons.album_outlined,
+                                      color: colors.textSecondary,
+                                      size: 72,
+                                    ),
+                                  ),
+                            if (hasImage)
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        begin: Alignment.topCenter,
+                                        end: Alignment.bottomCenter,
+                                        colors: <Color>[
+                                          Colors.transparent,
+                                          colors.bgPrimary,
+                                        ],
+                                        stops: const <double>[0.44, 1],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                _controller.albumName,
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '${_controller.artistName}${_controller.yearText.isEmpty ? '' : ' • ${_controller.yearText}'}',
-              style: TextStyle(color: colors.textSecondary),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: <Widget>[
-                _MobileActionButton(
-                  icon: Icons.play_arrow,
-                  onTap: _controller.playAlbum,
-                ),
-                const SizedBox(width: 14),
-                _MobileActionButton(
-                  icon: Icons.shuffle,
-                  onTap: _controller.shuffleAlbum,
-                ),
-                const SizedBox(width: 14),
-                _MobileActionButton(
-                  icon: _controller.isAlbumFavorite
-                      ? Icons.favorite
-                      : Icons.favorite_border_outlined,
-                  onTap: _controller.toggleAlbumFavorite,
-                ),
-                const SizedBox(width: 14),
-                _MobileActionButton(
-                  icon: Icons.more_vert_outlined,
-                  onTap: album == null
-                      ? null
-                      : () => unawaited(
-                          const AppContextMenuController().show(
-                            context: context,
-                            actions: _buildHeaderMenu(album),
-                          ),
-                        ),
-                ),
-              ],
-            ),
-            if (_controller.hasDescription)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                child: GestureDetector(
-                  onTap: _controller.toggleDescription,
-                  child: Text(
-                    _controller.description ?? '',
-                    maxLines: _controller.descriptionMaxLines,
-                    overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                      _controller.albumName,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${_controller.artistName}${_controller.yearText.isEmpty ? '' : ' • ${_controller.yearText}'}',
                     style: TextStyle(color: colors.textSecondary),
                   ),
-                ),
-              ),
-            const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: MediaTableSectionMobile<Track>(
-                title: 'Titel',
-                isLoading: _controller.isLoadingTracks,
-                items: _controller.tracks,
-                emptyText: 'Keine Titel gefunden.',
-                maxItemsPerPage: 0,
-                playbackCoordinator: widget.playbackCoordinator,
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: <Widget>[
+                      _MobileActionButton(
+                        icon: Icons.play_arrow,
+                        onTap: _controller.playAlbum,
+                      ),
+                      const SizedBox(width: 14),
+                      _MobileActionButton(
+                        icon: Icons.shuffle,
+                        onTap: _controller.shuffleAlbum,
+                      ),
+                      const SizedBox(width: 14),
+                      _MobileActionButton(
+                        icon: _controller.isAlbumFavorite
+                            ? Icons.favorite
+                            : Icons.favorite_border_outlined,
+                        onTap: _controller.toggleAlbumFavorite,
+                      ),
+                      const SizedBox(width: 14),
+                      _MobileActionButton(
+                        icon: Icons.more_vert_outlined,
+                        onTap: album == null
+                            ? null
+                            : () => unawaited(
+                                const AppContextMenuController().show(
+                                  context: context,
+                                  actions: _buildHeaderMenu(album),
+                                ),
+                              ),
+                      ),
+                    ],
+                  ),
+                  if (_controller.hasDescription)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                      child: GestureDetector(
+                        onTap: _controller.toggleDescription,
+                        child: Text(
+                          _controller.description ?? '',
+                          maxLines: _controller.descriptionMaxLines,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: colors.textSecondary),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
-            const SizedBox(height: 16),
-            Padding(
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            sliver: MediaTableSectionMobile<Track>(
+              title: 'Titel',
+              isLoading: _controller.isLoadingTracks,
+              items: _controller.tracks,
+              emptyText: 'Keine Titel gefunden.',
+              maxItemsPerPage: 0,
+              playbackCoordinator: widget.playbackCoordinator,
+            ),
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 16)),
+          SliverToBoxAdapter(
+            child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: MediaRowSectionMobile<Album>(
                 title: 'Weitere Alben',
@@ -217,8 +247,10 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
                 onItemTap: widget.onOpenAlbum,
               ),
             ),
-            const SizedBox(height: 16),
-            Padding(
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 16)),
+          SliverToBoxAdapter(
+            child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: MediaRowSectionMobile<Artist>(
                 title: 'Ähnliche Interpreten',
@@ -229,8 +261,9 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
                 onItemTap: widget.onOpenArtist,
               ),
             ),
-          ],
-        ),
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 12)),
+        ],
       ),
     );
   }
@@ -247,13 +280,12 @@ class _MobileActionButton extends StatelessWidget {
     final colors = context.mashinColors;
 
     return Material(
-      color: colors.bgSecondary,
+      color: Colors.transparent,
       shape: const CircleBorder(),
       child: InkWell(
         customBorder: const CircleBorder(),
         onTap: onTap,
-        hoverColor: colors.hover,
-        highlightColor: colors.selection,
+        highlightColor: Colors.transparent,
         splashColor: colors.selection,
         child: SizedBox(
           width: 44,

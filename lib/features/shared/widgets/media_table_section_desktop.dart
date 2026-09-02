@@ -41,6 +41,7 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
   final DesktopRowAction<T>? onRowDoubleTap;
   final DesktopRowFavoriteResolver<T>? isRowFavorite;
   final PlaybackCoordinator? playbackCoordinator;
+  final ScrollController? scrollController;
   final ValueChanged<Artist>? onArtistTap;
   final ValueChanged<Album>? onAlbumTap;
   final ValueChanged<Playlist>? onPlaylistTap;
@@ -65,6 +66,7 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
     this.onRowDoubleTap,
     this.isRowFavorite,
     this.playbackCoordinator,
+    this.scrollController,
     this.onArtistTap,
     this.onAlbumTap,
     this.onPlaylistTap,
@@ -717,6 +719,7 @@ class _MediaTableSectionDesktopState<T>
     if (widget.isLoading) {
       final Widget body = ListView.builder(
         primary: false,
+        controller: widget.scrollController,
         shrinkWrap: !useInternalScroll,
         physics: useInternalScroll
             ? const ClampingScrollPhysics()
@@ -754,6 +757,7 @@ class _MediaTableSectionDesktopState<T>
       // the list structure, while expanding keeps row identities intact.
       key: ValueKey<String>('table-rows-$T-paged-$_isExpanded'),
       primary: false,
+      controller: widget.scrollController,
       shrinkWrap: !useInternalScroll,
       physics: useInternalScroll
           ? const ClampingScrollPhysics()
@@ -854,6 +858,7 @@ class _MediaTableSectionDesktopState<T>
 
     return ListView.builder(
       primary: false,
+      controller: widget.scrollController,
       shrinkWrap: !useInternalScroll,
       physics: useInternalScroll
           ? const ClampingScrollPhysics()
@@ -2732,6 +2737,8 @@ class _ExpandToggleButtonState extends State<_ExpandToggleButton> {
             onTap: widget.onTap,
             borderRadius: BorderRadius.circular(12),
             hoverColor: colors.hover,
+            splashColor: Colors.transparent,
+            highlightColor: Colors.transparent,
             child: SizedBox(
               width: 24,
               height: 24,
@@ -2965,10 +2972,7 @@ class PlaybackAwareBuilder extends StatelessWidget {
     }
 
     return ListenableBuilder(
-      listenable: Listenable.merge(<Listenable>[
-        playbackCoordinator.playbackStateChanges,
-        playbackCoordinator.playbackQueueChanges,
-      ]),
+      listenable: playbackCoordinator.playbackQueueChanges,
       builder: (BuildContext context, Widget? child) {
         final int? currentIndex = playbackCoordinator.currentQueueIndex;
         final List<QueueItem> queueItems = playbackCoordinator.queueItems;
@@ -3127,16 +3131,21 @@ class _MediaTableCoverState extends State<MediaTableCover> {
 // Section header badge showing item count, matching the MAUI Album/Playlist detail header pill.
 class SectionCountBadge extends StatelessWidget {
   final int count;
+  final bool compact;
 
-  const SectionCountBadge({super.key, required this.count});
+  const SectionCountBadge({
+    super.key,
+    required this.count,
+    this.compact = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
 
     return Container(
-      height: 22,
-      padding: const EdgeInsets.symmetric(horizontal: 6),
+      height: compact ? 20 : 22,
+      padding: EdgeInsets.symmetric(horizontal: compact ? 5 : 6),
       alignment: Alignment.center,
       decoration: BoxDecoration(
         border: Border.all(color: colors.border),
@@ -3146,7 +3155,7 @@ class SectionCountBadge extends StatelessWidget {
         '$count',
         style: TextStyle(
           fontWeight: FontWeight.bold,
-          fontSize: 10,
+          fontSize: compact ? 9.5 : 10,
           color: colors.textPrimary,
         ),
       ),
@@ -3207,13 +3216,20 @@ class _SectionHeaderIconButtonState extends State<SectionHeaderIconButton> {
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
     final bool isDisabled = widget.onTap == null;
+    final bool enableHoverAndTooltip = switch (Theme.of(context).platform) {
+      TargetPlatform.android ||
+      TargetPlatform.iOS ||
+      TargetPlatform.fuchsia => false,
+      _ => true,
+    };
 
-    final Widget button = MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      child: GestureDetector(
+    final Widget buttonCore = Material(
+      color: Colors.transparent,
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
         onTap: widget.onTap,
-        behavior: HitTestBehavior.opaque,
+        splashColor: colors.selection,
         child: Opacity(
           opacity: isDisabled ? 0.4 : 1,
           child: Container(
@@ -3236,7 +3252,17 @@ class _SectionHeaderIconButtonState extends State<SectionHeaderIconButton> {
       ),
     );
 
-    if (widget.tooltip == null || widget.tooltip!.isEmpty) {
+    final Widget button = enableHoverAndTooltip
+        ? MouseRegion(
+            onEnter: (_) => setState(() => _isHovered = true),
+            onExit: (_) => setState(() => _isHovered = false),
+            child: buttonCore,
+          )
+        : buttonCore;
+
+    if (!enableHoverAndTooltip ||
+        widget.tooltip == null ||
+        widget.tooltip!.isEmpty) {
       return button;
     }
     return Tooltip(message: widget.tooltip!, child: button);
@@ -3244,6 +3270,9 @@ class _SectionHeaderIconButtonState extends State<SectionHeaderIconButton> {
 }
 
 class MediaProviderIcon extends StatelessWidget {
+  static final Map<String, String> _decodedInlineSvgCache = <String, String>{};
+  static final Map<String, Widget> _inlineSvgWidgetCache = <String, Widget>{};
+
   final String providerLabel;
   final String? iconSvg;
   final double size;
@@ -3267,9 +3296,9 @@ class MediaProviderIcon extends StatelessWidget {
       );
     }
 
-    // Provider manifests may deliver raw XML, XML with declaration, or URL-encoded XML.
-    final String decoded = _inlineSvgClassFillColors(
-      _maybeDecodeSvgPayload(trimmed),
+    final String decoded = _decodedInlineSvgCache.putIfAbsent(
+      trimmed,
+      () => _inlineSvgClassFillColors(_maybeDecodeSvgPayload(trimmed)),
     );
     final bool isInlineSvg =
         decoded.startsWith('<svg') ||
@@ -3277,7 +3306,11 @@ class MediaProviderIcon extends StatelessWidget {
         decoded.contains('<svg');
 
     if (isInlineSvg) {
-      return SvgPicture.string(decoded, width: size, height: size);
+      final String cacheKey = '$size::$decoded';
+      return _inlineSvgWidgetCache.putIfAbsent(
+        cacheKey,
+        () => SvgPicture.string(decoded, width: size, height: size),
+      );
     }
 
     final Uri? uri = Uri.tryParse(trimmed);

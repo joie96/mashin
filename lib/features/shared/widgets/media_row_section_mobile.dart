@@ -1,15 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
 import '../../../app/theme/app_theme.dart';
 import '../../../data/music_assistant/ma_models.dart';
 import '../../playback/playback_coordinator.dart';
+import '../selection/mobile_section_selection.dart';
 import 'media_table_section_desktop.dart';
 import 'media_image.dart';
+import 'mobile_section_header.dart';
 
-class MediaRowSectionMobile<T> extends StatelessWidget {
-  static const double _artistHeight = 142;
+class MediaRowSectionMobile<T> extends StatefulWidget {
+  static const double _compactTextHeight = 34;
+  static const double _trackTextHeight = 50;
 
   final String title;
   final bool isLoading;
@@ -18,11 +22,11 @@ class MediaRowSectionMobile<T> extends StatelessWidget {
   final double itemWidth;
   final double coverSize;
   final double itemSpacing;
-  final int maxVisibleItems;
   final double height;
   final int skeletonCount;
   final PlaybackCoordinator? playbackCoordinator;
   final ValueChanged<T>? onItemTap;
+  final bool showPlaylistDetails;
 
   const MediaRowSectionMobile({
     super.key,
@@ -30,15 +34,64 @@ class MediaRowSectionMobile<T> extends StatelessWidget {
     required this.isLoading,
     required this.items,
     required this.emptyText,
-    this.itemWidth = 112,
-    this.coverSize = 112,
+    this.itemWidth = 146,
+    this.coverSize = 146,
     this.itemSpacing = 8,
-    this.maxVisibleItems = 12,
-    this.height = 198,
+    this.height = 232,
     this.skeletonCount = 6,
     this.playbackCoordinator,
     this.onItemTap,
+    this.showPlaylistDetails = true,
   });
+
+  @override
+  State<MediaRowSectionMobile<T>> createState() =>
+      _MediaRowSectionMobileState<T>();
+}
+
+class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
+  final MobileSectionSelectionState _selectionController =
+      MobileSectionSelectionState(itemType: T);
+
+  String get title => widget.title;
+  bool get isLoading => widget.isLoading;
+  List<T> get items => widget.items;
+  String get emptyText => widget.emptyText;
+  double get itemWidth => widget.itemWidth;
+  double get coverSize => widget.coverSize;
+  double get itemSpacing => widget.itemSpacing;
+  double get height => widget.height;
+  int get skeletonCount => widget.skeletonCount;
+  PlaybackCoordinator? get playbackCoordinator => widget.playbackCoordinator;
+  ValueChanged<T>? get onItemTap => widget.onItemTap;
+  bool get showPlaylistDetails => widget.showPlaylistDetails;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectionController.addListener(_onSelectionChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant MediaRowSectionMobile<T> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _selectionController.updateItemCount(items.length);
+  }
+
+  @override
+  void dispose() {
+    _selectionController
+      ..removeListener(_onSelectionChanged)
+      ..disposeSelection()
+      ..dispose();
+    super.dispose();
+  }
+
+  void _onSelectionChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
 
   MediaItem? _resolvePlayableMediaItem(Object? rawItem) {
     if (rawItem is QueueItem) {
@@ -71,6 +124,21 @@ class MediaRowSectionMobile<T> extends StatelessWidget {
     }
 
     return playItems;
+  }
+
+  bool _hasPlayableItemsFromIndex(int startIndex) {
+    if (items.isEmpty || startIndex < 0 || startIndex >= items.length) {
+      return false;
+    }
+
+    for (int index = startIndex; index < items.length; index++) {
+      final MediaItem? resolved = _resolvePlayableMediaItem(items[index]);
+      if (resolved != null && _isValidPlayable(resolved)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   void _onPlayAllTap() {
@@ -146,43 +214,29 @@ class MediaRowSectionMobile<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
     final bool hasTitle = title.trim().isNotEmpty;
-    final double sectionHeight = T == Artist ? _artistHeight : height;
-    final bool hasPlayableContent =
-        !isLoading && _playableItemsFromIndex(0).isNotEmpty;
+    final bool reservesMetadataSpace =
+        T == Album ||
+        T == Track ||
+        T == QueueItem ||
+        (T == Playlist && showPlaylistDetails);
+    final double sectionHeight = T == Track
+        ? coverSize + MediaRowSectionMobile._trackTextHeight
+        : reservesMetadataSpace
+        ? height
+        : coverSize + MediaRowSectionMobile._compactTextHeight;
+    final bool hasPlayableContent = !isLoading && _hasPlayableItemsFromIndex(0);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         if (hasTitle)
-          Row(
-            children: <Widget>[
-              Text(
-                title,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-              ),
-              if (hasPlayableContent) ...<Widget>[
-                const SizedBox(width: 10),
-                SectionCountBadge(count: items.length),
-              ],
-              const SizedBox(width: 16),
-              const Expanded(child: SectionHeaderDivider()),
-              const SizedBox(width: 16),
-              if (playbackCoordinator != null) ...<Widget>[
-                SectionHeaderIconButton(
-                  icon: Icons.play_arrow,
-                  tooltip: 'Abspielen',
-                  onTap: hasPlayableContent ? _onPlayAllTap : null,
-                ),
-                const SizedBox(width: 8),
-                SectionHeaderIconButton(
-                  icon: Icons.shuffle,
-                  tooltip: 'Zufällig',
-                  onTap: hasPlayableContent ? _onShuffleAllTap : null,
-                ),
-              ],
-            ],
+          MobileSectionHeader(
+            title: title,
+            itemCount: hasPlayableContent ? items.length : null,
+            showPlaybackActions: playbackCoordinator != null,
+            onPlayTap: hasPlayableContent ? _onPlayAllTap : null,
+            onShuffleTap: hasPlayableContent ? _onShuffleAllTap : null,
+            shuffleTooltip: 'Zufällig',
           ),
         if (hasTitle) const SizedBox(height: 10),
         if (!isLoading && items.isEmpty)
@@ -191,93 +245,57 @@ class MediaRowSectionMobile<T> extends StatelessWidget {
           SizedBox(
             height: sectionHeight,
             child: isLoading
-                ? ListView.separated(
+                ? ListView.builder(
+                    primary: false,
                     scrollDirection: Axis.horizontal,
                     itemCount: skeletonCount,
-                    separatorBuilder: (_, _) => SizedBox(width: itemSpacing),
-                    itemBuilder: (_, _) {
-                      if (T == Album) {
-                        return _buildMobileMediaRowAlbumSkeleton(
-                          itemWidth: itemWidth,
-                          coverSize: coverSize,
-                        );
-                      }
-                      if (T == Playlist) {
-                        return _buildMobileMediaRowPlaylistSkeleton(
-                          itemWidth: itemWidth,
-                          coverSize: coverSize,
-                        );
-                      }
-                      if (T == Artist) {
-                        return _buildMobileMediaRowArtistSkeleton(
-                          itemWidth: itemWidth,
-                          coverSize: coverSize,
-                        );
-                      }
-                      if (T == Track) {
-                        return _buildMobileMediaRowTrackSkeleton(
-                          itemWidth: itemWidth,
-                          coverSize: coverSize,
-                        );
-                      }
+                    itemExtent: itemWidth + itemSpacing,
+                    scrollCacheExtent: ScrollCacheExtent.pixels(0),
+                    addAutomaticKeepAlives: false,
+                    addRepaintBoundaries: true,
+                    addSemanticIndexes: false,
+                    itemBuilder: (_, int index) {
+                      final bool isLastItem = index == skeletonCount - 1;
 
-                      return _buildMobileMediaRowUnknownSkeleton(
-                        itemWidth: itemWidth,
-                        coverSize: coverSize,
+                      return Padding(
+                        padding: EdgeInsets.only(
+                          right: isLastItem ? 0 : itemSpacing,
+                        ),
+                        child: _buildMobileTypedRowSkeleton(),
                       );
                     },
                   )
-                : ListView.separated(
+                : ListView.builder(
+                    primary: false,
                     scrollDirection: Axis.horizontal,
-                    itemCount: items.length > maxVisibleItems
-                        ? maxVisibleItems
-                        : items.length,
-                    separatorBuilder: (_, _) => SizedBox(width: itemSpacing),
+                    itemCount: _visibleItemCount,
+                    itemExtent: itemWidth + itemSpacing,
+                    scrollCacheExtent: ScrollCacheExtent.pixels(0),
+                    addAutomaticKeepAlives: false,
+                    addRepaintBoundaries: true,
+                    addSemanticIndexes: false,
                     itemBuilder: (BuildContext context, int index) {
-                      final T item = items[index];
-                      if (item is Album) {
-                        return _buildMobileMediaRowAlbum(
-                          item: item,
-                          itemWidth: itemWidth,
-                          coverSize: coverSize,
-                          onPlayTap: () => _onPlayTap(index),
-                          onItemTap: _itemTapCallback(item),
-                        );
-                      }
-                      if (item is Playlist) {
-                        return _buildMobileMediaRowPlaylist(
-                          item: item,
-                          itemWidth: itemWidth,
-                          coverSize: coverSize,
-                          onPlayTap: () => _onPlayTap(index),
-                          onItemTap: _itemTapCallback(item),
-                        );
-                      }
-                      if (item is Artist) {
-                        return _buildMobileMediaRowArtist(
-                          item: item,
-                          itemWidth: itemWidth,
-                          coverSize: coverSize,
-                          onPlayTap: () => _onPlayTap(index),
-                          onItemTap: _itemTapCallback(item),
-                        );
-                      }
-                      if (item is Track) {
-                        return _buildMobileMediaRowTrack(
-                          item: item,
-                          itemWidth: itemWidth,
-                          coverSize: coverSize,
-                          onPlayTap: () => _onPlayTap(index),
-                          onItemTap: _itemTapCallback(item),
-                          playbackCoordinator: playbackCoordinator,
-                        );
-                      }
+                      final bool isLastItem = index == _visibleItemCount - 1;
 
-                      return _buildMobileMediaRowUnknown(
-                        itemWidth: itemWidth,
-                        coverSize: coverSize,
-                        onPlayTap: () => _onPlayTap(index),
-                        onItemTap: _itemTapCallback(item),
+                      return Padding(
+                        padding: EdgeInsets.only(
+                          right: isLastItem ? 0 : itemSpacing,
+                        ),
+                        child: MobileSelectableSectionItem(
+                          selectionModeActive:
+                              _selectionController.isSelectionModeActive,
+                          isSelected: _selectionController.isSelected(index),
+                          onLongPress: () =>
+                              _selectionController.select(index, items.length),
+                          onToggleSelection: () =>
+                              _selectionController.toggle(index, items.length),
+                          onTap: _itemTapCallback(items[index]),
+                          child: _buildMobileTypedRow(
+                            item: items[index],
+                            index: index,
+                            onItemTap: null,
+                          ),
+                        ),
                       );
                     },
                   ),
@@ -286,10 +304,95 @@ class MediaRowSectionMobile<T> extends StatelessWidget {
     );
   }
 
+  Widget _buildMobileTypedRow({
+    required T item,
+    required int index,
+    required VoidCallback? onItemTap,
+  }) {
+    if (item is Album) {
+      return _buildMobileMediaRowAlbum(
+        item: item,
+        itemWidth: itemWidth,
+        coverSize: coverSize,
+        onPlayTap: () => _onPlayTap(index),
+        onItemTap: onItemTap,
+      );
+    }
+    if (item is Playlist) {
+      return _buildMobileMediaRowPlaylist(
+        item: item,
+        itemWidth: itemWidth,
+        coverSize: coverSize,
+        onPlayTap: () => _onPlayTap(index),
+        onItemTap: onItemTap,
+        showDetails: showPlaylistDetails,
+      );
+    }
+    if (item is Artist) {
+      return _buildMobileMediaRowArtist(
+        item: item,
+        itemWidth: itemWidth,
+        coverSize: coverSize,
+        onPlayTap: () => _onPlayTap(index),
+        onItemTap: onItemTap,
+      );
+    }
+    if (item is Track) {
+      return _buildMobileMediaRowTrack(
+        item: item,
+        itemWidth: itemWidth,
+        coverSize: coverSize,
+        onPlayTap: () => _onPlayTap(index),
+        onItemTap: onItemTap,
+        playbackCoordinator: playbackCoordinator,
+      );
+    }
+    return _buildMobileMediaRowUnknown(
+      itemWidth: itemWidth,
+      coverSize: coverSize,
+      onPlayTap: () => _onPlayTap(index),
+      onItemTap: onItemTap,
+    );
+  }
+
+  Widget _buildMobileTypedRowSkeleton() {
+    if (T == Album) {
+      return _buildMobileMediaRowAlbumSkeleton(
+        itemWidth: itemWidth,
+        coverSize: coverSize,
+      );
+    }
+    if (T == Playlist) {
+      return _buildMobileMediaRowPlaylistSkeleton(
+        itemWidth: itemWidth,
+        coverSize: coverSize,
+        showDetails: showPlaylistDetails,
+      );
+    }
+    if (T == Artist) {
+      return _buildMobileMediaRowArtistSkeleton(
+        itemWidth: itemWidth,
+        coverSize: coverSize,
+      );
+    }
+    if (T == Track) {
+      return _buildMobileMediaRowTrackSkeleton(
+        itemWidth: itemWidth,
+        coverSize: coverSize,
+      );
+    }
+    return _buildMobileMediaRowUnknownSkeleton(
+      itemWidth: itemWidth,
+      coverSize: coverSize,
+    );
+  }
+
   VoidCallback? _itemTapCallback(T item) {
     final ValueChanged<T>? onTap = onItemTap;
     return onTap == null ? null : () => onTap(item);
   }
+
+  int get _visibleItemCount => items.length;
 }
 
 // Typed mobile row builders
@@ -321,14 +424,15 @@ Widget _buildMobileMediaRowPlaylist({
   required double coverSize,
   required VoidCallback? onPlayTap,
   required VoidCallback? onItemTap,
+  required bool showDetails,
 }) {
   return _buildMobileMediaRowItemBase(
     itemWidth: itemWidth,
     coverSize: coverSize,
     icon: Icons.queue_music_outlined,
     title: _prefer(item.name, 'Unknown Playlist'),
-    secondaryText: _playlistSubtitle(item),
-    tertiaryText: _playlistTertiary(item),
+    secondaryText: showDetails ? _playlistSubtitle(item) : null,
+    tertiaryText: null,
     coverUrl: item.imageUriForSize(256) ?? '',
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
@@ -374,7 +478,7 @@ Widget _buildMobileMediaRowTrack({
     icon: Icons.music_note_outlined,
     title: _prefer(item.name, 'Unknown Track'),
     secondaryText: _trackSubtitle(item),
-    tertiaryText: _trackTertiary(item),
+    tertiaryText: null,
     coverUrl: item.imageUriForSize(256) ?? '',
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
@@ -431,6 +535,9 @@ Widget _buildMobileMediaRowItemBase({
       final bool hasTertiary =
           tertiaryText != null && tertiaryText.trim().isNotEmpty;
       final double effectiveCoverRadius = coverBorderRadius ?? 8;
+      final double coverScale = MobileSectionSelectionScope.coverScaleOf(
+        context,
+      );
 
       return GestureDetector(
         onTap: onItemTap,
@@ -442,75 +549,84 @@ Widget _buildMobileMediaRowItemBase({
             children: <Widget>[
               Stack(
                 children: <Widget>[
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(effectiveCoverRadius),
-                    child: Container(
-                      width: coverSize,
-                      height: coverSize,
-                      color: colors.bgTertiary,
-                      child: coverUrl != null && coverUrl.trim().isNotEmpty
-                          ? MediaImage(
-                              source: coverUrl,
-                              fit: BoxFit.cover,
-                              fallback: Icon(
-                                icon,
-                                color: colors.accent,
-                                size: 28,
-                              ),
-                            )
-                          : Icon(icon, color: colors.accent, size: 28),
-                    ),
-                  ),
-                  Positioned(
-                    left: 6,
-                    top: 6,
-                    child: MediaProviderIcon(
-                      providerLabel: providerLabel,
-                      iconSvg: providerIconSvg,
-                      size: 18,
+                  Transform.scale(
+                    alignment: Alignment.center,
+                    scale: coverScale,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(effectiveCoverRadius),
+                      child: Container(
+                        width: coverSize,
+                        height: coverSize,
+                        color: colors.bgTertiary,
+                        child: coverUrl != null && coverUrl.trim().isNotEmpty
+                            ? _DeferredRowMediaImage(
+                                source: coverUrl,
+                                fit: BoxFit.cover,
+                                fallback: Icon(
+                                  icon,
+                                  color: colors.textSecondary,
+                                  size: 56,
+                                ),
+                              )
+                            : Icon(icon, color: colors.textSecondary, size: 56),
+                      ),
                     ),
                   ),
                   if (showPlayOverlay)
                     Positioned(
                       left: 6,
                       bottom: 6,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: onPlayTap,
-                        child: Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: colors.overlayPlayButtonBackground,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Icon(
-                            Icons.play_arrow_sharp,
-                            size: 20,
-                            color: colors.overlayPlayButtonForeground,
+                      child: Material(
+                        color: Colors.transparent,
+                        shape: const CircleBorder(),
+                        child: InkWell(
+                          customBorder: const CircleBorder(),
+                          onTap: onPlayTap,
+                          splashColor: colors.selection,
+                          child: Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: colors.overlayPlayButtonBackground
+                                  .withValues(alpha: 0.88),
+                              borderRadius: BorderRadius.circular(24),
+                            ),
+                            child: Icon(
+                              Icons.play_arrow_sharp,
+                              size: 24,
+                              color: colors.overlayPlayButtonForeground,
+                            ),
                           ),
                         ),
                       ),
                     ),
+                  Positioned(
+                    left: 6,
+                    top: 6,
+                    child: IgnorePointer(
+                      child: MediaProviderIcon(
+                        providerLabel: providerLabel,
+                        iconSvg: providerIconSvg,
+                        size: 18,
+                      ),
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 8),
-              PlaybackAwareBuilder(
-                coordinator: playbackCoordinator,
-                item: playbackItem,
-                builder: (BuildContext context, bool isCurrent) {
-                  return Text(
-                    title,
-                    maxLines: 1,
-                    textAlign: TextAlign.center,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: isCurrent ? colors.accent : null,
-                    ),
-                  );
-                },
-              ),
+              if (playbackCoordinator == null || playbackItem == null)
+                _MobileRowTitleText(title: title, isCurrent: false)
+              else
+                PlaybackAwareBuilder(
+                  coordinator: playbackCoordinator,
+                  item: playbackItem,
+                  builder: (BuildContext context, bool isCurrent) {
+                    return _MobileRowTitleText(
+                      title: title,
+                      isCurrent: isCurrent,
+                    );
+                  },
+                ),
               if (hasSecondary) ...<Widget>[
                 const SizedBox(height: 2),
                 Text(
@@ -539,6 +655,85 @@ Widget _buildMobileMediaRowItemBase({
   );
 }
 
+class _MobileRowTitleText extends StatelessWidget {
+  const _MobileRowTitleText({required this.title, required this.isCurrent});
+
+  final String title;
+  final bool isCurrent;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+
+    return Text(
+      title,
+      maxLines: 1,
+      textAlign: TextAlign.center,
+      overflow: TextOverflow.ellipsis,
+      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+        fontWeight: FontWeight.w600,
+        color: isCurrent ? colors.accent : null,
+      ),
+    );
+  }
+}
+
+class _DeferredRowMediaImage extends StatefulWidget {
+  const _DeferredRowMediaImage({
+    required this.source,
+    required this.fit,
+    required this.fallback,
+  });
+
+  final String source;
+  final BoxFit fit;
+  final Widget fallback;
+
+  @override
+  State<_DeferredRowMediaImage> createState() => _DeferredRowMediaImageState();
+}
+
+class _DeferredRowMediaImageState extends State<_DeferredRowMediaImage> {
+  bool _hasPendingRecheck = false;
+
+  @override
+  void didUpdateWidget(covariant _DeferredRowMediaImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.source != widget.source) {
+      _hasPendingRecheck = false;
+    }
+  }
+
+  void _scheduleRecheck() {
+    if (_hasPendingRecheck) {
+      return;
+    }
+
+    _hasPendingRecheck = true;
+    Future<void>.delayed(const Duration(milliseconds: 80), () {
+      if (!mounted) {
+        return;
+      }
+      _hasPendingRecheck = false;
+      setState(() {});
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (Scrollable.recommendDeferredLoadingForContext(context)) {
+      _scheduleRecheck();
+      return widget.fallback;
+    }
+
+    return MediaImage(
+      source: widget.source,
+      fit: widget.fit,
+      fallback: widget.fallback,
+    );
+  }
+}
+
 // Typed mobile row skeleton builders
 Widget _buildMobileMediaRowAlbumSkeleton({
   required double itemWidth,
@@ -553,10 +748,12 @@ Widget _buildMobileMediaRowAlbumSkeleton({
 Widget _buildMobileMediaRowPlaylistSkeleton({
   required double itemWidth,
   required double coverSize,
+  required bool showDetails,
 }) {
   return _buildMobileMediaRowSkeletonBase(
     itemWidth: itemWidth,
     coverSize: coverSize,
+    lineCount: showDetails ? 3 : 1,
   );
 }
 
@@ -579,6 +776,7 @@ Widget _buildMobileMediaRowTrackSkeleton({
   return _buildMobileMediaRowSkeletonBase(
     itemWidth: itemWidth,
     coverSize: coverSize,
+    lineCount: 2,
   );
 }
 
@@ -638,31 +836,6 @@ Widget _buildMobileMediaRowSkeletonBase({
                     color: colors.bgTertiary,
                   ),
                 ),
-                Positioned(
-                  left: 6,
-                  top: 6,
-                  child: Container(
-                    width: 18,
-                    height: 18,
-                    decoration: BoxDecoration(
-                      color: colors.bgSecondary,
-                      borderRadius: BorderRadius.circular(9),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  left: 6,
-                  bottom: 6,
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: colors.bgSecondary,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: colors.border),
-                    ),
-                  ),
-                ),
               ],
             ),
             const SizedBox(height: 8),
@@ -711,14 +884,6 @@ String _trackSubtitle(Track track) {
   return _prefer(track.album?.name ?? '', 'Track');
 }
 
-String _trackTertiary(Track track) {
-  final albumName = _stripOrEmpty(track.album?.name);
-  if (albumName.isNotEmpty) {
-    return albumName;
-  }
-  return _formatDuration(track.duration);
-}
-
 String _albumTertiary(Album album) {
   if (album.year != null && album.year! > 0) {
     return '${album.year}';
@@ -764,18 +929,6 @@ String _firstArtistName(List<Artist> artists) {
   }
 
   return artists.first.name;
-}
-
-String _formatDuration(int seconds) {
-  if (seconds <= 0) {
-    return '0:00';
-  }
-
-  final duration = Duration(seconds: seconds);
-  final minutes = duration.inMinutes;
-  final remainingSeconds = duration.inSeconds % 60;
-
-  return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
 }
 
 String _providerLabelFromId(String providerOrDomain) {

@@ -57,19 +57,12 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
       itemId: widget.itemId,
       providerInstanceIdOrDomain: widget.providerInstanceIdOrDomain,
       userDataController: widget.userDataController,
-    )..addListener(_onControllerChanged);
+    );
     unawaited(_controller.loadArtist());
-  }
-
-  void _onControllerChanged() {
-    if (mounted) {
-      setState(() {});
-    }
   }
 
   @override
   void dispose() {
-    _controller.removeListener(_onControllerChanged);
     _controller.dispose();
     super.dispose();
   }
@@ -121,14 +114,14 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
         ),
       if (item is! Playlist)
         ContextMenuAction(
-        label: 'Radio starten',
-        icon: Icons.radio_outlined,
-        onSelected: () => item is Track
-            ? coordinator.playMediaRadioNext(
-                tracks.isEmpty ? <MediaItem>[item] : tracks,
-              )
-            : _controller.startItemRadio(item),
-      ),
+          label: 'Radio starten',
+          icon: Icons.radio_outlined,
+          onSelected: () => item is Track
+              ? coordinator.playMediaRadioNext(
+                  tracks.isEmpty ? <MediaItem>[item] : tracks,
+                )
+              : _controller.startItemRadio(item),
+        ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
@@ -297,93 +290,129 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
 
     return Container(
       color: colors.bgPrimary,
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            _buildHeader(context, colors),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  if (_controller.isLoadingMetadata ||
-                      _controller.hasDescription) ...<Widget>[
-                    const SizedBox(height: 24),
-                    _buildDescription(context, colors),
-                  ],
-                  const SizedBox(height: 24),
-                  MediaRowSectionDesktop<Album>(
-                    title: 'Veröffentlichungen',
-                    isLoading: _controller.isLoadingAlbums,
-                    items: _controller.albums,
-                    emptyText: 'Keine Veröffentlichungen gefunden.',
-                    playbackCoordinator: widget.playbackCoordinator,
-                    isRowFavorite: (Album item, int index) =>
-                        _controller.isItemFavorite(item),
-                    onRowFavoriteTap: (Album item, int index) =>
-                        _controller.toggleItemFavorite(item),
-                    onRowMoreAnchorTap:
-                        (Album item, int index, BuildContext anchorContext) =>
-                            _showItemMenu(item, anchorContext: anchorContext),
-                    onRowContextMenu:
-                        (Album item, int index, Offset globalPosition) =>
-                            _showItemMenuAtPosition(item, globalPosition),
-                    onArtistTap: _openArtist,
-                    onAlbumTap: _openAlbum,
-                  ),
-                  const SizedBox(height: 24),
-                  MediaRowSectionDesktop<Artist>(
-                    title: 'Ähnliche Interpreten',
-                    isLoading: _controller.isLoadingSimilarArtists,
-                    items: _controller.similarArtists,
-                    emptyText: 'Keine ähnlichen Interpreten gefunden.',
-                    playbackCoordinator: widget.playbackCoordinator,
-                    isRowFavorite: (Artist item, int index) =>
-                        _controller.isItemFavorite(item),
-                    onRowFavoriteTap: (Artist item, int index) =>
-                        _controller.toggleItemFavorite(item),
-                    onRowMoreAnchorTap:
-                        (Artist item, int index, BuildContext anchorContext) =>
-                            _showItemMenu(item, anchorContext: anchorContext),
-                    onRowContextMenu:
-                        (Artist item, int index, Offset globalPosition) =>
-                            _showItemMenuAtPosition(item, globalPosition),
-                    onArtistTap: widget.onOpenArtist,
-                  ),
-                  const SizedBox(height: 24),
-                  MediaTableSectionDesktop<Track>(
-                    title: 'Toplieder',
-                    isLoading: _controller.isLoadingTopTracks,
-                    items: _controller.topTracks,
-                    emptyText: 'Keine Toplieder gefunden.',
-                    maxItemsPerPage: 15,
-                    playbackCoordinator: widget.playbackCoordinator,
-                    isRowFavorite: (Track item, int index) =>
-                        _controller.isItemFavorite(item),
-                    onRowFavoriteTap: (Track item, int index) =>
-                        _controller.toggleItemFavorite(item),
-                    onRowMoreAnchorTap:
-                        (Track item, int index, BuildContext anchorContext) =>
-                            _showItemMenu(item, anchorContext: anchorContext),
-                    onRowContextMenu:
-                        (Track item, int index, Offset globalPosition) =>
-                            _showItemMenuAtPosition(item, globalPosition),
-                    onRowSelectionContextMenu:
-                        (List<Track> items, Offset globalPosition) =>
-                            _showItemMenuAtPosition(
-                              items.first,
-                              globalPosition,
-                              items,
-                            ),
-                    onArtistTap: _openArtist,
-                    onAlbumTap: _openAlbum,
-                  ),
-                ],
+      child: CustomScrollView(
+        slivers: <Widget>[
+          SliverToBoxAdapter(
+            child: ListenableBuilder(
+              listenable: Listenable.merge(<Listenable>[
+                _controller.metadataListenable,
+                _controller.albumsListenable,
+              ]),
+              builder: (BuildContext context, Widget? child) =>
+                  _buildHeader(context, colors),
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: ListenableBuilder(
+              listenable: _controller.metadataListenable,
+              builder: (BuildContext context, Widget? child) {
+                if (!_controller.isLoadingMetadata &&
+                    !_controller.hasDescription) {
+                  return const SizedBox.shrink();
+                }
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+                  child: _buildDescription(context, colors),
+                );
+              },
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+            sliver: SliverToBoxAdapter(
+              child: ListenableBuilder(
+                listenable: _controller.albumsListenable,
+                builder: (BuildContext context, Widget? child) =>
+                    MediaRowSectionDesktop<Album>(
+                      title: 'Veröffentlichungen',
+                      isLoading: _controller.isLoadingAlbums,
+                      items: _controller.albums,
+                      emptyText: 'Keine Veröffentlichungen gefunden.',
+                      playbackCoordinator: widget.playbackCoordinator,
+                      isRowFavorite: (Album item, int index) =>
+                          _controller.isItemFavorite(item),
+                      onRowFavoriteTap: (Album item, int index) =>
+                          _controller.toggleItemFavorite(item),
+                      onRowMoreAnchorTap:
+                          (Album item, int index, BuildContext anchorContext) =>
+                              _showItemMenu(item, anchorContext: anchorContext),
+                      onRowContextMenu:
+                          (Album item, int index, Offset globalPosition) =>
+                              _showItemMenuAtPosition(item, globalPosition),
+                      onArtistTap: _openArtist,
+                      onAlbumTap: _openAlbum,
+                    ),
               ),
             ),
-          ],
-        ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+            sliver: SliverToBoxAdapter(
+              child: ListenableBuilder(
+                listenable: _controller.similarArtistsListenable,
+                builder: (BuildContext context, Widget? child) =>
+                    MediaRowSectionDesktop<Artist>(
+                      title: 'Ähnliche Interpreten',
+                      isLoading: _controller.isLoadingSimilarArtists,
+                      items: _controller.similarArtists,
+                      emptyText: 'Keine ähnlichen Interpreten gefunden.',
+                      playbackCoordinator: widget.playbackCoordinator,
+                      isRowFavorite: (Artist item, int index) =>
+                          _controller.isItemFavorite(item),
+                      onRowFavoriteTap: (Artist item, int index) =>
+                          _controller.toggleItemFavorite(item),
+                      onRowMoreAnchorTap:
+                          (
+                            Artist item,
+                            int index,
+                            BuildContext anchorContext,
+                          ) =>
+                              _showItemMenu(item, anchorContext: anchorContext),
+                      onRowContextMenu:
+                          (Artist item, int index, Offset globalPosition) =>
+                              _showItemMenuAtPosition(item, globalPosition),
+                      onArtistTap: widget.onOpenArtist,
+                    ),
+              ),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+            sliver: SliverToBoxAdapter(
+              child: ListenableBuilder(
+                listenable: _controller.topTracksListenable,
+                builder: (BuildContext context, Widget? child) =>
+                    MediaTableSectionDesktop<Track>(
+                      title: 'Toplieder',
+                      isLoading: _controller.isLoadingTopTracks,
+                      items: _controller.topTracks,
+                      emptyText: 'Keine Toplieder gefunden.',
+                      maxItemsPerPage: 15,
+                      playbackCoordinator: widget.playbackCoordinator,
+                      isRowFavorite: (Track item, int index) =>
+                          _controller.isItemFavorite(item),
+                      onRowFavoriteTap: (Track item, int index) =>
+                          _controller.toggleItemFavorite(item),
+                      onRowMoreAnchorTap:
+                          (Track item, int index, BuildContext anchorContext) =>
+                              _showItemMenu(item, anchorContext: anchorContext),
+                      onRowContextMenu:
+                          (Track item, int index, Offset globalPosition) =>
+                              _showItemMenuAtPosition(item, globalPosition),
+                      onRowSelectionContextMenu:
+                          (List<Track> items, Offset globalPosition) =>
+                              _showItemMenuAtPosition(
+                                items.first,
+                                globalPosition,
+                                items,
+                              ),
+                      onArtistTap: _openArtist,
+                      onAlbumTap: _openAlbum,
+                    ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -693,7 +722,8 @@ class _HeaderActionButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(26),
         onTap: onTap,
         hoverColor: colors.bgPrimary.withValues(alpha: 0.45),
-        splashColor: colors.bgPrimary.withValues(alpha: 0.55),
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
         child: SizedBox(
           height: 40,
           child: Padding(
@@ -757,7 +787,8 @@ class _HeaderHoverIconButton extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(14),
           hoverColor: colors.hover,
-          splashColor: colors.hover,
+          splashColor: Colors.transparent,
+          highlightColor: Colors.transparent,
           child: SizedBox(
             width: 28,
             height: 28,
@@ -789,7 +820,8 @@ class _DescriptionToggleButton extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
         hoverColor: colors.hover,
-        splashColor: colors.hover,
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
         child: SizedBox(
           width: 24,
           height: 24,

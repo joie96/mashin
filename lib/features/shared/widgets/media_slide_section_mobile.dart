@@ -6,8 +6,10 @@ import 'package:flutter/material.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../data/music_assistant/ma_models.dart';
 import '../../playback/playback_coordinator.dart';
+import '../selection/mobile_section_selection.dart';
 import 'media_image.dart';
 import 'media_table_section_desktop.dart';
+import 'mobile_section_header.dart';
 
 class MediaSlideSectionMobile<T> extends StatefulWidget {
   final String title;
@@ -42,8 +44,6 @@ class MediaSlideSectionMobile<T> extends StatefulWidget {
       _MediaSlideSectionMobileState<T>();
 }
 
-// Shows compact slide cards in a horizontally growing list.
-
 class _MediaSlideSectionMobileState<T>
     extends State<MediaSlideSectionMobile<T>> {
   static const double _mobileChunkViewportFraction = 0.92;
@@ -52,11 +52,35 @@ class _MediaSlideSectionMobileState<T>
   final PageController _mobileChunkPageController = PageController(
     viewportFraction: _mobileChunkViewportFraction,
   );
+  final MobileSectionSelectionState _selectionController =
+      MobileSectionSelectionState(itemType: T);
+
+  @override
+  void initState() {
+    super.initState();
+    _selectionController.addListener(_onSelectionChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant MediaSlideSectionMobile<T> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _selectionController.updateItemCount(widget.items.length);
+  }
 
   @override
   void dispose() {
     _mobileChunkPageController.dispose();
+    _selectionController
+      ..removeListener(_onSelectionChanged)
+      ..disposeSelection()
+      ..dispose();
     super.dispose();
+  }
+
+  void _onSelectionChanged() {
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   void _playItem(int index) {
@@ -152,35 +176,15 @@ class _MediaSlideSectionMobileState<T>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         if (hasTitle)
-          Row(
-            children: <Widget>[
-              Text(
-                widget.title,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-              ),
-              if (!widget.isLoading && widget.items.isNotEmpty) ...<Widget>[
-                const SizedBox(width: 10),
-                SectionCountBadge(count: widget.items.length),
-              ],
-              const SizedBox(width: 16),
-              const Expanded(child: SectionHeaderDivider()),
-              const SizedBox(width: 16),
-              if (widget.playbackCoordinator != null) ...<Widget>[
-                SectionHeaderIconButton(
-                  icon: Icons.play_arrow,
-                  tooltip: 'Abspielen',
-                  onTap: hasPlayableContent ? _playAll : null,
-                ),
-                const SizedBox(width: 8),
-                SectionHeaderIconButton(
-                  icon: Icons.shuffle,
-                  tooltip: 'Zufällig abspielen',
-                  onTap: hasPlayableContent ? _shufflePlayAll : null,
-                ),
-              ],
-            ],
+          MobileSectionHeader(
+            title: widget.title,
+            itemCount: !widget.isLoading && widget.items.isNotEmpty
+                ? widget.items.length
+                : null,
+            showPlaybackActions: widget.playbackCoordinator != null,
+            onPlayTap: hasPlayableContent ? _playAll : null,
+            onShuffleTap: hasPlayableContent ? _shufflePlayAll : null,
+            shuffleTooltip: 'Zufällig abspielen',
           ),
         if (hasTitle) const SizedBox(height: 10),
         if (!widget.isLoading && widget.items.isEmpty)
@@ -225,15 +229,24 @@ class _MediaSlideSectionMobileState<T>
 
         return Padding(
           padding: EdgeInsets.only(right: isLastPage ? 0 : _mobileChunkGap),
-          child: _MobileSlideCard<T>(
-            item: widget.items[index],
-            itemWidth: double.infinity,
-            coverSize: widget.coverSize,
-            playbackCoordinator: widget.playbackCoordinator,
-            onPlayTap: () => _playItem(index),
+          child: MobileSelectableSectionItem(
+            selectionModeActive: _selectionController.isSelectionModeActive,
+            isSelected: _selectionController.isSelected(index),
+            onLongPress: () =>
+                _selectionController.select(index, widget.items.length),
+            onToggleSelection: () =>
+                _selectionController.toggle(index, widget.items.length),
             onTap: widget.onItemTap == null
                 ? null
                 : () => widget.onItemTap!(widget.items[index]),
+            child: _MobileSlideCard<T>(
+              item: widget.items[index],
+              itemWidth: double.infinity,
+              coverSize: widget.coverSize,
+              playbackCoordinator: widget.playbackCoordinator,
+              onPlayTap: () => _playItem(index),
+              onTap: null,
+            ),
           ),
         );
       },
@@ -264,6 +277,7 @@ class _MobileSlideCard<T> extends StatelessWidget {
     final MediaSlideItemData data = resolveMediaSlideItemData(item);
     final String? coverUrl = data.coverUrl?.trim();
     final bool hasCover = coverUrl != null && coverUrl.isNotEmpty;
+    final double coverScale = MobileSectionSelectionScope.coverScaleOf(context);
 
     return GestureDetector(
       onTap: onTap,
@@ -277,13 +291,24 @@ class _MobileSlideCard<T> extends StatelessWidget {
             fit: StackFit.expand,
             children: <Widget>[
               if (hasCover)
-                MediaArtworkBackground(
-                  source: coverUrl,
-                  borderRadius: BorderRadius.zero,
-                  child: const SizedBox.shrink(),
+                Transform.scale(
+                  alignment: Alignment.center,
+                  scale: coverScale,
+                  child: MediaArtworkBackground(
+                    source: coverUrl,
+                    borderRadius: BorderRadius.circular(14),
+                    child: const SizedBox.shrink(),
+                  ),
                 )
               else
-                ColoredBox(color: colors.bgSecondary),
+                Transform.scale(
+                  alignment: Alignment.center,
+                  scale: coverScale,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: ColoredBox(color: colors.bgSecondary),
+                  ),
+                ),
               Row(
                 children: <Widget>[
                   SizedBox.square(
@@ -291,42 +316,66 @@ class _MobileSlideCard<T> extends StatelessWidget {
                     child: Stack(
                       fit: StackFit.expand,
                       children: <Widget>[
-                        ColoredBox(
-                          color: colors.bgTertiary,
-                          child: hasCover
-                              ? MediaImage(
-                                  source: coverUrl,
-                                  fit: BoxFit.cover,
-                                  fallback: Icon(
+                        Transform.scale(
+                          alignment: Alignment.center,
+                          scale: coverScale,
+                          child: ColoredBox(
+                            color: colors.bgTertiary,
+                            child: hasCover
+                                ? MediaImage(
+                                    source: coverUrl,
+                                    fit: BoxFit.cover,
+                                    fallback: Icon(
+                                      data.fallbackIcon,
+                                      color: colors.textSecondary,
+                                      size: 34,
+                                    ),
+                                  )
+                                : Icon(
                                     data.fallbackIcon,
-                                    color: colors.accent,
+                                    color: colors.textSecondary,
                                     size: 34,
                                   ),
-                                )
-                              : Icon(
-                                  data.fallbackIcon,
-                                  color: colors.accent,
-                                  size: 34,
-                                ),
+                          ),
                         ),
                         Positioned(
                           left: 6,
                           bottom: 6,
-                          child: GestureDetector(
-                            onTap: onPlayTap,
-                            behavior: HitTestBehavior.opaque,
-                            child: Container(
-                              width: 40,
-                              height: 40,
-                              decoration: BoxDecoration(
-                                color: colors.overlayPlayButtonBackground,
-                                borderRadius: BorderRadius.circular(20),
+                          child: Material(
+                            color: Colors.transparent,
+                            shape: const CircleBorder(),
+                            child: InkWell(
+                              customBorder: const CircleBorder(),
+                              onTap: onPlayTap,
+                              splashColor: colors.selection,
+                              child: Container(
+                                width: 40,
+                                height: 40,
+                                decoration: BoxDecoration(
+                                  color: colors.overlayPlayButtonBackground
+                                      .withValues(alpha: 0.88),
+                                  borderRadius: BorderRadius.circular(24),
+                                ),
+                                child: Icon(
+                                  Icons.play_arrow_sharp,
+                                  size: 24,
+                                  color: colors.overlayPlayButtonForeground,
+                                ),
                               ),
-                              child: Icon(
-                                Icons.play_arrow_sharp,
-                                size: 20,
-                                color: colors.overlayPlayButtonForeground,
-                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          left: 6,
+                          top: 6,
+                          child: IgnorePointer(
+                            child: MediaProviderIcon(
+                              providerLabel: data.mediaItem?.provider ?? '-',
+                              iconSvg:
+                                  ProviderManifestRegistry.iconSvgForProvider(
+                                    data.mediaItem?.provider ?? '',
+                                  ),
+                              size: 18,
                             ),
                           ),
                         ),

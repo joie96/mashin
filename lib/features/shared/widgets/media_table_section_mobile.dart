@@ -8,6 +8,7 @@ import '../../../data/music_assistant/ma_models.dart';
 import '../../playback/playback_coordinator.dart';
 import '../selection/selection_controller.dart';
 import 'media_table_section_desktop.dart';
+import 'mobile_section_header.dart';
 
 class MediaTableSectionMobile<T> extends StatefulWidget {
   final String title;
@@ -17,6 +18,7 @@ class MediaTableSectionMobile<T> extends StatefulWidget {
   final int skeletonRowCount;
   final int maxItemsPerPage;
   final bool enableSelection;
+  final int? currentItemIndex;
   final DesktopRowAction<T>? onRowTap;
   final ValueChanged<List<T>>? onSelectionChanged;
   final VoidCallback? onSelectionMenuTap;
@@ -31,6 +33,7 @@ class MediaTableSectionMobile<T> extends StatefulWidget {
     this.skeletonRowCount = 10,
     this.maxItemsPerPage = 10,
     this.enableSelection = true,
+    this.currentItemIndex,
     this.onRowTap,
     this.onSelectionChanged,
     this.onSelectionMenuTap,
@@ -235,6 +238,8 @@ class _MediaTableSectionMobileState<T>
       owner: _selectionSessionOwner,
       registration: SelectionSessionRegistration(
         allSelected: _isAllSelected,
+        selectedCount: _selectedIndexes.length,
+        itemTypeLabel: selectionTypeLabel(T, _selectedIndexes.length),
         onToggleAll: _toggleAllSelectedIndexes,
         onMenuTap: widget.onSelectionMenuTap,
         onClose: _clearSelectionFromController,
@@ -323,68 +328,69 @@ class _MediaTableSectionMobileState<T>
     final bool hasPlayableContent =
         !widget.isLoading && _playableItemsFromIndex(0).isNotEmpty;
 
-    final Widget section = LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        final bool hasBoundedHeight = constraints.maxHeight.isFinite;
-        // Mirror desktop behavior: in non-paged mode, fill the constrained parent
-        // and scroll inside the table viewport.
-        final bool fillScrollableViewport =
-            hasBoundedHeight && !_isChunkModeEnabled;
-
-        final Widget tableContent = _buildMobile(
-          context,
-          constrainToHeight: hasBoundedHeight,
-          fillScrollableViewport: fillScrollableViewport,
-        );
-
-        final Widget content = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: hasBoundedHeight ? MainAxisSize.max : MainAxisSize.min,
-          children: <Widget>[
-            if (hasTitle)
-              Row(
-                children: <Widget>[
-                  Text(
-                    widget.title,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  if (!widget.isLoading && widget.items.isNotEmpty) ...<Widget>[
-                    const SizedBox(width: 10),
-                    SectionCountBadge(count: widget.items.length),
-                  ],
-                  const SizedBox(width: 16),
-                  const Expanded(child: SectionHeaderDivider()),
-                  const SizedBox(width: 16),
-                  if (widget.playbackCoordinator != null) ...<Widget>[
-                    SectionHeaderIconButton(
-                      icon: Icons.play_arrow,
-                      tooltip: 'Abspielen',
-                      onTap: hasPlayableContent ? _onPlayAllTap : null,
-                    ),
-                    const SizedBox(width: 8),
-                    SectionHeaderIconButton(
-                      icon: Icons.shuffle,
-                      tooltip: 'Zufällig',
-                      onTap: hasPlayableContent ? _onShuffleAllTap : null,
-                    ),
-                  ],
-                ],
+    return SliverMainAxisGroup(
+      slivers: <Widget>[
+        if (hasTitle)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: MobileSectionHeader(
+                title: widget.title,
+                itemCount: !widget.isLoading && widget.items.isNotEmpty
+                    ? widget.items.length
+                    : null,
+                showPlaybackActions: widget.playbackCoordinator != null,
+                onPlayTap: hasPlayableContent ? _onPlayAllTap : null,
+                onShuffleTap: hasPlayableContent ? _onShuffleAllTap : null,
+                shuffleTooltip: 'Zufällig',
               ),
-            if (hasTitle) const SizedBox(height: 10),
-            if (hasBoundedHeight)
-              Expanded(child: ClipRect(child: tableContent))
-            else
-              tableContent,
-          ],
-        );
-
-        return content;
-      },
+            ),
+          ),
+        if (widget.isLoading)
+          SliverFixedExtentList.builder(
+            itemExtent: _mobileRowExtent,
+            itemCount: widget.skeletonRowCount,
+            itemBuilder: (BuildContext context, int index) =>
+                _buildMobileTypedSkeletonRow(isFirst: index == 0),
+          )
+        else if (widget.items.isEmpty)
+          SliverToBoxAdapter(
+            child: Text(
+              widget.emptyText,
+              style: context.mashinTableTextStyles.emptyState,
+            ),
+          )
+        else if (_isChunkModeEnabled)
+          SliverToBoxAdapter(
+            child: SizedBox(
+              height: _chunkSize * _mobileRowExtent,
+              child: _buildMobile(
+                context,
+                constrainToHeight: false,
+                fillScrollableViewport: false,
+              ),
+            ),
+          )
+        else
+          SliverFixedExtentList.builder(
+            itemExtent: _mobileRowExtent,
+            itemCount: widget.items.length,
+            itemBuilder: (BuildContext context, int index) =>
+                _buildMobileTypedRow(
+                  item: widget.items[index],
+                  index: index,
+                  isFirst: index == 0,
+                  isSelected: _selectedIndexes.contains(index),
+                  selectionModeActive: _isMobileSelectionMode,
+                  selectionEnabled: widget.enableSelection,
+                  onToggleSelected: () => _toggleSelectedIndex(index),
+                  onLongPressSelect: () => _enterSelectionMode(index),
+                  onTap: () =>
+                      _onRowActivated(item: widget.items[index], index: index),
+                ),
+          ),
+      ],
     );
-
-    return section;
   }
 
   // Mobile Table Content
@@ -409,7 +415,7 @@ class _MediaTableSectionMobileState<T>
         itemCount: widget.skeletonRowCount,
         itemExtent: _mobileRowExtent,
         itemBuilder: (BuildContext context, int index) {
-          return _MobileTableRowSkeleton(isFirst: index == 0);
+          return _buildMobileTypedSkeletonRow(isFirst: index == 0);
         },
       );
 
@@ -600,6 +606,25 @@ class _MediaTableSectionMobileState<T>
       onLongPressSelect: onLongPressSelect,
       onTap: onTap,
     );
+  }
+
+  Widget _buildMobileTypedSkeletonRow({required bool isFirst}) {
+    if (T == Album) {
+      return _buildMobileTableRowAlbumSkeleton(isFirst: isFirst);
+    }
+    if (T == Playlist) {
+      return _buildMobileTableRowPlaylistSkeleton(isFirst: isFirst);
+    }
+    if (T == Artist) {
+      return _buildMobileTableRowArtistSkeleton(isFirst: isFirst);
+    }
+    if (T == Track) {
+      return _buildMobileTableRowTrackSkeleton(isFirst: isFirst);
+    }
+    if (T == QueueItem) {
+      return _buildMobileTableRowQueueSkeleton(isFirst: isFirst);
+    }
+    return _buildMobileTableRowUnknownSkeleton(isFirst: isFirst);
   }
 
   Widget _buildMobileTableRowTrack({
@@ -796,7 +821,7 @@ class _MediaTableSectionMobileState<T>
   }
 }
 
-class _MobileTableRowBase extends StatefulWidget {
+class _MobileTableRowBase extends StatelessWidget {
   final String title;
   final String subtitle;
   final String trailing;
@@ -834,120 +859,100 @@ class _MobileTableRowBase extends StatefulWidget {
   });
 
   @override
-  State<_MobileTableRowBase> createState() => _MobileTableRowBaseState();
-}
-
-class _MobileTableRowBaseState extends State<_MobileTableRowBase> {
-  bool _isHovered = false;
-
-  @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
     final textStyles = context.mashinTableTextStyles;
 
-    Color rowBackground = Colors.transparent;
-    if (widget.isSelected) {
-      rowBackground = _isHovered ? colors.hover : colors.selection;
-    } else if (_isHovered) {
-      rowBackground = colors.hover;
-    }
-
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onLongPress: widget.selectionEnabled ? widget.onLongPressSelect : null,
-        onTap: widget.selectionModeActive
-            ? widget.onToggleSelected
-            : widget.onTap,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 64),
-          decoration: BoxDecoration(
-            color: rowBackground,
-            border: widget.isFirst
-                ? null
-                : Border(top: BorderSide(color: colors.border)),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          child: Row(
-            children: <Widget>[
-              MediaTableCover(
-                coverUrl: widget.coverUrl,
-                fallbackIcon: widget.fallbackIcon,
-                size: 52,
-                radius: 8,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: <Widget>[
-                    PlaybackAwareBuilder(
-                      coordinator: widget.playbackCoordinator,
-                      item: widget.playbackItem,
-                      builder: (BuildContext context, bool isCurrent) {
-                        return Text(
-                          widget.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: textStyles.mobileTitle.copyWith(
-                            color: isCurrent ? colors.accent : null,
-                          ),
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 1),
-                    Text(
-                      widget.subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: textStyles.mobileSubtitle,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                widget.trailing,
-                textAlign: TextAlign.right,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: textStyles.mobileTrailing,
-              ),
-              const SizedBox(width: 10),
-              SizedBox(
-                width: 20,
-                child: Align(
-                  alignment: Alignment.center,
-                  child: MediaProviderIcon(
-                    providerLabel: widget.providerLabel,
-                    iconSvg: widget.providerIconSvg,
-                    size: 16,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              SizedBox(
-                width: 40,
-                height: 40,
-                child: Center(
-                  child: widget.selectionEnabled && widget.selectionModeActive
-                      ? _MobileSelectionCheckBox(
-                          isChecked: widget.isSelected,
-                          isVisible: true,
-                          onTap: widget.onToggleSelected,
-                        )
-                      : Icon(
-                          Icons.more_vert_outlined,
-                          size: 18,
-                          color: colors.textSecondary,
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onLongPress: selectionEnabled ? onLongPressSelect : null,
+      onTap: selectionModeActive ? onToggleSelected : onTap,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 64),
+        decoration: BoxDecoration(
+          color: isSelected ? colors.selection : Colors.transparent,
+          border: isFirst
+              ? null
+              : Border(top: BorderSide(color: colors.border)),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: Row(
+          children: <Widget>[
+            MediaTableCover(
+              coverUrl: coverUrl,
+              fallbackIcon: fallbackIcon,
+              size: 52,
+              radius: 8,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  PlaybackAwareBuilder(
+                    coordinator: playbackCoordinator,
+                    item: playbackItem,
+                    builder: (BuildContext context, bool isCurrent) {
+                      return Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textStyles.mobileTitle.copyWith(
+                          color: isCurrent ? colors.accent : null,
                         ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: textStyles.mobileSubtitle,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              trailing,
+              textAlign: TextAlign.right,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: textStyles.mobileTrailing,
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              width: 20,
+              child: Align(
+                alignment: Alignment.center,
+                child: MediaProviderIcon(
+                  providerLabel: providerLabel,
+                  iconSvg: providerIconSvg,
+                  size: 16,
                 ),
               ),
-            ],
-          ),
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              width: 40,
+              height: 40,
+              child: Center(
+                child: selectionEnabled && selectionModeActive
+                    ? _MobileSelectionCheckBox(
+                        isChecked: isSelected,
+                        isVisible: true,
+                        onTap: onToggleSelected,
+                      )
+                    : Icon(
+                        Icons.more_vert_outlined,
+                        size: 18,
+                        color: colors.textSecondary,
+                      ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -992,10 +997,72 @@ Widget _buildMobileTableRowBase({
   );
 }
 
+Widget _buildMobileTableRowTrackSkeleton({required bool isFirst}) {
+  return _MobileTableRowSkeleton(
+    isFirst: isFirst,
+    titleWidth: 176,
+    subtitleWidth: 124,
+    trailingWidth: 34,
+  );
+}
+
+Widget _buildMobileTableRowQueueSkeleton({required bool isFirst}) {
+  return _MobileTableRowSkeleton(
+    isFirst: isFirst,
+    titleWidth: 172,
+    subtitleWidth: 116,
+    trailingWidth: 34,
+  );
+}
+
+Widget _buildMobileTableRowAlbumSkeleton({required bool isFirst}) {
+  return _MobileTableRowSkeleton(
+    isFirst: isFirst,
+    titleWidth: 168,
+    subtitleWidth: 110,
+    trailingWidth: 28,
+  );
+}
+
+Widget _buildMobileTableRowPlaylistSkeleton({required bool isFirst}) {
+  return _MobileTableRowSkeleton(
+    isFirst: isFirst,
+    titleWidth: 170,
+    subtitleWidth: 96,
+    trailingWidth: 60,
+  );
+}
+
+Widget _buildMobileTableRowArtistSkeleton({required bool isFirst}) {
+  return _MobileTableRowSkeleton(
+    isFirst: isFirst,
+    titleWidth: 176,
+    subtitleWidth: 82,
+    trailingWidth: 68,
+  );
+}
+
+Widget _buildMobileTableRowUnknownSkeleton({required bool isFirst}) {
+  return _MobileTableRowSkeleton(
+    isFirst: isFirst,
+    titleWidth: 120,
+    subtitleWidth: 80,
+    trailingWidth: 28,
+  );
+}
+
 class _MobileTableRowSkeleton extends StatelessWidget {
   final bool isFirst;
+  final double titleWidth;
+  final double subtitleWidth;
+  final double trailingWidth;
 
-  const _MobileTableRowSkeleton({required this.isFirst});
+  const _MobileTableRowSkeleton({
+    required this.isFirst,
+    required this.titleWidth,
+    required this.subtitleWidth,
+    required this.trailingWidth,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1032,14 +1099,14 @@ class _MobileTableRowSkeleton extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
-                skeletonBox(width: 176, height: 15),
+                skeletonBox(width: titleWidth, height: 15),
                 const SizedBox(height: 4),
-                skeletonBox(width: 124, height: 12),
+                skeletonBox(width: subtitleWidth, height: 12),
               ],
             ),
           ),
           const SizedBox(width: 10),
-          skeletonBox(width: 34, height: 12, radius: 4),
+          skeletonBox(width: trailingWidth, height: 12, radius: 4),
           const SizedBox(width: 10),
           SizedBox(
             width: 20,

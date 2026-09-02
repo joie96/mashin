@@ -90,12 +90,12 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
         ),
       if (item is! Playlist)
         ContextMenuAction(
-        label: 'Radio starten',
-        icon: Icons.radio_outlined,
-        onSelected: () => item is Track
-            ? _controller.startTrackRadio(item)
-            : _controller.startItemRadio(item),
-      ),
+          label: 'Radio starten',
+          icon: Icons.radio_outlined,
+          onSelected: () => item is Track
+              ? _controller.startTrackRadio(item)
+              : _controller.startItemRadio(item),
+        ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
@@ -244,109 +244,138 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
     final MashinColors colors = context.mashinColors;
     final Playlist? playlist = _controller.playlist;
     final String? imageUri = playlist?.imageUri;
+    final bool hasImage = imageUri != null && imageUri.trim().isNotEmpty;
 
     return Container(
       color: colors.bgPrimary,
-      child: Column(
-        children: <Widget>[
-          SizedBox(
-            height: _bannerHeight,
-            width: double.infinity,
-            child: ClipRRect(
-              borderRadius: const BorderRadius.vertical(
-                bottom: Radius.circular(16),
-              ),
-              child: Container(
-                color: colors.bgTertiary,
-                child: imageUri == null || imageUri.trim().isEmpty
-                    ? Icon(
-                        Icons.queue_music_outlined,
-                        color: colors.accent,
-                        size: 72,
-                      )
-                    : MediaImage(
-                        source: imageUri,
-                        fit: BoxFit.cover,
-                        fallback: Icon(
-                          Icons.queue_music_outlined,
-                          color: colors.accent,
-                          size: 72,
+      child: CustomScrollView(
+        slivers: <Widget>[
+          SliverPadding(
+            padding: const EdgeInsets.only(bottom: 12),
+            sliver: SliverToBoxAdapter(
+              child: Column(
+                children: <Widget>[
+                  SizedBox(
+                    height: _bannerHeight,
+                    width: double.infinity,
+                    child: ClipRRect(
+                      borderRadius: const BorderRadius.vertical(
+                        bottom: Radius.circular(16),
+                      ),
+                      child: Container(
+                        color: colors.bgPrimary,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: <Widget>[
+                            !hasImage
+                                ? Icon(
+                                    Icons.queue_music_outlined,
+                                    color: colors.textSecondary,
+                                    size: 72,
+                                  )
+                                : MediaImage(
+                                    source: imageUri,
+                                    fit: BoxFit.cover,
+                                    fallback: Icon(
+                                      Icons.queue_music_outlined,
+                                      color: colors.textSecondary,
+                                      size: 72,
+                                    ),
+                                  ),
+                            if (hasImage)
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        begin: Alignment.topCenter,
+                                        end: Alignment.bottomCenter,
+                                        colors: <Color>[
+                                          Colors.transparent,
+                                          colors.bgPrimary,
+                                        ],
+                                        stops: const <double>[0.44, 1],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              _controller.playlistName,
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '${_controller.tracksCountText} • ${_controller.totalDurationText}',
-            style: TextStyle(color: colors.textSecondary),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              _MobileActionButton(
-                icon: Icons.play_arrow,
-                onTap: _controller.playPlaylist,
-              ),
-              const SizedBox(width: 14),
-              _MobileActionButton(
-                icon: Icons.shuffle,
-                onTap: _controller.shufflePlaylist,
-              ),
-              if (!_controller.isLocalPlaylist) ...<Widget>[
-                const SizedBox(width: 14),
-                _MobileActionButton(
-                  icon: _controller.isPlaylistFavorite
-                      ? Icons.favorite
-                      : Icons.favorite_border_outlined,
-                  onTap: _controller.togglePlaylistFavorite,
-                ),
-              ],
-              const SizedBox(width: 14),
-              _MobileActionButton(
-                icon: Icons.more_vert_outlined,
-                onTap: playlist == null
-                    ? null
-                    : () => unawaited(
-                        const AppContextMenuController().show(
-                          context: context,
-                          actions: _buildHeaderMenuActions(playlist),
-                        ),
-                      ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          // Header stays pinned, only the table scrolls.
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: MediaTableSectionMobile<Track>(
-                title: ' ',
-                isLoading: _controller.isLoadingTracks,
-                items: _controller.tracks,
-                emptyText: 'Keine Titel in dieser Wiedergabeliste.',
-                maxItemsPerPage: 0,
-                playbackCoordinator: widget.playbackCoordinator,
-                onRowTap: (Track item, int _) => unawaited(
-                  const AppContextMenuController().show(
-                    context: context,
-                    actions: _buildItemMenuActions(item),
+                    ),
                   ),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                      _controller.playlistName,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${_controller.tracksCountText} • ${_controller.totalDurationText}',
+                    style: TextStyle(color: colors.textSecondary),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: <Widget>[
+                      _MobileActionButton(
+                        icon: Icons.play_arrow,
+                        onTap: _controller.playPlaylist,
+                      ),
+                      const SizedBox(width: 14),
+                      _MobileActionButton(
+                        icon: Icons.shuffle,
+                        onTap: _controller.shufflePlaylist,
+                      ),
+                      if (!_controller.isLocalPlaylist) ...<Widget>[
+                        const SizedBox(width: 14),
+                        _MobileActionButton(
+                          icon: _controller.isPlaylistFavorite
+                              ? Icons.favorite
+                              : Icons.favorite_border_outlined,
+                          onTap: _controller.togglePlaylistFavorite,
+                        ),
+                      ],
+                      const SizedBox(width: 14),
+                      _MobileActionButton(
+                        icon: Icons.more_vert_outlined,
+                        onTap: playlist == null
+                            ? null
+                            : () => unawaited(
+                                const AppContextMenuController().show(
+                                  context: context,
+                                  actions: _buildHeaderMenuActions(playlist),
+                                ),
+                              ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            sliver: MediaTableSectionMobile<Track>(
+              title: ' ',
+              isLoading: _controller.isLoadingTracks,
+              items: _controller.tracks,
+              emptyText: 'Keine Titel in dieser Wiedergabeliste.',
+              maxItemsPerPage: 0,
+              playbackCoordinator: widget.playbackCoordinator,
+              onRowTap: (Track item, int _) => unawaited(
+                const AppContextMenuController().show(
+                  context: context,
+                  actions: _buildItemMenuActions(item),
                 ),
               ),
             ),
@@ -368,13 +397,12 @@ class _MobileActionButton extends StatelessWidget {
     final colors = context.mashinColors;
 
     return Material(
-      color: colors.bgSecondary,
+      color: Colors.transparent,
       shape: const CircleBorder(),
       child: InkWell(
         customBorder: const CircleBorder(),
         onTap: onTap,
-        hoverColor: colors.hover,
-        highlightColor: colors.selection,
+        highlightColor: Colors.transparent,
         splashColor: colors.selection,
         child: SizedBox(
           width: 44,

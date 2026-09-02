@@ -3,12 +3,16 @@ import 'package:flutter/scheduler.dart';
 
 class SelectionSessionRegistration {
   final bool allSelected;
+  final int selectedCount;
+  final String itemTypeLabel;
   final VoidCallback onToggleAll;
   final VoidCallback? onMenuTap;
   final VoidCallback onClose;
 
   const SelectionSessionRegistration({
     required this.allSelected,
+    this.selectedCount = 0,
+    this.itemTypeLabel = 'Elemente',
     required this.onToggleAll,
     required this.onMenuTap,
     required this.onClose,
@@ -27,9 +31,14 @@ class SelectionController extends ChangeNotifier {
 
   bool get allSelected => _activeRegistration?.allSelected ?? false;
 
+  int get selectedCount => _activeRegistration?.selectedCount ?? 0;
+
+  String get itemTypeLabel => _activeRegistration?.itemTypeLabel ?? 'Elemente';
+
   void _runAfterBuild(VoidCallback action) {
     final SchedulerPhase phase = SchedulerBinding.instance.schedulerPhase;
-    if (phase == SchedulerPhase.idle || phase == SchedulerPhase.postFrameCallbacks) {
+    if (phase == SchedulerPhase.idle ||
+        phase == SchedulerPhase.postFrameCallbacks) {
       action();
       return;
     }
@@ -48,11 +57,14 @@ class SelectionController extends ChangeNotifier {
     required SelectionSessionRegistration registration,
   }) {
     final bool ownerChanged = !identical(_activeOwner, owner);
-    final SelectionSessionRegistration? previousRegistration = _activeRegistration;
+    final SelectionSessionRegistration? previousRegistration =
+        _activeRegistration;
     final bool registrationChanged =
         previousRegistration == null ||
         previousRegistration.allSelected != registration.allSelected ||
-        previousRegistration.onMenuTap != registration.onMenuTap;
+        previousRegistration.onMenuTap != registration.onMenuTap ||
+        previousRegistration.selectedCount != registration.selectedCount ||
+        previousRegistration.itemTypeLabel != registration.itemTypeLabel;
 
     if (!ownerChanged && !registrationChanged) {
       return;
@@ -62,7 +74,8 @@ class SelectionController extends ChangeNotifier {
     _activeRegistration = registration;
 
     if (ownerChanged) {
-      final VoidCallback? clearPreviousSelection = previousRegistration?.onClose;
+      final VoidCallback? clearPreviousSelection =
+          previousRegistration?.onClose;
       if (clearPreviousSelection != null) {
         _runAfterBuild(clearPreviousSelection);
       }
@@ -92,4 +105,24 @@ class SelectionController extends ChangeNotifier {
   void onClose() {
     _activeRegistration?.onClose();
   }
+}
+
+String selectionTypeLabel(Type? type, int count) {
+  final String name = type?.toString() ?? '';
+  if (count == 1) {
+    return switch (name) {
+      'Track' || 'QueueItem' => 'Track',
+      'Album' => 'Album',
+      'Artist' => 'Artist',
+      'Playlist' => 'Playlist',
+      _ => 'Element',
+    };
+  }
+  return switch (name) {
+    'Track' || 'QueueItem' => 'Tracks',
+    'Album' => 'Alben',
+    'Artist' => 'Artists',
+    'Playlist' => 'Playlists',
+    _ => 'Elemente',
+  };
 }

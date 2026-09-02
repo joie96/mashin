@@ -73,7 +73,7 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
             context,
           ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 20),
         TextField(
           controller: _queryController,
           textInputAction: TextInputAction.search,
@@ -116,15 +116,24 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
             ),
           )
         else ...<Widget>[
-          MediaTableSectionMobile<Track>(
-            title: 'Tracks',
-            items: _controller.tracks,
-            isLoading: _controller.isLoadingTracks,
-            emptyText: 'Keine Tracks gefunden.',
-            maxItemsPerPage: 3,
-            playbackCoordinator: widget.playbackCoordinator,
+          SizedBox(
+            height: 234,
+            child: CustomScrollView(
+              primary: false,
+              physics: const NeverScrollableScrollPhysics(),
+              slivers: <Widget>[
+                MediaTableSectionMobile<Track>(
+                  title: 'Tracks',
+                  items: _controller.tracks,
+                  isLoading: _controller.isLoadingTracks,
+                  emptyText: 'Keine Tracks gefunden.',
+                  maxItemsPerPage: 3,
+                  playbackCoordinator: widget.playbackCoordinator,
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 28),
           MediaRowSectionMobile<Album>(
             title: 'Alben',
             isLoading: _controller.isLoadingAlbums,
@@ -133,7 +142,7 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
             playbackCoordinator: widget.playbackCoordinator,
             onItemTap: widget.onOpenAlbum,
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 28),
           MediaRowSectionMobile<Playlist>(
             title: 'Playlists',
             isLoading: _controller.isLoadingPlaylists,
@@ -142,7 +151,7 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
             playbackCoordinator: widget.playbackCoordinator,
             onItemTap: widget.onOpenPlaylist,
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 28),
           MediaRowSectionMobile<Artist>(
             title: 'Artists',
             isLoading: _controller.isLoadingArtists,

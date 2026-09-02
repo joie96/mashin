@@ -42,6 +42,7 @@ class ArtistDetailPageMobile extends StatefulWidget {
 class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
     with TickerProviderStateMixin {
   static const double _bannerHeight = 220;
+  static const int _descriptionCollapsedMaxLines = 3;
 
   late final ArtistDetailController _controller;
 
@@ -199,26 +200,34 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
 
     return Container(
       color: colors.bgPrimary,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            _buildBanner(colors),
-            const SizedBox(height: 4),
-            _buildNameAndMeta(context, colors),
-            const SizedBox(height: 16),
-            _buildActions(colors),
-            if (_controller.isLoadingMetadata ||
-                _controller.hasDescription) ...<Widget>[
-              const SizedBox(height: 16),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: _buildDescription(context, colors),
+      child: CustomScrollView(
+        slivers: <Widget>[
+          SliverPadding(
+            padding: const EdgeInsets.only(bottom: 12),
+            sliver: SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  _buildBanner(colors),
+                  const SizedBox(height: 4),
+                  _buildNameAndMeta(context, colors),
+                  const SizedBox(height: 16),
+                  _buildActions(colors),
+                  if (_controller.isLoadingMetadata ||
+                      _controller.hasDescription) ...<Widget>[
+                    const SizedBox(height: 16),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: _buildDescription(context, colors),
+                    ),
+                  ],
+                ],
               ),
-            ],
-            const SizedBox(height: 16),
-            Padding(
+            ),
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 16)),
+          SliverToBoxAdapter(
+            child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: MediaRowSectionMobile<Album>(
                 title: 'Veröffentlichungen',
@@ -229,8 +238,10 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
                 onItemTap: widget.onOpenAlbum,
               ),
             ),
-            const SizedBox(height: 16),
-            Padding(
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 16)),
+          SliverToBoxAdapter(
+            child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: MediaRowSectionMobile<Artist>(
                 title: 'Ähnliche Interpreten',
@@ -241,21 +252,22 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
                 onItemTap: widget.onOpenArtist,
               ),
             ),
-            const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: MediaTableSectionMobile<Track>(
-                title: 'Top Tracks',
-                isLoading: _controller.isLoadingTopTracks,
-                items: _controller.topTracks,
-                emptyText: 'Keine Top Tracks gefunden.',
-                maxItemsPerPage: 0,
-                playbackCoordinator: widget.playbackCoordinator,
-                onRowTap: (Track item, int index) => _showItemMenu(item),
-              ),
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 16)),
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            sliver: MediaTableSectionMobile<Track>(
+              title: 'Top Tracks',
+              isLoading: _controller.isLoadingTopTracks,
+              items: _controller.topTracks,
+              emptyText: 'Keine Top Tracks gefunden.',
+              maxItemsPerPage: 0,
+              playbackCoordinator: widget.playbackCoordinator,
+              onRowTap: (Track item, int index) => _showItemMenu(item),
             ),
-          ],
-        ),
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 12)),
+        ],
       ),
     );
   }
@@ -277,20 +289,43 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
           bottomRight: Radius.circular(16),
         ),
         child: Container(
-          color: colors.bgTertiary,
-          child: hasImage
-              ? MediaImage(
+          color: colors.bgPrimary,
+          child: Stack(
+            fit: StackFit.expand,
+            children: <Widget>[
+              if (hasImage)
+                MediaImage(
                   source: imageUri,
                   fit: BoxFit.cover,
                   fallback: Icon(
                     Icons.person_outlined,
-                    color: colors.accent,
+                    color: colors.textSecondary,
                     size: 72,
                   ),
                 )
-              : _controller.isLoadingMetadata
-              ? null
-              : Icon(Icons.person_outlined, color: colors.accent, size: 72),
+              else if (!_controller.isLoadingMetadata)
+                Icon(
+                  Icons.person_outlined,
+                  color: colors.textSecondary,
+                  size: 72,
+                ),
+              if (hasImage)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: <Color>[Colors.transparent, colors.bgPrimary],
+                          stops: const <double>[0.44, 1],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -330,6 +365,7 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: <Widget>[
               Flexible(
                 child: Text(
@@ -342,12 +378,15 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
               ),
               if (artist != null) ...<Widget>[
                 const SizedBox(width: 8),
-                MediaProviderIcon(
-                  providerLabel: artist.provider,
-                  iconSvg: ProviderManifestRegistry.iconSvgForProvider(
-                    artist.provider,
+                Transform.translate(
+                  offset: const Offset(0, 3),
+                  child: MediaProviderIcon(
+                    providerLabel: artist.provider,
+                    iconSvg: ProviderManifestRegistry.iconSvgForProvider(
+                      artist.provider,
+                    ),
+                    size: 20,
                   ),
-                  size: 20,
                 ),
               ],
             ],
@@ -428,31 +467,81 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
           style: TextStyle(color: colors.textPrimary, fontSize: 14),
         ),
         const SizedBox(height: 6),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 240),
-          curve: Curves.easeInOutCubic,
-          alignment: Alignment.topCenter,
-          clipBehavior: Clip.hardEdge,
-          child: GestureDetector(
-            onTap: _controller.toggleDescription,
-            child: Text(
-              _controller.description ?? '',
-              maxLines: _controller.descriptionMaxLines,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: colors.textSecondary, fontSize: 13),
-            ),
-          ),
-        ),
-        Center(
-          child: IconButton(
-            onPressed: _controller.toggleDescription,
-            icon: AnimatedRotation(
-              turns: _controller.isDescriptionExpanded ? 0.5 : 0,
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOutCubic,
-              child: const Icon(Icons.expand_more_outlined),
-            ),
-          ),
+        ListenableBuilder(
+          listenable: _controller.metadataListenable,
+          builder: (BuildContext context, Widget? child) {
+            final TextStyle descriptionStyle = TextStyle(
+              color: colors.textSecondary,
+              fontSize: 13,
+            );
+            final String description = _controller.description ?? '';
+            final bool isExpanded = _controller.isDescriptionExpanded;
+
+            return LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints constraints) {
+                final TextPainter textPainter = TextPainter(
+                  text: TextSpan(text: description, style: descriptionStyle),
+                  textDirection: Directionality.of(context),
+                  textScaler: MediaQuery.textScalerOf(context),
+                  maxLines: _descriptionCollapsedMaxLines,
+                )..layout(maxWidth: constraints.maxWidth);
+                final bool canExpand = textPainter.didExceedMaxLines;
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 260),
+                      curve: Curves.easeInOutCubic,
+                      alignment: Alignment.topCenter,
+                      clipBehavior: Clip.hardEdge,
+                      child: GestureDetector(
+                        onTap: canExpand ? _controller.toggleDescription : null,
+                        child: SizedBox(
+                          width: constraints.maxWidth,
+                          child: Text(
+                            description,
+                            maxLines: isExpanded
+                                ? 1000
+                                : _descriptionCollapsedMaxLines,
+                            overflow: TextOverflow.ellipsis,
+                            softWrap: true,
+                            textWidthBasis: TextWidthBasis.parent,
+                            style: descriptionStyle,
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (canExpand)
+                      Center(
+                        child: Material(
+                          color: Colors.transparent,
+                          borderRadius: BorderRadius.circular(12),
+                          child: InkWell(
+                            onTap: _controller.toggleDescription,
+                            borderRadius: BorderRadius.circular(12),
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: AnimatedRotation(
+                                turns: isExpanded ? 0.5 : 0,
+                                duration: const Duration(milliseconds: 220),
+                                curve: Curves.easeOutCubic,
+                                child: Icon(
+                                  Icons.expand_more_outlined,
+                                  size: 14,
+                                  color: colors.textPrimary,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            );
+          },
         ),
       ],
     );
@@ -485,13 +574,12 @@ class _MobileActionButton extends StatelessWidget {
     final colors = context.mashinColors;
 
     return Material(
-      color: colors.bgSecondary,
+      color: Colors.transparent,
       shape: const CircleBorder(),
       child: InkWell(
         customBorder: const CircleBorder(),
         onTap: onTap,
-        hoverColor: colors.hover,
-        highlightColor: colors.selection,
+        highlightColor: Colors.transparent,
         splashColor: colors.selection,
         child: SizedBox(
           width: 44,

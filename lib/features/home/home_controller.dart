@@ -27,6 +27,14 @@ class HomeController extends ChangeNotifier {
   final UserDataController? userDataController;
 
   bool _isDisposed = false;
+  final ChangeNotifier _recommendationsNotifier = ChangeNotifier();
+  final ChangeNotifier _genrePlaylistsNotifier = ChangeNotifier();
+  final ChangeNotifier _artistPlaylistsNotifier = ChangeNotifier();
+  final ChangeNotifier _topTracksNotifier = ChangeNotifier();
+  final ChangeNotifier _topArtistsNotifier = ChangeNotifier();
+  final ChangeNotifier _similarArtistsNotifier = ChangeNotifier();
+  final ChangeNotifier _recentListensNotifier = ChangeNotifier();
+
   bool _isLoadingRecommendations = true;
   bool _isLoadingGenrePlaylists = true;
   bool _isLoadingPlaylists = true;
@@ -61,6 +69,14 @@ class HomeController extends ChangeNotifier {
       _similarArtistSections;
   List<Track> get recentListens => _recentListens;
 
+  Listenable get recommendationsListenable => _recommendationsNotifier;
+  Listenable get genrePlaylistsListenable => _genrePlaylistsNotifier;
+  Listenable get artistPlaylistsListenable => _artistPlaylistsNotifier;
+  Listenable get topTracksListenable => _topTracksNotifier;
+  Listenable get topArtistsListenable => _topArtistsNotifier;
+  Listenable get similarArtistsListenable => _similarArtistsNotifier;
+  Listenable get recentListensListenable => _recentListensNotifier;
+
   bool get showNoRecommendations =>
       !_isLoadingRecommendations && _recommendationItems.isEmpty;
   bool get showNoGenrePlaylists =>
@@ -79,6 +95,21 @@ class HomeController extends ChangeNotifier {
     if (!_isDisposed) {
       super.notifyListeners();
     }
+  }
+
+  void _notifySection(ChangeNotifier notifier) {
+    if (!_isDisposed) {
+      notifier.notifyListeners();
+    }
+  }
+
+  void _notifyRecommendationSections() {
+    _notifySection(_recommendationsNotifier);
+    _notifySection(_genrePlaylistsNotifier);
+    _notifySection(_artistPlaylistsNotifier);
+    _notifySection(_topTracksNotifier);
+    _notifySection(_topArtistsNotifier);
+    _notifySection(_similarArtistsNotifier);
   }
 
   Future<void> load() async {
@@ -108,6 +139,8 @@ class HomeController extends ChangeNotifier {
         )
         .toList(growable: false);
     _recentListens = _withFavoriteStatuses(_recentListens);
+    _notifyRecommendationSections();
+    _notifySection(_recentListensNotifier);
     notifyListeners();
   }
 
@@ -150,6 +183,7 @@ class HomeController extends ChangeNotifier {
     _isLoadingTopTracks = true;
     _isLoadingTopArtists = true;
     _isLoadingSimilarArtists = true;
+    _notifyRecommendationSections();
     notifyListeners();
 
     try {
@@ -200,12 +234,14 @@ class HomeController extends ChangeNotifier {
       _isLoadingTopTracks = false;
       _isLoadingTopArtists = false;
       _isLoadingSimilarArtists = false;
+      _notifyRecommendationSections();
       notifyListeners();
     }
   }
 
   Future<void> _loadRecentListens() async {
     _isLoadingRecentListens = true;
+    _notifySection(_recentListensNotifier);
     notifyListeners();
     try {
       final List<MediaItem> recent = await client.getRecentlyPlayedItems(
@@ -223,6 +259,7 @@ class HomeController extends ChangeNotifier {
       _recentListens = const <Track>[];
     } finally {
       _isLoadingRecentListens = false;
+      _notifySection(_recentListensNotifier);
       notifyListeners();
     }
   }
@@ -310,9 +347,7 @@ class HomeController extends ChangeNotifier {
             ),
           ),
         )
-        .where(
-          (HomeSimilarArtistSection section) => section.artists.isNotEmpty,
-        )
+        .where((HomeSimilarArtistSection section) => section.artists.isNotEmpty)
         .take(5)
         .toList(growable: false);
   }
@@ -370,6 +405,13 @@ class HomeController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
+    _recommendationsNotifier.dispose();
+    _genrePlaylistsNotifier.dispose();
+    _artistPlaylistsNotifier.dispose();
+    _topTracksNotifier.dispose();
+    _topArtistsNotifier.dispose();
+    _similarArtistsNotifier.dispose();
+    _recentListensNotifier.dispose();
     super.dispose();
   }
 }
