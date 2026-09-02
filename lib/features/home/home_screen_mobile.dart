@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import '../../data/music_assistant/ma_client.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../playback/playback_coordinator.dart';
+import '../shared/context_menu/context_menu_controller.dart';
 import '../shared/userdata_controller.dart';
 import '../shared/widgets/media_list_section_mobile.dart';
 import '../shared/widgets/media_row_section_mobile.dart';
@@ -85,6 +86,139 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
     }
   }
 
+  Artist? _primaryArtistOf(MediaItem item) {
+    final List<Artist> artists = switch (item) {
+      Track track => track.artists,
+      Album album => album.artists,
+      _ => const <Artist>[],
+    };
+    return artists.firstOrNull;
+  }
+
+  List<ContextMenuAction> _buildSelectionMenuActions<T extends MediaItem>(
+    List<T> selectedItems,
+  ) {
+    final List<MediaItem> targets = selectedItems.cast<MediaItem>();
+    final MediaItem item = targets.first;
+    final List<Track> tracks = targets.whereType<Track>().toList(
+      growable: false,
+    );
+    final bool isSingleTarget = targets.length == 1;
+    final bool allFavorite = targets.every(_controller.isItemFavorite);
+    final List<ContextMenuAction> actions = <ContextMenuAction>[
+      ContextMenuAction(
+        label: 'Abspielen',
+        icon: Icons.play_arrow,
+        onSelected: () => widget.playbackCoordinator.playMedia(targets),
+      ),
+      if (item is Album || item is Playlist || item is Artist)
+        ContextMenuAction(
+          label: 'Zufällig abspielen',
+          icon: Icons.shuffle_outlined,
+          onSelected: () =>
+              widget.playbackCoordinator.shufflePlayMedia(targets),
+        ),
+      if (item is! Playlist)
+        ContextMenuAction(
+          label: 'Radio starten',
+          icon: Icons.radio_outlined,
+          onSelected: () =>
+              widget.playbackCoordinator.playMediaRadioNext(targets),
+        ),
+      ContextMenuAction(
+        label: 'Als Nächstes spielen',
+        icon: Icons.keyboard_return,
+        iconQuarterTurns: 2,
+        onSelected: () => widget.playbackCoordinator.playMediaNext(targets),
+      ),
+      ContextMenuAction(
+        label: 'Als Letztes spielen',
+        icon: Icons.last_page,
+        onSelected: () => widget.playbackCoordinator.playMediaLast(targets),
+      ),
+    ];
+
+    if (isSingleTarget) {
+      final Artist? primaryArtist = item is Artist
+          ? item
+          : _primaryArtistOf(item);
+      final Album? primaryAlbum = item is Track ? item.album : null;
+      if ((primaryArtist != null && widget.onOpenArtist != null) ||
+          (primaryAlbum != null && widget.onOpenAlbum != null)) {
+        actions.add(const ContextMenuAction.separator());
+        if (primaryArtist != null && widget.onOpenArtist != null) {
+          actions.add(
+            ContextMenuAction(
+              label: 'Künstler:in öffnen',
+              icon: Icons.person_outline,
+              onSelected: () => widget.onOpenArtist!(primaryArtist),
+            ),
+          );
+        }
+        if (primaryAlbum != null && widget.onOpenAlbum != null) {
+          actions.add(
+            ContextMenuAction(
+              label: 'Album öffnen',
+              icon: Icons.album_outlined,
+              onSelected: () => widget.onOpenAlbum!(primaryAlbum),
+            ),
+          );
+        }
+      }
+    }
+
+    final UserDataController? userData = widget.userDataController;
+    if (tracks.isNotEmpty &&
+        userData != null &&
+        userData.playlists.isNotEmpty) {
+      actions
+        ..add(const ContextMenuAction.separator())
+        ..add(
+          ContextMenuAction.submenu(
+            label: 'Zu Wiedergabeliste hinzufügen',
+            icon: Icons.playlist_add_outlined,
+            children: userData.playlists
+                .map(
+                  (Playlist playlist) => ContextMenuAction(
+                    label: playlist.name,
+                    icon: Icons.playlist_play_outlined,
+                    onSelected: () =>
+                        userData.addPlaylistTracks(playlist.itemId, tracks),
+                  ),
+                )
+                .toList(growable: false),
+          ),
+        );
+    }
+
+    actions
+      ..add(const ContextMenuAction.separator())
+      ..add(
+        ContextMenuAction(
+          label: allFavorite
+              ? 'Aus Favoriten entfernen'
+              : 'Zu Favoriten hinzufügen',
+          icon: allFavorite
+              ? Icons.favorite_outlined
+              : Icons.favorite_border_outlined,
+          isEnabled: widget.userDataController != null,
+          onSelected: () async {
+            for (final MediaItem target in targets) {
+              await _controller.setFavorite(target, !allFavorite);
+            }
+          },
+        ),
+      );
+    return actions;
+  }
+
+  Future<void> _showSelectionMenu<T extends MediaItem>(List<T> items) {
+    return const AppContextMenuController().show(
+      context: context,
+      actions: _buildSelectionMenuActions(items),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return CustomScrollView(
@@ -110,6 +244,8 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
             controller: _controller,
             playbackCoordinator: widget.playbackCoordinator,
             onItemTap: _openTrackContext,
+            onSelectionMenuTap: (List<Track> items) =>
+                unawaited(_showSelectionMenu(items)),
           ),
         ),
         const SliverPadding(padding: EdgeInsets.only(top: _sectionGap)),
@@ -118,6 +254,8 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
             controller: _controller,
             playbackCoordinator: widget.playbackCoordinator,
             onItemTap: widget.onOpenPlaylist,
+            onSelectionMenuTap: (List<Playlist> items) =>
+                unawaited(_showSelectionMenu(items)),
           ),
         ),
         const SliverPadding(padding: EdgeInsets.only(top: _sectionGap)),
@@ -126,6 +264,8 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
             controller: _controller,
             playbackCoordinator: widget.playbackCoordinator,
             onItemTap: widget.onOpenPlaylist,
+            onSelectionMenuTap: (List<Playlist> items) =>
+                unawaited(_showSelectionMenu(items)),
           ),
         ),
         const SliverPadding(padding: EdgeInsets.only(top: _sectionGap)),
@@ -134,6 +274,8 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
             controller: _controller,
             playbackCoordinator: widget.playbackCoordinator,
             onItemTap: _openTrackContext,
+            onSelectionMenuTap: (List<Track> items) =>
+                unawaited(_showSelectionMenu(items)),
           ),
         ),
         const SliverPadding(padding: EdgeInsets.only(top: _sectionGap)),
@@ -142,6 +284,8 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
             controller: _controller,
             playbackCoordinator: widget.playbackCoordinator,
             onItemTap: widget.onOpenArtist,
+            onSelectionMenuTap: (List<Artist> items) =>
+                unawaited(_showSelectionMenu(items)),
           ),
         ),
         const SliverPadding(padding: EdgeInsets.only(top: _sectionGap)),
@@ -150,6 +294,8 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
             controller: _controller,
             playbackCoordinator: widget.playbackCoordinator,
             onItemTap: widget.onOpenArtist,
+            onSelectionMenuTap: (List<Artist> items) =>
+                unawaited(_showSelectionMenu(items)),
             sectionGap: _sectionGap,
           ),
         ),
@@ -159,6 +305,8 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
             controller: _controller,
             playbackCoordinator: widget.playbackCoordinator,
             onItemTap: _openTrackContext,
+            onSelectionMenuTap: (List<Track> items) =>
+                unawaited(_showSelectionMenu(items)),
           ),
         ),
         const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
@@ -179,11 +327,13 @@ class _RecommendationsSection extends StatelessWidget {
     required this.controller,
     required this.playbackCoordinator,
     required this.onItemTap,
+    required this.onSelectionMenuTap,
   });
 
   final HomeController controller;
   final PlaybackCoordinator playbackCoordinator;
   final ValueChanged<Track> onItemTap;
+  final ValueChanged<List<Track>> onSelectionMenuTap;
 
   @override
   Widget build(BuildContext context) {
@@ -197,6 +347,7 @@ class _RecommendationsSection extends StatelessWidget {
             emptyText: 'Keine ListenBrainz-Empfehlungen verfügbar.',
             playbackCoordinator: playbackCoordinator,
             onItemTap: onItemTap,
+            onSelectionMenuTap: onSelectionMenuTap,
           ),
     );
   }
@@ -207,11 +358,13 @@ class _GenrePlaylistsSection extends StatelessWidget {
     required this.controller,
     required this.playbackCoordinator,
     required this.onItemTap,
+    required this.onSelectionMenuTap,
   });
 
   final HomeController controller;
   final PlaybackCoordinator playbackCoordinator;
   final ValueChanged<Playlist>? onItemTap;
+  final ValueChanged<List<Playlist>> onSelectionMenuTap;
 
   @override
   Widget build(BuildContext context) {
@@ -225,6 +378,7 @@ class _GenrePlaylistsSection extends StatelessWidget {
             emptyText: 'Keine Genre-Playlists verfügbar.',
             playbackCoordinator: playbackCoordinator,
             onItemTap: onItemTap,
+            onSelectionMenuTap: onSelectionMenuTap,
           ),
     );
   }
@@ -235,12 +389,14 @@ class _SimilarArtistsSections extends StatelessWidget {
     required this.controller,
     required this.playbackCoordinator,
     required this.onItemTap,
+    required this.onSelectionMenuTap,
     required this.sectionGap,
   });
 
   final HomeController controller;
   final PlaybackCoordinator playbackCoordinator;
   final ValueChanged<Artist>? onItemTap;
+  final ValueChanged<List<Artist>> onSelectionMenuTap;
   final double sectionGap;
 
   @override
@@ -273,6 +429,7 @@ class _SimilarArtistsSections extends StatelessWidget {
                 emptyText: 'Keine ähnlichen Künstler:innen verfügbar.',
                 playbackCoordinator: playbackCoordinator,
                 onItemTap: onItemTap,
+                onSelectionMenuTap: onSelectionMenuTap,
               ),
             ],
           ],
@@ -287,11 +444,13 @@ class _ArtistPlaylistsSection extends StatelessWidget {
     required this.controller,
     required this.playbackCoordinator,
     required this.onItemTap,
+    required this.onSelectionMenuTap,
   });
 
   final HomeController controller;
   final PlaybackCoordinator playbackCoordinator;
   final ValueChanged<Playlist>? onItemTap;
+  final ValueChanged<List<Playlist>> onSelectionMenuTap;
 
   @override
   Widget build(BuildContext context) {
@@ -306,6 +465,7 @@ class _ArtistPlaylistsSection extends StatelessWidget {
             emptyText: 'Keine Artist-Playlists verfügbar.',
             playbackCoordinator: playbackCoordinator,
             onItemTap: onItemTap,
+            onSelectionMenuTap: onSelectionMenuTap,
             showPlaylistDetails: false,
           );
         },
@@ -319,11 +479,13 @@ class _TopTracksSection extends StatelessWidget {
     required this.controller,
     required this.playbackCoordinator,
     required this.onItemTap,
+    required this.onSelectionMenuTap,
   });
 
   final HomeController controller;
   final PlaybackCoordinator playbackCoordinator;
   final ValueChanged<MediaItem> onItemTap;
+  final ValueChanged<List<Track>> onSelectionMenuTap;
 
   @override
   Widget build(BuildContext context) {
@@ -338,6 +500,7 @@ class _TopTracksSection extends StatelessWidget {
             emptyText: 'Keine Top-Tracks verfügbar.',
             playbackCoordinator: playbackCoordinator,
             onItemTap: onItemTap,
+            onSelectionMenuTap: onSelectionMenuTap,
           );
         },
       ),
@@ -350,11 +513,13 @@ class _TopArtistsSection extends StatelessWidget {
     required this.controller,
     required this.playbackCoordinator,
     required this.onItemTap,
+    required this.onSelectionMenuTap,
   });
 
   final HomeController controller;
   final PlaybackCoordinator playbackCoordinator;
   final ValueChanged<Artist>? onItemTap;
+  final ValueChanged<List<Artist>> onSelectionMenuTap;
 
   @override
   Widget build(BuildContext context) {
@@ -369,6 +534,7 @@ class _TopArtistsSection extends StatelessWidget {
             emptyText: 'Keine Top-Artists verfügbar.',
             playbackCoordinator: playbackCoordinator,
             onItemTap: onItemTap,
+            onSelectionMenuTap: onSelectionMenuTap,
           );
         },
       ),
@@ -381,11 +547,13 @@ class _RecentListensSection extends StatelessWidget {
     required this.controller,
     required this.playbackCoordinator,
     required this.onItemTap,
+    required this.onSelectionMenuTap,
   });
 
   final HomeController controller;
   final PlaybackCoordinator playbackCoordinator;
   final ValueChanged<MediaItem> onItemTap;
+  final ValueChanged<List<Track>> onSelectionMenuTap;
 
   @override
   Widget build(BuildContext context) {
@@ -400,6 +568,7 @@ class _RecentListensSection extends StatelessWidget {
             emptyText: 'Keine kürzlich gehörten Tracks verfügbar.',
             playbackCoordinator: playbackCoordinator,
             onItemTap: onItemTap,
+            onSelectionMenuTap: onSelectionMenuTap,
           );
         },
       ),

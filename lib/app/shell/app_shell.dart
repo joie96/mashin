@@ -515,27 +515,6 @@ class _AppShellState extends State<AppShell> {
             ),
           ],
         ),
-        AnimatedBuilder(
-          animation: _selectionSessionController,
-          builder: (BuildContext context, Widget? child) {
-            if (!_selectionSessionController.isVisible) {
-              return const SizedBox.shrink();
-            }
-
-            return Positioned(
-              right: 8,
-              bottom: _mobileSelectionOverlayBottomInset + 72,
-              child: SelectionActionsOverlay(
-                allSelected: _selectionSessionController.allSelected,
-                selectedCount: _selectionSessionController.selectedCount,
-                itemTypeLabel: _selectionSessionController.itemTypeLabel,
-                onToggleAll: _selectionSessionController.onToggleAll,
-                onMenuTap: _selectionSessionController.onMenuTap,
-                onClose: _selectionSessionController.onClose,
-              ),
-            );
-          },
-        ),
         _QueueUiScope(
           queueChanges: _playbackCoordinator.playbackQueueChanges,
           builder: (BuildContext context) => _PlaybackScope(
@@ -592,7 +571,30 @@ class _AppShellState extends State<AppShell> {
             userDataController: _userDataController,
             onClose: _closeQueueOverlay,
             onToggleDontStopTheMusic: _toggleDontStopTheMusic,
+            onOpenArtist: _openArtistFromQueue,
+            onOpenAlbum: _openAlbumFromQueue,
           ),
+        ),
+        AnimatedBuilder(
+          animation: _selectionSessionController,
+          builder: (BuildContext context, Widget? child) {
+            if (!_selectionSessionController.isVisible) {
+              return const SizedBox.shrink();
+            }
+
+            return Positioned(
+              right: 8,
+              bottom: _mobileSelectionOverlayBottomInset + 72,
+              child: SelectionActionsOverlay(
+                allSelected: _selectionSessionController.allSelected,
+                selectedCount: _selectionSessionController.selectedCount,
+                itemTypeLabel: _selectionSessionController.itemTypeLabel,
+                onToggleAll: _selectionSessionController.onToggleAll,
+                onMenuTap: _selectionSessionController.onMenuTap,
+                onClose: _selectionSessionController.onClose,
+              ),
+            );
+          },
         ),
       ],
     );
@@ -2327,13 +2329,26 @@ class _MobilePlayerBar extends StatelessWidget {
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
                             valueColor: AlwaysStoppedAnimation<Color>(
-                              colors.textSecondary,
+                              colors.bgPrimary,
                             ),
                           ),
                         )
-                      : Icon(isPlaying ? Icons.pause : Icons.play_arrow),
+                      : Icon(
+                          isPlaying
+                              ? Icons.pause_sharp
+                              : Icons.play_arrow_sharp,
+                        ),
+                  style: IconButton.styleFrom(
+                    shape: const CircleBorder(),
+                    backgroundColor: colors.textPrimary,
+                    foregroundColor: colors.bgPrimary,
+                    disabledBackgroundColor: colors.textPrimary.withValues(
+                      alpha: 0.45,
+                    ),
+                    disabledForegroundColor: colors.bgPrimary,
+                  ),
                 ),
-                const SizedBox(width: 4),
+                const SizedBox(width: 8),
               ],
             ),
           ],

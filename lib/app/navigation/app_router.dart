@@ -9,6 +9,7 @@ import '../../features/explore/explore_screen.dart';
 import '../../features/favorites/favorites_screen.dart';
 import '../../features/home/home_screen.dart';
 import '../../features/playlist/playlist_detail_page.dart';
+import '../../features/playlist/playlists_page.dart';
 import '../../features/search/search_screen.dart';
 import '../config/app_config.dart';
 import '../session/app_session_controller.dart';
@@ -179,10 +180,11 @@ class AppRouter {
               GoRoute(
                 path: AppRoutes.playlists,
                 builder: (BuildContext context, GoRouterState state) =>
-                    const _SectionPlaceholder(
-                      title: 'Playlists',
-                      subtitle: 'Lokale und remote Playlists',
-                      icon: Icons.queue_music_outlined,
+                    PlaylistsPage(
+                      playbackCoordinator: session.playbackCoordinator,
+                      userDataController: session.userDataController!,
+                      onOpenPlaylist: (Playlist playlist) =>
+                          context.push(AppRoutes.playlist(playlist)),
                     ),
               ),
               GoRoute(

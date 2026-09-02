@@ -65,6 +65,156 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
     if (mounted) setState(() {});
   }
 
+  List<ContextMenuAction> _buildPlaylistSubmenu(List<Track> tracks) {
+    final UserDataController? controller = widget.userDataController;
+    if (controller == null || tracks.isEmpty) {
+      return const <ContextMenuAction>[];
+    }
+    return controller.playlists
+        .map(
+          (Playlist playlist) => ContextMenuAction(
+            label: playlist.name,
+            icon: Icons.playlist_play_outlined,
+            onSelected: () =>
+                controller.addPlaylistTracks(playlist.itemId, tracks),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  List<ContextMenuAction> _buildItemMenuActions(
+    MediaItem item, [
+    List<MediaItem> selectedItems = const <MediaItem>[],
+  ]) {
+    final List<MediaItem> targets = selectedItems.isEmpty
+        ? <MediaItem>[item]
+        : selectedItems;
+    final List<Track> tracks = targets.whereType<Track>().toList(
+      growable: false,
+    );
+    final bool isSingleTarget = targets.length == 1;
+    final bool allFavorite = targets.every(_controller.isItemFavorite);
+    final List<ContextMenuAction> actions = <ContextMenuAction>[
+      ContextMenuAction(
+        label: 'Abspielen',
+        icon: Icons.play_arrow,
+        onSelected: () => widget.playbackCoordinator.playMedia(targets),
+      ),
+      if (item is Album || item is Playlist || item is Artist)
+        ContextMenuAction(
+          label: 'Zufällig abspielen',
+          icon: Icons.shuffle_outlined,
+          onSelected: () =>
+              widget.playbackCoordinator.shufflePlayMedia(targets),
+        ),
+      if (item is! Playlist && (isSingleTarget || tracks.isNotEmpty))
+        ContextMenuAction(
+          label: 'Radio starten',
+          icon: Icons.radio_outlined,
+          onSelected: () => tracks.isNotEmpty
+              ? widget.playbackCoordinator.playMediaRadioNext(tracks)
+              : _controller.startItemRadio(item),
+        ),
+      ContextMenuAction(
+        label: 'Als Nächstes spielen',
+        icon: Icons.keyboard_return,
+        iconQuarterTurns: 2,
+        onSelected: () => widget.playbackCoordinator.playMediaNext(targets),
+      ),
+      ContextMenuAction(
+        label: 'Als Letztes spielen',
+        icon: Icons.last_page,
+        onSelected: () => widget.playbackCoordinator.playMediaLast(targets),
+      ),
+    ];
+
+    if (isSingleTarget) {
+      final Artist? primaryArtist = _primaryArtistOf(item);
+      final Album? primaryAlbum = item is Track
+          ? item.album
+          : (item is Album ? item : null);
+      if ((primaryArtist != null && widget.onOpenArtist != null) ||
+          (primaryAlbum != null && widget.onOpenAlbum != null)) {
+        actions.add(const ContextMenuAction.separator());
+        if (primaryArtist != null && widget.onOpenArtist != null) {
+          actions.add(
+            ContextMenuAction(
+              label: 'Künstler:in öffnen',
+              icon: Icons.person_outline,
+              onSelected: () => widget.onOpenArtist!(primaryArtist),
+            ),
+          );
+        }
+        if (primaryAlbum != null && widget.onOpenAlbum != null) {
+          actions.add(
+            ContextMenuAction(
+              label: 'Album öffnen',
+              icon: Icons.album_outlined,
+              onSelected: () => widget.onOpenAlbum!(primaryAlbum),
+            ),
+          );
+        }
+      }
+    }
+
+    final List<ContextMenuAction> playlistActions = _buildPlaylistSubmenu(
+      tracks,
+    );
+    if (playlistActions.isNotEmpty) {
+      actions
+        ..add(const ContextMenuAction.separator())
+        ..add(
+          ContextMenuAction.submenu(
+            label: 'Zu Wiedergabeliste hinzufügen',
+            icon: Icons.playlist_add_outlined,
+            children: playlistActions,
+          ),
+        );
+    }
+    actions
+      ..add(const ContextMenuAction.separator())
+      ..add(
+        ContextMenuAction(
+          label: allFavorite
+              ? 'Aus Favoriten entfernen'
+              : 'Zu Favoriten hinzufügen',
+          icon: allFavorite
+              ? Icons.favorite_outlined
+              : Icons.favorite_border_outlined,
+          onSelected: () async {
+            for (final MediaItem target in targets) {
+              if (_controller.isItemFavorite(target) == allFavorite) {
+                await _controller.toggleItemFavorite(target);
+              }
+            }
+          },
+        ),
+      );
+    return actions;
+  }
+
+  Artist? _primaryArtistOf(MediaItem item) {
+    final List<Artist> artists = switch (item) {
+      Track track => track.artists,
+      Album album => album.artists,
+      _ => const <Artist>[],
+    };
+    for (final Artist artist in artists) {
+      if (artist.itemId.trim().isNotEmpty &&
+          artist.provider.trim().isNotEmpty) {
+        return artist;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _showSelectionMenu(List<MediaItem> items) {
+    return const AppContextMenuController().show(
+      context: context,
+      actions: _buildItemMenuActions(items.first, items),
+    );
+  }
+
   List<ContextMenuAction> _buildHeaderMenu(Album album) => <ContextMenuAction>[
     ContextMenuAction(
       label: 'Als Nächstes spielen',
@@ -79,6 +229,7 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
       onSelected: () =>
           widget.playbackCoordinator.playMediaLast(<MediaItem>[album]),
     ),
+    const ContextMenuAction.separator(),
     ContextMenuAction(
       label: _controller.isAlbumFavorite
           ? 'Aus Favoriten entfernen'
@@ -232,6 +383,8 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
               emptyText: 'Keine Titel gefunden.',
               maxItemsPerPage: 0,
               playbackCoordinator: widget.playbackCoordinator,
+              onSelectionMenuTap: (List<Track> items) =>
+                  unawaited(_showSelectionMenu(items)),
             ),
           ),
           const SliverToBoxAdapter(child: SizedBox(height: 16)),
@@ -245,6 +398,8 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
                 emptyText: 'Keine weiteren Alben gefunden.',
                 playbackCoordinator: widget.playbackCoordinator,
                 onItemTap: widget.onOpenAlbum,
+                onSelectionMenuTap: (List<Album> items) =>
+                    unawaited(_showSelectionMenu(items)),
               ),
             ),
           ),
@@ -259,6 +414,8 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
                 emptyText: 'Keine ähnlichen Interpreten gefunden.',
                 playbackCoordinator: widget.playbackCoordinator,
                 onItemTap: widget.onOpenArtist,
+                onSelectionMenuTap: (List<Artist> items) =>
+                    unawaited(_showSelectionMenu(items)),
               ),
             ),
           ),

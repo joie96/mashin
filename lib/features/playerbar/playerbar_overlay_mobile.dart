@@ -77,12 +77,16 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
 
   double _dragOffset = 0;
   Duration _dragOffsetAnimationDuration = Duration.zero;
+  bool _isDragging = false;
 
   @override
   void didUpdateWidget(covariant PlayerBarOverlayMobile oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!widget.isOpen && _dragOffset != 0) {
       _dragOffsetAnimationDuration = Duration.zero;
+    }
+    if (!widget.isOpen && _isDragging) {
+      _isDragging = false;
     }
   }
 
@@ -145,7 +149,16 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
     });
   }
 
+  void _handleDragStart(DragStartDetails details) {
+    if (widget.isOpen && !_isDragging) {
+      setState(() => _isDragging = true);
+    }
+  }
+
   void _handleDragEnd(DragEndDetails details) {
+    if (_isDragging) {
+      setState(() => _isDragging = false);
+    }
     if (!widget.isOpen) {
       return;
     }
@@ -164,6 +177,12 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
       _dragOffsetAnimationDuration = _animationDuration;
       _dragOffset = 0;
     });
+  }
+
+  void _handleDragCancel() {
+    if (_isDragging) {
+      setState(() => _isDragging = false);
+    }
   }
 
   @override
@@ -246,14 +265,13 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
                   ),
                   child: GestureDetector(
                     /// Down closes the expanded player; up promotes the view to the queue.
+                    onVerticalDragStart: _handleDragStart,
                     onVerticalDragUpdate: _handleDragUpdate,
                     onVerticalDragEnd: _handleDragEnd,
+                    onVerticalDragCancel: _handleDragCancel,
                     child: Container(
                       decoration: BoxDecoration(
                         color: colors.bgSecondary,
-                        borderRadius: const BorderRadius.vertical(
-                          top: Radius.circular(20),
-                        ),
                         border: Border(top: BorderSide(color: colors.border)),
                       ),
                       child: SafeArea(
@@ -280,15 +298,8 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
                                   ),
                                   child: Column(
                                     children: <Widget>[
-                                      Container(
-                                        width: 52,
-                                        height: 4,
-                                        decoration: BoxDecoration(
-                                          color: colors.bgTertiary,
-                                          borderRadius: BorderRadius.circular(
-                                            2,
-                                          ),
-                                        ),
+                                      MobileOverlayDragHandle(
+                                        isDragging: _isDragging,
                                       ),
                                       const SizedBox(height: 16),
                                       _PlayerOverlayArtwork(

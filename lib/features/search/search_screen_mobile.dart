@@ -6,6 +6,8 @@ import '../../app/theme/app_theme.dart';
 import '../../data/music_assistant/ma_client.dart';
 import '../../data/music_assistant/ma_models.dart';
 import '../playback/playback_coordinator.dart';
+import '../shared/context_menu/context_menu_controller.dart';
+import '../shared/userdata_controller.dart';
 import '../shared/widgets/media_row_section_mobile.dart';
 import '../shared/widgets/media_table_section_mobile.dart';
 import 'search_controller.dart' as feature_search;
@@ -14,6 +16,7 @@ import 'search_controller.dart' as feature_search;
 class SearchScreenMobile extends StatefulWidget {
   final MusicAssistantClient client;
   final PlaybackCoordinator playbackCoordinator;
+  final UserDataController? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
   final ValueChanged<Playlist>? onOpenPlaylist;
@@ -22,6 +25,7 @@ class SearchScreenMobile extends StatefulWidget {
     super.key,
     required this.client,
     required this.playbackCoordinator,
+    this.userDataController,
     this.onOpenArtist,
     this.onOpenAlbum,
     this.onOpenPlaylist,
@@ -40,8 +44,11 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
   @override
   void initState() {
     super.initState();
-    _controller = feature_search.SearchController(client: widget.client)
-      ..addListener(_onControllerChanged);
+    _controller = feature_search.SearchController(
+      client: widget.client,
+      userDataController: widget.userDataController,
+    )..addListener(_onControllerChanged);
+    widget.userDataController?.addListener(_onUserDataChanged);
     unawaited(_controller.load());
   }
 
@@ -57,7 +64,156 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
     _queryController.dispose();
     _controller.removeListener(_onControllerChanged);
     _controller.dispose();
+    widget.userDataController?.removeListener(_onUserDataChanged);
     super.dispose();
+  }
+
+  void _onUserDataChanged() {
+    _controller.refreshFavoriteStatuses();
+  }
+
+  Artist? _primaryArtistOf(MediaItem item) {
+    final List<Artist> artists = switch (item) {
+      Track track => track.artists,
+      Album album => album.artists,
+      _ => const <Artist>[],
+    };
+    return artists.firstOrNull;
+  }
+
+  List<ContextMenuAction> _buildSelectionMenuActions<T extends MediaItem>(
+    List<T> selectedItems,
+  ) {
+    final List<MediaItem> targets = selectedItems.cast<MediaItem>();
+    final MediaItem item = targets.first;
+    final List<Track> tracks = targets.whereType<Track>().toList(
+      growable: false,
+    );
+    final bool isSingleTarget = targets.length == 1;
+    final UserDataController? userData = widget.userDataController;
+    final bool allFavorite = targets.every(
+      (MediaItem target) => userData?.isFavorite(target) ?? target.favorite,
+    );
+    final List<ContextMenuAction> actions = <ContextMenuAction>[
+      ContextMenuAction(
+        label: 'Abspielen',
+        icon: Icons.play_arrow,
+        onSelected: () => widget.playbackCoordinator.playMedia(targets),
+      ),
+      if (item is Album || item is Playlist || item is Artist)
+        ContextMenuAction(
+          label: 'Zufällig abspielen',
+          icon: Icons.shuffle_outlined,
+          onSelected: () =>
+              widget.playbackCoordinator.shufflePlayMedia(targets),
+        ),
+      if (item is Track || item is Artist)
+        ContextMenuAction(
+          label: 'Radio starten',
+          icon: Icons.radio_outlined,
+          onSelected: () =>
+              widget.playbackCoordinator.playMediaRadioNext(targets),
+        ),
+      ContextMenuAction(
+        label: 'Als Nächstes spielen',
+        icon: Icons.keyboard_return,
+        iconQuarterTurns: 2,
+        onSelected: () => widget.playbackCoordinator.playMediaNext(targets),
+      ),
+      ContextMenuAction(
+        label: 'Als Letztes spielen',
+        icon: Icons.last_page,
+        onSelected: () => widget.playbackCoordinator.playMediaLast(targets),
+      ),
+    ];
+
+    if (isSingleTarget) {
+      final Artist? primaryArtist = item is Artist
+          ? item
+          : _primaryArtistOf(item);
+      final Album? primaryAlbum = item is Track
+          ? item.album
+          : (item is Album ? item : null);
+      final bool canOpenPlaylist =
+          item is Playlist && widget.onOpenPlaylist != null;
+      if ((primaryArtist != null && widget.onOpenArtist != null) ||
+          (primaryAlbum != null && widget.onOpenAlbum != null) ||
+          canOpenPlaylist) {
+        actions.add(const ContextMenuAction.separator());
+        if (primaryArtist != null && widget.onOpenArtist != null) {
+          actions.add(
+            ContextMenuAction(
+              label: 'Künstler:in öffnen',
+              icon: Icons.person_outline,
+              onSelected: () => widget.onOpenArtist!(primaryArtist),
+            ),
+          );
+        }
+        if (primaryAlbum != null && widget.onOpenAlbum != null) {
+          actions.add(
+            ContextMenuAction(
+              label: 'Album öffnen',
+              icon: Icons.album_outlined,
+              onSelected: () => widget.onOpenAlbum!(primaryAlbum),
+            ),
+          );
+        }
+        if (canOpenPlaylist) {
+          actions.add(
+            ContextMenuAction(
+              label: 'Wiedergabeliste öffnen',
+              icon: Icons.queue_music_outlined,
+              onSelected: () => widget.onOpenPlaylist!(item),
+            ),
+          );
+        }
+      }
+    }
+
+    if (tracks.isNotEmpty &&
+        userData != null &&
+        userData.playlists.isNotEmpty) {
+      actions
+        ..add(const ContextMenuAction.separator())
+        ..add(
+          ContextMenuAction.submenu(
+            label: 'Zu Wiedergabeliste hinzufügen',
+            icon: Icons.playlist_add_outlined,
+            children: userData.playlists
+                .map(
+                  (Playlist playlist) => ContextMenuAction(
+                    label: playlist.name,
+                    icon: Icons.playlist_play_outlined,
+                    onSelected: () =>
+                        userData.addPlaylistTracks(playlist.itemId, tracks),
+                  ),
+                )
+                .toList(growable: false),
+          ),
+        );
+    }
+    actions
+      ..add(const ContextMenuAction.separator())
+      ..add(
+        ContextMenuAction(
+          label: allFavorite
+              ? 'Aus Favoriten entfernen'
+              : 'Zu Favoriten hinzufügen',
+          icon: allFavorite
+              ? Icons.favorite_outlined
+              : Icons.favorite_border_outlined,
+          isEnabled: userData != null,
+          onSelected: () => userData?.setFavorite(targets, !allFavorite),
+        ),
+      );
+    return actions;
+  }
+
+  Future<void> _showSelectionMenu<T extends MediaItem>(List<T> items) {
+    return const AppContextMenuController().show(
+      context: context,
+      actions: _buildSelectionMenuActions(items),
+    );
   }
 
   @override
@@ -129,6 +285,8 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
                   emptyText: 'Keine Tracks gefunden.',
                   maxItemsPerPage: 3,
                   playbackCoordinator: widget.playbackCoordinator,
+                  onSelectionMenuTap: (List<Track> items) =>
+                      unawaited(_showSelectionMenu(items)),
                 ),
               ],
             ),
@@ -141,6 +299,8 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
             emptyText: 'Keine Alben gefunden.',
             playbackCoordinator: widget.playbackCoordinator,
             onItemTap: widget.onOpenAlbum,
+            onSelectionMenuTap: (List<Album> items) =>
+                unawaited(_showSelectionMenu(items)),
           ),
           const SizedBox(height: 28),
           MediaRowSectionMobile<Playlist>(
@@ -150,6 +310,8 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
             emptyText: 'Keine Playlists gefunden.',
             playbackCoordinator: widget.playbackCoordinator,
             onItemTap: widget.onOpenPlaylist,
+            onSelectionMenuTap: (List<Playlist> items) =>
+                unawaited(_showSelectionMenu(items)),
           ),
           const SizedBox(height: 28),
           MediaRowSectionMobile<Artist>(
@@ -159,6 +321,8 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
             emptyText: 'Keine Artists gefunden.',
             playbackCoordinator: widget.playbackCoordinator,
             onItemTap: widget.onOpenArtist,
+            onSelectionMenuTap: (List<Artist> items) =>
+                unawaited(_showSelectionMenu(items)),
           ),
         ],
       ],

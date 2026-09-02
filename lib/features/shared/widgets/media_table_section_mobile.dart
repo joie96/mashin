@@ -21,7 +21,7 @@ class MediaTableSectionMobile<T> extends StatefulWidget {
   final int? currentItemIndex;
   final DesktopRowAction<T>? onRowTap;
   final ValueChanged<List<T>>? onSelectionChanged;
-  final VoidCallback? onSelectionMenuTap;
+  final ValueChanged<List<T>>? onSelectionMenuTap;
   final PlaybackCoordinator? playbackCoordinator;
 
   const MediaTableSectionMobile({
@@ -228,6 +228,22 @@ class _MediaTableSectionMobileState<T>
     widget.onSelectionChanged!(selected);
   }
 
+  List<T> _selectedItems() => _selectedIndexes
+      .where((int index) => index >= 0 && index < widget.items.length)
+      .map((int index) => widget.items[index])
+      .toList(growable: false);
+
+  void _showSelectionMenu() {
+    final ValueChanged<List<T>>? onSelectionMenuTap = widget.onSelectionMenuTap;
+    if (onSelectionMenuTap == null) {
+      return;
+    }
+    final List<T> selectedItems = _selectedItems();
+    if (selectedItems.isNotEmpty) {
+      onSelectionMenuTap(selectedItems);
+    }
+  }
+
   void _syncSelectionSession() {
     if (_selectedIndexes.isEmpty) {
       _deactivateSelectionSession();
@@ -241,7 +257,9 @@ class _MediaTableSectionMobileState<T>
         selectedCount: _selectedIndexes.length,
         itemTypeLabel: selectionTypeLabel(T, _selectedIndexes.length),
         onToggleAll: _toggleAllSelectedIndexes,
-        onMenuTap: widget.onSelectionMenuTap,
+        onMenuTap: widget.onSelectionMenuTap == null
+            ? null
+            : _showSelectionMenu,
         onClose: _clearSelectionFromController,
       ),
     );

@@ -26,6 +26,7 @@ class MediaRowSectionMobile<T> extends StatefulWidget {
   final int skeletonCount;
   final PlaybackCoordinator? playbackCoordinator;
   final ValueChanged<T>? onItemTap;
+  final ValueChanged<List<T>>? onSelectionMenuTap;
   final bool showPlaylistDetails;
 
   const MediaRowSectionMobile({
@@ -41,6 +42,7 @@ class MediaRowSectionMobile<T> extends StatefulWidget {
     this.skeletonCount = 6,
     this.playbackCoordinator,
     this.onItemTap,
+    this.onSelectionMenuTap,
     this.showPlaylistDetails = true,
   });
 
@@ -50,8 +52,7 @@ class MediaRowSectionMobile<T> extends StatefulWidget {
 }
 
 class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
-  final MobileSectionSelectionState _selectionController =
-      MobileSectionSelectionState(itemType: T);
+  late final MobileSectionSelectionState _selectionController;
 
   String get title => widget.title;
   bool get isLoading => widget.isLoading;
@@ -69,6 +70,10 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
   @override
   void initState() {
     super.initState();
+    _selectionController = MobileSectionSelectionState(
+      itemType: T,
+      onMenuTap: _showSelectionMenu,
+    );
     _selectionController.addListener(_onSelectionChanged);
   }
 
@@ -90,6 +95,20 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
   void _onSelectionChanged() {
     if (mounted) {
       setState(() {});
+    }
+  }
+
+  void _showSelectionMenu() {
+    final ValueChanged<List<T>>? onSelectionMenuTap = widget.onSelectionMenuTap;
+    if (onSelectionMenuTap == null) {
+      return;
+    }
+    final List<T> selectedItems = _selectionController.selectedIndexes
+        .where((int index) => index >= 0 && index < items.length)
+        .map((int index) => items[index])
+        .toList(growable: false);
+    if (selectedItems.isNotEmpty) {
+      onSelectionMenuTap(selectedItems);
     }
   }
 

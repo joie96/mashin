@@ -23,6 +23,7 @@ class MediaSlideSectionMobile<T> extends StatefulWidget {
   final int skeletonCount;
   final PlaybackCoordinator? playbackCoordinator;
   final ValueChanged<T>? onItemTap;
+  final ValueChanged<List<T>>? onSelectionMenuTap;
 
   const MediaSlideSectionMobile({
     super.key,
@@ -37,6 +38,7 @@ class MediaSlideSectionMobile<T> extends StatefulWidget {
     this.skeletonCount = 4,
     this.playbackCoordinator,
     this.onItemTap,
+    this.onSelectionMenuTap,
   });
 
   @override
@@ -52,12 +54,15 @@ class _MediaSlideSectionMobileState<T>
   final PageController _mobileChunkPageController = PageController(
     viewportFraction: _mobileChunkViewportFraction,
   );
-  final MobileSectionSelectionState _selectionController =
-      MobileSectionSelectionState(itemType: T);
+  late final MobileSectionSelectionState _selectionController;
 
   @override
   void initState() {
     super.initState();
+    _selectionController = MobileSectionSelectionState(
+      itemType: T,
+      onMenuTap: _showSelectionMenu,
+    );
     _selectionController.addListener(_onSelectionChanged);
   }
 
@@ -80,6 +85,20 @@ class _MediaSlideSectionMobileState<T>
   void _onSelectionChanged() {
     if (mounted) {
       setState(() {});
+    }
+  }
+
+  void _showSelectionMenu() {
+    final ValueChanged<List<T>>? onSelectionMenuTap = widget.onSelectionMenuTap;
+    if (onSelectionMenuTap == null) {
+      return;
+    }
+    final List<T> selectedItems = _selectionController.selectedIndexes
+        .where((int index) => index >= 0 && index < widget.items.length)
+        .map((int index) => widget.items[index])
+        .toList(growable: false);
+    if (selectedItems.isNotEmpty) {
+      onSelectionMenuTap(selectedItems);
     }
   }
 

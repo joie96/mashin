@@ -189,11 +189,6 @@ class _QueueOverlayState extends State<QueueOverlay> {
                           ),
                           decoration: BoxDecoration(
                             color: colors.bgSecondary,
-                            borderRadius: widget.isDesktop
-                                ? BorderRadius.zero
-                                : const BorderRadius.vertical(
-                                    top: Radius.circular(20),
-                                  ),
                             border: Border(
                               top: BorderSide(color: colors.border),
                             ),
@@ -232,6 +227,10 @@ class _QueueOverlayState extends State<QueueOverlay> {
                                     currentQueueIndex: widget.currentQueueIndex,
                                     playbackCoordinator:
                                         widget.playbackCoordinator,
+                                    userDataController:
+                                        widget.userDataController,
+                                    onOpenArtist: widget.onOpenArtist,
+                                    onOpenAlbum: widget.onOpenAlbum,
                                     onClose: widget.onClose,
                                     onDismissDragUpdate:
                                         _handleMobileDismissDragUpdate,

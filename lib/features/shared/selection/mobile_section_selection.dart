@@ -6,13 +6,15 @@ import 'selection_controller.dart';
 
 class MobileSectionSelectionState extends ChangeNotifier {
   final Type? itemType;
+  final VoidCallback? onMenuTap;
   final Set<int> _selectedIndexes = <int>{};
   final Object _owner = Object();
   final SelectionController _overlayController = SelectionController.instance;
 
-  MobileSectionSelectionState({required this.itemType});
+  MobileSectionSelectionState({required this.itemType, this.onMenuTap});
 
   bool get isSelectionModeActive => _selectedIndexes.isNotEmpty;
+  Iterable<int> get selectedIndexes => _selectedIndexes;
 
   bool isSelected(int index) => _selectedIndexes.contains(index);
 
@@ -73,7 +75,7 @@ class MobileSectionSelectionState extends ChangeNotifier {
           selectedCount: _selectedIndexes.length,
           itemTypeLabel: selectionTypeLabel(itemType, _selectedIndexes.length),
           onToggleAll: () => _toggleAll(itemCount),
-          onMenuTap: null,
+          onMenuTap: onMenuTap,
           onClose: _clear,
         ),
       );

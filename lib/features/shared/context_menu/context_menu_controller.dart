@@ -7,6 +7,26 @@ import '../../../app/theme/app_theme.dart';
 
 typedef ContextMenuActionHandler = FutureOr<void> Function();
 
+class MobileOverlayDragHandle extends StatelessWidget {
+  const MobileOverlayDragHandle({required this.isDragging, super.key});
+
+  final bool isDragging;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+
+    return Container(
+      width: 52,
+      height: 4,
+      decoration: BoxDecoration(
+        color: isDragging ? colors.textPrimary : colors.bgTertiary,
+        borderRadius: BorderRadius.circular(2),
+      ),
+    );
+  }
+}
+
 class ContextMenuAction {
   final String label;
   final IconData icon;
@@ -128,8 +148,16 @@ class AppContextMenuController {
     if (AppConfig.isMobile()) {
       await showModalBottomSheet<void>(
         context: context,
-        showDragHandle: true,
-        builder: (_) => SafeArea(child: child),
+        useRootNavigator: true,
+        isScrollControlled: true,
+        showDragHandle: false,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.9,
+        ),
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+        ),
+        builder: (_) => _MobileContextMenuSheet(child: child),
       );
       return;
     }
@@ -275,15 +303,19 @@ class AppContextMenuController {
   }) async {
     await showModalBottomSheet<void>(
       context: context,
-      showDragHandle: true,
-      builder: (BuildContext sheetContext) => SafeArea(
-        child: ListView.separated(
+      useRootNavigator: true,
+      isScrollControlled: true,
+      showDragHandle: false,
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * 0.9,
+      ),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+      ),
+      builder: (BuildContext sheetContext) => _MobileContextMenuSheet(
+        child: ListView.builder(
           shrinkWrap: true,
           itemCount: actions.length,
-          separatorBuilder: (_, index) =>
-              actions[index].isSeparator || actions[index + 1].isSeparator
-              ? const SizedBox.shrink()
-              : const Divider(height: 1),
           itemBuilder: (BuildContext itemContext, int index) {
             final ContextMenuAction action = actions[index];
             final colors = itemContext.mashinColors;
@@ -293,25 +325,42 @@ class AppContextMenuController {
                 height: 9,
                 alignment: Alignment.center,
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Container(height: 1, color: colors.border),
+                child: Container(height: 1, color: colors.bgTertiary),
               );
             }
 
-            final Color color = action.isDestructive
+            final Color textColor = action.isDestructive
                 ? Theme.of(itemContext).colorScheme.error
                 : colors.textPrimary;
+            final Color iconColor = action.isDestructive
+                ? Theme.of(itemContext).colorScheme.error
+                : colors.textSecondary;
 
             return ListTile(
               enabled: action.isEnabled,
               leading: RotatedBox(
                 quarterTurns: action.iconQuarterTurns,
-                child: Icon(action.icon, color: color),
+                child: Icon(
+                  action.icon,
+                  size: 20,
+                  weight: 300,
+                  color: iconColor,
+                ),
               ),
-              title: Text(action.label, style: TextStyle(color: color)),
+              title: Text(
+                action.label,
+                style: Theme.of(itemContext).textTheme.bodyLarge?.copyWith(
+                  color: textColor,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w400,
+                  fontStyle: FontStyle.normal,
+                ),
+              ),
               trailing: action.hasSubmenu
                   ? Icon(
                       Icons.chevron_right_outlined,
                       size: 18,
+                      weight: 300,
                       color: colors.textSecondary,
                     )
                   : null,
@@ -331,6 +380,69 @@ class AppContextMenuController {
                     },
             );
           },
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileContextMenuSheet extends StatefulWidget {
+  const _MobileContextMenuSheet({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_MobileContextMenuSheet> createState() =>
+      _MobileContextMenuSheetState();
+}
+
+class _MobileContextMenuSheetState extends State<_MobileContextMenuSheet> {
+  static const double _dragThreshold = 3;
+
+  Offset? _pointerDownPosition;
+  bool _isDragging = false;
+
+  void _handlePointerMove(PointerMoveEvent event) {
+    final Offset? pointerDownPosition = _pointerDownPosition;
+    if (pointerDownPosition == null || _isDragging) {
+      return;
+    }
+
+    final Offset delta = event.position - pointerDownPosition;
+    if (delta.dy.abs() < _dragThreshold || delta.dy.abs() < delta.dx.abs()) {
+      return;
+    }
+
+    setState(() => _isDragging = true);
+  }
+
+  void _finishDrag() {
+    _pointerDownPosition = null;
+    if (_isDragging) {
+      setState(() => _isDragging = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      behavior: HitTestBehavior.opaque,
+      onPointerDown: (PointerDownEvent event) {
+        _pointerDownPosition = event.position;
+      },
+      onPointerMove: _handlePointerMove,
+      onPointerUp: (_) => _finishDrag(),
+      onPointerCancel: (_) => _finishDrag(),
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.only(top: 8, bottom: 0),
+              child: MobileOverlayDragHandle(isDragging: _isDragging),
+            ),
+            Flexible(child: widget.child),
+          ],
         ),
       ),
     );
