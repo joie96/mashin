@@ -251,21 +251,21 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
   }
 
   Future<void> _showItemMenu(MediaItem item) {
-    return const AppContextMenuController().show(
+    return const AppContextMenuController().showContextMenu(
       context: context,
       actions: _buildItemMenuActions(item),
     );
   }
 
   Future<void> _showSelectionMenu(List<MediaItem> items) {
-    return const AppContextMenuController().show(
+    return const AppContextMenuController().showContextMenu(
       context: context,
       actions: _buildItemMenuActions(items.first, items),
     );
   }
 
   Future<void> _showHeaderMenu(Artist artist) {
-    return const AppContextMenuController().show(
+    return const AppContextMenuController().showContextMenu(
       context: context,
       actions: _buildHeaderMenuActions(artist),
     );
@@ -302,7 +302,7 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
               ),
             ),
           ),
-          const SliverToBoxAdapter(child: SizedBox(height: 16)),
+          const SliverToBoxAdapter(child: SizedBox(height: 28)),
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -318,7 +318,7 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
               ),
             ),
           ),
-          const SliverToBoxAdapter(child: SizedBox(height: 16)),
+          const SliverToBoxAdapter(child: SizedBox(height: 28)),
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -386,6 +386,12 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
                     size: 72,
                   ),
                 )
+              else if (_controller.isLoadingMetadata)
+                Icon(
+                  Icons.person_outlined,
+                  color: colors.textSecondary,
+                  size: 72,
+                )
               else if (!_controller.isLoadingMetadata)
                 Icon(
                   Icons.person_outlined,
@@ -418,27 +424,30 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
     final Artist? artist = _controller.artist;
 
     if (_controller.isLoadingMetadata) {
-      return Column(
-        children: <Widget>[
-          Container(
-            width: 200,
-            height: 24,
-            margin: const EdgeInsets.symmetric(horizontal: 16),
-            decoration: BoxDecoration(
-              color: colors.bgTertiary,
-              borderRadius: BorderRadius.circular(6),
+      return SizedBox(
+        width: double.infinity,
+        child: Column(
+          children: <Widget>[
+            Container(
+              width: 200,
+              height: 24,
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(
+                color: colors.bgTertiary,
+                borderRadius: BorderRadius.circular(6),
+              ),
             ),
-          ),
-          const SizedBox(height: 4),
-          Container(
-            width: 64,
-            height: 12,
-            decoration: BoxDecoration(
-              color: colors.bgTertiary,
-              borderRadius: BorderRadius.circular(6),
+            const SizedBox(height: 4),
+            Container(
+              width: 64,
+              height: 12,
+              decoration: BoxDecoration(
+                color: colors.bgTertiary,
+                borderRadius: BorderRadius.circular(6),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       );
     }
 

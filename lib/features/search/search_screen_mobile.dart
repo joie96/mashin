@@ -210,7 +210,7 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
   }
 
   Future<void> _showSelectionMenu<T extends MediaItem>(List<T> items) {
-    return const AppContextMenuController().show(
+    return const AppContextMenuController().showContextMenu(
       context: context,
       actions: _buildSelectionMenuActions(items),
     );
@@ -221,7 +221,7 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
     final colors = context.mashinColors;
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
+      padding: const EdgeInsets.fromLTRB(18, 20, 18, 28),
       children: <Widget>[
         Text(
           'Suche',

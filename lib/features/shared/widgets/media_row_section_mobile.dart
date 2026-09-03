@@ -12,9 +12,6 @@ import 'media_image.dart';
 import 'mobile_section_header.dart';
 
 class MediaRowSectionMobile<T> extends StatefulWidget {
-  static const double _compactTextHeight = 34;
-  static const double _trackTextHeight = 50;
-
   final String title;
   final bool isLoading;
   final List<T> items;
@@ -22,7 +19,6 @@ class MediaRowSectionMobile<T> extends StatefulWidget {
   final double itemWidth;
   final double coverSize;
   final double itemSpacing;
-  final double height;
   final int skeletonCount;
   final PlaybackCoordinator? playbackCoordinator;
   final ValueChanged<T>? onItemTap;
@@ -38,7 +34,6 @@ class MediaRowSectionMobile<T> extends StatefulWidget {
     this.itemWidth = 146,
     this.coverSize = 146,
     this.itemSpacing = 8,
-    this.height = 232,
     this.skeletonCount = 6,
     this.playbackCoordinator,
     this.onItemTap,
@@ -52,6 +47,10 @@ class MediaRowSectionMobile<T> extends StatefulWidget {
 }
 
 class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
+  static const double _rowTitleHeight = 20;
+  static const double _rowSecondaryHeight = 18;
+  static const double _rowTertiaryHeight = 15;
+
   late final MobileSectionSelectionState _selectionController;
 
   String get title => widget.title;
@@ -61,7 +60,6 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
   double get itemWidth => widget.itemWidth;
   double get coverSize => widget.coverSize;
   double get itemSpacing => widget.itemSpacing;
-  double get height => widget.height;
   int get skeletonCount => widget.skeletonCount;
   PlaybackCoordinator? get playbackCoordinator => widget.playbackCoordinator;
   ValueChanged<T>? get onItemTap => widget.onItemTap;
@@ -233,16 +231,6 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
     final bool hasTitle = title.trim().isNotEmpty;
-    final bool reservesMetadataSpace =
-        T == Album ||
-        T == Track ||
-        T == QueueItem ||
-        (T == Playlist && showPlaylistDetails);
-    final double sectionHeight = T == Track
-        ? coverSize + MediaRowSectionMobile._trackTextHeight
-        : reservesMetadataSpace
-        ? height
-        : coverSize + MediaRowSectionMobile._compactTextHeight;
     final bool hasPlayableContent = !isLoading && _hasPlayableItemsFromIndex(0);
 
     return Column(
@@ -261,65 +249,69 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
         if (!isLoading && items.isEmpty)
           Text(emptyText, style: TextStyle(color: colors.textSecondary))
         else
-          SizedBox(
-            height: sectionHeight,
-            child: isLoading
-                ? ListView.builder(
-                    primary: false,
-                    scrollDirection: Axis.horizontal,
-                    itemCount: skeletonCount,
-                    itemExtent: itemWidth + itemSpacing,
-                    scrollCacheExtent: ScrollCacheExtent.pixels(0),
-                    addAutomaticKeepAlives: false,
-                    addRepaintBoundaries: true,
-                    addSemanticIndexes: false,
-                    itemBuilder: (_, int index) {
-                      final bool isLastItem = index == skeletonCount - 1;
-
-                      return Padding(
-                        padding: EdgeInsets.only(
-                          right: isLastItem ? 0 : itemSpacing,
-                        ),
-                        child: _buildMobileTypedRowSkeleton(),
-                      );
-                    },
-                  )
-                : ListView.builder(
-                    primary: false,
-                    scrollDirection: Axis.horizontal,
-                    itemCount: _visibleItemCount,
-                    itemExtent: itemWidth + itemSpacing,
-                    scrollCacheExtent: ScrollCacheExtent.pixels(0),
-                    addAutomaticKeepAlives: false,
-                    addRepaintBoundaries: true,
-                    addSemanticIndexes: false,
-                    itemBuilder: (BuildContext context, int index) {
-                      final bool isLastItem = index == _visibleItemCount - 1;
-
-                      return Padding(
-                        padding: EdgeInsets.only(
-                          right: isLastItem ? 0 : itemSpacing,
-                        ),
-                        child: MobileSelectableSectionItem(
-                          selectionModeActive:
-                              _selectionController.isSelectionModeActive,
-                          isSelected: _selectionController.isSelected(index),
-                          onLongPress: () =>
-                              _selectionController.select(index, items.length),
-                          onToggleSelection: () =>
-                              _selectionController.toggle(index, items.length),
-                          onTap: _itemTapCallback(items[index]),
-                          child: _buildMobileTypedRow(
-                            item: items[index],
-                            index: index,
-                            onItemTap: null,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
+          SizedBox(height: _sectionHeight, child: _buildHorizontalRows()),
       ],
+    );
+  }
+
+  double get _sectionHeight {
+    final int metadataLineCount = _metadataLineCount;
+    final double metadataHeight =
+        _rowTitleHeight +
+        (metadataLineCount > 1 ? 2 + _rowSecondaryHeight : 0) +
+        (metadataLineCount > 2 ? 2 + _rowTertiaryHeight : 0);
+    return coverSize + 8 + metadataHeight;
+  }
+
+  int get _metadataLineCount {
+    if (T == Artist) {
+      return 1;
+    }
+    if (T == Playlist) {
+      return showPlaylistDetails ? 2 : 1;
+    }
+    if (T == Track) {
+      return 2;
+    }
+    return 3;
+  }
+
+  Widget _buildHorizontalRows() {
+    final int itemCount = isLoading ? skeletonCount : _visibleItemCount;
+
+    return ListView.builder(
+      primary: false,
+      scrollDirection: Axis.horizontal,
+      itemCount: itemCount,
+      itemExtent: itemWidth + itemSpacing,
+      scrollCacheExtent: ScrollCacheExtent.pixels(0),
+      addAutomaticKeepAlives: false,
+      addRepaintBoundaries: true,
+      addSemanticIndexes: false,
+      itemBuilder: (BuildContext context, int index) {
+        final bool isLastItem = index == itemCount - 1;
+        final Widget item = isLoading
+            ? _buildMobileTypedRowSkeleton()
+            : MobileSelectableSectionItem(
+                selectionModeActive: _selectionController.isSelectionModeActive,
+                isSelected: _selectionController.isSelected(index),
+                onLongPress: () =>
+                    _selectionController.select(index, items.length),
+                onToggleSelection: () =>
+                    _selectionController.toggle(index, items.length),
+                onTap: _itemTapCallback(items[index]),
+                child: _buildMobileTypedRow(
+                  item: items[index],
+                  index: index,
+                  onItemTap: null,
+                ),
+              );
+
+        return Padding(
+          padding: EdgeInsets.only(right: isLastItem ? 0 : itemSpacing),
+          child: item,
+        );
+      },
     );
   }
 
@@ -761,6 +753,7 @@ Widget _buildMobileMediaRowAlbumSkeleton({
   return _buildMobileMediaRowSkeletonBase(
     itemWidth: itemWidth,
     coverSize: coverSize,
+    icon: Icons.album_outlined,
   );
 }
 
@@ -772,6 +765,7 @@ Widget _buildMobileMediaRowPlaylistSkeleton({
   return _buildMobileMediaRowSkeletonBase(
     itemWidth: itemWidth,
     coverSize: coverSize,
+    icon: Icons.queue_music_outlined,
     lineCount: showDetails ? 3 : 1,
   );
 }
@@ -783,6 +777,7 @@ Widget _buildMobileMediaRowArtistSkeleton({
   return _buildMobileMediaRowSkeletonBase(
     itemWidth: itemWidth,
     coverSize: coverSize,
+    icon: Icons.person_outlined,
     coverBorderRadius: coverSize / 2,
     lineCount: 1,
   );
@@ -795,6 +790,7 @@ Widget _buildMobileMediaRowTrackSkeleton({
   return _buildMobileMediaRowSkeletonBase(
     itemWidth: itemWidth,
     coverSize: coverSize,
+    icon: Icons.music_note_outlined,
     lineCount: 2,
   );
 }
@@ -806,12 +802,14 @@ Widget _buildMobileMediaRowUnknownSkeleton({
   return _buildMobileMediaRowSkeletonBase(
     itemWidth: itemWidth,
     coverSize: coverSize,
+    icon: Icons.music_note_outlined,
   );
 }
 
 Widget _buildMobileMediaRowSkeletonBase({
   required double itemWidth,
   required double coverSize,
+  required IconData icon,
   double? coverBorderRadius,
   int lineCount = 3,
 }) {
@@ -853,6 +851,7 @@ Widget _buildMobileMediaRowSkeletonBase({
                     width: coverSize,
                     height: coverSize,
                     color: colors.bgTertiary,
+                    child: Icon(icon, color: colors.textSecondary, size: 56),
                   ),
                 ),
               ],
@@ -916,10 +915,6 @@ String _playlistSubtitle(Playlist playlist) {
     return owner;
   }
   return 'Playlist';
-}
-
-String _playlistTertiary(Playlist playlist) {
-  return playlist.isEditable ? 'Editierbar' : 'Readonly';
 }
 
 String _mediaTypeLabel(String? rawType) {

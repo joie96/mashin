@@ -209,7 +209,7 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
   }
 
   Future<void> _showSelectionMenu(List<MediaItem> items) {
-    return const AppContextMenuController().show(
+    return const AppContextMenuController().showContextMenu(
       context: context,
       actions: _buildItemMenuActions(items.first, items),
     );
@@ -246,6 +246,7 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
     final colors = context.mashinColors;
     final Album? album = _controller.album;
     final String? imageUri = album?.imageUri;
+    final bool isLoadingMetadata = _controller.isLoadingMetadata;
     final bool hasImage = imageUri != null && imageUri.trim().isNotEmpty;
     return Container(
       color: colors.bgPrimary,
@@ -268,7 +269,13 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
                         child: Stack(
                           fit: StackFit.expand,
                           children: <Widget>[
-                            !hasImage
+                            isLoadingMetadata
+                                ? Icon(
+                                    Icons.album_outlined,
+                                    color: colors.textSecondary,
+                                    size: 72,
+                                  )
+                                : !hasImage
                                 ? Icon(
                                     Icons.album_outlined,
                                     color: colors.textSecondary,
@@ -307,41 +314,51 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(
-                      _controller.albumName,
-                      textAlign: TextAlign.center,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.headlineSmall
-                          ?.copyWith(fontWeight: FontWeight.bold),
+                  if (isLoadingMetadata)
+                    _buildSkeletonLine(colors, width: 200, height: 24)
+                  else
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        _controller.albumName,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
                     ),
-                  ),
                   const SizedBox(height: 4),
-                  Text(
-                    '${_controller.artistName}${_controller.yearText.isEmpty ? '' : ' • ${_controller.yearText}'}',
-                    style: TextStyle(color: colors.textSecondary),
-                  ),
+                  if (isLoadingMetadata)
+                    _buildSkeletonLine(colors, width: 120, height: 14)
+                  else
+                    Text(
+                      '${_controller.artistName}${_controller.yearText.isEmpty ? '' : ' • ${_controller.yearText}'}',
+                      style: TextStyle(color: colors.textSecondary),
+                    ),
                   const SizedBox(height: 16),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: <Widget>[
                       _MobileActionButton(
                         icon: Icons.play_arrow,
-                        onTap: _controller.playAlbum,
+                        onTap: isLoadingMetadata ? null : _controller.playAlbum,
                       ),
                       const SizedBox(width: 14),
                       _MobileActionButton(
                         icon: Icons.shuffle,
-                        onTap: _controller.shuffleAlbum,
+                        onTap: isLoadingMetadata
+                            ? null
+                            : _controller.shuffleAlbum,
                       ),
                       const SizedBox(width: 14),
                       _MobileActionButton(
                         icon: _controller.isAlbumFavorite
                             ? Icons.favorite
                             : Icons.favorite_border_outlined,
-                        onTap: _controller.toggleAlbumFavorite,
+                        onTap: isLoadingMetadata
+                            ? null
+                            : _controller.toggleAlbumFavorite,
                       ),
                       const SizedBox(width: 14),
                       _MobileActionButton(
@@ -349,7 +366,7 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
                         onTap: album == null
                             ? null
                             : () => unawaited(
-                                const AppContextMenuController().show(
+                                const AppContextMenuController().showContextMenu(
                                   context: context,
                                   actions: _buildHeaderMenu(album),
                                 ),
@@ -357,18 +374,41 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
                       ),
                     ],
                   ),
-                  if (_controller.hasDescription)
+                  if (isLoadingMetadata || _controller.hasDescription)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                      child: GestureDetector(
-                        onTap: _controller.toggleDescription,
-                        child: Text(
-                          _controller.description ?? '',
-                          maxLines: _controller.descriptionMaxLines,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: colors.textSecondary),
-                        ),
-                      ),
+                      child: isLoadingMetadata
+                          ? Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                _buildSkeletonLine(
+                                  colors,
+                                  width: double.infinity,
+                                  height: 13,
+                                ),
+                                const SizedBox(height: 6),
+                                _buildSkeletonLine(
+                                  colors,
+                                  width: double.infinity,
+                                  height: 13,
+                                ),
+                                const SizedBox(height: 6),
+                                _buildSkeletonLine(
+                                  colors,
+                                  width: 220,
+                                  height: 13,
+                                ),
+                              ],
+                            )
+                          : GestureDetector(
+                              onTap: _controller.toggleDescription,
+                              child: Text(
+                                _controller.description ?? '',
+                                maxLines: _controller.descriptionMaxLines,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(color: colors.textSecondary),
+                              ),
+                            ),
                     ),
                 ],
               ),
@@ -421,6 +461,21 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
           ),
           const SliverToBoxAdapter(child: SizedBox(height: 12)),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSkeletonLine(
+    MashinColors colors, {
+    required double width,
+    required double height,
+  }) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: colors.bgTertiary,
+        borderRadius: BorderRadius.circular(6),
       ),
     );
   }

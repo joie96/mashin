@@ -484,6 +484,11 @@ class _MobileSlideSkeleton extends StatelessWidget {
               color: colors.bgTertiary,
               borderRadius: BorderRadius.circular(12),
             ),
+            child: Icon(
+              Icons.music_note_outlined,
+              color: colors.textSecondary,
+              size: 34,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(

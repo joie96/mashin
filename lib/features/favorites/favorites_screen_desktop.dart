@@ -312,7 +312,7 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
     Offset? globalPosition,
     required List<ContextMenuAction> actions,
   }) {
-    return const AppContextMenuController().show(
+    return const AppContextMenuController().showContextMenu(
       context: context,
       anchorContext: anchorContext,
       globalPosition: globalPosition,

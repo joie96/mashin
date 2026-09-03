@@ -80,15 +80,15 @@ class PlaylistDetailController extends ChangeNotifier {
       (int sum, Track track) => sum + track.duration,
     );
     if (seconds <= 0) {
-      return '0 Min.';
+      return '0m';
     }
 
     final int hours = seconds ~/ 3600;
     final int minutes = (seconds % 3600) ~/ 60;
-    if (hours <= 0) {
-      return '$minutes Min.';
+    if (hours > 0) {
+      return '${hours}h ${minutes}m';
     }
-    return '$hours Std. $minutes Min.';
+    return '${minutes}m';
   }
 
   // Data loading

@@ -144,7 +144,7 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
   }
 
   Future<void> _showItemMenu(MediaItem item, {BuildContext? anchorContext}) {
-    return const AppContextMenuController().show(
+    return const AppContextMenuController().showContextMenu(
       context: context,
       anchorContext: anchorContext,
       actions: _buildItemMenuActions(item),
@@ -152,7 +152,7 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
   }
 
   Future<void> _showItemMenuAtPosition(MediaItem item, Offset globalPosition) {
-    return const AppContextMenuController().show(
+    return const AppContextMenuController().showContextMenu(
       context: context,
       globalPosition: globalPosition,
       actions: _buildItemMenuActions(item),

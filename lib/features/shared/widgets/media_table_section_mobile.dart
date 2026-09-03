@@ -23,6 +23,7 @@ class MediaTableSectionMobile<T> extends StatefulWidget {
   final ValueChanged<List<T>>? onSelectionChanged;
   final ValueChanged<List<T>>? onSelectionMenuTap;
   final PlaybackCoordinator? playbackCoordinator;
+  final String Function(Playlist playlist)? playlistSubtitleBuilder;
 
   const MediaTableSectionMobile({
     super.key,
@@ -38,6 +39,7 @@ class MediaTableSectionMobile<T> extends StatefulWidget {
     this.onSelectionChanged,
     this.onSelectionMenuTap,
     this.playbackCoordinator,
+    this.playlistSubtitleBuilder,
   });
 
   @override
@@ -63,6 +65,10 @@ class _MediaTableSectionMobileState<T>
 
   bool get _isChunkModeEnabled => widget.maxItemsPerPage > 0;
   int get _chunkSize => _isChunkModeEnabled ? widget.maxItemsPerPage : 0;
+  int get _effectiveSkeletonRowCount =>
+      _isChunkModeEnabled ? widget.maxItemsPerPage : widget.skeletonRowCount;
+  bool get _hasRowMoreAction =>
+      widget.onSelectionMenuTap != null || widget.onRowTap != null;
   bool get _isAllSelected =>
       widget.items.isNotEmpty && _selectedIndexes.length == widget.items.length;
   bool get _isTrackSection => T == Track;
@@ -179,18 +185,27 @@ class _MediaTableSectionMobileState<T>
   }
 
   void _onRowActivated({required T item, required int index}) {
-    final DesktopRowAction<T>? onRowTap = widget.onRowTap;
-    if (onRowTap != null) {
-      onRowTap(item, index);
+    if (!_isTrackSection) {
+      widget.onRowTap?.call(item, index);
       return;
     }
 
     unawaited(() async {
       final bool handled = await _handleRowActivate(item: item, index: index);
       if (!handled) {
-        return;
+        widget.onRowTap?.call(item, index);
       }
     }());
+  }
+
+  void _onRowMoreTap({required T item, required int index}) {
+    final ValueChanged<List<T>>? onSelectionMenuTap = widget.onSelectionMenuTap;
+    if (onSelectionMenuTap != null) {
+      onSelectionMenuTap(<T>[item]);
+      return;
+    }
+
+    widget.onRowTap?.call(item, index);
   }
 
   @override
@@ -367,7 +382,7 @@ class _MediaTableSectionMobileState<T>
         if (widget.isLoading)
           SliverFixedExtentList.builder(
             itemExtent: _mobileRowExtent,
-            itemCount: widget.skeletonRowCount,
+            itemCount: _effectiveSkeletonRowCount,
             itemBuilder: (BuildContext context, int index) =>
                 _buildMobileTypedSkeletonRow(isFirst: index == 0),
           )
@@ -405,6 +420,12 @@ class _MediaTableSectionMobileState<T>
                   onLongPressSelect: () => _enterSelectionMode(index),
                   onTap: () =>
                       _onRowActivated(item: widget.items[index], index: index),
+                  onMoreTap: !_hasRowMoreAction
+                      ? null
+                      : () => _onRowMoreTap(
+                          item: widget.items[index],
+                          index: index,
+                        ),
                 ),
           ),
       ],
@@ -430,7 +451,7 @@ class _MediaTableSectionMobileState<T>
         addAutomaticKeepAlives: false,
         addRepaintBoundaries: true,
         addSemanticIndexes: false,
-        itemCount: widget.skeletonRowCount,
+        itemCount: _effectiveSkeletonRowCount,
         itemExtent: _mobileRowExtent,
         itemBuilder: (BuildContext context, int index) {
           return _buildMobileTypedSkeletonRow(isFirst: index == 0);
@@ -495,6 +516,12 @@ class _MediaTableSectionMobileState<T>
                         item: chunkItems[localIndex],
                         index: itemIndex,
                       ),
+                      onMoreTap: !_hasRowMoreAction
+                          ? null
+                          : () => _onRowMoreTap(
+                              item: chunkItems[localIndex],
+                              index: itemIndex,
+                            ),
                     ),
                   );
                 }),
@@ -529,6 +556,10 @@ class _MediaTableSectionMobileState<T>
           onLongPressSelect: () => _enterSelectionMode(itemIndex),
           onTap: () =>
               _onRowActivated(item: widget.items[index], index: itemIndex),
+          onMoreTap: !_hasRowMoreAction
+              ? null
+              : () =>
+                    _onRowMoreTap(item: widget.items[index], index: itemIndex),
         );
       },
     );
@@ -546,6 +577,7 @@ class _MediaTableSectionMobileState<T>
     required VoidCallback onToggleSelected,
     required VoidCallback onLongPressSelect,
     required VoidCallback? onTap,
+    required VoidCallback? onMoreTap,
   }) {
     final Object? typedItem = item;
 
@@ -559,6 +591,7 @@ class _MediaTableSectionMobileState<T>
         onToggleSelected: onToggleSelected,
         onLongPressSelect: onLongPressSelect,
         onTap: onTap,
+        onMoreTap: onMoreTap,
       );
     }
 
@@ -572,6 +605,7 @@ class _MediaTableSectionMobileState<T>
         onToggleSelected: onToggleSelected,
         onLongPressSelect: onLongPressSelect,
         onTap: onTap,
+        onMoreTap: onMoreTap,
       );
     }
 
@@ -585,6 +619,7 @@ class _MediaTableSectionMobileState<T>
         onToggleSelected: onToggleSelected,
         onLongPressSelect: onLongPressSelect,
         onTap: onTap,
+        onMoreTap: onMoreTap,
       );
     }
 
@@ -598,6 +633,7 @@ class _MediaTableSectionMobileState<T>
         onToggleSelected: onToggleSelected,
         onLongPressSelect: onLongPressSelect,
         onTap: onTap,
+        onMoreTap: onMoreTap,
       );
     }
 
@@ -611,6 +647,7 @@ class _MediaTableSectionMobileState<T>
         onToggleSelected: onToggleSelected,
         onLongPressSelect: onLongPressSelect,
         onTap: onTap,
+        onMoreTap: onMoreTap,
       );
     }
 
@@ -623,6 +660,7 @@ class _MediaTableSectionMobileState<T>
       onToggleSelected: onToggleSelected,
       onLongPressSelect: onLongPressSelect,
       onTap: onTap,
+      onMoreTap: onMoreTap,
     );
   }
 
@@ -654,6 +692,7 @@ class _MediaTableSectionMobileState<T>
     required VoidCallback onToggleSelected,
     required VoidCallback onLongPressSelect,
     required VoidCallback? onTap,
+    required VoidCallback? onMoreTap,
   }) {
     return _buildMobileTableRowBase(
       title: _prefer(item.name, 'Unknown Track'),
@@ -672,6 +711,7 @@ class _MediaTableSectionMobileState<T>
       onToggleSelected: onToggleSelected,
       onLongPressSelect: onLongPressSelect,
       onTap: onTap,
+      onMoreTap: onMoreTap,
       playbackCoordinator: widget.playbackCoordinator,
       playbackItem: item,
     );
@@ -686,6 +726,7 @@ class _MediaTableSectionMobileState<T>
     required VoidCallback onToggleSelected,
     required VoidCallback onLongPressSelect,
     required VoidCallback? onTap,
+    required VoidCallback? onMoreTap,
   }) {
     final String provider = item.mediaItem?.provider.trim() ?? '';
     final String title = (item.mediaItem?.name.trim().isNotEmpty == true)
@@ -715,6 +756,7 @@ class _MediaTableSectionMobileState<T>
       onToggleSelected: onToggleSelected,
       onLongPressSelect: onLongPressSelect,
       onTap: onTap,
+      onMoreTap: onMoreTap,
       playbackCoordinator: widget.playbackCoordinator,
       playbackItem: item.mediaItem,
     );
@@ -729,6 +771,7 @@ class _MediaTableSectionMobileState<T>
     required VoidCallback onToggleSelected,
     required VoidCallback onLongPressSelect,
     required VoidCallback? onTap,
+    required VoidCallback? onMoreTap,
   }) {
     return _buildMobileTableRowBase(
       title: _prefer(item.name, 'Unknown Album'),
@@ -747,6 +790,7 @@ class _MediaTableSectionMobileState<T>
       onToggleSelected: onToggleSelected,
       onLongPressSelect: onLongPressSelect,
       onTap: onTap,
+      onMoreTap: onMoreTap,
     );
   }
 
@@ -759,11 +803,13 @@ class _MediaTableSectionMobileState<T>
     required VoidCallback onToggleSelected,
     required VoidCallback onLongPressSelect,
     required VoidCallback? onTap,
+    required VoidCallback? onMoreTap,
   }) {
     return _buildMobileTableRowBase(
       title: _prefer(item.name, 'Unknown Playlist'),
-      subtitle: _playlistSubtitle(item),
-      trailing: item.isEditable ? 'Editierbar' : 'Readonly',
+      subtitle: widget.playlistSubtitleBuilder?.call(item) ??
+          _playlistSubtitle(item),
+      trailing: null,
       coverUrl: item.imageUriForSize(80),
       fallbackIcon: Icons.queue_music_outlined,
       providerLabel: _providerLabelFromId(item.provider),
@@ -777,6 +823,7 @@ class _MediaTableSectionMobileState<T>
       onToggleSelected: onToggleSelected,
       onLongPressSelect: onLongPressSelect,
       onTap: onTap,
+      onMoreTap: onMoreTap,
     );
   }
 
@@ -789,6 +836,7 @@ class _MediaTableSectionMobileState<T>
     required VoidCallback onToggleSelected,
     required VoidCallback onLongPressSelect,
     required VoidCallback? onTap,
+    required VoidCallback? onMoreTap,
   }) {
     return _buildMobileTableRowBase(
       title: _prefer(item.name, 'Unknown Artist'),
@@ -807,6 +855,7 @@ class _MediaTableSectionMobileState<T>
       onToggleSelected: onToggleSelected,
       onLongPressSelect: onLongPressSelect,
       onTap: onTap,
+      onMoreTap: onMoreTap,
     );
   }
 
@@ -819,6 +868,7 @@ class _MediaTableSectionMobileState<T>
     required VoidCallback onToggleSelected,
     required VoidCallback onLongPressSelect,
     required VoidCallback? onTap,
+    required VoidCallback? onMoreTap,
   }) {
     return _buildMobileTableRowBase(
       title: itemLabel,
@@ -835,6 +885,7 @@ class _MediaTableSectionMobileState<T>
       onToggleSelected: onToggleSelected,
       onLongPressSelect: onLongPressSelect,
       onTap: onTap,
+      onMoreTap: onMoreTap,
     );
   }
 }
@@ -842,7 +893,7 @@ class _MediaTableSectionMobileState<T>
 class _MobileTableRowBase extends StatelessWidget {
   final String title;
   final String subtitle;
-  final String trailing;
+  final String? trailing;
   final String? coverUrl;
   final IconData fallbackIcon;
   final String providerLabel;
@@ -854,6 +905,7 @@ class _MobileTableRowBase extends StatelessWidget {
   final VoidCallback onToggleSelected;
   final VoidCallback onLongPressSelect;
   final VoidCallback? onTap;
+  final VoidCallback? onMoreTap;
   final PlaybackCoordinator? playbackCoordinator;
   final MediaItem? playbackItem;
 
@@ -872,6 +924,7 @@ class _MobileTableRowBase extends StatelessWidget {
     required this.onToggleSelected,
     required this.onLongPressSelect,
     this.onTap,
+    this.onMoreTap,
     this.playbackCoordinator,
     this.playbackItem,
   });
@@ -881,96 +934,130 @@ class _MobileTableRowBase extends StatelessWidget {
     final colors = context.mashinColors;
     final textStyles = context.mashinTableTextStyles;
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onLongPress: selectionEnabled ? onLongPressSelect : null,
-      onTap: selectionModeActive ? onToggleSelected : onTap,
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 64),
+    final Color rowBackground = isSelected
+        ? colors.selection
+        : Colors.transparent;
+    final Color splashColor = colors.selection.withValues(alpha: 0.42);
+    final Color highlightColor = colors.selection.withValues(alpha: 0.18);
+
+    return Material(
+      color: Colors.transparent,
+      child: Ink(
         decoration: BoxDecoration(
-          color: isSelected ? colors.selection : Colors.transparent,
+          color: rowBackground,
           border: isFirst
               ? null
               : Border(top: BorderSide(color: colors.border)),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Row(
-          children: <Widget>[
-            MediaTableCover(
-              coverUrl: coverUrl,
-              fallbackIcon: fallbackIcon,
-              size: 52,
-              radius: 8,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: <Widget>[
-                  PlaybackAwareBuilder(
-                    coordinator: playbackCoordinator,
-                    item: playbackItem,
-                    builder: (BuildContext context, bool isCurrent) {
-                      return Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: textStyles.mobileTitle.copyWith(
-                          color: isCurrent ? colors.accent : null,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 64),
+          child: Stack(
+            children: <Widget>[
+              Positioned.fill(
+                child: InkWell(
+                  onLongPress: selectionEnabled ? onLongPressSelect : null,
+                  onTap: selectionModeActive ? onToggleSelected : onTap,
+                  splashColor: splashColor,
+                  highlightColor: highlightColor,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 6, 58, 6),
+                    child: Row(
+                      children: <Widget>[
+                        MediaTableCover(
+                          coverUrl: coverUrl,
+                          fallbackIcon: fallbackIcon,
+                          size: 52,
+                          radius: 8,
                         ),
-                      );
-                    },
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: <Widget>[
+                              PlaybackAwareBuilder(
+                                coordinator: playbackCoordinator,
+                                item: playbackItem,
+                                builder:
+                                    (BuildContext context, bool isCurrent) {
+                                      return Text(
+                                        title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: textStyles.mobileTitle.copyWith(
+                                          color: isCurrent
+                                              ? colors.accent
+                                              : null,
+                                        ),
+                                      );
+                                    },
+                              ),
+                              const SizedBox(height: 1),
+                              Text(
+                                subtitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: textStyles.mobileSubtitle,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        if (trailing != null) ...<Widget>[
+                          Text(
+                            trailing!,
+                            textAlign: TextAlign.right,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: textStyles.mobileTrailing,
+                          ),
+                          const SizedBox(width: 10),
+                        ],
+                        SizedBox(
+                          width: 20,
+                          child: Align(
+                            alignment: Alignment.center,
+                            child: MediaProviderIcon(
+                              providerLabel: providerLabel,
+                              iconSvg: providerIconSvg,
+                              size: 16,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 1),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: textStyles.mobileSubtitle,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              trailing,
-              textAlign: TextAlign.right,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: textStyles.mobileTrailing,
-            ),
-            const SizedBox(width: 10),
-            SizedBox(
-              width: 20,
-              child: Align(
-                alignment: Alignment.center,
-                child: MediaProviderIcon(
-                  providerLabel: providerLabel,
-                  iconSvg: providerIconSvg,
-                  size: 16,
                 ),
               ),
-            ),
-            const SizedBox(width: 10),
-            SizedBox(
-              width: 40,
-              height: 40,
-              child: Center(
-                child: selectionEnabled && selectionModeActive
-                    ? _MobileSelectionCheckBox(
-                        isChecked: isSelected,
-                        isVisible: true,
-                        onTap: onToggleSelected,
-                      )
-                    : Icon(
-                        Icons.more_vert_outlined,
-                        size: 18,
-                        color: colors.textSecondary,
-                      ),
+              Positioned(
+                top: 0,
+                right: 0,
+                bottom: 0,
+                width: 48,
+                child: Material(
+                  color: Colors.transparent,
+                  child: Center(
+                    child: selectionEnabled && selectionModeActive
+                        ? _MobileSelectionCheckBox(
+                            isChecked: isSelected,
+                            isVisible: true,
+                            onTap: onToggleSelected,
+                          )
+                        : IconButton(
+                            onPressed: onMoreTap,
+                            splashColor: splashColor,
+                            highlightColor: highlightColor,
+                            icon: Icon(
+                              Icons.more_vert_outlined,
+                              size: 18,
+                              color: colors.textSecondary,
+                            ),
+                          ),
+                  ),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -980,7 +1067,7 @@ class _MobileTableRowBase extends StatelessWidget {
 Widget _buildMobileTableRowBase({
   required String title,
   required String subtitle,
-  required String trailing,
+  required String? trailing,
   required String? coverUrl,
   required IconData fallbackIcon,
   required String providerLabel,
@@ -992,6 +1079,7 @@ Widget _buildMobileTableRowBase({
   required VoidCallback onToggleSelected,
   required VoidCallback onLongPressSelect,
   required VoidCallback? onTap,
+  required VoidCallback? onMoreTap,
   PlaybackCoordinator? playbackCoordinator,
   MediaItem? playbackItem,
 }) {
@@ -1010,6 +1098,7 @@ Widget _buildMobileTableRowBase({
     onToggleSelected: onToggleSelected,
     onLongPressSelect: onLongPressSelect,
     onTap: onTap,
+    onMoreTap: onMoreTap,
     playbackCoordinator: playbackCoordinator,
     playbackItem: playbackItem,
   );
@@ -1018,6 +1107,7 @@ Widget _buildMobileTableRowBase({
 Widget _buildMobileTableRowTrackSkeleton({required bool isFirst}) {
   return _MobileTableRowSkeleton(
     isFirst: isFirst,
+    fallbackIcon: Icons.music_note_outlined,
     titleWidth: 176,
     subtitleWidth: 124,
     trailingWidth: 34,
@@ -1027,6 +1117,7 @@ Widget _buildMobileTableRowTrackSkeleton({required bool isFirst}) {
 Widget _buildMobileTableRowQueueSkeleton({required bool isFirst}) {
   return _MobileTableRowSkeleton(
     isFirst: isFirst,
+    fallbackIcon: Icons.music_note_outlined,
     titleWidth: 172,
     subtitleWidth: 116,
     trailingWidth: 34,
@@ -1036,6 +1127,7 @@ Widget _buildMobileTableRowQueueSkeleton({required bool isFirst}) {
 Widget _buildMobileTableRowAlbumSkeleton({required bool isFirst}) {
   return _MobileTableRowSkeleton(
     isFirst: isFirst,
+    fallbackIcon: Icons.album_outlined,
     titleWidth: 168,
     subtitleWidth: 110,
     trailingWidth: 28,
@@ -1045,6 +1137,7 @@ Widget _buildMobileTableRowAlbumSkeleton({required bool isFirst}) {
 Widget _buildMobileTableRowPlaylistSkeleton({required bool isFirst}) {
   return _MobileTableRowSkeleton(
     isFirst: isFirst,
+    fallbackIcon: Icons.queue_music_outlined,
     titleWidth: 170,
     subtitleWidth: 96,
     trailingWidth: 60,
@@ -1054,6 +1147,7 @@ Widget _buildMobileTableRowPlaylistSkeleton({required bool isFirst}) {
 Widget _buildMobileTableRowArtistSkeleton({required bool isFirst}) {
   return _MobileTableRowSkeleton(
     isFirst: isFirst,
+    fallbackIcon: Icons.person_outlined,
     titleWidth: 176,
     subtitleWidth: 82,
     trailingWidth: 68,
@@ -1063,6 +1157,7 @@ Widget _buildMobileTableRowArtistSkeleton({required bool isFirst}) {
 Widget _buildMobileTableRowUnknownSkeleton({required bool isFirst}) {
   return _MobileTableRowSkeleton(
     isFirst: isFirst,
+    fallbackIcon: Icons.music_note_outlined,
     titleWidth: 120,
     subtitleWidth: 80,
     trailingWidth: 28,
@@ -1071,12 +1166,14 @@ Widget _buildMobileTableRowUnknownSkeleton({required bool isFirst}) {
 
 class _MobileTableRowSkeleton extends StatelessWidget {
   final bool isFirst;
+  final IconData fallbackIcon;
   final double titleWidth;
   final double subtitleWidth;
   final double trailingWidth;
 
   const _MobileTableRowSkeleton({
     required this.isFirst,
+    required this.fallbackIcon,
     required this.titleWidth,
     required this.subtitleWidth,
     required this.trailingWidth,
@@ -1110,7 +1207,15 @@ class _MobileTableRowSkeleton extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       child: Row(
         children: <Widget>[
-          skeletonBox(width: 52, height: 52, radius: 8),
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: colors.bgTertiary,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(fallbackIcon, color: colors.textSecondary, size: 24),
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -1265,24 +1370,32 @@ String _firstArtistName(List<Artist> artists) {
 
 String _formatDuration(int seconds) {
   if (seconds <= 0) {
-    return '0:00';
+    return '0m';
   }
 
   final Duration duration = Duration(seconds: seconds);
+  final int hours = duration.inHours;
   final int minutes = duration.inMinutes;
-  final int remainingSeconds = duration.inSeconds % 60;
-  return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
+  final int remainingMinutes = minutes % 60;
+  if (hours > 0) {
+    return '${hours}h ${remainingMinutes}m';
+  }
+  return '${minutes}m';
 }
 
 String _formatQueueDuration(double seconds) {
   if (!seconds.isFinite || seconds <= 0) {
-    return '0:00';
+    return '0m';
   }
 
   final int totalSeconds = seconds.round();
+  final int hours = totalSeconds ~/ 3600;
   final int minutes = totalSeconds ~/ 60;
-  final int remainingSeconds = totalSeconds % 60;
-  return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
+  final int remainingMinutes = minutes % 60;
+  if (hours > 0) {
+    return '${hours}h ${remainingMinutes}m';
+  }
+  return '${minutes}m';
 }
 
 String _providerLabelFromId(String providerOrDomain) {

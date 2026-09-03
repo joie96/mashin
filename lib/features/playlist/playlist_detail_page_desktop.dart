@@ -315,7 +315,7 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
   }
 
   Future<void> _showItemMenu(MediaItem item, {BuildContext? anchorContext}) {
-    return const AppContextMenuController().show(
+    return const AppContextMenuController().showContextMenu(
       context: context,
       anchorContext: anchorContext,
       actions: _buildItemMenuActions(item),
@@ -327,7 +327,7 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
     Offset position, [
     List<Track> selectedTracks = const <Track>[],
   ]) {
-    return const AppContextMenuController().show(
+    return const AppContextMenuController().showContextMenu(
       context: context,
       globalPosition: position,
       actions: _buildItemMenuActions(item, selectedTracks),
@@ -339,7 +339,7 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
     if (playlist == null) {
       return;
     }
-    await const AppContextMenuController().show(
+    await const AppContextMenuController().showContextMenu(
       context: context,
       anchorContext: anchorKey.currentContext,
       actions: _buildHeaderMenuActions(playlist),

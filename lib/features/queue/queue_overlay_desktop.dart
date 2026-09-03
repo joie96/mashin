@@ -129,7 +129,7 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
     if (controller == null) {
       return Future<void>.value();
     }
-    return const AppContextMenuController().show(
+    return const AppContextMenuController().showContextMenu(
       context: context,
       actions: controller.playlists
           .map(
@@ -322,7 +322,7 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
     BuildContext? anchorContext,
     Offset? globalPosition,
   }) {
-    return const AppContextMenuController().show(
+    return const AppContextMenuController().showContextMenu(
       context: context,
       anchorContext: anchorContext,
       globalPosition: globalPosition,

@@ -3434,24 +3434,32 @@ String firstArtistName(List<Artist> artists) {
 
 String formatDuration(int seconds) {
   if (seconds <= 0) {
-    return '0:00';
+    return '0m';
   }
 
   final Duration duration = Duration(seconds: seconds);
+  final int hours = duration.inHours;
   final int minutes = duration.inMinutes;
-  final int remainingSeconds = duration.inSeconds % 60;
-  return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
+  final int remainingMinutes = minutes % 60;
+  if (hours > 0) {
+    return '${hours}h ${remainingMinutes}m';
+  }
+  return '${minutes}m';
 }
 
 String _formatQueueDurationSeconds(double seconds) {
   if (!seconds.isFinite || seconds <= 0) {
-    return '0:00';
+    return '0m';
   }
 
   final int totalSeconds = seconds.round();
+  final int hours = totalSeconds ~/ 3600;
   final int minutes = totalSeconds ~/ 60;
-  final int remainingSeconds = totalSeconds % 60;
-  return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
+  final int remainingMinutes = minutes % 60;
+  if (hours > 0) {
+    return '${hours}h ${remainingMinutes}m';
+  }
+  return '${minutes}m';
 }
 
 String _resolveQueueProvider(QueueItem item) {

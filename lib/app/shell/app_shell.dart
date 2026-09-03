@@ -48,6 +48,7 @@ class _AppShellState extends State<AppShell> {
       SelectionController.instance;
   bool _isQueueOverlayOpen = false;
   bool _isMobilePlayerOverlayOpen = false;
+  bool _isAudioOptionsOpen = false;
   double _mobilePlayerOverlayOpenProgress = 0;
   double _mobileQueueOverlayOpenProgress = 0;
   bool _isNavigationRefreshScheduled = false;
@@ -215,6 +216,7 @@ class _AppShellState extends State<AppShell> {
             _mobileQueueOverlayOpenProgress > 0 ||
             _isMobilePlayerOverlayOpen ||
             _mobilePlayerOverlayOpenProgress > 0 ||
+            _isAudioOptionsOpen ||
             _selectionSessionController.isVisible ||
             _canGoBack;
         return PopScope<void>(
@@ -227,7 +229,7 @@ class _AppShellState extends State<AppShell> {
           child: Scaffold(
             backgroundColor: context.mashinColors.bgPrimary,
             body: SafeArea(
-              top: false,
+              top: true,
               bottom: false,
               child: isDesktop
                   ? _buildDesktopLayout(context)
@@ -781,6 +783,16 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _handleMobileBack() {
+    if (_isAudioOptionsOpen) {
+      Navigator.of(context, rootNavigator: true).maybePop();
+      return;
+    }
+
+    if (_selectionSessionController.isVisible) {
+      _selectionSessionController.onClose();
+      return;
+    }
+
     if (_isQueueOverlayOpen || _mobileQueueOverlayOpenProgress > 0) {
       _closeQueueOverlay();
       return;
@@ -788,11 +800,6 @@ class _AppShellState extends State<AppShell> {
 
     if (_isMobilePlayerOverlayOpen || _mobilePlayerOverlayOpenProgress > 0) {
       _closeMobilePlayerOverlay();
-      return;
-    }
-
-    if (_selectionSessionController.isVisible) {
-      _selectionSessionController.onClose();
       return;
     }
 
@@ -859,7 +866,7 @@ class _AppShellState extends State<AppShell> {
     if (!playlist.isEditable) {
       return;
     }
-    await const AppContextMenuController().show(
+    await const AppContextMenuController().showContextMenu(
       context: context,
       globalPosition: position,
       actions: <ContextMenuAction>[
@@ -1031,20 +1038,29 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<void> _showAudioOptions(BuildContext anchorContext) async {
-    await const AppContextMenuController().showCustom(
-      context: context,
-      anchorContext: anchorContext,
-      width: 240,
-      height: 230,
-      child: _AudioOptionsMenu(
-        selectedCodec: _preferredCodec,
-        onSelected: _setPreferredAudioCodec,
-      ),
-    );
+    if (AppConfig.isMobile()) {
+      setState(() => _isAudioOptionsOpen = true);
+    }
+    try {
+      await const AppContextMenuController().showCustomContextMenu(
+        context: context,
+        anchorContext: anchorContext,
+        width: 240,
+        height: 230,
+        child: _AudioOptionsMenu(
+          selectedCodec: _preferredCodec,
+          onSelected: _setPreferredAudioCodec,
+        ),
+      );
+    } finally {
+      if (mounted && _isAudioOptionsOpen) {
+        setState(() => _isAudioOptionsOpen = false);
+      }
+    }
   }
 
   Future<void> _setPreferredAudioCodec(String codec) async {
-    Navigator.of(context).pop();
+    Navigator.of(context, rootNavigator: true).pop();
     final player = _playbackCoordinator.activePlayer;
     if (player is! SendspinPlayer || codec == _preferredCodec) {
       return;
@@ -1077,7 +1093,15 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _onNavigationChanged() {
-    if (!mounted || _isNavigationRefreshScheduled) {
+    if (!mounted) {
+      return;
+    }
+
+    if (_selectionSessionController.isVisible) {
+      _selectionSessionController.onClose();
+    }
+
+    if (_isNavigationRefreshScheduled) {
       return;
     }
 
@@ -1870,6 +1894,7 @@ class _AudioOptionsMenu extends StatelessWidget {
             }
           },
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               Padding(
@@ -1883,7 +1908,6 @@ class _AudioOptionsMenu extends StatelessWidget {
                   ),
                 ),
               ),
-              Divider(height: 1, color: colors.border),
               _AudioCodecOption(
                 value: 'opus',
                 title: 'Standard',
@@ -1951,7 +1975,7 @@ class _DesktopCurrentTrackInfo extends StatelessWidget {
     if (controller == null) {
       return Future<void>.value();
     }
-    return const AppContextMenuController().show(
+    return const AppContextMenuController().showContextMenu(
       context: context,
       actions: controller.playlists
           .map(

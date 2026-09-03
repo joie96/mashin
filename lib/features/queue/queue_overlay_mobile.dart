@@ -274,7 +274,7 @@ class _QueueOverlayMobileState extends State<QueueOverlayMobile> {
   }
 
   Future<void> _showSelectionMenu(List<QueueItem> items) {
-    return const AppContextMenuController().show(
+    return const AppContextMenuController().showContextMenu(
       context: context,
       actions: _buildMenuActions(items),
     );
@@ -285,7 +285,7 @@ class _QueueOverlayMobileState extends State<QueueOverlayMobile> {
     final colors = context.mashinColors;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
       child: Column(
         children: <Widget>[
           GestureDetector(
@@ -303,13 +303,8 @@ class _QueueOverlayMobileState extends State<QueueOverlayMobile> {
             behavior: HitTestBehavior.opaque,
             child: Column(
               children: <Widget>[
-                SizedBox(
-                  height: 28,
-                  child: Center(
-                    child: MobileOverlayDragHandle(isDragging: _isDragging),
-                  ),
-                ),
-                const SizedBox(height: 10),
+                MobileOverlayDragHandle(isDragging: _isDragging),
+                const SizedBox(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: <Widget>[

@@ -213,7 +213,7 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
   }
 
   Future<void> _showSelectionMenu<T extends MediaItem>(List<T> items) {
-    return const AppContextMenuController().show(
+    return const AppContextMenuController().showContextMenu(
       context: context,
       actions: _buildSelectionMenuActions(items),
     );

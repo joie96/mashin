@@ -77,8 +77,10 @@ class ContextMenuAction {
   bool get hasSubmenu => submenu.isNotEmpty;
 }
 
-/// Presents page-specific actions as an anchored popup on desktop and as a bottom sheet on mobile
+/// Presents page-specific actions as an anchored popup on desktop and a bottom
+/// sheet on mobile; mobile submenus use dialogs layered above their parent.
 class AppContextMenuController {
+  static const double _mobileDialogRadius = 8;
   static const double _desktopMenuWidth = 240;
   static const double _desktopMenuItemHeight = 48;
   static const double _desktopMenuSeparatorHeight = 9;
@@ -115,7 +117,7 @@ class AppContextMenuController {
 
   const AppContextMenuController();
 
-  Future<void> show({
+  Future<void> showContextMenu({
     required BuildContext context,
     required List<ContextMenuAction> actions,
     BuildContext? anchorContext,
@@ -126,11 +128,11 @@ class AppContextMenuController {
     }
 
     if (AppConfig.isMobile()) {
-      await _showMobile(context: context, actions: actions);
+      await _showMobileBottomSheet(context: context, actions: actions);
       return;
     }
 
-    await _showDesktop(
+    await _showDesktopContextMenu(
       context: context,
       anchorContext: anchorContext ?? context,
       actions: actions,
@@ -138,7 +140,57 @@ class AppContextMenuController {
     );
   }
 
-  Future<void> showCustom({
+  Future<void> showMobileDialog({
+    required BuildContext context,
+    required List<ContextMenuAction> actions,
+    String? title,
+  }) async {
+    if (actions.isEmpty) {
+      return;
+    }
+
+    if (AppConfig.isMobile()) {
+      await showGeneralDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        barrierLabel: 'Kontextmenü schließen',
+        pageBuilder: (BuildContext dialogContext, _, _) => Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(_mobileDialogRadius),
+          ),
+          child: SizedBox(
+            width: 240,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                if (title != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+                    child: Text(
+                      title,
+                      style: TextStyle(
+                        color: Theme.of(dialogContext).colorScheme.onSurface,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                _buildMobileContextMenuList(
+                  context: context,
+                  menuContext: dialogContext,
+                  actions: actions,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+  }
+
+  Future<void> showCustomContextMenu({
     required BuildContext context,
     required BuildContext anchorContext,
     required Widget child,
@@ -146,22 +198,48 @@ class AppContextMenuController {
     required double height,
   }) async {
     if (AppConfig.isMobile()) {
-      await showModalBottomSheet<void>(
+      await _showMobileCustomDialog(
         context: context,
-        useRootNavigator: true,
-        isScrollControlled: true,
-        showDragHandle: false,
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(context).height * 0.9,
-        ),
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
-        ),
-        builder: (_) => _MobileContextMenuSheet(child: child),
+        child: child,
+        width: width,
       );
       return;
     }
 
+    await _showDesktopCustomMenu(
+      context: context,
+      anchorContext: anchorContext,
+      child: child,
+      width: width,
+      height: height,
+    );
+  }
+
+  Future<void> _showMobileCustomDialog({
+    required BuildContext context,
+    required Widget child,
+    required double width,
+  }) async {
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Kontextmenü schließen',
+      pageBuilder: (_, _, _) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(_mobileDialogRadius),
+        ),
+        child: SizedBox(width: width, child: child),
+      ),
+    );
+  }
+
+  Future<void> _showDesktopCustomMenu({
+    required BuildContext context,
+    required BuildContext anchorContext,
+    required Widget child,
+    required double width,
+    required double height,
+  }) async {
     final RenderBox overlayBox =
         Navigator.of(context).overlay!.context.findRenderObject()! as RenderBox;
     final RenderBox anchorBox = anchorContext.findRenderObject()! as RenderBox;
@@ -209,7 +287,7 @@ class AppContextMenuController {
     );
   }
 
-  Future<void> _showDesktop({
+  Future<void> _showDesktopContextMenu({
     required BuildContext context,
     required BuildContext anchorContext,
     required List<ContextMenuAction> actions,
@@ -297,7 +375,7 @@ class AppContextMenuController {
     }
   }
 
-  Future<void> _showMobile({
+  Future<void> _showMobileBottomSheet({
     required BuildContext context,
     required List<ContextMenuAction> actions,
   }) async {
@@ -313,77 +391,81 @@ class AppContextMenuController {
         borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
       ),
       builder: (BuildContext sheetContext) => _MobileContextMenuSheet(
-        child: ListView.builder(
-          shrinkWrap: true,
-          itemCount: actions.length,
-          itemBuilder: (BuildContext itemContext, int index) {
-            final ContextMenuAction action = actions[index];
-            final colors = itemContext.mashinColors;
-
-            if (action.isSeparator) {
-              return Container(
-                height: 9,
-                alignment: Alignment.center,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Container(height: 1, color: colors.bgTertiary),
-              );
-            }
-
-            final Color textColor = action.isDestructive
-                ? Theme.of(itemContext).colorScheme.error
-                : colors.textPrimary;
-            final Color iconColor = action.isDestructive
-                ? Theme.of(itemContext).colorScheme.error
-                : colors.textSecondary;
-
-            return ListTile(
-              enabled: action.isEnabled,
-              leading: RotatedBox(
-                quarterTurns: action.iconQuarterTurns,
-                child: Icon(
-                  action.icon,
-                  size: 20,
-                  weight: 300,
-                  color: iconColor,
-                ),
-              ),
-              title: Text(
-                action.label,
-                style: Theme.of(itemContext).textTheme.bodyLarge?.copyWith(
-                  color: textColor,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w400,
-                  fontStyle: FontStyle.normal,
-                ),
-              ),
-              trailing: action.hasSubmenu
-                  ? Icon(
-                      Icons.chevron_right_outlined,
-                      size: 18,
-                      weight: 300,
-                      color: colors.textSecondary,
-                    )
-                  : null,
-              onTap: !action.isEnabled
-                  ? null
-                  : () async {
-                      if (action.hasSubmenu) {
-                        Navigator.of(sheetContext).pop();
-                        await _showMobile(
-                          context: context,
-                          actions: action.submenu,
-                        );
-                        return;
-                      }
-                      Navigator.of(sheetContext).pop();
-                      await action.onSelected();
-                    },
-            );
-          },
+        child: _buildMobileContextMenuList(
+          context: context,
+          menuContext: sheetContext,
+          actions: actions,
         ),
       ),
     );
   }
+
+  Widget _buildMobileContextMenuList({
+    required BuildContext context,
+    required BuildContext menuContext,
+    required List<ContextMenuAction> actions,
+  }) => ListView.builder(
+    shrinkWrap: true,
+    itemCount: actions.length,
+    itemBuilder: (BuildContext itemContext, int index) {
+      final ContextMenuAction action = actions[index];
+      final colors = itemContext.mashinColors;
+
+      if (action.isSeparator) {
+        return Container(
+          height: 9,
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Container(height: 1, color: colors.bgTertiary),
+        );
+      }
+
+      final Color textColor = action.isDestructive
+          ? Theme.of(itemContext).colorScheme.error
+          : colors.textPrimary;
+      final Color iconColor = action.isDestructive
+          ? Theme.of(itemContext).colorScheme.error
+          : colors.textSecondary;
+
+      return ListTile(
+        enabled: action.isEnabled,
+        leading: RotatedBox(
+          quarterTurns: action.iconQuarterTurns,
+          child: Icon(action.icon, size: 20, weight: 300, color: iconColor),
+        ),
+        title: Text(
+          action.label,
+          style: TextStyle(
+            color: textColor,
+            fontSize: 14,
+            fontWeight: FontWeight.w400,
+          ),
+        ),
+        trailing: action.hasSubmenu
+            ? Icon(
+                Icons.chevron_right_outlined,
+                size: 18,
+                weight: 300,
+                color: colors.textSecondary,
+              )
+            : null,
+        onTap: !action.isEnabled
+            ? null
+            : () async {
+                if (action.hasSubmenu) {
+                  await showMobileDialog(
+                    context: context,
+                    actions: action.submenu,
+                    title: 'Zu Playlist hinzufügen',
+                  );
+                  return;
+                }
+                Navigator.of(menuContext).pop();
+                await action.onSelected();
+              },
+      );
+    },
+  );
 }
 
 class _MobileContextMenuSheet extends StatefulWidget {

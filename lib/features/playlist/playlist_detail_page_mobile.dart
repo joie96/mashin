@@ -225,7 +225,7 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
   }
 
   Future<void> _showSelectionMenu(List<Track> items) {
-    return const AppContextMenuController().show(
+    return const AppContextMenuController().showContextMenu(
       context: context,
       actions: _buildItemMenuActions(items.first, items),
     );
@@ -314,6 +314,7 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
     final MashinColors colors = context.mashinColors;
     final Playlist? playlist = _controller.playlist;
     final String? imageUri = playlist?.imageUri;
+    final bool isLoadingMetadata = _controller.isLoadingMetadata;
     final bool hasImage = imageUri != null && imageUri.trim().isNotEmpty;
 
     return Container(
@@ -337,7 +338,13 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
                         child: Stack(
                           fit: StackFit.expand,
                           children: <Widget>[
-                            !hasImage
+                            isLoadingMetadata
+                                ? Icon(
+                                    Icons.queue_music_outlined,
+                                    color: colors.textSecondary,
+                                    size: 72,
+                                  )
+                                : !hasImage
                                 ? Icon(
                                     Icons.queue_music_outlined,
                                     color: colors.textSecondary,
@@ -376,34 +383,44 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(
-                      _controller.playlistName,
-                      textAlign: TextAlign.center,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.headlineSmall
-                          ?.copyWith(fontWeight: FontWeight.bold),
+                  if (isLoadingMetadata)
+                    _buildSkeletonLine(colors, width: 200, height: 24)
+                  else
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        _controller.playlistName,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
                     ),
-                  ),
                   const SizedBox(height: 4),
-                  Text(
-                    '${_controller.tracksCountText} • ${_controller.totalDurationText}',
-                    style: TextStyle(color: colors.textSecondary),
-                  ),
+                  if (isLoadingMetadata)
+                    _buildSkeletonLine(colors, width: 140, height: 14)
+                  else
+                    Text(
+                      '${_controller.tracksCountText} • ${_controller.totalDurationText}',
+                      style: TextStyle(color: colors.textSecondary),
+                    ),
                   const SizedBox(height: 8),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: <Widget>[
                       _MobileActionButton(
                         icon: Icons.play_arrow,
-                        onTap: _controller.playPlaylist,
+                        onTap: isLoadingMetadata
+                            ? null
+                            : _controller.playPlaylist,
                       ),
                       const SizedBox(width: 14),
                       _MobileActionButton(
                         icon: Icons.shuffle,
-                        onTap: _controller.shufflePlaylist,
+                        onTap: isLoadingMetadata
+                            ? null
+                            : _controller.shufflePlaylist,
                       ),
                       if (!_controller.isLocalPlaylist) ...<Widget>[
                         const SizedBox(width: 14),
@@ -411,7 +428,9 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
                           icon: _controller.isPlaylistFavorite
                               ? Icons.favorite
                               : Icons.favorite_border_outlined,
-                          onTap: _controller.togglePlaylistFavorite,
+                          onTap: isLoadingMetadata
+                              ? null
+                              : _controller.togglePlaylistFavorite,
                         ),
                       ],
                       const SizedBox(width: 14),
@@ -420,7 +439,7 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
                         onTap: playlist == null
                             ? null
                             : () => unawaited(
-                                const AppContextMenuController().show(
+                                const AppContextMenuController().showContextMenu(
                                   context: context,
                                   actions: _buildHeaderMenuActions(playlist),
                                 ),
@@ -443,7 +462,7 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
               maxItemsPerPage: 0,
               playbackCoordinator: widget.playbackCoordinator,
               onRowTap: (Track item, int _) => unawaited(
-                const AppContextMenuController().show(
+                const AppContextMenuController().showContextMenu(
                   context: context,
                   actions: _buildItemMenuActions(item),
                 ),
@@ -453,6 +472,21 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSkeletonLine(
+    MashinColors colors, {
+    required double width,
+    required double height,
+  }) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: colors.bgTertiary,
+        borderRadius: BorderRadius.circular(6),
       ),
     );
   }

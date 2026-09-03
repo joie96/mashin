@@ -100,8 +100,9 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
       return Future<void>.value();
     }
 
-    return const AppContextMenuController().show(
+    return const AppContextMenuController().showMobileDialog(
       context: context,
+      title: 'Zu Wiedergabeliste hinzufügen',
       actions: controller.playlists
           .map(
             (Playlist playlist) => ContextMenuAction(

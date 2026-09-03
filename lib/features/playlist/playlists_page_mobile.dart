@@ -103,7 +103,7 @@ class _PlaylistsPageMobileState extends State<PlaylistsPageMobile> {
   }
 
   Future<void> _showSelectionMenu(List<Playlist> playlists) {
-    return const AppContextMenuController().show(
+    return const AppContextMenuController().showContextMenu(
       context: context,
       actions: _buildMenuActions(playlists),
     );
@@ -144,7 +144,7 @@ class _PlaylistsPageMobileState extends State<PlaylistsPageMobile> {
     return CustomScrollView(
       slivers: <Widget>[
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(18, 20, 8, 12),
+          padding: const EdgeInsets.fromLTRB(18, 20, 8, 20),
           sliver: SliverToBoxAdapter(
             child: Row(
               children: <Widget>[
@@ -159,6 +159,13 @@ class _PlaylistsPageMobileState extends State<PlaylistsPageMobile> {
                 IconButton(
                   tooltip: 'Wiedergabeliste erstellen',
                   onPressed: _createPlaylist,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 36,
+                    minHeight: 36,
+                  ),
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 20,
                   icon: const Icon(Icons.add_outlined),
                 ),
               ],
@@ -174,6 +181,16 @@ class _PlaylistsPageMobileState extends State<PlaylistsPageMobile> {
             emptyText: 'Keine Wiedergabelisten vorhanden.',
             maxItemsPerPage: 0,
             playbackCoordinator: widget.playbackCoordinator,
+            playlistSubtitleBuilder: (Playlist playlist) {
+              final List<Track> tracks = _controller.tracksFor(<Playlist>[
+                playlist,
+              ]);
+              final int totalSeconds = tracks.fold<int>(
+                0,
+                (int sum, Track track) => sum + track.duration,
+              );
+              return '${tracks.length} Titel • ${_formatPlaylistDuration(totalSeconds)}';
+            },
             onRowTap: (Playlist playlist, int _) =>
                 widget.onOpenPlaylist(playlist),
             onSelectionMenuTap: (List<Playlist> playlists) =>
@@ -184,4 +201,19 @@ class _PlaylistsPageMobileState extends State<PlaylistsPageMobile> {
       ],
     );
   }
+}
+
+String _formatPlaylistDuration(int seconds) {
+  if (seconds <= 0) {
+    return '0m';
+  }
+
+  final Duration duration = Duration(seconds: seconds);
+  final int hours = duration.inHours;
+  final int minutes = duration.inMinutes;
+  final int remainingMinutes = minutes % 60;
+  if (hours > 0) {
+    return '${hours}h ${remainingMinutes}m';
+  }
+  return '${minutes}m';
 }
