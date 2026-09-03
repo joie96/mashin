@@ -33,6 +33,8 @@ class PlayerBarOverlay extends StatelessWidget {
     required this.onToggleMute,
     required this.onSeek,
     required this.onOpenAudioOptions,
+    this.onOpenArtist,
+    this.onOpenAlbum,
   });
 
   final bool isOpen;
@@ -61,6 +63,8 @@ class PlayerBarOverlay extends StatelessWidget {
   final Future<void> Function() onToggleMute;
   final Future<void> Function(double) onSeek;
   final ValueChanged<BuildContext> onOpenAudioOptions;
+  final ValueChanged<Artist>? onOpenArtist;
+  final ValueChanged<Album>? onOpenAlbum;
 
   @override
   Widget build(BuildContext context) {
@@ -90,6 +94,8 @@ class PlayerBarOverlay extends StatelessWidget {
       onToggleMute: onToggleMute,
       onSeek: onSeek,
       onOpenAudioOptions: onOpenAudioOptions,
+      onOpenArtist: onOpenArtist,
+      onOpenAlbum: onOpenAlbum,
     );
   }
 }

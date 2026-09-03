@@ -548,6 +548,8 @@ class _AppShellState extends State<AppShell> {
               onToggleMute: _toggleMute,
               onSeek: _seek,
               onOpenAudioOptions: _showAudioOptions,
+              onOpenArtist: _openArtistFromMobilePlayerOverlay,
+              onOpenAlbum: _openAlbumFromMobilePlayerOverlay,
             ),
           ),
         ),
@@ -666,6 +668,24 @@ class _AppShellState extends State<AppShell> {
       _mobilePlayerOverlayOpenProgress = 0;
       _mobileQueueOverlayOpenProgress = 0;
     });
+  }
+
+  Future<void> _openArtistFromMobilePlayerOverlay(Artist artist) async {
+    _closeMobilePlayerOverlay();
+    await Future<void>.delayed(QueueOverlay.animationDuration);
+    if (!mounted) {
+      return;
+    }
+    _openArtist(artist);
+  }
+
+  Future<void> _openAlbumFromMobilePlayerOverlay(Album album) async {
+    _closeMobilePlayerOverlay();
+    await Future<void>.delayed(QueueOverlay.animationDuration);
+    if (!mounted) {
+      return;
+    }
+    _openAlbum(album);
   }
 
   void _openQueueFromMobilePlayerOverlay() {

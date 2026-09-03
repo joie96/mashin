@@ -37,6 +37,8 @@ class PlayerBarOverlayMobile extends StatefulWidget {
     required this.onToggleMute,
     required this.onSeek,
     required this.onOpenAudioOptions,
+    this.onOpenArtist,
+    this.onOpenAlbum,
   });
 
   final bool isOpen;
@@ -65,6 +67,8 @@ class PlayerBarOverlayMobile extends StatefulWidget {
   final Future<void> Function() onToggleMute;
   final Future<void> Function(double) onSeek;
   final ValueChanged<BuildContext> onOpenAudioOptions;
+  final ValueChanged<Artist>? onOpenArtist;
+  final ValueChanged<Album>? onOpenAlbum;
 
   @override
   State<PlayerBarOverlayMobile> createState() => _PlayerBarOverlayMobileState();
@@ -209,6 +213,9 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
     final bool isFavorite =
         track != null &&
         (widget.userDataController?.isFavorite(track) ?? track.favorite);
+    final String albumName = track?.album?.name.trim() ?? '';
+    final Album? album = track?.album;
+    final Artist? artist = track?.artists.firstOrNull;
     final double clampedMaxSeconds = widget.maxSeconds
         .clamp(0, 36000)
         .toDouble();
@@ -277,276 +284,260 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
                       child: SafeArea(
                         top: true,
                         bottom: true,
-                        child: LayoutBuilder(
-                          builder: (BuildContext context, BoxConstraints constraints) {
-                            final double coverSide = (constraints.maxWidth - 32)
-                                .clamp(180, constraints.maxHeight * 0.48)
-                                .toDouble();
-
-                            return SingleChildScrollView(
-                              physics: const ClampingScrollPhysics(),
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(
-                                  minHeight: constraints.maxHeight,
-                                ),
-                                child: Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    16,
-                                    10,
-                                    16,
-                                    18,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
+                          child: Column(
+                            children: <Widget>[
+                              MobileOverlayDragHandle(isDragging: _isDragging),
+                              const SizedBox(height: 16),
+                              Expanded(
+                                child: Center(
+                                  child: AspectRatio(
+                                    aspectRatio: 1,
+                                    child: _PlayerOverlayArtwork(
+                                      coverUrl: widget.trackCoverUrl,
+                                    ),
                                   ),
-                                  child: Column(
+                                ),
+                              ),
+                              const SizedBox(height: 18),
+                              Text(
+                                widget.trackTitle,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: colors.textPrimary,
+                                  fontFamily: 'PoppinsRegular',
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              if (albumName.isNotEmpty) ...<Widget>[
+                                _PlayerOverlayLinkText(
+                                  text: albumName,
+                                  color: colors.textTertiary,
+                                  onTap: album == null
+                                      ? null
+                                      : () => widget.onOpenAlbum?.call(album),
+                                ),
+                                const SizedBox(height: 6),
+                              ],
+                              _PlayerOverlayLinkText(
+                                text: widget.trackSubtitle,
+                                color: colors.textSecondary,
+                                onTap: artist == null
+                                    ? null
+                                    : () => widget.onOpenArtist?.call(artist),
+                              ),
+                              const SizedBox(height: 30),
+                              Center(
+                                child: ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    maxWidth: 400,
+                                  ),
+                                  child: Row(
                                     children: <Widget>[
-                                      MobileOverlayDragHandle(
-                                        isDragging: _isDragging,
-                                      ),
-                                      const SizedBox(height: 16),
-                                      _PlayerOverlayArtwork(
-                                        side: coverSide,
-                                        coverUrl: widget.trackCoverUrl,
-                                      ),
-                                      const SizedBox(height: 18),
                                       Text(
-                                        widget.trackTitle,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        textAlign: TextAlign.center,
+                                        _formatSeconds(clampedCurrentSeconds),
                                         style: TextStyle(
-                                          color: colors.textPrimary,
-                                          fontFamily: 'PoppinsRegular',
-                                          fontSize: 24,
-                                          fontWeight: FontWeight.w600,
+                                          color: colors.textTertiary,
+                                          fontSize: 12,
                                         ),
                                       ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        widget.trackSubtitle,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                          color: colors.textSecondary,
-                                          fontFamily: 'PoppinsRegular',
-                                          fontSize: 14,
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: SliderTheme(
+                                          data: SliderTheme.of(context).copyWith(
+                                            trackHeight: 3,
+                                            thumbShape:
+                                                const RoundSliderThumbShape(
+                                                  enabledThumbRadius: 7,
+                                                  disabledThumbRadius: 7,
+                                                ),
+                                            overlayShape:
+                                                const RoundSliderOverlayShape(
+                                                  overlayRadius: 10,
+                                                ),
+                                            thumbColor: colors.textSecondary,
+                                            activeTrackColor:
+                                                colors.textSecondary,
+                                            inactiveTrackColor:
+                                                colors.bgTertiary,
+                                          ),
+                                          child: _PlayerbarOverlaySeekSlider(
+                                            value: clampedCurrentSeconds,
+                                            min: 0,
+                                            max: clampedMaxSeconds > 0
+                                                ? clampedMaxSeconds
+                                                : 1,
+                                            enabled: hasPlaybackSession,
+                                            onSeek: widget.onSeek,
+                                          ),
                                         ),
                                       ),
-                                      const SizedBox(height: 18),
-                                      Row(
-                                        children: <Widget>[
-                                          Text(
-                                            _formatSeconds(
-                                              clampedCurrentSeconds,
-                                            ),
-                                            style: TextStyle(
-                                              color: colors.textTertiary,
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          Expanded(
-                                            child: SliderTheme(
-                                              data: SliderTheme.of(context).copyWith(
-                                                trackHeight: 3,
-                                                thumbShape:
-                                                    const RoundSliderThumbShape(
-                                                      enabledThumbRadius: 7,
-                                                      disabledThumbRadius: 7,
-                                                    ),
-                                                overlayShape:
-                                                    const RoundSliderOverlayShape(
-                                                      overlayRadius: 10,
-                                                    ),
-                                                thumbColor:
-                                                    colors.textSecondary,
-                                                activeTrackColor:
-                                                    colors.textSecondary,
-                                                inactiveTrackColor:
-                                                    colors.bgTertiary,
-                                              ),
-                                              child:
-                                                  _PlayerbarOverlaySeekSlider(
-                                                    value:
-                                                        clampedCurrentSeconds,
-                                                    min: 0,
-                                                    max: clampedMaxSeconds > 0
-                                                        ? clampedMaxSeconds
-                                                        : 1,
-                                                    enabled: hasPlaybackSession,
-                                                    onSeek: widget.onSeek,
-                                                  ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 22),
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: <Widget>[
-                                          _MobileOverlayIconButton(
-                                            icon: Icons.shuffle_outlined,
-                                            onTap: hasPlaybackSession
-                                                ? () => unawaited(
-                                                    widget.onToggleShuffle(),
-                                                  )
-                                                : null,
-                                            color: isShuffleActive
-                                                ? colors.accent
-                                                : colors.textSecondary,
-                                          ),
-                                          _MobileOverlayIconButton(
-                                            icon: Icons.skip_previous_sharp,
-                                            iconSize: 26,
-                                            onTap: hasPlaybackSession
-                                                ? () => unawaited(
-                                                    widget.onPrevious(),
-                                                  )
-                                                : null,
-                                            color: colors.textPrimary,
-                                          ),
-                                          _MobileOverlayIconButton(
-                                            size: 60,
-                                            iconSize: 34,
-                                            icon: isPlaying
-                                                ? Icons.pause_sharp
-                                                : Icons.play_arrow_sharp,
-                                            onTap: isBusy
-                                                ? null
-                                                : () => unawaited(
-                                                    widget.onTogglePlayPause(),
-                                                  ),
-                                            color: colors.bgPrimary,
-                                            backgroundColor: colors.textPrimary,
-                                            child: isBusy
-                                                ? SizedBox(
-                                                    width: 24,
-                                                    height: 24,
-                                                    child: CircularProgressIndicator(
-                                                      strokeWidth: 2,
-                                                      valueColor:
-                                                          AlwaysStoppedAnimation<
-                                                            Color
-                                                          >(colors.bgPrimary),
-                                                    ),
-                                                  )
-                                                : null,
-                                          ),
-                                          _MobileOverlayIconButton(
-                                            icon: Icons.skip_next_sharp,
-                                            iconSize: 26,
-                                            onTap: hasPlaybackSession
-                                                ? () =>
-                                                      unawaited(widget.onNext())
-                                                : null,
-                                            color: colors.textPrimary,
-                                          ),
-                                          _MobileOverlayIconButton(
-                                            icon: repeatIcon,
-                                            onTap: hasPlaybackSession
-                                                ? () => unawaited(
-                                                    widget.onToggleRepeatMode(),
-                                                  )
-                                                : null,
-                                            color: repeatColor,
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 18),
-                                      Wrap(
-                                        alignment: WrapAlignment.center,
-                                        spacing: 14,
-                                        runSpacing: 10,
-                                        children: <Widget>[
-                                          Builder(
-                                            builder:
-                                                (
-                                                  BuildContext menuContext,
-                                                ) => _MobileOverlayIconButton(
-                                                  icon: Icons.add_outlined,
-                                                  onTap:
-                                                      track == null ||
-                                                          widget.userDataController ==
-                                                              null ||
-                                                          widget
-                                                              .userDataController!
-                                                              .playlists
-                                                              .isEmpty
-                                                      ? null
-                                                      : () => unawaited(
-                                                          _showAddToPlaylistMenu(
-                                                            menuContext,
-                                                            track,
-                                                          ),
-                                                        ),
-                                                  color: colors.textSecondary,
-                                                ),
-                                          ),
-                                          _MobileOverlayIconButton(
-                                            icon: isFavorite
-                                                ? Icons.favorite_outlined
-                                                : Icons
-                                                      .favorite_border_outlined,
-                                            onTap:
-                                                track == null ||
-                                                    widget.userDataController ==
-                                                        null
-                                                ? null
-                                                : _toggleCurrentTrackFavorite,
-                                            color: isFavorite
-                                                ? colors.accent
-                                                : colors.textSecondary,
-                                          ),
-                                          _MobileOverlayIconButton(
-                                            icon: Icons.queue_music_outlined,
-                                            onTap: widget.onOpenQueue,
-                                            color: colors.textSecondary,
-                                          ),
-                                          _MobileOverlayIconButton(
-                                            icon: Icons.cell_tower_outlined,
-                                            onTap: hasPlaybackSession
-                                                ? () => unawaited(
-                                                    widget
-                                                        .onToggleDontStopTheMusic(),
-                                                  )
-                                                : null,
-                                            color:
-                                                widget.dontStopTheMusicEnabled
-                                                ? colors.accent
-                                                : colors.textSecondary,
-                                          ),
-                                          _MobileOverlayIconButton(
-                                            icon: widget.playbackState.muted
-                                                ? Icons.volume_off_outlined
-                                                : Icons.volume_up_outlined,
-                                            onTap: () => unawaited(
-                                              widget.onToggleMute(),
-                                            ),
-                                            color: widget.playbackState.muted
-                                                ? colors.accent
-                                                : colors.textSecondary,
-                                          ),
-                                          Builder(
-                                            builder:
-                                                (
-                                                  BuildContext menuContext,
-                                                ) => _MobileOverlayIconButton(
-                                                  icon: Icons.tune_outlined,
-                                                  onTap: () =>
-                                                      widget.onOpenAudioOptions(
-                                                        menuContext,
-                                                      ),
-                                                  color: colors.textSecondary,
-                                                ),
-                                          ),
-                                        ],
+                                      const SizedBox(width: 10),
+                                      Text(
+                                        _formatSeconds(clampedMaxSeconds),
+                                        style: TextStyle(
+                                          color: colors.textTertiary,
+                                          fontSize: 12,
+                                        ),
                                       ),
                                     ],
                                   ),
                                 ),
                               ),
-                            );
-                          },
+                              const SizedBox(height: 22),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: <Widget>[
+                                  _MobileOverlayIconButton(
+                                    icon: Icons.shuffle_outlined,
+                                    onTap: hasPlaybackSession
+                                        ? () => unawaited(
+                                            widget.onToggleShuffle(),
+                                          )
+                                        : null,
+                                    color: isShuffleActive
+                                        ? colors.accent
+                                        : colors.textSecondary,
+                                  ),
+                                  const Flexible(child: SizedBox(width: 28)),
+                                  _MobileOverlayIconButton(
+                                    icon: Icons.skip_previous_sharp,
+                                    iconSize: 26,
+                                    onTap: hasPlaybackSession
+                                        ? () => unawaited(widget.onPrevious())
+                                        : null,
+                                    color: colors.textPrimary,
+                                  ),
+                                  const Flexible(child: SizedBox(width: 28)),
+                                  _MobileOverlayIconButton(
+                                    size: 60,
+                                    iconSize: 34,
+                                    icon: isPlaying
+                                        ? Icons.pause_sharp
+                                        : Icons.play_arrow_sharp,
+                                    onTap: isBusy
+                                        ? null
+                                        : () => unawaited(
+                                            widget.onTogglePlayPause(),
+                                          ),
+                                    color: colors.bgPrimary,
+                                    backgroundColor: colors.textPrimary,
+                                    child: isBusy
+                                        ? SizedBox(
+                                            width: 24,
+                                            height: 24,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              valueColor:
+                                                  AlwaysStoppedAnimation<Color>(
+                                                    colors.bgPrimary,
+                                                  ),
+                                            ),
+                                          )
+                                        : null,
+                                  ),
+                                  const Flexible(child: SizedBox(width: 28)),
+                                  _MobileOverlayIconButton(
+                                    icon: Icons.skip_next_sharp,
+                                    iconSize: 26,
+                                    onTap: hasPlaybackSession
+                                        ? () => unawaited(widget.onNext())
+                                        : null,
+                                    color: colors.textPrimary,
+                                  ),
+                                  const Flexible(child: SizedBox(width: 28)),
+                                  _MobileOverlayIconButton(
+                                    icon: repeatIcon,
+                                    onTap: hasPlaybackSession
+                                        ? () => unawaited(
+                                            widget.onToggleRepeatMode(),
+                                          )
+                                        : null,
+                                    color: repeatColor,
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 34),
+                              Wrap(
+                                alignment: WrapAlignment.center,
+                                spacing: 14,
+                                runSpacing: 10,
+                                children: <Widget>[
+                                  Builder(
+                                    builder: (BuildContext menuContext) =>
+                                        _MobileOverlayIconButton(
+                                          icon: Icons.add_outlined,
+                                          onTap:
+                                              track == null ||
+                                                  widget.userDataController ==
+                                                      null ||
+                                                  widget
+                                                      .userDataController!
+                                                      .playlists
+                                                      .isEmpty
+                                              ? null
+                                              : () => unawaited(
+                                                  _showAddToPlaylistMenu(
+                                                    menuContext,
+                                                    track,
+                                                  ),
+                                                ),
+                                          color: colors.textSecondary,
+                                        ),
+                                  ),
+                                  _MobileOverlayIconButton(
+                                    icon: isFavorite
+                                        ? Icons.favorite_outlined
+                                        : Icons.favorite_border_outlined,
+                                    onTap:
+                                        track == null ||
+                                            widget.userDataController == null
+                                        ? null
+                                        : _toggleCurrentTrackFavorite,
+                                    color: isFavorite
+                                        ? colors.accent
+                                        : colors.textSecondary,
+                                  ),
+                                  _MobileOverlayIconButton(
+                                    icon: Icons.queue_music_outlined,
+                                    onTap: widget.onOpenQueue,
+                                    color: colors.textSecondary,
+                                  ),
+                                  _MobileOverlayIconButton(
+                                    icon: Icons.cell_tower_outlined,
+                                    onTap: hasPlaybackSession
+                                        ? () => unawaited(
+                                            widget.onToggleDontStopTheMusic(),
+                                          )
+                                        : null,
+                                    color: widget.dontStopTheMusicEnabled
+                                        ? colors.accent
+                                        : colors.textSecondary,
+                                  ),
+                                  _MobileOverlayIconButton(
+                                    icon: Icons.devices_outlined,
+                                    onTap: () {},
+                                    color: colors.textSecondary,
+                                  ),
+                                  Builder(
+                                    builder: (BuildContext menuContext) =>
+                                        _MobileOverlayIconButton(
+                                          icon: Icons.tune_outlined,
+                                          onTap: () => widget
+                                              .onOpenAudioOptions(menuContext),
+                                          color: colors.textSecondary,
+                                        ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -561,10 +552,43 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
   }
 }
 
-class _PlayerOverlayArtwork extends StatelessWidget {
-  const _PlayerOverlayArtwork({required this.side, required this.coverUrl});
+class _PlayerOverlayLinkText extends StatelessWidget {
+  const _PlayerOverlayLinkText({
+    required this.text,
+    required this.color,
+    required this.onTap,
+  });
 
-  final double side;
+  final String text;
+  final Color color;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 8),
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: color,
+            fontFamily: 'PoppinsRegular',
+            fontSize: 17,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PlayerOverlayArtwork extends StatelessWidget {
+  const _PlayerOverlayArtwork({required this.coverUrl});
+
   final String? coverUrl;
 
   @override
@@ -576,8 +600,6 @@ class _PlayerOverlayArtwork extends StatelessWidget {
 
     return RepaintBoundary(
       child: Container(
-        width: side,
-        height: side,
         decoration: BoxDecoration(
           color: colors.bgTertiary,
           borderRadius: BorderRadius.circular(16),

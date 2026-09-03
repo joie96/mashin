@@ -189,9 +189,9 @@ class _QueueOverlayState extends State<QueueOverlay> {
                           ),
                           decoration: BoxDecoration(
                             color: colors.bgSecondary,
-                            border: Border(
-                              top: BorderSide(color: colors.border),
-                            ),
+                            border: widget.isDesktop
+                                ? Border(top: BorderSide(color: colors.border))
+                                : null,
                           ),
                           child: widget.isDesktop
                               ? QueueOverlayDesktop(
@@ -231,7 +231,6 @@ class _QueueOverlayState extends State<QueueOverlay> {
                                         widget.userDataController,
                                     onOpenArtist: widget.onOpenArtist,
                                     onOpenAlbum: widget.onOpenAlbum,
-                                    onClose: widget.onClose,
                                     onDismissDragUpdate:
                                         _handleMobileDismissDragUpdate,
                                     onDismissDragEnd:

@@ -16,7 +16,6 @@ class QueueOverlayMobile extends StatefulWidget {
   final UserDataController? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
-  final VoidCallback onClose;
   final ValueChanged<double> onDismissDragUpdate;
   final ValueChanged<double> onDismissDragEnd;
 
@@ -29,7 +28,6 @@ class QueueOverlayMobile extends StatefulWidget {
     this.userDataController,
     this.onOpenArtist,
     this.onOpenAlbum,
-    required this.onClose,
     required this.onDismissDragUpdate,
     required this.onDismissDragEnd,
     super.key,
@@ -287,7 +285,7 @@ class _QueueOverlayMobileState extends State<QueueOverlayMobile> {
     final colors = context.mashinColors;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
       child: Column(
         children: <Widget>[
           GestureDetector(
@@ -305,38 +303,59 @@ class _QueueOverlayMobileState extends State<QueueOverlayMobile> {
             behavior: HitTestBehavior.opaque,
             child: Column(
               children: <Widget>[
-                MobileOverlayDragHandle(isDragging: _isDragging),
-                const SizedBox(height: 14),
+                SizedBox(
+                  height: 28,
+                  child: Center(
+                    child: MobileOverlayDragHandle(isDragging: _isDragging),
+                  ),
+                ),
+                const SizedBox(height: 10),
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: <Widget>[
                     Text(
                       'Warteschlange',
                       style: TextStyle(
                         color: colors.textSecondary,
+                        fontSize: 14,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text('•', style: TextStyle(color: colors.textTertiary)),
+                    Text(
+                      '•',
+                      style: TextStyle(
+                        color: colors.textTertiary,
+                        fontSize: 14,
+                      ),
+                    ),
                     const SizedBox(width: 8),
                     Text(
                       widget.queueTrackCountText,
-                      style: TextStyle(color: colors.textTertiary),
+                      style: TextStyle(
+                        color: colors.textTertiary,
+                        fontSize: 14,
+                      ),
                     ),
                     const SizedBox(width: 8),
-                    Text('•', style: TextStyle(color: colors.textTertiary)),
+                    Text(
+                      '•',
+                      style: TextStyle(
+                        color: colors.textTertiary,
+                        fontSize: 14,
+                      ),
+                    ),
                     const SizedBox(width: 8),
                     Text(
                       widget.queueTotalDurationText,
-                      style: TextStyle(color: colors.textTertiary),
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      onPressed: widget.onClose,
-                      icon: const Icon(Icons.close_outlined),
+                      style: TextStyle(
+                        color: colors.textTertiary,
+                        fontSize: 14,
+                      ),
                     ),
                   ],
                 ),
+                const SizedBox(height: 10),
               ],
             ),
           ),
