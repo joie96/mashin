@@ -1782,7 +1782,7 @@ Widget _buildDesktopTableRowQueue({
       _buildDesktopTableSizedCell(
         width: 80,
         child: _buildDesktopBodyText(
-          _formatQueueDurationSeconds((item.duration ?? 0).toDouble()),
+          formatDuration(item.duration ?? 0),
           TextAlign.right,
           DesktopTextTone.tertiary,
         ),
@@ -3434,32 +3434,12 @@ String firstArtistName(List<Artist> artists) {
 
 String formatDuration(int seconds) {
   if (seconds <= 0) {
-    return '0m';
+    return '0:00';
   }
 
-  final Duration duration = Duration(seconds: seconds);
-  final int hours = duration.inHours;
-  final int minutes = duration.inMinutes;
-  final int remainingMinutes = minutes % 60;
-  if (hours > 0) {
-    return '${hours}h ${remainingMinutes}m';
-  }
-  return '${minutes}m';
-}
-
-String _formatQueueDurationSeconds(double seconds) {
-  if (!seconds.isFinite || seconds <= 0) {
-    return '0m';
-  }
-
-  final int totalSeconds = seconds.round();
-  final int hours = totalSeconds ~/ 3600;
-  final int minutes = totalSeconds ~/ 60;
-  final int remainingMinutes = minutes % 60;
-  if (hours > 0) {
-    return '${hours}h ${remainingMinutes}m';
-  }
-  return '${minutes}m';
+  final int minutes = seconds ~/ 60;
+  final int remainingSeconds = seconds % 60;
+  return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
 }
 
 String _resolveQueueProvider(QueueItem item) {

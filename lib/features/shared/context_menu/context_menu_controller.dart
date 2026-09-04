@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../../app/config/app_config.dart';
@@ -383,57 +382,27 @@ class AppContextMenuController {
     required List<ContextMenuAction> actions,
   }) async {
     final double maxSheetHeight = MediaQuery.sizeOf(context).height * 0.9;
-    final NavigatorState navigator = Navigator.of(context, rootNavigator: true);
-    final AnimationController transitionController =
-        BottomSheet.createAnimationController(navigator.overlay!);
-
-    try {
-      await showModalBottomSheet<void>(
-        context: context,
-        useRootNavigator: true,
-        isScrollControlled: true,
-        showDragHandle: false,
-        enableDrag: false,
-        transitionAnimationController: transitionController,
-        constraints: BoxConstraints(maxHeight: maxSheetHeight),
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
-        ),
-        builder: (BuildContext sheetContext) => _MobileContextMenuSheet(
-          onDismissDragUpdate: (double delta) {
-            transitionController.value =
-                (transitionController.value - delta / maxSheetHeight).clamp(
-                  0.0,
-                  1.0,
-                );
-          },
-          onDismissDragEnd: (double velocity) {
-            final double dragDistance =
-                (1 - transitionController.value) * maxSheetHeight;
-            if (dragDistance >= _mobileDismissThreshold || velocity > 700) {
-              Navigator.of(sheetContext).pop();
-              return;
-            }
-            unawaited(
-              transitionController.animateTo(
-                1,
-                duration: _mobileDragResetDuration,
-                curve: Curves.easeOutCubic,
-              ),
-            );
-          },
-          childBuilder: (ScrollController scrollController) =>
-              _buildMobileContextMenuList(
-                context: context,
-                menuContext: sheetContext,
-                actions: actions,
-                scrollController: scrollController,
-              ),
-        ),
-      );
-    } finally {
-      transitionController.dispose();
-    }
+    await showModalBottomSheet<void>(
+      context: context,
+      useRootNavigator: true,
+      isScrollControlled: true,
+      showDragHandle: false,
+      enableDrag: false,
+      constraints: BoxConstraints(maxHeight: maxSheetHeight),
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      builder: (BuildContext sheetContext) => _MobileContextMenuSheet(
+        maxDragOffset: maxSheetHeight,
+        onDismiss: () => Navigator.of(sheetContext).pop(),
+        childBuilder: (ScrollController scrollController) =>
+            _buildMobileContextMenuList(
+              context: context,
+              menuContext: sheetContext,
+              actions: actions,
+              scrollController: scrollController,
+            ),
+      ),
+    );
   }
 
   Widget _buildMobileContextMenuList({
@@ -510,13 +479,13 @@ class AppContextMenuController {
 class _MobileContextMenuSheet extends StatefulWidget {
   const _MobileContextMenuSheet({
     required this.childBuilder,
-    required this.onDismissDragUpdate,
-    required this.onDismissDragEnd,
+    required this.maxDragOffset,
+    required this.onDismiss,
   });
 
   final Widget Function(ScrollController scrollController) childBuilder;
-  final ValueChanged<double> onDismissDragUpdate;
-  final ValueChanged<double> onDismissDragEnd;
+  final double maxDragOffset;
+  final VoidCallback onDismiss;
 
   @override
   State<_MobileContextMenuSheet> createState() =>
@@ -524,67 +493,87 @@ class _MobileContextMenuSheet extends StatefulWidget {
 }
 
 class _MobileContextMenuSheetState extends State<_MobileContextMenuSheet> {
-  static const double _dragThreshold = 3;
-  static const double _scrollTopTolerance = 0.5;
-
   final ScrollController _scrollController = ScrollController();
-  Offset? _pointerDownPosition;
-  VelocityTracker? _velocityTracker;
-  bool _gestureClaimedByScroll = false;
   bool _isDragging = false;
+  double? _nonScrollableDragPointerY;
+  double _dragOffset = 0;
+  Duration _dragOffsetAnimationDuration = Duration.zero;
 
-  void _handlePointerDown(PointerDownEvent event) {
-    _pointerDownPosition = event.position;
-    _velocityTracker = VelocityTracker.withKind(event.kind)
-      ..addPosition(event.timeStamp, event.position);
-    _gestureClaimedByScroll =
-        _scrollController.hasClients &&
-        _scrollController.position.pixels >
-            _scrollController.position.minScrollExtent + _scrollTopTolerance;
+  void _updateDismissDrag(double delta) {
+    if (delta <= 0) {
+      return;
+    }
+    setState(() {
+      _dragOffsetAnimationDuration = Duration.zero;
+      _dragOffset = (_dragOffset + delta).clamp(0, widget.maxDragOffset);
+    });
   }
 
-  void _handlePointerMove(PointerMoveEvent event) {
-    _velocityTracker?.addPosition(event.timeStamp, event.position);
-    final Offset? pointerDownPosition = _pointerDownPosition;
-    if (pointerDownPosition == null || _gestureClaimedByScroll) {
+  void _handleContentPointerDown(PointerDownEvent event) {
+    if (!_scrollController.hasClients ||
+        _scrollController.position.maxScrollExtent >
+            _scrollController.position.minScrollExtent) {
+      _nonScrollableDragPointerY = null;
       return;
     }
-
-    if (_isDragging) {
-      widget.onDismissDragUpdate(event.delta.dy);
-      return;
-    }
-
-    final Offset delta = event.position - pointerDownPosition;
-    if (delta.dy.abs() < _dragThreshold || delta.dy.abs() < delta.dx.abs()) {
-      return;
-    }
-
-    if (delta.dy <= 0 ||
-        (_scrollController.hasClients &&
-            _scrollController.position.pixels >
-                _scrollController.position.minScrollExtent +
-                    _scrollTopTolerance)) {
-      _gestureClaimedByScroll = true;
-      return;
-    }
-
-    setState(() => _isDragging = true);
-    widget.onDismissDragUpdate(delta.dy);
+    _nonScrollableDragPointerY = event.position.dy;
   }
 
-  void _finishDrag(PointerEvent event) {
-    _velocityTracker?.addPosition(event.timeStamp, event.position);
-    final double velocity =
-        _velocityTracker?.getVelocity().pixelsPerSecond.dy ?? 0;
-    final bool wasDragging = _isDragging;
-    _pointerDownPosition = null;
-    _velocityTracker = null;
-    _gestureClaimedByScroll = false;
-    if (wasDragging) {
-      setState(() => _isDragging = false);
-      widget.onDismissDragEnd(velocity);
+  void _handleContentPointerMove(PointerMoveEvent event) {
+    final double? previousY = _nonScrollableDragPointerY;
+    if (previousY == null) {
+      return;
     }
+
+    _nonScrollableDragPointerY = event.position.dy;
+    final double downwardDelta = event.position.dy - previousY;
+    if (downwardDelta > 0) {
+      if (!_isDragging) {
+        setState(() => _isDragging = true);
+      }
+      _updateDismissDrag(downwardDelta);
+    }
+  }
+
+  void _finishContentPointerDrag() {
+    _nonScrollableDragPointerY = null;
+    _finishDismissDrag(0);
+  }
+
+  void _finishDismissDrag(double velocity) {
+    if (!_isDragging) {
+      return;
+    }
+    setState(() => _isDragging = false);
+    if (_dragOffset >= AppContextMenuController._mobileDismissThreshold ||
+        velocity > 700) {
+      widget.onDismiss();
+      return;
+    }
+    setState(() {
+      _dragOffsetAnimationDuration =
+          AppContextMenuController._mobileDragResetDuration;
+      _dragOffset = 0;
+    });
+  }
+
+  bool _handleMenuScrollNotification(ScrollNotification notification) {
+    if (notification.metrics.maxScrollExtent <=
+        notification.metrics.minScrollExtent) {
+      return false;
+    }
+    if (notification.metrics.pixels > notification.metrics.minScrollExtent) {
+      return false;
+    }
+    if (notification is OverscrollNotification && notification.overscroll < 0) {
+      if (!_isDragging) {
+        setState(() => _isDragging = true);
+      }
+      _updateDismissDrag(-notification.overscroll);
+    } else if (notification is ScrollEndNotification) {
+      _finishDismissDrag(notification.dragDetails?.primaryVelocity ?? 0);
+    }
+    return false;
   }
 
   @override
@@ -595,22 +584,57 @@ class _MobileContextMenuSheetState extends State<_MobileContextMenuSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Listener(
-      behavior: HitTestBehavior.opaque,
-      onPointerDown: _handlePointerDown,
-      onPointerMove: _handlePointerMove,
-      onPointerUp: _finishDrag,
-      onPointerCancel: _finishDrag,
-      child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.only(top: 8, bottom: 0),
-              child: MobileOverlayDragHandle(isDragging: _isDragging),
-            ),
-            Flexible(child: widget.childBuilder(_scrollController)),
-          ],
+    final colors = context.mashinColors;
+
+    return AnimatedSlide(
+      duration: _dragOffsetAnimationDuration,
+      curve: Curves.easeOutCubic,
+      offset: Offset(0, _dragOffset / widget.maxDragOffset),
+      onEnd: () {
+        if (mounted && _dragOffsetAnimationDuration != Duration.zero) {
+          setState(() => _dragOffsetAnimationDuration = Duration.zero);
+        }
+      },
+      child: Material(
+        color: colors.bgSecondary,
+        clipBehavior: Clip.antiAlias,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              GestureDetector(
+                onVerticalDragStart: (_) => setState(() => _isDragging = true),
+                onVerticalDragUpdate: (DragUpdateDetails details) {
+                  _updateDismissDrag(details.delta.dy);
+                },
+                onVerticalDragEnd: (DragEndDetails details) {
+                  _finishDismissDrag(details.primaryVelocity ?? 0);
+                },
+                onVerticalDragCancel: () => _finishDismissDrag(0),
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 0),
+                  child: MobileOverlayDragHandle(isDragging: _isDragging),
+                ),
+              ),
+              Flexible(
+                child: Listener(
+                  behavior: HitTestBehavior.translucent,
+                  onPointerDown: _handleContentPointerDown,
+                  onPointerMove: _handleContentPointerMove,
+                  onPointerUp: (_) => _finishContentPointerDrag(),
+                  onPointerCancel: (_) => _finishContentPointerDrag(),
+                  child: NotificationListener<ScrollNotification>(
+                    onNotification: _handleMenuScrollNotification,
+                    child: widget.childBuilder(_scrollController),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

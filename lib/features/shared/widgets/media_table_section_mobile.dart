@@ -744,7 +744,7 @@ class _MediaTableSectionMobileState<T>
     return _buildMobileTableRowBase(
       title: title,
       subtitle: subtitle.isEmpty ? '-' : subtitle,
-      trailing: _formatQueueDuration((item.duration ?? 0).toDouble()),
+      trailing: _formatDuration(item.duration ?? 0),
       coverUrl: item.mediaItem?.imageUriForSize(80),
       fallbackIcon: Icons.music_note_outlined,
       providerLabel: _providerLabelFromId(provider),
@@ -1376,21 +1376,6 @@ String _formatDuration(int seconds) {
   final int minutes = seconds ~/ 60;
   final int remainingSeconds = seconds % 60;
   return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
-}
-
-String _formatQueueDuration(double seconds) {
-  if (!seconds.isFinite || seconds <= 0) {
-    return '0m';
-  }
-
-  final int totalSeconds = seconds.round();
-  final int hours = totalSeconds ~/ 3600;
-  final int minutes = totalSeconds ~/ 60;
-  final int remainingMinutes = minutes % 60;
-  if (hours > 0) {
-    return '${hours}h ${remainingMinutes}m';
-  }
-  return '${minutes}m';
 }
 
 String _providerLabelFromId(String providerOrDomain) {
