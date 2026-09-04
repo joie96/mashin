@@ -42,6 +42,7 @@ class _QueueOverlayMobileState extends State<QueueOverlayMobile> {
   final ScrollController _scrollController = ScrollController();
   int? _lastCurrentQueueIndex;
   bool _isDragging = false;
+  double? _nonScrollableDragPointerY;
 
   void _setDragging(bool isDragging) {
     if (_isDragging == isDragging) {
@@ -51,6 +52,10 @@ class _QueueOverlayMobileState extends State<QueueOverlayMobile> {
   }
 
   bool _handleTableScrollNotification(ScrollNotification notification) {
+    if (notification.metrics.maxScrollExtent <=
+        notification.metrics.minScrollExtent) {
+      return false;
+    }
     if (notification.metrics.pixels > notification.metrics.minScrollExtent) {
       return false;
     }
@@ -62,6 +67,36 @@ class _QueueOverlayMobileState extends State<QueueOverlayMobile> {
       widget.onDismissDragEnd(notification.dragDetails?.primaryVelocity ?? 0);
     }
     return false;
+  }
+
+  void _handleContentPointerDown(PointerDownEvent event) {
+    if (!_scrollController.hasClients ||
+        _scrollController.position.maxScrollExtent >
+            _scrollController.position.minScrollExtent) {
+      _nonScrollableDragPointerY = null;
+      return;
+    }
+    _nonScrollableDragPointerY = event.position.dy;
+  }
+
+  void _handleContentPointerMove(PointerMoveEvent event) {
+    final double? previousY = _nonScrollableDragPointerY;
+    if (previousY == null) {
+      return;
+    }
+
+    _nonScrollableDragPointerY = event.position.dy;
+    final double downwardDelta = event.position.dy - previousY;
+    if (downwardDelta > 0) {
+      _setDragging(true);
+      widget.onDismissDragUpdate(downwardDelta);
+    }
+  }
+
+  void _finishContentPointerDrag() {
+    _nonScrollableDragPointerY = null;
+    _setDragging(false);
+    widget.onDismissDragEnd(0);
   }
 
   @override
@@ -357,14 +392,10 @@ class _QueueOverlayMobileState extends State<QueueOverlayMobile> {
           Expanded(
             child: Listener(
               behavior: HitTestBehavior.translucent,
-              onPointerUp: (_) {
-                _setDragging(false);
-                widget.onDismissDragEnd(0);
-              },
-              onPointerCancel: (_) {
-                _setDragging(false);
-                widget.onDismissDragEnd(0);
-              },
+              onPointerDown: _handleContentPointerDown,
+              onPointerMove: _handleContentPointerMove,
+              onPointerUp: (_) => _finishContentPointerDrag(),
+              onPointerCancel: (_) => _finishContentPointerDrag(),
               child: NotificationListener<ScrollNotification>(
                 onNotification: _handleTableScrollNotification,
                 child: CustomScrollView(

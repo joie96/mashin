@@ -1370,17 +1370,12 @@ String _firstArtistName(List<Artist> artists) {
 
 String _formatDuration(int seconds) {
   if (seconds <= 0) {
-    return '0m';
+    return '0:00';
   }
 
-  final Duration duration = Duration(seconds: seconds);
-  final int hours = duration.inHours;
-  final int minutes = duration.inMinutes;
-  final int remainingMinutes = minutes % 60;
-  if (hours > 0) {
-    return '${hours}h ${remainingMinutes}m';
-  }
-  return '${minutes}m';
+  final int minutes = seconds ~/ 60;
+  final int remainingSeconds = seconds % 60;
+  return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
 }
 
 String _formatQueueDuration(double seconds) {
