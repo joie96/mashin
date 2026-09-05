@@ -21,6 +21,12 @@ enum PlaybackStateType {
   error,
 }
 
+enum PlaybackStateReason {
+  playMedia,
+  codecSwitch,
+  seek,
+}
+
 // Queue State
 class PlaybackQueue {
   final String? queueId;
@@ -75,6 +81,8 @@ class PlaybackState {
   final int? seekMaxMillis;
   final int? positionMillis;
   final int? durationMillis;
+  final PlaybackStateReason? reason;
+  final DateTime? activeSince;
 
   const PlaybackState({
     this.playbackState = PlaybackStateType.uninitialized,
@@ -85,6 +93,8 @@ class PlaybackState {
     this.seekMaxMillis,
     this.positionMillis,
     this.durationMillis,
+    this.reason,
+    this.activeSince,
   });
 
   PlaybackState copyWith({
@@ -101,6 +111,10 @@ class PlaybackState {
     bool clearPositionMillis = false,
     int? durationMillis,
     bool clearDurationMillis = false,
+    PlaybackStateReason? reason,
+    bool clearReason = false,
+    DateTime? activeSince,
+    bool clearActiveSince = false,
   }) {
     return PlaybackState(
       playbackState: playbackState ?? this.playbackState,
@@ -113,6 +127,8 @@ class PlaybackState {
           : (seekMaxMillis ?? this.seekMaxMillis),
       positionMillis: clearPositionMillis ? null : (positionMillis ?? this.positionMillis),
       durationMillis: clearDurationMillis ? null : (durationMillis ?? this.durationMillis),
+      reason: clearReason ? null : (reason ?? this.reason),
+      activeSince: clearActiveSince ? null : (activeSince ?? this.activeSince),
     );
   }
 
@@ -126,6 +142,8 @@ class PlaybackState {
       'seekMaxMillis': seekMaxMillis,
       'positionMillis': positionMillis,
       'durationMillis': durationMillis,
+      'reason': reason?.name,
+      'activeSinceUtc': activeSince?.toUtc().toIso8601String(),
     };
     return payload;
   }
@@ -156,6 +174,8 @@ class PlaybackState {
       seekMaxMillis: seekMaxMillis,
       positionMillis: positionMillis,
       durationMillis: durationMillis,
+      reason: _parsePlaybackStateReason(json['reason']),
+      activeSince: _parseDateTime(json['activeSinceUtc']),
     );
   }
 }
@@ -177,6 +197,20 @@ int? _toClampedMillisFromSeconds(double? value) {
   return _toClampedMillis(value * 1000);
 }
 
+DateTime? _parseDateTime(Object? value) {
+  final String? raw = value as String?;
+  return raw == null ? null : DateTime.tryParse(raw)?.toLocal();
+}
+
+PlaybackStateReason? _parsePlaybackStateReason(Object? value) {
+  final String? normalized = (value as String?)?.trim().toLowerCase();
+  return switch (normalized) {
+    'playmedia' => PlaybackStateReason.playMedia,
+    'codecswitch' => PlaybackStateReason.codecSwitch,
+    'seek' => PlaybackStateReason.seek,
+    _ => null,
+  };
+}
 
 // Helper functions to parse enums from strings
 PlaybackStateType _parsePlaybackState(dynamic value) {

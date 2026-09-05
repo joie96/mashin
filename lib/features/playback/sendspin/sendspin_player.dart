@@ -18,6 +18,7 @@ class SendspinPlayer implements PlaybackPlayer {
     required this.eventHubResolver,
   });
 
+  static const Duration _bufferingHoldDuration = Duration(seconds: 8);
   static const Duration _positionTickInterval = Duration(milliseconds: 250);
   static const int _codecSwitchPlayRetryAttempts = 10;
   static const Duration _codecSwitchPlayRetryDelay = Duration(
@@ -154,6 +155,8 @@ class SendspinPlayer implements PlaybackPlayer {
     _playbackState = _playbackState.copyWith(
       playbackState: PlaybackStateType.seeking,
       positionMillis: position * 1000,
+      reason: PlaybackStateReason.seek,
+      activeSince: DateTime.now(),
     );
     _emitPlaybackState();
 
@@ -190,6 +193,8 @@ class SendspinPlayer implements PlaybackPlayer {
 
     _playbackState = _playbackState.copyWith(
       playbackState: PlaybackStateType.buffering,
+      reason: PlaybackStateReason.codecSwitch,
+      activeSince: DateTime.now(),
     );
     _emitPlaybackState();
 
@@ -246,6 +251,13 @@ class SendspinPlayer implements PlaybackPlayer {
     if (client == null || mediaItems.isEmpty) {
       return;
     }
+
+    _playbackState = _playbackState.copyWith(
+      playbackState: PlaybackStateType.buffering,
+      reason: PlaybackStateReason.playMedia,
+      activeSince: DateTime.now(),
+    );
+    _emitPlaybackState();
 
     final String queueId = await _resolveQueueId();
     await client.playMedia(
@@ -477,8 +489,11 @@ class SendspinPlayer implements PlaybackPlayer {
     required bool emit,
   }) {
     final PlaybackState previousPlaybackState = _playbackState;
+    final bool shouldHoldBuffering = _shouldHoldBuffering(nextPlaybackState);
     _playbackState = _playbackState.copyWith(
-      playbackState: nextPlaybackState.playbackState,
+      playbackState: shouldHoldBuffering
+          ? PlaybackStateType.buffering
+          : nextPlaybackState.playbackState,
       volume: nextPlaybackState.volume,
       muted: nextPlaybackState.muted,
       repeatMode: nextPlaybackState.repeatMode,
@@ -489,6 +504,8 @@ class SendspinPlayer implements PlaybackPlayer {
       clearSeekMaxMillis: nextPlaybackState.seekMaxMillis == null,
       durationMillis: nextPlaybackState.durationMillis,
       clearDurationMillis: nextPlaybackState.durationMillis == null,
+      clearReason: !shouldHoldBuffering,
+      clearActiveSince: !shouldHoldBuffering,
     );
 
     if (nextPlaybackState.playbackState == PlaybackStateType.playing) {
@@ -514,13 +531,27 @@ class SendspinPlayer implements PlaybackPlayer {
         previousPlaybackState.durationMillis !=
             nextPlaybackState.durationMillis) {
       _logger.debug(
-        'Sendspin playback state applied. PlaybackState=${nextPlaybackState.playbackState.name}, PositionMillis=${_playbackState.positionMillis}, DurationMillis=${nextPlaybackState.durationMillis}',
+        'Sendspin playback state applied. PlaybackState=${_playbackState.playbackState.name}, PositionMillis=${_playbackState.positionMillis}, DurationMillis=${nextPlaybackState.durationMillis}',
       );
     }
 
     if (emit) {
       _emitPlaybackState();
     }
+  }
+
+  bool _shouldHoldBuffering(PlaybackState nextPlaybackState) {
+    final DateTime? bufferingStartedAt = _playbackState.activeSince;
+    if (_playbackState.playbackState != PlaybackStateType.buffering ||
+      _playbackState.reason != PlaybackStateReason.playMedia ||
+        bufferingStartedAt == null ||
+        DateTime.now().difference(bufferingStartedAt) >
+            _bufferingHoldDuration) {
+      return false;
+    }
+
+    return nextPlaybackState.playbackState == PlaybackStateType.idle ||
+        nextPlaybackState.playbackState == PlaybackStateType.paused;
   }
 
   void _resetPositionAnchor() {

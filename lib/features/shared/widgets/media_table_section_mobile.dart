@@ -185,7 +185,7 @@ class _MediaTableSectionMobileState<T>
   }
 
   void _onRowActivated({required T item, required int index}) {
-    if (!_isTrackSection) {
+    if (!_isTrackSection && item is! QueueItem) {
       widget.onRowTap?.call(item, index);
       return;
     }

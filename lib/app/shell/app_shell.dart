@@ -21,6 +21,7 @@ import 'package:go_router/go_router.dart';
 import '../navigation/app_router.dart';
 import '../session/app_session_controller.dart';
 import '../theme/app_theme.dart';
+import '../logging/app_logger.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({
@@ -42,6 +43,7 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   static const double _mobileSelectionOverlayBottomInset = 84;
+  final AppLogger _logger = AppLogger('AppShell');
 
   bool _isDarkTheme = true;
   final SelectionController _selectionSessionController =
@@ -1032,8 +1034,12 @@ class _AppShellState extends State<AppShell> {
     final int safeVolume = next.round().clamp(0, 100);
     try {
       await _playbackCoordinator.setVolume(safeVolume);
-    } catch (error) {
-      debugPrint('Set volume failed: $error');
+    } catch (error, stackTrace) {
+      _logger.error(
+        'Set volume failed: $error',
+        error: error,
+        stackTrace: stackTrace,
+      );
     }
   }
 

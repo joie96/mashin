@@ -13,8 +13,11 @@ import '../../features/playback/sendspin/sendspin_rust_backend.dart';
 import '../../features/playback/sendspin/sendspin_rust_bridge_ffi.dart';
 import '../../features/shared/userdata_controller.dart';
 import '../config/app_config.dart';
+import '../logging/app_logger.dart';
 
 class AppSessionController extends ChangeNotifier {
+  final AppLogger _logger = AppLogger('AppSessionController');
+
   AppSessionController()
     : playbackCoordinator = PlaybackCoordinator(
         players: <PlaybackPlayer>[
@@ -58,8 +61,12 @@ class AppSessionController extends ChangeNotifier {
       _preferredCodec = await AppConfig.getSendspinPreferredCodec();
       await _restoreSession();
       await playbackCoordinator.initialize();
-    } catch (error) {
-      debugPrint('Startup bootstrap failed: $error');
+    } catch (error, stackTrace) {
+      _logger.error(
+        'Startup bootstrap failed: $error',
+        error: error,
+        stackTrace: stackTrace,
+      );
     } finally {
       if (!_isDisposed) {
         _isLoading = false;

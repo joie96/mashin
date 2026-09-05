@@ -1,4 +1,4 @@
-import 'dart:developer' as developer;
+import 'package:flutter/foundation.dart';
 
 enum AppLogLevel {
   debug,
@@ -32,24 +32,39 @@ abstract class AppLogSink {
 class ConsoleLogSink implements AppLogSink {
   @override
   void log(AppLogEvent event) {
-    developer.log(
-      event.message,
-      name: event.category,
-      level: _toDeveloperLevel(event.level),
-      time: event.timestamp,
-      error: event.error,
-      stackTrace: event.stackTrace,
-    );
+    debugPrint(_formatEvent(event));
   }
 
-  int _toDeveloperLevel(AppLogLevel level) {
+  String _formatEvent(AppLogEvent event) {
+    final DateTime timestamp = event.timestamp;
+    final String formattedTimestamp =
+        '${timestamp.year.toString().padLeft(4, '0')}-'
+        '${timestamp.month.toString().padLeft(2, '0')}-'
+        '${timestamp.day.toString().padLeft(2, '0')} '
+        '${timestamp.hour.toString().padLeft(2, '0')}:'
+        '${timestamp.minute.toString().padLeft(2, '0')}:'
+        '${timestamp.second.toString().padLeft(2, '0')}.'
+        '${timestamp.millisecond.toString().padLeft(3, '0')}';
+    final String error = event.error == null
+      ? ''
+      : ' | ${event.error.toString().replaceAll('\n', ' ')}';
+    final String stackTrace = event.stackTrace == null
+      ? ''
+      : ' | ${event.stackTrace.toString().replaceAll('\n', ' ')}';
+    return '[$formattedTimestamp] [${_toShortLevel(event.level)}] '
+      '${event.category}: ${event.message.replaceAll('\n', ' ')}'
+      '$error$stackTrace';
+  }
+
+  String _toShortLevel(AppLogLevel level) {
     return switch (level) {
-      AppLogLevel.debug => 500,
-      AppLogLevel.info => 800,
-      AppLogLevel.warn => 900,
-      AppLogLevel.error => 1000,
+      AppLogLevel.debug => 'DBG',
+      AppLogLevel.info => 'INF',
+      AppLogLevel.warn => 'WRN',
+      AppLogLevel.error => 'ERR',
     };
   }
+
 }
 
 class AppLogger {
