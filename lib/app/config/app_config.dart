@@ -9,7 +9,8 @@ class AppConfig {
   static const String defaultMusicAssistantUrl = 'http://192.168.1.2:8095';
   static const String defaultSendspinUrl = 'ws://192.168.1.2:8927/sendspin';
 
-  static const int sendspinBufferCapacityBytes = 52428800;
+  static const int sendspinBufferCapacityBytes = 150 * 1024 * 1024;
+  static const int defaultSendspinCacheCapacityBytes = 250 * 1024 * 1024;
   static const String sendspinPreferredCodec = 'pcm';
   static const int defaultLocalVolume = 100;
 
@@ -17,6 +18,8 @@ class AppConfig {
   static const String _sendspinUrlKey = 'ma.sendspin_url';
   static const String _sendspinPreferredCodecKey =
       'ma.sendspin_preferred_codec';
+    static const String _sendspinCacheCapacityBytesKey =
+      'ma.sendspin_cache_capacity_bytes';
   static const String _localVolumeKey = 'ma.local_volume';
 
   static bool isMobile() {
@@ -80,6 +83,22 @@ class AppConfig {
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_sendspinPreferredCodecKey, normalized);
+  }
+
+  static Future<int> getSendspinCacheCapacityBytes() async {
+    final prefs = await SharedPreferences.getInstance();
+    final int configured =
+        prefs.getInt(_sendspinCacheCapacityBytesKey) ??
+        defaultSendspinCacheCapacityBytes;
+    return configured.clamp(16 * 1024 * 1024, 4 * 1024 * 1024 * 1024);
+  }
+
+  static Future<void> setSendspinCacheCapacityBytes(int value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(
+      _sendspinCacheCapacityBytesKey,
+      value.clamp(16 * 1024 * 1024, 4 * 1024 * 1024 * 1024),
+    );
   }
 
   static Future<int> getLocalVolume() async {
@@ -153,6 +172,16 @@ class AppConfig {
   }
 
   static String get maAppId => deriveMaAppId(appId);
+
+  static String sendspinDownloadSlotId(int slot) {
+    if (slot != 1 && slot != 2) {
+      throw ArgumentError.value(slot, 'slot', 'Expected download slot 1 or 2.');
+    }
+    return '$appId-$slot';
+  }
+
+  static String maDownloadSlotPlayerId(int slot) =>
+      deriveMaAppId(sendspinDownloadSlotId(slot));
 
   static String _normalizeForId(String raw, {required bool preserveHyphen}) {
     final lower = raw.trim().toLowerCase();

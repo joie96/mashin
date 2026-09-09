@@ -3,11 +3,7 @@ import 'dart:convert';
 import '../../data/music_assistant/ma_models.dart';
 
 // Output Modes (corresponding to different players)
-enum PlaybackOutputMode {
-  localOffline,
-  localSendspin,
-  maRemote,
-}
+enum PlaybackOutputMode { localOffline, localSendspin, maRemote }
 
 // Playback State Types
 enum PlaybackStateType {
@@ -21,10 +17,48 @@ enum PlaybackStateType {
   error,
 }
 
-enum PlaybackStateReason {
-  playMedia,
-  codecSwitch,
-  seek,
+enum PlaybackStateReason { playMedia, codecSwitch, seek }
+
+class PlaybackContentKey {
+  const PlaybackContentKey._();
+
+  static String fromMediaItem(
+    MediaItem item, {
+    required String codec,
+    required int bitDepth,
+    required int sampleRate,
+    required int channels,
+  }) {
+    final String provider = item.provider.trim().toLowerCase();
+    final String mediaType = item.mediaType.name.trim().toLowerCase();
+    final String itemId = item.itemId.trim();
+    if (provider.isEmpty || itemId.isEmpty) {
+      throw ArgumentError.value(
+        item,
+        'item',
+        'A media item needs a provider and item id for local playback.',
+      );
+    }
+
+    final normalizedCodec = codec.trim().toLowerCase();
+    if (normalizedCodec.isEmpty ||
+        bitDepth <= 0 ||
+        sampleRate <= 0 ||
+        channels <= 0) {
+      throw ArgumentError.value(
+        codec,
+        'codec',
+        'A complete audio quality profile is required.',
+      );
+    }
+
+    // This cache key describes the requested quality profile; the negotiated stream may differ.
+    return '$provider:$mediaType:$itemId'
+        ':$normalizedCodec'
+        ':$sampleRate'
+        ':$channels'
+        ':$bitDepth';
+  }
 }
 
 // Queue State
@@ -34,7 +68,7 @@ class PlaybackQueue {
   final int? currentIndex;
   final bool? shuffleEnabled;
   final RepeatMode? repeatMode;
-  final bool? dontStopTheMusicEnabled;
+  final bool? autoplayEnabled;
 
   const PlaybackQueue({
     this.queueId,
@@ -42,7 +76,7 @@ class PlaybackQueue {
     this.currentIndex,
     this.shuffleEnabled,
     this.repeatMode,
-    this.dontStopTheMusicEnabled,
+    this.autoplayEnabled,
   });
 
   PlaybackQueue copyWith({
@@ -61,12 +95,16 @@ class PlaybackQueue {
     return PlaybackQueue(
       queueId: clearQueueId ? null : (queueId ?? this.queueId),
       items: items ?? this.items,
-      currentIndex: clearCurrentIndex ? null : (currentIndex ?? this.currentIndex),
-      shuffleEnabled: clearShuffleEnabled ? null : (shuffleEnabled ?? this.shuffleEnabled),
-      repeatMode: clearRepeatMode ? null : (repeatMode ?? this.repeatMode),
-      dontStopTheMusicEnabled: clearDontStopTheMusicEnabled
+      currentIndex: clearCurrentIndex
           ? null
-          : (dontStopTheMusicEnabled ?? this.dontStopTheMusicEnabled),
+          : (currentIndex ?? this.currentIndex),
+      shuffleEnabled: clearShuffleEnabled
+          ? null
+          : (shuffleEnabled ?? this.shuffleEnabled),
+      repeatMode: clearRepeatMode ? null : (repeatMode ?? this.repeatMode),
+      autoplayEnabled: clearDontStopTheMusicEnabled
+          ? null
+          : (dontStopTheMusicEnabled ?? this.autoplayEnabled),
     );
   }
 }
@@ -121,12 +159,18 @@ class PlaybackState {
       volume: volume ?? this.volume,
       muted: muted ?? this.muted,
       repeatMode: clearRepeatMode ? null : (repeatMode ?? this.repeatMode),
-      shuffleEnabled: clearShuffleEnabled ? null : (shuffleEnabled ?? this.shuffleEnabled),
+      shuffleEnabled: clearShuffleEnabled
+          ? null
+          : (shuffleEnabled ?? this.shuffleEnabled),
       seekMaxMillis: clearSeekMaxMillis
           ? null
           : (seekMaxMillis ?? this.seekMaxMillis),
-      positionMillis: clearPositionMillis ? null : (positionMillis ?? this.positionMillis),
-      durationMillis: clearDurationMillis ? null : (durationMillis ?? this.durationMillis),
+      positionMillis: clearPositionMillis
+          ? null
+          : (positionMillis ?? this.positionMillis),
+      durationMillis: clearDurationMillis
+          ? null
+          : (durationMillis ?? this.durationMillis),
       reason: clearReason ? null : (reason ?? this.reason),
       activeSince: clearActiveSince ? null : (activeSince ?? this.activeSince),
     );
@@ -153,17 +197,25 @@ class PlaybackState {
   factory PlaybackState.fromJson(Map<String, dynamic> json) {
     final seekMaxMillis =
         (json['seekMaxMillis'] as num?)?.toInt() ??
-            (json['seekMaxMilliseconds'] as num?)?.toInt();
+        (json['seekMaxMilliseconds'] as num?)?.toInt();
     final positionMillis =
-      _toClampedMillis((json['positionMillis'] as num?)?.toDouble()) ??
+        _toClampedMillis((json['positionMillis'] as num?)?.toDouble()) ??
         _toClampedMillis((json['positionMs'] as num?)?.toDouble()) ??
-        _toClampedMillisFromSeconds((json['positionSecs'] as num?)?.toDouble()) ??
-        _toClampedMillisFromSeconds((json['positionSeconds'] as num?)?.toDouble());
+        _toClampedMillisFromSeconds(
+          (json['positionSecs'] as num?)?.toDouble(),
+        ) ??
+        _toClampedMillisFromSeconds(
+          (json['positionSeconds'] as num?)?.toDouble(),
+        );
     final durationMillis =
-      _toClampedMillis((json['durationMillis'] as num?)?.toDouble()) ??
+        _toClampedMillis((json['durationMillis'] as num?)?.toDouble()) ??
         _toClampedMillis((json['durationMs'] as num?)?.toDouble()) ??
-        _toClampedMillisFromSeconds((json['durationSecs'] as num?)?.toDouble()) ??
-        _toClampedMillisFromSeconds((json['durationSeconds'] as num?)?.toDouble());
+        _toClampedMillisFromSeconds(
+          (json['durationSecs'] as num?)?.toDouble(),
+        ) ??
+        _toClampedMillisFromSeconds(
+          (json['durationSeconds'] as num?)?.toDouble(),
+        );
 
     return PlaybackState(
       playbackState: _parsePlaybackState(json['playbackState']),
@@ -234,4 +286,3 @@ PlaybackStateType _parsePlaybackState(dynamic value) {
       return PlaybackStateType.unknown;
   }
 }
-

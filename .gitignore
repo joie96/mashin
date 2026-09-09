@@ -62,4 +62,4 @@ app.*.map.json
 /windows/native/*.exp
 /windows/native/*.pdb
 
-mashin-maui
+other_projects

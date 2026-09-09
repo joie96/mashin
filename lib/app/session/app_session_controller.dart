@@ -9,8 +9,7 @@ import '../../features/playback/playback_coordinator.dart';
 import '../../features/playback/playback_models.dart';
 import '../../features/playback/playback_player.dart';
 import '../../features/playback/sendspin/sendspin_player.dart';
-import '../../features/playback/sendspin/sendspin_rust_backend.dart';
-import '../../features/playback/sendspin/sendspin_rust_bridge_ffi.dart';
+import '../../features/playback/sendspin/sendspin_rust_bridge.dart';
 import '../../features/shared/userdata_controller.dart';
 import '../config/app_config.dart';
 import '../logging/app_logger.dart';
@@ -22,11 +21,8 @@ class AppSessionController extends ChangeNotifier {
     : playbackCoordinator = PlaybackCoordinator(
         players: <PlaybackPlayer>[
           SendspinPlayer(
-            transportBackend: SendspinRustBackend(
-              bridge: FfiSendspinRustBridge(),
-            ),
+            transportBackend: SendspinRustBridge(),
             clientResolver: () => _instance?._client,
-            eventHubResolver: () => _instance?._eventHub,
           ),
         ],
         initialOutputMode: PlaybackOutputMode.localSendspin,

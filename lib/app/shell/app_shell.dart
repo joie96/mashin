@@ -429,7 +429,7 @@ class _AppShellState extends State<AppShell> {
                     dontStopTheMusicEnabled:
                         _playbackCoordinator
                             .playbackQueue
-                            .dontStopTheMusicEnabled ??
+                            .autoplayEnabled ??
                         false,
                     maxSeconds: _currentTrackMaxSeconds,
                     currentSeconds: _currentTrackPositionSeconds,
@@ -461,7 +461,7 @@ class _AppShellState extends State<AppShell> {
             queueTrackCountText: _queueTrackCountText,
             queueTotalDurationText: _queueTotalDurationText,
             dontStopTheMusicEnabled:
-                _playbackCoordinator.playbackQueue.dontStopTheMusicEnabled ??
+                _playbackCoordinator.playbackQueue.autoplayEnabled ??
                 false,
             queueItems: _playbackCoordinator.playbackQueue.items,
             currentQueueIndex: _playbackCoordinator.playbackQueue.currentIndex,
@@ -536,7 +536,7 @@ class _AppShellState extends State<AppShell> {
               maxSeconds: _currentTrackMaxSeconds,
               currentSeconds: _currentTrackPositionSeconds,
               dontStopTheMusicEnabled:
-                  _playbackCoordinator.playbackQueue.dontStopTheMusicEnabled ??
+                  _playbackCoordinator.playbackQueue.autoplayEnabled ??
                   false,
               userDataController: _userDataController,
               onClose: _closeMobilePlayerOverlay,
@@ -569,7 +569,7 @@ class _AppShellState extends State<AppShell> {
             queueTrackCountText: _queueTrackCountText,
             queueTotalDurationText: _queueTotalDurationText,
             dontStopTheMusicEnabled:
-                _playbackCoordinator.playbackQueue.dontStopTheMusicEnabled ??
+                _playbackCoordinator.playbackQueue.autoplayEnabled ??
                 false,
             queueItems: _playbackCoordinator.playbackQueue.items,
             currentQueueIndex: _playbackCoordinator.playbackQueue.currentIndex,

@@ -643,6 +643,7 @@ class MusicAssistantClient {
     String itemId,
     String providerInstanceIdOrDomain, {
     bool forceRefresh = false,
+    bool allowDynamicTracks = false,
   }) async {
     final result = await _sendCommand(
       'music/playlists/playlist_tracks',
@@ -650,6 +651,7 @@ class MusicAssistantClient {
         'item_id': itemId,
         'provider_instance_id_or_domain': providerInstanceIdOrDomain,
         'force_refresh': forceRefresh,
+        'allow_dynamic_tracks': allowDynamicTracks,
       },
     );
 
@@ -1063,7 +1065,7 @@ class MusicAssistantClient {
       throw RequestException('Media items list cannot be empty');
     }
 
-    final List<MediaItem> resolvedMediaItems = await _resolvePlayableMediaItems(
+    final List<MediaItem> resolvedMediaItems = await resolvePlayableMediaItems(
       mediaItems,
     );
     if (shuffle) {
@@ -1074,7 +1076,7 @@ class MusicAssistantClient {
           (MediaItem item) =>
               item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty,
         )
-        .map(_createMediaItemPayload)
+        .map(createMediaItemPayload)
         .toList(growable: false);
 
     if (mediaPayload.isEmpty) {
@@ -1109,7 +1111,7 @@ class MusicAssistantClient {
     }
   }
 
-  Future<List<MediaItem>> _resolvePlayableMediaItems(
+  Future<List<MediaItem>> resolvePlayableMediaItems(
     List<MediaItem> mediaItems,
   ) async {
     const int artistTopTracksLimit = 25;
@@ -1203,10 +1205,10 @@ class MusicAssistantClient {
                 item.itemId.trim().toLowerCase() == startItemId.toLowerCase(),
             orElse: () => mediaItems.first,
           );
-    return _createMediaItemPayload(resolvedStartItem);
+    return createMediaItemPayload(resolvedStartItem);
   }
 
-  Map<String, dynamic> _createMediaItemPayload(MediaItem mediaItem) {
+  Map<String, dynamic> createMediaItemPayload(MediaItem mediaItem) {
     final payload = <String, dynamic>{
       'item_id': mediaItem.itemId,
       'provider': mediaItem.provider,

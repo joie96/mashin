@@ -18,7 +18,7 @@ class MainActivity : FlutterActivity() {
 		super.onCreate(savedInstanceState)
 
 		nativeBridgeReady = try {
-			System.loadLibrary("mashin_sendspin_bridge")
+			System.loadLibrary("mashin_playback_engine")
 			true
 		} catch (error: UnsatisfiedLinkError) {
 			Log.e(TAG, "Native bridge library not available", error)

@@ -1,49 +1,40 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import '../../../app/config/app_config.dart';
-import '../../../app/logging/app_logger.dart';
-import '../../../data/music_assistant/ma_models.dart';
 import '../../../data/music_assistant/ma_client.dart';
-import '../../../data/music_assistant/ma_event_hub.dart';
+import '../../../data/music_assistant/ma_models.dart';
 import '../playback_models.dart';
 import '../playback_player.dart';
-import 'sendspin_player_models.dart';
-import 'sendspin_rust_backend.dart';
+import 'sendspin_models.dart';
+import 'sendspin_rust_bridge.dart';
 
 class SendspinPlayer implements PlaybackPlayer {
   SendspinPlayer({
     required this.transportBackend,
     required this.clientResolver,
-    required this.eventHubResolver,
   });
 
-  static const Duration _bufferingHoldDuration = Duration(seconds: 8);
-  static const Duration _positionTickInterval = Duration(milliseconds: 250);
-  static const int _codecSwitchPlayRetryAttempts = 10;
-  static const Duration _codecSwitchPlayRetryDelay = Duration(
-    milliseconds: 500,
-  );
-  static const String _logName = 'SendspinPlayer';
-
-  final SendspinRustBackend transportBackend;
+  final SendspinRustBridge transportBackend;
   final MusicAssistantClient? Function() clientResolver;
-  final MusicAssistantEventHub? Function() eventHubResolver;
-
-  final StreamController<PlaybackQueue> _queueStateController =
-      StreamController<PlaybackQueue>.broadcast();
   final StreamController<PlaybackState> _playbackStateController =
       StreamController<PlaybackState>.broadcast();
+  final StreamController<PlaybackQueue> _queueStateController =
+      StreamController<PlaybackQueue>.broadcast();
 
+  static const int _autoplayRefillThreshold = 5;
+  static const int _autoplayBatchSize = 25;
+  static const int _autoplayMaxSeedItems = 10;
+  static const int _radioMaxTrackDurationSeconds = 20 * 60;
+  static const int _radioBaseSampleSize = 5;
+
+  StreamSubscription<SendspinPlayerState>? _stateSubscription;
   PlaybackState _playbackState = const PlaybackState();
   PlaybackQueue _queueState = const PlaybackQueue();
-  StreamSubscription<PlaybackState>? _transportPlaybackStateSubscription;
-  StreamSubscription<MusicAssistantQueueEvent>? _queueEventSubscription;
-  Timer? _positionInterpolationTimer;
-  int? _positionAnchorMillis;
-  DateTime? _positionAnchorUpdatedAt;
-  Future<void> _queueEventProcessing = Future<void>.value();
-  final AppLogger _logger = AppLogger(_logName);
+  final List<MediaItem> _autoplaySeedItems = <MediaItem>[];
+  bool _autoplayEnabled = false;
+  bool _autoplayRefillInProgress = false;
 
   @override
   PlaybackOutputMode get outputMode => transportBackend.outputMode;
@@ -54,73 +45,27 @@ class SendspinPlayer implements PlaybackPlayer {
   @override
   Stream<PlaybackQueue> get queueStates => _queueStateController.stream;
 
-  // Connection and Activation
   @override
   Future<void> activate({String? targetPlayerId}) async {
-    _logger.info(
-      'Sendspin activate requested. TargetPlayerId=${targetPlayerId ?? ''}',
-    );
-    await _ensurePlaybackStateSubscription();
+    await _ensureStateSubscription();
     await transportBackend.activate(targetPlayerId: targetPlayerId);
-    await _ensureQueueEventSubscription();
-    await getPlaybackState();
-    await _refreshQueueFromServer();
-    _logger.info(
-      'Sendspin activate completed. QueueId=${_queueState.queueId ?? ''}',
-    );
   }
 
   @override
-  Future<void> deactivate() async {
-    _logger.info('Sendspin deactivate requested.');
-    _positionInterpolationTimer?.cancel();
-    _positionInterpolationTimer = null;
-    await _transportPlaybackStateSubscription?.cancel();
-    _transportPlaybackStateSubscription = null;
-    await _queueEventSubscription?.cancel();
-    _queueEventSubscription = null;
-    await transportBackend.deactivate();
-    _logger.info('Sendspin deactivate completed.');
-  }
+  Future<void> deactivate() => transportBackend.deactivate();
 
   @override
-  Future<void> connect() async {
-    _logger.info('Sendspin connect requested.');
-    await _ensurePlaybackStateSubscription();
-    await transportBackend.connect();
-    await _ensureQueueEventSubscription();
-    await getPlaybackState();
-    await _refreshQueueFromServer();
-    _logger.info(
-      'Sendspin connect completed. QueueId=${_queueState.queueId ?? ''}',
-    );
-  }
-
-  Future<void> reconnect() => transportBackend.reconnect();
-
-  Future<void> disconnect({String reason = 'client_disconnect'}) =>
-      transportBackend.disconnect(reason: reason);
+  Future<void> connect() => transportBackend.connect();
 
   @override
   Future<void> terminate() async {
-    _logger.info('Sendspin terminate requested.');
-    _positionInterpolationTimer?.cancel();
-    _positionInterpolationTimer = null;
-    await _transportPlaybackStateSubscription?.cancel();
-    _transportPlaybackStateSubscription = null;
-    await _queueEventSubscription?.cancel();
-    _queueEventSubscription = null;
-    if (!_playbackStateController.isClosed) {
-      await _playbackStateController.close();
-    }
-    if (!_queueStateController.isClosed) {
-      await _queueStateController.close();
-    }
+    await _stateSubscription?.cancel();
+    _stateSubscription = null;
+    await _playbackStateController.close();
+    await _queueStateController.close();
     await transportBackend.terminate();
-    _logger.info('Sendspin terminate completed.');
   }
 
-  // Transport Controls
   @override
   Future<void> transportPlay() => transportBackend.transportPlay();
 
@@ -134,37 +79,8 @@ class SendspinPlayer implements PlaybackPlayer {
   Future<void> transportPrevious() => transportBackend.transportPrevious();
 
   @override
-  Future<void> transportSeek(double seconds) async {
-    final client = clientResolver();
-    if (client == null) {
-      _logger.warn(
-        'Sendspin seek skipped because MusicAssistant client is null.',
-      );
-      return;
-    }
-
-    final int position = seconds.isNaN || seconds.isInfinite
-        ? 0
-        : math.max(0, seconds.round());
-    final String playerId = AppConfig.maAppId.trim();
-    if (playerId.isEmpty) {
-      _logger.warn('Sendspin seek skipped because player id is empty.');
-      return;
-    }
-
-    _playbackState = _playbackState.copyWith(
-      playbackState: PlaybackStateType.seeking,
-      positionMillis: position * 1000,
-      reason: PlaybackStateReason.seek,
-      activeSince: DateTime.now(),
-    );
-    _emitPlaybackState();
-
-    _logger.info(
-      'Sendspin seek requested via MusicAssistant. PlayerId=$playerId, Seconds=$position',
-    );
-    await client.playerSeek(playerId, position);
-  }
+  Future<void> transportSeek(double seconds) =>
+      transportBackend.transportSeek(seconds);
 
   @override
   Future<void> setVolume(int volume) => transportBackend.setVolume(volume);
@@ -172,758 +88,315 @@ class SendspinPlayer implements PlaybackPlayer {
   @override
   Future<void> setMuted(bool muted) => transportBackend.setMuted(muted);
 
-  Future<void> setPreferredAudioCodec(String codec) async {
-    final normalized = codec.trim().toLowerCase();
-    if (normalized != 'opus' && normalized != 'flac' && normalized != 'pcm') {
-      throw ArgumentError.value(codec, 'codec', 'Unsupported Sendspin codec.');
-    }
-
-    await AppConfig.setSendspinPreferredCodec(normalized);
-    final initialState = await transportBackend.getPlayerState();
-    if (initialState.connectionState != SendspinConnectionState.online) {
-      return;
-    }
-
-    final wasPlaying =
-        _playbackState.playbackState == PlaybackStateType.playing;
-
-    if (wasPlaying) {
-      await transportBackend.transportPause();
-    }
-
-    _playbackState = _playbackState.copyWith(
-      playbackState: PlaybackStateType.buffering,
-      reason: PlaybackStateReason.codecSwitch,
-      activeSince: DateTime.now(),
-    );
-    _emitPlaybackState();
-
-    var codecRequestSucceeded = false;
-    try {
-      await transportBackend.requestCodec(normalized);
-      codecRequestSucceeded = true;
-    } catch (_) {
-      // Keep the MAUI behavior: still attempt to resume playback.
-    }
-
-    if (!wasPlaying) {
-      return;
-    }
-
-    SendspinPlayerState? resumedState;
-    var attempts = 0;
-    for (var attempt = 1; attempt <= _codecSwitchPlayRetryAttempts; attempt++) {
-      attempts = attempt;
-      try {
-        await transportBackend.transportPlay();
-      } catch (_) {
-        // Retry after the server finishes applying the format change.
-      }
-
-      await Future<void>.delayed(_codecSwitchPlayRetryDelay);
-      final state = await transportBackend.getPlayerState();
-        final targetCodecActive =
-          state.activeCodec?.toLowerCase() == normalized;
-        final resumed = targetCodecActive &&
-          (state.playbackState == PlaybackStateType.playing ||
-            state.playbackState == PlaybackStateType.buffering);
-      if (resumed) {
-        resumedState = state;
-        break;
-      }
-    }
-
-    _logger.info(
-      'Sendspin codec switch completed. RequestedCodec=$normalized, CodecRequestSucceeded=$codecRequestSucceeded, Resumed=${resumedState != null}, Attempts=$attempts, ActiveCodec=${resumedState?.activeCodec ?? ''}, PlaybackState=${resumedState?.playbackState.name ?? PlaybackStateType.idle.name}',
-    );
-
-    if (resumedState == null) {
-      throw StateError(
-        'Failed to resume playback after Sendspin codec change.',
-      );
-    }
-  }
-
-  // Play Media and Queue Management
   @override
   Future<void> playMedia(List<MediaItem> mediaItems) async {
-    final client = clientResolver();
-    if (client == null || mediaItems.isEmpty) {
-      return;
-    }
-
-    _playbackState = _playbackState.copyWith(
-      playbackState: PlaybackStateType.buffering,
-      reason: PlaybackStateReason.playMedia,
-      activeSince: DateTime.now(),
-    );
-    _emitPlaybackState();
-
-    final String queueId = await _resolveQueueId();
-    await client.playMedia(
-      queueId,
-      mediaItems,
-      option: QueueOption.replace,
-      radioMode: false,
-      sortBy: 'original',
-    );
+    _resetAutoplaySeeds(mediaItems);
+    await transportBackend.playMediaJson(await _mediaItemsJson(mediaItems));
   }
 
   @override
   Future<void> playMediaNext(List<MediaItem> mediaItems) async {
-    final client = clientResolver();
-    if (client == null || mediaItems.isEmpty) {
-      return;
-    }
-
-    final String queueId = await _resolveQueueId();
-    await client.playMedia(
-      queueId,
-      mediaItems,
-      option: QueueOption.next,
-      radioMode: false,
-      sortBy: 'original',
-    );
+    _appendAutoplaySeeds(mediaItems);
+    await transportBackend.playMediaNextJson(await _mediaItemsJson(mediaItems));
   }
 
   @override
   Future<void> playMediaReplaceNext(List<MediaItem> mediaItems) async {
-    final client = clientResolver();
-    if (client == null || mediaItems.isEmpty) {
-      return;
-    }
-
-    final String queueId = await _resolveQueueId();
-    await client.playMedia(
-      queueId,
-      mediaItems,
-      option: QueueOption.replaceNext,
-      radioMode: false,
-      sortBy: 'original',
+    _resetAutoplaySeeds(mediaItems);
+    await transportBackend.playMediaReplaceNextJson(
+      await _mediaItemsJson(mediaItems),
     );
   }
 
   @override
   Future<void> playMediaLast(List<MediaItem> mediaItems) async {
-    final client = clientResolver();
-    if (client == null || mediaItems.isEmpty) {
-      return;
-    }
-
-    final String queueId = await _resolveQueueId();
-    await client.playMedia(
-      queueId,
-      mediaItems,
-      option: QueueOption.add,
-      radioMode: false,
-      sortBy: 'original',
-    );
+    _appendAutoplaySeeds(mediaItems);
+    await transportBackend.playMediaLastJson(await _mediaItemsJson(mediaItems));
   }
 
   @override
   Future<void> playMediaRadioNext(List<MediaItem> mediaItems) async {
-    if (mediaItems.isEmpty) {
+    _appendAutoplaySeeds(mediaItems);
+    final tracks = await _radioTracksFromSeeds(mediaItems);
+    if (tracks.isEmpty) {
       return;
     }
-
-    final client = clientResolver();
-    if (client == null) {
-      return;
-    }
-
-    final String queueId = await _resolveQueueId();
-    await client.playMedia(
-      queueId,
-      mediaItems,
-      option: QueueOption.next,
-      radioMode: true,
-      startItem: mediaItems.first,
-      sortBy: 'original',
-    );
+    await transportBackend.playMediaNextJson(await _tracksJson(tracks));
   }
 
   @override
-  Future<void> shufflePlayMedia(List<MediaItem> mediaItems) async {
-    if (mediaItems.isEmpty) {
-      return;
-    }
-
-    final client = clientResolver();
-    if (client == null) {
-      return;
-    }
-    final String queueId = await _resolveQueueId();
-    await client.playMedia(
-      queueId,
-      mediaItems,
-      option: QueueOption.replace,
-      radioMode: false,
-      shuffle: true,
-      sortBy: 'original',
-    );
+  Future<void> shufflePlayMedia(List<MediaItem> mediaItems) {
+    final shuffled = List<MediaItem>.of(mediaItems)..shuffle();
+    return playMedia(shuffled);
   }
 
   @override
-  Future<void> clearQueue({bool skipStop = false}) async {
-    final client = clientResolver();
-    if (client == null) {
-      return;
-    }
-
-    final String queueId = await _resolveQueueId();
-    await client.clearQueue(queueId, skipStop: skipStop);
-  }
+  Future<void> clearQueue({bool skipStop = false}) =>
+      transportBackend.clearQueue();
 
   @override
-  Future<void> playQueueIndex(int index) async {
-    final client = clientResolver();
-    if (client == null) {
-      return;
-    }
-
-    final String queueId = await _resolveQueueId();
-    await client.playQueueIndex(queueId, index);
-  }
+  Future<void> playQueueIndex(int index) =>
+      transportBackend.playQueueIndex(index);
 
   @override
-  Future<void> moveQueueItem(String queueItemId, {int posShift = 0}) async {
-    final client = clientResolver();
-    if (client == null || queueItemId.trim().isEmpty) {
-      return;
-    }
-
-    final String queueId = await _resolveQueueId();
-    await client.moveQueueItem(queueId, queueItemId.trim(), posShift: posShift);
-  }
+  Future<void> moveQueueItem(String queueItemId, {int posShift = 0}) =>
+      transportBackend.moveQueueItem(queueItemId, posShift);
 
   @override
-  Future<void> deleteQueueItem(String queueItemId) async {
-    final client = clientResolver();
-    if (client == null || queueItemId.trim().isEmpty) {
-      return;
-    }
-
-    final String queueId = await _resolveQueueId();
-    await client.deleteQueueItemById(queueId, queueItemId.trim());
-  }
+  Future<void> deleteQueueItem(String queueItemId) =>
+      transportBackend.deleteQueueItem(queueItemId);
 
   @override
-  Future<void> setShuffle(bool enabled) async {
-    final client = clientResolver();
-    if (client == null) {
-      return;
-    }
-
-    final String queueId = await _resolveQueueId();
-    await client.setShuffle(queueId, enabled);
-  }
+  Future<void> setShuffle(bool enabled) =>
+      transportBackend.transportShuffle(enabled);
 
   @override
-  Future<void> setRepeatMode(RepeatMode repeatMode) async {
-    final client = clientResolver();
-    if (client == null) {
-      return;
-    }
+  Future<void> setRepeatMode(RepeatMode repeatMode) =>
+      transportBackend.transportRepeatMode(repeatMode);
 
-    final String queueId = await _resolveQueueId();
-    await client.setRepeat(queueId, repeatMode);
+  Future<void> setPreferredAudioCodec(String codec) async {
+    await AppConfig.setSendspinPreferredCodec(codec);
+    await transportBackend.requestCodec(codec);
   }
 
   @override
   Future<void> setDontStopTheMusic(bool enabled) async {
-    final client = clientResolver();
-    if (client == null) {
-      return;
-    }
+    await setAutoplay(enabled);
+  }
 
-    final String queueId = await _resolveQueueId();
-    await client.setDontStopTheMusic(queueId, enabled);
+  Future<void> setAutoplay(bool enabled) async {
+    _autoplayEnabled = enabled;
+    _queueState = _queueState.copyWith(dontStopTheMusicEnabled: enabled);
+    if (!_queueStateController.isClosed) {
+      _queueStateController.add(_queueState);
+    }
+    if (enabled) {
+      unawaited(_maybeRefillAutoplay());
+    }
   }
 
   @override
   Future<PlaybackState> getPlaybackState() async {
-    await _ensurePlaybackStateSubscription();
-    final PlaybackState nextPlaybackState = await transportBackend
-        .getPlaybackState();
-    _applyPlaybackState(nextPlaybackState, emit: true);
-    _logger.debug(
-      'Sendspin getPlaybackState applied. PlaybackState=${_playbackState.playbackState.name}, PositionMillis=${_playbackState.positionMillis}, DurationMillis=${_playbackState.durationMillis}',
-    );
+    await _ensureStateSubscription();
+    _handleState(await transportBackend.getPlaybackState());
     return _playbackState;
   }
 
   @override
   Future<PlaybackQueue> getQueueState() async {
+    await _ensureStateSubscription();
     return _queueState;
   }
 
-  // Playback state stream subscription.
-  Future<void> _ensurePlaybackStateSubscription() async {
-    if (_transportPlaybackStateSubscription != null) {
-      return;
+  Future<String> _mediaItemsJson(List<MediaItem> mediaItems) async {
+    final client = clientResolver();
+    if (client == null) {
+      return jsonEncode(const <Map<String, dynamic>>[]);
     }
-
-    _logger.debug('Sendspin playback state subscription initialized.');
-
-    _transportPlaybackStateSubscription = transportBackend.playbackStates
-        .listen(
-          (PlaybackState nextPlaybackState) {
-            _applyPlaybackState(nextPlaybackState, emit: true);
-          },
-          onError: (Object error, StackTrace stackTrace) {
-            _logger.error(
-              'Sendspin playback state stream error. Error=$error',
-              error: error,
-              stackTrace: stackTrace,
-            );
-          },
-        );
-  }
-
-  // Apply playback state
-  // - update playback flags (state/volume/mute/repeat/shuffle)
-  // - keep duration from metadata
-  // - do not overwrite position anchor from this stream
-  void _applyPlaybackState(
-    PlaybackState nextPlaybackState, {
-    required bool emit,
-  }) {
-    final PlaybackState previousPlaybackState = _playbackState;
-    final bool shouldHoldBuffering = _shouldHoldBuffering(nextPlaybackState);
-    _playbackState = _playbackState.copyWith(
-      playbackState: shouldHoldBuffering
-          ? PlaybackStateType.buffering
-          : nextPlaybackState.playbackState,
-      volume: nextPlaybackState.volume,
-      muted: nextPlaybackState.muted,
-      repeatMode: nextPlaybackState.repeatMode,
-      clearRepeatMode: nextPlaybackState.repeatMode == null,
-      shuffleEnabled: nextPlaybackState.shuffleEnabled,
-      clearShuffleEnabled: nextPlaybackState.shuffleEnabled == null,
-      seekMaxMillis: nextPlaybackState.seekMaxMillis,
-      clearSeekMaxMillis: nextPlaybackState.seekMaxMillis == null,
-      durationMillis: nextPlaybackState.durationMillis,
-      clearDurationMillis: nextPlaybackState.durationMillis == null,
-      clearReason: !shouldHoldBuffering,
-      clearActiveSince: !shouldHoldBuffering,
-    );
-
-    if (nextPlaybackState.playbackState == PlaybackStateType.playing) {
-      // Only interpolate position when playing.
-      _positionAnchorMillis ??= _playbackState.positionMillis;
-      _positionAnchorUpdatedAt ??= DateTime.now();
-      _startPositionInterpolation();
-    } else {
-      // Reset anchor when not playing.
-      _resetPositionAnchor();
-      if (_positionInterpolationTimer != null) {
-        _logger.debug(
-          'Sendspin interpolation stopped. PlaybackState=${nextPlaybackState.playbackState.name}',
-        );
-      }
-      _positionInterpolationTimer?.cancel();
-      _positionInterpolationTimer = null;
-    }
-
-    if (previousPlaybackState.playbackState !=
-            nextPlaybackState.playbackState ||
-        previousPlaybackState.positionMillis != _playbackState.positionMillis ||
-        previousPlaybackState.durationMillis !=
-            nextPlaybackState.durationMillis) {
-      _logger.debug(
-        'Sendspin playback state applied. PlaybackState=${_playbackState.playbackState.name}, PositionMillis=${_playbackState.positionMillis}, DurationMillis=${nextPlaybackState.durationMillis}',
-      );
-    }
-
-    if (emit) {
-      _emitPlaybackState();
-    }
-  }
-
-  bool _shouldHoldBuffering(PlaybackState nextPlaybackState) {
-    final DateTime? bufferingStartedAt = _playbackState.activeSince;
-    if (_playbackState.playbackState != PlaybackStateType.buffering ||
-      _playbackState.reason != PlaybackStateReason.playMedia ||
-        bufferingStartedAt == null ||
-        DateTime.now().difference(bufferingStartedAt) >
-            _bufferingHoldDuration) {
-      return false;
-    }
-
-    return nextPlaybackState.playbackState == PlaybackStateType.idle ||
-        nextPlaybackState.playbackState == PlaybackStateType.paused;
-  }
-
-  void _resetPositionAnchor() {
-    _positionAnchorMillis = _playbackState.positionMillis;
-    _positionAnchorUpdatedAt = null;
-  }
-
-  // Position interpolation.
-  // - run only while playing
-  // - derive from anchor + elapsed wall time
-  // - clamp to track duration if known
-  void _startPositionInterpolation() {
-    if (_positionInterpolationTimer != null) {
-      return;
-    }
-
-    _logger.debug(
-      'Sendspin interpolation started. TickMs=${_positionTickInterval.inMilliseconds}, AnchorMillis=$_positionAnchorMillis',
-    );
-
-    _positionInterpolationTimer = Timer.periodic(_positionTickInterval, (_) {
-      if (_playbackState.playbackState != PlaybackStateType.playing) {
-        _logger.debug(
-          'Sendspin interpolation canceled because playback state is ${_playbackState.playbackState.name}.',
-        );
-        _positionInterpolationTimer?.cancel();
-        _positionInterpolationTimer = null;
-        return;
-      }
-
-      final int? anchorMillis = _positionAnchorMillis;
-      final DateTime? anchorUpdatedAt = _positionAnchorUpdatedAt;
-      if (anchorMillis == null || anchorUpdatedAt == null) {
-        return;
-      }
-
-      final int elapsedMillis = DateTime.now()
-          .difference(anchorUpdatedAt)
-          .inMilliseconds;
-      var nextPosition = anchorMillis + elapsedMillis;
-
-      final int? durationMillis = _playbackState.durationMillis;
-      if (durationMillis != null && durationMillis > 0) {
-        nextPosition = nextPosition.clamp(0, durationMillis);
-      }
-
-      if (nextPosition == _playbackState.positionMillis) {
-        return;
-      }
-
-      _playbackState = _playbackState.copyWith(positionMillis: nextPosition);
-      _emitPlaybackState();
-    });
-  }
-
-  // Emit playback state to the coordinator
-  void _emitPlaybackState() {
-    if (_playbackStateController.isClosed) {
-      return;
-    }
-    _playbackStateController.add(_playbackState);
-  }
-
-  // Queue ID Helper
-  Future<String> _resolveQueueId() async {
-    if ((_queueState.queueId ?? '').trim().isNotEmpty) {
-      return _queueState.queueId!.trim();
-    }
-
-    final playerId = AppConfig.maAppId.trim();
-    if (playerId.isNotEmpty) {
-      _queueState = _queueState.copyWith(queueId: playerId);
-      _emitQueueState();
-      return playerId;
-    }
-
-    _logger.error(
-      'Sendspin queue id resolution failed. QueueStateQueueId=${_queueState.queueId ?? ''}, AppConfigQueueId=${AppConfig.maAppId}',
-    );
-    throw StateError('Keine Sendspin QueueId verfuegbar.');
-  }
-
-  // Queue event subscription
-  Future<void> _ensureQueueEventSubscription() async {
-    final hub = eventHubResolver();
-    if (hub == null) {
-      _logger.warn(
-        'Queue event subscription skipped because event hub resolver returned null.',
-      );
-      return;
-    }
-
-    if (!hub.isConnected) {
-      _logger.debug(
-        'Event hub is disconnected, connecting before queue subscription.',
-      );
-      await hub.connect();
-    }
-
-    await _queueEventSubscription?.cancel();
-    _queueEventSubscription = hub.queueEvents.listen((event) {
-      _queueEventProcessing = _queueEventProcessing
-          .then((_) => _onQueueEvent(event))
-          .catchError((Object error, StackTrace stackTrace) {
-            _logger.error(
-              'Queue event processing failed. Event=${event.event}, Error=$error',
-              error: error,
-              stackTrace: stackTrace,
-            );
-          });
-    });
-    _logger.debug('Queue event subscription initialized.');
-  }
-
-  // Apply queue events.
-  // - ignore unrelated queue ids
-  // - project queue metadata/settings
-  // - take progress anchor from queue timing
-  Future<void> _onQueueEvent(MusicAssistantQueueEvent event) async {
-    final String expectedQueueId = (_queueState.queueId ?? AppConfig.maAppId)
-        .trim();
-    final String eventQueueId = (event.queueId ?? event.queue?.queueId ?? '')
-        .trim();
-
-    if (expectedQueueId.isNotEmpty &&
-        eventQueueId.isNotEmpty &&
-        eventQueueId != expectedQueueId) {
-      _logger.debug(
-        'Queue event ignored due to queue mismatch. Event=${event.event}, EventQueueId=$eventQueueId, ExpectedQueueId=$expectedQueueId',
-      );
-      return;
-    }
-
-    switch (event.event) {
-      case 'queue_added':
-      case 'queue_updated':
-        final PlayerQueue? queue = event.queue;
-        if (queue != null) {
-          // Set Queue properties.
-          _queueState = _queueState.copyWith(
-            queueId: queue.queueId.isNotEmpty
-                ? queue.queueId
-                : (eventQueueId.isNotEmpty
-                      ? eventQueueId
-                      : _queueState.queueId),
-            currentIndex: queue.currentIndex,
-            clearCurrentIndex: queue.currentIndex == null,
-            shuffleEnabled: queue.shuffleEnabled,
-            repeatMode: queue.repeatMode,
-            dontStopTheMusicEnabled: queue.dontStopTheMusicEnabled,
-          );
-
-          // Set DurationMillis from queue payload.
-          _playbackState = _playbackState.copyWith(
-            durationMillis: _queueDurationToMillis(queue.currentItem?.duration),
-            clearDurationMillis: queue.currentItem?.duration == null,
-          );
-
-          // Set positionMillis from queue elapsed time when present.
-          if (queue.elapsedTime != null) {
-            _applyQueueTimingProgress(
-              (queue.elapsedTime! * 1000).round(),
-              source: 'queue_updated',
-            );
-          } else {
-            _emitPlaybackState();
-          }
-
-          _emitQueueState();
-        }
-        return;
-      case 'queue_items_updated':
-        final String queueIdForItems = eventQueueId.isNotEmpty
-            ? eventQueueId
-            : ((_queueState.queueId ?? AppConfig.maAppId).trim());
-        if (queueIdForItems.isNotEmpty) {
-          await _refreshQueueItemsFromServer(queueIdForItems);
-        }
-        return;
-      case 'queue_settings_updated':
-        final settings = event.queueSettings;
-        if (settings == null) {
-          return;
-        }
-
-        _queueState = _queueState.copyWith(
-          queueId: eventQueueId.isNotEmpty ? eventQueueId : _queueState.queueId,
-          shuffleEnabled: settings.shuffleEnabled ?? _queueState.shuffleEnabled,
-          repeatMode: settings.repeatMode ?? _queueState.repeatMode,
-          dontStopTheMusicEnabled:
-              settings.dontStopTheMusicEnabled ??
-              _queueState.dontStopTheMusicEnabled,
-        );
-        _emitQueueState();
-        return;
-      case 'queue_removed':
-        _queueState = _queueState.copyWith(
-          queueId: eventQueueId.isNotEmpty ? eventQueueId : _queueState.queueId,
-          items: const <QueueItem>[],
-          clearCurrentIndex: true,
-        );
-        _resetPositionAnchor();
-        _playbackState = _playbackState.copyWith(
-          playbackState: PlaybackStateType.idle,
-          clearPositionMillis: true,
-          clearDurationMillis: true,
-        );
-        _emitQueueState();
-        _emitPlaybackState();
-        return;
-      case 'queue_time_updated':
-        // Set position/progress from queue_time_updated.
-        final int? elapsedMillis = _extractElapsedMillis(event);
-        if (elapsedMillis != null) {
-          _applyQueueTimingProgress(
-            elapsedMillis,
-            source: 'queue_time_updated',
-          );
-        } else {
-          _logger.debug(
-            'Queue timing update ignored because elapsed time is missing. QueueId=$eventQueueId, Event=${event.event}',
-          );
-        }
-      default:
-        return;
-    }
-  }
-
-  void _applyQueueTimingProgress(int positionMillis, {required String source}) {
-    final int clampedPosition = positionMillis < 0 ? 0 : positionMillis;
-
-    _positionAnchorMillis = clampedPosition;
-    _positionAnchorUpdatedAt = DateTime.now();
-
-    _playbackState = _playbackState.copyWith(positionMillis: clampedPosition);
-
-    if (_playbackState.playbackState == PlaybackStateType.playing) {
-      _startPositionInterpolation();
-    }
-
-    _emitPlaybackState();
-    _logger.debug(
-      'Queue timing progress applied. Source=$source, PositionMillis=$clampedPosition, DurationMillis=${_playbackState.durationMillis}',
+    final resolved = await client.resolvePlayableMediaItems(mediaItems);
+    return jsonEncode(
+      resolved.map(client.createMediaItemPayload).toList(growable: false),
     );
   }
 
-  int? _extractElapsedMillis(MusicAssistantQueueEvent event) {
-    final double? eventElapsedSeconds = event.elapsedTimeSeconds;
-    if (eventElapsedSeconds != null) {
-      return (eventElapsedSeconds * 1000).round();
+  Future<String> _tracksJson(List<Track> tracks) async {
+    final client = clientResolver();
+    if (client == null) {
+      return jsonEncode(const <Map<String, dynamic>>[]);
     }
-
-    return null;
+    return jsonEncode(
+      tracks.map(client.createMediaItemPayload).toList(growable: false),
+    );
   }
 
-  int? _queueDurationToMillis(int? value) {
-    if (value == null) {
+  Future<List<Track>> _radioTracksFromSeeds(List<MediaItem> seeds) async {
+    final client = clientResolver();
+    if (client == null) {
+      return const <Track>[];
+    }
+    final seedTrackKeys = (await client.resolvePlayableMediaItems(
+      seeds,
+    )).whereType<Track>().map(_trackKey).toSet();
+    final tracks = <Track>[];
+    for (final seed in seeds) {
+      final uri = _seedUri(seed);
+      if (uri == null) {
+        continue;
+      }
+      tracks.addAll(
+        await client.getPlaylistTracks(
+          uri,
+          'radio_playlist',
+          forceRefresh: true,
+          allowDynamicTracks: true,
+        ),
+      );
+    }
+    return _dedupeTracks(tracks)
+        .where((track) => !seedTrackKeys.contains(_trackKey(track)))
+        .where((track) => track.duration <= _radioMaxTrackDurationSeconds)
+        .toList(growable: false);
+  }
+
+  Future<void> _maybeRefillAutoplay() async {
+    if (!_autoplayEnabled || _autoplayRefillInProgress) {
+      return;
+    }
+    final currentIndex = _queueState.currentIndex;
+    if (currentIndex == null || _autoplaySeedItems.isEmpty) {
+      return;
+    }
+    final upcomingCount = _queueState.items.length - currentIndex - 1;
+    if (upcomingCount >= _autoplayRefillThreshold) {
+      return;
+    }
+
+    _autoplayRefillInProgress = true;
+    try {
+      final tracks = await _autoplayTracksFromSeeds();
+      if (tracks.isEmpty) {
+        return;
+      }
+      await transportBackend.playMediaLastJson(await _tracksJson(tracks));
+    } catch (_) {
+      return;
+    } finally {
+      _autoplayRefillInProgress = false;
+    }
+  }
+
+  Future<List<Track>> _autoplayTracksFromSeeds() async {
+    final client = clientResolver();
+    if (client == null) {
+      return const <Track>[];
+    }
+    final baseTracks = await client.resolvePlayableMediaItems(
+      _autoplaySeedItems,
+    );
+    if (baseTracks.isEmpty) {
+      return const <Track>[];
+    }
+    final shuffledBase = List<MediaItem>.of(baseTracks)..shuffle();
+    final sampledBaseTracks = shuffledBase
+        .whereType<Track>()
+        .take(math.min(_radioBaseSampleSize, shuffledBase.length))
+        .toList(growable: false);
+    final candidates = <Track>[];
+    for (final baseTrack in sampledBaseTracks) {
+      var similar = await client.getSimilarTracks(
+        baseTrack.itemId,
+        baseTrack.provider,
+        limit: _autoplayBatchSize,
+        allowLookup: false,
+      );
+      if (similar.isEmpty) {
+        similar = await client.getSimilarTracks(
+          baseTrack.itemId,
+          baseTrack.provider,
+          limit: _autoplayBatchSize,
+          allowLookup: true,
+        );
+      }
+      candidates.addAll(similar);
+    }
+    final excludedUris = <String>{
+      for (final item in _queueState.items)
+        if (item.mediaItem?.uri case final String uri when uri.isNotEmpty) uri,
+      for (final track in sampledBaseTracks)
+        if (track.uri case final String uri when uri.isNotEmpty) uri,
+    };
+    return _dedupeTracks(candidates)
+        .where((track) => track.duration <= _radioMaxTrackDurationSeconds)
+        .where(
+          (track) => track.uri == null || !excludedUris.contains(track.uri),
+        )
+        .take(_autoplayBatchSize)
+        .toList(growable: false);
+  }
+
+  void _resetAutoplaySeeds(List<MediaItem> mediaItems) {
+    _autoplaySeedItems.clear();
+    _appendAutoplaySeeds(mediaItems);
+  }
+
+  void _appendAutoplaySeeds(List<MediaItem> mediaItems) {
+    for (final item in mediaItems) {
+      if (!_canSeedAutoplay(item)) {
+        continue;
+      }
+      _autoplaySeedItems.add(item);
+      while (_autoplaySeedItems.length > _autoplayMaxSeedItems) {
+        _autoplaySeedItems.removeAt(0);
+      }
+    }
+  }
+
+  bool _canSeedAutoplay(MediaItem item) {
+    return switch (item.mediaType) {
+      MediaType.track ||
+      MediaType.album ||
+      MediaType.playlist ||
+      MediaType.artist => true,
+      _ => false,
+    };
+  }
+
+  String? _seedUri(MediaItem item) {
+    final uri = item.uri?.trim();
+    if (uri != null && uri.isNotEmpty) {
+      return uri;
+    }
+    final provider = item.provider.trim();
+    final itemId = item.itemId.trim();
+    if (provider.isEmpty || itemId.isEmpty) {
       return null;
     }
-
-    if (value <= 0) {
-      return 0;
-    }
-
-    // Queue duration is usually seconds. Keep large values that already look like milliseconds.
-    return value >= 100000 ? value : value * 1000;
+    return '$provider://${item.mediaType.name}/$itemId';
   }
 
-  // Full queue refresh
-  Future<void> _refreshQueueFromServer() async {
-    final client = clientResolver();
-    if (client == null) {
-      _logger.warn(
-        'Queue refresh skipped because MusicAssistant client is null.',
-      );
-      return;
+  List<Track> _dedupeTracks(List<Track> tracks) {
+    final seen = <String>{};
+    final result = <Track>[];
+    for (final track in tracks) {
+      final key = _trackKey(track);
+      if (seen.add(key)) {
+        result.add(track);
+      }
     }
-
-    final String queueId = await _resolveQueueId();
-    final PlayerQueue? queue = await client.getPlayerQueue(queueId);
-    if (queue == null) {
-      _logger.warn('Queue refresh returned null queue for QueueId=$queueId.');
-      return;
-    }
-
-    final int limit = queue.itemCount <= 0
-        ? 500
-        : math.max(100, queue.itemCount);
-    final List<QueueItem> items = await client.getQueueItems(
-      queueId,
-      limit: limit,
-    );
-
-    _queueState = _queueState.copyWith(
-      queueId: queue.queueId.isNotEmpty ? queue.queueId : queueId,
-      items: items,
-      currentIndex: queue.currentIndex,
-      clearCurrentIndex: queue.currentIndex == null,
-      shuffleEnabled: queue.shuffleEnabled,
-      repeatMode: queue.repeatMode,
-      dontStopTheMusicEnabled: queue.dontStopTheMusicEnabled,
-    );
-
-    // Set DurationMillis from queue payload.
-    _playbackState = _playbackState.copyWith(
-      durationMillis: _queueDurationToMillis(queue.currentItem?.duration),
-      clearDurationMillis: queue.currentItem?.duration == null,
-    );
-
-    // Set positionMillis from queue elapsed time when present.
-    if (queue.elapsedTime != null) {
-      _applyQueueTimingProgress(
-        (queue.elapsedTime! * 1000).round(),
-        source: 'refresh_queue',
-      );
-    } else {
-      _emitPlaybackState();
-    }
-
-    _emitQueueState();
-    _logger.debug(
-      'Queue refresh applied. QueueId=${_queueState.queueId ?? ''}, Items=${_queueState.items.length}, CurrentIndex=${_queueState.currentIndex}',
-    );
+    return result;
   }
 
-  // Targeted item refresh
-  Future<void> _refreshQueueItemsFromServer(String queueId) async {
-    final client = clientResolver();
-    if (client == null) {
-      _logger.warn(
-        'Queue item refresh skipped because MusicAssistant client is null.',
-      );
-      return;
-    }
-
-    final String normalizedQueueId = queueId.trim();
-    if (normalizedQueueId.isEmpty) {
-      _logger.warn('Queue item refresh skipped because queueId is empty.');
-      return;
-    }
-
-    final int itemCount = _queueState.items.length;
-    final int limit = itemCount <= 0 ? 500 : math.max(100, itemCount);
-    final List<QueueItem> items = await client.getQueueItems(
-      normalizedQueueId,
-      limit: limit,
-    );
-
-    final String activeQueueId = (_queueState.queueId ?? AppConfig.maAppId)
-        .trim();
-    if (activeQueueId.isNotEmpty && normalizedQueueId != activeQueueId) {
-      _logger.debug(
-        'Queue item refresh ignored due to queue mismatch. IncomingQueueId=$normalizedQueueId, ActiveQueueId=$activeQueueId',
-      );
-      return;
-    }
-
-    _queueState = _queueState.copyWith(
-      queueId: normalizedQueueId,
-      items: items,
-    );
-    _emitQueueState();
-    _logger.debug(
-      'Queue items refresh applied. QueueId=$normalizedQueueId, Items=${items.length}',
-    );
+  String _trackKey(Track track) {
+    return (track.uri?.trim().isNotEmpty ?? false)
+        ? track.uri!.trim()
+        : '${track.provider}:${track.itemId}';
   }
 
-  // Emits the current queue snapshot to the coordinator.
-  void _emitQueueState() {
-    if (_queueStateController.isClosed) {
+  Future<void> _ensureStateSubscription() async {
+    if (_stateSubscription != null) {
       return;
     }
-    _queueStateController.add(_queueState);
+    _stateSubscription = transportBackend.playerStates.listen(_handleState);
+  }
+
+  void _handleState(SendspinPlayerState state) {
+    final previousCurrentIndex = _queueState.currentIndex;
+    _playbackState = state.toPlaybackState();
+    _queueState = PlaybackQueue(
+      queueId: 'local-sendspin',
+      items: state.queue,
+      currentIndex: state.currentIndex,
+      autoplayEnabled: _autoplayEnabled,
+    );
+    if (!_playbackStateController.isClosed) {
+      _playbackStateController.add(_playbackState);
+    }
+    if (!_queueStateController.isClosed) {
+      _queueStateController.add(_queueState);
+    }
+    if (state.currentIndex != null &&
+        state.currentIndex != previousCurrentIndex) {
+      unawaited(_maybeRefillAutoplay());
+    }
   }
 }

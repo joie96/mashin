@@ -77,7 +77,7 @@ class PlaybackCoordinator {
   RepeatMode? get repeatMode =>
       _queueState.repeatMode ?? _playbackState.repeatMode;
 
-  bool? get dontStopTheMusicEnabled => _queueState.dontStopTheMusicEnabled;
+  bool? get dontStopTheMusicEnabled => _queueState.autoplayEnabled;
 
   // Initialization
   Future<void> initialize() async {
