@@ -1,5 +1,4 @@
 use ::sendspin::audio::AudioFormat;
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -15,19 +14,6 @@ pub(crate) fn notify_cache_changed(signal: &CacheChangeSignal) {
         *generation = generation.saturating_add(1);
         signal.1.notify_all();
     }
-}
-
-pub(crate) fn wait_for_cache_change(signal: &CacheChangeSignal, generation: u64) -> u64 {
-    let Ok(mut current) = signal.0.lock() else {
-        return generation;
-    };
-    while *current == generation {
-        current = signal
-            .1
-            .wait(current)
-            .unwrap_or_else(|error| error.into_inner());
-    }
-    *current
 }
 
 #[derive(Debug, Clone)]
@@ -67,8 +53,16 @@ pub(crate) type EncodedCaches = Arc<Mutex<HashMap<String, EncodedTrackCache>>>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CacheAppendResult {
     Appended,
-    SoftLimitReached,
     HardLimitReached,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CacheRetentionPolicy {
+    pub(crate) current: Option<String>,
+    pub(crate) next: Option<String>,
+    pub(crate) protected: Vec<String>,
+    pub(crate) prefetch: Vec<String>,
+    pub(crate) recently_played: Vec<String>,
 }
 
 pub(crate) fn reservation_is_current(
@@ -84,11 +78,30 @@ pub(crate) fn reservation_is_current(
         .unwrap_or(false)
 }
 
+pub(crate) fn release_reservation_if_current(
+    slots: &DownloadSlots,
+    slot_index: usize,
+    reservation: &DownloadSlotReservation,
+) -> bool {
+    slots
+        .lock()
+        .map(|mut slots| {
+            let Some(current) = slots[slot_index].as_ref() else {
+                return false;
+            };
+            if current.lease_id != reservation.lease_id {
+                return false;
+            }
+            slots[slot_index] = None;
+            true
+        })
+        .unwrap_or(false)
+}
+
 pub(crate) fn cache_encoded_chunk(
     caches: &EncodedCaches,
     cache_sequence: &Arc<AtomicU64>,
     cache_capacity_bytes: usize,
-    cache_pause_threshold_bytes: usize,
     reservation: &DownloadSlotReservation,
     format: &AudioFormat,
     duration_millis: u64,
@@ -134,9 +147,6 @@ pub(crate) fn cache_encoded_chunk(
         cache.last_touched = touch;
         cache.format = Some(format.clone());
         cache.append(Arc::from(data), duration_millis);
-        if cached_bytes.saturating_add(incoming_bytes) >= cache_pause_threshold_bytes {
-            return CacheAppendResult::SoftLimitReached;
-        }
         return CacheAppendResult::Appended;
     }
 
@@ -229,6 +239,25 @@ mod tests {
     }
 
     #[test]
+    fn release_reservation_only_removes_the_matching_lease() {
+        let first = reservation("provider:track:first", "slot-1-1");
+        let replacement = reservation("provider:track:second", "slot-1-2");
+        let slots: DownloadSlots = Arc::new(Mutex::new([Some(first.clone()), None]));
+
+        assert!(release_reservation_if_current(&slots, 0, &first));
+        assert!(slots.lock().expect("slot lock")[0].is_none());
+
+        slots.lock().expect("slot lock")[0] = Some(replacement.clone());
+        assert!(!release_reservation_if_current(&slots, 0, &first));
+        assert_eq!(
+            slots.lock().expect("slot lock")[0]
+                .as_ref()
+                .map(|value| value.lease_id.as_str()),
+            Some("slot-1-2"),
+        );
+    }
+
+    #[test]
     fn preserves_warm_caches_when_the_hard_limit_is_reached() {
         let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
         let sequence = Arc::new(AtomicU64::new(0));
@@ -243,11 +272,11 @@ mod tests {
             codec_header: None,
         };
         assert_eq!(
-            cache_encoded_chunk(&caches, &sequence, 10, 9, &first, &format, 10, &[1; 6]),
+            cache_encoded_chunk(&caches, &sequence, 10, &first, &format, 10, &[1; 6]),
             CacheAppendResult::Appended,
         );
         assert_eq!(
-            cache_encoded_chunk(&caches, &sequence, 10, 9, &second, &format, 10, &[2; 6]),
+            cache_encoded_chunk(&caches, &sequence, 10, &second, &format, 10, &[2; 6]),
             CacheAppendResult::HardLimitReached,
         );
 
@@ -257,7 +286,7 @@ mod tests {
     }
 
     #[test]
-    fn reports_soft_limit_after_storing_the_chunk() {
+    fn stores_chunks_until_the_ram_cache_limit() {
         let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
         let sequence = Arc::new(AtomicU64::new(0));
         let reservation = reservation("provider:track:soft-limit", "slot-1-1");
@@ -270,17 +299,8 @@ mod tests {
         };
 
         assert_eq!(
-            cache_encoded_chunk(
-                &caches,
-                &sequence,
-                100,
-                90,
-                &reservation,
-                &format,
-                90,
-                &[1; 90]
-            ),
-            CacheAppendResult::SoftLimitReached,
+            cache_encoded_chunk(&caches, &sequence, 100, &reservation, &format, 90, &[1; 90]),
+            CacheAppendResult::Appended,
         );
         let (chunk, _) = read_cache_chunk(&caches, &reservation.cache_content_key, 0)
             .expect("stored soft-limit chunk");
@@ -288,7 +308,7 @@ mod tests {
     }
 
     #[test]
-    fn evicts_by_queue_position_without_touching_current_or_next() {
+    fn evicts_untracked_then_prefetch_without_touching_protected_tracks() {
         let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
         let sequence = Arc::new(AtomicU64::new(0));
         let format = AudioFormat {
@@ -300,35 +320,24 @@ mod tests {
         };
         for key in ["past", "current", "next", "future", "orphan"] {
             let reservation = reservation(&format!("provider:track:{key}"), "slot-1-1");
-            cache_encoded_chunk(
-                &caches,
-                &sequence,
-                100,
-                90,
-                &reservation,
-                &format,
-                10,
-                &[1; 10],
-            );
+            cache_encoded_chunk(&caches, &sequence, 100, &reservation, &format, 10, &[1; 10]);
         }
-        let plan = CachePlan {
-            current_cache_content_key: Some("provider:track:current".to_string()),
-            next_cache_content_key: Some("provider:track:next".to_string()),
-            last_played_cache_content_key: Some("provider:track:past".to_string()),
-            ordered_cache_content_keys: vec![
-                "provider:track:past".to_string(),
+        let policy = CacheRetentionPolicy {
+            current: Some("provider:track:current".to_string()),
+            next: Some("provider:track:next".to_string()),
+            protected: vec![
                 "provider:track:current".to_string(),
                 "provider:track:next".to_string(),
-                "provider:track:future".to_string(),
             ],
+            prefetch: vec!["provider:track:future".to_string()],
+            recently_played: vec!["provider:track:past".to_string()],
         };
-
         assert_eq!(
-            evict_to_target(&caches, &plan, 40),
+            evict_to_fit(&caches, &policy, 40, 0),
             vec!["provider:track:orphan"]
         );
         assert_eq!(
-            evict_to_target(&caches, &plan, 30),
+            evict_to_fit(&caches, &policy, 30, 0),
             vec!["provider:track:future"]
         );
         let caches = caches.lock().expect("cache lock");
@@ -358,7 +367,6 @@ mod tests {
             &caches,
             &sequence,
             100,
-            90,
             &reservation,
             &first_format,
             10,
@@ -368,7 +376,6 @@ mod tests {
             &caches,
             &sequence,
             100,
-            90,
             &reservation,
             &second_format,
             10,
@@ -399,16 +406,7 @@ mod tests {
             codec_header: None,
         };
 
-        cache_encoded_chunk(
-            &caches,
-            &sequence,
-            100,
-            90,
-            &reservation,
-            &format,
-            10,
-            &[1, 2],
-        );
+        cache_encoded_chunk(&caches, &sequence, 100, &reservation, &format, 10, &[1, 2]);
 
         let (chunk, complete) = read_cache_chunk(&caches, &reservation.cache_content_key, 0)
             .expect("partial cache should be readable");
@@ -429,8 +427,8 @@ mod tests {
             bit_depth: 16,
             codec_header: None,
         };
-        cache_encoded_chunk(&caches, &sequence, 100, 90, &partial, &format, 10, &[1]);
-        cache_encoded_chunk(&caches, &sequence, 100, 90, &complete, &format, 10, &[2]);
+        cache_encoded_chunk(&caches, &sequence, 100, &partial, &format, 10, &[1]);
+        cache_encoded_chunk(&caches, &sequence, 100, &complete, &format, 10, &[2]);
         mark_cache_complete(&caches, &complete);
 
         discard_incomplete_cache(&caches, &partial.cache_content_key);
@@ -442,68 +440,60 @@ mod tests {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CachePlan {
-    pub(crate) current_cache_content_key: Option<String>,
-    pub(crate) next_cache_content_key: Option<String>,
-    pub(crate) last_played_cache_content_key: Option<String>,
-    pub(crate) ordered_cache_content_keys: Vec<String>,
-}
-
-pub(crate) fn evict_to_target(
+pub(crate) fn evict_to_fit(
     caches: &EncodedCaches,
-    plan: &CachePlan,
-    target_bytes: usize,
+    policy: &CacheRetentionPolicy,
+    cache_capacity_bytes: usize,
+    incoming_bytes: usize,
 ) -> Vec<String> {
     let Ok(mut caches) = caches.lock() else {
         return Vec::new();
     };
     let mut evicted = Vec::new();
-    while caches.values().map(|cache| cache.byte_len).sum::<usize>() > target_bytes {
+    while caches
+        .values()
+        .map(|cache| cache.byte_len)
+        .sum::<usize>()
+        .saturating_add(incoming_bytes)
+        > cache_capacity_bytes
+    {
         let candidate = caches
-            .keys()
-            .min_by_key(|key| eviction_rank(key, plan))
-            .cloned();
+            .iter()
+            .filter(|(key, _)| {
+                policy.current.as_deref() != Some(key.as_str())
+                    && !policy.protected.iter().any(|value| value == *key)
+            })
+            .min_by_key(|(key, cache)| eviction_rank(key, cache, policy))
+            .map(|(key, _)| key.clone());
         let Some(key) = candidate else {
             break;
         };
-        if eviction_rank(&key, plan).0 >= 100 {
-            break;
-        }
         caches.remove(&key);
         evicted.push(key);
     }
     evicted
 }
 
-fn eviction_rank(cache_content_key: &str, plan: &CachePlan) -> (u8, i64) {
-    if plan.current_cache_content_key.as_deref() == Some(cache_content_key) {
-        return (100, 0);
+fn eviction_rank(
+    cache_content_key: &str,
+    cache: &EncodedTrackCache,
+    policy: &CacheRetentionPolicy,
+) -> (u8, i64) {
+    if policy
+        .recently_played
+        .iter()
+        .any(|key| key == cache_content_key)
+    {
+        return (30, cache.last_touched as i64);
     }
-    if plan.next_cache_content_key.as_deref() == Some(cache_content_key) {
-        return (90, 0);
-    }
-    if plan.last_played_cache_content_key.as_deref() == Some(cache_content_key) {
-        return (80, 0);
-    }
-    let Some(index) = plan
-        .ordered_cache_content_keys
+    let Some(index) = policy
+        .prefetch
         .iter()
         .position(|key| key == cache_content_key)
     else {
-        return (0, 0);
+        return (0, cache.last_touched as i64);
     };
-    let current_index = plan.current_cache_content_key.as_ref().and_then(|current| {
-        plan.ordered_cache_content_keys
-            .iter()
-            .position(|key| key == current)
-    });
-    match current_index {
-        Some(current_index) if index < current_index => (10, index as i64),
-        Some(_) => (20, -(index as i64)),
-        None => (20, -(index as i64)),
-    }
+    (20, -(index as i64))
 }
 
 pub(crate) fn cache_byte_len(caches: &EncodedCaches) -> usize {

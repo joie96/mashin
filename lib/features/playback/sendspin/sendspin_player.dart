@@ -386,6 +386,8 @@ class SendspinPlayer implements PlaybackPlayer {
       queueId: 'local-sendspin',
       items: state.queue,
       currentIndex: state.currentIndex,
+      shuffleEnabled: state.shuffleEnabled,
+      repeatMode: state.repeatMode,
       autoplayEnabled: _autoplayEnabled,
     );
     if (!_playbackStateController.isClosed) {

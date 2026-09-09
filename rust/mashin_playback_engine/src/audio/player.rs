@@ -54,6 +54,7 @@ pub(crate) enum AudioPlayerState {
     Idle,
     Buffering,
     Playing,
+    Paused,
     Ended,
     Error,
 }
@@ -112,6 +113,33 @@ impl AudioPlayer {
         if let Some(output) = self.output.as_ref() {
             output.set_mute(muted);
         }
+    }
+
+    pub(crate) fn pause(&mut self) {
+        if !matches!(
+            self.state,
+            AudioPlayerState::Buffering | AudioPlayerState::Playing
+        ) {
+            return;
+        }
+        if let Some(output) = self.output.as_ref() {
+            output.set_paused(true);
+        }
+        self.state = AudioPlayerState::Paused;
+    }
+
+    pub(crate) fn resume(&mut self) {
+        if self.state != AudioPlayerState::Paused {
+            return;
+        }
+        if let Some(output) = self.output.as_ref() {
+            output.set_paused(false);
+        }
+        self.state = if self.buffered_duration_millis() > 0 {
+            AudioPlayerState::Playing
+        } else {
+            AudioPlayerState::Buffering
+        };
     }
 
     pub(crate) fn enqueue_encoded(&self, data: &[u8]) -> Result<(), String> {

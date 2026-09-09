@@ -131,13 +131,6 @@ class _AppShellState extends State<AppShell> {
       return durationFromStateSeconds;
     }
 
-    final seekMaxSeconds =
-        ((_playbackCoordinator.playbackState.seekMaxMillis ?? 0) / 1000)
-            .toDouble();
-    if (seekMaxSeconds > 0) {
-      return seekMaxSeconds;
-    }
-
     final queueDuration = _currentQueueItem?.duration;
     if (queueDuration != null && queueDuration > 0) {
       return queueDuration.toDouble();

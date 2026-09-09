@@ -1,6 +1,6 @@
 use super::connection::{audio_format_from_stream, player_support};
-use super::models::{CacheItemSnapshot, DownloadPlan, DownloadPlanItem};
-use crate::cache::store::CachePlan;
+use super::models::{CacheItemState, DownloadPlan, DownloadPlanItem};
+use crate::cache::store::CacheRetentionPolicy;
 use ::sendspin::audio::AudioFormat;
 use ::sendspin::protocol::client::{ConnectionGuard, Controller};
 use ::sendspin::protocol::messages::{GoodbyeReason, Message, PlayerState};
@@ -27,12 +27,13 @@ pub(crate) struct SendspinDownloader {
     runtime: Runtime,
     config: Option<SendspinDownloaderConfig>,
     plan: Option<DownloadPlan>,
-    cache_states: Arc<Mutex<HashMap<String, CacheItemSnapshot>>>,
+    cache_states: Arc<Mutex<HashMap<String, CacheItemState>>>,
     caches: crate::cache::store::EncodedCaches,
     cache_change_signal: crate::cache::store::CacheChangeSignal,
+    retention_policy: Arc<Mutex<CacheRetentionPolicy>>,
     cache_sequence: Arc<std::sync::atomic::AtomicU64>,
     slots: crate::cache::store::DownloadSlots,
-    controllers: [Option<Controller>; 2],
+    controllers: Arc<Mutex<[Option<Controller>; 2]>>,
     guards: [Option<ConnectionGuard>; 2],
     io_tasks: [Option<JoinHandle<()>>; 2],
 }
@@ -49,9 +50,10 @@ impl SendspinDownloader {
             cache_states: Arc::new(Mutex::new(HashMap::new())),
             caches: Arc::new(Mutex::new(HashMap::new())),
             cache_change_signal: crate::cache::store::new_cache_change_signal(),
+            retention_policy: Arc::new(Mutex::new(CacheRetentionPolicy::default())),
             cache_sequence: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             slots: Arc::new(Mutex::new([None, None])),
-            controllers: [None, None],
+            controllers: Arc::new(Mutex::new([None, None])),
             guards: [None, None],
             io_tasks: [None, None],
         }
@@ -62,7 +64,12 @@ impl SendspinDownloader {
     }
 
     pub(crate) fn connect(&mut self) -> Result<(), String> {
-        if self.controllers.iter().all(Option::is_some) {
+        if self
+            .controllers
+            .lock()
+            .map(|controllers| controllers.iter().all(Option::is_some))
+            .unwrap_or(false)
+        {
             return Ok(());
         }
         self.connect_slot(0)?;
@@ -71,7 +78,12 @@ impl SendspinDownloader {
     }
 
     fn connect_slot(&mut self, slot_index: usize) -> Result<(), String> {
-        if self.controllers[slot_index].is_some() {
+        if self
+            .controllers
+            .lock()
+            .map(|controllers| controllers[slot_index].is_some())
+            .unwrap_or(false)
+        {
             return Ok(());
         }
         let config = self
@@ -91,6 +103,8 @@ impl SendspinDownloader {
         let caches = Arc::clone(&self.caches);
         let states = Arc::clone(&self.cache_states);
         let cache_change_signal = Arc::clone(&self.cache_change_signal);
+        let retention_policy = Arc::clone(&self.retention_policy);
+        let controllers = Arc::clone(&self.controllers);
         let sequence = Arc::clone(&self.cache_sequence);
         let capacity = config.cache_capacity_bytes;
         let (controller, guard, task) = self.runtime.block_on(async move {
@@ -136,11 +150,17 @@ impl SendspinDownloader {
                                 }
                                 Message::StreamEnd(_) => {
                                     if let Some(value) = reservation.as_ref() {
-                                        crate::cache::store::mark_cache_complete(&caches, value);
-                                        crate::cache::store::notify_cache_changed(&cache_change_signal);
-                                        if let Ok(mut states) = states.lock() {
-                                            if let Some(state) = states.get_mut(&value.cache_content_key) {
-                                                state.state = "complete".to_string();
+                                        if crate::cache::store::release_reservation_if_current(
+                                            &slots,
+                                            slot_index,
+                                            value,
+                                        ) {
+                                            crate::cache::store::mark_cache_complete(&caches, value);
+                                            crate::cache::store::notify_cache_changed(&cache_change_signal);
+                                            if let Ok(mut states) = states.lock() {
+                                                if let Some(state) = states.get_mut(&value.cache_content_key) {
+                                                    state.state = "complete".to_string();
+                                                }
                                             }
                                         }
                                     }
@@ -150,9 +170,15 @@ impl SendspinDownloader {
                                 }
                                 Message::StreamClear(_) => {
                                     if let Some(value) = reservation.as_ref() {
-                                        crate::cache::store::discard_incomplete_cache(&caches, &value.cache_content_key);
+                                        release_incomplete_reservation(
+                                            &slots,
+                                            &caches,
+                                            &cache_change_signal,
+                                            &states,
+                                            slot_index,
+                                            value,
+                                        );
                                     }
-                                    crate::cache::store::notify_cache_changed(&cache_change_signal);
                                     reservation = None;
                                     format = None;
                                     last_timestamp = None;
@@ -167,11 +193,30 @@ impl SendspinDownloader {
                                 .map(|previous| chunk.timestamp.saturating_sub(previous).max(0) as u64 / 1_000)
                                 .unwrap_or(0);
                             last_timestamp = Some(chunk.timestamp);
+                            if crate::cache::store::reservation_is_current(&slots, slot_index, reservation) {
+                                let policy = retention_policy.lock().map(|policy| policy.clone()).unwrap_or_default();
+                                let evicted = crate::cache::store::evict_to_fit(
+                                    &caches,
+                                    &policy,
+                                    capacity,
+                                    chunk.data.len(),
+                                );
+                                stop_evicted_slot_downloads(&slots, &controllers, &evicted).await;
+                                if let Ok(mut states) = states.lock() {
+                                    for cache_content_key in evicted {
+                                        if let Some(state) = states.get_mut(&cache_content_key) {
+                                            state.state = "evicted".to_string();
+                                        }
+                                    }
+                                }
+                            }
+                            if !crate::cache::store::reservation_is_current(&slots, slot_index, reservation) {
+                                continue;
+                            }
                             let result = crate::cache::store::cache_encoded_chunk(
                                 &caches,
                                 &sequence,
                                 capacity,
-                                capacity.saturating_mul(90) / 100,
                                 reservation,
                                 format,
                                 duration,
@@ -190,21 +235,21 @@ impl SendspinDownloader {
                     }
                 }
                 if let Some(value) = reservation {
-                    crate::cache::store::discard_incomplete_cache(
+                    release_incomplete_reservation(
+                        &slots,
                         &caches,
-                        &value.cache_content_key,
+                        &cache_change_signal,
+                        &states,
+                        slot_index,
+                        &value,
                     );
-                    crate::cache::store::notify_cache_changed(&cache_change_signal);
-                    if let Ok(mut states) = states.lock() {
-                        if let Some(state) = states.get_mut(&value.cache_content_key) {
-                            state.state = "incomplete".to_string();
-                        }
-                    }
                 }
             });
             Ok::<_, String>((controller, connection.guard, task))
         })?;
-        self.controllers[slot_index] = Some(controller);
+        if let Ok(mut controllers) = self.controllers.lock() {
+            controllers[slot_index] = Some(controller);
+        }
         self.guards[slot_index] = Some(guard);
         self.io_tasks[slot_index] = Some(task);
         Ok(())
@@ -238,25 +283,25 @@ impl SendspinDownloader {
                 }
             }
         });
-        self.controllers = [None, None];
+        if let Ok(mut controllers) = self.controllers.lock() {
+            *controllers = [None, None];
+        }
         if let Ok(mut slots) = self.slots.lock() {
             *slots = [None, None];
         }
     }
 
-    pub(crate) fn apply_plan(&mut self, plan_json: &str) -> Result<CachePlan, String> {
+    pub(crate) fn apply_download_plan(&mut self, plan_json: &str) -> Result<(), String> {
         let plan = parse_plan(plan_json)?;
-        let cache_plan = cache_plan(&plan);
         if let Ok(mut states) = self.cache_states.lock() {
             states.clear();
         }
-        for item in prioritized_items(&plan) {
+        for item in &plan.items {
             if let Ok(mut states) = self.cache_states.lock() {
                 states.insert(
                     item.cache_content_key.clone(),
-                    CacheItemSnapshot {
-                        cache_content_key: item.cache_content_key,
-                        queue_item_id: Some(item.queue_item_id),
+                    CacheItemState {
+                        queue_item_id: item.queue_item_id.clone(),
                         state: "queued".to_string(),
                         cached_duration_millis: 0,
                     },
@@ -264,21 +309,142 @@ impl SendspinDownloader {
             }
         }
         self.plan = Some(plan);
-        self.start_plan_downloads()?;
-        Ok(cache_plan)
+        Ok(())
     }
 
-    fn start_plan_downloads(&mut self) -> Result<(), String> {
-        let Some(plan) = self.plan.clone() else {
+    pub(crate) fn download_plan(&self) -> Option<&DownloadPlan> {
+        self.plan.as_ref()
+    }
+
+    pub(crate) fn cache_states(&self) -> Vec<CacheItemState> {
+        self.cache_states
+            .lock()
+            .map(|states| states.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn mark_cache_buffering(&mut self, content_key: &str) -> Result<(), String> {
+        let Ok(mut states) = self.cache_states.lock() else {
+            return Err("Sendspin downloader state lock poisoned".to_string());
+        };
+        let Some(item) = states.get_mut(content_key) else {
+            return Err("track is not present in the current download plan".to_string());
+        };
+        item.state = "buffering".to_string();
+        Ok(())
+    }
+
+    pub(crate) fn cache_format(&self, content_key: &str) -> Result<AudioFormat, String> {
+        crate::cache::store::read_cache_format(&self.caches, content_key)
+    }
+
+    pub(crate) fn cache_chunk(
+        &self,
+        content_key: &str,
+        chunk_index: usize,
+    ) -> Result<(Option<Arc<[u8]>>, bool), String> {
+        crate::cache::store::read_cache_chunk(&self.caches, content_key, chunk_index)
+    }
+
+    pub(crate) fn update_playback_window(
+        &mut self,
+        current: Option<String>,
+        upcoming: Vec<String>,
+        recently_played: Vec<String>,
+    ) {
+        let next = upcoming.first().cloned();
+        let mut protected = current.iter().cloned().collect::<Vec<_>>();
+        if let Some(next) = next.as_ref() {
+            protected.push(next.clone());
+        }
+        if let Ok(mut policy) = self.retention_policy.lock() {
+            *policy = CacheRetentionPolicy {
+                current,
+                next,
+                protected,
+                prefetch: upcoming.into_iter().skip(1).collect(),
+                recently_played,
+            };
+        }
+        self.evict_to_capacity(0);
+    }
+
+    pub(crate) fn ensure_download_window(&mut self, content_keys: &[String]) -> Result<(), String> {
+        self.evict_to_capacity(0);
+        let Some(plan) = self.plan.as_ref() else {
             return Ok(());
         };
+        let candidates = content_keys
+            .iter()
+            .filter_map(|content_key| {
+                plan.items
+                    .iter()
+                    .find(|item| item.cache_content_key == *content_key)
+                    .cloned()
+            })
+            .collect::<Vec<_>>();
         let Some(config) = self.config.clone() else {
             return Ok(());
         };
-        for (slot_index, item) in prioritized_items(&plan).into_iter().take(2).enumerate() {
+
+        for item in candidates {
+            if crate::cache::store::complete_cache_duration_millis(
+                &self.caches,
+                &item.cache_content_key,
+            )
+            .is_some()
+            {
+                continue;
+            }
+            let slot_index = {
+                let slots = self
+                    .slots
+                    .lock()
+                    .map_err(|_| "Sendspin downloader slot lock poisoned".to_string())?;
+                if slots
+                    .iter()
+                    .flatten()
+                    .any(|slot| slot.cache_content_key == item.cache_content_key)
+                {
+                    continue;
+                }
+                slots.iter().position(Option::is_none)
+            };
+            let Some(slot_index) = slot_index else {
+                break;
+            };
             self.start_slot_download(slot_index, &item, &config)?;
         }
         Ok(())
+    }
+
+    fn evict_to_capacity(&mut self, incoming_bytes: usize) {
+        let Some(config) = self.config.as_ref() else {
+            return;
+        };
+        let policy = self
+            .retention_policy
+            .lock()
+            .map(|policy| policy.clone())
+            .unwrap_or_default();
+        let evicted = crate::cache::store::evict_to_fit(
+            &self.caches,
+            &policy,
+            config.cache_capacity_bytes,
+            incoming_bytes,
+        );
+        self.runtime.block_on(stop_evicted_slot_downloads(
+            &self.slots,
+            &self.controllers,
+            &evicted,
+        ));
+        if let Ok(mut states) = self.cache_states.lock() {
+            for cache_content_key in evicted {
+                if let Some(state) = states.get_mut(&cache_content_key) {
+                    state.state = "evicted".to_string();
+                }
+            }
+        }
     }
 
     fn start_slot_download(
@@ -347,14 +513,14 @@ impl SendspinDownloader {
         match response {
             Ok(response) if response.status().is_success() => Ok(()),
             Ok(response) => {
-                let _ = self.release_reservation(slot_index, &reservation);
+                self.release_reservation(slot_index, &reservation);
                 Err(format!(
                     "Music Assistant download request returned HTTP {}",
                     response.status()
                 ))
             }
             Err(error) => {
-                let _ = self.release_reservation(slot_index, &reservation);
+                self.release_reservation(slot_index, &reservation);
                 Err(format!("Music Assistant download request failed: {error}"))
             }
         }
@@ -364,44 +530,21 @@ impl SendspinDownloader {
         &mut self,
         slot_index: usize,
         reservation: &crate::cache::store::DownloadSlotReservation,
-    ) -> Result<(), String> {
+    ) {
         reservation
             .warm_keepalive_cancel
             .store(true, Ordering::Relaxed);
-        crate::cache::store::discard_incomplete_cache(&self.caches, &reservation.cache_content_key);
-        if let Ok(mut slots) = self.slots.lock() {
-            slots[slot_index] = None;
+        if crate::cache::store::release_reservation_if_current(&self.slots, slot_index, reservation)
+        {
+            crate::cache::store::discard_incomplete_cache(
+                &self.caches,
+                &reservation.cache_content_key,
+            );
+            crate::cache::store::notify_cache_changed(&self.cache_change_signal);
         }
-        Ok(())
     }
 
-    pub(crate) fn plan(&self) -> Option<&DownloadPlan> {
-        self.plan.as_ref()
-    }
-
-    pub(crate) fn cache_states(&self) -> Vec<CacheItemSnapshot> {
-        self.cache_states
-            .lock()
-            .map(|states| states.values().cloned().collect())
-            .unwrap_or_default()
-    }
-
-    pub(crate) fn mark_buffering(&mut self, content_key: &str) -> Result<(), String> {
-        let Ok(mut states) = self.cache_states.lock() else {
-            return Err("Sendspin downloader state lock poisoned".to_string());
-        };
-        let Some(item) = states.get_mut(content_key) else {
-            return Err("track is not present in the current download plan".to_string());
-        };
-        item.state = "buffering".to_string();
-        Ok(())
-    }
-
-    pub(crate) fn seek_via_music_assistant(
-        &mut self,
-        content_key: &str,
-        seconds: i64,
-    ) -> Result<(), String> {
+    pub(crate) fn seek(&mut self, content_key: &str, seconds: i64) -> Result<(), String> {
         let slot_index = self
             .slots
             .lock()
@@ -416,7 +559,10 @@ impl SendspinDownloader {
             .ok_or_else(|| {
                 "track is not assigned to an active Sendspin download slot".to_string()
             })?;
-        let controller = self.controllers[slot_index]
+        let controller = self
+            .controllers
+            .lock()
+            .map_err(|_| "Sendspin downloader controller lock poisoned".to_string())?[slot_index]
             .clone()
             .ok_or_else(|| "Sendspin download slot controller is unavailable".to_string())?;
         let config = self
@@ -464,29 +610,67 @@ impl SendspinDownloader {
             Ok(())
         })
     }
+}
 
-    pub(crate) fn cache_format(&self, content_key: &str) -> Result<AudioFormat, String> {
-        crate::cache::store::read_cache_format(&self.caches, content_key)
+fn release_incomplete_reservation(
+    slots: &crate::cache::store::DownloadSlots,
+    caches: &crate::cache::store::EncodedCaches,
+    cache_change_signal: &crate::cache::store::CacheChangeSignal,
+    states: &Arc<Mutex<HashMap<String, CacheItemState>>>,
+    slot_index: usize,
+    reservation: &crate::cache::store::DownloadSlotReservation,
+) {
+    reservation
+        .warm_keepalive_cancel
+        .store(true, Ordering::Relaxed);
+    if !crate::cache::store::release_reservation_if_current(slots, slot_index, reservation) {
+        return;
     }
-
-    pub(crate) fn cache_chunk(
-        &self,
-        content_key: &str,
-        chunk_index: usize,
-    ) -> Result<(Option<Arc<[u8]>>, bool), String> {
-        crate::cache::store::read_cache_chunk(&self.caches, content_key, chunk_index)
+    crate::cache::store::discard_incomplete_cache(caches, &reservation.cache_content_key);
+    crate::cache::store::notify_cache_changed(cache_change_signal);
+    if let Ok(mut states) = states.lock() {
+        if let Some(state) = states.get_mut(&reservation.cache_content_key) {
+            state.state = "incomplete".to_string();
+        }
     }
+}
 
-    pub(crate) fn cache_change_generation(&self) -> u64 {
-        self.cache_change_signal
-            .0
+async fn stop_evicted_slot_downloads(
+    slots: &crate::cache::store::DownloadSlots,
+    controllers: &Arc<Mutex<[Option<Controller>; 2]>>,
+    evicted_content_keys: &[String],
+) {
+    if evicted_content_keys.is_empty() {
+        return;
+    }
+    let slot_indexes = slots
+        .lock()
+        .map(|mut slots| {
+            slots
+                .iter_mut()
+                .enumerate()
+                .filter_map(|(index, reservation)| {
+                    let matches = reservation
+                        .as_ref()
+                        .map(|value| evicted_content_keys.contains(&value.cache_content_key))
+                        .unwrap_or(false);
+                    matches.then(|| reservation.take().map(|value| (index, value)))
+                })
+                .flatten()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for (slot_index, reservation) in slot_indexes {
+        reservation
+            .warm_keepalive_cancel
+            .store(true, Ordering::Relaxed);
+        let controller = controllers
             .lock()
-            .map(|generation| *generation)
-            .unwrap_or(0)
-    }
-
-    pub(crate) fn wait_for_cache_change(&self, generation: u64) -> u64 {
-        crate::cache::store::wait_for_cache_change(&self.cache_change_signal, generation)
+            .ok()
+            .and_then(|controllers| controllers[slot_index].clone());
+        if let Some(controller) = controller {
+            let _ = controller.stop().await;
+        }
     }
 }
 
@@ -513,31 +697,4 @@ fn normalize_client_id(value: &str) -> String {
 
 pub(crate) fn parse_plan(plan_json: &str) -> Result<DownloadPlan, String> {
     serde_json::from_str(plan_json).map_err(|error| format!("invalid download plan json: {error}"))
-}
-
-pub(crate) fn cache_plan(plan: &DownloadPlan) -> CachePlan {
-    CachePlan {
-        current_cache_content_key: plan
-            .items
-            .iter()
-            .find(|item| item.role == "current")
-            .map(|item| item.cache_content_key.clone()),
-        next_cache_content_key: plan
-            .items
-            .iter()
-            .find(|item| item.role == "next")
-            .map(|item| item.cache_content_key.clone()),
-        last_played_cache_content_key: None,
-        ordered_cache_content_keys: plan
-            .items
-            .iter()
-            .map(|item| item.cache_content_key.clone())
-            .collect(),
-    }
-}
-
-pub(crate) fn prioritized_items(plan: &DownloadPlan) -> Vec<DownloadPlanItem> {
-    let mut items = plan.items.clone();
-    items.sort_by_key(|item| std::cmp::Reverse(item.priority));
-    items
 }

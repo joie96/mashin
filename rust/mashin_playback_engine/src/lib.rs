@@ -205,9 +205,12 @@ impl PlaybackCoordinator {
         }
     }
 
-    fn transport_play(&mut self) {
-        if self.active_engine == PlaybackEngineKind::Sendspin {
-            self.sendspin.transport_play();
+    fn transport_play(&mut self) -> Result<(), String> {
+        match self.active_engine {
+            PlaybackEngineKind::Sendspin => self.sendspin.transport_play(),
+            PlaybackEngineKind::Offline => {
+                Err("offline playback engine is not implemented yet".to_string())
+            }
         }
     }
 
@@ -412,19 +415,19 @@ fn with_coordinator<F>(operation: F) -> i32
 where
     F: FnOnce(&mut PlaybackCoordinator) -> Result<(), String>,
 {
-    match COORDINATOR.lock() {
-        Ok(mut coordinator) => match operation(&mut coordinator) {
-            Ok(()) => {
-                emit_snapshot();
-                0
-            }
-            Err(error) => {
-                set_last_error(error);
-                -1
-            }
-        },
-        Err(_) => {
-            set_last_error("playback coordinator lock poisoned");
+    let result = match COORDINATOR.lock() {
+        Ok(mut coordinator) => {
+            operation(&mut coordinator).and_then(|()| coordinator.snapshot_json())
+        }
+        Err(_) => Err("playback coordinator lock poisoned".to_string()),
+    };
+    match result {
+        Ok(snapshot) => {
+            emit_json_text(&snapshot);
+            0
+        }
+        Err(error) => {
+            set_last_error(error);
             -1
         }
     }
@@ -605,10 +608,7 @@ pub extern "C" fn mashin_playback_engine_delete_queue_item(item_id: *const c_cha
 
 #[no_mangle]
 pub extern "C" fn mashin_playback_engine_transport_play() -> i32 {
-    with_coordinator(|coordinator| {
-        coordinator.transport_play();
-        Ok(())
-    })
+    with_coordinator(|coordinator| coordinator.transport_play())
 }
 
 #[no_mangle]

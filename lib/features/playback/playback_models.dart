@@ -17,54 +17,51 @@ enum PlaybackStateType {
   error,
 }
 
-enum PlaybackStateReason { playMedia, codecSwitch, seek }
+// Custom Queue Item with Cache information
+class PlaybackQueueItemCache {
+  final String state;
+  final int cachedDurationMillis;
 
-class PlaybackContentKey {
-  const PlaybackContentKey._();
+  const PlaybackQueueItemCache({
+    required this.state,
+    required this.cachedDurationMillis,
+  });
 
-  static String fromMediaItem(
-    MediaItem item, {
-    required String codec,
-    required int bitDepth,
-    required int sampleRate,
-    required int channels,
-  }) {
-    final String provider = item.provider.trim().toLowerCase();
-    final String mediaType = item.mediaType.name.trim().toLowerCase();
-    final String itemId = item.itemId.trim();
-    if (provider.isEmpty || itemId.isEmpty) {
-      throw ArgumentError.value(
-        item,
-        'item',
-        'A media item needs a provider and item id for local playback.',
-      );
-    }
-
-    final normalizedCodec = codec.trim().toLowerCase();
-    if (normalizedCodec.isEmpty ||
-        bitDepth <= 0 ||
-        sampleRate <= 0 ||
-        channels <= 0) {
-      throw ArgumentError.value(
-        codec,
-        'codec',
-        'A complete audio quality profile is required.',
-      );
-    }
-
-    // This cache key describes the requested quality profile; the negotiated stream may differ.
-    return '$provider:$mediaType:$itemId'
-        ':$normalizedCodec'
-        ':$sampleRate'
-        ':$channels'
-        ':$bitDepth';
+  factory PlaybackQueueItemCache.fromJson(Map<String, dynamic> json) {
+    return PlaybackQueueItemCache(
+      state: (json['state'] as String?)?.trim().toLowerCase() ?? 'idle',
+      cachedDurationMillis:
+          (json['cachedDurationMillis'] as num?)?.toInt() ?? 0,
+    );
   }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'state': state,
+    'cachedDurationMillis': cachedDurationMillis,
+  };
 }
+
+class PlaybackQueueItem extends QueueItem {
+  final PlaybackQueueItemCache? cache;
+
+  const PlaybackQueueItem({
+    required super.queueId,
+    required super.queueItemId,
+    required super.name,
+    super.duration,
+    super.sortIndex,
+    super.available,
+    super.mediaItem,
+    this.cache,
+  });
+
+}
+
 
 // Queue State
 class PlaybackQueue {
   final String? queueId;
-  final List<QueueItem> items;
+  final List<PlaybackQueueItem> items;
   final int? currentIndex;
   final bool? shuffleEnabled;
   final RepeatMode? repeatMode;
@@ -72,7 +69,7 @@ class PlaybackQueue {
 
   const PlaybackQueue({
     this.queueId,
-    this.items = const <QueueItem>[],
+    this.items = const <PlaybackQueueItem>[],
     this.currentIndex,
     this.shuffleEnabled,
     this.repeatMode,
@@ -82,7 +79,7 @@ class PlaybackQueue {
   PlaybackQueue copyWith({
     String? queueId,
     bool clearQueueId = false,
-    List<QueueItem>? items,
+    List<PlaybackQueueItem>? items,
     int? currentIndex,
     bool clearCurrentIndex = false,
     bool? shuffleEnabled,
@@ -104,10 +101,11 @@ class PlaybackQueue {
       repeatMode: clearRepeatMode ? null : (repeatMode ?? this.repeatMode),
       autoplayEnabled: clearDontStopTheMusicEnabled
           ? null
-          : (dontStopTheMusicEnabled ?? this.autoplayEnabled),
+          : (dontStopTheMusicEnabled ?? autoplayEnabled),
     );
   }
 }
+
 
 // Playback State
 class PlaybackState {
@@ -116,10 +114,8 @@ class PlaybackState {
   final bool muted;
   final RepeatMode? repeatMode;
   final bool? shuffleEnabled;
-  final int? seekMaxMillis;
   final int? positionMillis;
   final int? durationMillis;
-  final PlaybackStateReason? reason;
   final DateTime? activeSince;
 
   const PlaybackState({
@@ -128,10 +124,8 @@ class PlaybackState {
     this.muted = false,
     this.repeatMode,
     this.shuffleEnabled,
-    this.seekMaxMillis,
     this.positionMillis,
     this.durationMillis,
-    this.reason,
     this.activeSince,
   });
 
@@ -143,14 +137,10 @@ class PlaybackState {
     bool clearRepeatMode = false,
     bool? shuffleEnabled,
     bool clearShuffleEnabled = false,
-    int? seekMaxMillis,
-    bool clearSeekMaxMillis = false,
     int? positionMillis,
     bool clearPositionMillis = false,
     int? durationMillis,
     bool clearDurationMillis = false,
-    PlaybackStateReason? reason,
-    bool clearReason = false,
     DateTime? activeSince,
     bool clearActiveSince = false,
   }) {
@@ -162,16 +152,12 @@ class PlaybackState {
       shuffleEnabled: clearShuffleEnabled
           ? null
           : (shuffleEnabled ?? this.shuffleEnabled),
-      seekMaxMillis: clearSeekMaxMillis
-          ? null
-          : (seekMaxMillis ?? this.seekMaxMillis),
       positionMillis: clearPositionMillis
           ? null
           : (positionMillis ?? this.positionMillis),
       durationMillis: clearDurationMillis
           ? null
           : (durationMillis ?? this.durationMillis),
-      reason: clearReason ? null : (reason ?? this.reason),
       activeSince: clearActiveSince ? null : (activeSince ?? this.activeSince),
     );
   }
@@ -183,10 +169,8 @@ class PlaybackState {
       'muted': muted,
       'repeatMode': repeatMode?.name,
       'shuffleEnabled': shuffleEnabled,
-      'seekMaxMillis': seekMaxMillis,
       'positionMillis': positionMillis,
       'durationMillis': durationMillis,
-      'reason': reason?.name,
       'activeSinceUtc': activeSince?.toUtc().toIso8601String(),
     };
     return payload;
@@ -195,9 +179,6 @@ class PlaybackState {
   String toJsonString() => jsonEncode(toJson());
 
   factory PlaybackState.fromJson(Map<String, dynamic> json) {
-    final seekMaxMillis =
-        (json['seekMaxMillis'] as num?)?.toInt() ??
-        (json['seekMaxMilliseconds'] as num?)?.toInt();
     final positionMillis =
         _toClampedMillis((json['positionMillis'] as num?)?.toDouble()) ??
         _toClampedMillis((json['positionMs'] as num?)?.toDouble()) ??
@@ -223,15 +204,15 @@ class PlaybackState {
       muted: json['muted'] == true,
       repeatMode: repeatModeFromJson((json['repeatMode'] as String?)?.trim()),
       shuffleEnabled: json['shuffleEnabled'] as bool?,
-      seekMaxMillis: seekMaxMillis,
       positionMillis: positionMillis,
       durationMillis: durationMillis,
-      reason: _parsePlaybackStateReason(json['reason']),
       activeSince: _parseDateTime(json['activeSinceUtc']),
     );
   }
 }
 
+
+// Helper
 int? _toClampedMillis(double? value) {
   if (value == null) {
     return null;
@@ -254,17 +235,6 @@ DateTime? _parseDateTime(Object? value) {
   return raw == null ? null : DateTime.tryParse(raw)?.toLocal();
 }
 
-PlaybackStateReason? _parsePlaybackStateReason(Object? value) {
-  final String? normalized = (value as String?)?.trim().toLowerCase();
-  return switch (normalized) {
-    'playmedia' => PlaybackStateReason.playMedia,
-    'codecswitch' => PlaybackStateReason.codecSwitch,
-    'seek' => PlaybackStateReason.seek,
-    _ => null,
-  };
-}
-
-// Helper functions to parse enums from strings
 PlaybackStateType _parsePlaybackState(dynamic value) {
   final normalized = (value as String?)?.trim().toLowerCase();
   switch (normalized) {
