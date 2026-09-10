@@ -60,4 +60,5 @@ abstract class PlaybackPlayer {
   Future<PlaybackState> getPlaybackState();
 
   Future<PlaybackQueue> getQueueState();
+
 }

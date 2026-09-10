@@ -1,10 +1,28 @@
 import 'package:flutter/foundation.dart';
 
 enum AppLogLevel {
+  trace,
   debug,
   info,
   warn,
   error,
+
+  ;
+
+  static AppLogLevel parse(String value) {
+    return switch (value.trim().toLowerCase()) {
+      'trace' => AppLogLevel.trace,
+      'debug' => AppLogLevel.debug,
+      'info' => AppLogLevel.info,
+      'warn' || 'warning' => AppLogLevel.warn,
+      'error' => AppLogLevel.error,
+      _ => AppLogLevel.info,
+    };
+  }
+}
+
+extension on AppLogLevel {
+  bool allows(AppLogLevel eventLevel) => eventLevel.index >= index;
 }
 
 class AppLogEvent {
@@ -58,6 +76,7 @@ class ConsoleLogSink implements AppLogSink {
 
   String _toShortLevel(AppLogLevel level) {
     return switch (level) {
+      AppLogLevel.trace => 'TRC',
       AppLogLevel.debug => 'DBG',
       AppLogLevel.info => 'INF',
       AppLogLevel.warn => 'WRN',
@@ -75,6 +94,11 @@ class AppLogger {
   static final List<AppLogSink> _sinks = <AppLogSink>[
     ConsoleLogSink(),
   ];
+  static AppLogLevel _minimumLevel = AppLogLevel.info;
+
+  static void configureLevel(String value) {
+    _minimumLevel = AppLogLevel.parse(value);
+  }
 
   static void configureSinks(List<AppLogSink> sinks) {
     _sinks
@@ -85,6 +109,15 @@ class AppLogger {
   void debug(String message, {Object? error, StackTrace? stackTrace}) {
     _emit(
       AppLogLevel.debug,
+      message,
+      error: error,
+      stackTrace: stackTrace,
+    );
+  }
+
+  void trace(String message, {Object? error, StackTrace? stackTrace}) {
+    _emit(
+      AppLogLevel.trace,
       message,
       error: error,
       stackTrace: stackTrace,
@@ -124,6 +157,10 @@ class AppLogger {
     Object? error,
     StackTrace? stackTrace,
   }) {
+    if (!_minimumLevel.allows(level)) {
+      return;
+    }
+
     final event = AppLogEvent(
       timestamp: DateTime.now(),
       level: level,

@@ -1,9 +1,13 @@
 use super::downloader::{SendspinDownloader, SendspinDownloaderConfig};
-use super::models::{QueueItemCacheSnapshot, QueueItemSnapshot};
+use super::models::{QueueCacheUpdate, QueueItemCacheSnapshot, QueueItemSnapshot};
 use crate::audio::player::{AudioPlayer, AudioPlayerState};
 use crate::audio::source::{AudioSource, SourceReadResult};
+use crate::logging::Logger;
 use serde::Serialize;
 use serde_json::Value;
+use std::time::{Duration, Instant};
+
+static LOGGER: Logger = Logger::new(module_path!());
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PlaybackState {
@@ -64,9 +68,18 @@ pub(crate) struct SendspinEngine {
     downloader: SendspinDownloader,
     audio_player: AudioPlayer,
     download_plan_version: u64,
+    next_queue_item_id: u64,
+    queue_revision: u64,
     current_cache_content_key: Option<String>,
     queue_content_keys: Vec<String>,
     recently_played_content_keys: Vec<String>,
+    last_download_status_log: Option<Instant>,
+}
+
+#[derive(Clone)]
+struct QueueMediaItem {
+    queue_item_id: String,
+    media_item: Value,
 }
 
 impl SendspinEngine {
@@ -77,9 +90,12 @@ impl SendspinEngine {
             downloader: SendspinDownloader::new(),
             audio_player: AudioPlayer::new(),
             download_plan_version: 0,
+            next_queue_item_id: 1,
+            queue_revision: 0,
             current_cache_content_key: None,
             queue_content_keys: Vec::new(),
             recently_played_content_keys: Vec::new(),
+            last_download_status_log: None,
         }
     }
 
@@ -128,9 +144,11 @@ impl SendspinEngine {
         self.config = Some(config);
         self.snapshot = SendspinSnapshot::default();
         self.download_plan_version = 0;
+        self.next_queue_item_id = 1;
         self.current_cache_content_key = None;
         self.queue_content_keys.clear();
         self.recently_played_content_keys.clear();
+        self.last_download_status_log = None;
         self.downloader = SendspinDownloader::new();
         self.downloader.configure(downloader_config);
         self.audio_player.stop();
@@ -145,6 +163,13 @@ impl SendspinEngine {
         if url.is_empty() {
             return Err("Sendspin URL is required".to_string());
         }
+        LOGGER.info(format!(
+            "Sendspin configured with preferred codec {}",
+            config
+                .get("preferredCodec")
+                .and_then(Value::as_str)
+                .unwrap_or("pcm")
+        ));
         self.init(config);
         Ok(())
     }
@@ -168,6 +193,7 @@ impl SendspinEngine {
     }
 
     pub(crate) fn connect(&mut self) -> Result<(), String> {
+        LOGGER.info("connecting Sendspin engine");
         self.downloader.connect()?;
         self.snapshot.connection_state = "online".to_string();
         if self.snapshot.playback_state == PlaybackState::Uninitialized.as_str() {
@@ -177,13 +203,14 @@ impl SendspinEngine {
     }
 
     pub(crate) fn disconnect(&mut self) {
+        LOGGER.info("disconnecting Sendspin engine");
         self.downloader.disconnect();
         self.snapshot.connection_state = "offline".to_string();
         self.snapshot.playback_state = PlaybackState::Idle.as_str().to_string();
         self.current_cache_content_key = None;
     }
 
-    pub(crate) fn apply_download_plan(&mut self, plan_json: &str) -> Result<(), String> {
+    pub(crate) fn apply_queue_download_plan(&mut self, plan_json: &str) -> Result<(), String> {
         self.downloader.apply_download_plan(plan_json)?;
         let plan = self
             .downloader
@@ -213,6 +240,13 @@ impl SendspinEngine {
             })
             .collect();
         self.snapshot.current_index = plan.items.iter().position(|item| item.role == "current");
+        LOGGER.debug(format!(
+            "queue download plan applied: version {}, {} items, current index {:?}",
+            plan.version,
+            plan.items.len(),
+            self.snapshot.current_index
+        ));
+        self.queue_revision = self.queue_revision.saturating_add(1);
         self.sync_download_window()?;
         self.refresh_queue_cache_states();
         Ok(())
@@ -224,16 +258,21 @@ impl SendspinEngine {
         if media_items.is_empty() {
             return Err("play_media requires at least one media item".to_string());
         }
+        LOGGER.info(format!(
+            "starting playback for {} media items",
+            media_items.len()
+        ));
 
-        let plan = self.build_download_plan(media_items)?;
+        let queue_items = self.new_queue_media_items(media_items);
+        let plan = self.build_queue_download_plan(queue_items, 0)?;
         let plan_json = serde_json::to_string(&plan)
             .map_err(|error| format!("serialize Sendspin download plan failed: {error}"))?;
-        self.apply_download_plan(&plan_json)?;
+        self.apply_queue_download_plan(&plan_json)?;
         let content_key = self
             .current_cache_content_key
             .clone()
             .ok_or_else(|| "play_media plan has no current item".to_string())?;
-        self.play(&content_key)
+        self.play_cached_content(&content_key)
     }
 
     pub(crate) fn play_media_next(
@@ -253,23 +292,26 @@ impl SendspinEngine {
         if replace_following {
             queue.truncate(insertion);
         }
-        queue.splice(insertion..insertion, additions);
-        self.update_media_queue(queue, false)
+        queue.splice(insertion..insertion, self.new_queue_media_items(additions));
+        self.replace_queue_media_items(queue)
     }
 
     pub(crate) fn play_media_last(&mut self, media_items_json: &str) -> Result<(), String> {
         let mut queue = self.queue_media_items();
         let additions: Vec<Value> = serde_json::from_str(media_items_json)
             .map_err(|error| format!("invalid media items json: {error}"))?;
-        queue.extend(additions);
-        self.update_media_queue(queue, false)
+        queue.extend(self.new_queue_media_items(additions));
+        self.replace_queue_media_items(queue)
     }
 
     pub(crate) fn clear_queue(&mut self) -> Result<(), String> {
+        LOGGER.info("clearing playback queue");
+        self.audio_player.stop();
         self.snapshot.queue.clear();
         self.snapshot.current_index = None;
         self.current_cache_content_key = None;
         self.queue_content_keys.clear();
+        self.queue_revision = self.queue_revision.saturating_add(1);
         self.snapshot.playback_state = PlaybackState::Idle.as_str().to_string();
         Ok(())
     }
@@ -287,7 +329,7 @@ impl SendspinEngine {
         let item = queue.remove(source);
         let target = (source as i32 + shift).clamp(0, queue.len() as i32) as usize;
         queue.insert(target, item);
-        self.update_media_queue(queue, false)
+        self.replace_queue_media_items(queue)
     }
 
     pub(crate) fn delete_queue_item(&mut self, item_id: &str) -> Result<(), String> {
@@ -304,36 +346,92 @@ impl SendspinEngine {
         if queue.is_empty() {
             return self.clear_queue();
         }
-        self.update_media_queue(queue, false)
+        self.replace_queue_media_items(queue)
     }
 
-    fn queue_media_items(&self) -> Vec<Value> {
+    pub(crate) fn play_queue_index(&mut self, index: usize) -> Result<(), String> {
+        let Some(content_key) = self.queue_content_keys.get(index) else {
+            return Err("queue index is out of range".to_string());
+        };
+        let content_key = content_key.clone();
+        self.record_recently_played_track(&content_key);
+        self.snapshot.current_index = Some(index);
+        self.play_cached_content(&content_key)?;
+        self.sync_download_window()
+    }
+
+    fn queue_media_items(&self) -> Vec<QueueMediaItem> {
         self.snapshot
             .queue
             .iter()
-            .map(|item| item.media_item.clone())
+            .map(|item| QueueMediaItem {
+                queue_item_id: item.queue_item_id.clone(),
+                media_item: item.media_item.clone(),
+            })
             .collect()
     }
 
-    fn update_media_queue(&mut self, media_items: Vec<Value>, play: bool) -> Result<(), String> {
+    fn new_queue_media_items(&mut self, media_items: Vec<Value>) -> Vec<QueueMediaItem> {
+        media_items
+            .into_iter()
+            .map(|media_item| {
+                let queue_item_id = format!("local-{}", self.next_queue_item_id);
+                self.next_queue_item_id = self.next_queue_item_id.saturating_add(1);
+                QueueMediaItem {
+                    queue_item_id,
+                    media_item,
+                }
+            })
+            .collect()
+    }
+
+    fn replace_queue_media_items(
+        &mut self,
+        media_items: Vec<QueueMediaItem>,
+    ) -> Result<(), String> {
         if media_items.is_empty() {
             return self.clear_queue();
         }
-        let plan = self.build_download_plan(media_items)?;
+        let previous_current_index = self.snapshot.current_index;
+        let previous_current_queue_item_id = self.current_queue_item_id().map(str::to_owned);
+        let current_index = previous_current_queue_item_id
+            .as_deref()
+            .and_then(|queue_item_id| {
+                media_items
+                    .iter()
+                    .position(|item| item.queue_item_id == queue_item_id)
+            })
+            .or_else(|| {
+                previous_current_index.map(|index| index.min(media_items.len().saturating_sub(1)))
+            })
+            .unwrap_or(0);
+        let plan = self.build_queue_download_plan(media_items, current_index)?;
         let plan_json = serde_json::to_string(&plan)
             .map_err(|error| format!("serialize Sendspin download plan failed: {error}"))?;
-        self.apply_download_plan(&plan_json)?;
-        if play {
+        self.apply_queue_download_plan(&plan_json)?;
+        let current_queue_item_id = self.current_queue_item_id();
+        if previous_current_queue_item_id.as_deref() != current_queue_item_id {
             let content_key = self
                 .current_cache_content_key
                 .clone()
                 .ok_or_else(|| "queue has no current item".to_string())?;
-            self.play(&content_key)?;
+            self.play_cached_content(&content_key)?;
         }
         Ok(())
     }
 
-    fn build_download_plan(&self, media_items: Vec<Value>) -> Result<Value, String> {
+    fn current_queue_item_id(&self) -> Option<&str> {
+        self.snapshot
+            .current_index
+            .and_then(|index| self.snapshot.queue.get(index))
+            .map(|item| item.queue_item_id.as_str())
+    }
+
+    fn build_queue_download_plan(
+        &self,
+        media_items: Vec<QueueMediaItem>,
+        current_index: usize,
+    ) -> Result<Value, String> {
         let preferred_codec = self
             .config
             .as_ref()
@@ -344,24 +442,37 @@ impl SendspinEngine {
         let items = media_items
             .into_iter()
             .enumerate()
-            .map(|(index, media_item)| {
-                let queue_item_id = format!("local-{}", index + 1);
+            .map(|(index, queue_item)| -> Result<Value, String> {
+                let QueueMediaItem {
+                    queue_item_id,
+                    media_item,
+                } = queue_item;
                 let provider = media_item
                     .get("provider")
-                    .or_else(|| media_item.get("providerId"))
                     .and_then(Value::as_str)
-                    .unwrap_or("media");
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| {
+                        format!("queue item {queue_item_id} has no Music Assistant provider")
+                    })?;
                 let item_id = media_item
-                    .get("itemId")
-                    .or_else(|| media_item.get("mediaItemId"))
-                    .or_else(|| media_item.get("id"))
+                    .get("item_id")
                     .and_then(Value::as_str)
-                    .unwrap_or("unknown");
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| {
+                        format!("queue item {queue_item_id} has no Music Assistant item_id")
+                    })?;
                 let cache_content_key =
                     format!("{provider}:{item_id}:{preferred_codec}:48000:16:2");
-                let role = if index == 0 {
+                let expected_duration_millis = media_item
+                    .get("duration")
+                    .and_then(Value::as_u64)
+                    .filter(|duration| *duration > 0)
+                    .map(|duration| duration.saturating_mul(1_000));
+                let role = if index == current_index {
                     "current"
-                } else if index == 1 {
+                } else if index == current_index.saturating_add(1) {
                     "next"
                 } else {
                     "future"
@@ -371,15 +482,16 @@ impl SendspinEngine {
                     "next" => 90,
                     _ => 50,
                 };
-                serde_json::json!({
+                Ok(serde_json::json!({
                     "queueItemId": queue_item_id,
                     "role": role,
                     "priority": priority,
                     "cacheContentKey": cache_content_key,
+                    "expectedDurationMillis": expected_duration_millis,
                     "mediaItem": media_item,
-                })
+                }))
             })
-            .collect::<Vec<Value>>();
+            .collect::<Result<Vec<Value>, String>>()?;
 
         Ok(serde_json::json!({
             "version": self.download_plan_version.saturating_add(1),
@@ -387,27 +499,120 @@ impl SendspinEngine {
         }))
     }
 
-    pub(crate) fn play(&mut self, content_key: &str) -> Result<(), String> {
+    fn sync_download_window(&mut self) -> Result<(), String> {
+        let download_window = self
+            .queue_content_keys
+            .iter()
+            .skip(self.snapshot.current_index.unwrap_or(0))
+            .map(String::clone)
+            .collect::<Vec<_>>();
+        let current = download_window.first().cloned();
+        let upcoming = download_window.iter().skip(1).cloned().collect::<Vec<_>>();
+        self.downloader.update_playback_window(
+            current,
+            upcoming.clone(),
+            self.recently_played_content_keys.clone(),
+        );
+        self.downloader.ensure_download_window(&download_window)
+    }
+
+    fn record_recently_played_track(&mut self, next_content_key: &str) {
+        let Some(current) = self.current_cache_content_key.as_ref() else {
+            return;
+        };
+        if current == next_content_key {
+            return;
+        }
+        self.recently_played_content_keys
+            .retain(|key| key != current);
+        self.recently_played_content_keys.push(current.clone());
+    }
+
+    fn refresh_queue_cache_states(&mut self) {
+        let states = self.downloader.cache_states();
+        for item in &mut self.snapshot.queue {
+            if let Some(state) = states
+                .iter()
+                .find(|state| state.queue_item_id == item.queue_item_id)
+            {
+                item.cache.state = state.state.clone();
+                item.cache.cached_duration_millis = state.cached_duration_millis;
+            }
+        }
+    }
+
+    fn log_download_status(&mut self) {
+        let now = Instant::now();
+        if self
+            .last_download_status_log
+            .map(|last_log| now.duration_since(last_log) < Duration::from_secs(5))
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let (active_downloads, cache_used_bytes, cache_capacity_bytes) =
+            self.downloader.download_status();
+        let completed_cache_items = self
+            .downloader
+            .completed_cache_item_count(&self.queue_content_keys);
+        let active_downloads = active_downloads
+            .iter()
+            .map(|download| {
+                let track_name = self
+                    .snapshot
+                    .queue
+                    .iter()
+                    .find(|item| item.queue_item_id == download.queue_item_id)
+                    .and_then(|item| item.media_item.get("name"))
+                    .and_then(Value::as_str)
+                    .unwrap_or(&download.queue_item_id);
+                let expected_duration_millis = download.expected_duration_millis.unwrap_or(0);
+                format!(
+                    "{track_name} {}/{} ms ({:.1}%)",
+                    download.cached_duration_millis,
+                    expected_duration_millis,
+                    Self::percentage(
+                        download.cached_duration_millis,
+                        expected_duration_millis,
+                    )
+                )
+            })
+            .collect::<Vec<_>>();
+        let cache_usage_percent =
+            Self::percentage(cache_used_bytes as u64, cache_capacity_bytes as u64);
+        LOGGER.info(format!(
+            "download status: {}/{} complete queue item(s), [{}], cache {}/{} bytes ({:.1}%)",
+            completed_cache_items,
+            self.queue_content_keys.len(),
+            active_downloads.join(", "),
+            cache_used_bytes,
+            cache_capacity_bytes,
+            cache_usage_percent,
+        ));
+        self.last_download_status_log = Some(now);
+    }
+
+    fn percentage(value: u64, total: u64) -> f64 {
+        if total == 0 {
+            return 0.0;
+        }
+        value as f64 * 100.0 / total as f64
+    }
+
+    pub(crate) fn play_cached_content(&mut self, content_key: &str) -> Result<(), String> {
         let key = content_key.trim();
         if key.is_empty() {
             return Err("play content key is empty".to_string());
         }
+        LOGGER.debug("preparing cached content for playback");
         self.downloader.mark_cache_buffering(key)?;
         self.audio_player
             .prepare(AudioSource::cached_content(key.to_string()));
-        let format = self.wait_for_cache_format(key)?;
-        self.audio_player
-            .start(&format, self.snapshot.volume, self.snapshot.muted)?;
-        self.pump_audio(key);
-        self.refresh_queue_cache_states();
         self.current_cache_content_key = Some(key.to_string());
-        self.snapshot.playback_state = if self.audio_player.buffered_duration_millis() > 0 {
-            PlaybackState::Playing.as_str().to_string()
-        } else {
-            PlaybackState::Buffering.as_str().to_string()
-        };
-        self.snapshot.local_playback_position_millis =
-            Some(self.audio_player.playback_position_millis());
+        self.snapshot.playback_state = PlaybackState::Buffering.as_str().to_string();
+        self.snapshot.local_playback_position_millis = Some(0);
+        self.start_prepared_audio_if_available(key);
+        self.refresh_queue_cache_states();
         Ok(())
     }
 
@@ -415,7 +620,21 @@ impl SendspinEngine {
         let Some(content_key) = self.current_cache_content_key.clone() else {
             return;
         };
-        self.pump_audio(&content_key);
+        if self.downloader.take_download_window_refresh() {
+            if let Err(error) = self.sync_download_window() {
+                LOGGER.error(format!("failed to refresh Sendspin download window: {error}"));
+            }
+        }
+        if self.downloader.take_download_status_refresh() {
+            self.refresh_queue_cache_states();
+            self.log_download_status();
+        }
+        self.start_prepared_audio_if_available(&content_key);
+        if !self.audio_player.is_started() {
+            self.refresh_queue_cache_states();
+            return;
+        }
+        self.pump_audio_player(&content_key);
         if self.audio_player.state() == AudioPlayerState::Ended {
             let Some(current_index) = self.snapshot.current_index else {
                 self.snapshot.playback_state = PlaybackState::Idle.as_str().to_string();
@@ -453,7 +672,7 @@ impl SendspinEngine {
         .to_string();
     }
 
-    fn pump_audio(&mut self, content_key: &str) {
+    fn pump_audio_player(&mut self, content_key: &str) {
         self.audio_player.pump_until(750, |chunk_index| {
             match self.downloader.cache_chunk(content_key, chunk_index) {
                 Ok((Some(chunk), _)) => SourceReadResult::Data(chunk),
@@ -464,17 +683,20 @@ impl SendspinEngine {
         });
     }
 
-    fn wait_for_cache_format(
-        &self,
-        content_key: &str,
-    ) -> Result<::sendspin::audio::AudioFormat, String> {
-        for _ in 0..500 {
-            if let Ok(format) = self.downloader.cache_format(content_key) {
-                return Ok(format);
-            }
-            std::thread::sleep(std::time::Duration::from_millis(20));
+    fn start_prepared_audio_if_available(&mut self, content_key: &str) {
+        if self.audio_player.is_started() {
+            return;
         }
-        Err("timed out waiting for Sendspin cache format".to_string())
+        let Ok(format) = self.downloader.cache_format(content_key) else {
+            return;
+        };
+        if let Err(error) =
+            self.audio_player
+                .start(&format, self.snapshot.volume, self.snapshot.muted)
+        {
+            LOGGER.error(format!("failed to start audio playback: {error}"));
+            self.snapshot.playback_state = PlaybackState::Error.as_str().to_string();
+        }
     }
 
     pub(crate) fn transport_play(&mut self) -> Result<(), String> {
@@ -483,7 +705,7 @@ impl SendspinEngine {
                 .current_cache_content_key
                 .clone()
                 .ok_or_else(|| "cannot play without an active track".to_string())?;
-            return self.play(&content_key);
+            return self.play_cached_content(&content_key);
         }
         self.audio_player.resume();
         self.snapshot.playback_state = PlaybackState::Playing.as_str().to_string();
@@ -538,59 +760,6 @@ impl SendspinEngine {
         self.play_queue_index(current_index.saturating_sub(1))
     }
 
-    pub(crate) fn play_queue_index(&mut self, index: usize) -> Result<(), String> {
-        let Some(content_key) = self.queue_content_keys.get(index) else {
-            return Err("queue index is out of range".to_string());
-        };
-        let content_key = content_key.clone();
-        self.remember_current_track(&content_key);
-        self.snapshot.current_index = Some(index);
-        self.play(&content_key)?;
-        self.sync_download_window()
-    }
-
-    fn sync_download_window(&mut self) -> Result<(), String> {
-        let download_window = self
-            .queue_content_keys
-            .iter()
-            .skip(self.snapshot.current_index.unwrap_or(0))
-            .map(String::clone)
-            .collect::<Vec<_>>();
-        let current = download_window.first().cloned();
-        let upcoming = download_window.iter().skip(1).cloned().collect::<Vec<_>>();
-        self.downloader.update_playback_window(
-            current,
-            upcoming.clone(),
-            self.recently_played_content_keys.clone(),
-        );
-        self.downloader.ensure_download_window(&download_window)
-    }
-
-    fn remember_current_track(&mut self, next_content_key: &str) {
-        let Some(current) = self.current_cache_content_key.as_ref() else {
-            return;
-        };
-        if current == next_content_key {
-            return;
-        }
-        self.recently_played_content_keys
-            .retain(|key| key != current);
-        self.recently_played_content_keys.push(current.clone());
-    }
-
-    fn refresh_queue_cache_states(&mut self) {
-        let states = self.downloader.cache_states();
-        for item in &mut self.snapshot.queue {
-            if let Some(state) = states
-                .iter()
-                .find(|state| state.queue_item_id == item.queue_item_id)
-            {
-                item.cache.state = state.state.clone();
-                item.cache.cached_duration_millis = state.cached_duration_millis;
-            }
-        }
-    }
-
     pub(crate) fn set_volume(&mut self, volume: u8) {
         self.snapshot.volume = volume.min(100);
         self.audio_player.set_volume(self.snapshot.volume);
@@ -611,5 +780,94 @@ impl SendspinEngine {
 
     pub(crate) fn snapshot(&self) -> &SendspinSnapshot {
         &self.snapshot
+    }
+
+    pub(crate) fn queue_revision(&self) -> u64 {
+        self.queue_revision
+    }
+
+    pub(crate) fn cache_updates(&self) -> Vec<QueueCacheUpdate> {
+        self.snapshot
+            .queue
+            .iter()
+            .map(|item| QueueCacheUpdate {
+                queue_item_id: item.queue_item_id.clone(),
+                cache: item.cache.clone(),
+            })
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn queue_item_ids_stay_stable_when_inserting_media() {
+        let mut engine = SendspinEngine::new();
+        let initial_items =
+            engine.new_queue_media_items(vec![json!({"id": "first"}), json!({"id": "second"})]);
+        engine.snapshot.queue = initial_items
+            .iter()
+            .map(|item| QueueItemSnapshot {
+                queue_item_id: item.queue_item_id.clone(),
+                media_item: item.media_item.clone(),
+                cache: QueueItemCacheSnapshot {
+                    state: "queued".to_string(),
+                    cached_duration_millis: 0,
+                },
+            })
+            .collect();
+
+        let mut rebuilt_items = engine.queue_media_items();
+        rebuilt_items.splice(
+            1..1,
+            engine.new_queue_media_items(vec![json!({"id": "inserted"})]),
+        );
+
+        assert_eq!(
+            rebuilt_items
+                .iter()
+                .map(|item| item.queue_item_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["local-1", "local-3", "local-2"],
+        );
+    }
+
+    #[test]
+    fn queue_download_plan_keeps_the_selected_item_current() {
+        let mut engine = SendspinEngine::new();
+        let queue_items = engine.new_queue_media_items(vec![
+            json!({"provider": "test", "item_id": "first"}),
+            json!({"provider": "test", "item_id": "second"}),
+            json!({"provider": "test", "item_id": "third"}),
+        ]);
+
+        let plan = engine
+            .build_queue_download_plan(queue_items, 1)
+            .expect("build queue plan");
+        let items = plan["items"].as_array().expect("plan items");
+
+        assert_eq!(items[0]["role"], "future");
+        assert_eq!(items[1]["role"], "current");
+        assert_eq!(items[2]["role"], "next");
+    }
+
+    #[test]
+    fn queue_download_plan_uses_music_assistant_item_ids_for_cache_keys() {
+        let mut engine = SendspinEngine::new();
+        let queue_items = engine.new_queue_media_items(vec![
+            json!({"provider": "deezer", "item_id": "first"}),
+            json!({"provider": "deezer", "item_id": "second"}),
+        ]);
+
+        let plan = engine
+            .build_queue_download_plan(queue_items, 0)
+            .expect("build queue plan");
+        let items = plan["items"].as_array().expect("plan items");
+
+        assert_eq!(items[0]["cacheContentKey"], "deezer:first:pcm:48000:16:2");
+        assert_eq!(items[1]["cacheContentKey"], "deezer:second:pcm:48000:16:2");
     }
 }

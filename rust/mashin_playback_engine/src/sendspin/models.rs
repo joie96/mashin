@@ -14,11 +14,18 @@ pub(crate) struct QueueItemCacheSnapshot {
     pub(crate) cached_duration_millis: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct QueueItemSnapshot {
     pub(crate) queue_item_id: String,
     pub(crate) media_item: serde_json::Value,
+    pub(crate) cache: QueueItemCacheSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct QueueCacheUpdate {
+    pub(crate) queue_item_id: String,
     pub(crate) cache: QueueItemCacheSnapshot,
 }
 
@@ -38,6 +45,8 @@ pub(crate) struct DownloadPlanItem {
     #[allow(dead_code)]
     pub(crate) priority: i32,
     pub(crate) cache_content_key: String,
+    #[serde(default)]
+    pub(crate) expected_duration_millis: Option<u64>,
     #[allow(dead_code)]
     pub(crate) media_item: serde_json::Value,
 }

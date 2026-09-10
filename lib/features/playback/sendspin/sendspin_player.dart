@@ -176,17 +176,10 @@ class SendspinPlayer implements PlaybackPlayer {
   }
 
   @override
-  Future<PlaybackState> getPlaybackState() async {
-    await _ensureStateSubscription();
-    _handleState(await transportBackend.getPlaybackState());
-    return _playbackState;
-  }
+  Future<PlaybackState> getPlaybackState() async => _playbackState;
 
   @override
-  Future<PlaybackQueue> getQueueState() async {
-    await _ensureStateSubscription();
-    return _queueState;
-  }
+  Future<PlaybackQueue> getQueueState() async => _queueState;
 
   Future<String> _mediaItemsJson(List<MediaItem> mediaItems) async {
     final client = clientResolver();

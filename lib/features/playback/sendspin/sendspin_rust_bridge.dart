@@ -75,13 +75,21 @@ abstract class _SendspinRustBridgeApi {
   Future<void> deleteQueueItem(String itemId);
   Future<void> playQueueIndex(int index);
   Future<void> requestCodec(String codec);
-  Future<SendspinPlayerState> getPlaybackState();
   Future<void> dispose();
 }
 
 class SendspinRustBridge implements _SendspinRustBridgeApi {
   SendspinRustBridge() : _bindings = _RustBindings(_openLibrary()) {
     _instance = this;
+    final logLevel = const String.fromEnvironment(
+      'MASHIN_LOG_LEVEL',
+      defaultValue: 'info',
+    ).toNativeUtf8();
+    try {
+      _throwIfError(_bindings.setLogLevel(logLevel), 'setLogLevel');
+    } finally {
+      calloc.free(logLevel);
+    }
     _nativeEventCallback = ffi.NativeCallable<_NativeEventCallbackFn>.listener(
       _dispatchNativeEvent,
     );
@@ -348,12 +356,6 @@ class SendspinRustBridge implements _SendspinRustBridgeApi {
   }
 
   @override
-  Future<SendspinPlayerState> getPlaybackState() async {
-    await _pullState();
-    return _playbackState;
-  }
-
-  @override
   Future<void> dispose() async {
     if (_disposed) {
       return;
@@ -398,7 +400,10 @@ class SendspinRustBridge implements _SendspinRustBridgeApi {
 
       _eventController.add(statePayload);
 
-      final nextState = SendspinPlayerState.fromJson(statePayload);
+      final nextState = _mergeNativeStateEvent(statePayload);
+      if (nextState == null) {
+        return;
+      }
       final nextHash = nextState.toJsonString();
       if (nextHash == _playbackStateHash) {
         return;
@@ -412,30 +417,93 @@ class SendspinRustBridge implements _SendspinRustBridgeApi {
     }
   }
 
-  Future<void> _pullState() async {
-    final pointer = _bindings.getSnapshotJson();
-    if (pointer == ffi.nullptr) {
-      return;
+  SendspinPlayerState? _mergeNativeStateEvent(Map<String, dynamic> payload) {
+    final eventType = payload['type'];
+    if (eventType == null) {
+      return SendspinPlayerState.fromJson(payload);
     }
-
-    try {
-      final jsonText = pointer.toDartString();
-      if (jsonText.trim().isEmpty) {
-        return;
-      }
-
-      final dynamic decoded = jsonDecode(jsonText);
-      if (decoded is! Map<String, dynamic>) {
-        return;
-      }
-
-      final nextState = SendspinPlayerState.fromJson(decoded);
-      _playbackState = nextState;
-      _playbackStateHash = nextState.toJsonString();
-      _playbackStateController.add(nextState);
-    } finally {
-      _bindings.freeRustString(pointer);
+    switch (eventType) {
+      case 'queue':
+        final eventState = SendspinPlayerState.fromJson(payload);
+        return _copyState(queue: eventState.queue);
+      case 'playback':
+        final eventState = SendspinPlayerState.fromJson(payload);
+        return _copyState(
+          connectionState: eventState.connectionState,
+          playbackState: eventState.playbackState,
+          volume: eventState.volume,
+          muted: eventState.muted,
+          repeatMode: eventState.repeatMode,
+          shuffleEnabled: eventState.shuffleEnabled,
+          positionMillis: eventState.positionMillis,
+          currentIndex: (payload['currentIndex'] as num?)?.toInt(),
+          clearCurrentIndex: payload['currentIndex'] == null,
+        );
+      case 'cache':
+        final updates = <String, PlaybackQueueItemCache>{};
+        for (final item in (payload['items'] as List? ?? const <Object>[])) {
+          if (item is! Map<String, dynamic>) {
+            continue;
+          }
+          final queueItemId = (item['queueItemId'] as String?)?.trim();
+          final cacheJson = item['cache'];
+          if (queueItemId == null || queueItemId.isEmpty ||
+              cacheJson is! Map<String, dynamic>) {
+            continue;
+          }
+          updates[queueItemId] = PlaybackQueueItemCache.fromJson(cacheJson);
+        }
+        if (updates.isEmpty) {
+          return null;
+        }
+        return _copyState(
+          queue: _playbackState.queue.map((item) {
+            final cache = updates[item.queueItemId];
+            if (cache == null) {
+              return item;
+            }
+            return PlaybackQueueItem(
+              queueId: item.queueId,
+              queueItemId: item.queueItemId,
+              name: item.name,
+              duration: item.duration,
+              sortIndex: item.sortIndex,
+              available: item.available,
+              mediaItem: item.mediaItem,
+              cache: cache,
+            );
+          }).toList(growable: false),
+        );
+      default:
+        return null;
     }
+  }
+
+  SendspinPlayerState _copyState({
+    SendspinConnectionState? connectionState,
+    PlaybackStateType? playbackState,
+    int? volume,
+    bool? muted,
+    RepeatMode? repeatMode,
+    bool? shuffleEnabled,
+    int? positionMillis,
+    List<PlaybackQueueItem>? queue,
+    int? currentIndex,
+    bool clearCurrentIndex = false,
+  }) {
+    return SendspinPlayerState(
+      connectionState: connectionState ?? _playbackState.connectionState,
+      playbackState: playbackState ?? _playbackState.playbackState,
+      volume: volume ?? _playbackState.volume,
+      muted: muted ?? _playbackState.muted,
+      repeatMode: repeatMode ?? _playbackState.repeatMode,
+      shuffleEnabled: shuffleEnabled ?? _playbackState.shuffleEnabled,
+      positionMillis: positionMillis ?? _playbackState.positionMillis,
+      queue: queue ?? _playbackState.queue,
+      currentIndex: clearCurrentIndex
+          ? null
+          : (currentIndex ?? _playbackState.currentIndex),
+    );
   }
 
   void _throwIfError(int code, String operation) {
@@ -556,6 +624,9 @@ class _RustBindings {
           .lookupFunction<_NativeEngineSelectFn, _DartEngineSelectFn>(
             'mashin_playback_engine_set_active_engine',
           ),
+      setLogLevel = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
+        'mashin_playback_engine_set_log_level',
+      ),
       initialize = library.lookupFunction<_NativeInitFn, _DartInitFn>(
         'mashin_playback_engine_initialize',
       ),
@@ -629,10 +700,6 @@ class _RustBindings {
             _NativeRegisterEventCallbackFn,
             _DartRegisterEventCallbackFn
           >('mashin_playback_engine_register_event_callback'),
-      getSnapshotJson = library
-          .lookupFunction<_NativeGetStringFn, _DartGetStringFn>(
-            'mashin_playback_engine_get_snapshot_json',
-          ),
       getLastError = library
           .lookupFunction<_NativeGetStringFn, _DartGetStringFn>(
             'mashin_playback_engine_get_last_error',
@@ -643,6 +710,7 @@ class _RustBindings {
           );
 
   final _DartEngineSelectFn setActiveEngine;
+  final _DartCodecFn setLogLevel;
   final _DartInitFn initialize;
   final _DartVoidFn activate;
   final _DartVoidFn deactivate;
@@ -666,7 +734,6 @@ class _RustBindings {
   final _DartVolumeFn playQueueIndex;
   final _DartCodecFn setPreferredCodec;
   final _DartRegisterEventCallbackFn registerEventCallback;
-  final _DartGetStringFn getSnapshotJson;
   final _DartGetStringFn getLastError;
   final _DartFreeStringFn freeRustString;
 }

@@ -139,17 +139,18 @@ class PlaybackCoordinator {
       await _activePlayer!.deactivate();
     }
 
+    _activePlayer = nextPlayer;
+    _outputMode = mode;
+    if (playerChanged) {
+      _queueState = const PlaybackQueue();
+    }
+    await _bindStreams(nextPlayer);
     if (!hadPreviousPlayer || playerChanged) {
       _logger.debug(
         'activating target player for output mode switch. RequestedMode=${mode.name}',
       );
       await nextPlayer.activate(targetPlayerId: targetPlayerId);
     }
-
-    _activePlayer = nextPlayer;
-    _outputMode = mode;
-
-    await _bindStreams(nextPlayer);
     _updatePlaybackState(
       await nextPlayer.getPlaybackState(),
       source: 'switchOutputMode/getPlaybackState',

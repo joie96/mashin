@@ -2,29 +2,44 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Flutter App (main.dart)",
-      "type": "dart",
-      "request": "launch",
-      "program": "lib/main.dart"
-    },
-    {
-      "name": "Flutter App (Release)",
+      "name": "Debug",
       "type": "dart",
       "request": "launch",
       "program": "lib/main.dart",
-      "flutterMode": "release"
+      "toolArgs": ["--dart-define=MASHIN_LOG_LEVEL=debug"],
+      "preLaunchTask": "Rust Playback Engine: Current Flutter Platforms Debug"
     },
     {
-      "name": "Build Rust Playback Engine (Windows Release)",
-      "type": "node-terminal",
+      "name": "Debug (Trace)",
+      "type": "dart",
       "request": "launch",
-      "command": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Set-Location \"\"${workspaceFolder}/rust/mashin_playback_engine\"\"; cargo build --release; New-Item -ItemType Directory -Path \"\"${workspaceFolder}/windows/native\"\" -Force | Out-Null; Copy-Item \"\"${workspaceFolder}/rust/mashin_playback_engine/target/release/mashin_playback_engine.dll\"\" \"\"${workspaceFolder}/windows/native/mashin_playback_engine.dll\"\" -Force\""
+      "program": "lib/main.dart",
+      "toolArgs": ["--dart-define=MASHIN_LOG_LEVEL=trace"],
+      "preLaunchTask": "Rust Playback Engine: Current Flutter Platforms Debug"
     },
     {
-      "name": "Build Rust Playback Engine (Android arm64-v8a Release)",
-      "type": "node-terminal",
+      "name": "Release (Windows x64)",
+      "type": "dart",
       "request": "launch",
-      "command": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Set-Location \"\"${workspaceFolder}/rust/mashin_playback_engine\"\"; cargo ndk -t arm64-v8a -P 26 -o \"\"${workspaceFolder}/android/app/src/main/jniLibs\"\" build --release\""
+      "program": "lib/main.dart",
+      "flutterMode": "release",
+      "toolArgs": [
+        "--target-platform=windows-x64",
+        "--dart-define=MASHIN_LOG_LEVEL=info"
+      ],
+      "preLaunchTask": "Rust Playback Engine: Windows x64 Release"
+    },
+    {
+      "name": "Release (Windows arm64)",
+      "type": "dart",
+      "request": "launch",
+      "program": "lib/main.dart",
+      "flutterMode": "release",
+      "toolArgs": [
+        "--target-platform=windows-arm64",
+        "--dart-define=MASHIN_LOG_LEVEL=info"
+      ],
+      "preLaunchTask": "Rust Playback Engine: Windows arm64 Release"
     }
   ]
 }

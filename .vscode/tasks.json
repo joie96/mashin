@@ -1,0 +1,23 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Rust Playback Engine: Current Flutter Platforms Debug",
+      "type": "shell",
+      "command": "& '${workspaceFolder}/scripts/build_rust_playback_engine.ps1' -Profile Debug -PlatformSelection CurrentFlutter",
+      "problemMatcher": []
+    },
+    {
+      "label": "Rust Playback Engine: Windows x64 Release",
+      "type": "shell",
+      "command": "& '${workspaceFolder}/scripts/build_rust_playback_engine.ps1' -Profile Release -PlatformSelection WindowsX64",
+      "problemMatcher": []
+    },
+    {
+      "label": "Rust Playback Engine: Windows arm64 Release",
+      "type": "shell",
+      "command": "& '${workspaceFolder}/scripts/build_rust_playback_engine.ps1' -Profile Release -PlatformSelection WindowsArm64",
+      "problemMatcher": []
+    }
+  ]
+}

@@ -5,7 +5,9 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::log_error;
+use crate::logging::Logger;
+
+static LOGGER: Logger = Logger::new(module_path!());
 
 struct LocalPlaybackQueue {
     buffers: VecDeque<Arc<[i32]>>,
@@ -17,12 +19,6 @@ impl LocalPlaybackQueue {
     fn enqueue(&mut self, samples: Arc<[i32]>) {
         self.queued_samples += samples.len();
         self.buffers.push_back(samples);
-    }
-
-    fn clear(&mut self) {
-        self.buffers.clear();
-        self.sample_offset = 0;
-        self.queued_samples = 0;
     }
 
     fn next_sample(&mut self) -> Option<i32> {
@@ -46,6 +42,7 @@ pub(crate) struct AudioOutput {
     volume: Arc<AtomicU8>,
     muted: Arc<AtomicBool>,
     paused: Arc<AtomicBool>,
+    underrun: Arc<AtomicBool>,
     played_samples: Arc<AtomicU64>,
     sample_rate: u32,
     channels: u8,
@@ -57,14 +54,23 @@ impl AudioOutput {
         let device = host
             .default_output_device()
             .ok_or_else(|| "no default output device available".to_string())?;
+        let requested_sample_rate = cpal::SampleRate::from(format.sample_rate);
         let device_config = device
-            .default_output_config()
-            .map_err(|err| err.to_string())?;
-        let stream_config = StreamConfig {
-            channels: format.channels as u16,
-            sample_rate: cpal::SampleRate::from(format.sample_rate),
-            buffer_size: cpal::BufferSize::Default,
-        };
+            .supported_output_configs()
+            .map_err(|error| format!("read default output device configurations failed: {error}"))?
+            .find(|config| {
+                config.channels() == u16::from(format.channels)
+                    && config.min_sample_rate() <= requested_sample_rate
+                    && config.max_sample_rate() >= requested_sample_rate
+            })
+            .map(|config| config.with_sample_rate(requested_sample_rate))
+            .ok_or_else(|| {
+                format!(
+                    "default output device does not support {} Hz with {} channels",
+                    format.sample_rate, format.channels
+                )
+            })?;
+        let stream_config = device_config.config();
         let queue = Arc::new(Mutex::new(LocalPlaybackQueue {
             buffers: VecDeque::new(),
             sample_offset: 0,
@@ -73,6 +79,7 @@ impl AudioOutput {
         let volume = Arc::new(AtomicU8::new(volume));
         let muted = Arc::new(AtomicBool::new(muted));
         let paused = Arc::new(AtomicBool::new(false));
+        let underrun = Arc::new(AtomicBool::new(false));
         let played_samples = Arc::new(AtomicU64::new(0));
         let stream = build_local_fifo_stream(
             &device,
@@ -82,15 +89,21 @@ impl AudioOutput {
             Arc::clone(&volume),
             Arc::clone(&muted),
             Arc::clone(&paused),
+            Arc::clone(&underrun),
             Arc::clone(&played_samples),
         )?;
         stream.play().map_err(|err| err.to_string())?;
+        LOGGER.info(format!(
+            "audio output started: {} Hz, {} channels",
+            format.sample_rate, format.channels
+        ));
         Ok(Self {
             _stream: stream,
             queue,
             volume,
             muted,
             paused,
+            underrun,
             played_samples,
             sample_rate: format.sample_rate,
             channels: format.channels,
@@ -101,13 +114,6 @@ impl AudioOutput {
         if let Ok(mut queue) = self.queue.lock() {
             queue.enqueue(samples);
         }
-    }
-
-    pub(crate) fn clear(&self) {
-        if let Ok(mut queue) = self.queue.lock() {
-            queue.clear();
-        }
-        self.played_samples.store(0, Ordering::Relaxed);
     }
 
     pub(crate) fn buffered_duration_millis(&self) -> i64 {
@@ -147,6 +153,10 @@ impl AudioOutput {
     pub(crate) fn set_paused(&self, paused: bool) {
         self.paused.store(paused, Ordering::Relaxed);
     }
+
+    pub(crate) fn take_underrun(&self) -> bool {
+        self.underrun.swap(false, Ordering::Relaxed)
+    }
 }
 
 fn build_local_fifo_stream(
@@ -157,6 +167,7 @@ fn build_local_fifo_stream(
     volume: Arc<AtomicU8>,
     muted: Arc<AtomicBool>,
     paused: Arc<AtomicBool>,
+    underrun: Arc<AtomicBool>,
     played_samples: Arc<AtomicU64>,
 ) -> Result<Stream, String> {
     macro_rules! build_stream {
@@ -165,6 +176,7 @@ fn build_local_fifo_stream(
             let volume = Arc::clone(&volume);
             let muted = Arc::clone(&muted);
             let paused = Arc::clone(&paused);
+            let underrun = Arc::clone(&underrun);
             let played_samples = Arc::clone(&played_samples);
             device.build_output_stream(
                 config.clone(),
@@ -182,20 +194,29 @@ fn build_local_fifo_stream(
                         output.fill(<$sample>::EQUILIBRIUM);
                         return;
                     };
+                    let mut underrun_detected = false;
                     for destination in output {
                         let sample = match queue.next_sample() {
                             Some(value) => {
                                 played_samples.fetch_add(1, Ordering::Relaxed);
                                 value
                             }
-                            None => 0,
+                            None => {
+                                underrun_detected = true;
+                                0
+                            }
                         } as f32
                             / i32::MAX as f32
                             * gain;
                         *destination = <$sample>::from_sample(sample);
                     }
+                    if underrun_detected {
+                        underrun.store(true, Ordering::Relaxed);
+                    }
                 },
-                |error| log_error(&format!("local audio stream error: {error}")),
+                |error| {
+                    LOGGER.error(format!("local audio stream error: {error}"));
+                },
                 None,
             )
         }};

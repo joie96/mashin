@@ -4,6 +4,9 @@ use std::sync::Arc;
 
 use super::output::AudioOutput;
 use super::source::{AudioSource, SourceReadResult};
+use crate::logging::Logger;
+
+static LOGGER: Logger = Logger::new(module_path!());
 
 pub(crate) enum ActiveDecoder {
     Pcm(PcmDecoder),
@@ -77,6 +80,7 @@ impl AudioPlayer {
         self.state = AudioPlayerState::Buffering;
         self.next_chunk_index = 0;
         self.source_ended = false;
+        LOGGER.debug("audio source prepared");
     }
 
     pub(crate) fn start(
@@ -91,6 +95,10 @@ impl AudioPlayer {
         self.decoder = Some(ActiveDecoder::from_format(format)?);
         self.output = Some(AudioOutput::new(format, volume, muted)?);
         self.state = AudioPlayerState::Buffering;
+        LOGGER.info(format!(
+            "audio playback started: {:?}, {} Hz, {} channels",
+            format.codec, format.sample_rate, format.channels
+        ));
         Ok(())
     }
 
@@ -176,6 +184,12 @@ impl AudioPlayer {
             return;
         }
 
+        let underrun_detected = self
+            .output
+            .as_ref()
+            .map(AudioOutput::take_underrun)
+            .unwrap_or(false);
+
         while self.buffered_duration_millis() < max_buffer_millis {
             let chunk = match read(self.next_chunk_index) {
                 SourceReadResult::Data(chunk) => Some(chunk),
@@ -184,7 +198,8 @@ impl AudioPlayer {
                     self.source_ended = true;
                     None
                 }
-                SourceReadResult::Error(_) => {
+                SourceReadResult::Error(error) => {
+                    LOGGER.error(format!("audio source read failed: {error}"));
                     self.state = AudioPlayerState::Error;
                     return;
                 }
@@ -192,14 +207,17 @@ impl AudioPlayer {
             let Some(chunk) = chunk else {
                 break;
             };
-            if self.enqueue_encoded(&chunk).is_err() {
+            if let Err(error) = self.enqueue_encoded(&chunk) {
+                LOGGER.error(format!("audio chunk decode failed: {error}"));
                 self.state = AudioPlayerState::Error;
                 return;
             }
             self.next_chunk_index = self.next_chunk_index.saturating_add(1);
         }
 
-        self.state = if self.buffered_duration_millis() > 0 {
+        self.state = if underrun_detected {
+            AudioPlayerState::Buffering
+        } else if self.buffered_duration_millis() > 0 {
             AudioPlayerState::Playing
         } else if self.source_ended {
             AudioPlayerState::Ended

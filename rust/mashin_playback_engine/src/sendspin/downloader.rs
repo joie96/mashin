@@ -1,6 +1,7 @@
 use super::connection::{audio_format_from_stream, player_support};
 use super::models::{CacheItemState, DownloadPlan, DownloadPlanItem};
 use crate::cache::store::CacheRetentionPolicy;
+use crate::logging::Logger;
 use ::sendspin::audio::AudioFormat;
 use ::sendspin::protocol::client::{ConnectionGuard, Controller};
 use ::sendspin::protocol::messages::{GoodbyeReason, Message, PlayerState};
@@ -10,6 +11,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
+
+static LOGGER: Logger = Logger::new(module_path!());
+
+const CACHE_COMPLETION_TOLERANCE_MILLIS: u64 = 500;
 
 #[derive(Clone)]
 pub(crate) struct SendspinDownloaderConfig {
@@ -23,6 +28,13 @@ pub(crate) struct SendspinDownloaderConfig {
     pub(crate) preferred_codec: String,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct ActiveDownloadStatus {
+    pub(crate) queue_item_id: String,
+    pub(crate) cached_duration_millis: u64,
+    pub(crate) expected_duration_millis: Option<u64>,
+}
+
 pub(crate) struct SendspinDownloader {
     runtime: Runtime,
     config: Option<SendspinDownloaderConfig>,
@@ -32,7 +44,10 @@ pub(crate) struct SendspinDownloader {
     cache_change_signal: crate::cache::store::CacheChangeSignal,
     retention_policy: Arc<Mutex<CacheRetentionPolicy>>,
     cache_sequence: Arc<std::sync::atomic::AtomicU64>,
+    download_window_refresh: Arc<AtomicBool>,
+    download_status_refresh: Arc<AtomicBool>,
     slots: crate::cache::store::DownloadSlots,
+    queue_ids: [Option<String>; 2],
     controllers: Arc<Mutex<[Option<Controller>; 2]>>,
     guards: [Option<ConnectionGuard>; 2],
     io_tasks: [Option<JoinHandle<()>>; 2],
@@ -52,7 +67,10 @@ impl SendspinDownloader {
             cache_change_signal: crate::cache::store::new_cache_change_signal(),
             retention_policy: Arc::new(Mutex::new(CacheRetentionPolicy::default())),
             cache_sequence: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            download_window_refresh: Arc::new(AtomicBool::new(false)),
+            download_status_refresh: Arc::new(AtomicBool::new(false)),
             slots: Arc::new(Mutex::new([None, None])),
+            queue_ids: [None, None],
             controllers: Arc::new(Mutex::new([None, None])),
             guards: [None, None],
             io_tasks: [None, None],
@@ -60,10 +78,15 @@ impl SendspinDownloader {
     }
 
     pub(crate) fn configure(&mut self, config: SendspinDownloaderConfig) {
+        LOGGER.debug(format!(
+            "downloader configured: preferred codec {}, cache capacity {} bytes",
+            config.preferred_codec, config.cache_capacity_bytes
+        ));
         self.config = Some(config);
     }
 
     pub(crate) fn connect(&mut self) -> Result<(), String> {
+        LOGGER.info("connecting Sendspin downloader slots");
         if self
             .controllers
             .lock()
@@ -74,6 +97,30 @@ impl SendspinDownloader {
         }
         self.connect_slot(0)?;
         self.connect_slot(1)?;
+        let config = self
+            .config
+            .clone()
+            .ok_or_else(|| "Sendspin downloader is not configured".to_string())?;
+        let endpoint = format!("{}/api", config.music_assistant_url.trim_end_matches('/'));
+        let client_ids = [
+            download_client_id(&config.client_id, 1),
+            download_client_id(&config.client_id, 2),
+        ];
+        let queue_ids = self.runtime.block_on(resolve_queue_ids(
+            &endpoint,
+            config.music_assistant_auth_token.as_deref(),
+            &client_ids,
+        ))?;
+        self.runtime.block_on(disable_queue_autoplay(
+            &endpoint,
+            config.music_assistant_auth_token.as_deref(),
+            &queue_ids,
+        ))?;
+        LOGGER.info(format!(
+            "resolved Music Assistant queue IDs and disabled autoplay for download slots: {}, {}",
+            queue_ids[0], queue_ids[1]
+        ));
+        self.queue_ids = [Some(queue_ids[0].clone()), Some(queue_ids[1].clone())];
         Ok(())
     }
 
@@ -92,12 +139,8 @@ impl SendspinDownloader {
             .ok_or_else(|| "Sendspin downloader is not configured".to_string())?;
         let url = config.sendspin_url.clone();
         let slot_number = slot_index + 1;
-        let download_suffix = format!("dl{slot_number}");
-        let client_id = format!(
-            "mashin-{}-{download_suffix}",
-            normalize_client_id(&config.client_id),
-        );
-        let client_name = format!("Mashin {} {download_suffix}", config.client_name.trim());
+        let client_id = download_client_id(&config.client_id, slot_number);
+        let client_name = download_client_name(&config.client_name, slot_number);
         let support = player_support(&config.preferred_codec, config.buffer_capacity_bytes);
         let slots = Arc::clone(&self.slots);
         let caches = Arc::clone(&self.caches);
@@ -106,6 +149,8 @@ impl SendspinDownloader {
         let retention_policy = Arc::clone(&self.retention_policy);
         let controllers = Arc::clone(&self.controllers);
         let sequence = Arc::clone(&self.cache_sequence);
+        let download_window_refresh = Arc::clone(&self.download_window_refresh);
+        let download_status_refresh = Arc::clone(&self.download_status_refresh);
         let capacity = config.cache_capacity_bytes;
         let (controller, guard, task) = self.runtime.block_on(async move {
             let client = ProtocolClientBuilder::builder()
@@ -130,6 +175,10 @@ impl SendspinDownloader {
                 let mut format = None;
                 let mut reservation = None;
                 let mut last_timestamp = None;
+                let mut cached_bytes = 0_usize;
+                let mut cached_duration_millis = 0_u64;
+                let mut next_progress_millis = 5_000_u64;
+                let mut hard_limit_reported = false;
                 loop {
                     tokio::select! {
                         message = messages.recv() => {
@@ -147,21 +196,51 @@ impl SendspinDownloader {
                                     });
                                     reservation = slots.lock().ok().and_then(|values| values[slot_index].clone());
                                     last_timestamp = None;
+                                    cached_bytes = 0;
+                                    cached_duration_millis = 0;
+                                    next_progress_millis = 5_000;
+                                    hard_limit_reported = false;
+                                    if let Some(format) = format.as_ref() {
+                                        LOGGER.info(format!(
+                                            "stream started on slot {}: {:?}, {} Hz, {} channels",
+                                            slot_index + 1,
+                                            format.codec,
+                                            format.sample_rate,
+                                            format.channels
+                                        ));
+                                    } else {
+                                        LOGGER.warn(format!(
+                                            "stream on slot {} announced an unsupported audio format",
+                                            slot_index + 1
+                                        ));
+                                    }
+                                    if let Some(reservation) = reservation.as_ref() {
+                                        LOGGER.trace(format!(
+                                            "download stream bound: slot {}, cache key {}",
+                                            slot_index + 1,
+                                            reservation.cache_content_key
+                                        ));
+                                    }
                                 }
                                 Message::StreamEnd(_) => {
                                     if let Some(value) = reservation.as_ref() {
-                                        if crate::cache::store::release_reservation_if_current(
+                                        if crate::cache::store::slot_reservation_is_current(
                                             &slots,
                                             slot_index,
                                             value,
                                         ) {
-                                            crate::cache::store::mark_cache_complete(&caches, value);
-                                            crate::cache::store::notify_cache_changed(&cache_change_signal);
-                                            if let Ok(mut states) = states.lock() {
-                                                if let Some(state) = states.get_mut(&value.cache_content_key) {
-                                                    state.state = "complete".to_string();
-                                                }
-                                            }
+                                            LOGGER.warn(format!(
+                                                "stream ended before download completion on slot {}",
+                                                slot_index + 1
+                                            ));
+                                            release_incomplete_reservation(
+                                                &slots,
+                                                &caches,
+                                                &cache_change_signal,
+                                                &states,
+                                                slot_index,
+                                                value,
+                                            );
                                         }
                                     }
                                     reservation = None;
@@ -169,6 +248,7 @@ impl SendspinDownloader {
                                     last_timestamp = None;
                                 }
                                 Message::StreamClear(_) => {
+                                    LOGGER.warn(format!("stream cleared on slot {}", slot_index + 1));
                                     if let Some(value) = reservation.as_ref() {
                                         release_incomplete_reservation(
                                             &slots,
@@ -193,15 +273,28 @@ impl SendspinDownloader {
                                 .map(|previous| chunk.timestamp.saturating_sub(previous).max(0) as u64 / 1_000)
                                 .unwrap_or(0);
                             last_timestamp = Some(chunk.timestamp);
-                            if crate::cache::store::reservation_is_current(&slots, slot_index, reservation) {
+                            if crate::cache::store::slot_reservation_is_current(&slots, slot_index, reservation) {
                                 let policy = retention_policy.lock().map(|policy| policy.clone()).unwrap_or_default();
-                                let evicted = crate::cache::store::evict_to_fit(
+                                let evicted = crate::cache::store::cache_evict_to_fit(
                                     &caches,
                                     &policy,
                                     capacity,
                                     chunk.data.len(),
                                 );
-                                stop_evicted_slot_downloads(&slots, &controllers, &evicted).await;
+                                if !evicted.is_empty() {
+                                    LOGGER.trace(format!(
+                                        "cache eviction on slot {}: {} item(s) for {} incoming bytes",
+                                        slot_index + 1,
+                                        evicted.len(),
+                                        chunk.data.len()
+                                    ));
+                                }
+                                stop_evicted_slot_downloads(
+                                    Arc::clone(&slots),
+                                    Arc::clone(&controllers),
+                                    evicted.clone(),
+                                )
+                                .await;
                                 if let Ok(mut states) = states.lock() {
                                     for cache_content_key in evicted {
                                         if let Some(state) = states.get_mut(&cache_content_key) {
@@ -210,10 +303,10 @@ impl SendspinDownloader {
                                     }
                                 }
                             }
-                            if !crate::cache::store::reservation_is_current(&slots, slot_index, reservation) {
+                            if !crate::cache::store::slot_reservation_is_current(&slots, slot_index, reservation) {
                                 continue;
                             }
-                            let result = crate::cache::store::cache_encoded_chunk(
+                            let result = crate::cache::store::cache_append_encoded_chunk(
                                 &caches,
                                 &sequence,
                                 capacity,
@@ -223,6 +316,8 @@ impl SendspinDownloader {
                                 &chunk.data,
                             );
                             if result != crate::cache::store::CacheAppendResult::HardLimitReached {
+                                cached_bytes = cached_bytes.saturating_add(chunk.data.len());
+                                cached_duration_millis = cached_duration_millis.saturating_add(duration);
                                 crate::cache::store::notify_cache_changed(&cache_change_signal);
                                 if let Ok(mut states) = states.lock() {
                                     if let Some(state) = states.get_mut(&reservation.cache_content_key) {
@@ -230,6 +325,53 @@ impl SendspinDownloader {
                                         state.cached_duration_millis = state.cached_duration_millis.saturating_add(duration);
                                     }
                                 }
+                                if download_duration_reached(
+                                    reservation.expected_duration_millis,
+                                    cached_duration_millis,
+                                ) {
+                                    if crate::cache::store::slot_release_reservation_if_current(
+                                        &slots,
+                                        slot_index,
+                                        reservation,
+                                    ) {
+                                        crate::cache::store::cache_mark_complete(&caches, reservation);
+                                        crate::cache::store::notify_cache_changed(&cache_change_signal);
+                                        download_window_refresh.store(true, Ordering::Release);
+                                        if let Ok(mut states) = states.lock() {
+                                            if let Some(state) = states.get_mut(&reservation.cache_content_key) {
+                                                state.state = "complete".to_string();
+                                            }
+                                        }
+                                        LOGGER.trace(format!(
+                                            "download complete from expected duration: slot {}, cache key {}, {} ms, {} bytes",
+                                            slot_index + 1,
+                                            reservation.cache_content_key,
+                                            cached_duration_millis,
+                                            cached_bytes
+                                        ));
+                                    }
+                                }
+                                if cached_duration_millis >= next_progress_millis {
+                                    download_status_refresh.store(true, Ordering::Release);
+                                    LOGGER.trace(format!(
+                                        "download progress: slot {}, cache key {}, {} ms, {} bytes",
+                                        slot_index + 1,
+                                        reservation.cache_content_key,
+                                        cached_duration_millis,
+                                        cached_bytes
+                                    ));
+                                    next_progress_millis = cached_duration_millis
+                                        .saturating_div(5_000)
+                                        .saturating_add(1)
+                                        .saturating_mul(5_000);
+                                }
+                            } else if !hard_limit_reported {
+                                LOGGER.trace(format!(
+                                    "cache capacity reached: slot {}, cache key {}, rejecting further chunks",
+                                    slot_index + 1,
+                                    reservation.cache_content_key
+                                ));
+                                hard_limit_reported = true;
                             }
                         }
                     }
@@ -252,10 +394,15 @@ impl SendspinDownloader {
         }
         self.guards[slot_index] = Some(guard);
         self.io_tasks[slot_index] = Some(task);
+        LOGGER.info(format!(
+            "Sendspin downloader slot {} connected",
+            slot_index + 1
+        ));
         Ok(())
     }
 
     pub(crate) fn disconnect(&mut self) {
+        LOGGER.info("disconnecting Sendspin downloader slots");
         let active_reservations = self
             .slots
             .lock()
@@ -265,7 +412,7 @@ impl SendspinDownloader {
             reservation
                 .warm_keepalive_cancel
                 .store(true, Ordering::Relaxed);
-            crate::cache::store::discard_incomplete_cache(
+            crate::cache::store::cache_discard_incomplete(
                 &self.caches,
                 &reservation.cache_content_key,
             );
@@ -289,10 +436,16 @@ impl SendspinDownloader {
         if let Ok(mut slots) = self.slots.lock() {
             *slots = [None, None];
         }
+        self.queue_ids = [None, None];
     }
 
     pub(crate) fn apply_download_plan(&mut self, plan_json: &str) -> Result<(), String> {
         let plan = parse_plan(plan_json)?;
+        LOGGER.debug(format!(
+            "downloader plan accepted: version {}, {} items",
+            plan.version,
+            plan.items.len()
+        ));
         if let Ok(mut states) = self.cache_states.lock() {
             states.clear();
         }
@@ -323,6 +476,63 @@ impl SendspinDownloader {
             .unwrap_or_default()
     }
 
+    pub(crate) fn take_download_window_refresh(&self) -> bool {
+        self.download_window_refresh.swap(false, Ordering::AcqRel)
+    }
+
+    pub(crate) fn take_download_status_refresh(&self) -> bool {
+        self.download_status_refresh.swap(false, Ordering::AcqRel)
+    }
+
+    pub(crate) fn download_status(&self) -> (Vec<ActiveDownloadStatus>, usize, usize) {
+        let reservations = self
+            .slots
+            .lock()
+            .map(|slots| slots.iter().flatten().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        let active_downloads = self
+            .cache_states
+            .lock()
+            .map(|states| {
+                reservations
+                    .iter()
+                    .map(|reservation| {
+                        let state = states.get(&reservation.cache_content_key);
+                        ActiveDownloadStatus {
+                            queue_item_id: state
+                                .map(|state| state.queue_item_id.clone())
+                                .unwrap_or_else(|| reservation.cache_content_key.clone()),
+                            cached_duration_millis: state
+                                .map(|state| state.cached_duration_millis)
+                                .unwrap_or(0),
+                            expected_duration_millis: reservation.expected_duration_millis,
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let cache_capacity_bytes = self
+            .config
+            .as_ref()
+            .map(|config| config.cache_capacity_bytes)
+            .unwrap_or(0);
+        (
+            active_downloads,
+            crate::cache::store::cache_total_bytes(&self.caches),
+            cache_capacity_bytes,
+        )
+    }
+
+    pub(crate) fn completed_cache_item_count(&self, content_keys: &[String]) -> usize {
+        content_keys
+            .iter()
+            .filter(|content_key| {
+                crate::cache::store::cache_complete_duration_millis(&self.caches, content_key)
+                    .is_some()
+            })
+            .count()
+    }
+
     pub(crate) fn mark_cache_buffering(&mut self, content_key: &str) -> Result<(), String> {
         let Ok(mut states) = self.cache_states.lock() else {
             return Err("Sendspin downloader state lock poisoned".to_string());
@@ -335,7 +545,7 @@ impl SendspinDownloader {
     }
 
     pub(crate) fn cache_format(&self, content_key: &str) -> Result<AudioFormat, String> {
-        crate::cache::store::read_cache_format(&self.caches, content_key)
+        crate::cache::store::cache_read_format(&self.caches, content_key)
     }
 
     pub(crate) fn cache_chunk(
@@ -343,7 +553,7 @@ impl SendspinDownloader {
         content_key: &str,
         chunk_index: usize,
     ) -> Result<(Option<Arc<[u8]>>, bool), String> {
-        crate::cache::store::read_cache_chunk(&self.caches, content_key, chunk_index)
+        crate::cache::store::cache_read_chunk(&self.caches, content_key, chunk_index)
     }
 
     pub(crate) fn update_playback_window(
@@ -360,7 +570,6 @@ impl SendspinDownloader {
         if let Ok(mut policy) = self.retention_policy.lock() {
             *policy = CacheRetentionPolicy {
                 current,
-                next,
                 protected,
                 prefetch: upcoming.into_iter().skip(1).collect(),
                 recently_played,
@@ -386,9 +595,22 @@ impl SendspinDownloader {
         let Some(config) = self.config.clone() else {
             return Ok(());
         };
+        let prioritized_content_keys = candidates
+            .iter()
+            .filter(|item| {
+                crate::cache::store::cache_complete_duration_millis(
+                    &self.caches,
+                    &item.cache_content_key,
+                )
+                .is_none()
+            })
+            .take(2)
+            .map(|item| item.cache_content_key.clone())
+            .collect::<Vec<_>>();
+        self.preempt_deprioritized_downloads(&prioritized_content_keys);
 
         for item in candidates {
-            if crate::cache::store::complete_cache_duration_millis(
+            if crate::cache::store::cache_complete_duration_millis(
                 &self.caches,
                 &item.cache_content_key,
             )
@@ -418,6 +640,70 @@ impl SendspinDownloader {
         Ok(())
     }
 
+    fn preempt_deprioritized_downloads(&mut self, prioritized_content_keys: &[String]) {
+        let preempted = self
+            .slots
+            .lock()
+            .map(|mut slots| {
+                slots
+                    .iter_mut()
+                    .enumerate()
+                    .filter_map(|(slot_index, reservation)| {
+                        let is_prioritized = reservation
+                            .as_ref()
+                            .map(|value| {
+                                prioritized_content_keys
+                                    .iter()
+                                    .any(|key| key == &value.cache_content_key)
+                            })
+                            .unwrap_or(true);
+                        (!is_prioritized)
+                            .then(|| reservation.take().map(|value| (slot_index, value)))
+                            .flatten()
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if preempted.is_empty() {
+            return;
+        }
+
+        for (slot_index, reservation) in &preempted {
+            reservation
+                .warm_keepalive_cancel
+                .store(true, Ordering::Relaxed);
+            crate::cache::store::cache_discard_incomplete(
+                &self.caches,
+                &reservation.cache_content_key,
+            );
+            if let Ok(mut states) = self.cache_states.lock() {
+                if let Some(state) = states.get_mut(&reservation.cache_content_key) {
+                    state.state = "queued".to_string();
+                    state.cached_duration_millis = 0;
+                }
+            }
+            LOGGER.trace(format!(
+                "download preempted by playback priority: slot {}, cache key {}",
+                slot_index + 1,
+                reservation.cache_content_key
+            ));
+        }
+        crate::cache::store::notify_cache_changed(&self.cache_change_signal);
+
+        let controllers = Arc::clone(&self.controllers);
+        self.runtime.block_on(async {
+            for (slot_index, _) in preempted {
+                let controller = controllers
+                    .lock()
+                    .ok()
+                    .and_then(|controllers| controllers[slot_index].clone());
+                if let Some(controller) = controller {
+                    let _ = controller.stop().await;
+                }
+            }
+        });
+    }
+
     fn evict_to_capacity(&mut self, incoming_bytes: usize) {
         let Some(config) = self.config.as_ref() else {
             return;
@@ -427,17 +713,21 @@ impl SendspinDownloader {
             .lock()
             .map(|policy| policy.clone())
             .unwrap_or_default();
-        let evicted = crate::cache::store::evict_to_fit(
+        let evicted = crate::cache::store::cache_evict_to_fit(
             &self.caches,
             &policy,
             config.cache_capacity_bytes,
             incoming_bytes,
         );
-        self.runtime.block_on(stop_evicted_slot_downloads(
-            &self.slots,
-            &self.controllers,
-            &evicted,
-        ));
+        if !evicted.is_empty() {
+            let slots = Arc::clone(&self.slots);
+            let controllers = Arc::clone(&self.controllers);
+            self.runtime.spawn(stop_evicted_slot_downloads(
+                slots,
+                controllers,
+                evicted.clone(),
+            ));
+        }
         if let Ok(mut states) = self.cache_states.lock() {
             for cache_content_key in evicted {
                 if let Some(state) = states.get_mut(&cache_content_key) {
@@ -453,15 +743,19 @@ impl SendspinDownloader {
         item: &DownloadPlanItem,
         config: &SendspinDownloaderConfig,
     ) -> Result<(), String> {
-        if crate::cache::store::complete_cache_duration_millis(
+        if crate::cache::store::cache_complete_duration_millis(
             &self.caches,
             &item.cache_content_key,
         )
         .is_some()
         {
+            LOGGER.trace(format!(
+                "download skipped: cache hit for {}",
+                item.cache_content_key
+            ));
             return Ok(());
         }
-        crate::cache::store::discard_incomplete_cache(&self.caches, &item.cache_content_key);
+        crate::cache::store::cache_discard_incomplete(&self.caches, &item.cache_content_key);
         crate::cache::store::notify_cache_changed(&self.cache_change_signal);
         let reservation = {
             let mut slots = self
@@ -470,6 +764,7 @@ impl SendspinDownloader {
                 .map_err(|_| "Sendspin downloader slot lock poisoned".to_string())?;
             let reservation = crate::cache::store::DownloadSlotReservation {
                 cache_content_key: item.cache_content_key.clone(),
+                expected_duration_millis: item.expected_duration_millis,
                 lease_id: format!(
                     "slot-{}-{}",
                     slot_index + 1,
@@ -480,6 +775,11 @@ impl SendspinDownloader {
             slots[slot_index] = Some(reservation.clone());
             reservation
         };
+        LOGGER.trace(format!(
+            "download prepared: slot {}, cache key {}",
+            slot_index + 1,
+            reservation.cache_content_key
+        ));
         if let Ok(mut states) = self.cache_states.lock() {
             if let Some(state) = states.get_mut(&item.cache_content_key) {
                 state.state = "prepared".to_string();
@@ -487,61 +787,62 @@ impl SendspinDownloader {
         }
 
         let endpoint = format!("{}/api", config.music_assistant_url.trim_end_matches('/'));
-        let payload = serde_json::json!({
-            "command": "player_queues/play_media",
-            "args": {
-                "queue_id": format!(
-                    "upmashin{}-dl{}",
-                    normalize_client_id(&config.client_id).replace('-', ""),
-                    slot_index + 1
-                ),
-                "media": [item.media_item],
-                "option": "replace",
-                "radio_mode": false,
-                "sort_by": "original"
-            }
-        });
+        let queue_id = self.queue_ids[slot_index]
+            .clone()
+            .ok_or_else(|| "Music Assistant queue ID is not resolved".to_string())?;
+        let media_item = item.media_item.clone();
         let auth_token = config.music_assistant_auth_token.clone();
-        let response = self.runtime.block_on(async move {
+        let slots = Arc::clone(&self.slots);
+        let caches = Arc::clone(&self.caches);
+        let cache_change_signal = Arc::clone(&self.cache_change_signal);
+        let states = Arc::clone(&self.cache_states);
+        self.runtime.spawn(async move {
             let client = reqwest::Client::new();
+            let payload = serde_json::json!({
+                "command": "player_queues/play_media",
+                "args": {
+                    "queue_id": queue_id,
+                    "media": [media_item],
+                    "option": "replace",
+                    "radio_mode": false,
+                    "sort_by": "original"
+                }
+            });
             let mut request = client.post(endpoint).json(&payload);
-            if let Some(token) = auth_token.filter(|value| !value.trim().is_empty()) {
+            if let Some(token) = auth_token
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+            {
                 request = request.bearer_auth(token);
             }
-            request.send().await.map_err(|error| error.to_string())
-        });
-        match response {
-            Ok(response) if response.status().is_success() => Ok(()),
-            Ok(response) => {
-                self.release_reservation(slot_index, &reservation);
-                Err(format!(
+            let result = match request.send().await {
+                Ok(response) if response.status().is_success() => {
+                    LOGGER.trace(format!(
+                        "download requested: slot {}, cache key {}",
+                        slot_index + 1,
+                        reservation.cache_content_key
+                    ));
+                    Ok(())
+                }
+                Ok(response) => Err(format!(
                     "Music Assistant download request returned HTTP {}",
                     response.status()
-                ))
+                )),
+                Err(error) => Err(format!("Music Assistant download request failed: {error}")),
+            };
+            if let Err(error) = result {
+                LOGGER.error(error);
+                release_incomplete_reservation(
+                    &slots,
+                    &caches,
+                    &cache_change_signal,
+                    &states,
+                    slot_index,
+                    &reservation,
+                );
             }
-            Err(error) => {
-                self.release_reservation(slot_index, &reservation);
-                Err(format!("Music Assistant download request failed: {error}"))
-            }
-        }
-    }
-
-    fn release_reservation(
-        &mut self,
-        slot_index: usize,
-        reservation: &crate::cache::store::DownloadSlotReservation,
-    ) {
-        reservation
-            .warm_keepalive_cancel
-            .store(true, Ordering::Relaxed);
-        if crate::cache::store::release_reservation_if_current(&self.slots, slot_index, reservation)
-        {
-            crate::cache::store::discard_incomplete_cache(
-                &self.caches,
-                &reservation.cache_content_key,
-            );
-            crate::cache::store::notify_cache_changed(&self.cache_change_signal);
-        }
+        });
+        Ok(())
     }
 
     pub(crate) fn seek(&mut self, content_key: &str, seconds: i64) -> Result<(), String> {
@@ -570,18 +871,18 @@ impl SendspinDownloader {
             .clone()
             .ok_or_else(|| "Sendspin downloader is not configured".to_string())?;
         let position = seconds.max(0);
-        let player_id = format!(
-            "upmashin{}-dl{}",
-            normalize_client_id(&config.client_id).replace('-', ""),
-            slot_index + 1
-        );
+        let player_id = self.queue_ids[slot_index]
+            .clone()
+            .ok_or_else(|| "Music Assistant queue ID is not resolved".to_string())?;
+        let endpoint = format!("{}/api", config.music_assistant_url.trim_end_matches('/'));
+        let auth_token = config.music_assistant_auth_token.clone();
 
         self.runtime.block_on(async {
+            let client = reqwest::Client::new();
             controller
                 .play()
                 .await
                 .map_err(|error| format!("Sendspin seek slot play failed: {error}"))?;
-            let endpoint = format!("{}/api", config.music_assistant_url.trim_end_matches('/'));
             let payload = serde_json::json!({
                 "command": "players/cmd/seek",
                 "args": {
@@ -589,10 +890,9 @@ impl SendspinDownloader {
                     "position": position,
                 }
             });
-            let client = reqwest::Client::new();
             let mut request = client.post(endpoint).json(&payload);
-            if let Some(token) = config
-                .music_assistant_auth_token
+            if let Some(token) = auth_token
+                .as_deref()
                 .filter(|value| !value.trim().is_empty())
             {
                 request = request.bearer_auth(token);
@@ -612,6 +912,109 @@ impl SendspinDownloader {
     }
 }
 
+async fn resolve_queue_ids(
+    endpoint: &str,
+    auth_token: Option<&str>,
+    sendspin_client_ids: &[String; 2],
+) -> Result<[String; 2], String> {
+    let client = reqwest::Client::new();
+    let payload = serde_json::json!({
+        "command": "players/all",
+        "args": {
+            "return_unavailable": true,
+            "return_protocol_players": true
+        }
+    });
+    let mut request = client.post(endpoint).json(&payload);
+    if let Some(token) = auth_token.filter(|value| !value.trim().is_empty()) {
+        request = request.bearer_auth(token);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|error| format!("Music Assistant player lookup failed: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Music Assistant player lookup returned HTTP {}",
+            response.status()
+        ));
+    }
+    let players: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|error| format!("Music Assistant player lookup returned invalid JSON: {error}"))?;
+    let first = find_queue_id(&players, &sendspin_client_ids[0]).ok_or_else(|| {
+        format!(
+            "Music Assistant player for Sendspin client {} is not available",
+            sendspin_client_ids[0]
+        )
+    })?;
+    let second = find_queue_id(&players, &sendspin_client_ids[1]).ok_or_else(|| {
+        format!(
+            "Music Assistant player for Sendspin client {} is not available",
+            sendspin_client_ids[1]
+        )
+    })?;
+    Ok([first, second])
+}
+
+async fn disable_queue_autoplay(
+    endpoint: &str,
+    auth_token: Option<&str>,
+    queue_ids: &[String; 2],
+) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    for queue_id in queue_ids {
+        let payload = serde_json::json!({
+            "command": "player_queues/autoplay",
+            "args": {
+                "queue_id": queue_id,
+                "autoplay_enabled": false,
+            }
+        });
+        let mut request = client.post(endpoint).json(&payload);
+        if let Some(token) = auth_token.filter(|value| !value.trim().is_empty()) {
+            request = request.bearer_auth(token);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|error| format!("Music Assistant autoplay disable failed: {error}"))?;
+        if !response.status().is_success() {
+            return Err(format!(
+                "Music Assistant autoplay disable returned HTTP {} for queue {queue_id}",
+                response.status()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn find_queue_id(players: &serde_json::Value, sendspin_client_id: &str) -> Option<String> {
+    let players = players.as_array()?;
+    for player in players {
+        let Some(output_protocols) = player
+            .get("output_protocols")
+            .and_then(serde_json::Value::as_array)
+        else {
+            continue;
+        };
+        let matches_client_id = output_protocols.iter().any(|protocol| {
+            protocol
+                .get("output_protocol_id")
+                .and_then(serde_json::Value::as_str)
+                == Some(sendspin_client_id)
+        });
+        if matches_client_id {
+            return player
+                .get("player_id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
+        }
+    }
+    None
+}
+
 fn release_incomplete_reservation(
     slots: &crate::cache::store::DownloadSlots,
     caches: &crate::cache::store::EncodedCaches,
@@ -623,22 +1026,23 @@ fn release_incomplete_reservation(
     reservation
         .warm_keepalive_cancel
         .store(true, Ordering::Relaxed);
-    if !crate::cache::store::release_reservation_if_current(slots, slot_index, reservation) {
+    if !crate::cache::store::slot_release_reservation_if_current(slots, slot_index, reservation) {
         return;
     }
-    crate::cache::store::discard_incomplete_cache(caches, &reservation.cache_content_key);
+    crate::cache::store::cache_discard_incomplete(caches, &reservation.cache_content_key);
     crate::cache::store::notify_cache_changed(cache_change_signal);
     if let Ok(mut states) = states.lock() {
         if let Some(state) = states.get_mut(&reservation.cache_content_key) {
             state.state = "incomplete".to_string();
+            state.cached_duration_millis = 0;
         }
     }
 }
 
 async fn stop_evicted_slot_downloads(
-    slots: &crate::cache::store::DownloadSlots,
-    controllers: &Arc<Mutex<[Option<Controller>; 2]>>,
-    evicted_content_keys: &[String],
+    slots: crate::cache::store::DownloadSlots,
+    controllers: Arc<Mutex<[Option<Controller>; 2]>>,
+    evicted_content_keys: Vec<String>,
 ) {
     if evicted_content_keys.is_empty() {
         return;
@@ -675,26 +1079,133 @@ async fn stop_evicted_slot_downloads(
 }
 
 fn normalize_client_id(value: &str) -> String {
-    let normalized: String = value
+    value
         .trim()
         .to_ascii_lowercase()
         .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() {
-                character
-            } else {
-                '-'
-            }
+        .filter(|character| character.is_ascii_alphanumeric())
+        .collect::<String>()
+}
+
+fn download_duration_reached(
+    expected_duration_millis: Option<u64>,
+    cached_duration_millis: u64,
+) -> bool {
+    expected_duration_millis
+        .map(|expected| {
+            cached_duration_millis.saturating_add(CACHE_COMPLETION_TOLERANCE_MILLIS) >= expected
         })
-        .collect();
-    let normalized = normalized.trim_matches('-');
-    if normalized.is_empty() {
-        "device".to_string()
+        .unwrap_or(false)
+}
+
+fn download_client_id(base_id: &str, slot_number: usize) -> String {
+    let normalized = normalize_client_id(base_id);
+    let base_id = if normalized.is_empty() {
+        "mashin".to_string()
     } else {
-        normalized.to_string()
-    }
+        normalized
+    };
+    format!("{base_id}dl{slot_number}")
+}
+
+fn download_client_name(base_name: &str, slot_number: usize) -> String {
+    let base_name = base_name.trim();
+    let base_name = if base_name.is_empty() {
+        "Mashin (Device)"
+    } else {
+        base_name
+    };
+    format!("{base_name} DL{slot_number}")
 }
 
 pub(crate) fn parse_plan(plan_json: &str) -> Result<DownloadPlan, String> {
     serde_json::from_str(plan_json).map_err(|error| format!("invalid download plan json: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        download_client_id, download_client_name, download_duration_reached, find_queue_id,
+        normalize_client_id, SendspinDownloader,
+    };
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn normalizes_client_ids_without_separators() {
+        assert_eq!(
+            normalize_client_id("Mashin-Surface-Pro_11"),
+            "mashinsurfacepro11"
+        );
+        assert_eq!(
+            download_client_id("mashin-surface-pro-11", 1),
+            "mashinsurfacepro11dl1"
+        );
+        assert_eq!(
+            download_client_id("mashin-surface-pro-11", 2),
+            "mashinsurfacepro11dl2"
+        );
+    }
+
+    #[test]
+    fn uses_expected_download_client_names() {
+        assert_eq!(
+            download_client_name("Mashin (Surface Pro 11)", 1),
+            "Mashin (Surface Pro 11) DL1"
+        );
+        assert_eq!(download_client_name("", 2), "Mashin (Device) DL2");
+    }
+
+    #[test]
+    fn resolves_dynamic_universal_player_id_from_output_protocol() {
+        let players = serde_json::json!([
+            {
+                "player_id": "mashinsurfacepro11dl2",
+                "output_protocols": []
+            },
+            {
+                "player_id": "upcc05aedd",
+                "output_protocols": [
+                    {
+                        "output_protocol_id": "mashinsurfacepro11dl2",
+                        "protocol_domain": "sendspin"
+                    }
+                ]
+            }
+        ]);
+
+        assert_eq!(
+            find_queue_id(&players, "mashinsurfacepro11dl2"),
+            Some("upcc05aedd".to_string())
+        );
+    }
+
+    #[test]
+    fn returns_no_id_when_protocol_id_is_not_present() {
+        let players = serde_json::json!([
+            {
+                "player_id": "upcc05aedd",
+                "output_protocols": []
+            }
+        ]);
+
+        assert_eq!(find_queue_id(&players, "mashinsurfacepro11dl1"), None);
+    }
+
+    #[test]
+    fn completes_download_when_cached_duration_reaches_tolerance_window() {
+        assert!(!download_duration_reached(Some(180_000), 179_499));
+        assert!(download_duration_reached(Some(180_000), 179_500));
+        assert!(!download_duration_reached(None, 999_999));
+    }
+
+    #[test]
+    fn consumes_download_window_refresh_request_once() {
+        let downloader = SendspinDownloader::new();
+        downloader
+            .download_window_refresh
+            .store(true, Ordering::Release);
+
+        assert!(downloader.take_download_window_refresh());
+        assert!(!downloader.take_download_window_refresh());
+    }
 }

@@ -19,6 +19,7 @@ pub(crate) fn notify_cache_changed(signal: &CacheChangeSignal) {
 #[derive(Debug, Clone)]
 pub(crate) struct DownloadSlotReservation {
     pub(crate) cache_content_key: String,
+    pub(crate) expected_duration_millis: Option<u64>,
     pub(crate) lease_id: String,
     pub(crate) warm_keepalive_cancel: Arc<AtomicBool>,
 }
@@ -59,13 +60,12 @@ pub(crate) enum CacheAppendResult {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CacheRetentionPolicy {
     pub(crate) current: Option<String>,
-    pub(crate) next: Option<String>,
     pub(crate) protected: Vec<String>,
     pub(crate) prefetch: Vec<String>,
     pub(crate) recently_played: Vec<String>,
 }
 
-pub(crate) fn reservation_is_current(
+pub(crate) fn slot_reservation_is_current(
     slots: &DownloadSlots,
     slot_index: usize,
     reservation: &DownloadSlotReservation,
@@ -78,7 +78,7 @@ pub(crate) fn reservation_is_current(
         .unwrap_or(false)
 }
 
-pub(crate) fn release_reservation_if_current(
+pub(crate) fn slot_release_reservation_if_current(
     slots: &DownloadSlots,
     slot_index: usize,
     reservation: &DownloadSlotReservation,
@@ -98,7 +98,7 @@ pub(crate) fn release_reservation_if_current(
         .unwrap_or(false)
 }
 
-pub(crate) fn cache_encoded_chunk(
+pub(crate) fn cache_append_encoded_chunk(
     caches: &EncodedCaches,
     cache_sequence: &Arc<AtomicU64>,
     cache_capacity_bytes: usize,
@@ -153,7 +153,7 @@ pub(crate) fn cache_encoded_chunk(
     CacheAppendResult::HardLimitReached
 }
 
-pub(crate) fn mark_cache_complete(caches: &EncodedCaches, reservation: &DownloadSlotReservation) {
+pub(crate) fn cache_mark_complete(caches: &EncodedCaches, reservation: &DownloadSlotReservation) {
     if let Ok(mut caches) = caches.lock() {
         if let Some(cache) = caches.get_mut(&reservation.cache_content_key) {
             cache.complete = true;
@@ -161,7 +161,7 @@ pub(crate) fn mark_cache_complete(caches: &EncodedCaches, reservation: &Download
     }
 }
 
-pub(crate) fn discard_incomplete_cache(caches: &EncodedCaches, content_key: &str) {
+pub(crate) fn cache_discard_incomplete(caches: &EncodedCaches, content_key: &str) {
     if let Ok(mut caches) = caches.lock() {
         let remove = caches
             .get(content_key)
@@ -173,13 +173,7 @@ pub(crate) fn discard_incomplete_cache(caches: &EncodedCaches, content_key: &str
     }
 }
 
-pub(crate) fn discard_all_incomplete_caches(caches: &EncodedCaches) {
-    if let Ok(mut caches) = caches.lock() {
-        caches.retain(|_, cache| cache.complete);
-    }
-}
-
-pub(crate) fn read_cache_format(
+pub(crate) fn cache_read_format(
     caches: &EncodedCaches,
     content_key: &str,
 ) -> Result<AudioFormat, String> {
@@ -197,7 +191,7 @@ pub(crate) fn read_cache_format(
     Ok(format)
 }
 
-pub(crate) fn read_cache_chunk(
+pub(crate) fn cache_read_chunk(
     caches: &EncodedCaches,
     content_key: &str,
     chunk_index: usize,
@@ -212,235 +206,7 @@ pub(crate) fn read_cache_chunk(
     Ok((cache.chunks.get(chunk_index).cloned(), cache.complete))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn reservation(cache_content_key: &str, lease_id: &str) -> DownloadSlotReservation {
-        DownloadSlotReservation {
-            cache_content_key: cache_content_key.to_string(),
-            lease_id: lease_id.to_string(),
-            warm_keepalive_cancel: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    #[test]
-    fn reservation_is_only_current_for_its_slot_and_lease() {
-        let first = reservation("provider:track:first", "slot-1-1");
-        let slots: DownloadSlots = Arc::new(Mutex::new([Some(first.clone()), None]));
-
-        assert!(reservation_is_current(&slots, 0, &first));
-        assert!(!reservation_is_current(&slots, 1, &first));
-        assert!(!reservation_is_current(
-            &slots,
-            0,
-            &reservation("provider:track:first", "slot-1-2"),
-        ));
-    }
-
-    #[test]
-    fn release_reservation_only_removes_the_matching_lease() {
-        let first = reservation("provider:track:first", "slot-1-1");
-        let replacement = reservation("provider:track:second", "slot-1-2");
-        let slots: DownloadSlots = Arc::new(Mutex::new([Some(first.clone()), None]));
-
-        assert!(release_reservation_if_current(&slots, 0, &first));
-        assert!(slots.lock().expect("slot lock")[0].is_none());
-
-        slots.lock().expect("slot lock")[0] = Some(replacement.clone());
-        assert!(!release_reservation_if_current(&slots, 0, &first));
-        assert_eq!(
-            slots.lock().expect("slot lock")[0]
-                .as_ref()
-                .map(|value| value.lease_id.as_str()),
-            Some("slot-1-2"),
-        );
-    }
-
-    #[test]
-    fn preserves_warm_caches_when_the_hard_limit_is_reached() {
-        let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
-        let sequence = Arc::new(AtomicU64::new(0));
-        let first = reservation("provider:track:first", "slot-1-1");
-        let second = reservation("provider:track:second", "slot-2-1");
-
-        let format = AudioFormat {
-            codec: ::sendspin::audio::Codec::Pcm,
-            sample_rate: 48_000,
-            channels: 2,
-            bit_depth: 16,
-            codec_header: None,
-        };
-        assert_eq!(
-            cache_encoded_chunk(&caches, &sequence, 10, &first, &format, 10, &[1; 6]),
-            CacheAppendResult::Appended,
-        );
-        assert_eq!(
-            cache_encoded_chunk(&caches, &sequence, 10, &second, &format, 10, &[2; 6]),
-            CacheAppendResult::HardLimitReached,
-        );
-
-        let caches = caches.lock().expect("cache lock");
-        assert!(caches.contains_key(&first.cache_content_key));
-        assert!(!caches.contains_key(&second.cache_content_key));
-    }
-
-    #[test]
-    fn stores_chunks_until_the_ram_cache_limit() {
-        let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
-        let sequence = Arc::new(AtomicU64::new(0));
-        let reservation = reservation("provider:track:soft-limit", "slot-1-1");
-        let format = AudioFormat {
-            codec: ::sendspin::audio::Codec::Pcm,
-            sample_rate: 48_000,
-            channels: 2,
-            bit_depth: 16,
-            codec_header: None,
-        };
-
-        assert_eq!(
-            cache_encoded_chunk(&caches, &sequence, 100, &reservation, &format, 90, &[1; 90]),
-            CacheAppendResult::Appended,
-        );
-        let (chunk, _) = read_cache_chunk(&caches, &reservation.cache_content_key, 0)
-            .expect("stored soft-limit chunk");
-        assert_eq!(chunk.expect("first chunk").len(), 90);
-    }
-
-    #[test]
-    fn evicts_untracked_then_prefetch_without_touching_protected_tracks() {
-        let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
-        let sequence = Arc::new(AtomicU64::new(0));
-        let format = AudioFormat {
-            codec: ::sendspin::audio::Codec::Pcm,
-            sample_rate: 48_000,
-            channels: 2,
-            bit_depth: 16,
-            codec_header: None,
-        };
-        for key in ["past", "current", "next", "future", "orphan"] {
-            let reservation = reservation(&format!("provider:track:{key}"), "slot-1-1");
-            cache_encoded_chunk(&caches, &sequence, 100, &reservation, &format, 10, &[1; 10]);
-        }
-        let policy = CacheRetentionPolicy {
-            current: Some("provider:track:current".to_string()),
-            next: Some("provider:track:next".to_string()),
-            protected: vec![
-                "provider:track:current".to_string(),
-                "provider:track:next".to_string(),
-            ],
-            prefetch: vec!["provider:track:future".to_string()],
-            recently_played: vec!["provider:track:past".to_string()],
-        };
-        assert_eq!(
-            evict_to_fit(&caches, &policy, 40, 0),
-            vec!["provider:track:orphan"]
-        );
-        assert_eq!(
-            evict_to_fit(&caches, &policy, 30, 0),
-            vec!["provider:track:future"]
-        );
-        let caches = caches.lock().expect("cache lock");
-        assert!(caches.contains_key("provider:track:past"));
-        assert!(caches.contains_key("provider:track:current"));
-        assert!(caches.contains_key("provider:track:next"));
-    }
-
-    #[test]
-    fn replaces_partial_cache_when_the_negotiated_format_changes() {
-        let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
-        let sequence = Arc::new(AtomicU64::new(0));
-        let reservation = reservation("provider:track:format", "slot-1-1");
-        let first_format = AudioFormat {
-            codec: ::sendspin::audio::Codec::Pcm,
-            sample_rate: 48_000,
-            channels: 2,
-            bit_depth: 16,
-            codec_header: None,
-        };
-        let second_format = AudioFormat {
-            sample_rate: 44_100,
-            ..first_format.clone()
-        };
-
-        cache_encoded_chunk(
-            &caches,
-            &sequence,
-            100,
-            &reservation,
-            &first_format,
-            10,
-            &[1],
-        );
-        cache_encoded_chunk(
-            &caches,
-            &sequence,
-            100,
-            &reservation,
-            &second_format,
-            10,
-            &[2],
-        );
-
-        assert_eq!(
-            read_cache_format(&caches, &reservation.cache_content_key)
-                .expect("replacement format")
-                .sample_rate,
-            44_100,
-        );
-        let (chunk, _) = read_cache_chunk(&caches, &reservation.cache_content_key, 0)
-            .expect("replacement chunk");
-        assert_eq!(chunk.expect("first chunk").as_ref(), &[2]);
-    }
-
-    #[test]
-    fn partial_cache_exposes_received_chunks_before_stream_end() {
-        let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
-        let sequence = Arc::new(AtomicU64::new(0));
-        let reservation = reservation("provider:track:partial", "slot-1-1");
-        let format = AudioFormat {
-            codec: ::sendspin::audio::Codec::Pcm,
-            sample_rate: 48_000,
-            channels: 2,
-            bit_depth: 16,
-            codec_header: None,
-        };
-
-        cache_encoded_chunk(&caches, &sequence, 100, &reservation, &format, 10, &[1, 2]);
-
-        let (chunk, complete) = read_cache_chunk(&caches, &reservation.cache_content_key, 0)
-            .expect("partial cache should be readable");
-        assert_eq!(chunk.expect("first chunk").as_ref(), &[1, 2]);
-        assert!(!complete);
-    }
-
-    #[test]
-    fn discarding_incomplete_cache_keeps_completed_cache() {
-        let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
-        let sequence = Arc::new(AtomicU64::new(0));
-        let partial = reservation("provider:track:partial", "slot-1-1");
-        let complete = reservation("provider:track:complete", "slot-2-1");
-        let format = AudioFormat {
-            codec: ::sendspin::audio::Codec::Pcm,
-            sample_rate: 48_000,
-            channels: 2,
-            bit_depth: 16,
-            codec_header: None,
-        };
-        cache_encoded_chunk(&caches, &sequence, 100, &partial, &format, 10, &[1]);
-        cache_encoded_chunk(&caches, &sequence, 100, &complete, &format, 10, &[2]);
-        mark_cache_complete(&caches, &complete);
-
-        discard_incomplete_cache(&caches, &partial.cache_content_key);
-        discard_incomplete_cache(&caches, &complete.cache_content_key);
-
-        let caches = caches.lock().expect("cache lock");
-        assert!(!caches.contains_key(&partial.cache_content_key));
-        assert!(caches.contains_key(&complete.cache_content_key));
-    }
-}
-
-pub(crate) fn evict_to_fit(
+pub(crate) fn cache_evict_to_fit(
     caches: &EncodedCaches,
     policy: &CacheRetentionPolicy,
     cache_capacity_bytes: usize,
@@ -496,18 +262,262 @@ fn eviction_rank(
     (20, -(index as i64))
 }
 
-pub(crate) fn cache_byte_len(caches: &EncodedCaches) -> usize {
-    caches
-        .lock()
-        .map(|caches| caches.values().map(|cache| cache.byte_len).sum())
-        .unwrap_or(0)
-}
-
-pub(crate) fn complete_cache_duration_millis(
+pub(crate) fn cache_complete_duration_millis(
     caches: &EncodedCaches,
     content_key: &str,
 ) -> Option<u64> {
     let caches = caches.lock().ok()?;
     let cache = caches.get(content_key)?;
     cache.complete.then_some(cache.cached_duration_millis)
+}
+
+pub(crate) fn cache_total_bytes(caches: &EncodedCaches) -> usize {
+    caches
+        .lock()
+        .map(|caches| caches.values().map(|cache| cache.byte_len).sum())
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reservation(cache_content_key: &str, lease_id: &str) -> DownloadSlotReservation {
+        DownloadSlotReservation {
+            cache_content_key: cache_content_key.to_string(),
+            expected_duration_millis: None,
+            lease_id: lease_id.to_string(),
+            warm_keepalive_cancel: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    #[test]
+    fn reservation_is_only_current_for_its_slot_and_lease() {
+        let first = reservation("provider:track:first", "slot-1-1");
+        let slots: DownloadSlots = Arc::new(Mutex::new([Some(first.clone()), None]));
+
+        assert!(slot_reservation_is_current(&slots, 0, &first));
+        assert!(!slot_reservation_is_current(&slots, 1, &first));
+        assert!(!slot_reservation_is_current(
+            &slots,
+            0,
+            &reservation("provider:track:first", "slot-1-2"),
+        ));
+    }
+
+    #[test]
+    fn release_reservation_only_removes_the_matching_lease() {
+        let first = reservation("provider:track:first", "slot-1-1");
+        let replacement = reservation("provider:track:second", "slot-1-2");
+        let slots: DownloadSlots = Arc::new(Mutex::new([Some(first.clone()), None]));
+
+        assert!(slot_release_reservation_if_current(&slots, 0, &first));
+        assert!(slots.lock().expect("slot lock")[0].is_none());
+
+        slots.lock().expect("slot lock")[0] = Some(replacement.clone());
+        assert!(!slot_release_reservation_if_current(&slots, 0, &first));
+        assert_eq!(
+            slots.lock().expect("slot lock")[0]
+                .as_ref()
+                .map(|value| value.lease_id.as_str()),
+            Some("slot-1-2"),
+        );
+    }
+
+    #[test]
+    fn preserves_warm_caches_when_the_hard_limit_is_reached() {
+        let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
+        let sequence = Arc::new(AtomicU64::new(0));
+        let first = reservation("provider:track:first", "slot-1-1");
+        let second = reservation("provider:track:second", "slot-2-1");
+
+        let format = AudioFormat {
+            codec: ::sendspin::audio::Codec::Pcm,
+            sample_rate: 48_000,
+            channels: 2,
+            bit_depth: 16,
+            codec_header: None,
+        };
+        assert_eq!(
+            cache_append_encoded_chunk(&caches, &sequence, 10, &first, &format, 10, &[1; 6]),
+            CacheAppendResult::Appended,
+        );
+        assert_eq!(
+            cache_append_encoded_chunk(&caches, &sequence, 10, &second, &format, 10, &[2; 6]),
+            CacheAppendResult::HardLimitReached,
+        );
+
+        let caches = caches.lock().expect("cache lock");
+        assert!(caches.contains_key(&first.cache_content_key));
+        assert!(!caches.contains_key(&second.cache_content_key));
+    }
+
+    #[test]
+    fn stores_chunks_until_the_ram_cache_limit() {
+        let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
+        let sequence = Arc::new(AtomicU64::new(0));
+        let reservation = reservation("provider:track:soft-limit", "slot-1-1");
+        let format = AudioFormat {
+            codec: ::sendspin::audio::Codec::Pcm,
+            sample_rate: 48_000,
+            channels: 2,
+            bit_depth: 16,
+            codec_header: None,
+        };
+
+        assert_eq!(
+            cache_append_encoded_chunk(
+                &caches,
+                &sequence,
+                100,
+                &reservation,
+                &format,
+                90,
+                &[1; 90]
+            ),
+            CacheAppendResult::Appended,
+        );
+        let (chunk, _) = cache_read_chunk(&caches, &reservation.cache_content_key, 0)
+            .expect("stored soft-limit chunk");
+        assert_eq!(chunk.expect("first chunk").len(), 90);
+    }
+
+    #[test]
+    fn evicts_untracked_then_prefetch_without_touching_protected_tracks() {
+        let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
+        let sequence = Arc::new(AtomicU64::new(0));
+        let format = AudioFormat {
+            codec: ::sendspin::audio::Codec::Pcm,
+            sample_rate: 48_000,
+            channels: 2,
+            bit_depth: 16,
+            codec_header: None,
+        };
+        for key in ["past", "current", "next", "future", "orphan"] {
+            let reservation = reservation(&format!("provider:track:{key}"), "slot-1-1");
+            cache_append_encoded_chunk(
+                &caches,
+                &sequence,
+                100,
+                &reservation,
+                &format,
+                10,
+                &[1; 10],
+            );
+        }
+        let policy = CacheRetentionPolicy {
+            current: Some("provider:track:current".to_string()),
+            protected: vec![
+                "provider:track:current".to_string(),
+                "provider:track:next".to_string(),
+            ],
+            prefetch: vec!["provider:track:future".to_string()],
+            recently_played: vec!["provider:track:past".to_string()],
+        };
+        assert_eq!(
+            cache_evict_to_fit(&caches, &policy, 40, 0),
+            vec!["provider:track:orphan"]
+        );
+        assert_eq!(
+            cache_evict_to_fit(&caches, &policy, 30, 0),
+            vec!["provider:track:future"]
+        );
+        let caches = caches.lock().expect("cache lock");
+        assert!(caches.contains_key("provider:track:past"));
+        assert!(caches.contains_key("provider:track:current"));
+        assert!(caches.contains_key("provider:track:next"));
+    }
+
+    #[test]
+    fn replaces_partial_cache_when_the_negotiated_format_changes() {
+        let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
+        let sequence = Arc::new(AtomicU64::new(0));
+        let reservation = reservation("provider:track:format", "slot-1-1");
+        let first_format = AudioFormat {
+            codec: ::sendspin::audio::Codec::Pcm,
+            sample_rate: 48_000,
+            channels: 2,
+            bit_depth: 16,
+            codec_header: None,
+        };
+        let second_format = AudioFormat {
+            sample_rate: 44_100,
+            ..first_format.clone()
+        };
+
+        cache_append_encoded_chunk(
+            &caches,
+            &sequence,
+            100,
+            &reservation,
+            &first_format,
+            10,
+            &[1],
+        );
+        cache_append_encoded_chunk(
+            &caches,
+            &sequence,
+            100,
+            &reservation,
+            &second_format,
+            10,
+            &[2],
+        );
+
+        assert_eq!(
+            cache_read_format(&caches, &reservation.cache_content_key)
+                .expect("replacement format")
+                .sample_rate,
+            44_100,
+        );
+        let (chunk, _) = cache_read_chunk(&caches, &reservation.cache_content_key, 0)
+            .expect("replacement chunk");
+        assert_eq!(chunk.expect("first chunk").as_ref(), &[2]);
+    }
+
+    #[test]
+    fn partial_cache_exposes_received_chunks_before_stream_end() {
+        let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
+        let sequence = Arc::new(AtomicU64::new(0));
+        let reservation = reservation("provider:track:partial", "slot-1-1");
+        let format = AudioFormat {
+            codec: ::sendspin::audio::Codec::Pcm,
+            sample_rate: 48_000,
+            channels: 2,
+            bit_depth: 16,
+            codec_header: None,
+        };
+
+        cache_append_encoded_chunk(&caches, &sequence, 100, &reservation, &format, 10, &[1, 2]);
+
+        let (chunk, complete) = cache_read_chunk(&caches, &reservation.cache_content_key, 0)
+            .expect("partial cache should be readable");
+        assert_eq!(chunk.expect("first chunk").as_ref(), &[1, 2]);
+        assert!(!complete);
+    }
+
+    #[test]
+    fn discarding_incomplete_cache_keeps_completed_cache() {
+        let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
+        let sequence = Arc::new(AtomicU64::new(0));
+        let partial = reservation("provider:track:partial", "slot-1-1");
+        let complete = reservation("provider:track:complete", "slot-2-1");
+        let format = AudioFormat {
+            codec: ::sendspin::audio::Codec::Pcm,
+            sample_rate: 48_000,
+            channels: 2,
+            bit_depth: 16,
+            codec_header: None,
+        };
+        cache_append_encoded_chunk(&caches, &sequence, 100, &partial, &format, 10, &[1]);
+        cache_append_encoded_chunk(&caches, &sequence, 100, &complete, &format, 10, &[2]);
+        cache_mark_complete(&caches, &complete);
+
+        cache_discard_incomplete(&caches, &partial.cache_content_key);
+        cache_discard_incomplete(&caches, &complete.cache_content_key);
+
+        let caches = caches.lock().expect("cache lock");
+        assert!(!caches.contains_key(&partial.cache_content_key));
+        assert!(caches.contains_key(&complete.cache_content_key));
+    }
 }

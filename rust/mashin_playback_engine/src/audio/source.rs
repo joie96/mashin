@@ -21,13 +21,6 @@ impl AudioSource {
         }
     }
 
-    pub(crate) fn content_key(&self) -> Option<&str> {
-        match self {
-            Self::CachedContent { content_key } => Some(content_key),
-            Self::File { .. } => None,
-        }
-    }
-
     #[allow(dead_code)]
     pub(crate) fn file(path: impl Into<PathBuf>) -> Self {
         Self::File { path: path.into() }
