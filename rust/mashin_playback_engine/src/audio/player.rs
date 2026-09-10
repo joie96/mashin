@@ -159,8 +159,7 @@ impl AudioPlayer {
             .output
             .as_ref()
             .ok_or_else(|| "audio output is not started".to_string())?;
-        output.enqueue(decoder.decode(data)?);
-        Ok(())
+        output.enqueue(decoder.decode(data)?)
     }
 
     pub(crate) fn is_started(&self) -> bool {
@@ -215,10 +214,10 @@ impl AudioPlayer {
             self.next_chunk_index = self.next_chunk_index.saturating_add(1);
         }
 
-        self.state = if underrun_detected {
-            AudioPlayerState::Buffering
-        } else if self.buffered_duration_millis() > 0 {
+        self.state = if self.buffered_duration_millis() > 0 {
             AudioPlayerState::Playing
+        } else if underrun_detected {
+            AudioPlayerState::Buffering
         } else if self.source_ended {
             AudioPlayerState::Ended
         } else {

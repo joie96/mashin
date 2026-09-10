@@ -154,8 +154,8 @@ class SendspinRustBridge implements _SendspinRustBridgeApi {
       'musicAssistantAuthToken': authSession?.token,
       'clientId': AppConfig.appId,
       'clientName': AppConfig.appName,
-      'bufferCapacityBytes': AppConfig.sendspinBufferCapacityBytes,
-      'cacheCapacityBytes': await AppConfig.getSendspinCacheCapacityBytes(),
+      'bufferCapacityBytes': AppConfig.singleSendspinBufferCapacityBytes,
+      'cacheCapacityBytes': AppConfig.cacheCapacityBytes,
       'preferredCodec': await AppConfig.getSendspinPreferredCodec(),
     };
 

@@ -15,6 +15,9 @@ use tokio::task::JoinHandle;
 static LOGGER: Logger = Logger::new(module_path!());
 
 const CACHE_COMPLETION_TOLERANCE_MILLIS: u64 = 500;
+const CACHE_DOWNLOAD_PAUSE_PERCENT: usize = 95;
+const DOWNLOAD_KEEPALIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(20);
+const DOWNLOAD_KEEPALIVE_PLAY_DURATION: std::time::Duration = std::time::Duration::from_secs(1);
 
 #[derive(Clone)]
 pub(crate) struct SendspinDownloaderConfig {
@@ -51,6 +54,7 @@ pub(crate) struct SendspinDownloader {
     controllers: Arc<Mutex<[Option<Controller>; 2]>>,
     guards: [Option<ConnectionGuard>; 2],
     io_tasks: [Option<JoinHandle<()>>; 2],
+    keepalive_tasks: [Option<JoinHandle<()>>; 2],
 }
 
 impl SendspinDownloader {
@@ -74,6 +78,7 @@ impl SendspinDownloader {
             controllers: Arc::new(Mutex::new([None, None])),
             guards: [None, None],
             io_tasks: [None, None],
+            keepalive_tasks: [None, None],
         }
     }
 
@@ -424,6 +429,11 @@ impl SendspinDownloader {
                     task.abort();
                 }
             }
+            for task in self.keepalive_tasks.iter_mut() {
+                if let Some(task) = task.take() {
+                    task.abort();
+                }
+            }
             for guard in self.guards.iter_mut() {
                 if let Some(guard) = guard.take() {
                     let _ = guard.disconnect(GoodbyeReason::Shutdown).await;
@@ -441,6 +451,7 @@ impl SendspinDownloader {
 
     pub(crate) fn apply_download_plan(&mut self, plan_json: &str) -> Result<(), String> {
         let plan = parse_plan(plan_json)?;
+        self.cancel_warm_keepalives();
         LOGGER.debug(format!(
             "downloader plan accepted: version {}, {} items",
             plan.version,
@@ -580,6 +591,7 @@ impl SendspinDownloader {
 
     pub(crate) fn ensure_download_window(&mut self, content_keys: &[String]) -> Result<(), String> {
         self.evict_to_capacity(0);
+        self.pause_downloads_near_capacity();
         let Some(plan) = self.plan.as_ref() else {
             return Ok(());
         };
@@ -610,6 +622,13 @@ impl SendspinDownloader {
         self.preempt_deprioritized_downloads(&prioritized_content_keys);
 
         for item in candidates {
+            if cache_reaches_download_pause_threshold(
+                crate::cache::store::cache_total_bytes(&self.caches),
+                config.cache_capacity_bytes,
+            ) {
+                self.pause_downloads_near_capacity();
+                break;
+            }
             if crate::cache::store::cache_complete_duration_millis(
                 &self.caches,
                 &item.cache_content_key,
@@ -733,6 +752,92 @@ impl SendspinDownloader {
                 if let Some(state) = states.get_mut(&cache_content_key) {
                     state.state = "evicted".to_string();
                 }
+            }
+        }
+    }
+
+    fn pause_downloads_near_capacity(&mut self) {
+        let Some(config) = self.config.as_ref() else {
+            return;
+        };
+        if !cache_reaches_download_pause_threshold(
+            crate::cache::store::cache_total_bytes(&self.caches),
+            config.cache_capacity_bytes,
+        ) {
+            return;
+        }
+
+        let reservations = self
+            .slots
+            .lock()
+            .map(|slots| slots.clone())
+            .unwrap_or([None, None]);
+        for (slot_index, reservation) in reservations.iter().enumerate() {
+            let Some(reservation) = reservation else {
+                continue;
+            };
+            if self.keepalive_tasks[slot_index].is_some() {
+                continue;
+            }
+            let controller = self
+                .controllers
+                .lock()
+                .ok()
+                .and_then(|controllers| controllers[slot_index].clone());
+            let Some(controller) = controller else {
+                continue;
+            };
+            let cancel = Arc::clone(&reservation.warm_keepalive_cancel);
+            let cache_content_key = reservation.cache_content_key.clone();
+            let lease = reservation.clone();
+            let slots = Arc::clone(&self.slots);
+            self.keepalive_tasks[slot_index] = Some(self.runtime.spawn(async move {
+                if !warm_keepalive_is_current(&slots, slot_index, &lease) {
+                    return;
+                }
+                if controller.pause().await.is_err() {
+                    return;
+                }
+                LOGGER.trace(format!(
+                    "download paused near cache capacity: slot {}, cache key {}",
+                    slot_index + 1,
+                    cache_content_key
+                ));
+                loop {
+                    tokio::time::sleep(DOWNLOAD_KEEPALIVE_INTERVAL).await;
+                    if cancel.load(Ordering::Relaxed)
+                        || !warm_keepalive_is_current(&slots, slot_index, &lease)
+                    {
+                        break;
+                    }
+                    if controller.play().await.is_err() {
+                        break;
+                    }
+                    tokio::time::sleep(DOWNLOAD_KEEPALIVE_PLAY_DURATION).await;
+                    if cancel.load(Ordering::Relaxed)
+                        || !warm_keepalive_is_current(&slots, slot_index, &lease)
+                    {
+                        break;
+                    }
+                    if controller.pause().await.is_err() {
+                        break;
+                    }
+                }
+            }));
+        }
+    }
+
+    fn cancel_warm_keepalives(&mut self) {
+        if let Ok(slots) = self.slots.lock() {
+            for reservation in slots.iter().flatten() {
+                reservation
+                    .warm_keepalive_cancel
+                    .store(true, Ordering::Relaxed);
+            }
+        }
+        for task in self.keepalive_tasks.iter_mut() {
+            if let Some(task) = task.take() {
+                task.abort();
             }
         }
     }
@@ -1098,6 +1203,24 @@ fn download_duration_reached(
         .unwrap_or(false)
 }
 
+fn cache_reaches_download_pause_threshold(
+    cache_used_bytes: usize,
+    cache_capacity_bytes: usize,
+) -> bool {
+    cache_capacity_bytes > 0
+        && cache_used_bytes.saturating_mul(100)
+            >= cache_capacity_bytes.saturating_mul(CACHE_DOWNLOAD_PAUSE_PERCENT)
+}
+
+fn warm_keepalive_is_current(
+    slots: &crate::cache::store::DownloadSlots,
+    slot_index: usize,
+    reservation: &crate::cache::store::DownloadSlotReservation,
+) -> bool {
+    !reservation.warm_keepalive_cancel.load(Ordering::Relaxed)
+        && crate::cache::store::slot_reservation_is_current(slots, slot_index, reservation)
+}
+
 fn download_client_id(base_id: &str, slot_number: usize) -> String {
     let normalized = normalize_client_id(base_id);
     let base_id = if normalized.is_empty() {
@@ -1125,9 +1248,12 @@ pub(crate) fn parse_plan(plan_json: &str) -> Result<DownloadPlan, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        download_client_id, download_client_name, download_duration_reached, find_queue_id,
-        normalize_client_id, SendspinDownloader,
+        cache_reaches_download_pause_threshold, download_client_id, download_client_name,
+        download_duration_reached, find_queue_id, normalize_client_id, warm_keepalive_is_current,
+        SendspinDownloader,
     };
+    use crate::cache::store::{DownloadSlotReservation, DownloadSlots};
+    use std::sync::{Arc, Mutex};
     use std::sync::atomic::Ordering;
 
     #[test]
@@ -1196,6 +1322,35 @@ mod tests {
         assert!(!download_duration_reached(Some(180_000), 179_499));
         assert!(download_duration_reached(Some(180_000), 179_500));
         assert!(!download_duration_reached(None, 999_999));
+    }
+
+    #[test]
+    fn pauses_downloads_at_ninety_five_percent_cache_usage() {
+        assert!(!cache_reaches_download_pause_threshold(94, 100));
+        assert!(cache_reaches_download_pause_threshold(95, 100));
+        assert!(cache_reaches_download_pause_threshold(100, 100));
+        assert!(!cache_reaches_download_pause_threshold(0, 0));
+    }
+
+    #[test]
+    fn warm_keepalive_stops_when_its_slot_lease_is_replaced() {
+        let first = DownloadSlotReservation {
+            cache_content_key: "provider:track:first".to_string(),
+            expected_duration_millis: None,
+            lease_id: "slot-1-1".to_string(),
+            warm_keepalive_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        };
+        let replacement = DownloadSlotReservation {
+            cache_content_key: "provider:track:second".to_string(),
+            expected_duration_millis: None,
+            lease_id: "slot-1-2".to_string(),
+            warm_keepalive_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        };
+        let slots: DownloadSlots = Arc::new(Mutex::new([Some(first.clone()), None]));
+
+        assert!(warm_keepalive_is_current(&slots, 0, &first));
+        slots.lock().expect("slot lock")[0] = Some(replacement);
+        assert!(!warm_keepalive_is_current(&slots, 0, &first));
     }
 
     #[test]

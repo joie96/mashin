@@ -581,12 +581,12 @@ impl SendspinEngine {
         let cache_usage_percent =
             Self::percentage(cache_used_bytes as u64, cache_capacity_bytes as u64);
         LOGGER.info(format!(
-            "download status: {}/{} complete queue item(s), [{}], cache {}/{} bytes ({:.1}%)",
+            "download status: {}/{} complete queue item(s), [{}], cache {} KiB/{} KiB ({:.1}%)",
             completed_cache_items,
             self.queue_content_keys.len(),
             active_downloads.join(", "),
-            cache_used_bytes,
-            cache_capacity_bytes,
+            cache_used_bytes / 1024,
+            cache_capacity_bytes / 1024,
             cache_usage_percent,
         ));
         self.last_download_status_log = Some(now);

@@ -4,6 +4,7 @@ use ::sendspin::protocol::messages::{AudioFormatSpec, PlayerV1Support};
 pub(crate) fn supported_audio_formats(preferred_codec: &str) -> Vec<AudioFormatSpec> {
     let preferred = preferred_codec.trim().to_ascii_lowercase();
     let codecs = [preferred.as_str(), "opus", "flac", "pcm"];
+    let sample_rates = [48_000, 44_100];
     let mut formats = Vec::new();
 
     for codec in codecs {
@@ -14,12 +15,14 @@ pub(crate) fn supported_audio_formats(preferred_codec: &str) -> Vec<AudioFormatS
         {
             continue;
         }
-        formats.push(AudioFormatSpec {
-            codec: codec.to_string(),
-            sample_rate: 48_000,
-            channels: 2,
-            bit_depth: if codec == "opus" { 16 } else { 24 },
-        });
+        for sample_rate in sample_rates {
+            formats.push(AudioFormatSpec {
+                codec: codec.to_string(),
+                sample_rate,
+                channels: 2,
+                bit_depth: 16,
+            });
+        }
     }
 
     formats
