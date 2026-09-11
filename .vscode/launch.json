@@ -23,10 +23,7 @@
       "request": "launch",
       "program": "lib/main.dart",
       "flutterMode": "release",
-      "toolArgs": [
-        "--target-platform=windows-x64",
-        "--dart-define=MASHIN_LOG_LEVEL=info"
-      ],
+      "toolArgs": ["--dart-define=MASHIN_LOG_LEVEL=info"],
       "preLaunchTask": "Rust Playback Engine: Windows x64 Release"
     },
     {
@@ -35,10 +32,7 @@
       "request": "launch",
       "program": "lib/main.dart",
       "flutterMode": "release",
-      "toolArgs": [
-        "--target-platform=windows-arm64",
-        "--dart-define=MASHIN_LOG_LEVEL=info"
-      ],
+      "toolArgs": ["--dart-define=MASHIN_LOG_LEVEL=info"],
       "preLaunchTask": "Rust Playback Engine: Windows arm64 Release"
     }
   ]
