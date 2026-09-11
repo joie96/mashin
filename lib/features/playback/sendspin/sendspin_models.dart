@@ -81,7 +81,7 @@ PlaybackQueueItem _queueItemFromRustJson(Map<String, dynamic> json) {
     queueItemId: (json['queueItemId'] as String?)?.trim() ?? '',
     name: track?.name ?? (json['name'] as String?)?.trim() ?? '',
     duration: track?.duration,
-    sortIndex: (json['sortIndex'] as num?)?.toInt(),
+    sortIndex: (json['originalIndex'] as num?)?.toInt(),
     available: true,
     mediaItem: track,
     cache: json['cache'] is Map<String, dynamic>

@@ -5,7 +5,7 @@ use crate::audio::source::{AudioSource, SourceReadResult};
 use crate::logging::Logger;
 use serde::Serialize;
 use serde_json::Value;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 static LOGGER: Logger = Logger::new(module_path!());
 
@@ -69,6 +69,7 @@ pub(crate) struct SendspinEngine {
     audio_player: AudioPlayer,
     download_plan_version: u64,
     next_queue_item_id: u64,
+    next_original_index: usize,
     queue_revision: u64,
     current_cache_content_key: Option<String>,
     queue_content_keys: Vec<String>,
@@ -79,6 +80,7 @@ pub(crate) struct SendspinEngine {
 #[derive(Clone)]
 struct QueueMediaItem {
     queue_item_id: String,
+    original_index: usize,
     media_item: Value,
 }
 
@@ -91,6 +93,7 @@ impl SendspinEngine {
             audio_player: AudioPlayer::new(),
             download_plan_version: 0,
             next_queue_item_id: 1,
+            next_original_index: 0,
             queue_revision: 0,
             current_cache_content_key: None,
             queue_content_keys: Vec::new(),
@@ -145,6 +148,7 @@ impl SendspinEngine {
         self.snapshot = SendspinSnapshot::default();
         self.download_plan_version = 0;
         self.next_queue_item_id = 1;
+        self.next_original_index = 0;
         self.current_cache_content_key = None;
         self.queue_content_keys.clear();
         self.recently_played_content_keys.clear();
@@ -232,6 +236,7 @@ impl SendspinEngine {
             .iter()
             .map(|item| QueueItemSnapshot {
                 queue_item_id: item.queue_item_id.clone(),
+                original_index: item.original_index,
                 media_item: item.media_item.clone(),
                 cache: QueueItemCacheSnapshot {
                     state: "queued".to_string(),
@@ -311,6 +316,7 @@ impl SendspinEngine {
         self.snapshot.current_index = None;
         self.current_cache_content_key = None;
         self.queue_content_keys.clear();
+        self.next_original_index = 0;
         self.queue_revision = self.queue_revision.saturating_add(1);
         self.snapshot.playback_state = PlaybackState::Idle.as_str().to_string();
         Ok(())
@@ -366,6 +372,7 @@ impl SendspinEngine {
             .iter()
             .map(|item| QueueMediaItem {
                 queue_item_id: item.queue_item_id.clone(),
+                original_index: item.original_index,
                 media_item: item.media_item.clone(),
             })
             .collect()
@@ -377,8 +384,11 @@ impl SendspinEngine {
             .map(|media_item| {
                 let queue_item_id = format!("local-{}", self.next_queue_item_id);
                 self.next_queue_item_id = self.next_queue_item_id.saturating_add(1);
+                let original_index = self.next_original_index;
+                self.next_original_index = self.next_original_index.saturating_add(1);
                 QueueMediaItem {
                     queue_item_id,
+                    original_index,
                     media_item,
                 }
             })
@@ -445,6 +455,7 @@ impl SendspinEngine {
             .map(|(index, queue_item)| -> Result<Value, String> {
                 let QueueMediaItem {
                     queue_item_id,
+                    original_index,
                     media_item,
                 } = queue_item;
                 let provider = media_item
@@ -484,6 +495,7 @@ impl SendspinEngine {
                 };
                 Ok(serde_json::json!({
                     "queueItemId": queue_item_id,
+                    "originalIndex": original_index,
                     "role": role,
                     "priority": priority,
                     "cacheContentKey": cache_content_key,
@@ -771,7 +783,54 @@ impl SendspinEngine {
     }
 
     pub(crate) fn set_shuffle(&mut self, enabled: bool) {
+        if self.snapshot.shuffle_enabled == enabled {
+            return;
+        }
+        let Some(current_index) = self.snapshot.current_index else {
+            self.snapshot.shuffle_enabled = enabled;
+            return;
+        };
+        let mut queue = self.queue_media_items();
+        let upcoming = queue.get_mut(current_index.saturating_add(1)..);
+        if let Some(upcoming) = upcoming {
+            if enabled {
+                Self::shuffle_items(upcoming);
+            } else {
+                upcoming.sort_by_key(|item| item.original_index);
+            }
+        }
+        if let Err(error) = self.replace_queue_media_items(queue) {
+            LOGGER.error(format!("failed to update queue for shuffle: {error}"));
+            return;
+        }
         self.snapshot.shuffle_enabled = enabled;
+    }
+
+    fn shuffle_items(items: &mut [QueueMediaItem]) {
+        if items.len() < 2 {
+            return;
+        }
+        let original_order = items
+            .iter()
+            .map(|item| item.queue_item_id.clone())
+            .collect::<Vec<_>>();
+        let mut state = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos() as u64)
+            .unwrap_or(0)
+            ^ items.len() as u64;
+        for index in (1..items.len()).rev() {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let target = (state as usize) % (index + 1);
+            items.swap(index, target);
+        }
+        if items
+            .iter()
+            .map(|item| &item.queue_item_id)
+            .eq(original_order.iter())
+        {
+            items.swap(0, 1);
+        }
     }
 
     pub(crate) fn set_repeat_mode(&mut self, mode: &str) {
@@ -812,6 +871,7 @@ mod tests {
             .iter()
             .map(|item| QueueItemSnapshot {
                 queue_item_id: item.queue_item_id.clone(),
+                original_index: item.original_index,
                 media_item: item.media_item.clone(),
                 cache: QueueItemCacheSnapshot {
                     state: "queued".to_string(),
@@ -869,5 +929,113 @@ mod tests {
 
         assert_eq!(items[0]["cacheContentKey"], "deezer:first:pcm:48000:16:2");
         assert_eq!(items[1]["cacheContentKey"], "deezer:second:pcm:48000:16:2");
+    }
+
+    #[test]
+    fn shuffling_upcoming_items_keeps_the_current_item_in_place() {
+        let mut engine = SendspinEngine::new();
+        let mut queue = engine.new_queue_media_items(vec![
+            json!({"id": "played"}),
+            json!({"id": "current"}),
+            json!({"id": "third"}),
+            json!({"id": "fourth"}),
+        ]);
+        let current_id = queue[1].queue_item_id.clone();
+        let played_id = queue[0].queue_item_id.clone();
+        let upcoming_ids = queue[2..]
+            .iter()
+            .map(|item| item.queue_item_id.clone())
+            .collect::<Vec<_>>();
+
+        SendspinEngine::shuffle_items(&mut queue[2..]);
+
+        assert_eq!(queue[0].queue_item_id, played_id);
+        assert_eq!(queue[1].queue_item_id, current_id);
+        assert_ne!(
+            queue[2..]
+                .iter()
+                .map(|item| item.queue_item_id.clone())
+                .collect::<Vec<_>>(),
+            upcoming_ids
+        );
+        assert_eq!(
+            {
+                let mut original_indexes = queue[2..]
+                .iter()
+                .map(|item| item.original_index)
+                .collect::<Vec<_>>();
+                original_indexes.sort_unstable();
+                original_indexes
+            },
+            vec![2, 3]
+        );
+    }
+
+    #[test]
+    fn disabling_shuffle_restores_upcoming_items_to_original_order() {
+        let mut engine = SendspinEngine::new();
+        let mut queue = engine.new_queue_media_items(vec![
+            json!({"id": "played"}),
+            json!({"id": "current"}),
+            json!({"id": "third"}),
+            json!({"id": "fourth"}),
+            json!({"id": "fifth"}),
+        ]);
+        queue[2..].reverse();
+
+        queue[2..].sort_by_key(|item| item.original_index);
+
+        assert_eq!(
+            queue.iter().map(|item| item.original_index).collect::<Vec<_>>(),
+            vec![0, 1, 2, 3, 4]
+        );
+    }
+
+    #[test]
+    fn shuffling_replaces_the_downloader_plan_with_the_new_queue_order() {
+        let mut engine = SendspinEngine::new();
+        engine
+            .play_media(
+                &serde_json::to_string(&vec![
+                    json!({"provider": "test", "item_id": "first"}),
+                    json!({"provider": "test", "item_id": "second"}),
+                    json!({"provider": "test", "item_id": "third"}),
+                    json!({"provider": "test", "item_id": "fourth"}),
+                ])
+                .expect("serialize media items"),
+            )
+            .expect("start playback");
+        let original_upcoming_ids = engine.snapshot.queue[1..]
+            .iter()
+            .map(|item| item.queue_item_id.clone())
+            .collect::<Vec<_>>();
+
+        engine.set_shuffle(true);
+
+        let downloader_plan = engine.downloader.download_plan().expect("download plan");
+        assert_eq!(engine.snapshot.shuffle_enabled, true);
+        assert_eq!(downloader_plan.version, 2);
+        assert_eq!(
+            downloader_plan
+                .items
+                .iter()
+                .map(|item| item.queue_item_id.clone())
+                .collect::<Vec<_>>(),
+            engine
+                .snapshot
+                .queue
+                .iter()
+                .map(|item| item.queue_item_id.clone())
+                .collect::<Vec<_>>(),
+        );
+        assert_ne!(
+            engine.snapshot.queue[1..]
+                .iter()
+                .map(|item| item.queue_item_id.clone())
+                .collect::<Vec<_>>(),
+            original_upcoming_ids,
+        );
+        assert_eq!(downloader_plan.items[0].role, "current");
+        assert_eq!(downloader_plan.items[1].role, "next");
     }
 }

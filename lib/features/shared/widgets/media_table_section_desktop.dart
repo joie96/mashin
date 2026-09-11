@@ -1757,7 +1757,7 @@ Widget _buildDesktopTableRowQueue({
           child: DesktopPlaybackIndicator(
             coordinator: playbackCoordinator,
             item: item.mediaItem,
-            fallback: '${index + 1}',
+            fallback: '${(item.sortIndex ?? index) + 1}',
           ),
         ),
       ),

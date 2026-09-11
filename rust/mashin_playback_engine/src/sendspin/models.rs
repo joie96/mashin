@@ -18,6 +18,7 @@ pub(crate) struct QueueItemCacheSnapshot {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct QueueItemSnapshot {
     pub(crate) queue_item_id: String,
+    pub(crate) original_index: usize,
     pub(crate) media_item: serde_json::Value,
     pub(crate) cache: QueueItemCacheSnapshot,
 }
@@ -40,6 +41,8 @@ pub(crate) struct DownloadPlan {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DownloadPlanItem {
     pub(crate) queue_item_id: String,
+    #[serde(default)]
+    pub(crate) original_index: usize,
     #[allow(dead_code)]
     pub(crate) role: String,
     #[allow(dead_code)]
