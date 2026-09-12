@@ -50,6 +50,8 @@ pub(crate) struct AudioPlayer {
     state: AudioPlayerState,
     next_chunk_index: usize,
     source_ended: bool,
+    skip_remaining_millis: u64,
+    input_channels: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,15 +73,23 @@ impl AudioPlayer {
             state: AudioPlayerState::Idle,
             next_chunk_index: 0,
             source_ended: false,
+            skip_remaining_millis: 0,
+            input_channels: 0,
         }
     }
 
-    pub(crate) fn prepare(&mut self, source: AudioSource) {
+    pub(crate) fn prepare_with_seek(
+        &mut self,
+        source: AudioSource,
+        chunk_index: usize,
+        skip_millis: u64,
+    ) {
         self.stop();
         self.source = Some(source);
         self.state = AudioPlayerState::Buffering;
-        self.next_chunk_index = 0;
+        self.next_chunk_index = chunk_index;
         self.source_ended = false;
+        self.skip_remaining_millis = skip_millis;
         LOGGER.debug("audio source prepared");
     }
 
@@ -94,6 +104,7 @@ impl AudioPlayer {
         }
         self.decoder = Some(ActiveDecoder::from_format(format)?);
         self.output = Some(AudioOutput::new(format, volume, muted)?);
+        self.input_channels = usize::from(format.channels.max(1));
         self.state = AudioPlayerState::Buffering;
         LOGGER.info(format!(
             "audio playback started: {:?}, {} Hz, {} channels",
@@ -109,6 +120,8 @@ impl AudioPlayer {
         self.state = AudioPlayerState::Idle;
         self.next_chunk_index = 0;
         self.source_ended = false;
+        self.skip_remaining_millis = 0;
+        self.input_channels = 0;
     }
 
     pub(crate) fn set_volume(&self, volume: u8) {
@@ -150,7 +163,12 @@ impl AudioPlayer {
         };
     }
 
-    pub(crate) fn enqueue_encoded(&self, data: &[u8]) -> Result<(), String> {
+    pub(crate) fn enqueue_encoded(
+        &self,
+        data: &[u8],
+        skip_millis: u64,
+        chunk_duration_millis: u64,
+    ) -> Result<(), String> {
         let decoder = self
             .decoder
             .as_ref()
@@ -159,7 +177,21 @@ impl AudioPlayer {
             .output
             .as_ref()
             .ok_or_else(|| "audio output is not started".to_string())?;
-        output.enqueue(decoder.decode(data)?)
+        let samples = decoder.decode(data)?;
+        if samples.is_empty() || skip_millis == 0 || chunk_duration_millis == 0 {
+            return output.enqueue(samples);
+        }
+        let skipped_samples = samples
+            .len()
+            .saturating_mul(skip_millis.min(chunk_duration_millis) as usize)
+            .saturating_div(chunk_duration_millis as usize);
+        let skipped_samples = skipped_samples
+            .saturating_div(self.input_channels.max(1))
+            .saturating_mul(self.input_channels.max(1));
+        if skipped_samples >= samples.len() {
+            return Ok(());
+        }
+        output.enqueue(Arc::from(samples[skipped_samples..].to_vec()))
     }
 
     pub(crate) fn is_started(&self) -> bool {
@@ -191,7 +223,7 @@ impl AudioPlayer {
 
         while self.buffered_duration_millis() < max_buffer_millis {
             let chunk = match read(self.next_chunk_index) {
-                SourceReadResult::Data(chunk) => Some(chunk),
+                SourceReadResult::Data { data, duration_millis } => Some((data, duration_millis)),
                 SourceReadResult::Waiting => None,
                 SourceReadResult::EndOfStream => {
                     self.source_ended = true;
@@ -203,14 +235,16 @@ impl AudioPlayer {
                     return;
                 }
             };
-            let Some(chunk) = chunk else {
+            let Some((chunk, duration_millis)) = chunk else {
                 break;
             };
-            if let Err(error) = self.enqueue_encoded(&chunk) {
+            let skip_millis = self.skip_remaining_millis.min(duration_millis);
+            if let Err(error) = self.enqueue_encoded(&chunk, skip_millis, duration_millis) {
                 LOGGER.error(format!("audio chunk decode failed: {error}"));
                 self.state = AudioPlayerState::Error;
                 return;
             }
+            self.skip_remaining_millis = self.skip_remaining_millis.saturating_sub(duration_millis);
             self.next_chunk_index = self.next_chunk_index.saturating_add(1);
         }
 

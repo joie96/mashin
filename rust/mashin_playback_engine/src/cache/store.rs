@@ -26,21 +26,38 @@ pub(crate) struct DownloadSlotReservation {
     pub(crate) warm_keepalive_cancel: Arc<AtomicBool>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CacheIntegrity {
+    Partial,
+    Interrupted,
+    Complete,
+}
+
+struct EncodedCacheChunk {
+    data: Arc<[u8]>,
+    start_position_millis: u64,
+    duration_millis: u64,
+}
+
 pub(crate) struct EncodedTrackCache {
-    chunks: VecDeque<Arc<[u8]>>,
+    chunks: VecDeque<EncodedCacheChunk>,
     byte_len: usize,
     cached_duration_millis: u64,
     last_touched: u64,
     format: Option<AudioFormat>,
-    complete: bool,
-    corrupted: bool,
+    integrity: CacheIntegrity,
 }
 
 impl EncodedTrackCache {
     fn append(&mut self, chunk: Arc<[u8]>, duration_millis: u64) {
         self.byte_len = self.byte_len.saturating_add(chunk.len());
+        let start_position_millis = self.cached_duration_millis;
         self.cached_duration_millis = self.cached_duration_millis.saturating_add(duration_millis);
-        self.chunks.push_back(chunk);
+        self.chunks.push_back(EncodedCacheChunk {
+            data: chunk,
+            start_position_millis,
+            duration_millis,
+        });
     }
 }
 
@@ -53,6 +70,13 @@ fn audio_format_matches(left: &AudioFormat, right: &AudioFormat) -> bool {
 
 pub(crate) type DownloadSlots = Arc<Mutex<[Option<DownloadSlotReservation>; 2]>>;
 pub(crate) type EncodedCaches = Arc<Mutex<HashMap<String, EncodedTrackCache>>>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LocalCacheSeekTarget {
+    pub(crate) chunk_index: usize,
+    pub(crate) chunk_start_position_millis: u64,
+    pub(crate) skip_within_chunk_millis: u64,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CacheAppendResult {
@@ -117,7 +141,7 @@ pub(crate) fn cache_append_encoded_chunk(
     if let Ok(mut caches) = caches.lock() {
         let touch = cache_sequence.fetch_add(1, Ordering::Relaxed);
         if let Some(existing) = caches.get(&reservation.cache_content_key) {
-            if existing.complete {
+            if existing.integrity == CacheIntegrity::Complete {
                 return CacheAppendResult::Appended;
             }
             if existing
@@ -142,11 +166,10 @@ pub(crate) fn cache_append_encoded_chunk(
             .or_insert_with(|| EncodedTrackCache {
                 chunks: VecDeque::new(),
                 byte_len: 0,
-                cached_duration_millis: 0,
+                cached_duration_millis: reservation.resume_after_millis,
                 last_touched: touch,
                 format: Some(format.clone()),
-                complete: false,
-                corrupted: false,
+                integrity: CacheIntegrity::Partial,
             });
         cache.last_touched = touch;
         cache.format = Some(format.clone());
@@ -160,7 +183,7 @@ pub(crate) fn cache_append_encoded_chunk(
 pub(crate) fn cache_mark_complete(caches: &EncodedCaches, reservation: &DownloadSlotReservation) {
     if let Ok(mut caches) = caches.lock() {
         if let Some(cache) = caches.get_mut(&reservation.cache_content_key) {
-            cache.complete = true;
+            cache.integrity = CacheIntegrity::Complete;
         }
     }
 }
@@ -169,7 +192,7 @@ pub(crate) fn cache_discard_incomplete(caches: &EncodedCaches, content_key: &str
     if let Ok(mut caches) = caches.lock() {
         let remove = caches
             .get(content_key)
-            .map(|cache| !cache.complete)
+            .map(|cache| cache.integrity != CacheIntegrity::Complete)
             .unwrap_or(false);
         if remove {
             caches.remove(content_key);
@@ -177,28 +200,40 @@ pub(crate) fn cache_discard_incomplete(caches: &EncodedCaches, content_key: &str
     }
 }
 
-pub(crate) fn cache_mark_corrupted(caches: &EncodedCaches, content_key: &str) -> Option<u64> {
+pub(crate) fn cache_discard(caches: &EncodedCaches, content_key: &str) {
+    if let Ok(mut caches) = caches.lock() {
+        caches.remove(content_key);
+    }
+}
+
+pub(crate) fn cache_clear_all(caches: &EncodedCaches) {
+    if let Ok(mut caches) = caches.lock() {
+        caches.clear();
+    }
+}
+
+pub(crate) fn cache_mark_interrupted(caches: &EncodedCaches, content_key: &str) -> Option<u64> {
     let Ok(mut caches) = caches.lock() else {
         return None;
     };
     let cache = caches.get_mut(content_key)?;
-    if cache.complete {
+    if cache.integrity == CacheIntegrity::Complete {
         return None;
     }
-    cache.corrupted = true;
+    cache.integrity = CacheIntegrity::Interrupted;
     Some(cache.cached_duration_millis)
 }
 
-pub(crate) fn cache_corrupted_duration_millis(
+pub(crate) fn cache_interrupted_duration_millis(
     caches: &EncodedCaches,
     content_key: &str,
 ) -> Option<u64> {
     let caches = caches.lock().ok()?;
     let cache = caches.get(content_key)?;
-    cache.corrupted.then_some(cache.cached_duration_millis)
+    (cache.integrity == CacheIntegrity::Interrupted).then_some(cache.cached_duration_millis)
 }
 
-pub(crate) fn cache_discard_corrupted_outside_window(
+pub(crate) fn cache_discard_interrupted_outside_window(
     caches: &EncodedCaches,
     content_keys: &[String],
 ) -> Vec<String> {
@@ -207,7 +242,9 @@ pub(crate) fn cache_discard_corrupted_outside_window(
     };
     let discarded = caches
         .iter()
-        .filter(|(key, cache)| cache.corrupted && !content_keys.contains(key))
+        .filter(|(key, cache)| {
+            cache.integrity == CacheIntegrity::Interrupted && !content_keys.contains(key)
+        })
         .map(|(key, _)| key.clone())
         .collect::<Vec<_>>();
     for key in &discarded {
@@ -246,7 +283,54 @@ pub(crate) fn cache_read_chunk(
         .get_mut(content_key)
         .ok_or_else(|| "encoded track cache is unavailable".to_string())?;
     cache.last_touched = cache.last_touched.saturating_add(1);
-    Ok((cache.chunks.get(chunk_index).cloned(), cache.complete))
+    Ok((
+        cache.chunks.get(chunk_index).map(|chunk| Arc::clone(&chunk.data)),
+        cache.integrity == CacheIntegrity::Complete,
+    ))
+}
+
+pub(crate) fn cache_read_chunk_with_duration(
+    caches: &EncodedCaches,
+    content_key: &str,
+    chunk_index: usize,
+) -> Result<(Option<(Arc<[u8]>, u64)>, bool), String> {
+    let mut caches = caches
+        .lock()
+        .map_err(|_| "encoded cache lock poisoned".to_string())?;
+    let cache = caches
+        .get_mut(content_key)
+        .ok_or_else(|| "encoded track cache is unavailable".to_string())?;
+    cache.last_touched = cache.last_touched.saturating_add(1);
+    Ok((
+        cache
+            .chunks
+            .get(chunk_index)
+            .map(|chunk| (Arc::clone(&chunk.data), chunk.duration_millis)),
+        cache.integrity == CacheIntegrity::Complete,
+    ))
+}
+
+pub(crate) fn cache_local_seek_target(
+    caches: &EncodedCaches,
+    content_key: &str,
+    target_position_millis: u64,
+) -> Option<LocalCacheSeekTarget> {
+    let mut caches = caches.lock().ok()?;
+    let cache = caches.get_mut(content_key)?;
+    let (chunk_index, chunk) = cache.chunks.iter().enumerate().find(|(_, chunk)| {
+        target_position_millis >= chunk.start_position_millis
+            && target_position_millis
+                <= chunk
+                    .start_position_millis
+                    .saturating_add(chunk.duration_millis)
+    })?;
+    cache.last_touched = cache.last_touched.saturating_add(1);
+    Some(LocalCacheSeekTarget {
+        chunk_index,
+        chunk_start_position_millis: chunk.start_position_millis,
+        skip_within_chunk_millis: target_position_millis
+            .saturating_sub(chunk.start_position_millis),
+    })
 }
 
 pub(crate) fn cache_evict_to_fit(
@@ -311,7 +395,7 @@ pub(crate) fn cache_complete_duration_millis(
 ) -> Option<u64> {
     let caches = caches.lock().ok()?;
     let cache = caches.get(content_key)?;
-    cache.complete.then_some(cache.cached_duration_millis)
+    (cache.integrity == CacheIntegrity::Complete).then_some(cache.cached_duration_millis)
 }
 
 pub(crate) fn cache_total_bytes(caches: &EncodedCaches) -> usize {
@@ -567,7 +651,7 @@ mod tests {
     }
 
     #[test]
-    fn discards_only_corrupted_caches_that_leave_the_download_window() {
+    fn discards_only_interrupted_caches_that_leave_the_download_window() {
         let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
         let sequence = Arc::new(AtomicU64::new(0));
         let format = AudioFormat {
@@ -577,24 +661,24 @@ mod tests {
             bit_depth: 16,
             codec_header: None,
         };
-        let corrupted = reservation("provider:track:corrupted", "slot-1-1");
+        let interrupted = reservation("provider:track:interrupted", "slot-1-1");
         let healthy = reservation("provider:track:healthy", "slot-2-1");
-        cache_append_encoded_chunk(&caches, &sequence, 100, &corrupted, &format, 10, &[1]);
+        cache_append_encoded_chunk(&caches, &sequence, 100, &interrupted, &format, 10, &[1]);
         cache_append_encoded_chunk(&caches, &sequence, 100, &healthy, &format, 10, &[2]);
         assert_eq!(
-            cache_mark_corrupted(&caches, &corrupted.cache_content_key),
+            cache_mark_interrupted(&caches, &interrupted.cache_content_key),
             Some(10)
         );
 
         assert_eq!(
-            cache_discard_corrupted_outside_window(
+            cache_discard_interrupted_outside_window(
                 &caches,
                 std::slice::from_ref(&healthy.cache_content_key),
             ),
-            vec![corrupted.cache_content_key.clone()]
+            vec![interrupted.cache_content_key.clone()]
         );
         let caches = caches.lock().expect("cache lock");
-        assert!(!caches.contains_key(&corrupted.cache_content_key));
+        assert!(!caches.contains_key(&interrupted.cache_content_key));
         assert!(caches.contains_key(&healthy.cache_content_key));
     }
 }

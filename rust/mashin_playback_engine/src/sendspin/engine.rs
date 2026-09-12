@@ -77,6 +77,7 @@ pub(crate) struct SendspinEngine {
     last_download_status_log: Option<Instant>,
     next_reconnect_attempt: Option<Instant>,
     reconnect_in_flight: bool,
+    playback_position_offset_millis: i64,
 }
 
 #[derive(Clone)]
@@ -103,11 +104,31 @@ impl SendspinEngine {
             last_download_status_log: None,
             next_reconnect_attempt: None,
             reconnect_in_flight: false,
+            playback_position_offset_millis: 0,
         }
     }
 
     pub(crate) fn init(&mut self, config: Value) {
-        let downloader_config = SendspinDownloaderConfig {
+        let downloader_config = Self::downloader_config(&config);
+        self.config = Some(config);
+        self.snapshot = SendspinSnapshot::default();
+        self.download_plan_version = 0;
+        self.next_queue_item_id = 1;
+        self.next_original_index = 0;
+        self.current_cache_content_key = None;
+        self.queue_content_keys.clear();
+        self.recently_played_content_keys.clear();
+        self.last_download_status_log = None;
+        self.next_reconnect_attempt = None;
+        self.reconnect_in_flight = false;
+        self.playback_position_offset_millis = 0;
+        self.downloader = SendspinDownloader::new();
+        self.downloader.configure(downloader_config);
+        self.audio_player.stop();
+    }
+
+    fn downloader_config(config: &Value) -> SendspinDownloaderConfig {
+        SendspinDownloaderConfig {
             sendspin_url: config
                 .get("sendspinUrl")
                 .and_then(Value::as_str)
@@ -147,21 +168,7 @@ impl SendspinEngine {
                 .and_then(Value::as_str)
                 .unwrap_or("pcm")
                 .to_string(),
-        };
-        self.config = Some(config);
-        self.snapshot = SendspinSnapshot::default();
-        self.download_plan_version = 0;
-        self.next_queue_item_id = 1;
-        self.next_original_index = 0;
-        self.current_cache_content_key = None;
-        self.queue_content_keys.clear();
-        self.recently_played_content_keys.clear();
-        self.last_download_status_log = None;
-        self.next_reconnect_attempt = None;
-        self.reconnect_in_flight = false;
-        self.downloader = SendspinDownloader::new();
-        self.downloader.configure(downloader_config);
-        self.audio_player.stop();
+            }
     }
 
     pub(crate) fn configure(&mut self, config: Value) -> Result<(), String> {
@@ -193,11 +200,43 @@ impl SendspinEngine {
             .config
             .clone()
             .ok_or_else(|| "Sendspin engine is not configured".to_string())?;
+        if config
+            .get("preferredCodec")
+            .and_then(Value::as_str)
+            .map(|value| value.eq_ignore_ascii_case(&normalized))
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
         config["preferredCodec"] = Value::String(normalized);
-        let was_online = self.snapshot.connection_state == "online";
-        self.configure(config)?;
-        if was_online {
-            self.connect()?;
+        let playback_position_millis = self
+            .snapshot
+            .local_playback_position_millis
+            .unwrap_or_else(|| self.audio_player.playback_position_millis())
+            .max(0);
+        let queue_items = self.queue_media_items();
+        let current_index = self.snapshot.current_index;
+        let was_connected = matches!(self.snapshot.connection_state.as_str(), "online" | "reconnecting");
+        self.config = Some(config.clone());
+        let downloader_config = Self::downloader_config(&config);
+        if was_connected {
+            self.downloader.restart_for_codec_change(downloader_config)?;
+        } else {
+            self.downloader.configure(downloader_config);
+        }
+        if let Some(current_index) = current_index {
+            let plan = self.build_queue_download_plan(queue_items, current_index)?;
+            let plan_json = serde_json::to_string(&plan)
+                .map_err(|error| format!("serialize Sendspin codec-change plan failed: {error}"))?;
+            self.downloader
+                .set_pending_current_seek(playback_position_millis / 1_000)?;
+            self.apply_queue_download_plan(&plan_json)?;
+            let content_key = self
+                .current_cache_content_key
+                .clone()
+                .ok_or_else(|| "codec-change plan has no current item".to_string())?;
+            self.play_cached_content(&content_key)?;
+            self.playback_position_offset_millis = playback_position_millis;
         }
         Ok(())
     }
@@ -621,15 +660,28 @@ impl SendspinEngine {
     }
 
     pub(crate) fn play_cached_content(&mut self, content_key: &str) -> Result<(), String> {
+        self.play_cached_content_with_seek(content_key, 0, 0)
+    }
+
+    fn play_cached_content_with_seek(
+        &mut self,
+        content_key: &str,
+        chunk_index: usize,
+        skip_millis: u64,
+    ) -> Result<(), String> {
         let key = content_key.trim();
         if key.is_empty() {
             return Err("play content key is empty".to_string());
         }
         LOGGER.debug("preparing cached content for playback");
         self.downloader.mark_cache_buffering(key)?;
-        self.audio_player
-            .prepare(AudioSource::cached_content(key.to_string()));
+        self.audio_player.prepare_with_seek(
+            AudioSource::cached_content(key.to_string()),
+            chunk_index,
+            skip_millis,
+        );
         self.current_cache_content_key = Some(key.to_string());
+        self.playback_position_offset_millis = 0;
         self.snapshot.playback_state = PlaybackState::Buffering.as_str().to_string();
         self.snapshot.local_playback_position_millis = Some(0);
         self.start_prepared_audio_if_available(key);
@@ -711,8 +763,10 @@ impl SendspinEngine {
             return;
         }
         self.refresh_queue_cache_states();
-        self.snapshot.local_playback_position_millis =
-            Some(self.audio_player.playback_position_millis());
+        self.snapshot.local_playback_position_millis = Some(
+            self.playback_position_offset_millis
+                .saturating_add(self.audio_player.playback_position_millis()),
+        );
         self.snapshot.playback_state = match self.audio_player.state() {
             AudioPlayerState::Buffering => PlaybackState::Buffering,
             AudioPlayerState::Playing => PlaybackState::Playing,
@@ -727,8 +781,11 @@ impl SendspinEngine {
 
     fn pump_audio_player(&mut self, content_key: &str) {
         self.audio_player.pump_until(750, |chunk_index| {
-            match self.downloader.cache_chunk(content_key, chunk_index) {
-                Ok((Some(chunk), _)) => SourceReadResult::Data(chunk),
+            match self.downloader.cache_chunk_with_duration(content_key, chunk_index) {
+                Ok((Some((data, duration_millis)), _)) => SourceReadResult::Data {
+                    data,
+                    duration_millis,
+                },
                 Ok((None, true)) => SourceReadResult::EndOfStream,
                 Ok((None, false)) => SourceReadResult::Waiting,
                 Err(error) => SourceReadResult::Error(error),
@@ -787,10 +844,30 @@ impl SendspinEngine {
             .clone()
             .ok_or_else(|| "cannot seek without an active track".to_string())?;
 
-        // TODO: Seek directly in the local cache when chunk/time indexing exists.
+        if let Some(target) = self
+            .downloader
+            .local_cache_seek_target(&content_key, position as u64)
+        {
+            LOGGER.debug(format!(
+                "transport seek served from local cache: target {} ms, chunk {}, chunk start {} ms",
+                position, target.chunk_index, target.chunk_start_position_millis
+            ));
+            self.play_cached_content_with_seek(
+                &content_key,
+                target.chunk_index,
+                target.skip_within_chunk_millis,
+            )?;
+            self.playback_position_offset_millis = position;
+            self.snapshot.local_playback_position_millis = Some(position);
+            return Ok(());
+        }
+        LOGGER.debug(format!(
+            "transport seek delegated to downloader: target {} ms is not cached",
+            position
+        ));
         self.downloader.seek(&content_key, position / 1000)?;
-        self.snapshot.local_playback_position_millis = Some(position);
-        self.snapshot.playback_state = PlaybackState::Buffering.as_str().to_string();
+        self.play_cached_content(&content_key)?;
+        self.playback_position_offset_millis = position;
         Ok(())
     }
 
