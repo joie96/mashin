@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -3288,12 +3290,13 @@ class MediaProviderIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
     final String? trimmed = iconSvg?.trim();
+    final Widget fallback = Icon(
+      Icons.radio_button_checked_outlined,
+      size: size,
+      color: colors.textSecondary,
+    );
     if (trimmed == null || trimmed.isEmpty) {
-      return Icon(
-        Icons.radio_button_checked_outlined,
-        size: size,
-        color: colors.textSecondary,
-      );
+      return fallback;
     }
 
     final String decoded = _decodedInlineSvgCache.putIfAbsent(
@@ -3313,31 +3316,49 @@ class MediaProviderIcon extends StatelessWidget {
       );
     }
 
+    if (_isRasterImageDataUri(trimmed)) {
+      return MediaImage(
+        source: trimmed,
+        fit: BoxFit.contain,
+        fallback: fallback,
+      );
+    }
+
     final Uri? uri = Uri.tryParse(trimmed);
     final bool isNetworkSvg =
         uri != null && (uri.scheme == 'http' || uri.scheme == 'https');
     if (!isNetworkSvg) {
-      return Icon(
-        Icons.radio_button_checked_outlined,
-        size: size,
-        color: colors.textSecondary,
-      );
+      return fallback;
     }
 
     return SvgPicture.network(
       trimmed,
       width: size,
       height: size,
-      placeholderBuilder: (_) => Icon(
-        Icons.radio_button_checked_outlined,
-        size: size,
-        color: colors.textSecondary,
-      ),
+      placeholderBuilder: (_) => fallback,
     );
   }
 }
 
 String _maybeDecodeSvgPayload(String raw) {
+  final String lowerCase = raw.toLowerCase();
+  if (lowerCase.startsWith('data:image/svg+xml')) {
+    final int separator = raw.indexOf(',');
+    if (separator < 0) {
+      return raw;
+    }
+
+    try {
+      final String header = raw.substring(0, separator).toLowerCase();
+      final String payload = raw.substring(separator + 1);
+      return header.contains(';base64')
+          ? utf8.decode(base64Decode(payload))
+          : Uri.decodeComponent(payload);
+    } on FormatException {
+      return raw;
+    }
+  }
+
   if (!raw.contains('%')) {
     return raw;
   }
@@ -3347,6 +3368,12 @@ String _maybeDecodeSvgPayload(String raw) {
   } catch (_) {
     return raw;
   }
+}
+
+bool _isRasterImageDataUri(String value) {
+  final String lowerCase = value.toLowerCase();
+  return lowerCase.startsWith('data:image/') &&
+      !lowerCase.startsWith('data:image/svg+xml');
 }
 
 String _inlineSvgClassFillColors(String svg) {

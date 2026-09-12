@@ -1502,7 +1502,34 @@ class MusicAssistantClient {
     final result = await _sendCommand('providers/manifests');
     final manifests = _mapList(result, ProviderManifest.fromJson);
     ProviderManifestRegistry.registerAll(manifests);
+    await Future.wait(
+      manifests.where((ProviderManifest manifest) => manifest.hasDefaultIcon).map(
+        (ProviderManifest manifest) async {
+          try {
+            final iconData = await getProviderIconData(manifest.domain);
+            if (iconData != null) {
+              ProviderManifestRegistry.registerIconData(
+                manifest.domain,
+                iconData,
+              );
+            }
+          } catch (_) {}
+        },
+      ),
+    );
     return manifests;
+  }
+
+  Future<String?> getProviderIconData(String provider) async {
+    final result = await _sendCommand(
+      'providers/icon',
+      args: <String, dynamic>{'provider': provider, 'variant': 'default'},
+    );
+    if (result is! String) {
+      return null;
+    }
+    final iconData = result.trim();
+    return iconData.isEmpty ? null : iconData;
   }
 
   Future<ProviderManifest?> getProviderManifest(
@@ -1518,6 +1545,14 @@ class MusicAssistantClient {
 
     final manifest = ProviderManifest.fromJson(result);
     ProviderManifestRegistry.registerOne(manifest);
+    if (manifest.hasDefaultIcon) {
+      try {
+        final iconData = await getProviderIconData(manifest.domain);
+        if (iconData != null) {
+          ProviderManifestRegistry.registerIconData(manifest.domain, iconData);
+        }
+      } catch (_) {}
+    }
     return manifest;
   }
 

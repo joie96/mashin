@@ -943,6 +943,7 @@ class ProviderManifest {
   final String? iconSvg;
   final String? iconSvgDark;
   final String? iconSvgMonochrome;
+  final List<String> iconImages;
   final String? type;
   final bool? builtin;
   final Map<String, dynamic> raw;
@@ -955,6 +956,7 @@ class ProviderManifest {
     this.iconSvg,
     this.iconSvgDark,
     this.iconSvgMonochrome,
+    this.iconImages = const <String>[],
     this.type,
     this.builtin,
     required this.raw,
@@ -969,6 +971,12 @@ class ProviderManifest {
       iconSvg: (json['icon_svg'] as String?)?.trim(),
       iconSvgDark: (json['icon_svg_dark'] as String?)?.trim(),
       iconSvgMonochrome: (json['icon_svg_monochrome'] as String?)?.trim(),
+        iconImages: (json['icon_images'] as List?)
+            ?.whereType<String>()
+            .map((String value) => value.trim().toLowerCase())
+            .where((String value) => value.isNotEmpty)
+            .toList(growable: false) ??
+          const <String>[],
       type: (json['type'] as String?)?.trim(),
       builtin: json['builtin'] as bool?,
       raw: Map<String, dynamic>.from(json),
@@ -976,11 +984,14 @@ class ProviderManifest {
   }
 
   String? get preferredIconSvg => iconSvg?.trim();
+
+  bool get hasDefaultIcon => iconImages.contains('default');
 }
 
 class ProviderManifestRegistry {
   static final Map<String, ProviderManifest> _byDomain =
       <String, ProviderManifest>{};
+  static final Map<String, String> _iconDataByDomain = <String, String>{};
 
   static void registerAll(Iterable<ProviderManifest> manifests) {
     for (final manifest in manifests) {
@@ -996,6 +1007,14 @@ class ProviderManifestRegistry {
     registerAll(<ProviderManifest>[manifest]);
   }
 
+  static void registerIconData(String providerOrDomain, String iconData) {
+    final domain = _providerDomain(providerOrDomain);
+    final value = iconData.trim();
+    if (domain.isNotEmpty && value.isNotEmpty) {
+      _iconDataByDomain[domain] = value;
+    }
+  }
+
   static ProviderManifest? getByProvider(String providerOrDomain) {
     final domain = _providerDomain(providerOrDomain);
     if (domain.isEmpty) {
@@ -1005,7 +1024,10 @@ class ProviderManifestRegistry {
   }
 
   static String? iconSvgForProvider(String providerOrDomain) {
-    final raw = getByProvider(providerOrDomain)?.preferredIconSvg?.trim();
+    final domain = _providerDomain(providerOrDomain);
+    final raw =
+        _iconDataByDomain[domain]?.trim() ??
+        getByProvider(providerOrDomain)?.preferredIconSvg?.trim();
     if (raw == null || raw.isEmpty) {
       return null;
     }
