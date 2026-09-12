@@ -20,6 +20,8 @@ pub(crate) fn notify_cache_changed(signal: &CacheChangeSignal) {
 pub(crate) struct DownloadSlotReservation {
     pub(crate) cache_content_key: String,
     pub(crate) expected_duration_millis: Option<u64>,
+    pub(crate) resume_after_millis: u64,
+    pub(crate) append_after_seek: Arc<AtomicBool>,
     pub(crate) lease_id: String,
     pub(crate) warm_keepalive_cancel: Arc<AtomicBool>,
 }
@@ -31,6 +33,7 @@ pub(crate) struct EncodedTrackCache {
     last_touched: u64,
     format: Option<AudioFormat>,
     complete: bool,
+    corrupted: bool,
 }
 
 impl EncodedTrackCache {
@@ -143,6 +146,7 @@ pub(crate) fn cache_append_encoded_chunk(
                 last_touched: touch,
                 format: Some(format.clone()),
                 complete: false,
+                corrupted: false,
             });
         cache.last_touched = touch;
         cache.format = Some(format.clone());
@@ -171,6 +175,45 @@ pub(crate) fn cache_discard_incomplete(caches: &EncodedCaches, content_key: &str
             caches.remove(content_key);
         }
     }
+}
+
+pub(crate) fn cache_mark_corrupted(caches: &EncodedCaches, content_key: &str) -> Option<u64> {
+    let Ok(mut caches) = caches.lock() else {
+        return None;
+    };
+    let cache = caches.get_mut(content_key)?;
+    if cache.complete {
+        return None;
+    }
+    cache.corrupted = true;
+    Some(cache.cached_duration_millis)
+}
+
+pub(crate) fn cache_corrupted_duration_millis(
+    caches: &EncodedCaches,
+    content_key: &str,
+) -> Option<u64> {
+    let caches = caches.lock().ok()?;
+    let cache = caches.get(content_key)?;
+    cache.corrupted.then_some(cache.cached_duration_millis)
+}
+
+pub(crate) fn cache_discard_corrupted_outside_window(
+    caches: &EncodedCaches,
+    content_keys: &[String],
+) -> Vec<String> {
+    let Ok(mut caches) = caches.lock() else {
+        return Vec::new();
+    };
+    let discarded = caches
+        .iter()
+        .filter(|(key, cache)| cache.corrupted && !content_keys.contains(key))
+        .map(|(key, _)| key.clone())
+        .collect::<Vec<_>>();
+    for key in &discarded {
+        caches.remove(key);
+    }
+    discarded
 }
 
 pub(crate) fn cache_read_format(
@@ -286,6 +329,8 @@ mod tests {
         DownloadSlotReservation {
             cache_content_key: cache_content_key.to_string(),
             expected_duration_millis: None,
+            resume_after_millis: 0,
+            append_after_seek: Arc::new(AtomicBool::new(true)),
             lease_id: lease_id.to_string(),
             warm_keepalive_cancel: Arc::new(AtomicBool::new(false)),
         }
@@ -519,5 +564,37 @@ mod tests {
         let caches = caches.lock().expect("cache lock");
         assert!(!caches.contains_key(&partial.cache_content_key));
         assert!(caches.contains_key(&complete.cache_content_key));
+    }
+
+    #[test]
+    fn discards_only_corrupted_caches_that_leave_the_download_window() {
+        let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
+        let sequence = Arc::new(AtomicU64::new(0));
+        let format = AudioFormat {
+            codec: ::sendspin::audio::Codec::Pcm,
+            sample_rate: 48_000,
+            channels: 2,
+            bit_depth: 16,
+            codec_header: None,
+        };
+        let corrupted = reservation("provider:track:corrupted", "slot-1-1");
+        let healthy = reservation("provider:track:healthy", "slot-2-1");
+        cache_append_encoded_chunk(&caches, &sequence, 100, &corrupted, &format, 10, &[1]);
+        cache_append_encoded_chunk(&caches, &sequence, 100, &healthy, &format, 10, &[2]);
+        assert_eq!(
+            cache_mark_corrupted(&caches, &corrupted.cache_content_key),
+            Some(10)
+        );
+
+        assert_eq!(
+            cache_discard_corrupted_outside_window(
+                &caches,
+                std::slice::from_ref(&healthy.cache_content_key),
+            ),
+            vec![corrupted.cache_content_key.clone()]
+        );
+        let caches = caches.lock().expect("cache lock");
+        assert!(!caches.contains_key(&corrupted.cache_content_key));
+        assert!(caches.contains_key(&healthy.cache_content_key));
     }
 }

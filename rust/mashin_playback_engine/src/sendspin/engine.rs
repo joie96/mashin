@@ -75,6 +75,8 @@ pub(crate) struct SendspinEngine {
     queue_content_keys: Vec<String>,
     recently_played_content_keys: Vec<String>,
     last_download_status_log: Option<Instant>,
+    next_reconnect_attempt: Option<Instant>,
+    reconnect_in_flight: bool,
 }
 
 #[derive(Clone)]
@@ -99,6 +101,8 @@ impl SendspinEngine {
             queue_content_keys: Vec::new(),
             recently_played_content_keys: Vec::new(),
             last_download_status_log: None,
+            next_reconnect_attempt: None,
+            reconnect_in_flight: false,
         }
     }
 
@@ -153,6 +157,8 @@ impl SendspinEngine {
         self.queue_content_keys.clear();
         self.recently_played_content_keys.clear();
         self.last_download_status_log = None;
+        self.next_reconnect_attempt = None;
+        self.reconnect_in_flight = false;
         self.downloader = SendspinDownloader::new();
         self.downloader.configure(downloader_config);
         self.audio_player.stop();
@@ -212,6 +218,8 @@ impl SendspinEngine {
         self.snapshot.connection_state = "offline".to_string();
         self.snapshot.playback_state = PlaybackState::Idle.as_str().to_string();
         self.current_cache_content_key = None;
+        self.next_reconnect_attempt = None;
+        self.reconnect_in_flight = false;
     }
 
     pub(crate) fn apply_queue_download_plan(&mut self, plan_json: &str) -> Result<(), String> {
@@ -553,7 +561,7 @@ impl SendspinEngine {
         }
     }
 
-    fn log_download_status(&mut self) {
+    fn refresh_and_log_download_status(&mut self) {
         let now = Instant::now();
         if self
             .last_download_status_log
@@ -562,6 +570,7 @@ impl SendspinEngine {
         {
             return;
         }
+        self.refresh_queue_cache_states();
         let (active_downloads, cache_used_bytes, cache_capacity_bytes) =
             self.downloader.download_status();
         let completed_cache_items = self
@@ -629,6 +638,38 @@ impl SendspinEngine {
     }
 
     pub(crate) fn pump_playback(&mut self) {
+        if self.downloader.take_connection_lost() {
+            if self.snapshot.connection_state != "reconnecting" {
+                self.snapshot.connection_state = "reconnecting".to_string();
+                self.next_reconnect_attempt = Some(Instant::now());
+            } else if self.reconnect_in_flight {
+                self.reconnect_in_flight = false;
+                self.next_reconnect_attempt = Some(Instant::now() + Duration::from_secs(2));
+            }
+        }
+        if self.downloader.take_connection_ready() {
+            self.snapshot.connection_state = "online".to_string();
+            self.next_reconnect_attempt = None;
+            self.reconnect_in_flight = false;
+            if let Err(error) = self.sync_download_window() {
+                LOGGER.error(format!("failed to resume Sendspin downloads: {error}"));
+            }
+        }
+        if self.snapshot.connection_state == "reconnecting"
+            && !self.reconnect_in_flight
+            && self
+                .next_reconnect_attempt
+                .map(|attempt| Instant::now() >= attempt)
+                .unwrap_or(false)
+        {
+            match self.downloader.reconnect() {
+                Ok(()) => self.reconnect_in_flight = true,
+                Err(error) => {
+                    LOGGER.error(format!("failed to request Sendspin reconnect: {error}"));
+                    self.next_reconnect_attempt = Some(Instant::now() + Duration::from_secs(2));
+                }
+            }
+        }
         let Some(content_key) = self.current_cache_content_key.clone() else {
             return;
         };
@@ -639,8 +680,8 @@ impl SendspinEngine {
         }
         if self.downloader.take_download_status_refresh() {
             self.refresh_queue_cache_states();
-            self.log_download_status();
         }
+        self.refresh_and_log_download_status();
         self.start_prepared_audio_if_available(&content_key);
         if !self.audio_player.is_started() {
             self.refresh_queue_cache_states();
