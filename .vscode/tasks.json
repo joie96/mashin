@@ -2,9 +2,21 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Rust Playback Engine: Current Flutter Platforms Debug",
+      "label": "Rust Playback Engine: Android arm64 Debug",
       "type": "shell",
-      "command": "& '${workspaceFolder}/scripts/build_rust_playback_engine.ps1' -Profile Debug -PlatformSelection CurrentFlutter",
+      "command": "& '${workspaceFolder}/scripts/build_rust_playback_engine.ps1' -Profile Debug -PlatformSelection AndroidArm64",
+      "problemMatcher": []
+    },
+    {
+      "label": "Rust Playback Engine: Windows x64 Debug",
+      "type": "shell",
+      "command": "& '${workspaceFolder}/scripts/build_rust_playback_engine.ps1' -Profile Debug -PlatformSelection WindowsX64",
+      "problemMatcher": []
+    },
+    {
+      "label": "Rust Playback Engine: Windows arm64 Debug",
+      "type": "shell",
+      "command": "& '${workspaceFolder}/scripts/build_rust_playback_engine.ps1' -Profile Debug -PlatformSelection WindowsArm64",
       "problemMatcher": []
     },
     {
@@ -17,6 +29,59 @@
       "label": "Rust Playback Engine: Windows arm64 Release",
       "type": "shell",
       "command": "& '${workspaceFolder}/scripts/build_rust_playback_engine.ps1' -Profile Release -PlatformSelection WindowsArm64",
+      "problemMatcher": []
+    },
+    {
+      "label": "Rust Playback Engine: Android arm64 Release",
+      "type": "shell",
+      "command": "& '${workspaceFolder}/scripts/build_rust_playback_engine.ps1' -Profile Release -PlatformSelection AndroidArm64",
+      "problemMatcher": []
+    },
+    {
+      "label": "Release Build: Android APK",
+      "type": "shell",
+      "command": "flutter",
+      "args": [
+        "build",
+        "apk",
+        "--release",
+        "--dart-define=MASHIN_LOG_LEVEL=info"
+      ],
+      "dependsOn": "Rust Playback Engine: Android arm64 Release",
+      "dependsOrder": "sequence",
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Release Build: Windows x64 EXE",
+      "type": "shell",
+      "command": "flutter",
+      "args": [
+        "build",
+        "windows",
+        "--release",
+        "--target-platform=windows-x64",
+        "--dart-define=MASHIN_LOG_LEVEL=info"
+      ],
+      "dependsOn": "Rust Playback Engine: Windows x64 Release",
+      "dependsOrder": "sequence",
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Release Build: Windows arm64 EXE",
+      "type": "shell",
+      "command": "flutter",
+      "args": [
+        "build",
+        "windows",
+        "--release",
+        "--target-platform=windows-arm64",
+        "--dart-define=MASHIN_LOG_LEVEL=info"
+      ],
+      "dependsOn": "Rust Playback Engine: Windows arm64 Release",
+      "dependsOrder": "sequence",
+      "group": "build",
       "problemMatcher": []
     }
   ]

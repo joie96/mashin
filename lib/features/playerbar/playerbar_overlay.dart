@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart' hide RepeatMode;
 
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_models.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_models.dart';
+import '../core/core_userdata.dart';
 import 'playerbar_overlay_mobile.dart';
 
 class PlayerBarOverlay extends StatelessWidget {
@@ -16,6 +15,7 @@ class PlayerBarOverlay extends StatelessWidget {
     required this.currentTrack,
     required this.playbackStateType,
     required this.playbackState,
+    required this.playbackQueue,
     required this.maxSeconds,
     required this.currentSeconds,
     required this.dontStopTheMusicEnabled,
@@ -43,12 +43,13 @@ class PlayerBarOverlay extends StatelessWidget {
   final String trackSubtitle;
   final String? trackCoverUrl;
   final Track? currentTrack;
-  final PlaybackStateType playbackStateType;
-  final PlaybackState playbackState;
+  final PlayState playbackStateType;
+  final PlayerState playbackState;
+  final Queue playbackQueue;
   final double maxSeconds;
   final double currentSeconds;
   final bool dontStopTheMusicEnabled;
-  final UserDataController? userDataController;
+  final UserData? userDataController;
   final VoidCallback onClose;
   final VoidCallback onOpenQueue;
   final void Function(double upwardDelta, double viewportHeight)
@@ -77,6 +78,7 @@ class PlayerBarOverlay extends StatelessWidget {
       currentTrack: currentTrack,
       playbackStateType: playbackStateType,
       playbackState: playbackState,
+      playbackQueue: playbackQueue,
       maxSeconds: maxSeconds,
       currentSeconds: currentSeconds,
       dontStopTheMusicEnabled: dontStopTheMusicEnabled,

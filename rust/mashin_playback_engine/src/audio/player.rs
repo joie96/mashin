@@ -65,6 +65,7 @@ pub(crate) enum AudioPlayerState {
 }
 
 impl AudioPlayer {
+    // Construction.
     pub(crate) fn new() -> Self {
         Self {
             source: None,
@@ -78,6 +79,7 @@ impl AudioPlayer {
         }
     }
 
+    // Source preparation and playback lifecycle.
     pub(crate) fn prepare_with_seek(
         &mut self,
         source: AudioSource,
@@ -124,6 +126,7 @@ impl AudioPlayer {
         self.input_channels = 0;
     }
 
+    // Output controls.
     pub(crate) fn set_volume(&self, volume: u8) {
         if let Some(output) = self.output.as_ref() {
             output.set_volume(volume);
@@ -136,6 +139,7 @@ impl AudioPlayer {
         }
     }
 
+    // Playback state transitions.
     pub(crate) fn pause(&mut self) {
         if !matches!(
             self.state,
@@ -163,6 +167,7 @@ impl AudioPlayer {
         };
     }
 
+    // Decoded sample enqueueing.
     pub(crate) fn enqueue_encoded(
         &self,
         data: &[u8],
@@ -194,6 +199,7 @@ impl AudioPlayer {
         output.enqueue(Arc::from(samples[skipped_samples..].to_vec()))
     }
 
+    // Player state queries.
     pub(crate) fn is_started(&self) -> bool {
         self.decoder.is_some() && self.output.is_some()
     }
@@ -202,6 +208,7 @@ impl AudioPlayer {
         self.state
     }
 
+    // Buffer fill and state reconciliation.
     pub(crate) fn pump_until<F>(&mut self, max_buffer_millis: i64, mut read: F)
     where
         F: FnMut(usize) -> SourceReadResult,
@@ -223,7 +230,10 @@ impl AudioPlayer {
 
         while self.buffered_duration_millis() < max_buffer_millis {
             let chunk = match read(self.next_chunk_index) {
-                SourceReadResult::Data { data, duration_millis } => Some((data, duration_millis)),
+                SourceReadResult::Data {
+                    data,
+                    duration_millis,
+                } => Some((data, duration_millis)),
                 SourceReadResult::Waiting => None,
                 SourceReadResult::EndOfStream => {
                     self.source_ended = true;
@@ -259,6 +269,7 @@ impl AudioPlayer {
         };
     }
 
+    // Buffered-duration and position queries.
     pub(crate) fn buffered_duration_millis(&self) -> i64 {
         self.output
             .as_ref()

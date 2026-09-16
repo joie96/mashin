@@ -2,25 +2,22 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_userdata.dart';
 
 class AlbumDetailController extends ChangeNotifier {
   AlbumDetailController({
-    required this.client,
-    required this.playbackCoordinator,
+    required this.coreBridge,
     required this.itemId,
     required this.providerInstanceIdOrDomain,
     this.userDataController,
   });
 
-  final MusicAssistantClient client;
-  final PlaybackCoordinator playbackCoordinator;
+  final MashinCoreBridgeApi coreBridge;
   final String itemId;
   final String providerInstanceIdOrDomain;
-  final UserDataController? userDataController;
+  final UserData? userDataController;
   final ChangeNotifier _metadataNotifier = ChangeNotifier();
   final ChangeNotifier _tracksNotifier = ChangeNotifier();
   final ChangeNotifier _relatedNotifier = ChangeNotifier();
@@ -108,13 +105,11 @@ class AlbumDetailController extends ChangeNotifier {
 
   Future<void> _loadMetadata() async {
     try {
-      final Album? loaded = await client.getAlbum(
+      final Album loaded = await coreBridge.getAlbum(
         itemId,
         providerInstanceIdOrDomain,
       );
-      _album = loaded == null
-          ? null
-          : (userDataController?.withFavoriteStatus(loaded) ?? loaded);
+      _album = userDataController?.withFavoriteStatus(loaded) ?? loaded;
       final Album? album = _album;
       _isAlbumFavorite = album != null && isItemFavorite(album);
     } catch (_) {
@@ -128,7 +123,7 @@ class AlbumDetailController extends ChangeNotifier {
 
   Future<void> _loadTracks() async {
     try {
-      final List<Track> loaded = await client.getAlbumTracks(
+      final List<Track> loaded = await coreBridge.getAlbumTracks(
         itemId,
         providerInstanceIdOrDomain,
       );
@@ -144,12 +139,20 @@ class AlbumDetailController extends ChangeNotifier {
                       name: track.name,
                       duration: track.duration,
                       artists: track.artists,
+                      version: track.version,
                       sortName: track.sortName,
                       uri: track.uri,
-                      album: loadedAlbum,
+                      externalIds: track.externalIds,
+                      isPlayable: track.isPlayable,
+                      album: AlbumReference.fromAlbum(loadedAlbum),
+                      image: track.image,
                       providerMappings: track.providerMappings,
                       metadata: track.metadata,
-                      favorite: false,
+                      favorite: track.favorite,
+                      position: track.position,
+                      dateAdded: track.dateAdded,
+                      discNumber: track.discNumber,
+                      trackNumber: track.trackNumber,
                     );
               return userDataController?.withFavoriteStatus(withAlbum) ??
                   withAlbum;
@@ -176,7 +179,7 @@ class AlbumDetailController extends ChangeNotifier {
     }
 
     try {
-      final List<Album> loaded = await client.getArtistAlbums(
+      final List<Album> loaded = await coreBridge.getArtistAlbums(
         artist.itemId,
         artist.provider,
       );
@@ -213,14 +216,14 @@ class AlbumDetailController extends ChangeNotifier {
     }
 
     try {
-      List<Track> similarTracks = await client.getSimilarTracks(
+      List<Track> similarTracks = await coreBridge.getSimilarTracks(
         seed.itemId,
         seed.provider,
         limit: 50,
         allowLookup: true,
       );
       if (similarTracks.isEmpty) {
-        final List<Track> versions = await client.getTrackVersions(
+        final List<Track> versions = await coreBridge.getTrackVersions(
           seed.itemId,
           seed.provider,
         );
@@ -229,7 +232,7 @@ class AlbumDetailController extends ChangeNotifier {
             (Track version) => version.provider != seed.provider,
             orElse: () => versions.first,
           );
-          similarTracks = await client.getSimilarTracks(
+          similarTracks = await coreBridge.getSimilarTracks(
             fallback.itemId,
             fallback.provider,
             limit: 50,
@@ -252,7 +255,7 @@ class AlbumDetailController extends ChangeNotifier {
       for (final Artist artist in unique.values.take(15)) {
         try {
           enriched.add(
-            await client.getArtist(artist.itemId, artist.provider) ?? artist,
+            await coreBridge.getArtist(artist.itemId, artist.provider),
           );
         } catch (_) {
           enriched.add(artist);
@@ -285,7 +288,7 @@ class AlbumDetailController extends ChangeNotifier {
     _tracksNotifier.notifyListeners();
     _relatedNotifier.notifyListeners();
     try {
-      final UserDataController? controller = userDataController;
+      final UserData? controller = userDataController;
       if (controller == null) {
         _favoriteOverrides.remove(key);
         _tracksNotifier.notifyListeners();
@@ -309,7 +312,7 @@ class AlbumDetailController extends ChangeNotifier {
     _isAlbumFavorite = next;
     _metadataNotifier.notifyListeners();
     try {
-      final UserDataController? controller = userDataController;
+      final UserData? controller = userDataController;
       if (controller == null) {
         _isAlbumFavorite = !next;
         _metadataNotifier.notifyListeners();
@@ -332,24 +335,24 @@ class AlbumDetailController extends ChangeNotifier {
     if (current == null) {
       return;
     }
-    await playbackCoordinator.playMedia(<MediaItem>[current]);
+    await coreBridge.playMedia(<MediaItem>[current]);
   }
 
   Future<void> shuffleAlbum() async {
     if (_tracks.isEmpty) {
       return;
     }
-    await playbackCoordinator.shufflePlayMedia(_tracks);
+    await coreBridge.playShuffledMedia(_tracks);
   }
 
   Future<void> startTrackRadio(Track track) async {
-    await playbackCoordinator.playMedia(<MediaItem>[track]);
-    await playbackCoordinator.playMediaRadioNext(<MediaItem>[track]);
+    await coreBridge.playMedia(<MediaItem>[track]);
+    await coreBridge.playSendspinRadioNext(<MediaItem>[track]);
   }
 
   Future<void> startItemRadio(MediaItem item) async {
-    await playbackCoordinator.playMedia(<MediaItem>[item]);
-    await playbackCoordinator.playMediaRadioNext(<MediaItem>[item]);
+    await coreBridge.playMedia(<MediaItem>[item]);
+    await coreBridge.playSendspinRadioNext(<MediaItem>[item]);
   }
 
   String _favoriteKey(MediaItem item) =>

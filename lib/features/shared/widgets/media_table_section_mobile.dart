@@ -4,8 +4,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
-import '../../../data/music_assistant/ma_models.dart';
-import '../../playback/playback_coordinator.dart';
+import '../../core/core_bridge.dart';
+import '../../core/core_events.dart';
+import '../../core/core_models.dart';
 import '../selection/selection_controller.dart';
 import 'media_table_section_desktop.dart';
 import 'mobile_section_header.dart';
@@ -22,7 +23,8 @@ class MediaTableSectionMobile<T> extends StatefulWidget {
   final DesktopRowAction<T>? onRowTap;
   final ValueChanged<List<T>>? onSelectionChanged;
   final ValueChanged<List<T>>? onSelectionMenuTap;
-  final PlaybackCoordinator? playbackCoordinator;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
   final String Function(Playlist playlist)? playlistSubtitleBuilder;
 
   const MediaTableSectionMobile({
@@ -38,7 +40,8 @@ class MediaTableSectionMobile<T> extends StatefulWidget {
     this.onRowTap,
     this.onSelectionChanged,
     this.onSelectionMenuTap,
-    this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     this.playlistSubtitleBuilder,
   });
 
@@ -107,11 +110,6 @@ class _MediaTableSectionMobileState<T>
   }
 
   void _onPlayAllTap() {
-    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
-    if (coordinator == null) {
-      return;
-    }
-
     final List<MediaItem> playItems = _playableItemsFromIndex(0);
     if (playItems.isEmpty) {
       return;
@@ -119,7 +117,7 @@ class _MediaTableSectionMobileState<T>
 
     unawaited(() async {
       try {
-        await coordinator.playMedia(
+        await widget.coreBridge.playMedia(
           _isTrackSection ? playItems : <MediaItem>[playItems.first],
         );
       } catch (_) {
@@ -129,11 +127,6 @@ class _MediaTableSectionMobileState<T>
   }
 
   void _onShuffleAllTap() {
-    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
-    if (coordinator == null) {
-      return;
-    }
-
     final List<MediaItem> playItems = _playableItemsFromIndex(0);
     if (playItems.isEmpty) {
       return;
@@ -142,13 +135,13 @@ class _MediaTableSectionMobileState<T>
     unawaited(() async {
       try {
         if (_isTrackSection) {
-          await coordinator.shufflePlayMedia(playItems);
+          await widget.coreBridge.playShuffledMedia(playItems);
           return;
         }
 
         final MediaItem item =
             playItems[math.Random().nextInt(playItems.length)];
-        await coordinator.playMedia(<MediaItem>[item]);
+        await widget.coreBridge.playMedia(<MediaItem>[item]);
       } catch (_) {
         // Ignore failures to keep header interactions responsive.
       }
@@ -156,15 +149,14 @@ class _MediaTableSectionMobileState<T>
   }
 
   Future<bool> _handleRowActivate({required T item, required int index}) async {
-    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
-    if (coordinator == null || index < 0 || index >= widget.items.length) {
+    if (index < 0 || index >= widget.items.length) {
       return false;
     }
 
     final Object? rawItem = item;
     if (rawItem is QueueItem) {
       try {
-        await coordinator.playQueueIndex(index);
+        await widget.coreBridge.playQueueIndex(index);
         return true;
       } catch (_) {
         return false;
@@ -177,7 +169,7 @@ class _MediaTableSectionMobileState<T>
     }
 
     try {
-      await coordinator.playMedia(playItems);
+      await widget.coreBridge.playMedia(playItems);
       return true;
     } catch (_) {
       return false;
@@ -372,7 +364,7 @@ class _MediaTableSectionMobileState<T>
                 itemCount: !widget.isLoading && widget.items.isNotEmpty
                     ? widget.items.length
                     : null,
-                showPlaybackActions: widget.playbackCoordinator != null,
+                showPlaybackActions: true,
                 onPlayTap: hasPlayableContent ? _onPlayAllTap : null,
                 onShuffleTap: hasPlayableContent ? _onShuffleAllTap : null,
                 shuffleTooltip: 'Zufällig',
@@ -712,7 +704,7 @@ class _MediaTableSectionMobileState<T>
       onLongPressSelect: onLongPressSelect,
       onTap: onTap,
       onMoreTap: onMoreTap,
-      playbackCoordinator: widget.playbackCoordinator,
+      coreEvents: widget.coreEvents,
       playbackItem: item,
     );
   }
@@ -728,24 +720,25 @@ class _MediaTableSectionMobileState<T>
     required VoidCallback? onTap,
     required VoidCallback? onMoreTap,
   }) {
-    final String provider = item.mediaItem?.provider.trim() ?? '';
-    final String title = (item.mediaItem?.name.trim().isNotEmpty == true)
-        ? item.mediaItem!.name.trim()
+    final MediaItem mediaItem = item.mediaItem;
+    final Track? track = mediaItem is Track ? mediaItem : null;
+    final String provider = item.mediaItem.provider.trim();
+    final String title = item.mediaItem.name.trim().isNotEmpty
+        ? item.mediaItem.name.trim()
         : item.name.trim().isNotEmpty
         ? item.name.trim()
         : 'Unbekannter Titel';
     final String subtitle =
-        item.mediaItem?.artists
+        track?.artists
             .map((artist) => artist.name.trim())
             .where((name) => name.isNotEmpty)
             .join(', ') ??
         '';
-
     return _buildMobileTableRowBase(
       title: title,
       subtitle: subtitle.isEmpty ? '-' : subtitle,
       trailing: _formatDuration(item.duration ?? 0),
-      coverUrl: item.mediaItem?.imageUriForSize(80),
+      coverUrl: item.mediaItem.imageUriForSize(80),
       fallbackIcon: Icons.music_note_outlined,
       providerLabel: _providerLabelFromId(provider),
       providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(provider),
@@ -757,7 +750,7 @@ class _MediaTableSectionMobileState<T>
       onLongPressSelect: onLongPressSelect,
       onTap: onTap,
       onMoreTap: onMoreTap,
-      playbackCoordinator: widget.playbackCoordinator,
+      coreEvents: widget.coreEvents,
       playbackItem: item.mediaItem,
     );
   }
@@ -791,6 +784,7 @@ class _MediaTableSectionMobileState<T>
       onLongPressSelect: onLongPressSelect,
       onTap: onTap,
       onMoreTap: onMoreTap,
+      coreEvents: widget.coreEvents,
     );
   }
 
@@ -807,8 +801,8 @@ class _MediaTableSectionMobileState<T>
   }) {
     return _buildMobileTableRowBase(
       title: _prefer(item.name, 'Unknown Playlist'),
-      subtitle: widget.playlistSubtitleBuilder?.call(item) ??
-          _playlistSubtitle(item),
+      subtitle:
+          widget.playlistSubtitleBuilder?.call(item) ?? _playlistSubtitle(item),
       trailing: null,
       coverUrl: item.imageUriForSize(80),
       fallbackIcon: Icons.queue_music_outlined,
@@ -824,6 +818,7 @@ class _MediaTableSectionMobileState<T>
       onLongPressSelect: onLongPressSelect,
       onTap: onTap,
       onMoreTap: onMoreTap,
+      coreEvents: widget.coreEvents,
     );
   }
 
@@ -856,6 +851,7 @@ class _MediaTableSectionMobileState<T>
       onLongPressSelect: onLongPressSelect,
       onTap: onTap,
       onMoreTap: onMoreTap,
+      coreEvents: widget.coreEvents,
     );
   }
 
@@ -886,6 +882,7 @@ class _MediaTableSectionMobileState<T>
       onLongPressSelect: onLongPressSelect,
       onTap: onTap,
       onMoreTap: onMoreTap,
+      coreEvents: widget.coreEvents,
     );
   }
 }
@@ -906,7 +903,7 @@ class _MobileTableRowBase extends StatelessWidget {
   final VoidCallback onLongPressSelect;
   final VoidCallback? onTap;
   final VoidCallback? onMoreTap;
-  final PlaybackCoordinator? playbackCoordinator;
+  final MashinCoreBridgeEvents coreEvents;
   final MediaItem? playbackItem;
 
   const _MobileTableRowBase({
@@ -925,7 +922,7 @@ class _MobileTableRowBase extends StatelessWidget {
     required this.onLongPressSelect,
     this.onTap,
     this.onMoreTap,
-    this.playbackCoordinator,
+    required this.coreEvents,
     this.playbackItem,
   });
 
@@ -976,7 +973,7 @@ class _MobileTableRowBase extends StatelessWidget {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: <Widget>[
                               PlaybackAwareBuilder(
-                                coordinator: playbackCoordinator,
+                                coreEvents: coreEvents,
                                 item: playbackItem,
                                 builder:
                                     (BuildContext context, bool isCurrent) {
@@ -1080,7 +1077,7 @@ Widget _buildMobileTableRowBase({
   required VoidCallback onLongPressSelect,
   required VoidCallback? onTap,
   required VoidCallback? onMoreTap,
-  PlaybackCoordinator? playbackCoordinator,
+  required MashinCoreBridgeEvents coreEvents,
   MediaItem? playbackItem,
 }) {
   return _MobileTableRowBase(
@@ -1099,7 +1096,7 @@ Widget _buildMobileTableRowBase({
     onLongPressSelect: onLongPressSelect,
     onTap: onTap,
     onMoreTap: onMoreTap,
-    playbackCoordinator: playbackCoordinator,
+    coreEvents: coreEvents,
     playbackItem: playbackItem,
   );
 }
@@ -1311,7 +1308,7 @@ String _albumSubtitle(Album album) {
   if (artist != '-') {
     return artist;
   }
-  return _mediaTypeLabel(album.albumType);
+  return _mediaTypeLabel(album.albumType.name);
 }
 
 String _trackSubtitle(Track track) {

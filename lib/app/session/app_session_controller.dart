@@ -2,61 +2,48 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import '../../data/music_assistant/ma_auth_store.dart';
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_event_hub.dart';
-import '../../features/playback/playback_coordinator.dart';
-import '../../features/playback/playback_models.dart';
-import '../../features/playback/playback_player.dart';
-import '../../features/playback/sendspin/sendspin_player.dart';
-import '../../features/playback/sendspin/sendspin_rust_bridge.dart';
-import '../../features/shared/userdata_controller.dart';
-import '../config/app_config.dart';
+import '../../features/core/core_events.dart';
+import '../../features/core/core_bridge.dart';
+import '../../features/core/core_models.dart';
+import '../../features/core/core_userdata.dart';
 import '../logging/app_logger.dart';
 
 class AppSessionController extends ChangeNotifier {
   final AppLogger _logger = AppLogger('AppSessionController');
 
-  AppSessionController()
-    : playbackCoordinator = PlaybackCoordinator(
-        players: <PlaybackPlayer>[
-          SendspinPlayer(
-            transportBackend: SendspinRustBridge(),
-            clientResolver: () => _instance?._client,
-          ),
-        ],
-        initialOutputMode: PlaybackOutputMode.localSendspin,
-      ) {
+  AppSessionController() {
+    coreBridge = MashinCoreBridge();
+    coreEvents = MashinCoreBridgeEvents(coreBridge: coreBridge);
     _instance = this;
   }
 
   static AppSessionController? _instance;
 
-  final AuthStore _authStore = AuthStore();
-  final PlaybackCoordinator playbackCoordinator;
+  late final MashinCoreBridge coreBridge;
+  late final MashinCoreBridgeEvents coreEvents;
 
-  MusicAssistantClient? _client;
-  MusicAssistantEventHub? _eventHub;
-  UserDataController? _userDataController;
-  String _baseUrl = AppConfig.defaultMusicAssistantUrl;
+  UserData? _userDataController;
+  late String _baseUrl;
   String? _username;
-  String _preferredCodec = AppConfig.sendspinPreferredCodec;
+  late String _preferredCodec;
+  bool _isAuthenticated = false;
   bool _isLoading = true;
   bool _isDisposed = false;
 
-  MusicAssistantClient? get client => _client;
-  UserDataController? get userDataController => _userDataController;
+  UserData? get userDataController => _userDataController;
   String get baseUrl => _baseUrl;
   String? get username => _username;
   String get preferredCodec => _preferredCodec;
   bool get isLoading => _isLoading;
-  bool get isAuthenticated => _client != null;
+  bool get isAuthenticated => _isAuthenticated;
 
   Future<void> initialize() async {
     try {
-      _preferredCodec = await AppConfig.getSendspinPreferredCodec();
       await _restoreSession();
-      await playbackCoordinator.initialize();
+      await _refreshSessionSettings();
+      await _loadProviderIcons();
+      await _initializeUserData();
+      await coreEvents.start();
     } catch (error, stackTrace) {
       _logger.error(
         'Startup bootstrap failed: $error',
@@ -78,150 +65,91 @@ class AppSessionController extends ChangeNotifier {
   }) async {
     _baseUrl = baseUrl;
     _username = username;
-    final String sendspinUrl = await _authStore.readSendspinUrl(
-      baseUrl: baseUrl,
-    );
-    final MusicAssistantClient loginClient = MusicAssistantClient(
-      baseUrl: baseUrl,
-    );
 
     try {
-      final String token = await loginClient.login(
+      await coreBridge.login(
+        musicAssistantUrl: baseUrl,
         username: username,
         password: password,
       );
-      final MusicAssistantClient authenticatedClient = MusicAssistantClient(
-        baseUrl: baseUrl,
-        authToken: token,
-      );
-      final MusicAssistantEventHub authenticatedEventHub =
-          MusicAssistantEventHub(baseUrl: baseUrl, authToken: token);
-
-      if (!await authenticatedClient.hasValidSession()) {
-        authenticatedClient.dispose();
-        await authenticatedEventHub.dispose();
-        return 'Anmeldung fehlgeschlagen. Bitte Eingaben pruefen.';
-      }
-
-      await _authStore.write(
-        AuthSession(
-          baseUrl: baseUrl,
-          sendspinUrl: sendspinUrl,
-          username: username,
-          token: token,
-        ),
-      );
-
       if (_isDisposed) {
-        authenticatedClient.dispose();
-        await authenticatedEventHub.dispose();
         return null;
       }
 
-      await _replaceAuthenticatedSession(
-        client: authenticatedClient,
-        eventHub: authenticatedEventHub,
-        username: username,
-      );
+      await _refreshSessionSettings();
+      _isAuthenticated = true;
+      await _loadProviderIcons();
+      await _initializeUserData();
       notifyListeners();
       return null;
-    } on UnauthorizedException {
-      return 'Benutzername oder Passwort ist ungueltig.';
-    } on RequestException catch (error) {
-      return error.message;
     } catch (_) {
       return 'Verbindung fehlgeschlagen. Bitte Server-URL pruefen.';
-    } finally {
-      loginClient.dispose();
     }
   }
 
   Future<void> setPreferredCodec(String codec) async {
-    final SendspinPlayer? player =
-        playbackCoordinator.activePlayer is SendspinPlayer
-        ? playbackCoordinator.activePlayer as SendspinPlayer
-        : null;
-    if (player == null || codec == _preferredCodec) {
+    if (codec == _preferredCodec) {
       return;
     }
 
-    await player.setPreferredAudioCodec(codec);
+    await coreBridge.requestCodec(codec);
     _preferredCodec = codec;
     notifyListeners();
   }
 
   Future<void> _restoreSession() async {
-    final AuthSession? stored = await _authStore.read();
-    _baseUrl = stored?.baseUrl ?? _baseUrl;
-    _username = stored?.username;
-
-    await _authStore.writeSendspinUrl(
-      baseUrl: _baseUrl,
-      sendspinUrl: stored?.sendspinUrl,
-    );
-
-    if (stored == null) {
-      return;
-    }
-
-    final MusicAssistantClient candidateClient = MusicAssistantClient(
-      baseUrl: stored.baseUrl,
-      authToken: stored.token,
-    );
-    if (!await candidateClient.hasValidSession()) {
-      candidateClient.dispose();
-      await _authStore.clear();
-      return;
-    }
-
-    if (_isDisposed) {
-      candidateClient.dispose();
-      return;
-    }
-
-    await _replaceAuthenticatedSession(
-      client: candidateClient,
-      eventHub: MusicAssistantEventHub(
-        baseUrl: stored.baseUrl,
-        authToken: stored.token,
-      ),
-      username: stored.username,
-    );
+    _isAuthenticated = await coreBridge.restorePersistedSession();
   }
 
-  Future<void> _replaceAuthenticatedSession({
-    required MusicAssistantClient client,
-    required MusicAssistantEventHub eventHub,
-    required String? username,
-  }) async {
-    _disposeUserDataController();
-    _client?.dispose();
-    unawaited(_eventHub?.dispose());
+  Future<void> _refreshSessionSettings() async {
+    final settings = await coreBridge.getSessionSettings();
+    _baseUrl = settings.musicAssistantUrl;
+    MediaItemImage.configureProxyBaseUrl(_baseUrl);
+    _username = settings.username;
+    _preferredCodec = settings.preferredCodec;
+  }
 
-    _client = client;
-    _eventHub = eventHub;
-    _username = username;
-    final UserDataController controller = UserDataController(
-      client: client,
-      configuredUsername: username,
-    );
-    controller.addListener(_onUserDataChanged);
+  Future<void> _initializeUserData() async {
+    _disposeUserDataController();
+    if (!_isAuthenticated) {
+      return;
+    }
+    final controller = UserData(coreBridge: coreBridge);
     _userDataController = controller;
     await controller.loadPreferences();
   }
 
-  void _onUserDataChanged() {
-    if (!_isDisposed) {
-      notifyListeners();
+  Future<void> _loadProviderIcons() async {
+    if (!_isAuthenticated) {
+      return;
     }
+
+    final manifests = await coreBridge.getProviderManifests();
+    ProviderManifestRegistry.registerAll(manifests);
+    await Future.wait(
+      manifests.where((manifest) => manifest.hasDefaultIcon).map((
+        manifest,
+      ) async {
+        try {
+          final iconData = await coreBridge.getProviderIconData(
+            manifest.domain,
+          );
+          if (iconData != null) {
+            ProviderManifestRegistry.registerIconData(
+              manifest.domain,
+              iconData,
+            );
+          }
+        } catch (_) {}
+      }),
+    );
   }
 
   void _disposeUserDataController() {
-    final UserDataController? controller = _userDataController;
+    final UserData? controller = _userDataController;
     if (controller == null) {
       return;
     }
-    controller.removeListener(_onUserDataChanged);
     controller.dispose();
     _userDataController = null;
   }
@@ -230,10 +158,8 @@ class AppSessionController extends ChangeNotifier {
   void dispose() {
     _isDisposed = true;
     _disposeUserDataController();
-    unawaited(playbackCoordinator.shutdown());
-    playbackCoordinator.dispose();
-    unawaited(_eventHub?.dispose());
-    _client?.dispose();
+    unawaited(coreBridge.shutdown());
+    coreEvents.dispose();
     if (identical(_instance, this)) {
       _instance = null;
     }

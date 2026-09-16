@@ -2,27 +2,24 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_userdata.dart';
 
 /// Loads and holds the data of a playlist detail page (metadata + tracks) and
 /// exposes the playback/favorite/edit actions used by the desktop and mobile pages.
 class PlaylistDetailController extends ChangeNotifier {
   PlaylistDetailController({
-    required this.client,
-    required this.playbackCoordinator,
+    required this.coreBridge,
     required this.itemId,
     required this.providerInstanceIdOrDomain,
     this.userDataController,
   });
 
-  final MusicAssistantClient client;
-  final PlaybackCoordinator playbackCoordinator;
+  final MashinCoreBridgeApi coreBridge;
   final String itemId;
   final String providerInstanceIdOrDomain;
-  final UserDataController? userDataController;
+  final UserData? userDataController;
 
   Playlist? _playlist;
   List<Track> _tracks = const <Track>[];
@@ -57,7 +54,7 @@ class PlaylistDetailController extends ChangeNotifier {
   bool get isEditable => _playlist?.isEditable ?? false;
   bool get isLocalPlaylist =>
       _playlist?.provider.trim().toLowerCase() ==
-      UserDataController.localPlaylistProvider;
+      UserData.localPlaylistProvider;
 
   String get playlistName {
     final String name = _playlist?.name.trim() ?? '';
@@ -104,9 +101,11 @@ class PlaylistDetailController extends ChangeNotifier {
       );
 
       if (local != null) {
-        final bool isUserPlaylist = local.provider.trim().toLowerCase() ==
-            UserDataController.localPlaylistProvider;
-        final List<Track> storedTracks = userDataController
+        final bool isUserPlaylist =
+            local.provider.trim().toLowerCase() ==
+            UserData.localPlaylistProvider;
+        final List<Track> storedTracks =
+            userDataController
                 ?.tracksForPlaylist(local.itemId)
                 .toList(growable: false) ??
             const <Track>[];
@@ -133,12 +132,14 @@ class PlaylistDetailController extends ChangeNotifier {
     _playlist = userDataController?.withFavoriteStatus(playlist) ?? playlist;
 
     _tracks = List<Track>.unmodifiable(
-      storedTracks.map((Track track) {
-        final Track withFavorite =
-            userDataController?.withFavoriteStatus(track) ?? track;
-        _favoriteOverrides[_favoriteKey(track)] = withFavorite.favorite;
-        return withFavorite;
-      }).toList(growable: false),
+      storedTracks
+          .map((Track track) {
+            final Track withFavorite =
+                userDataController?.withFavoriteStatus(track) ?? track;
+            _favoriteOverrides[_favoriteKey(track)] = withFavorite.favorite;
+            return withFavorite;
+          })
+          .toList(growable: false),
     );
 
     _isPlaylistFavorite = _playlist?.favorite ?? false;
@@ -146,15 +147,11 @@ class PlaylistDetailController extends ChangeNotifier {
 
   Future<void> _loadMetadata() async {
     try {
-      final Playlist? online = await client.getPlaylist(
+      final Playlist online = await coreBridge.getPlaylist(
         itemId,
         providerInstanceIdOrDomain,
       );
-      if (online != null) {
-        _playlist = userDataController?.withFavoriteStatus(online) ?? online;
-      } else {
-        _playlist = null;
-      }
+      _playlist = userDataController?.withFavoriteStatus(online) ?? online;
       _isPlaylistFavorite = _playlist?.favorite ?? false;
     } catch (_) {
       _playlist = null;
@@ -163,19 +160,21 @@ class PlaylistDetailController extends ChangeNotifier {
 
   Future<void> _loadTracks() async {
     try {
-      final List<Track> loaded = await client.getPlaylistTracks(
+      final List<Track> loaded = await coreBridge.getPlaylistTracks(
         itemId,
         providerInstanceIdOrDomain,
         forceRefresh: true,
       );
 
       _tracks = List<Track>.unmodifiable(
-        loaded.map((Track track) {
-          final Track withFavorite =
-              userDataController?.withFavoriteStatus(track) ?? track;
-          _favoriteOverrides[_favoriteKey(track)] = withFavorite.favorite;
-          return withFavorite;
-        }).toList(growable: false),
+        loaded
+            .map((Track track) {
+              final Track withFavorite =
+                  userDataController?.withFavoriteStatus(track) ?? track;
+              _favoriteOverrides[_favoriteKey(track)] = withFavorite.favorite;
+              return withFavorite;
+            })
+            .toList(growable: false),
       );
     } catch (_) {
       _tracks = const <Track>[];
@@ -193,24 +192,24 @@ class PlaylistDetailController extends ChangeNotifier {
     if (_tracks.isEmpty) {
       return;
     }
-    await playbackCoordinator.playMedia(_tracks);
+    await coreBridge.playMedia(_tracks);
   }
 
   Future<void> shufflePlaylist() async {
     if (_tracks.isEmpty) {
       return;
     }
-    await playbackCoordinator.shufflePlayMedia(_tracks);
+    await coreBridge.playShuffledMedia(_tracks);
   }
 
   Future<void> startTrackRadio(Track track) async {
-    await playbackCoordinator.playMedia(<MediaItem>[track]);
-    await playbackCoordinator.playMediaRadioNext(<MediaItem>[track]);
+    await coreBridge.playMedia(<MediaItem>[track]);
+    await coreBridge.playSendspinRadioNext(<MediaItem>[track]);
   }
 
   Future<void> startItemRadio(MediaItem item) async {
-    await playbackCoordinator.playMedia(<MediaItem>[item]);
-    await playbackCoordinator.playMediaRadioNext(<MediaItem>[item]);
+    await coreBridge.playMedia(<MediaItem>[item]);
+    await coreBridge.playSendspinRadioNext(<MediaItem>[item]);
   }
 
   // Favorites
@@ -223,7 +222,7 @@ class PlaylistDetailController extends ChangeNotifier {
     _favoriteOverrides[key] = next;
     notifyListeners();
     try {
-      final UserDataController? controller = userDataController;
+      final UserData? controller = userDataController;
       if (controller == null) {
         _favoriteOverrides.remove(key);
         notifyListeners();
@@ -245,7 +244,7 @@ class PlaylistDetailController extends ChangeNotifier {
     _isPlaylistFavorite = next;
     notifyListeners();
     try {
-      final UserDataController? controller = userDataController;
+      final UserData? controller = userDataController;
       if (controller == null) {
         _isPlaylistFavorite = !next;
         notifyListeners();
@@ -273,17 +272,19 @@ class PlaylistDetailController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final bool isUserPlaylist = current.provider.trim().toLowerCase() ==
-          UserDataController.localPlaylistProvider;
+      final bool isUserPlaylist =
+          current.provider.trim().toLowerCase() ==
+          UserData.localPlaylistProvider;
 
       if (isUserPlaylist && userDataController != null) {
-        await userDataController!.removePlaylistTracks(
-          current.itemId,
-          <Track>[track],
-        );
+        await userDataController!.removePlaylistTracks(current.itemId, <Track>[
+          track,
+        ]);
       } else {
         // The API positions are 1-based.
-        await client.removePlaylistTracks(current.itemId, <int>[position + 1]);
+        await coreBridge.removePlaylistTracks(current.itemId, <int>[
+          position + 1,
+        ]);
       }
     } catch (_) {
       _tracks = previous;
@@ -306,10 +307,12 @@ class PlaylistDetailController extends ChangeNotifier {
     final Playlist? current = _playlist;
     final bool isUserPlaylist =
         current?.provider.trim().toLowerCase() ==
-        UserDataController.localPlaylistProvider;
+        UserData.localPlaylistProvider;
 
     if (isUserPlaylist && userDataController != null) {
-      final List<Track> tracks = items.whereType<Track>().toList(growable: false);
+      final List<Track> tracks = items.whereType<Track>().toList(
+        growable: false,
+      );
       if (tracks.isEmpty) {
         return;
       }
@@ -318,15 +321,15 @@ class PlaylistDetailController extends ChangeNotifier {
       return;
     }
 
-    await client.addPlaylistTracks(playlistId, uris);
+    await coreBridge.addPlaylistTracks(playlistId, uris);
   }
 
   Playlist? _resolvePlaylistFromUserData(
     String targetItemId,
     String targetProvider,
   ) {
-    final List<Playlist> playlists = userDataController?.playlists ??
-        const <Playlist>[];
+    final List<Playlist> playlists =
+        userDataController?.playlists ?? const <Playlist>[];
     if (playlists.isEmpty) {
       return null;
     }

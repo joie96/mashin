@@ -4,8 +4,9 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import '../../../app/theme/app_theme.dart';
-import '../../../data/music_assistant/ma_models.dart';
-import '../../playback/playback_coordinator.dart';
+import '../../core/core_bridge.dart';
+import '../../core/core_models.dart';
+import '../../core/core_events.dart';
 import '../selection/mobile_section_selection.dart';
 import 'media_table_section_desktop.dart';
 import 'media_image.dart';
@@ -20,7 +21,8 @@ class MediaRowSectionMobile<T> extends StatefulWidget {
   final double coverSize;
   final double itemSpacing;
   final int skeletonCount;
-  final PlaybackCoordinator? playbackCoordinator;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents? coreEvents;
   final ValueChanged<T>? onItemTap;
   final ValueChanged<List<T>>? onSelectionMenuTap;
   final bool showPlaylistDetails;
@@ -35,7 +37,8 @@ class MediaRowSectionMobile<T> extends StatefulWidget {
     this.coverSize = 146,
     this.itemSpacing = 8,
     this.skeletonCount = 6,
-    this.playbackCoordinator,
+    required this.coreBridge,
+    this.coreEvents,
     this.onItemTap,
     this.onSelectionMenuTap,
     this.showPlaylistDetails = true,
@@ -61,7 +64,7 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
   double get coverSize => widget.coverSize;
   double get itemSpacing => widget.itemSpacing;
   int get skeletonCount => widget.skeletonCount;
-  PlaybackCoordinator? get playbackCoordinator => widget.playbackCoordinator;
+  MashinCoreBridgeEvents? get coreEvents => widget.coreEvents;
   ValueChanged<T>? get onItemTap => widget.onItemTap;
   bool get showPlaylistDetails => widget.showPlaylistDetails;
 
@@ -159,11 +162,6 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
   }
 
   void _onPlayAllTap() {
-    final PlaybackCoordinator? coordinator = playbackCoordinator;
-    if (coordinator == null) {
-      return;
-    }
-
     final List<MediaItem> playItems = _playableItemsFromIndex(0);
     if (playItems.isEmpty) {
       return;
@@ -171,7 +169,7 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
 
     unawaited(() async {
       try {
-        await coordinator.playMedia(
+        await widget.coreBridge.playMedia(
           _isTrackSection ? playItems : <MediaItem>[playItems.first],
         );
       } catch (_) {
@@ -181,11 +179,6 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
   }
 
   void _onShuffleAllTap() {
-    final PlaybackCoordinator? coordinator = playbackCoordinator;
-    if (coordinator == null) {
-      return;
-    }
-
     final List<MediaItem> playItems = _playableItemsFromIndex(0);
     if (playItems.isEmpty) {
       return;
@@ -194,13 +187,13 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
     unawaited(() async {
       try {
         if (_isTrackSection) {
-          await coordinator.shufflePlayMedia(playItems);
+          await widget.coreBridge.playShuffledMedia(playItems);
           return;
         }
 
         final MediaItem item =
             playItems[math.Random().nextInt(playItems.length)];
-        await coordinator.playMedia(<MediaItem>[item]);
+        await widget.coreBridge.playMedia(<MediaItem>[item]);
       } catch (_) {
         // Ignore failures to keep header interactions responsive.
       }
@@ -208,8 +201,7 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
   }
 
   void _onPlayTap(int index) {
-    final PlaybackCoordinator? coordinator = playbackCoordinator;
-    if (coordinator == null || index < 0 || index >= items.length) {
+    if (index < 0 || index >= items.length) {
       return;
     }
 
@@ -220,7 +212,7 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
 
     unawaited(() async {
       try {
-        await coordinator.playMedia(<MediaItem>[item]);
+        await widget.coreBridge.playMedia(<MediaItem>[item]);
       } catch (_) {
         // Ignore failures to keep row interactions responsive.
       }
@@ -240,7 +232,7 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
           MobileSectionHeader(
             title: title,
             itemCount: hasPlayableContent ? items.length : null,
-            showPlaybackActions: playbackCoordinator != null,
+            showPlaybackActions: coreEvents != null,
             onPlayTap: hasPlayableContent ? _onPlayAllTap : null,
             onShuffleTap: hasPlayableContent ? _onShuffleAllTap : null,
             shuffleTooltip: 'Zufällig',
@@ -355,7 +347,7 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
         coverSize: coverSize,
         onPlayTap: () => _onPlayTap(index),
         onItemTap: onItemTap,
-        playbackCoordinator: playbackCoordinator,
+        coreEvents: coreEvents,
       );
     }
     return _buildMobileMediaRowUnknown(
@@ -481,7 +473,7 @@ Widget _buildMobileMediaRowTrack({
   required double coverSize,
   required VoidCallback? onPlayTap,
   required VoidCallback? onItemTap,
-  PlaybackCoordinator? playbackCoordinator,
+  MashinCoreBridgeEvents? coreEvents,
 }) {
   return _buildMobileMediaRowItemBase(
     itemWidth: itemWidth,
@@ -495,7 +487,7 @@ Widget _buildMobileMediaRowTrack({
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
     onPlayTap: onPlayTap,
     onItemTap: onItemTap,
-    playbackCoordinator: playbackCoordinator,
+    coreEvents: coreEvents,
     playbackItem: item,
   );
 }
@@ -535,7 +527,7 @@ Widget _buildMobileMediaRowItemBase({
   required VoidCallback? onPlayTap,
   required VoidCallback? onItemTap,
   bool showPlayOverlay = true,
-  PlaybackCoordinator? playbackCoordinator,
+  MashinCoreBridgeEvents? coreEvents,
   MediaItem? playbackItem,
 }) {
   return Builder(
@@ -625,11 +617,11 @@ Widget _buildMobileMediaRowItemBase({
                 ],
               ),
               const SizedBox(height: 8),
-              if (playbackCoordinator == null || playbackItem == null)
+              if (coreEvents == null || playbackItem == null)
                 _MobileRowTitleText(title: title, isCurrent: false)
               else
                 PlaybackAwareBuilder(
-                  coordinator: playbackCoordinator,
+                  coreEvents: coreEvents,
                   item: playbackItem,
                   builder: (BuildContext context, bool isCurrent) {
                     return _MobileRowTitleText(
@@ -891,7 +883,7 @@ String _albumSubtitle(Album album) {
   if (artist != '-') {
     return artist;
   }
-  return _mediaTypeLabel(album.albumType);
+  return _mediaTypeLabel(album.albumType.name);
 }
 
 String _trackSubtitle(Track track) {

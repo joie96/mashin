@@ -3,10 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart' hide RepeatMode;
 
 import '../../app/theme/app_theme.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_models.dart';
+import '../core/core_models.dart';
 import '../shared/context_menu/context_menu_controller.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_userdata.dart';
 import '../shared/widgets/media_image.dart';
 
 class PlayerBarOverlayMobile extends StatefulWidget {
@@ -20,6 +19,7 @@ class PlayerBarOverlayMobile extends StatefulWidget {
     required this.currentTrack,
     required this.playbackStateType,
     required this.playbackState,
+    required this.playbackQueue,
     required this.maxSeconds,
     required this.currentSeconds,
     required this.dontStopTheMusicEnabled,
@@ -47,12 +47,13 @@ class PlayerBarOverlayMobile extends StatefulWidget {
   final String trackSubtitle;
   final String? trackCoverUrl;
   final Track? currentTrack;
-  final PlaybackStateType playbackStateType;
-  final PlaybackState playbackState;
+  final PlayState playbackStateType;
+  final PlayerState playbackState;
+  final Queue playbackQueue;
   final double maxSeconds;
   final double currentSeconds;
   final bool dontStopTheMusicEnabled;
-  final UserDataController? userDataController;
+  final UserData? userDataController;
   final VoidCallback onClose;
   final VoidCallback onOpenQueue;
   final void Function(double upwardDelta, double viewportHeight)
@@ -95,7 +96,7 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
   }
 
   Future<void> _showAddToPlaylistMenu(BuildContext context, Track track) {
-    final UserDataController? controller = widget.userDataController;
+    final UserData? controller = widget.userDataController;
     if (controller == null || controller.playlists.isEmpty) {
       return Future<void>.value();
     }
@@ -118,7 +119,7 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
 
   void _toggleCurrentTrackFavorite() {
     final Track? track = widget.currentTrack;
-    final UserDataController? controller = widget.userDataController;
+    final UserData? controller = widget.userDataController;
     if (track == null || controller == null) {
       return;
     }
@@ -194,15 +195,13 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
     final bool hasPlaybackSession =
-        widget.playbackStateType != PlaybackStateType.uninitialized;
-    final bool isPlaying =
-        widget.playbackStateType == PlaybackStateType.playing;
+        widget.playbackStateType != PlayState.uninitialized;
+    final bool isPlaying = widget.playbackStateType == PlayState.playing;
     final bool isBusy =
-        widget.playbackStateType == PlaybackStateType.buffering ||
-        widget.playbackStateType == PlaybackStateType.seeking;
-    final bool isShuffleActive = widget.playbackState.shuffleEnabled == true;
-    final RepeatMode repeatMode =
-        widget.playbackState.repeatMode ?? RepeatMode.off;
+        widget.playbackStateType == PlayState.buffering ||
+        widget.playbackStateType == PlayState.seeking;
+    final bool isShuffleActive = widget.playbackQueue.shuffleEnabled;
+    final RepeatMode repeatMode = widget.playbackQueue.repeatMode;
     final bool isRepeatOne = repeatMode == RepeatMode.one;
     final IconData repeatIcon = isRepeatOne
         ? Icons.repeat_one_outlined

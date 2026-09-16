@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../../data/music_assistant/ma_models.dart';
+import '../../core/core_models.dart';
 
 /// Renders a comma-separated list of media items (artists, albums, playlists, ...)
 /// where each name is individually tappable and underlines only while hovered,

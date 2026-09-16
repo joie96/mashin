@@ -5,6 +5,7 @@ use std::sync::{Arc, Condvar, Mutex};
 
 pub(crate) type CacheChangeSignal = Arc<(Mutex<u64>, Condvar)>;
 
+// Cache-change synchronization.
 pub(crate) fn new_cache_change_signal() -> CacheChangeSignal {
     Arc::new((Mutex::new(0), Condvar::new()))
 }
@@ -92,6 +93,7 @@ pub(crate) struct CacheRetentionPolicy {
     pub(crate) recently_played: Vec<String>,
 }
 
+// Download-slot reservation management.
 pub(crate) fn slot_reservation_is_current(
     slots: &DownloadSlots,
     slot_index: usize,
@@ -125,6 +127,7 @@ pub(crate) fn slot_release_reservation_if_current(
         .unwrap_or(false)
 }
 
+// Cache writes and completion.
 pub(crate) fn cache_append_encoded_chunk(
     caches: &EncodedCaches,
     cache_sequence: &Arc<AtomicU64>,
@@ -212,6 +215,7 @@ pub(crate) fn cache_clear_all(caches: &EncodedCaches) {
     }
 }
 
+// Interrupted-cache handling.
 pub(crate) fn cache_mark_interrupted(caches: &EncodedCaches, content_key: &str) -> Option<u64> {
     let Ok(mut caches) = caches.lock() else {
         return None;
@@ -253,6 +257,7 @@ pub(crate) fn cache_discard_interrupted_outside_window(
     discarded
 }
 
+// Cache reading and local seeking.
 pub(crate) fn cache_read_format(
     caches: &EncodedCaches,
     content_key: &str,
@@ -284,7 +289,10 @@ pub(crate) fn cache_read_chunk(
         .ok_or_else(|| "encoded track cache is unavailable".to_string())?;
     cache.last_touched = cache.last_touched.saturating_add(1);
     Ok((
-        cache.chunks.get(chunk_index).map(|chunk| Arc::clone(&chunk.data)),
+        cache
+            .chunks
+            .get(chunk_index)
+            .map(|chunk| Arc::clone(&chunk.data)),
         cache.integrity == CacheIntegrity::Complete,
     ))
 }
@@ -333,6 +341,7 @@ pub(crate) fn cache_local_seek_target(
     })
 }
 
+// Cache eviction policy.
 pub(crate) fn cache_evict_to_fit(
     caches: &EncodedCaches,
     policy: &CacheRetentionPolicy,
@@ -344,6 +353,7 @@ pub(crate) fn cache_evict_to_fit(
     };
     let mut evicted = Vec::new();
     while caches
+        // Cache metadata queries.
         .values()
         .map(|cache| cache.byte_len)
         .sum::<usize>()

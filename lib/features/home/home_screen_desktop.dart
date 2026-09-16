@@ -3,28 +3,28 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_theme.dart';
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
+import '../core/core_models.dart';
+import '../core/core_bridge.dart';
+import '../core/core_events.dart';
 import '../shared/context_menu/context_menu_controller.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_userdata.dart';
 import '../shared/widgets/media_list_section_desktop.dart';
 import '../shared/widgets/media_row_section_desktop.dart';
 import '../shared/widgets/media_slide_section_desktop.dart';
 import 'home_controller.dart';
 
 class HomeScreenDesktop extends StatefulWidget {
-  final MusicAssistantClient client;
-  final PlaybackCoordinator playbackCoordinator;
-  final UserDataController? userDataController;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
+  final UserData? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
   final ValueChanged<Playlist>? onOpenPlaylist;
 
   const HomeScreenDesktop({
     super.key,
-    required this.client,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     this.userDataController,
     this.onOpenArtist,
     this.onOpenAlbum,
@@ -42,8 +42,7 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
   void initState() {
     super.initState();
     _controller = HomeController(
-      client: widget.client,
-      playbackCoordinator: widget.playbackCoordinator,
+      coreBridge: widget.coreBridge,
       userDataController: widget.userDataController,
     );
     widget.userDataController?.addListener(_onUserDataChanged);
@@ -85,35 +84,32 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () =>
-            widget.playbackCoordinator.playMedia(<MediaItem>[item]),
+        onSelected: () => widget.coreBridge.playMedia(<MediaItem>[item]),
       ),
       if (item is Album || item is Playlist)
         ContextMenuAction(
           label: 'Zufällig abspielen',
           icon: Icons.shuffle_outlined,
           onSelected: () =>
-              widget.playbackCoordinator.shufflePlayMedia(<MediaItem>[item]),
+              widget.coreBridge.playShuffledMedia(<MediaItem>[item]),
         ),
       if (item is! Playlist)
         ContextMenuAction(
           label: 'Radio starten',
           icon: Icons.radio_outlined,
           onSelected: () =>
-              widget.playbackCoordinator.playMediaRadioNext(<MediaItem>[item]),
+              widget.coreBridge.playSendspinRadioNext(<MediaItem>[item]),
         ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () =>
-            widget.playbackCoordinator.playMediaNext(<MediaItem>[item]),
+        onSelected: () => widget.coreBridge.playMediaNext(<MediaItem>[item]),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () =>
-            widget.playbackCoordinator.playMediaLast(<MediaItem>[item]),
+        onSelected: () => widget.coreBridge.playMediaLast(<MediaItem>[item]),
       ),
       if (primaryArtist != null || primaryAlbum != null) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
@@ -185,7 +181,8 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
                   emptyText: 'Keine ListenBrainz-Empfehlungen verfügbar.',
                   coverSize: 175,
                   height: 215,
-                  playbackCoordinator: widget.playbackCoordinator,
+                  coreBridge: widget.coreBridge,
+                  coreEvents: widget.coreEvents,
                   isRowFavorite: (MediaItem item, int _) =>
                       _controller.isItemFavorite(item),
                   onRowFavoriteTap: (MediaItem item, int _) => _controller
@@ -209,7 +206,7 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
                   items: _controller.genrePlaylists,
                   emptyText: 'Keine Genre-Playlists verfügbar.',
                   maxItems: 9,
-                  playbackCoordinator: widget.playbackCoordinator,
+                  coreBridge: widget.coreBridge,
                   onItemTap: widget.onOpenPlaylist,
                   onItemContextMenu: (Playlist item, int _, Offset position) =>
                       _showItemMenuAtPosition(item, position),
@@ -224,7 +221,8 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
                   isLoading: _controller.isLoadingPlaylists,
                   items: _controller.artistPlaylists,
                   emptyText: 'Keine Artist-Playlists verfügbar.',
-                  playbackCoordinator: widget.playbackCoordinator,
+                  coreBridge: widget.coreBridge,
+                  coreEvents: widget.coreEvents,
                   isRowFavorite: (Playlist item, int _) =>
                       _controller.isItemFavorite(item),
                   onRowFavoriteTap: (Playlist item, int _) => _controller
@@ -247,7 +245,8 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
                   isLoading: _controller.isLoadingTopTracks,
                   items: _controller.topTracks,
                   emptyText: 'Keine Top-Tracks verfügbar.',
-                  playbackCoordinator: widget.playbackCoordinator,
+                  coreBridge: widget.coreBridge,
+                  coreEvents: widget.coreEvents,
                   isRowFavorite: (Track item, int _) =>
                       _controller.isItemFavorite(item),
                   onRowFavoriteTap: (Track item, int _) => _controller
@@ -270,7 +269,8 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
                   isLoading: _controller.isLoadingTopArtists,
                   items: _controller.topArtists,
                   emptyText: 'Keine Top-Artists verfügbar.',
-                  playbackCoordinator: widget.playbackCoordinator,
+                  coreBridge: widget.coreBridge,
+                  coreEvents: widget.coreEvents,
                   isRowFavorite: (Artist item, int _) =>
                       _controller.isItemFavorite(item),
                   onRowFavoriteTap: (Artist item, int _) => _controller
@@ -292,7 +292,8 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
                   isLoading: _controller.isLoadingRecentListens,
                   items: _controller.recentListens,
                   emptyText: 'Keine kürzlich gehörten Tracks verfügbar.',
-                  playbackCoordinator: widget.playbackCoordinator,
+                  coreBridge: widget.coreBridge,
+                  coreEvents: widget.coreEvents,
                   isRowFavorite: (Track item, int _) =>
                       _controller.isItemFavorite(item),
                   onRowFavoriteTap: (Track item, int _) => _controller

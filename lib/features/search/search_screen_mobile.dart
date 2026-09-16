@@ -3,28 +3,28 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_theme.dart';
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_events.dart';
 import '../shared/context_menu/context_menu_controller.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_userdata.dart';
 import '../shared/widgets/media_row_section_mobile.dart';
 import '../shared/widgets/media_table_section_mobile.dart';
 import 'search_controller.dart' as feature_search;
 
 /// Mobile search page with local search input and stacked result sections.
 class SearchScreenMobile extends StatefulWidget {
-  final MusicAssistantClient client;
-  final PlaybackCoordinator playbackCoordinator;
-  final UserDataController? userDataController;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
+  final UserData? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
   final ValueChanged<Playlist>? onOpenPlaylist;
 
   const SearchScreenMobile({
     super.key,
-    required this.client,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     this.userDataController,
     this.onOpenArtist,
     this.onOpenAlbum,
@@ -45,11 +45,10 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
   void initState() {
     super.initState();
     _controller = feature_search.SearchController(
-      client: widget.client,
+      coreBridge: widget.coreBridge,
       userDataController: widget.userDataController,
     )..addListener(_onControllerChanged);
     widget.userDataController?.addListener(_onUserDataChanged);
-    unawaited(_controller.load());
   }
 
   void _onControllerChanged() {
@@ -90,7 +89,7 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
       growable: false,
     );
     final bool isSingleTarget = targets.length == 1;
-    final UserDataController? userData = widget.userDataController;
+    final UserData? userData = widget.userDataController;
     final bool allFavorite = targets.every(
       (MediaItem target) => userData?.isFavorite(target) ?? target.favorite,
     );
@@ -98,32 +97,30 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () => widget.playbackCoordinator.playMedia(targets),
+        onSelected: () => widget.coreBridge.playMedia(targets),
       ),
       if (item is Album || item is Playlist || item is Artist)
         ContextMenuAction(
           label: 'Zufällig abspielen',
           icon: Icons.shuffle_outlined,
-          onSelected: () =>
-              widget.playbackCoordinator.shufflePlayMedia(targets),
+          onSelected: () => widget.coreBridge.playShuffledMedia(targets),
         ),
       if (item is Track || item is Artist)
         ContextMenuAction(
           label: 'Radio starten',
           icon: Icons.radio_outlined,
-          onSelected: () =>
-              widget.playbackCoordinator.playMediaRadioNext(targets),
+          onSelected: () => widget.coreBridge.playSendspinRadioNext(targets),
         ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => widget.playbackCoordinator.playMediaNext(targets),
+        onSelected: () => widget.coreBridge.playMediaNext(targets),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => widget.playbackCoordinator.playMediaLast(targets),
+        onSelected: () => widget.coreBridge.playMediaLast(targets),
       ),
     ];
 
@@ -284,7 +281,8 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
                   isLoading: _controller.isLoadingTracks,
                   emptyText: 'Keine Tracks gefunden.',
                   maxItemsPerPage: 3,
-                  playbackCoordinator: widget.playbackCoordinator,
+                  coreBridge: widget.coreBridge,
+                  coreEvents: widget.coreEvents,
                   onSelectionMenuTap: (List<Track> items) =>
                       unawaited(_showSelectionMenu(items)),
                 ),
@@ -297,7 +295,8 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
             isLoading: _controller.isLoadingAlbums,
             items: _controller.albums,
             emptyText: 'Keine Alben gefunden.',
-            playbackCoordinator: widget.playbackCoordinator,
+            coreBridge: widget.coreBridge,
+            coreEvents: widget.coreEvents,
             onItemTap: widget.onOpenAlbum,
             onSelectionMenuTap: (List<Album> items) =>
                 unawaited(_showSelectionMenu(items)),
@@ -308,7 +307,8 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
             isLoading: _controller.isLoadingPlaylists,
             items: _controller.playlists,
             emptyText: 'Keine Playlists gefunden.',
-            playbackCoordinator: widget.playbackCoordinator,
+            coreBridge: widget.coreBridge,
+            coreEvents: widget.coreEvents,
             onItemTap: widget.onOpenPlaylist,
             onSelectionMenuTap: (List<Playlist> items) =>
                 unawaited(_showSelectionMenu(items)),
@@ -319,7 +319,8 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
             isLoading: _controller.isLoadingArtists,
             items: _controller.artists,
             emptyText: 'Keine Artists gefunden.',
-            playbackCoordinator: widget.playbackCoordinator,
+            coreBridge: widget.coreBridge,
+            coreEvents: widget.coreEvents,
             onItemTap: widget.onOpenArtist,
             onSelectionMenuTap: (List<Artist> items) =>
                 unawaited(_showSelectionMenu(items)),

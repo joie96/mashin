@@ -1,25 +1,25 @@
 import 'package:flutter/material.dart';
 
-import '../../app/config/app_config.dart';
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
-import '../shared/userdata_controller.dart';
+import '../../app/layout/layout_utils.dart';
+import '../core/core_models.dart';
+import '../core/core_bridge.dart';
+import '../core/core_events.dart';
+import '../core/core_userdata.dart';
 import 'home_screen_desktop.dart';
 import 'home_screen_mobile.dart';
 
 class HomeScreen extends StatelessWidget {
-  final MusicAssistantClient client;
-  final PlaybackCoordinator playbackCoordinator;
-  final UserDataController? userDataController;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
+  final UserData? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
   final ValueChanged<Playlist>? onOpenPlaylist;
 
   const HomeScreen({
     super.key,
-    required this.client,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     this.userDataController,
     this.onOpenArtist,
     this.onOpenAlbum,
@@ -28,10 +28,10 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (AppConfig.isMobile()) {
+    if (isCompactLayout(context)) {
       return HomeScreenMobile(
-        client: client,
-        playbackCoordinator: playbackCoordinator,
+        coreBridge: coreBridge,
+        coreEvents: coreEvents,
         userDataController: userDataController,
         onOpenArtist: onOpenArtist,
         onOpenAlbum: onOpenAlbum,
@@ -40,8 +40,8 @@ class HomeScreen extends StatelessWidget {
     }
 
     return HomeScreenDesktop(
-      client: client,
-      playbackCoordinator: playbackCoordinator,
+      coreBridge: coreBridge,
+      coreEvents: coreEvents,
       userDataController: userDataController,
       onOpenArtist: onOpenArtist,
       onOpenAlbum: onOpenAlbum,

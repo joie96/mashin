@@ -28,9 +28,12 @@ pub(crate) fn supported_audio_formats(preferred_codec: &str) -> Vec<AudioFormatS
     formats
 }
 
-pub(crate) fn player_support(preferred_codec: &str, buffer_capacity: u64) -> PlayerV1Support {
+pub(crate) fn player_support(
+    preferred_codec: crate::sendspin::models::SendspinAudioCodec,
+    buffer_capacity: u64,
+) -> PlayerV1Support {
     PlayerV1Support {
-        supported_formats: supported_audio_formats(preferred_codec),
+        supported_formats: supported_audio_formats(preferred_codec.as_str()),
         buffer_capacity: buffer_capacity.min(u32::MAX as u64) as u32,
         supported_commands: Vec::new(),
     }

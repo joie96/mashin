@@ -3,9 +3,10 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_theme.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_events.dart';
+import '../core/core_userdata.dart';
 import 'queue_overlay_desktop.dart';
 import 'queue_overlay_mobile.dart';
 
@@ -21,7 +22,8 @@ class QueueOverlay extends StatefulWidget {
     required this.dontStopTheMusicEnabled,
     required this.queueItems,
     required this.currentQueueIndex,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     this.userDataController,
     this.desktopBottomInset = 0,
     this.mobileOpenProgress = 0,
@@ -42,8 +44,9 @@ class QueueOverlay extends StatefulWidget {
   final bool dontStopTheMusicEnabled;
   final List<QueueItem> queueItems;
   final int? currentQueueIndex;
-  final PlaybackCoordinator playbackCoordinator;
-  final UserDataController? userDataController;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
+  final UserData? userDataController;
   final double desktopBottomInset;
   final double mobileOpenProgress;
   final VoidCallback onClose;
@@ -206,8 +209,9 @@ class _QueueOverlayState extends State<QueueOverlay> {
                                       widget.dontStopTheMusicEnabled,
                                   queueItems: widget.queueItems,
                                   currentQueueIndex: widget.currentQueueIndex,
-                                  playbackCoordinator:
-                                      widget.playbackCoordinator,
+                                  coreBridge: widget.coreBridge,
+                                  coreEvents:
+                                      widget.coreEvents,
                                   userDataController: widget.userDataController,
                                   onClose: widget.onClose,
                                   onToggleDontStopTheMusic:
@@ -225,8 +229,9 @@ class _QueueOverlayState extends State<QueueOverlay> {
                                         widget.queueTotalDurationText,
                                     queueItems: widget.queueItems,
                                     currentQueueIndex: widget.currentQueueIndex,
-                                    playbackCoordinator:
-                                        widget.playbackCoordinator,
+                                    coreBridge: widget.coreBridge,
+                                    coreEvents:
+                                        widget.coreEvents,
                                     userDataController:
                                         widget.userDataController,
                                     onOpenArtist: widget.onOpenArtist,

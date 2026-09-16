@@ -3,11 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_theme.dart';
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_events.dart';
 import '../shared/context_menu/context_menu_controller.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_userdata.dart';
 import '../shared/widgets/media_row_section_mobile.dart';
 import '../shared/widgets/media_table_section_mobile.dart';
 import '../shared/widgets/media_image.dart';
@@ -16,8 +16,8 @@ import 'album_detail_controller.dart';
 class AlbumDetailPageMobile extends StatefulWidget {
   const AlbumDetailPageMobile({
     super.key,
-    required this.client,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     required this.itemId,
     required this.providerInstanceIdOrDomain,
     this.userDataController,
@@ -25,11 +25,11 @@ class AlbumDetailPageMobile extends StatefulWidget {
     this.onOpenAlbum,
   });
 
-  final MusicAssistantClient client;
-  final PlaybackCoordinator playbackCoordinator;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
   final String itemId;
   final String providerInstanceIdOrDomain;
-  final UserDataController? userDataController;
+  final UserData? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
 
@@ -44,8 +44,7 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
   void initState() {
     super.initState();
     _controller = AlbumDetailController(
-      client: widget.client,
-      playbackCoordinator: widget.playbackCoordinator,
+      coreBridge: widget.coreBridge,
       itemId: widget.itemId,
       providerInstanceIdOrDomain: widget.providerInstanceIdOrDomain,
       userDataController: widget.userDataController,
@@ -66,7 +65,7 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
   }
 
   List<ContextMenuAction> _buildPlaylistSubmenu(List<Track> tracks) {
-    final UserDataController? controller = widget.userDataController;
+    final UserData? controller = widget.userDataController;
     if (controller == null || tracks.isEmpty) {
       return const <ContextMenuAction>[];
     }
@@ -98,33 +97,32 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () => widget.playbackCoordinator.playMedia(targets),
+        onSelected: () => widget.coreBridge.playMedia(targets),
       ),
       if (item is Album || item is Playlist || item is Artist)
         ContextMenuAction(
           label: 'Zufällig abspielen',
           icon: Icons.shuffle_outlined,
-          onSelected: () =>
-              widget.playbackCoordinator.shufflePlayMedia(targets),
+          onSelected: () => widget.coreBridge.playShuffledMedia(targets),
         ),
       if (item is! Playlist && (isSingleTarget || tracks.isNotEmpty))
         ContextMenuAction(
           label: 'Radio starten',
           icon: Icons.radio_outlined,
           onSelected: () => tracks.isNotEmpty
-              ? widget.playbackCoordinator.playMediaRadioNext(tracks)
+              ? widget.coreBridge.playSendspinRadioNext(tracks)
               : _controller.startItemRadio(item),
         ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => widget.playbackCoordinator.playMediaNext(targets),
+        onSelected: () => widget.coreBridge.playMediaNext(targets),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => widget.playbackCoordinator.playMediaLast(targets),
+        onSelected: () => widget.coreBridge.playMediaLast(targets),
       ),
     ];
 
@@ -220,14 +218,12 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
       label: 'Als Nächstes spielen',
       icon: Icons.keyboard_return,
       iconQuarterTurns: 2,
-      onSelected: () =>
-          widget.playbackCoordinator.playMediaNext(<MediaItem>[album]),
+      onSelected: () => widget.coreBridge.playMediaNext(<MediaItem>[album]),
     ),
     ContextMenuAction(
       label: 'Als Letztes spielen',
       icon: Icons.last_page,
-      onSelected: () =>
-          widget.playbackCoordinator.playMediaLast(<MediaItem>[album]),
+      onSelected: () => widget.coreBridge.playMediaLast(<MediaItem>[album]),
     ),
     const ContextMenuAction.separator(),
     ContextMenuAction(
@@ -366,10 +362,11 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
                         onTap: album == null
                             ? null
                             : () => unawaited(
-                                const AppContextMenuController().showContextMenu(
-                                  context: context,
-                                  actions: _buildHeaderMenu(album),
-                                ),
+                                const AppContextMenuController()
+                                    .showContextMenu(
+                                      context: context,
+                                      actions: _buildHeaderMenu(album),
+                                    ),
                               ),
                       ),
                     ],
@@ -422,7 +419,8 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
               items: _controller.tracks,
               emptyText: 'Keine Titel gefunden.',
               maxItemsPerPage: 0,
-              playbackCoordinator: widget.playbackCoordinator,
+              coreBridge: widget.coreBridge,
+              coreEvents: widget.coreEvents,
               onSelectionMenuTap: (List<Track> items) =>
                   unawaited(_showSelectionMenu(items)),
             ),
@@ -436,7 +434,8 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
                 isLoading: _controller.isLoadingOtherAlbums,
                 items: _controller.otherAlbums,
                 emptyText: 'Keine weiteren Alben gefunden.',
-                playbackCoordinator: widget.playbackCoordinator,
+                coreBridge: widget.coreBridge,
+                coreEvents: widget.coreEvents,
                 onItemTap: widget.onOpenAlbum,
                 onSelectionMenuTap: (List<Album> items) =>
                     unawaited(_showSelectionMenu(items)),
@@ -452,7 +451,8 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
                 isLoading: _controller.isLoadingSimilarArtists,
                 items: _controller.similarArtists,
                 emptyText: 'Keine ähnlichen Interpreten gefunden.',
-                playbackCoordinator: widget.playbackCoordinator,
+                coreBridge: widget.coreBridge,
+                coreEvents: widget.coreEvents,
                 onItemTap: widget.onOpenArtist,
                 onSelectionMenuTap: (List<Artist> items) =>
                     unawaited(_showSelectionMenu(items)),

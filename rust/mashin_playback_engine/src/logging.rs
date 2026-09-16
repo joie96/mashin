@@ -39,8 +39,9 @@ impl LogLevel {
 }
 
 pub(crate) fn set_minimum_level(value: &str) -> Result<(), String> {
-    let level = LogLevel::parse(value)
-        .ok_or_else(|| format!("invalid log level: {value}; expected trace, debug, info, warn, or error"))?;
+    let level = LogLevel::parse(value).ok_or_else(|| {
+        format!("invalid log level: {value}; expected trace, debug, info, warn, or error")
+    })?;
     MINIMUM_LOG_LEVEL.store(level as u8, Ordering::Relaxed);
     Ok(())
 }
@@ -81,14 +82,51 @@ impl Logger {
 
         let message = message.to_string().replace('\n', " ");
         let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
-        let mut stderr = io::stderr().lock();
-        let _ = writeln!(
-            stderr,
+        let text = format!(
             "[{timestamp}] [{}] {}: {message}",
             level.short_name(),
             self.category,
         );
+        #[cfg(target_os = "android")]
+        android_log(level, &text);
+        let mut stderr = io::stderr().lock();
+        let _ = writeln!(stderr, "{text}");
     }
+}
+
+#[cfg(target_os = "android")]
+fn android_log(level: LogLevel, message: &str) {
+    use std::ffi::CString;
+
+    const ANDROID_LOG_DEBUG: i32 = 3;
+    const ANDROID_LOG_INFO: i32 = 4;
+    const ANDROID_LOG_WARN: i32 = 5;
+    const ANDROID_LOG_ERROR: i32 = 6;
+    let priority = match level {
+        LogLevel::Trace | LogLevel::Debug => ANDROID_LOG_DEBUG,
+        LogLevel::Info => ANDROID_LOG_INFO,
+        LogLevel::Warn => ANDROID_LOG_WARN,
+        LogLevel::Error => ANDROID_LOG_ERROR,
+    };
+    let Ok(tag) = CString::new("MashinRust") else {
+        return;
+    };
+    let Ok(message) = CString::new(message) else {
+        return;
+    };
+    unsafe {
+        __android_log_write(priority, tag.as_ptr(), message.as_ptr());
+    }
+}
+
+#[cfg(target_os = "android")]
+#[link(name = "log")]
+unsafe extern "C" {
+    fn __android_log_write(
+        priority: i32,
+        tag: *const std::ffi::c_char,
+        text: *const std::ffi::c_char,
+    ) -> i32;
 }
 
 #[cfg(test)]
@@ -108,7 +146,10 @@ mod tests {
     #[test]
     fn accepts_shared_log_level_names() {
         set_minimum_level("trace").unwrap();
-        assert_eq!(MINIMUM_LOG_LEVEL.load(Ordering::Relaxed), LogLevel::Trace as u8);
+        assert_eq!(
+            MINIMUM_LOG_LEVEL.load(Ordering::Relaxed),
+            LogLevel::Trace as u8
+        );
         assert!(set_minimum_level("verbose").is_err());
     }
 }

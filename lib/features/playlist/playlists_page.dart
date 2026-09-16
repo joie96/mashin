@@ -1,26 +1,30 @@
 import 'package:flutter/material.dart';
 
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_events.dart';
+import '../core/core_userdata.dart';
 import 'playlists_page_mobile.dart';
 
 class PlaylistsPage extends StatelessWidget {
   const PlaylistsPage({
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     required this.userDataController,
     required this.onOpenPlaylist,
     super.key,
   });
 
-  final PlaybackCoordinator playbackCoordinator;
-  final UserDataController userDataController;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
+  final UserData userDataController;
   final ValueChanged<Playlist> onOpenPlaylist;
 
   @override
   Widget build(BuildContext context) {
     return PlaylistsPageMobile(
-      playbackCoordinator: playbackCoordinator,
+      coreBridge: coreBridge,
+      coreEvents: coreEvents,
       userDataController: userDataController,
       onOpenPlaylist: onOpenPlaylist,
     );

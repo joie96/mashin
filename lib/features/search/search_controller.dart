@@ -1,15 +1,15 @@
 import 'package:flutter/foundation.dart';
 
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_userdata.dart';
 
 /// Holds search state and loading logic for tracks, albums, playlists and artists.
 class SearchController extends ChangeNotifier {
-  final MusicAssistantClient client;
-  final UserDataController? userDataController;
+  final MashinCoreBridgeApi coreBridge;
+  final UserData? userDataController;
 
-  SearchController({required this.client, this.userDataController});
+  SearchController({required this.coreBridge, this.userDataController});
 
   int _requestId = 0;
   bool _isDisposed = false;
@@ -44,15 +44,6 @@ class SearchController extends ChangeNotifier {
     _notifyListenersIfAlive();
   }
 
-  Future<void> load() async {
-    try {
-      await client.getProviderManifests();
-      _notifyListenersIfAlive();
-    } catch (_) {
-      // Keep UI functional even if manifest loading fails.
-    }
-  }
-
   Future<void> runSearch(String query) async {
     if (query.isEmpty) {
       resetResults();
@@ -72,12 +63,28 @@ class SearchController extends ChangeNotifier {
     _artists = const <Artist>[];
     _notifyListenersIfAlive();
 
-    await Future.wait<void>(<Future<void>>[
-      _searchForType(requestId, query, MediaType.track),
-      _searchForType(requestId, query, MediaType.album),
-      _searchForType(requestId, query, MediaType.playlist),
-      _searchForType(requestId, query, MediaType.artist),
-    ]);
+    try {
+      final SearchResults results = await coreBridge.searchMusic(query);
+      if (requestId != _requestId) {
+        return;
+      }
+      _tracks = _withFavoriteStatuses(results.tracks);
+      _albums = _withFavoriteStatuses(results.albums);
+      _playlists = _withFavoriteStatuses(results.playlists);
+      _artists = _withFavoriteStatuses(results.artists);
+    } catch (_) {
+      if (requestId != _requestId) {
+        return;
+      }
+    } finally {
+      if (requestId == _requestId) {
+        _isLoadingTracks = false;
+        _isLoadingAlbums = false;
+        _isLoadingPlaylists = false;
+        _isLoadingArtists = false;
+      }
+      _notifyListenersIfAlive();
+    }
   }
 
   void resetResults() {
@@ -93,82 +100,6 @@ class SearchController extends ChangeNotifier {
     _notifyListenersIfAlive();
   }
 
-  Future<void> _searchForType(int requestId, String query, MediaType mediaType) async {
-    try {
-      final SearchResults? result = await client.search(
-        searchQuery: query,
-        mediaTypes: <MediaType>[mediaType],
-        limit: 50,
-        libraryOnly: false,
-      );
-
-      if (requestId != _requestId) {
-        // Ignore stale responses when a newer query already started.
-        return;
-      }
-
-      switch (mediaType) {
-        case MediaType.track:
-          _tracks = _withFavoriteStatuses(result?.tracks ?? const <Track>[]);
-          break;
-        case MediaType.album:
-          _albums = _withFavoriteStatuses(result?.albums ?? const <Album>[]);
-          break;
-        case MediaType.playlist:
-          _playlists = _withFavoriteStatuses(
-            result?.playlists ?? const <Playlist>[],
-          );
-          break;
-        case MediaType.artist:
-          _artists = _withFavoriteStatuses(result?.artists ?? const <Artist>[]);
-          break;
-        default:
-          break;
-      }
-    } catch (_) {
-      if (requestId != _requestId) {
-        return;
-      }
-
-      switch (mediaType) {
-        case MediaType.track:
-          _tracks = const <Track>[];
-          break;
-        case MediaType.album:
-          _albums = const <Album>[];
-          break;
-        case MediaType.playlist:
-          _playlists = const <Playlist>[];
-          break;
-        case MediaType.artist:
-          _artists = const <Artist>[];
-          break;
-        default:
-          break;
-      }
-    } finally {
-      if (requestId == _requestId) {
-        switch (mediaType) {
-          case MediaType.track:
-            _isLoadingTracks = false;
-            break;
-          case MediaType.album:
-            _isLoadingAlbums = false;
-            break;
-          case MediaType.playlist:
-            _isLoadingPlaylists = false;
-            break;
-          case MediaType.artist:
-            _isLoadingArtists = false;
-            break;
-          default:
-            break;
-        }
-      }
-      _notifyListenersIfAlive();
-    }
-  }
-
   void _notifyListenersIfAlive() {
     if (_isDisposed) {
       return;
@@ -177,7 +108,7 @@ class SearchController extends ChangeNotifier {
   }
 
   List<T> _withFavoriteStatuses<T extends MediaItem>(List<T> items) {
-    final UserDataController? controller = userDataController;
+    final UserData? controller = userDataController;
     if (controller == null) {
       return items;
     }

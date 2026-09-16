@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../../../app/config/app_config.dart';
+import '../../../app/layout/layout_utils.dart';
 import '../../../app/theme/app_theme.dart';
 
 typedef ContextMenuActionHandler = FutureOr<void> Function();
@@ -129,7 +129,7 @@ class AppContextMenuController {
       return;
     }
 
-    if (AppConfig.isMobile()) {
+    if (isCompactLayout(context)) {
       await _showMobileBottomSheet(context: context, actions: actions);
       return;
     }
@@ -151,7 +151,7 @@ class AppContextMenuController {
       return;
     }
 
-    if (AppConfig.isMobile()) {
+    if (isCompactLayout(context)) {
       await showGeneralDialog<void>(
         context: context,
         barrierDismissible: true,
@@ -199,7 +199,7 @@ class AppContextMenuController {
     required double width,
     required double height,
   }) async {
-    if (AppConfig.isMobile()) {
+    if (isCompactLayout(context)) {
       await _showMobileCustomDialog(
         context: context,
         child: child,

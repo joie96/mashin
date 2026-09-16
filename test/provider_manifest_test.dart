@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mashin_flutter/data/music_assistant/ma_models.dart';
+import 'package:mashin_flutter/features/core/core_models.dart';
 
 void main() {
   tearDown(() => MediaItemImage.configureProxyBaseUrl(null));
@@ -31,6 +31,27 @@ void main() {
     expect(
       ProviderManifestRegistry.iconSvgForProvider('provider-icon-priority'),
       '<svg viewBox="0 0 1 1"></svg>',
+    );
+  });
+
+  test('prefers icon data loaded from the provider icon endpoint', () {
+    ProviderManifestRegistry.registerOne(
+      ProviderManifest.fromJson(<String, dynamic>{
+        'domain': 'provider-icon-endpoint',
+        'icon_svg': '<svg viewBox="0 0 1 1"></svg>',
+        'icon_images': <String>['default'],
+      }),
+    );
+    ProviderManifestRegistry.registerIconData(
+      'provider-icon-endpoint',
+      'data:image/png;base64,aWNvbg==',
+    );
+
+    expect(
+      ProviderManifestRegistry.iconSvgForProvider(
+        'provider-icon-endpoint--user',
+      ),
+      'data:image/png;base64,aWNvbg==',
     );
   });
 }

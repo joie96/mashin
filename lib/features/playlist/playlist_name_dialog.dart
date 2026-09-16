@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../data/music_assistant/ma_models.dart';
+import '../core/core_models.dart';
 
 Future<String?> showPlaylistNameDialog({
   required BuildContext context,

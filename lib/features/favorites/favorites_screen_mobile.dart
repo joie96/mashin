@@ -2,11 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_events.dart';
 import '../shared/context_menu/context_menu_controller.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_userdata.dart';
 import '../shared/widgets/media_row_section_mobile.dart';
 import '../shared/widgets/media_table_section_mobile.dart';
 import 'favorites_controller.dart';
@@ -15,17 +15,17 @@ import 'favorites_controller.dart';
 /// Only tracks expose a tap-to-open context menu, mirroring the other migrated
 /// mobile detail pages (album/artist/playlist).
 class FavoritesScreenMobile extends StatefulWidget {
-  final MusicAssistantClient client;
-  final PlaybackCoordinator playbackCoordinator;
-  final UserDataController userDataController;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
+  final UserData userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
   final ValueChanged<Playlist>? onOpenPlaylist;
 
   const FavoritesScreenMobile({
     super.key,
-    required this.client,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     required this.userDataController,
     this.onOpenArtist,
     this.onOpenAlbum,
@@ -43,8 +43,7 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
   void initState() {
     super.initState();
     _controller = FavoritesController(
-      client: widget.client,
-      playbackCoordinator: widget.playbackCoordinator,
+      coreBridge: widget.coreBridge,
       userDataController: widget.userDataController,
     )..addListener(_onControllerChanged);
   }
@@ -99,8 +98,7 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () =>
-            widget.playbackCoordinator.playMedia(<MediaItem>[track]),
+        onSelected: () => widget.coreBridge.playMedia(<MediaItem>[track]),
       ),
       ContextMenuAction(
         label: 'Radio starten',
@@ -111,14 +109,12 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () =>
-            widget.playbackCoordinator.playMediaNext(<MediaItem>[track]),
+        onSelected: () => widget.coreBridge.playMediaNext(<MediaItem>[track]),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () =>
-            widget.playbackCoordinator.playMediaLast(<MediaItem>[track]),
+        onSelected: () => widget.coreBridge.playMediaLast(<MediaItem>[track]),
       ),
       if (primaryArtist != null || primaryAlbum != null) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
@@ -177,14 +173,13 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () => widget.playbackCoordinator.playMedia(targets),
+        onSelected: () => widget.coreBridge.playMedia(targets),
       ),
       if (item is Album || item is Playlist || item is Artist)
         ContextMenuAction(
           label: 'Zufällig abspielen',
           icon: Icons.shuffle_outlined,
-          onSelected: () =>
-              widget.playbackCoordinator.shufflePlayMedia(targets),
+          onSelected: () => widget.coreBridge.playShuffledMedia(targets),
         ),
       if (item is Track || item is Artist)
         ContextMenuAction(
@@ -192,18 +187,18 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
           icon: Icons.radio_outlined,
           onSelected: () => item is Artist && isSingleTarget
               ? _controller.startArtistRadio(item)
-              : widget.playbackCoordinator.playMediaRadioNext(targets),
+              : widget.coreBridge.playSendspinRadioNext(targets),
         ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => widget.playbackCoordinator.playMediaNext(targets),
+        onSelected: () => widget.coreBridge.playMediaNext(targets),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => widget.playbackCoordinator.playMediaLast(targets),
+        onSelected: () => widget.coreBridge.playMediaLast(targets),
       ),
     ];
 
@@ -312,7 +307,8 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
                 isLoading: _controller.isLoading,
                 emptyText: 'Keine favorisierten Titel.',
                 maxItemsPerPage: 3,
-                playbackCoordinator: widget.playbackCoordinator,
+                coreBridge: widget.coreBridge,
+                coreEvents: widget.coreEvents,
                 onRowTap: (Track item, int _) =>
                     unawaited(_showTrackMenu(item)),
                 onSelectionMenuTap: (List<Track> items) =>
@@ -327,7 +323,8 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
           isLoading: _controller.isLoading,
           items: _controller.albums,
           emptyText: 'Keine favorisierten Alben.',
-          playbackCoordinator: widget.playbackCoordinator,
+          coreBridge: widget.coreBridge,
+          coreEvents: widget.coreEvents,
           onItemTap: widget.onOpenAlbum,
           onSelectionMenuTap: (List<Album> items) =>
               unawaited(_showSelectionMenu(items)),
@@ -338,7 +335,8 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
           isLoading: _controller.isLoading,
           items: _controller.playlists,
           emptyText: 'Keine favorisierten Playlists.',
-          playbackCoordinator: widget.playbackCoordinator,
+          coreBridge: widget.coreBridge,
+          coreEvents: widget.coreEvents,
           onItemTap: widget.onOpenPlaylist,
           onSelectionMenuTap: (List<Playlist> items) =>
               unawaited(_showSelectionMenu(items)),
@@ -349,7 +347,8 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
           isLoading: _controller.isLoading,
           items: _controller.artists,
           emptyText: 'Keine favorisierten Artists.',
-          playbackCoordinator: widget.playbackCoordinator,
+          coreBridge: widget.coreBridge,
+          coreEvents: widget.coreEvents,
           onItemTap: widget.onOpenArtist,
           onSelectionMenuTap: (List<Artist> items) =>
               unawaited(_showSelectionMenu(items)),

@@ -2,24 +2,27 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_events.dart';
 import '../shared/context_menu/context_menu_controller.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_userdata.dart';
 import '../shared/widgets/media_table_section_mobile.dart';
 import 'playlist_name_dialog.dart';
 import 'playlists_controller.dart';
 
 class PlaylistsPageMobile extends StatefulWidget {
   const PlaylistsPageMobile({
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     required this.userDataController,
     required this.onOpenPlaylist,
     super.key,
   });
 
-  final PlaybackCoordinator playbackCoordinator;
-  final UserDataController userDataController;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
+  final UserData userDataController;
   final ValueChanged<Playlist> onOpenPlaylist;
 
   @override
@@ -33,7 +36,7 @@ class _PlaylistsPageMobileState extends State<PlaylistsPageMobile> {
   void initState() {
     super.initState();
     _controller = PlaylistsController(
-      playbackCoordinator: widget.playbackCoordinator,
+      coreBridge: widget.coreBridge,
       userDataController: widget.userDataController,
     )..addListener(_onControllerChanged);
   }
@@ -180,7 +183,8 @@ class _PlaylistsPageMobileState extends State<PlaylistsPageMobile> {
             isLoading: _controller.isLoading,
             emptyText: 'Keine Wiedergabelisten vorhanden.',
             maxItemsPerPage: 0,
-            playbackCoordinator: widget.playbackCoordinator,
+            coreBridge: widget.coreBridge,
+            coreEvents: widget.coreEvents,
             playlistSubtitleBuilder: (Playlist playlist) {
               final List<Track> tracks = _controller.tracksFor(<Playlist>[
                 playlist,

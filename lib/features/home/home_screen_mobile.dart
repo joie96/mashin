@@ -3,28 +3,28 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
+import '../core/core_models.dart';
+import '../core/core_bridge.dart';
+import '../core/core_events.dart';
 import '../shared/context_menu/context_menu_controller.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_userdata.dart';
 import '../shared/widgets/media_list_section_mobile.dart';
 import '../shared/widgets/media_row_section_mobile.dart';
 import '../shared/widgets/media_slide_section_mobile.dart';
 import 'home_controller.dart';
 
 class HomeScreenMobile extends StatefulWidget {
-  final MusicAssistantClient client;
-  final PlaybackCoordinator playbackCoordinator;
-  final UserDataController? userDataController;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
+  final UserData? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
   final ValueChanged<Playlist>? onOpenPlaylist;
 
   const HomeScreenMobile({
     super.key,
-    required this.client,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     this.userDataController,
     this.onOpenArtist,
     this.onOpenAlbum,
@@ -45,8 +45,7 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
   void initState() {
     super.initState();
     _controller = HomeController(
-      client: widget.client,
-      playbackCoordinator: widget.playbackCoordinator,
+      coreBridge: widget.coreBridge,
       userDataController: widget.userDataController,
     );
     widget.userDataController?.addListener(_onUserDataChanged);
@@ -109,32 +108,30 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () => widget.playbackCoordinator.playMedia(targets),
+        onSelected: () => widget.coreBridge.playMedia(targets),
       ),
       if (item is Album || item is Playlist || item is Artist)
         ContextMenuAction(
           label: 'Zufällig abspielen',
           icon: Icons.shuffle_outlined,
-          onSelected: () =>
-              widget.playbackCoordinator.shufflePlayMedia(targets),
+          onSelected: () => widget.coreBridge.playShuffledMedia(targets),
         ),
       if (item is! Playlist)
         ContextMenuAction(
           label: 'Radio starten',
           icon: Icons.radio_outlined,
-          onSelected: () =>
-              widget.playbackCoordinator.playMediaRadioNext(targets),
+          onSelected: () => widget.coreBridge.playSendspinRadioNext(targets),
         ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => widget.playbackCoordinator.playMediaNext(targets),
+        onSelected: () => widget.coreBridge.playMediaNext(targets),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => widget.playbackCoordinator.playMediaLast(targets),
+        onSelected: () => widget.coreBridge.playMediaLast(targets),
       ),
     ];
 
@@ -167,7 +164,7 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
       }
     }
 
-    final UserDataController? userData = widget.userDataController;
+    final UserData? userData = widget.userDataController;
     if (tracks.isNotEmpty &&
         userData != null &&
         userData.playlists.isNotEmpty) {
@@ -242,7 +239,8 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
         _sectionSliver(
           _RecommendationsSection(
             controller: _controller,
-            playbackCoordinator: widget.playbackCoordinator,
+            coreBridge: widget.coreBridge,
+            coreEvents: widget.coreEvents,
             onItemTap: _openTrackContext,
             onSelectionMenuTap: (List<Track> items) =>
                 unawaited(_showSelectionMenu(items)),
@@ -252,7 +250,7 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
         _sectionSliver(
           _GenrePlaylistsSection(
             controller: _controller,
-            playbackCoordinator: widget.playbackCoordinator,
+            coreBridge: widget.coreBridge,
             onItemTap: widget.onOpenPlaylist,
             onSelectionMenuTap: (List<Playlist> items) =>
                 unawaited(_showSelectionMenu(items)),
@@ -262,7 +260,8 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
         _sectionSliver(
           _ArtistPlaylistsSection(
             controller: _controller,
-            playbackCoordinator: widget.playbackCoordinator,
+            coreBridge: widget.coreBridge,
+            coreEvents: widget.coreEvents,
             onItemTap: widget.onOpenPlaylist,
             onSelectionMenuTap: (List<Playlist> items) =>
                 unawaited(_showSelectionMenu(items)),
@@ -272,7 +271,8 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
         _sectionSliver(
           _TopTracksSection(
             controller: _controller,
-            playbackCoordinator: widget.playbackCoordinator,
+            coreBridge: widget.coreBridge,
+            coreEvents: widget.coreEvents,
             onItemTap: _openTrackContext,
             onSelectionMenuTap: (List<Track> items) =>
                 unawaited(_showSelectionMenu(items)),
@@ -282,7 +282,8 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
         _sectionSliver(
           _TopArtistsSection(
             controller: _controller,
-            playbackCoordinator: widget.playbackCoordinator,
+            coreBridge: widget.coreBridge,
+            coreEvents: widget.coreEvents,
             onItemTap: widget.onOpenArtist,
             onSelectionMenuTap: (List<Artist> items) =>
                 unawaited(_showSelectionMenu(items)),
@@ -292,7 +293,8 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
         _sectionSliver(
           _SimilarArtistsSections(
             controller: _controller,
-            playbackCoordinator: widget.playbackCoordinator,
+            coreBridge: widget.coreBridge,
+            coreEvents: widget.coreEvents,
             onItemTap: widget.onOpenArtist,
             onSelectionMenuTap: (List<Artist> items) =>
                 unawaited(_showSelectionMenu(items)),
@@ -303,7 +305,8 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
         _sectionSliver(
           _RecentListensSection(
             controller: _controller,
-            playbackCoordinator: widget.playbackCoordinator,
+            coreBridge: widget.coreBridge,
+            coreEvents: widget.coreEvents,
             onItemTap: _openTrackContext,
             onSelectionMenuTap: (List<Track> items) =>
                 unawaited(_showSelectionMenu(items)),
@@ -325,13 +328,15 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
 class _RecommendationsSection extends StatelessWidget {
   const _RecommendationsSection({
     required this.controller,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     required this.onItemTap,
     required this.onSelectionMenuTap,
   });
 
   final HomeController controller;
-  final PlaybackCoordinator playbackCoordinator;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
   final ValueChanged<Track> onItemTap;
   final ValueChanged<List<Track>> onSelectionMenuTap;
 
@@ -345,7 +350,8 @@ class _RecommendationsSection extends StatelessWidget {
             isLoading: controller.isLoadingRecommendations,
             items: controller.recommendationItems,
             emptyText: 'Keine ListenBrainz-Empfehlungen verfügbar.',
-            playbackCoordinator: playbackCoordinator,
+            coreBridge: coreBridge,
+            coreEvents: coreEvents,
             onItemTap: onItemTap,
             onSelectionMenuTap: onSelectionMenuTap,
           ),
@@ -356,13 +362,13 @@ class _RecommendationsSection extends StatelessWidget {
 class _GenrePlaylistsSection extends StatelessWidget {
   const _GenrePlaylistsSection({
     required this.controller,
-    required this.playbackCoordinator,
+    required this.coreBridge,
     required this.onItemTap,
     required this.onSelectionMenuTap,
   });
 
   final HomeController controller;
-  final PlaybackCoordinator playbackCoordinator;
+  final MashinCoreBridgeApi coreBridge;
   final ValueChanged<Playlist>? onItemTap;
   final ValueChanged<List<Playlist>> onSelectionMenuTap;
 
@@ -376,7 +382,7 @@ class _GenrePlaylistsSection extends StatelessWidget {
             isLoading: controller.isLoadingGenrePlaylists,
             items: controller.genrePlaylists,
             emptyText: 'Keine Genre-Playlists verfügbar.',
-            playbackCoordinator: playbackCoordinator,
+            coreBridge: coreBridge,
             onItemTap: onItemTap,
             onSelectionMenuTap: onSelectionMenuTap,
           ),
@@ -387,14 +393,16 @@ class _GenrePlaylistsSection extends StatelessWidget {
 class _SimilarArtistsSections extends StatelessWidget {
   const _SimilarArtistsSections({
     required this.controller,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     required this.onItemTap,
     required this.onSelectionMenuTap,
     required this.sectionGap,
   });
 
   final HomeController controller;
-  final PlaybackCoordinator playbackCoordinator;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
   final ValueChanged<Artist>? onItemTap;
   final ValueChanged<List<Artist>> onSelectionMenuTap;
   final double sectionGap;
@@ -427,7 +435,8 @@ class _SimilarArtistsSections extends StatelessWidget {
                     ? const <Artist>[]
                     : sections[index].artists,
                 emptyText: 'Keine ähnlichen Künstler:innen verfügbar.',
-                playbackCoordinator: playbackCoordinator,
+                coreBridge: coreBridge,
+                coreEvents: coreEvents,
                 onItemTap: onItemTap,
                 onSelectionMenuTap: onSelectionMenuTap,
               ),
@@ -442,13 +451,15 @@ class _SimilarArtistsSections extends StatelessWidget {
 class _ArtistPlaylistsSection extends StatelessWidget {
   const _ArtistPlaylistsSection({
     required this.controller,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     required this.onItemTap,
     required this.onSelectionMenuTap,
   });
 
   final HomeController controller;
-  final PlaybackCoordinator playbackCoordinator;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
   final ValueChanged<Playlist>? onItemTap;
   final ValueChanged<List<Playlist>> onSelectionMenuTap;
 
@@ -463,7 +474,8 @@ class _ArtistPlaylistsSection extends StatelessWidget {
             isLoading: controller.isLoadingPlaylists,
             items: controller.artistPlaylists,
             emptyText: 'Keine Artist-Playlists verfügbar.',
-            playbackCoordinator: playbackCoordinator,
+            coreBridge: coreBridge,
+            coreEvents: coreEvents,
             onItemTap: onItemTap,
             onSelectionMenuTap: onSelectionMenuTap,
             showPlaylistDetails: false,
@@ -477,13 +489,15 @@ class _ArtistPlaylistsSection extends StatelessWidget {
 class _TopTracksSection extends StatelessWidget {
   const _TopTracksSection({
     required this.controller,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     required this.onItemTap,
     required this.onSelectionMenuTap,
   });
 
   final HomeController controller;
-  final PlaybackCoordinator playbackCoordinator;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
   final ValueChanged<MediaItem> onItemTap;
   final ValueChanged<List<Track>> onSelectionMenuTap;
 
@@ -498,7 +512,8 @@ class _TopTracksSection extends StatelessWidget {
             isLoading: controller.isLoadingTopTracks,
             items: controller.topTracks,
             emptyText: 'Keine Top-Tracks verfügbar.',
-            playbackCoordinator: playbackCoordinator,
+            coreBridge: coreBridge,
+            coreEvents: coreEvents,
             onItemTap: onItemTap,
             onSelectionMenuTap: onSelectionMenuTap,
           );
@@ -511,13 +526,15 @@ class _TopTracksSection extends StatelessWidget {
 class _TopArtistsSection extends StatelessWidget {
   const _TopArtistsSection({
     required this.controller,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     required this.onItemTap,
     required this.onSelectionMenuTap,
   });
 
   final HomeController controller;
-  final PlaybackCoordinator playbackCoordinator;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
   final ValueChanged<Artist>? onItemTap;
   final ValueChanged<List<Artist>> onSelectionMenuTap;
 
@@ -532,7 +549,8 @@ class _TopArtistsSection extends StatelessWidget {
             isLoading: controller.isLoadingTopArtists,
             items: controller.topArtists,
             emptyText: 'Keine Top-Artists verfügbar.',
-            playbackCoordinator: playbackCoordinator,
+            coreBridge: coreBridge,
+            coreEvents: coreEvents,
             onItemTap: onItemTap,
             onSelectionMenuTap: onSelectionMenuTap,
           );
@@ -545,13 +563,15 @@ class _TopArtistsSection extends StatelessWidget {
 class _RecentListensSection extends StatelessWidget {
   const _RecentListensSection({
     required this.controller,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     required this.onItemTap,
     required this.onSelectionMenuTap,
   });
 
   final HomeController controller;
-  final PlaybackCoordinator playbackCoordinator;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
   final ValueChanged<MediaItem> onItemTap;
   final ValueChanged<List<Track>> onSelectionMenuTap;
 
@@ -566,7 +586,8 @@ class _RecentListensSection extends StatelessWidget {
             isLoading: controller.isLoadingRecentListens,
             items: controller.recentListens,
             emptyText: 'Keine kürzlich gehörten Tracks verfügbar.',
-            playbackCoordinator: playbackCoordinator,
+            coreBridge: coreBridge,
+            coreEvents: coreEvents,
             onItemTap: onItemTap,
             onSelectionMenuTap: onSelectionMenuTap,
           );

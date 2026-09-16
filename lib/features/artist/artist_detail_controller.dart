@@ -5,10 +5,9 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_userdata.dart';
 
 /// Loads and holds all data required by the artist detail page (metadata, albums,
 /// similar artists, top tracks) and exposes the playback/favorite/description actions
@@ -18,19 +17,17 @@ class ArtistDetailController extends ChangeNotifier {
   static final http.Client _deezerHttpClient = http.Client();
   final Random _shuffleRandom = Random();
 
-  final MusicAssistantClient client;
-  final PlaybackCoordinator playbackCoordinator;
+  final MashinCoreBridgeApi coreBridge;
   final String itemId;
   final String providerInstanceIdOrDomain;
-  final UserDataController? userDataController;
+  final UserData? userDataController;
   final ChangeNotifier _metadataNotifier = ChangeNotifier();
   final ChangeNotifier _albumsNotifier = ChangeNotifier();
   final ChangeNotifier _similarArtistsNotifier = ChangeNotifier();
   final ChangeNotifier _topTracksNotifier = ChangeNotifier();
 
   ArtistDetailController({
-    required this.client,
-    required this.playbackCoordinator,
+    required this.coreBridge,
     required this.itemId,
     required this.providerInstanceIdOrDomain,
     this.userDataController,
@@ -116,13 +113,11 @@ class ArtistDetailController extends ChangeNotifier {
     _isLoadingMetadata = true;
     notifyListeners();
     try {
-      final Artist? loaded = await client.getArtist(
+      final Artist loaded = await coreBridge.getArtist(
         itemId,
         providerInstanceIdOrDomain,
       );
-      _artist = loaded == null
-          ? null
-          : (userDataController?.withFavoriteStatus(loaded) ?? loaded);
+      _artist = userDataController?.withFavoriteStatus(loaded) ?? loaded;
       final Artist? artist = _artist;
       _isArtistFavorite = artist != null && isItemFavorite(artist);
       await _loadDeezerBiographyIfNeeded();
@@ -139,7 +134,7 @@ class ArtistDetailController extends ChangeNotifier {
     _isLoadingAlbums = true;
     notifyListeners();
     try {
-      final List<Album> albums = await client.getArtistAlbums(
+      final List<Album> albums = await coreBridge.getArtistAlbums(
         itemId,
         providerInstanceIdOrDomain,
       );
@@ -167,7 +162,7 @@ class ArtistDetailController extends ChangeNotifier {
     _isLoadingSimilarArtists = true;
     notifyListeners();
     try {
-      List<Artist> artists = await client.getSimilarArtists(
+      List<Artist> artists = await coreBridge.getSimilarArtists(
         itemId,
         providerInstanceIdOrDomain,
         limit: 25,
@@ -196,7 +191,7 @@ class ArtistDetailController extends ChangeNotifier {
     _isLoadingTopTracks = true;
     notifyListeners();
     try {
-      final List<Track> tracks = await client.getArtistTopTracks(
+      final List<Track> tracks = await coreBridge.getArtistTopTracks(
         itemId,
         providerInstanceIdOrDomain,
       );
@@ -243,17 +238,27 @@ class ArtistDetailController extends ChangeNotifier {
       itemId: currentArtist.itemId,
       provider: currentArtist.provider,
       name: currentArtist.name,
+      version: currentArtist.version,
       sortName: currentArtist.sortName,
       uri: currentArtist.uri,
+      externalIds: currentArtist.externalIds,
+      isPlayable: currentArtist.isPlayable,
       providerMappings: currentArtist.providerMappings,
       favorite: currentArtist.favorite,
+      position: currentArtist.position,
+      dateAdded: currentArtist.dateAdded,
+      artistType: currentArtist.artistType,
       metadata: MediaItemMetadata(
         description: biography,
+        descriptionLanguage: previousMetadata.descriptionLanguage,
         images: previousMetadata.images,
         genres: previousMetadata.genres,
         label: previousMetadata.label,
         popularity: previousMetadata.popularity,
         cacheChecksum: previousMetadata.cacheChecksum,
+        explicit: previousMetadata.explicit,
+        lyrics: previousMetadata.lyrics,
+        transcript: previousMetadata.transcript,
       ),
     );
   }
@@ -367,27 +372,40 @@ class ArtistDetailController extends ChangeNotifier {
       itemId: trackAlbum.itemId,
       provider: trackAlbum.provider,
       name: trackAlbum.name,
+      version: trackAlbum.version,
       artists: trackAlbum.artists,
       sortName: trackAlbum.sortName,
       uri: trackAlbum.uri,
+      externalIds: trackAlbum.externalIds,
+      isPlayable: trackAlbum.isPlayable,
       year: matchingAlbum!.year,
       albumType: trackAlbum.albumType,
       providerMappings: trackAlbum.providerMappings,
       metadata: trackAlbum.metadata,
       favorite: trackAlbum.favorite,
+      position: trackAlbum.position,
+      dateAdded: trackAlbum.dateAdded,
     );
     return Track(
       itemId: track.itemId,
       provider: track.provider,
       name: track.name,
+      version: track.version,
       duration: track.duration,
       artists: track.artists,
       sortName: track.sortName,
       uri: track.uri,
-      album: albumWithYear,
+      externalIds: track.externalIds,
+      isPlayable: track.isPlayable,
+      album: AlbumReference.fromAlbum(albumWithYear),
+      image: track.image,
       providerMappings: track.providerMappings,
       metadata: track.metadata,
       favorite: track.favorite,
+      position: track.position,
+      dateAdded: track.dateAdded,
+      discNumber: track.discNumber,
+      trackNumber: track.trackNumber,
     );
   }
 
@@ -397,14 +415,14 @@ class ArtistDetailController extends ChangeNotifier {
       return const <Artist>[];
     }
 
-    List<Track> similarTracks = await client.getSimilarTracks(
+    List<Track> similarTracks = await coreBridge.getSimilarTracks(
       topTrack.itemId,
       topTrack.provider,
       limit: 50,
       allowLookup: true,
     );
     if (similarTracks.isEmpty) {
-      final List<Track> versions = await client.getTrackVersions(
+      final List<Track> versions = await coreBridge.getTrackVersions(
         topTrack.itemId,
         topTrack.provider,
       );
@@ -413,7 +431,7 @@ class ArtistDetailController extends ChangeNotifier {
           (Track version) => version.provider != topTrack.provider,
           orElse: () => versions.first,
         );
-        similarTracks = await client.getSimilarTracks(
+        similarTracks = await coreBridge.getSimilarTracks(
           fallbackVersion.itemId,
           fallbackVersion.provider,
           limit: 50,
@@ -443,8 +461,10 @@ class ArtistDetailController extends ChangeNotifier {
     final List<Artist> enriched = await Future.wait<Artist>(
       fallbackArtists.map((Artist candidate) async {
         try {
-          return await client.getArtist(candidate.itemId, candidate.provider) ??
-              candidate;
+          return await coreBridge.getArtist(
+            candidate.itemId,
+            candidate.provider,
+          );
         } catch (_) {
           return candidate;
         }
@@ -468,7 +488,7 @@ class ArtistDetailController extends ChangeNotifier {
     _notifyContentSections();
 
     try {
-      final UserDataController? controller = userDataController;
+      final UserData? controller = userDataController;
       if (controller == null) {
         _favoriteOverrides.remove(key);
         _notifyContentSections();
@@ -493,7 +513,7 @@ class ArtistDetailController extends ChangeNotifier {
     _metadataNotifier.notifyListeners();
 
     try {
-      final UserDataController? controller = userDataController;
+      final UserData? controller = userDataController;
       if (controller == null) {
         _isArtistFavorite = !nextFavorite;
         _metadataNotifier.notifyListeners();
@@ -536,7 +556,7 @@ class ArtistDetailController extends ChangeNotifier {
       return;
     }
     try {
-      await playbackCoordinator.playMedia(items);
+      await coreBridge.playMedia(items);
     } catch (_) {
       // Ignore playback failures to keep the UI responsive.
     }
@@ -548,7 +568,7 @@ class ArtistDetailController extends ChangeNotifier {
       return;
     }
     try {
-      await playbackCoordinator.shufflePlayMedia(items);
+      await coreBridge.playShuffledMedia(items);
     } catch (_) {
       // Ignore playback failures to keep the UI responsive.
     }
@@ -563,8 +583,8 @@ class ArtistDetailController extends ChangeNotifier {
 
     try {
       final MediaItem startItem = items[_shuffleRandom.nextInt(items.length)];
-      await playbackCoordinator.playMedia(<MediaItem>[startItem]);
-      await playbackCoordinator.playMediaRadioNext(<MediaItem>[currentArtist]);
+      await coreBridge.playMedia(<MediaItem>[startItem]);
+      await coreBridge.playSendspinRadioNext(<MediaItem>[currentArtist]);
     } catch (_) {
       // Ignore playback failures to keep the UI responsive.
     }
@@ -578,8 +598,8 @@ class ArtistDetailController extends ChangeNotifier {
     }
 
     try {
-      await playbackCoordinator.playMedia(<MediaItem>[item]);
-      await playbackCoordinator.playMediaRadioNext(<MediaItem>[item]);
+      await coreBridge.playMedia(<MediaItem>[item]);
+      await coreBridge.playSendspinRadioNext(<MediaItem>[item]);
     } catch (_) {
       // Ignore playback failures to keep the UI responsive.
     }
@@ -594,23 +614,8 @@ class ArtistDetailController extends ChangeNotifier {
     }
 
     try {
-      await playbackCoordinator.playMedia(<MediaItem>[track]);
-      await playbackCoordinator.playMediaRadioNext(<MediaItem>[track]);
-
-      // The radio command inserts a duplicate of the seed track directly after
-      // the played one; remove it once it shows up in the queue.
-      const int duplicateIndex = 1;
-      for (int attempt = 0; attempt < 10; attempt++) {
-        final List<QueueItem> queueItems = playbackCoordinator.queueItems;
-        if (queueItems.length > duplicateIndex) {
-          final String queueItemId = queueItems[duplicateIndex].queueItemId;
-          if (queueItemId.trim().isNotEmpty) {
-            await playbackCoordinator.deleteQueueItem(queueItemId);
-            return;
-          }
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 500));
-      }
+      await coreBridge.playMedia(<MediaItem>[track]);
+      await coreBridge.playSendspinRadioNext(<MediaItem>[track]);
     } catch (_) {
       // Ignore playback failures to keep the UI responsive.
     }

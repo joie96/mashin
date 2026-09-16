@@ -1,0 +1,4 @@
+<resources>
+    <string name="media_playback_notification_channel_name">Media playback</string>
+    <string name="media_playback_notification_title">Mashin</string>
+</resources>

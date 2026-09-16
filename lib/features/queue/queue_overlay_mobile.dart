@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_theme.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_events.dart';
 import '../shared/context_menu/context_menu_controller.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_userdata.dart';
 import '../shared/widgets/media_table_section_mobile.dart';
 
 class QueueOverlayMobile extends StatefulWidget {
@@ -12,8 +13,9 @@ class QueueOverlayMobile extends StatefulWidget {
   final String queueTotalDurationText;
   final List<QueueItem> queueItems;
   final int? currentQueueIndex;
-  final PlaybackCoordinator playbackCoordinator;
-  final UserDataController? userDataController;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
+  final UserData? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
   final ValueChanged<double> onDismissDragUpdate;
@@ -24,7 +26,8 @@ class QueueOverlayMobile extends StatefulWidget {
     required this.queueTotalDurationText,
     required this.queueItems,
     required this.currentQueueIndex,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     this.userDataController,
     this.onOpenArtist,
     this.onOpenAlbum,
@@ -170,10 +173,7 @@ class _QueueOverlayMobileState extends State<QueueOverlayMobile> {
       }
       final int positionShift = insertPosition - currentPosition;
       if (positionShift != 0) {
-        await widget.playbackCoordinator.moveQueueItem(
-          itemId,
-          posShift: positionShift,
-        );
+        await widget.coreBridge.moveQueueItem(itemId, positionShift);
       }
       itemOrder
         ..removeAt(currentPosition)
@@ -197,10 +197,7 @@ class _QueueOverlayMobileState extends State<QueueOverlayMobile> {
       }
       final int positionShift = itemOrder.length - 1 - currentPosition;
       if (positionShift != 0) {
-        await widget.playbackCoordinator.moveQueueItem(
-          itemId,
-          posShift: positionShift,
-        );
+        await widget.coreBridge.moveQueueItem(itemId, positionShift);
       }
       itemOrder
         ..removeAt(currentPosition)
@@ -214,7 +211,7 @@ class _QueueOverlayMobileState extends State<QueueOverlayMobile> {
         .whereType<Track>()
         .toList(growable: false);
     final Track? track = tracks.length == 1 ? tracks.single : null;
-    final UserDataController? controller = widget.userDataController;
+    final UserData? controller = widget.userDataController;
     final bool areAllFavorites =
         tracks.isNotEmpty &&
         tracks.every(
@@ -230,7 +227,7 @@ class _QueueOverlayMobileState extends State<QueueOverlayMobile> {
           );
           return index < 0
               ? Future<void>.value()
-              : widget.playbackCoordinator.playQueueIndex(index);
+              : widget.coreBridge.playQueueIndex(index);
         },
       ),
       ContextMenuAction(
@@ -250,9 +247,7 @@ class _QueueOverlayMobileState extends State<QueueOverlayMobile> {
         onSelected: () async {
           for (final QueueItem target in targets) {
             if (target.queueItemId.isNotEmpty) {
-              await widget.playbackCoordinator.deleteQueueItem(
-                target.queueItemId,
-              );
+              await widget.coreBridge.deleteQueueItem(target.queueItemId);
             }
           }
         },
@@ -410,7 +405,8 @@ class _QueueOverlayMobileState extends State<QueueOverlayMobile> {
                       maxItemsPerPage: 0,
                       enableSelection: true,
                       currentItemIndex: widget.currentQueueIndex,
-                      playbackCoordinator: widget.playbackCoordinator,
+                      coreBridge: widget.coreBridge,
+                      coreEvents: widget.coreEvents,
                       onSelectionMenuTap: (List<QueueItem> items) =>
                           _showSelectionMenu(items),
                     ),

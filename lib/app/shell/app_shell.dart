@@ -2,19 +2,18 @@ import 'dart:async';
 
 import 'package:flutter/material.dart' hide RepeatMode;
 
-import '../config/app_config.dart';
+import '../layout/layout_utils.dart';
 import '../../features/shared/selection/selection_controller.dart';
 import '../../features/shared/selection/selection_overlay.dart';
 import '../../features/shared/context_menu/context_menu_controller.dart';
 import '../../features/shared/widgets/media_link_text.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../../features/playback/playback_coordinator.dart';
-import '../../features/playback/playback_models.dart';
+import '../../features/core/core_bridge.dart';
+import '../../features/core/core_events.dart';
+import '../../features/core/core_models.dart';
 import '../../features/playerbar/playerbar_overlay.dart';
 import '../../features/queue/queue_overlay.dart';
-import '../../features/playback/sendspin/sendspin_player.dart';
 import '../../features/playlist/playlist_name_dialog.dart';
-import '../../features/shared/userdata_controller.dart';
+import '../../features/core/core_userdata.dart';
 import '../../features/shared/widgets/media_image.dart';
 import 'package:go_router/go_router.dart';
 
@@ -57,9 +56,10 @@ class _AppShellState extends State<AppShell> {
   final TextEditingController _desktopSearchController =
       TextEditingController();
 
-  PlaybackCoordinator get _playbackCoordinator =>
-      widget.session.playbackCoordinator;
-  UserDataController? get _userDataController =>
+    MashinCoreBridgeEvents get _coreEvents =>
+      widget.session.coreEvents;
+  MashinCoreBridgeApi get _coreBridge => widget.session.coreBridge;
+  UserData? get _userDataController =>
       widget.session.userDataController;
   String get _preferredCodec => widget.session.preferredCodec;
   bool get _canGoBack => widget.navigatorKey.currentState?.canPop() ?? false;
@@ -72,8 +72,9 @@ class _AppShellState extends State<AppShell> {
 
   /// Current playback and queue state
   QueueItem? get _currentQueueItem {
-    final items = _playbackCoordinator.playbackQueue.items;
-    final index = _playbackCoordinator.playbackQueue.currentIndex;
+    final items = _coreEvents.mediaSessionState.queue.items;
+    final index =
+      _coreEvents.mediaSessionState.queue.currentIndex;
     if (index == null || index < 0 || index >= items.length) {
       return null;
     }
@@ -86,7 +87,7 @@ class _AppShellState extends State<AppShell> {
       return 'Kein Track aktiv';
     }
 
-    final mediaName = item.mediaItem?.name.trim() ?? '';
+    final mediaName = item.mediaItem.name.trim();
     final queueName = item.name.trim();
     if (mediaName.isNotEmpty) {
       return mediaName;
@@ -103,8 +104,11 @@ class _AppShellState extends State<AppShell> {
       return 'Waehle einen Titel zum Starten';
     }
 
+    final Track? track = item.mediaItem is Track
+        ? item.mediaItem as Track
+        : null;
     final artists =
-        item.mediaItem?.artists
+        track?.artists
             .map((artist) => artist.name.trim())
             .where((name) => name.isNotEmpty)
             .toList() ??
@@ -115,8 +119,7 @@ class _AppShellState extends State<AppShell> {
     return 'Unbekannte:r Interpret:in';
   }
 
-  Artist? get _currentTrackPrimaryArtist =>
-      _currentQueueItem?.mediaItem?.artists.firstOrNull;
+  Artist? get _currentTrackPrimaryArtist => _currentTrack?.artists.firstOrNull;
 
   Track? get _currentTrack {
     final MediaItem? mediaItem = _currentQueueItem?.mediaItem;
@@ -125,7 +128,12 @@ class _AppShellState extends State<AppShell> {
 
   double get _currentTrackMaxSeconds {
     final durationFromStateSeconds =
-        ((_playbackCoordinator.playbackState.durationMillis ?? 0) / 1000)
+        ((_coreEvents
+                .mediaSessionState
+                .playerState
+                .durationMillis ??
+              0) /
+            1000)
             .toDouble();
     if (durationFromStateSeconds > 0) {
       return durationFromStateSeconds;
@@ -140,23 +148,24 @@ class _AppShellState extends State<AppShell> {
   }
 
   String? get _currentTrackCoverUrl {
-    final url = _currentQueueItem?.mediaItem?.imageUriForSize(80)?.trim() ?? '';
+    final url = _currentQueueItem?.mediaItem.imageUriForSize(80)?.trim() ?? '';
     return url.isEmpty ? null : url;
   }
 
   String? get _currentQueueCoverUrl {
-    final url =
-        _currentQueueItem?.mediaItem?.imageUriForSize(512)?.trim() ?? '';
+    final url = _currentQueueItem?.mediaItem.imageUriForSize(512)?.trim() ?? '';
     return url.isEmpty ? null : url;
   }
 
-  int get _queueTrackCount => _playbackCoordinator.playbackQueue.items.length;
+  int get _queueTrackCount =>
+      _coreEvents.mediaSessionState.queue.items.length;
 
   String get _queueTrackCountText => '$_queueTrackCount Tracks';
 
   String get _queueTotalDurationText {
     int totalSeconds = 0;
-    for (final item in _playbackCoordinator.playbackQueue.items) {
+    for (final item
+      in _coreEvents.mediaSessionState.queue.items) {
       final int duration = item.duration ?? 0;
       if (duration > 0) {
         totalSeconds += duration;
@@ -175,7 +184,12 @@ class _AppShellState extends State<AppShell> {
 
   double get _currentTrackPositionSeconds {
     final positionFromStateSeconds =
-        ((_playbackCoordinator.playbackState.positionMillis ?? 0) / 1000)
+        ((_coreEvents
+                .mediaSessionState
+                .playerState
+                .positionMillis ??
+              0) /
+            1000)
             .toDouble();
     if (positionFromStateSeconds > 0) {
       return positionFromStateSeconds;
@@ -205,7 +219,7 @@ class _AppShellState extends State<AppShell> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
-        final isDesktop = !AppConfig.isMobile();
+        final isDesktop = !isCompactLayout(context);
         final bool hasMobileBackAction =
             _isQueueOverlayOpen ||
             _mobileQueueOverlayOpenProgress > 0 ||
@@ -398,10 +412,10 @@ class _AppShellState extends State<AppShell> {
                 ],
               ),
             ),
-            _PlaybackScope(
-              playbackChanges: _playbackCoordinator.playbackStateChanges,
+            _MediaSessionScope(
+              mediaSessionChanges: _coreEvents,
               child: _QueueUiScope(
-                queueChanges: _playbackCoordinator.playbackQueueChanges,
+                mediaSessionChanges: _coreEvents,
                 builder: (BuildContext context) => _DesktopCurrentTrackInfo(
                   trackTitle: _currentTrackTitle,
                   trackSubtitle: _currentTrackSubtitle,
@@ -417,13 +431,21 @@ class _AppShellState extends State<AppShell> {
                     currentTrackInfo:
                         currentTrackInfo ?? const SizedBox.shrink(),
                     playStateType:
-                        _playbackCoordinator.playbackState.playbackState,
-                    playbackState: _playbackCoordinator.playbackState,
+                        _coreEvents
+                          .mediaSessionState
+                          .playerState
+                          .playbackState,
+                      playbackState: _coreEvents
+                        .mediaSessionState
+                        .playerState,
+                      playbackQueue: _coreEvents
+                        .mediaSessionState
+                        .queue,
                     dontStopTheMusicEnabled:
-                        _playbackCoordinator
-                            .playbackQueue
-                            .autoplayEnabled ??
-                        false,
+                        _coreEvents
+                          .mediaSessionState
+                          .queue
+                          .autoplayEnabled,
                     maxSeconds: _currentTrackMaxSeconds,
                     currentSeconds: _currentTrackPositionSeconds,
                     isQueueOpen: _isQueueOverlayOpen,
@@ -443,7 +465,7 @@ class _AppShellState extends State<AppShell> {
           ],
         ),
         _QueueUiScope(
-          queueChanges: _playbackCoordinator.playbackQueueChanges,
+          mediaSessionChanges: _coreEvents,
           builder: (BuildContext context) => QueueOverlay(
             isOpen: _isQueueOverlayOpen,
             isDesktop: true,
@@ -454,11 +476,15 @@ class _AppShellState extends State<AppShell> {
             queueTrackCountText: _queueTrackCountText,
             queueTotalDurationText: _queueTotalDurationText,
             dontStopTheMusicEnabled:
-                _playbackCoordinator.playbackQueue.autoplayEnabled ??
-                false,
-            queueItems: _playbackCoordinator.playbackQueue.items,
-            currentQueueIndex: _playbackCoordinator.playbackQueue.currentIndex,
-            playbackCoordinator: _playbackCoordinator,
+                _coreEvents
+                    .mediaSessionState
+                    .queue
+                    .autoplayEnabled,
+            queueItems: _coreEvents.mediaSessionState.queue.items,
+            currentQueueIndex:
+                _coreEvents.mediaSessionState.queue.currentIndex,
+            coreBridge: _coreBridge,
+            coreEvents: _coreEvents,
             userDataController: _userDataController,
             onClose: _closeQueueOverlay,
             onToggleDontStopTheMusic: _toggleDontStopTheMusic,
@@ -480,10 +506,10 @@ class _AppShellState extends State<AppShell> {
             Expanded(
               child: Container(color: colors.bgPrimary, child: widget.child),
             ),
-            _PlaybackScope(
-              playbackChanges: _playbackCoordinator.playbackStateChanges,
+            _MediaSessionScope(
+              mediaSessionChanges: _coreEvents,
               child: _QueueUiScope(
-                queueChanges: _playbackCoordinator.playbackQueueChanges,
+                mediaSessionChanges: _coreEvents,
                 builder: (BuildContext context) => _MobileCurrentTrackInfo(
                   trackTitle: _currentTrackTitle,
                   trackSubtitle: _currentTrackSubtitle,
@@ -495,7 +521,10 @@ class _AppShellState extends State<AppShell> {
                     currentTrackInfo:
                         currentTrackInfo ?? const SizedBox.shrink(),
                     playbackState:
-                        _playbackCoordinator.playbackState.playbackState,
+                        _coreEvents
+                          .mediaSessionState
+                          .playerState
+                          .playbackState,
                     currentSeconds: _currentTrackPositionSeconds,
                     maxSeconds: _currentTrackMaxSeconds,
                     onTogglePlayPause: _togglePlayPause,
@@ -513,9 +542,9 @@ class _AppShellState extends State<AppShell> {
           ],
         ),
         _QueueUiScope(
-          queueChanges: _playbackCoordinator.playbackQueueChanges,
-          builder: (BuildContext context) => _PlaybackScope(
-            playbackChanges: _playbackCoordinator.playbackStateChanges,
+          mediaSessionChanges: _coreEvents,
+          builder: (BuildContext context) => _MediaSessionScope(
+            mediaSessionChanges: _coreEvents,
             builder: (BuildContext context, Widget? child) => PlayerBarOverlay(
               isOpen: _isMobilePlayerOverlayOpen,
               openProgress: _mobilePlayerOverlayOpenProgress,
@@ -524,13 +553,21 @@ class _AppShellState extends State<AppShell> {
               trackCoverUrl: _currentQueueCoverUrl,
               currentTrack: _currentTrack,
               playbackStateType:
-                  _playbackCoordinator.playbackState.playbackState,
-              playbackState: _playbackCoordinator.playbackState,
+                    _coreEvents
+                      .mediaSessionState
+                      .playerState
+                      .playbackState,
+                  playbackState: _coreEvents
+                    .mediaSessionState
+                    .playerState,
+                  playbackQueue: _coreEvents.mediaSessionState.queue,
               maxSeconds: _currentTrackMaxSeconds,
               currentSeconds: _currentTrackPositionSeconds,
               dontStopTheMusicEnabled:
-                  _playbackCoordinator.playbackQueue.autoplayEnabled ??
-                  false,
+                    _coreEvents
+                      .mediaSessionState
+                      .queue
+                      .autoplayEnabled,
               userDataController: _userDataController,
               onClose: _closeMobilePlayerOverlay,
               onOpenQueue: _openQueueFromMobilePlayerOverlay,
@@ -551,7 +588,7 @@ class _AppShellState extends State<AppShell> {
           ),
         ),
         _QueueUiScope(
-          queueChanges: _playbackCoordinator.playbackQueueChanges,
+          mediaSessionChanges: _coreEvents,
           builder: (BuildContext context) => QueueOverlay(
             isOpen: _isQueueOverlayOpen,
             isDesktop: false,
@@ -562,11 +599,15 @@ class _AppShellState extends State<AppShell> {
             queueTrackCountText: _queueTrackCountText,
             queueTotalDurationText: _queueTotalDurationText,
             dontStopTheMusicEnabled:
-                _playbackCoordinator.playbackQueue.autoplayEnabled ??
-                false,
-            queueItems: _playbackCoordinator.playbackQueue.items,
-            currentQueueIndex: _playbackCoordinator.playbackQueue.currentIndex,
-            playbackCoordinator: _playbackCoordinator,
+                _coreEvents
+                    .mediaSessionState
+                    .queue
+                    .autoplayEnabled,
+            queueItems: _coreEvents.mediaSessionState.queue.items,
+            currentQueueIndex:
+                _coreEvents.mediaSessionState.queue.currentIndex,
+            coreBridge: _coreBridge,
+            coreEvents: _coreEvents,
             userDataController: _userDataController,
             onClose: _closeQueueOverlay,
             onToggleDontStopTheMusic: _toggleDontStopTheMusic,
@@ -828,7 +869,7 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<void> _createPlaylist() async {
-    final UserDataController? controller = _userDataController;
+    final UserData? controller = _userDataController;
     if (controller == null || !mounted) {
       return;
     }
@@ -840,7 +881,7 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<void> _renamePlaylist(Playlist playlist) async {
-    final UserDataController? controller = _userDataController;
+    final UserData? controller = _userDataController;
     if (controller == null || !mounted || !playlist.isEditable) {
       return;
     }
@@ -915,26 +956,26 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _playSidebarPlaylist(Playlist playlist) async {
     final List<Track> tracks = _playlistTracks(playlist);
-    if (tracks.isNotEmpty) await _playbackCoordinator.playMedia(tracks);
+    if (tracks.isNotEmpty) await _coreBridge.playMedia(tracks);
   }
 
   Future<void> _shuffleSidebarPlaylist(Playlist playlist) async {
     final List<Track> tracks = _playlistTracks(playlist);
-    if (tracks.isNotEmpty) await _playbackCoordinator.shufflePlayMedia(tracks);
+    if (tracks.isNotEmpty) await _coreBridge.playShuffledMedia(tracks);
   }
 
   Future<void> _playSidebarPlaylistNext(Playlist playlist) async {
     final List<Track> tracks = _playlistTracks(playlist);
-    if (tracks.isNotEmpty) await _playbackCoordinator.playMediaNext(tracks);
+    if (tracks.isNotEmpty) await _coreBridge.playMediaNext(tracks);
   }
 
   Future<void> _playSidebarPlaylistLast(Playlist playlist) async {
     final List<Track> tracks = _playlistTracks(playlist);
-    if (tracks.isNotEmpty) await _playbackCoordinator.playMediaLast(tracks);
+    if (tracks.isNotEmpty) await _coreBridge.playMediaLast(tracks);
   }
 
   Future<void> _deleteSidebarPlaylist(Playlist playlist) async {
-    final UserDataController? controller = _userDataController;
+    final UserData? controller = _userDataController;
     if (controller == null || !playlist.isEditable || !mounted) return;
 
     final bool confirmed = await showDeletePlaylistDialog(
@@ -962,7 +1003,12 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _togglePlayPause() async {
     try {
-      await _playbackCoordinator.togglePlayPause();
+      if (_coreEvents.mediaSessionState.playerState.playbackState ==
+          PlayState.playing) {
+        await _coreBridge.transportPause();
+      } else {
+        await _coreBridge.transportPlay();
+      }
     } catch (_) {
       // Ignore playback command failures in shell-level controls.
     }
@@ -970,7 +1016,7 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _playPrevious() async {
     try {
-      await _playbackCoordinator.previous();
+      await _coreBridge.transportPrevious();
     } catch (_) {
       // Ignore playback command failures in shell-level controls.
     }
@@ -978,7 +1024,7 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _playNext() async {
     try {
-      await _playbackCoordinator.next();
+      await _coreBridge.transportNext();
     } catch (_) {
       // Ignore playback command failures in shell-level controls.
     }
@@ -986,8 +1032,8 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _toggleShuffle() async {
     try {
-      await _playbackCoordinator.toggleShuffle(
-        _playbackCoordinator.playbackState.shuffleEnabled,
+      await _coreBridge.transportShuffle(
+        !_coreEvents.mediaSessionState.queue.shuffleEnabled,
       );
     } catch (_) {
       // Ignore playback command failures in shell-level controls.
@@ -996,9 +1042,13 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _toggleRepeatMode() async {
     try {
-      await _playbackCoordinator.toggleRepeatMode(
-        _playbackCoordinator.playbackState.repeatMode,
-      );
+      final current = _coreEvents.mediaSessionState.queue.repeatMode;
+      final next = switch (current) {
+        RepeatMode.off => RepeatMode.all,
+        RepeatMode.all => RepeatMode.one,
+        RepeatMode.one => RepeatMode.off,
+      };
+      await _coreBridge.transportRepeatMode(next);
     } catch (_) {
       // Ignore playback command failures in shell-level controls.
     }
@@ -1006,8 +1056,9 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _toggleDontStopTheMusic() async {
     try {
-      final enabled = _playbackCoordinator.dontStopTheMusicEnabled ?? false;
-      await _playbackCoordinator.setDontStopTheMusic(!enabled);
+        final enabled =
+          _coreEvents.mediaSessionState.queue.autoplayEnabled;
+        await _coreBridge.setAutoplay(!enabled);
     } catch (_) {
       // Ignore playback command failures in shell-level controls.
     }
@@ -1015,8 +1066,8 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _toggleMute() async {
     try {
-      await _playbackCoordinator.setMuted(
-        !_playbackCoordinator.playbackState.muted,
+      await _coreBridge.setMuted(
+        !_coreEvents.mediaSessionState.playerState.muted,
       );
     } catch (_) {
       // Ignore playback command failures in shell-level controls.
@@ -1026,7 +1077,7 @@ class _AppShellState extends State<AppShell> {
   Future<void> _setVolume(double next) async {
     final int safeVolume = next.round().clamp(0, 100);
     try {
-      await _playbackCoordinator.setVolume(safeVolume);
+      await _coreBridge.setVolume(safeVolume);
     } catch (error, stackTrace) {
       _logger.error(
         'Set volume failed: $error',
@@ -1037,7 +1088,7 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<void> _showAudioOptions(BuildContext anchorContext) async {
-    if (AppConfig.isMobile()) {
+    if (isCompactLayout(context)) {
       setState(() => _isAudioOptionsOpen = true);
     }
     try {
@@ -1060,8 +1111,7 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _setPreferredAudioCodec(String codec) async {
     Navigator.of(context, rootNavigator: true).pop();
-    final player = _playbackCoordinator.activePlayer;
-    if (player is! SendspinPlayer || codec == _preferredCodec) {
+    if (codec == _preferredCodec) {
       return;
     }
 
@@ -1078,7 +1128,7 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _seek(double seconds) async {
     try {
-      await _playbackCoordinator.seek(seconds);
+      await _coreBridge.transportSeek(seconds);
     } catch (_) {
       // Ignore playback command failures in shell-level controls.
     }
@@ -1114,22 +1164,22 @@ class _AppShellState extends State<AppShell> {
   }
 }
 
-/// Playback and queue state scopes
-class _PlaybackScope extends StatelessWidget {
-  const _PlaybackScope({
-    required this.playbackChanges,
+/// Media-session render-state scopes.
+class _MediaSessionScope extends StatelessWidget {
+  const _MediaSessionScope({
+    required this.mediaSessionChanges,
     required this.builder,
     this.child,
   });
 
-  final Listenable playbackChanges;
+  final Listenable mediaSessionChanges;
   final TransitionBuilder builder;
   final Widget? child;
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: playbackChanges,
+      animation: mediaSessionChanges,
       builder: builder,
       child: child,
     );
@@ -1137,15 +1187,18 @@ class _PlaybackScope extends StatelessWidget {
 }
 
 class _QueueUiScope extends StatelessWidget {
-  const _QueueUiScope({required this.queueChanges, required this.builder});
+  const _QueueUiScope({
+    required this.mediaSessionChanges,
+    required this.builder,
+  });
 
-  final Listenable queueChanges;
+  final Listenable mediaSessionChanges;
   final WidgetBuilder builder;
 
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: queueChanges,
+      listenable: mediaSessionChanges,
       builder: (BuildContext context, Widget? child) => builder(context),
     );
   }
@@ -1586,8 +1639,9 @@ class _DesktopPlayerBar extends StatelessWidget {
   static const double barHeight = 90;
 
   final Widget currentTrackInfo;
-  final PlaybackStateType playStateType;
-  final PlaybackState playbackState;
+  final PlayState playStateType;
+  final PlayerState playbackState;
+  final Queue playbackQueue;
   final bool dontStopTheMusicEnabled;
   final double maxSeconds;
   final double currentSeconds;
@@ -1608,6 +1662,7 @@ class _DesktopPlayerBar extends StatelessWidget {
     required this.currentTrackInfo,
     required this.playStateType,
     required this.playbackState,
+    required this.playbackQueue,
     required this.dontStopTheMusicEnabled,
     required this.maxSeconds,
     required this.currentSeconds,
@@ -1628,14 +1683,13 @@ class _DesktopPlayerBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
-    final bool hasPlaybackSession =
-        playStateType != PlaybackStateType.uninitialized;
-    final bool isPlaying = playStateType == PlaybackStateType.playing;
+    final bool hasPlaybackSession = playStateType != PlayState.uninitialized;
+    final bool isPlaying = playStateType == PlayState.playing;
     final bool isBusy =
-        playStateType == PlaybackStateType.buffering ||
-        playStateType == PlaybackStateType.seeking;
-    final bool isShuffleActive = playbackState.shuffleEnabled == true;
-    final RepeatMode repeatMode = playbackState.repeatMode ?? RepeatMode.off;
+        playStateType == PlayState.buffering ||
+        playStateType == PlayState.seeking;
+    final bool isShuffleActive = playbackQueue.shuffleEnabled;
+    final RepeatMode repeatMode = playbackQueue.repeatMode;
     final bool isRepeatOne = repeatMode == RepeatMode.one;
     final IconData repeatIcon = isRepeatOne
         ? Icons.repeat_one_outlined
@@ -1966,11 +2020,11 @@ class _DesktopCurrentTrackInfo extends StatelessWidget {
   final Artist? currentTrackArtist;
   final String? trackCoverUrl;
   final Track? currentTrack;
-  final UserDataController? userDataController;
+  final UserData? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
 
   Future<void> _showAddToPlaylistMenu(BuildContext context, Track track) {
-    final UserDataController? controller = userDataController;
+    final UserData? controller = userDataController;
     if (controller == null) {
       return Future<void>.value();
     }
@@ -2289,7 +2343,7 @@ String _formatSeconds(double seconds) {
 /// Mobile UI components
 class _MobilePlayerBar extends StatelessWidget {
   final Widget currentTrackInfo;
-  final PlaybackStateType playbackState;
+  final PlayState playbackState;
   final double currentSeconds;
   final double maxSeconds;
   final Future<void> Function() onTogglePlayPause;
@@ -2312,10 +2366,10 @@ class _MobilePlayerBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
-    final bool isPlaying = playbackState == PlaybackStateType.playing;
+    final bool isPlaying = playbackState == PlayState.playing;
     final bool isBusy =
-        playbackState == PlaybackStateType.buffering ||
-        playbackState == PlaybackStateType.seeking;
+        playbackState == PlayState.buffering ||
+        playbackState == PlayState.seeking;
     final double progress = maxSeconds > 0
         ? (currentSeconds / maxSeconds).clamp(0.0, 1.0)
         : 0.0;

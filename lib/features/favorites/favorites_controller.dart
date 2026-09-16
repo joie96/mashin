@@ -1,28 +1,24 @@
-import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_userdata.dart';
 
-/// Exposes the favorited tracks/albums/playlists/artists held by [UserDataController]
+/// Exposes the favorited tracks/albums/playlists/artists held by [UserData]
 /// plus the radio/favorite-toggle actions used by the desktop and mobile favorites pages.
 /// favorites come from the already loaded user preferences snapshot instead of a dedicated network call.
 class FavoritesController extends ChangeNotifier {
   FavoritesController({
-    required this.client,
-    required this.playbackCoordinator,
+    required this.coreBridge,
     required this.userDataController,
   }) {
     userDataController.addListener(_onUserDataChanged);
   }
 
-  final MusicAssistantClient client;
-  final PlaybackCoordinator playbackCoordinator;
-  final UserDataController userDataController;
+  final MashinCoreBridgeApi coreBridge;
+  final UserData userDataController;
 
   final Random _shuffleRandom = Random();
   bool _isDisposed = false;
@@ -61,9 +57,8 @@ class FavoritesController extends ChangeNotifier {
     }
 
     try {
-      await playbackCoordinator.playMedia(<MediaItem>[track]);
-      await playbackCoordinator.playMediaRadioNext(<MediaItem>[track]);
-      await _removeDuplicateRadioQueueItem();
+      await coreBridge.playMedia(<MediaItem>[track]);
+      await coreBridge.playSendspinRadioNext(<MediaItem>[track]);
     } catch (_) {
       // Ignore playback failures to keep the UI responsive.
     }
@@ -75,8 +70,8 @@ class FavoritesController extends ChangeNotifier {
     }
 
     try {
-      await playbackCoordinator.playMedia(<MediaItem>[item]);
-      await playbackCoordinator.playMediaRadioNext(<MediaItem>[item]);
+      await coreBridge.playMedia(<MediaItem>[item]);
+      await coreBridge.playSendspinRadioNext(<MediaItem>[item]);
     } catch (_) {
       // Ignore playback failures to keep the UI responsive.
     }
@@ -88,7 +83,7 @@ class FavoritesController extends ChangeNotifier {
     }
 
     try {
-      final List<Track> topTracks = await client.getArtistTopTracks(
+      final List<Track> topTracks = await coreBridge.getArtistTopTracks(
         artist.itemId,
         artist.provider,
       );
@@ -96,28 +91,12 @@ class FavoritesController extends ChangeNotifier {
         return;
       }
 
-      final Track startTrack = topTracks[_shuffleRandom.nextInt(topTracks.length)];
-      await playbackCoordinator.playMedia(<MediaItem>[startTrack]);
-      await playbackCoordinator.playMediaRadioNext(<MediaItem>[artist]);
+      final Track startTrack =
+          topTracks[_shuffleRandom.nextInt(topTracks.length)];
+      await coreBridge.playMedia(<MediaItem>[startTrack]);
+      await coreBridge.playSendspinRadioNext(<MediaItem>[artist]);
     } catch (_) {
       // Ignore playback failures to keep the UI responsive.
-    }
-  }
-
-  /// The radio command inserts a duplicate of the seed track directly after
-  /// the played one; remove it once it shows up in the queue.
-  Future<void> _removeDuplicateRadioQueueItem() async {
-    const int duplicateIndex = 1;
-    for (int attempt = 0; attempt < 10; attempt++) {
-      final List<QueueItem> queueItems = playbackCoordinator.queueItems;
-      if (queueItems.length > duplicateIndex) {
-        final String queueItemId = queueItems[duplicateIndex].queueItemId;
-        if (queueItemId.trim().isNotEmpty) {
-          await playbackCoordinator.deleteQueueItem(queueItemId);
-          return;
-        }
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 500));
     }
   }
 
@@ -128,7 +107,10 @@ class FavoritesController extends ChangeNotifier {
     await userDataController.setFavorite(<MediaItem>[item], favorite);
   }
 
-  Future<void> addTracksToPlaylist(String playlistId, List<Track> tracksToAdd) async {
+  Future<void> addTracksToPlaylist(
+    String playlistId,
+    List<Track> tracksToAdd,
+  ) async {
     if (playlistId.trim().isEmpty || tracksToAdd.isEmpty) {
       return;
     }

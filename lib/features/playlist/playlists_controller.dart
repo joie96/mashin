@@ -1,19 +1,19 @@
 import 'package:flutter/foundation.dart';
 
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_userdata.dart';
 
 class PlaylistsController extends ChangeNotifier {
   PlaylistsController({
-    required this.playbackCoordinator,
+    required this.coreBridge,
     required this.userDataController,
   }) {
     userDataController.addListener(_onUserDataChanged);
   }
 
-  final PlaybackCoordinator playbackCoordinator;
-  final UserDataController userDataController;
+  final MashinCoreBridgeApi coreBridge;
+  final UserData userDataController;
 
   List<Playlist> get playlists => userDataController.playlists;
   bool get isLoading => userDataController.isLoadingPreferences;
@@ -25,17 +25,15 @@ class PlaylistsController extends ChangeNotifier {
       )
       .toList(growable: false);
 
-  Future<void> play(List<Track> tracks) =>
-      playbackCoordinator.playMedia(tracks);
+  // Playlist playback commands.
+  Future<void> play(List<Track> tracks) => coreBridge.playMedia(tracks);
 
   Future<void> shuffle(List<Track> tracks) =>
-      playbackCoordinator.shufflePlayMedia(tracks);
+      coreBridge.playShuffledMedia(tracks);
 
-  Future<void> playNext(List<Track> tracks) =>
-      playbackCoordinator.playMediaNext(tracks);
+  Future<void> playNext(List<Track> tracks) => coreBridge.playMediaNext(tracks);
 
-  Future<void> playLast(List<Track> tracks) =>
-      playbackCoordinator.playMediaLast(tracks);
+  Future<void> playLast(List<Track> tracks) => coreBridge.playMediaLast(tracks);
 
   Future<Playlist?> createPlaylist(String name) =>
       userDataController.createLocalPlaylist(name);

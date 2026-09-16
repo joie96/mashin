@@ -43,7 +43,11 @@ enum AudioResampler {
 }
 
 impl AudioResampler {
-    fn new(source_sample_rate: u32, output_sample_rate: u32, channels: usize) -> Result<Self, String> {
+    fn new(
+        source_sample_rate: u32,
+        output_sample_rate: u32,
+        channels: usize,
+    ) -> Result<Self, String> {
         if source_sample_rate == output_sample_rate {
             return Ok(Self::Passthrough);
         }
@@ -65,7 +69,11 @@ struct RubatoResampler {
 }
 
 impl RubatoResampler {
-    fn new(source_sample_rate: u32, output_sample_rate: u32, channels: usize) -> Result<Self, String> {
+    fn new(
+        source_sample_rate: u32,
+        output_sample_rate: u32,
+        channels: usize,
+    ) -> Result<Self, String> {
         let resampler = FftFixedInOut::new(
             source_sample_rate as usize,
             output_sample_rate as usize,
@@ -96,7 +104,11 @@ impl RubatoResampler {
             let input = self
                 .pending_input
                 .iter_mut()
-                .map(|channel| channel.drain(..self.resampler.input_frames_next()).collect())
+                .map(|channel| {
+                    channel
+                        .drain(..self.resampler.input_frames_next())
+                        .collect()
+                })
                 .collect::<Vec<Vec<f32>>>();
             let mut resampled = vec![vec![0.0; self.resampler.output_frames_next()]; self.channels];
             let (_, output_frames) = self
@@ -131,6 +143,7 @@ pub(crate) struct AudioOutput {
 }
 
 impl AudioOutput {
+    // Construction.
     pub(crate) fn new(format: &AudioFormat, volume: u8, muted: bool) -> Result<Self, String> {
         let host = cpal::default_host();
         let device = host
@@ -143,8 +156,7 @@ impl AudioOutput {
         if stream_config.channels != u16::from(format.channels) {
             return Err(format!(
                 "audio stream has {} channels but the default output device has {} channels",
-                format.channels,
-                stream_config.channels
+                format.channels, stream_config.channels
             ));
         }
         let queue = Arc::new(Mutex::new(LocalPlaybackQueue {
@@ -163,6 +175,12 @@ impl AudioOutput {
             stream_config.sample_rate,
             usize::from(format.channels),
         )?;
+        LOGGER.debug(format!(
+            "building local audio stream: {:?}, {} Hz, {} channels",
+            device_config.sample_format(),
+            stream_config.sample_rate,
+            stream_config.channels,
+        ));
         let stream = build_local_fifo_stream(
             &device,
             &stream_config,
@@ -175,7 +193,11 @@ impl AudioOutput {
             Arc::clone(&underrun_active),
             Arc::clone(&played_samples),
         )?;
-        stream.play().map_err(|err| err.to_string())?;
+        LOGGER.debug("starting local audio stream");
+        stream.play().map_err(|error| {
+            LOGGER.error(format!("starting local audio stream failed: {error}"));
+            error.to_string()
+        })?;
         LOGGER.info(format!(
             "audio output started: {} Hz input, {} Hz output, {} channels",
             format.sample_rate, stream_config.sample_rate, format.channels
@@ -196,6 +218,7 @@ impl AudioOutput {
         })
     }
 
+    // Sample enqueueing.
     pub(crate) fn enqueue(&self, samples: Arc<[i32]>) -> Result<(), String> {
         let samples = self
             .resampler
@@ -216,12 +239,13 @@ impl AudioOutput {
         Ok(())
     }
 
+    // Buffered-duration and position queries.
     pub(crate) fn buffered_duration_millis(&self) -> i64 {
         let Ok(queue) = self.queue.lock() else {
             return 0;
         };
-        let samples_per_second =
-            u64::from(self.output_sample_rate).saturating_mul(u64::from(self.output_channels.max(1)));
+        let samples_per_second = u64::from(self.output_sample_rate)
+            .saturating_mul(u64::from(self.output_channels.max(1)));
         if samples_per_second == 0 {
             return 0;
         }
@@ -231,8 +255,8 @@ impl AudioOutput {
     }
 
     pub(crate) fn playback_position_millis(&self) -> i64 {
-        let samples_per_second =
-            u64::from(self.output_sample_rate).saturating_mul(u64::from(self.output_channels.max(1)));
+        let samples_per_second = u64::from(self.output_sample_rate)
+            .saturating_mul(u64::from(self.output_channels.max(1)));
         if samples_per_second == 0 {
             return 0;
         }
@@ -242,6 +266,7 @@ impl AudioOutput {
             .saturating_div(samples_per_second) as i64
     }
 
+    // Output controls and underrun state.
     pub(crate) fn set_volume(&self, volume: u8) {
         self.volume.store(volume, Ordering::Relaxed);
     }
@@ -252,7 +277,10 @@ impl AudioOutput {
 
     pub(crate) fn set_paused(&self, paused: bool) {
         self.paused.store(paused, Ordering::Relaxed);
-        LOGGER.debug(format!("audio output {}", if paused { "paused" } else { "resumed" }));
+        LOGGER.debug(format!(
+            "audio output {}",
+            if paused { "paused" } else { "resumed" }
+        ));
     }
 
     pub(crate) fn take_underrun(&self) -> bool {
@@ -263,9 +291,10 @@ impl AudioOutput {
         detected
     }
 
+    // Buffer duration conversion.
     fn buffered_duration_millis_from_samples(&self, samples: usize) -> i64 {
-        let samples_per_second =
-            u64::from(self.output_sample_rate).saturating_mul(u64::from(self.output_channels.max(1)));
+        let samples_per_second = u64::from(self.output_sample_rate)
+            .saturating_mul(u64::from(self.output_channels.max(1)));
         if samples_per_second == 0 {
             return 0;
         }

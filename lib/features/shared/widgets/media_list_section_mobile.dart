@@ -1,11 +1,10 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
-import '../../../data/music_assistant/ma_models.dart';
-import '../../playback/playback_coordinator.dart';
+import '../../core/core_bridge.dart';
+import '../../core/core_models.dart';
 import '../selection/mobile_section_selection.dart';
 import 'media_list_section_desktop.dart';
 import 'mobile_section_header.dart';
@@ -16,7 +15,7 @@ class MediaListSectionMobile<T extends MediaItem> extends StatefulWidget {
   final bool isLoading;
   final String emptyText;
   final double itemWidth;
-  final PlaybackCoordinator? playbackCoordinator;
+  final MashinCoreBridgeApi? coreBridge;
   final ValueChanged<T>? onItemTap;
   final ValueChanged<List<T>>? onSelectionMenuTap;
 
@@ -27,7 +26,7 @@ class MediaListSectionMobile<T extends MediaItem> extends StatefulWidget {
     required this.isLoading,
     required this.emptyText,
     this.itemWidth = 320,
-    this.playbackCoordinator,
+    this.coreBridge,
     this.onItemTap,
     this.onSelectionMenuTap,
   });
@@ -102,15 +101,15 @@ class _MediaListSectionMobileState<T extends MediaItem>
   }
 
   void _onPlayAllTap() {
-    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
+    final MashinCoreBridgeApi? bridge = widget.coreBridge;
     final List<MediaItem> playItems = _playableItems();
-    if (coordinator == null || playItems.isEmpty) {
+    if (bridge == null || playItems.isEmpty) {
       return;
     }
 
     unawaited(() async {
       try {
-        await coordinator.playMedia(<MediaItem>[playItems.first]);
+        await bridge.playMedia(<MediaItem>[playItems.first]);
       } catch (_) {
         // Playback failures should not block header actions.
       }
@@ -118,17 +117,15 @@ class _MediaListSectionMobileState<T extends MediaItem>
   }
 
   void _onShuffleAllTap() {
-    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
+    final MashinCoreBridgeApi? bridge = widget.coreBridge;
     final List<MediaItem> playItems = _playableItems();
-    if (coordinator == null || playItems.isEmpty) {
+    if (bridge == null || playItems.isEmpty) {
       return;
     }
 
     unawaited(() async {
       try {
-        final MediaItem item =
-            playItems[math.Random().nextInt(playItems.length)];
-        await coordinator.playMedia(<MediaItem>[item]);
+        await bridge.playShuffledMedia(playItems);
       } catch (_) {
         // Playback failures should not block header actions.
       }
@@ -151,7 +148,7 @@ class _MediaListSectionMobileState<T extends MediaItem>
             itemCount: !widget.isLoading && widget.items.isNotEmpty
                 ? widget.items.length
                 : null,
-            showPlaybackActions: widget.playbackCoordinator != null,
+            showPlaybackActions: widget.coreBridge != null,
             onPlayTap: hasPlayableContent ? _onPlayAllTap : null,
             onShuffleTap: hasPlayableContent ? _onShuffleAllTap : null,
             shuffleTooltip: 'Zufällig abspielen',
@@ -205,7 +202,7 @@ class _MediaListSectionMobileState<T extends MediaItem>
                                   ),
                             child: _MobileListTile<T>(
                               item: widget.items[(columnIndex * 3) + row],
-                              playbackCoordinator: widget.playbackCoordinator,
+                              coreBridge: widget.coreBridge,
                               onItemTap: null,
                             ),
                           ),
@@ -225,18 +222,18 @@ class _MediaListSectionMobileState<T extends MediaItem>
 
 class _MobileListTile<T extends MediaItem> extends StatelessWidget {
   final T item;
-  final PlaybackCoordinator? playbackCoordinator;
+  final MashinCoreBridgeApi? coreBridge;
   final ValueChanged<T>? onItemTap;
 
   const _MobileListTile({
     required this.item,
-    required this.playbackCoordinator,
+    required this.coreBridge,
     required this.onItemTap,
   });
 
   void _play() {
-    final PlaybackCoordinator? coordinator = playbackCoordinator;
-    if (coordinator == null ||
+    final MashinCoreBridgeApi? bridge = coreBridge;
+    if (bridge == null ||
         item.itemId.trim().isEmpty ||
         item.provider.trim().isEmpty) {
       return;
@@ -244,7 +241,7 @@ class _MobileListTile<T extends MediaItem> extends StatelessWidget {
 
     unawaited(() async {
       try {
-        await coordinator.playMedia(<MediaItem>[item]);
+        await bridge.playMedia(<MediaItem>[item]);
       } catch (_) {
         // Playback failures should not block list taps.
       }

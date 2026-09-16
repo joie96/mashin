@@ -3,20 +3,20 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_theme.dart';
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_events.dart';
 import '../shared/context_menu/context_menu_controller.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_userdata.dart';
 import '../shared/widgets/media_row_section_desktop.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
 import 'search_controller.dart' as feature_search;
 
 /// Desktop search page driven by the shell top-bar query.
 class SearchScreenDesktop extends StatefulWidget {
-  final MusicAssistantClient client;
-  final PlaybackCoordinator playbackCoordinator;
-  final UserDataController? userDataController;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
+  final UserData? userDataController;
   final bool desktopSearchDriven;
   final String desktopSearchQuery;
   final ValueChanged<Artist>? onOpenArtist;
@@ -25,8 +25,8 @@ class SearchScreenDesktop extends StatefulWidget {
 
   const SearchScreenDesktop({
     super.key,
-    required this.client,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     this.userDataController,
     this.desktopSearchDriven = false,
     this.desktopSearchQuery = '',
@@ -46,11 +46,10 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
   void initState() {
     super.initState();
     _controller = feature_search.SearchController(
-      client: widget.client,
+      coreBridge: widget.coreBridge,
       userDataController: widget.userDataController,
     )..addListener(_onControllerChanged);
     widget.userDataController?.addListener(_onUserDataChanged);
-    unawaited(_controller.load());
 
     if (widget.desktopSearchDriven) {
       _syncDesktopQuery(widget.desktopSearchQuery);
@@ -91,7 +90,7 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
   bool _isItemFavorite(MediaItem item) => item.favorite;
 
   void _toggleFavorite(MediaItem item) {
-    final UserDataController? userDataController = widget.userDataController;
+    final UserData? userDataController = widget.userDataController;
     if (userDataController == null) {
       return;
     }
@@ -116,7 +115,7 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
   }
 
   List<ContextMenuAction> _buildPlaylistSubmenu(List<Track> tracks) {
-    final UserDataController? controller = widget.userDataController;
+    final UserData? controller = widget.userDataController;
     if (controller == null) {
       return const <ContextMenuAction>[];
     }
@@ -151,23 +150,23 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () => widget.playbackCoordinator.playMedia(tracks),
+        onSelected: () => widget.coreBridge.playMedia(tracks),
       ),
       ContextMenuAction(
         label: 'Radio starten',
         icon: Icons.radio_outlined,
-        onSelected: () => widget.playbackCoordinator.playMediaRadioNext(tracks),
+        onSelected: () => widget.coreBridge.playSendspinRadioNext(tracks),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => widget.playbackCoordinator.playMediaNext(tracks),
+        onSelected: () => widget.coreBridge.playMediaNext(tracks),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => widget.playbackCoordinator.playMediaLast(tracks),
+        onSelected: () => widget.coreBridge.playMediaLast(tracks),
       ),
       if ((primaryArtist != null && widget.onOpenArtist != null) ||
           (primaryAlbum != null &&
@@ -219,27 +218,24 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () =>
-            widget.playbackCoordinator.playMedia(<MediaItem>[album]),
+        onSelected: () => widget.coreBridge.playMedia(<MediaItem>[album]),
       ),
       ContextMenuAction(
         label: 'Zufällig abspielen',
         icon: Icons.shuffle_outlined,
         onSelected: () =>
-        widget.playbackCoordinator.shufflePlayMedia(<MediaItem>[album]),
+            widget.coreBridge.playShuffledMedia(<MediaItem>[album]),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () =>
-            widget.playbackCoordinator.playMediaNext(<MediaItem>[album]),
+        onSelected: () => widget.coreBridge.playMediaNext(<MediaItem>[album]),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () =>
-            widget.playbackCoordinator.playMediaLast(<MediaItem>[album]),
+        onSelected: () => widget.coreBridge.playMediaLast(<MediaItem>[album]),
       ),
       if ((primaryArtist != null && widget.onOpenArtist != null) ||
           widget.onOpenAlbum != null) ...<ContextMenuAction>[
@@ -277,27 +273,26 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () =>
-            widget.playbackCoordinator.playMedia(<MediaItem>[playlist]),
+        onSelected: () => widget.coreBridge.playMedia(<MediaItem>[playlist]),
       ),
       ContextMenuAction(
         label: 'Zufällig abspielen',
         icon: Icons.shuffle_outlined,
         onSelected: () =>
-        widget.playbackCoordinator.shufflePlayMedia(<MediaItem>[playlist]),
+            widget.coreBridge.playShuffledMedia(<MediaItem>[playlist]),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
         onSelected: () =>
-            widget.playbackCoordinator.playMediaNext(<MediaItem>[playlist]),
+            widget.coreBridge.playMediaNext(<MediaItem>[playlist]),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
         onSelected: () =>
-            widget.playbackCoordinator.playMediaLast(<MediaItem>[playlist]),
+            widget.coreBridge.playMediaLast(<MediaItem>[playlist]),
       ),
       if (widget.onOpenPlaylist != null) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
@@ -327,27 +322,24 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () =>
-            widget.playbackCoordinator.playMedia(<MediaItem>[artist]),
+        onSelected: () => widget.coreBridge.playMedia(<MediaItem>[artist]),
       ),
       ContextMenuAction(
         label: 'Radio starten',
         icon: Icons.radio_outlined,
         onSelected: () =>
-            widget.playbackCoordinator.playMediaRadioNext(<MediaItem>[artist]),
+            widget.coreBridge.playSendspinRadioNext(<MediaItem>[artist]),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () =>
-            widget.playbackCoordinator.playMediaNext(<MediaItem>[artist]),
+        onSelected: () => widget.coreBridge.playMediaNext(<MediaItem>[artist]),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () =>
-            widget.playbackCoordinator.playMediaLast(<MediaItem>[artist]),
+        onSelected: () => widget.coreBridge.playMediaLast(<MediaItem>[artist]),
       ),
       if (widget.onOpenArtist != null) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
@@ -418,7 +410,8 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             isLoading: _controller.isLoadingTracks,
             emptyText: 'Keine Tracks gefunden.',
             maxItemsPerPage: 10,
-            playbackCoordinator: widget.playbackCoordinator,
+            coreBridge: widget.coreBridge,
+            coreEvents: widget.coreEvents,
             isRowFavorite: (Track item, int _) => _isItemFavorite(item),
             onRowFavoriteTap: widget.userDataController == null
                 ? null
@@ -450,7 +443,8 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             isLoading: _controller.isLoadingAlbums,
             items: _controller.albums,
             emptyText: 'Keine Alben gefunden.',
-            playbackCoordinator: widget.playbackCoordinator,
+            coreBridge: widget.coreBridge,
+            coreEvents: widget.coreEvents,
             isRowFavorite: (Album item, int _) => _isItemFavorite(item),
             onRowFavoriteTap: widget.userDataController == null
                 ? null
@@ -476,7 +470,8 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             isLoading: _controller.isLoadingPlaylists,
             items: _controller.playlists,
             emptyText: 'Keine Playlists gefunden.',
-            playbackCoordinator: widget.playbackCoordinator,
+            coreBridge: widget.coreBridge,
+            coreEvents: widget.coreEvents,
             isRowFavorite: (Playlist item, int _) => _isItemFavorite(item),
             onRowFavoriteTap: widget.userDataController == null
                 ? null
@@ -501,7 +496,8 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             isLoading: _controller.isLoadingArtists,
             items: _controller.artists,
             emptyText: 'Keine Artists gefunden.',
-            playbackCoordinator: widget.playbackCoordinator,
+            coreBridge: widget.coreBridge,
+            coreEvents: widget.coreEvents,
             isRowFavorite: (Artist item, int _) => _isItemFavorite(item),
             onRowFavoriteTap: widget.userDataController == null
                 ? null

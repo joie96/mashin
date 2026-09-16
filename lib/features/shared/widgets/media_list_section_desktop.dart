@@ -5,8 +5,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
-import '../../../data/music_assistant/ma_models.dart';
-import '../../playback/playback_coordinator.dart';
+import '../../core/core_bridge.dart';
+import '../../core/core_models.dart';
 import 'media_link_text.dart';
 import 'media_table_section_desktop.dart';
 
@@ -16,7 +16,7 @@ class MediaListSectionDesktop<T extends MediaItem> extends StatelessWidget {
   final bool isLoading;
   final String emptyText;
   final int maxItems;
-  final PlaybackCoordinator? playbackCoordinator;
+  final MashinCoreBridgeApi? coreBridge;
   final ValueChanged<T>? onItemTap;
   final DesktopRowContextMenuAction<T>? onItemContextMenu;
 
@@ -27,7 +27,7 @@ class MediaListSectionDesktop<T extends MediaItem> extends StatelessWidget {
     required this.isLoading,
     required this.emptyText,
     this.maxItems = 9,
-    this.playbackCoordinator,
+    this.coreBridge,
     this.onItemTap,
     this.onItemContextMenu,
   });
@@ -37,15 +37,15 @@ class MediaListSectionDesktop<T extends MediaItem> extends StatelessWidget {
   }
 
   void _onPlayAllTap() {
-    final PlaybackCoordinator? coordinator = playbackCoordinator;
+    final MashinCoreBridgeApi? bridge = coreBridge;
     final List<MediaItem> playItems = _playableItems();
-    if (coordinator == null || playItems.isEmpty) {
+    if (bridge == null || playItems.isEmpty) {
       return;
     }
 
     unawaited(() async {
       try {
-        await coordinator.playMedia(<MediaItem>[playItems.first]);
+        await bridge.playMedia(<MediaItem>[playItems.first]);
       } catch (_) {
         // Playback failures should not block header actions.
       }
@@ -53,17 +53,15 @@ class MediaListSectionDesktop<T extends MediaItem> extends StatelessWidget {
   }
 
   void _onShuffleAllTap() {
-    final PlaybackCoordinator? coordinator = playbackCoordinator;
+    final MashinCoreBridgeApi? bridge = coreBridge;
     final List<MediaItem> playItems = _playableItems();
-    if (coordinator == null || playItems.isEmpty) {
+    if (bridge == null || playItems.isEmpty) {
       return;
     }
 
     unawaited(() async {
       try {
-        final MediaItem item =
-            playItems[math.Random().nextInt(playItems.length)];
-        await coordinator.playMedia(<MediaItem>[item]);
+        await bridge.playShuffledMedia(playItems);
       } catch (_) {
         // Playback failures should not block header actions.
       }
@@ -95,7 +93,7 @@ class MediaListSectionDesktop<T extends MediaItem> extends StatelessWidget {
               const SizedBox(width: 16),
               const Expanded(child: SectionHeaderDivider()),
               const SizedBox(width: 16),
-              if (playbackCoordinator != null) ...<Widget>[
+              if (coreBridge != null) ...<Widget>[
                 SectionHeaderIconButton(
                   icon: Icons.play_arrow,
                   tooltip: 'Abspielen',
@@ -136,15 +134,12 @@ class MediaListSectionDesktop<T extends MediaItem> extends StatelessWidget {
                 itemBuilder: (BuildContext context, int index) {
                   return _MediaListTile<T>(
                     item: items[index],
-                    playbackCoordinator: playbackCoordinator,
+                    coreBridge: coreBridge,
                     onItemTap: onItemTap,
                     onContextMenu: onItemContextMenu == null
                         ? null
-                        : (Offset position) => onItemContextMenu!(
-                            items[index],
-                            index,
-                            position,
-                          ),
+                        : (Offset position) =>
+                              onItemContextMenu!(items[index], index, position),
                   );
                 },
               );
@@ -170,13 +165,13 @@ class MediaListSectionDesktop<T extends MediaItem> extends StatelessWidget {
 
 class _MediaListTile<T extends MediaItem> extends StatefulWidget {
   final T item;
-  final PlaybackCoordinator? playbackCoordinator;
+  final MashinCoreBridgeApi? coreBridge;
   final ValueChanged<T>? onItemTap;
   final ValueChanged<Offset>? onContextMenu;
 
   const _MediaListTile({
     required this.item,
-    required this.playbackCoordinator,
+    required this.coreBridge,
     required this.onItemTap,
     required this.onContextMenu,
   });
@@ -191,14 +186,14 @@ class _MediaListTileState<T extends MediaItem>
   bool _isPlayHovered = false;
 
   void _play() {
-    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
-    if (coordinator == null || !_isValidPlayable(widget.item)) {
+    final MashinCoreBridgeApi? bridge = widget.coreBridge;
+    if (bridge == null || !_isValidPlayable(widget.item)) {
       return;
     }
 
     unawaited(() async {
       try {
-        await coordinator.playMedia(<MediaItem>[widget.item]);
+        await bridge.playMedia(<MediaItem>[widget.item]);
       } catch (_) {
         // Playback failures should not block list hover actions.
       }
@@ -241,60 +236,61 @@ class _MediaListTileState<T extends MediaItem>
           clipBehavior: Clip.antiAlias,
           child: Stack(
             children: <Widget>[
-            Positioned(
-              top: 0,
-              bottom: 0,
-              left: 0,
-              width: 8,
-              child: ColoredBox(color: accentColorFromText(title)),
-            ),
-            Padding(
-              padding: const EdgeInsets.only(left: 24, right: 56),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: MediaLinkText(
-                  items: <MediaItem>[widget.item],
-                  fallbackText: title,
-                  onItemTap: widget.onItemTap == null
-                      ? null
-                      : (MediaItem item) => widget.onItemTap!(item as T),
-                  style: TextStyle(
-                    color: colors.textSecondary,
-                    fontWeight: FontWeight.w500,
+              Positioned(
+                top: 0,
+                bottom: 0,
+                left: 0,
+                width: 8,
+                child: ColoredBox(color: accentColorFromText(title)),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(left: 24, right: 56),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: MediaLinkText(
+                    items: <MediaItem>[widget.item],
+                    fallbackText: title,
+                    onItemTap: widget.onItemTap == null
+                        ? null
+                        : (MediaItem item) => widget.onItemTap!(item as T),
+                    style: TextStyle(
+                      color: colors.textSecondary,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
               ),
-            ),
-            Positioned(
-              top: 8,
-              right: 12,
-              child: IgnorePointer(
-                ignoring: !_isHovered,
-                child: AnimatedOpacity(
-                  duration: const Duration(milliseconds: 150),
-                  opacity: _isHovered ? 1 : 0,
-                  child: AnimatedSlide(
+              Positioned(
+                top: 8,
+                right: 12,
+                child: IgnorePointer(
+                  ignoring: !_isHovered,
+                  child: AnimatedOpacity(
                     duration: const Duration(milliseconds: 150),
-                    offset: _isHovered ? Offset.zero : const Offset(0.25, 0),
-                    child: MouseRegion(
-                      onEnter: (_) => setState(() => _isPlayHovered = true),
-                      onExit: (_) => setState(() => _isPlayHovered = false),
-                      child: AnimatedScale(
-                        duration: const Duration(milliseconds: 100),
-                        scale: _isPlayHovered ? 1.1 : 1,
-                        child: GestureDetector(
-                          onTap: _play,
-                          child: Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              color: colors.overlayPlayButtonBackground,
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Icon(
-                              Icons.play_arrow_sharp,
-                              size: 21,
-                              color: colors.overlayPlayButtonForeground,
+                    opacity: _isHovered ? 1 : 0,
+                    child: AnimatedSlide(
+                      duration: const Duration(milliseconds: 150),
+                      offset: _isHovered ? Offset.zero : const Offset(0.25, 0),
+                      child: MouseRegion(
+                        onEnter: (_) => setState(() => _isPlayHovered = true),
+                        onExit: (_) => setState(() => _isPlayHovered = false),
+                        child: AnimatedScale(
+                          duration: const Duration(milliseconds: 100),
+                          scale: _isPlayHovered ? 1.1 : 1,
+                          child: GestureDetector(
+                            onTap: _play,
+                            child: Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: colors.overlayPlayButtonBackground,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Icon(
+                                Icons.play_arrow_sharp,
+                                size: 21,
+                                color: colors.overlayPlayButtonForeground,
+                              ),
                             ),
                           ),
                         ),
@@ -303,7 +299,6 @@ class _MediaListTileState<T extends MediaItem>
                   ),
                 ),
               ),
-            ),
             ],
           ),
         ),

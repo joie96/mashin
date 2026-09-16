@@ -1,18 +1,18 @@
 import 'package:flutter/material.dart';
 
-import '../../app/config/app_config.dart';
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
-import '../shared/userdata_controller.dart';
+import '../../app/layout/layout_utils.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_events.dart';
+import '../core/core_userdata.dart';
 import 'search_screen_desktop.dart';
 import 'search_screen_mobile.dart';
 
 /// Entry point that renders [SearchScreenDesktop] or [SearchScreenMobile] depending on the current viewport.
 class SearchScreen extends StatelessWidget {
-  final MusicAssistantClient client;
-  final PlaybackCoordinator playbackCoordinator;
-  final UserDataController? userDataController;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
+  final UserData? userDataController;
   final bool desktopSearchDriven;
   final String desktopSearchQuery;
   final ValueChanged<Artist>? onOpenArtist;
@@ -21,8 +21,8 @@ class SearchScreen extends StatelessWidget {
 
   const SearchScreen({
     super.key,
-    required this.client,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     this.userDataController,
     this.desktopSearchDriven = false,
     this.desktopSearchQuery = '',
@@ -33,10 +33,10 @@ class SearchScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (AppConfig.isMobile()) {
+    if (isCompactLayout(context)) {
       return SearchScreenMobile(
-        client: client,
-        playbackCoordinator: playbackCoordinator,
+        coreBridge: coreBridge,
+        coreEvents: coreEvents,
         userDataController: userDataController,
         onOpenArtist: onOpenArtist,
         onOpenAlbum: onOpenAlbum,
@@ -45,8 +45,8 @@ class SearchScreen extends StatelessWidget {
     }
 
     return SearchScreenDesktop(
-      client: client,
-      playbackCoordinator: playbackCoordinator,
+      coreBridge: coreBridge,
+      coreEvents: coreEvents,
       userDataController: userDataController,
       desktopSearchDriven: desktopSearchDriven,
       desktopSearchQuery: desktopSearchQuery,

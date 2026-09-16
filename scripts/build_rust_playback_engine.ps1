@@ -4,7 +4,7 @@ param(
     [string]$Profile,
 
     [Parameter(Mandatory = $true)]
-    [ValidateSet('CurrentFlutter', 'WindowsX64', 'WindowsArm64')]
+    [ValidateSet('CurrentFlutter', 'WindowsX64', 'WindowsArm64', 'AndroidArm64')]
     [string]$PlatformSelection
 )
 
@@ -56,6 +56,7 @@ function Build-AndroidEngine {
 switch ($PlatformSelection) {
     'WindowsX64' { Build-WindowsEngine 'x86_64-pc-windows-msvc'; break }
     'WindowsArm64' { Build-WindowsEngine 'aarch64-pc-windows-msvc'; break }
+    'AndroidArm64' { Build-AndroidEngine; break }
     'CurrentFlutter' {
         $devices = @(flutter devices --machine | ConvertFrom-Json)
         $platforms = $devices.targetPlatform | Where-Object { $_ -match '^(windows|android)-' } | Select-Object -Unique

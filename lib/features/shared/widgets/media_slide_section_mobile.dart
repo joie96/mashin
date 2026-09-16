@@ -1,11 +1,11 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
-import '../../../data/music_assistant/ma_models.dart';
-import '../../playback/playback_coordinator.dart';
+import '../../core/core_bridge.dart';
+import '../../core/core_models.dart';
+import '../../core/core_events.dart';
 import '../selection/mobile_section_selection.dart';
 import 'media_image.dart';
 import 'media_table_section_desktop.dart';
@@ -21,7 +21,8 @@ class MediaSlideSectionMobile<T> extends StatefulWidget {
   final double coverSize;
   final double itemSpacing;
   final int skeletonCount;
-  final PlaybackCoordinator? playbackCoordinator;
+  final MashinCoreBridgeApi? coreBridge;
+  final MashinCoreBridgeEvents? coreEvents;
   final ValueChanged<T>? onItemTap;
   final ValueChanged<List<T>>? onSelectionMenuTap;
 
@@ -36,7 +37,8 @@ class MediaSlideSectionMobile<T> extends StatefulWidget {
     this.coverSize = 112,
     this.itemSpacing = 8,
     this.skeletonCount = 4,
-    this.playbackCoordinator,
+    this.coreBridge,
+    this.coreEvents,
     this.onItemTap,
     this.onSelectionMenuTap,
   });
@@ -103,8 +105,8 @@ class _MediaSlideSectionMobileState<T>
   }
 
   void _playItem(int index) {
-    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
-    if (coordinator == null || index < 0 || index >= widget.items.length) {
+    final MashinCoreBridgeApi? bridge = widget.coreBridge;
+    if (bridge == null || index < 0 || index >= widget.items.length) {
       return;
     }
 
@@ -115,7 +117,7 @@ class _MediaSlideSectionMobileState<T>
 
     unawaited(() async {
       try {
-        await coordinator.playMedia(<MediaItem>[item]);
+        await bridge.playMedia(<MediaItem>[item]);
       } catch (_) {
         // Keep row interactions responsive when playback rejects an item.
       }
@@ -136,8 +138,8 @@ class _MediaSlideSectionMobileState<T>
   }
 
   void _playAll() {
-    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
-    if (coordinator == null) {
+    final MashinCoreBridgeApi? bridge = widget.coreBridge;
+    if (bridge == null) {
       return;
     }
 
@@ -148,7 +150,7 @@ class _MediaSlideSectionMobileState<T>
 
     unawaited(() async {
       try {
-        await coordinator.playMedia(
+        await bridge.playMedia(
           _isTrackSection ? playItems : <MediaItem>[playItems.first],
         );
       } catch (_) {
@@ -158,8 +160,8 @@ class _MediaSlideSectionMobileState<T>
   }
 
   void _shufflePlayAll() {
-    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
-    if (coordinator == null) {
+    final MashinCoreBridgeApi? bridge = widget.coreBridge;
+    if (bridge == null) {
       return;
     }
 
@@ -170,14 +172,7 @@ class _MediaSlideSectionMobileState<T>
 
     unawaited(() async {
       try {
-        if (_isTrackSection) {
-          await coordinator.shufflePlayMedia(playItems);
-          return;
-        }
-
-        final MediaItem item =
-            playItems[math.Random().nextInt(playItems.length)];
-        await coordinator.playMedia(<MediaItem>[item]);
+        await bridge.playShuffledMedia(playItems);
       } catch (_) {
         // Keep header interactions responsive when playback rejects an item.
       }
@@ -200,7 +195,7 @@ class _MediaSlideSectionMobileState<T>
             itemCount: !widget.isLoading && widget.items.isNotEmpty
                 ? widget.items.length
                 : null,
-            showPlaybackActions: widget.playbackCoordinator != null,
+            showPlaybackActions: widget.coreBridge != null,
             onPlayTap: hasPlayableContent ? _playAll : null,
             onShuffleTap: hasPlayableContent ? _shufflePlayAll : null,
             shuffleTooltip: 'Zufällig abspielen',
@@ -262,7 +257,7 @@ class _MediaSlideSectionMobileState<T>
               item: widget.items[index],
               itemWidth: double.infinity,
               coverSize: widget.coverSize,
-              playbackCoordinator: widget.playbackCoordinator,
+              coreEvents: widget.coreEvents,
               onPlayTap: () => _playItem(index),
               onTap: null,
             ),
@@ -277,7 +272,7 @@ class _MobileSlideCard<T> extends StatelessWidget {
   final T item;
   final double itemWidth;
   final double coverSize;
-  final PlaybackCoordinator? playbackCoordinator;
+  final MashinCoreBridgeEvents? coreEvents;
   final VoidCallback? onPlayTap;
   final VoidCallback? onTap;
 
@@ -285,7 +280,7 @@ class _MobileSlideCard<T> extends StatelessWidget {
     required this.item,
     required this.itemWidth,
     required this.coverSize,
-    required this.playbackCoordinator,
+    this.coreEvents,
     required this.onPlayTap,
     required this.onTap,
   });
@@ -409,7 +404,7 @@ class _MobileSlideCard<T> extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
                           PlaybackAwareBuilder(
-                            coordinator: playbackCoordinator,
+                            coreEvents: coreEvents,
                             item: data.mediaItem,
                             builder: (BuildContext context, bool isCurrent) {
                               return Text(
@@ -540,12 +535,13 @@ class MediaSlideItemData {
 
 MediaSlideItemData resolveMediaSlideItemData(Object? item) {
   if (item is QueueItem) {
-    final Track? mediaItem = item.mediaItem;
+    final MediaItem mediaItem = item.mediaItem;
+    final Track? track = mediaItem is Track ? mediaItem : null;
     return MediaSlideItemData(
       mediaItem: mediaItem,
-      title: _prefer(mediaItem?.name ?? item.name, 'Unbekannter Titel'),
-      subtitle: mediaItem == null ? '-' : _trackSubtitle(mediaItem),
-      coverUrl: mediaItem?.imageUriForSize(512),
+      title: _prefer(mediaItem.name, 'Unbekannter Titel'),
+      subtitle: track == null ? '-' : _trackSubtitle(track),
+      coverUrl: mediaItem.imageUriForSize(512),
       fallbackIcon: Icons.music_note_outlined,
     );
   }
@@ -620,7 +616,7 @@ String _albumSubtitle(Album album) {
   if (artist != '-') {
     return artist;
   }
-  return _mediaTypeLabel(album.albumType);
+  return _mediaTypeLabel(album.albumType.name);
 }
 
 String _playlistSubtitle(Playlist playlist) {

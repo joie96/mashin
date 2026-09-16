@@ -4,11 +4,11 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_theme.dart';
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_events.dart';
 import '../shared/context_menu/context_menu_controller.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_userdata.dart';
 import '../shared/widgets/media_row_section_desktop.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
 import '../shared/widgets/media_image.dart';
@@ -17,18 +17,18 @@ import 'artist_detail_controller.dart';
 /// Desktop artist detail page: header with cover/name/actions, description and
 /// paginated album/similar-artist rows plus a top-tracks table
 class ArtistDetailPageDesktop extends StatefulWidget {
-  final MusicAssistantClient client;
-  final PlaybackCoordinator playbackCoordinator;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
   final String itemId;
   final String providerInstanceIdOrDomain;
-  final UserDataController? userDataController;
+  final UserData? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
 
   const ArtistDetailPageDesktop({
     super.key,
-    required this.client,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     required this.itemId,
     required this.providerInstanceIdOrDomain,
     this.userDataController,
@@ -52,8 +52,7 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
   void initState() {
     super.initState();
     _controller = ArtistDetailController(
-      client: widget.client,
-      playbackCoordinator: widget.playbackCoordinator,
+      coreBridge: widget.coreBridge,
       itemId: widget.itemId,
       providerInstanceIdOrDomain: widget.providerInstanceIdOrDomain,
       userDataController: widget.userDataController,
@@ -72,7 +71,7 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
   }
 
   List<ContextMenuAction> _buildPlaylistSubmenu(List<Track> tracks) {
-    final UserDataController? controller = widget.userDataController;
+    final UserData? controller = widget.userDataController;
     if (controller == null || tracks.isEmpty) {
       return const <ContextMenuAction>[];
     }
@@ -97,27 +96,27 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
         ? <Track>[item]
         : selectedTracks;
     final bool isFavorite = _controller.isItemFavorite(item);
-    final PlaybackCoordinator coordinator = widget.playbackCoordinator;
-
     final List<ContextMenuAction> actions = <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () =>
-            coordinator.playMedia(tracks.isEmpty ? <MediaItem>[item] : tracks),
+        onSelected: () => widget.coreBridge.playMedia(
+          tracks.isEmpty ? <MediaItem>[item] : tracks,
+        ),
       ),
       if (item is Album || item is Playlist)
         ContextMenuAction(
           label: 'Zufällig abspielen',
           icon: Icons.shuffle_outlined,
-          onSelected: () => coordinator.shufflePlayMedia(<MediaItem>[item]),
+          onSelected: () =>
+              widget.coreBridge.playShuffledMedia(<MediaItem>[item]),
         ),
       if (item is! Playlist)
         ContextMenuAction(
           label: 'Radio starten',
           icon: Icons.radio_outlined,
           onSelected: () => item is Track
-              ? coordinator.playMediaRadioNext(
+              ? widget.coreBridge.playSendspinRadioNext(
                   tracks.isEmpty ? <MediaItem>[item] : tracks,
                 )
               : _controller.startItemRadio(item),
@@ -126,14 +125,14 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => coordinator.playMediaNext(
+        onSelected: () => widget.coreBridge.playMediaNext(
           tracks.isEmpty ? <MediaItem>[item] : tracks,
         ),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => coordinator.playMediaLast(
+        onSelected: () => widget.coreBridge.playMediaLast(
           tracks.isEmpty ? <MediaItem>[item] : tracks,
         ),
       ),
@@ -234,14 +233,12 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () =>
-            widget.playbackCoordinator.playMediaNext(<MediaItem>[artist]),
+        onSelected: () => widget.coreBridge.playMediaNext(<MediaItem>[artist]),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () =>
-            widget.playbackCoordinator.playMediaLast(<MediaItem>[artist]),
+        onSelected: () => widget.coreBridge.playMediaLast(<MediaItem>[artist]),
       ),
       const ContextMenuAction.separator(),
       ContextMenuAction(
@@ -328,7 +325,8 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
                       isLoading: _controller.isLoadingAlbums,
                       items: _controller.albums,
                       emptyText: 'Keine Veröffentlichungen gefunden.',
-                      playbackCoordinator: widget.playbackCoordinator,
+                      coreBridge: widget.coreBridge,
+                      coreEvents: widget.coreEvents,
                       isRowFavorite: (Album item, int index) =>
                           _controller.isItemFavorite(item),
                       onRowFavoriteTap: (Album item, int index) =>
@@ -356,7 +354,8 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
                       isLoading: _controller.isLoadingSimilarArtists,
                       items: _controller.similarArtists,
                       emptyText: 'Keine ähnlichen Interpreten gefunden.',
-                      playbackCoordinator: widget.playbackCoordinator,
+                      coreBridge: widget.coreBridge,
+                      coreEvents: widget.coreEvents,
                       isRowFavorite: (Artist item, int index) =>
                           _controller.isItemFavorite(item),
                       onRowFavoriteTap: (Artist item, int index) =>
@@ -388,7 +387,8 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
                       items: _controller.topTracks,
                       emptyText: 'Keine Toplieder gefunden.',
                       maxItemsPerPage: 15,
-                      playbackCoordinator: widget.playbackCoordinator,
+                      coreBridge: widget.coreBridge,
+                      coreEvents: widget.coreEvents,
                       isRowFavorite: (Track item, int index) =>
                           _controller.isItemFavorite(item),
                       onRowFavoriteTap: (Track item, int index) =>

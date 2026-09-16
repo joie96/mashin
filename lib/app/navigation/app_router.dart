@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../data/music_assistant/ma_models.dart';
+import '../../features/core/core_models.dart';
 import '../../features/album/album_detail_page.dart';
 import '../../features/artist/artist_detail_page.dart';
 import '../../features/auth/login_screen.dart';
@@ -11,7 +11,7 @@ import '../../features/home/home_screen.dart';
 import '../../features/playlist/playlist_detail_page.dart';
 import '../../features/playlist/playlists_page.dart';
 import '../../features/search/search_screen.dart';
-import '../config/app_config.dart';
+import '../layout/layout_utils.dart';
 import '../session/app_session_controller.dart';
 import '../shell/app_shell.dart';
 
@@ -140,8 +140,9 @@ class AppRouter {
                 path: AppRoutes.home,
                 builder: (BuildContext context, GoRouterState state) =>
                     HomeScreen(
-                      client: session.client!,
-                      playbackCoordinator: session.playbackCoordinator,
+                      coreBridge: session.coreBridge,
+                      coreEvents:
+                          session.coreEvents,
                       userDataController: session.userDataController,
                       onOpenArtist: (Artist artist) =>
                           context.push(AppRoutes.artist(artist)),
@@ -155,8 +156,9 @@ class AppRouter {
                 path: AppRoutes.explore,
                 builder: (BuildContext context, GoRouterState state) =>
                     ExploreScreen(
-                      client: session.client!,
-                      playbackCoordinator: session.playbackCoordinator,
+                      coreBridge: session.coreBridge,
+                      coreEvents:
+                          session.coreEvents,
                       userDataController: session.userDataController,
                       onOpenArtist: (Artist artist) =>
                           context.push(AppRoutes.artist(artist)),
@@ -166,8 +168,9 @@ class AppRouter {
                 path: AppRoutes.favorites,
                 builder: (BuildContext context, GoRouterState state) =>
                     FavoritesScreen(
-                      client: session.client!,
-                      playbackCoordinator: session.playbackCoordinator,
+                      coreBridge: session.coreBridge,
+                      coreEvents:
+                          session.coreEvents,
                       userDataController: session.userDataController!,
                       onOpenArtist: (Artist artist) =>
                           context.push(AppRoutes.artist(artist)),
@@ -181,7 +184,9 @@ class AppRouter {
                 path: AppRoutes.playlists,
                 builder: (BuildContext context, GoRouterState state) =>
                     PlaylistsPage(
-                      playbackCoordinator: session.playbackCoordinator,
+                      coreBridge: session.coreBridge,
+                      coreEvents:
+                          session.coreEvents,
                       userDataController: session.userDataController!,
                       onOpenPlaylist: (Playlist playlist) =>
                           context.push(AppRoutes.playlist(playlist)),
@@ -191,10 +196,11 @@ class AppRouter {
                 path: AppRoutes.search,
                 builder: (BuildContext context, GoRouterState state) =>
                     SearchScreen(
-                      client: session.client!,
-                      playbackCoordinator: session.playbackCoordinator,
+                      coreBridge: session.coreBridge,
+                      coreEvents:
+                          session.coreEvents,
                       userDataController: session.userDataController,
-                      desktopSearchDriven: !AppConfig.isMobile(),
+                      desktopSearchDriven: !isCompactLayout(context),
                       desktopSearchQuery: state.uri.queryParameters['q'] ?? '',
                       onOpenArtist: (Artist artist) =>
                           context.push(AppRoutes.artist(artist)),
@@ -209,8 +215,9 @@ class AppRouter {
                 parentNavigatorKey: _shellNavigatorKey,
                 builder: (BuildContext context, GoRouterState state) =>
                     ArtistDetailPage(
-                      client: session.client!,
-                      playbackCoordinator: session.playbackCoordinator,
+                      coreBridge: session.coreBridge,
+                      coreEvents:
+                          session.coreEvents,
                       itemId: state.pathParameters['itemId']!,
                       providerInstanceIdOrDomain:
                           state.pathParameters['provider']!,
@@ -226,8 +233,9 @@ class AppRouter {
                 parentNavigatorKey: _shellNavigatorKey,
                 builder: (BuildContext context, GoRouterState state) =>
                     AlbumDetailPage(
-                      client: session.client!,
-                      playbackCoordinator: session.playbackCoordinator,
+                      coreBridge: session.coreBridge,
+                      coreEvents:
+                          session.coreEvents,
                       itemId: state.pathParameters['itemId']!,
                       providerInstanceIdOrDomain:
                           state.pathParameters['provider']!,
@@ -243,8 +251,9 @@ class AppRouter {
                 parentNavigatorKey: _shellNavigatorKey,
                 builder: (BuildContext context, GoRouterState state) =>
                     PlaylistDetailPage(
-                      client: session.client!,
-                      playbackCoordinator: session.playbackCoordinator,
+                      coreBridge: session.coreBridge,
+                      coreEvents:
+                          session.coreEvents,
                       itemId: state.pathParameters['itemId']!,
                       providerInstanceIdOrDomain:
                           state.pathParameters['provider']!,
@@ -263,35 +272,4 @@ class AppRouter {
 
   final AppSessionController session;
   final GoRouter router;
-}
-
-class _SectionPlaceholder extends StatelessWidget {
-  const _SectionPlaceholder({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-  });
-
-  final String title;
-  final String subtitle;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(icon, size: 46),
-            const SizedBox(height: 14),
-            Text(title, style: Theme.of(context).textTheme.headlineSmall),
-            const SizedBox(height: 6),
-            Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
-          ],
-        ),
-      ),
-    );
-  }
 }

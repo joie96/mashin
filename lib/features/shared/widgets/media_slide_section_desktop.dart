@@ -1,13 +1,13 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
-import '../../../data/music_assistant/ma_models.dart';
-import '../../playback/playback_coordinator.dart';
+import '../../core/core_bridge.dart';
+import '../../core/core_models.dart';
+import '../../core/core_events.dart';
 import 'media_image.dart';
 import 'media_link_text.dart';
 import 'media_table_section_desktop.dart';
@@ -19,7 +19,8 @@ class MediaSlideSectionDesktop<T> extends StatefulWidget {
   final String emptyText;
   final double height;
   final double coverSize;
-  final PlaybackCoordinator? playbackCoordinator;
+  final MashinCoreBridgeApi? coreBridge;
+  final MashinCoreBridgeEvents? coreEvents;
   final DesktopRowAction<T>? onRowFavoriteTap;
   final DesktopRowFavoriteResolver<T>? isRowFavorite;
   final DesktopRowAction<T>? onRowMoreTap;
@@ -36,7 +37,8 @@ class MediaSlideSectionDesktop<T> extends StatefulWidget {
     required this.emptyText,
     this.height = 240,
     this.coverSize = 200,
-    this.playbackCoordinator,
+    this.coreBridge,
+    this.coreEvents,
     this.onRowFavoriteTap,
     this.isRowFavorite,
     this.onRowMoreTap,
@@ -91,8 +93,8 @@ class _MediaSlideSectionDesktopState<T>
   }
 
   void _playCurrent() {
-    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
-    if (coordinator == null || widget.items.isEmpty) {
+    final MashinCoreBridgeApi? bridge = widget.coreBridge;
+    if (bridge == null || widget.items.isEmpty) {
       return;
     }
 
@@ -105,7 +107,7 @@ class _MediaSlideSectionDesktopState<T>
 
     unawaited(() async {
       try {
-        await coordinator.playMedia(<MediaItem>[item]);
+        await bridge.playMedia(<MediaItem>[item]);
       } catch (_) {
         // Keep card interactions responsive when playback rejects an item.
       }
@@ -126,8 +128,8 @@ class _MediaSlideSectionDesktopState<T>
   }
 
   void _playAll() {
-    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
-    if (coordinator == null) {
+    final MashinCoreBridgeApi? bridge = widget.coreBridge;
+    if (bridge == null) {
       return;
     }
 
@@ -138,7 +140,7 @@ class _MediaSlideSectionDesktopState<T>
 
     unawaited(() async {
       try {
-        await coordinator.playMedia(
+        await bridge.playMedia(
           _isTrackSection ? playItems : <MediaItem>[playItems.first],
         );
       } catch (_) {
@@ -148,8 +150,8 @@ class _MediaSlideSectionDesktopState<T>
   }
 
   void _shufflePlayAll() {
-    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
-    if (coordinator == null) {
+    final MashinCoreBridgeApi? bridge = widget.coreBridge;
+    if (bridge == null) {
       return;
     }
 
@@ -160,14 +162,7 @@ class _MediaSlideSectionDesktopState<T>
 
     unawaited(() async {
       try {
-        if (_isTrackSection) {
-          await coordinator.shufflePlayMedia(playItems);
-          return;
-        }
-
-        final MediaItem item =
-            playItems[math.Random().nextInt(playItems.length)];
-        await coordinator.playMedia(<MediaItem>[item]);
+        await bridge.playShuffledMedia(playItems);
       } catch (_) {
         // Keep header interactions responsive when playback rejects an item.
       }
@@ -180,7 +175,7 @@ class _MediaSlideSectionDesktopState<T>
       return resolver(item, index);
     }
     if (item is QueueItem) {
-      return item.mediaItem?.favorite ?? false;
+      return item.mediaItem.favorite;
     }
     return (item as MediaItem?)?.favorite ?? false;
   }
@@ -241,7 +236,7 @@ class _MediaSlideSectionDesktopState<T>
               const SizedBox(width: 16),
               const Expanded(child: SectionHeaderDivider()),
               const SizedBox(width: 16),
-              if (widget.playbackCoordinator != null) ...<Widget>[
+              if (widget.coreBridge != null) ...<Widget>[
                 SectionHeaderIconButton(
                   icon: Icons.play_arrow,
                   tooltip: 'Abspielen',
@@ -323,7 +318,7 @@ class _MediaSlideSectionDesktopState<T>
                       item: widget.items[_currentIndex],
                       index: _currentIndex,
                       coverSize: widget.coverSize,
-                      playbackCoordinator: widget.playbackCoordinator,
+                      coreEvents: widget.coreEvents,
                       isFavorite: _isItemFavorite(
                         widget.items[_currentIndex],
                         _currentIndex,
@@ -357,7 +352,7 @@ class _DesktopSlideCard<T> extends StatefulWidget {
   final T item;
   final int index;
   final double coverSize;
-  final PlaybackCoordinator? playbackCoordinator;
+  final MashinCoreBridgeEvents? coreEvents;
   final bool isFavorite;
   final VoidCallback? onPlayTap;
   final VoidCallback? onFavoriteTap;
@@ -369,7 +364,7 @@ class _DesktopSlideCard<T> extends StatefulWidget {
     required this.item,
     required this.index,
     required this.coverSize,
-    required this.playbackCoordinator,
+    this.coreEvents,
     required this.isFavorite,
     required this.onPlayTap,
     required this.onFavoriteTap,
@@ -444,15 +439,15 @@ class _DesktopSlideCardState<T> extends State<_DesktopSlideCard<T>> {
                                     size: 46,
                                   ),
                           ),
-                            Positioned(
-                              left: 6,
-                              top: 6,
-                              child: MediaProviderIcon(
-                                providerLabel: data.providerLabel,
-                                iconSvg: data.providerIconSvg,
-                                size: 18,
-                              ),
+                          Positioned(
+                            left: 6,
+                            top: 6,
+                            child: MediaProviderIcon(
+                              providerLabel: data.providerLabel,
+                              iconSvg: data.providerIconSvg,
+                              size: 18,
                             ),
+                          ),
                           Positioned.fill(
                             child: AnimatedOpacity(
                               duration: const Duration(milliseconds: 140),
@@ -535,7 +530,7 @@ class _DesktopSlideCardState<T> extends State<_DesktopSlideCard<T>> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       PlaybackAwareBuilder(
-                        coordinator: widget.playbackCoordinator,
+                        coreEvents: widget.coreEvents,
                         item: data.mediaItem,
                         builder: (BuildContext context, bool isCurrent) {
                           return Text(
@@ -650,19 +645,20 @@ class MediaSlideItemData {
 
 MediaSlideItemData resolveMediaSlideItemData(Object? item) {
   if (item is QueueItem) {
-    final Track? mediaItem = item.mediaItem;
+    final MediaItem mediaItem = item.mediaItem;
+    final Track? track = mediaItem is Track ? mediaItem : null;
     final String provider = _resolveQueueProvider(item);
     return MediaSlideItemData(
       mediaItem: mediaItem,
-      title: _prefer(mediaItem?.name ?? item.name, 'Unbekannter Titel'),
-      subtitle: mediaItem == null ? '-' : _trackSubtitle(mediaItem),
-      tertiary: _formatDuration(item.duration ?? mediaItem?.duration ?? 0),
-      coverUrl: mediaItem?.imageUriForSize(512),
+      title: _prefer(mediaItem.name, 'Unbekannter Titel'),
+      subtitle: track == null ? '-' : _trackSubtitle(track),
+      tertiary: _formatDuration(item.duration ?? track?.duration ?? 0),
+      coverUrl: mediaItem.imageUriForSize(512),
       fallbackIcon: Icons.music_note_outlined,
       providerLabel: _providerLabelFromId(provider),
       providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(provider),
-      artists: mediaItem?.artists ?? const <Artist>[],
-      album: mediaItem?.album,
+      artists: track?.artists ?? const <Artist>[],
+      album: track?.album,
     );
   }
 
@@ -769,7 +765,7 @@ String _albumSubtitle(Album album) {
   if (artist != '-') {
     return artist;
   }
-  return _mediaTypeLabel(album.albumType);
+  return _mediaTypeLabel(album.albumType.name);
 }
 
 String _albumTertiary(Album album) {
@@ -880,13 +876,12 @@ String _prefer(String primary, String fallback) {
 }
 
 String _resolveQueueProvider(QueueItem item) {
-  final String directProvider = _stripOrEmpty(item.mediaItem?.provider);
+  final String directProvider = _stripOrEmpty(item.mediaItem.provider);
   if (directProvider.isNotEmpty) {
     return directProvider;
   }
 
-  final List<ProviderMapping> mappings =
-      item.mediaItem?.providerMappings ?? const <ProviderMapping>[];
+  final List<ProviderMapping> mappings = item.mediaItem.providerMappings;
   for (final ProviderMapping mapping in mappings) {
     final String domain = _stripOrEmpty(mapping.providerDomain);
     if (domain.isNotEmpty) {

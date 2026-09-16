@@ -4,11 +4,11 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_theme.dart';
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_events.dart';
 import '../shared/context_menu/context_menu_controller.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_userdata.dart';
 import '../shared/widgets/media_link_text.dart';
 import '../shared/widgets/media_row_section_desktop.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
@@ -18,8 +18,8 @@ import 'album_detail_controller.dart';
 class AlbumDetailPageDesktop extends StatefulWidget {
   const AlbumDetailPageDesktop({
     super.key,
-    required this.client,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     required this.itemId,
     required this.providerInstanceIdOrDomain,
     this.userDataController,
@@ -27,11 +27,11 @@ class AlbumDetailPageDesktop extends StatefulWidget {
     this.onOpenAlbum,
   });
 
-  final MusicAssistantClient client;
-  final PlaybackCoordinator playbackCoordinator;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
   final String itemId;
   final String providerInstanceIdOrDomain;
-  final UserDataController? userDataController;
+  final UserData? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
 
@@ -49,8 +49,7 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
   void initState() {
     super.initState();
     _controller = AlbumDetailController(
-      client: widget.client,
-      playbackCoordinator: widget.playbackCoordinator,
+      coreBridge: widget.coreBridge,
       itemId: widget.itemId,
       providerInstanceIdOrDomain: widget.providerInstanceIdOrDomain,
       userDataController: widget.userDataController,
@@ -65,7 +64,7 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
   }
 
   List<ContextMenuAction> _buildPlaylistSubmenu(List<Track> tracks) {
-    final UserDataController? controller = widget.userDataController;
+    final UserData? controller = widget.userDataController;
     if (controller == null || tracks.isEmpty) {
       return const <ContextMenuAction>[];
     }
@@ -90,26 +89,27 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
         ? <Track>[item]
         : selectedTracks;
     final bool isFavorite = _controller.isItemFavorite(item);
-    final PlaybackCoordinator coordinator = widget.playbackCoordinator;
     final List<ContextMenuAction> actions = <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () =>
-            coordinator.playMedia(tracks.isEmpty ? <MediaItem>[item] : tracks),
+        onSelected: () => widget.coreBridge.playMedia(
+          tracks.isEmpty ? <MediaItem>[item] : tracks,
+        ),
       ),
       if (item is Album || item is Playlist)
         ContextMenuAction(
           label: 'Zufällig abspielen',
           icon: Icons.shuffle_outlined,
-          onSelected: () => coordinator.shufflePlayMedia(<MediaItem>[item]),
+          onSelected: () =>
+              widget.coreBridge.playShuffledMedia(<MediaItem>[item]),
         ),
       if (item is! Playlist)
         ContextMenuAction(
           label: 'Radio starten',
           icon: Icons.radio_outlined,
           onSelected: () => item is Track
-              ? coordinator.playMediaRadioNext(
+              ? widget.coreBridge.playSendspinRadioNext(
                   tracks.isEmpty ? <MediaItem>[item] : tracks,
                 )
               : _controller.startItemRadio(item),
@@ -118,14 +118,14 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => coordinator.playMediaNext(
+        onSelected: () => widget.coreBridge.playMediaNext(
           tracks.isEmpty ? <MediaItem>[item] : tracks,
         ),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => coordinator.playMediaLast(
+        onSelected: () => widget.coreBridge.playMediaLast(
           tracks.isEmpty ? <MediaItem>[item] : tracks,
         ),
       ),
@@ -220,14 +220,12 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () =>
-            widget.playbackCoordinator.playMediaNext(<MediaItem>[album]),
+        onSelected: () => widget.coreBridge.playMediaNext(<MediaItem>[album]),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () =>
-            widget.playbackCoordinator.playMediaLast(<MediaItem>[album]),
+        onSelected: () => widget.coreBridge.playMediaLast(<MediaItem>[album]),
       ),
       const ContextMenuAction.separator(),
       ContextMenuAction(
@@ -306,7 +304,8 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
                       items: _controller.tracks,
                       emptyText: 'Keine Titel gefunden.',
                       maxItemsPerPage: 15,
-                      playbackCoordinator: widget.playbackCoordinator,
+                      coreBridge: widget.coreBridge,
+                      coreEvents: widget.coreEvents,
                       isRowFavorite: (Track item, int _) =>
                           _controller.isItemFavorite(item),
                       onRowFavoriteTap: (Track item, int _) =>
@@ -340,7 +339,8 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
                       isLoading: _controller.isLoadingOtherAlbums,
                       items: _controller.otherAlbums,
                       emptyText: 'Keine weiteren Alben gefunden.',
-                      playbackCoordinator: widget.playbackCoordinator,
+                      coreBridge: widget.coreBridge,
+                      coreEvents: widget.coreEvents,
                       isRowFavorite: (Album item, int _) =>
                           _controller.isItemFavorite(item),
                       onRowFavoriteTap: (Album item, int _) =>
@@ -367,7 +367,8 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
                       isLoading: _controller.isLoadingSimilarArtists,
                       items: _controller.similarArtists,
                       emptyText: 'Keine ähnlichen Interpreten gefunden.',
-                      playbackCoordinator: widget.playbackCoordinator,
+                      coreBridge: widget.coreBridge,
+                      coreEvents: widget.coreEvents,
                       isRowFavorite: (Artist item, int _) =>
                           _controller.isItemFavorite(item),
                       onRowFavoriteTap: (Artist item, int _) =>
@@ -520,12 +521,15 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
                               onTap: album == null
                                   ? null
                                   : () => unawaited(
-                                      const AppContextMenuController().showContextMenu(
-                                        context: context,
-                                        anchorContext:
-                                            _headerMenuAnchorKey.currentContext,
-                                        actions: _buildHeaderMenuActions(album),
-                                      ),
+                                      const AppContextMenuController()
+                                          .showContextMenu(
+                                            context: context,
+                                            anchorContext: _headerMenuAnchorKey
+                                                .currentContext,
+                                            actions: _buildHeaderMenuActions(
+                                              album,
+                                            ),
+                                          ),
                                     ),
                             ),
                           ],

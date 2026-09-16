@@ -2,7 +2,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub(crate) enum SourceReadResult {
-    Data { data: Arc<[u8]>, duration_millis: u64 },
+    Data {
+        data: Arc<[u8]>,
+        duration_millis: u64,
+    },
     Waiting,
     EndOfStream,
     Error(String),

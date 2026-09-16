@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_events.dart';
 import '../shared/context_menu/context_menu_controller.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_userdata.dart';
 import '../shared/widgets/media_row_section_desktop.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
 import 'favorites_controller.dart';
@@ -12,17 +12,17 @@ import 'favorites_controller.dart';
 /// Desktop favorites page: stacked track table plus album/playlist/artist rows,
 /// each with its own context menu.
 class FavoritesScreenDesktop extends StatefulWidget {
-  final MusicAssistantClient client;
-  final PlaybackCoordinator playbackCoordinator;
-  final UserDataController userDataController;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
+  final UserData userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
   final ValueChanged<Playlist>? onOpenPlaylist;
 
   const FavoritesScreenDesktop({
     super.key,
-    required this.client,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     required this.userDataController,
     this.onOpenArtist,
     this.onOpenAlbum,
@@ -40,8 +40,7 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
   void initState() {
     super.initState();
     _controller = FavoritesController(
-      client: widget.client,
-      playbackCoordinator: widget.playbackCoordinator,
+      coreBridge: widget.coreBridge,
       userDataController: widget.userDataController,
     )..addListener(_onControllerChanged);
   }
@@ -95,7 +94,6 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
         ? <Track>[track]
         : selectedTracks;
     final bool isFavorite = _controller.isItemFavorite(track);
-    final PlaybackCoordinator coordinator = widget.playbackCoordinator;
     final Artist? primaryArtist = _primaryArtistOf(track);
     final Album? primaryAlbum = track.album;
     final List<ContextMenuAction> playlistActions = _buildPlaylistSubmenu(
@@ -106,23 +104,23 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () => coordinator.playMedia(tracks),
+        onSelected: () => widget.coreBridge.playMedia(tracks),
       ),
       ContextMenuAction(
         label: 'Radio starten',
         icon: Icons.radio_outlined,
-        onSelected: () => coordinator.playMediaRadioNext(tracks),
+        onSelected: () => widget.coreBridge.playSendspinRadioNext(tracks),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => coordinator.playMediaNext(tracks),
+        onSelected: () => widget.coreBridge.playMediaNext(tracks),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => coordinator.playMediaLast(tracks),
+        onSelected: () => widget.coreBridge.playMediaLast(tracks),
       ),
       if (primaryArtist != null || primaryAlbum != null) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
@@ -166,30 +164,30 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
 
   List<ContextMenuAction> _buildAlbumMenuActions(Album album) {
     final bool isFavorite = _controller.isItemFavorite(album);
-    final PlaybackCoordinator coordinator = widget.playbackCoordinator;
     final Artist? primaryArtist = _primaryArtistOf(album);
 
     return <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () => coordinator.playMedia(<MediaItem>[album]),
+        onSelected: () => widget.coreBridge.playMedia(<MediaItem>[album]),
       ),
       ContextMenuAction(
         label: 'Zufällig abspielen',
         icon: Icons.shuffle_outlined,
-        onSelected: () => coordinator.shufflePlayMedia(<MediaItem>[album]),
+        onSelected: () =>
+            widget.coreBridge.playShuffledMedia(<MediaItem>[album]),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => coordinator.playMediaNext(<MediaItem>[album]),
+        onSelected: () => widget.coreBridge.playMediaNext(<MediaItem>[album]),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => coordinator.playMediaLast(<MediaItem>[album]),
+        onSelected: () => widget.coreBridge.playMediaLast(<MediaItem>[album]),
       ),
       if ((primaryArtist != null && widget.onOpenArtist != null) ||
           widget.onOpenAlbum != null) ...<ContextMenuAction>[
@@ -222,29 +220,31 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
 
   List<ContextMenuAction> _buildPlaylistMenuActions(Playlist playlist) {
     final bool isFavorite = _controller.isItemFavorite(playlist);
-    final PlaybackCoordinator coordinator = widget.playbackCoordinator;
 
     return <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () => coordinator.playMedia(<MediaItem>[playlist]),
+        onSelected: () => widget.coreBridge.playMedia(<MediaItem>[playlist]),
       ),
       ContextMenuAction(
         label: 'Zufällig abspielen',
         icon: Icons.shuffle_outlined,
-        onSelected: () => coordinator.shufflePlayMedia(<MediaItem>[playlist]),
+        onSelected: () =>
+            widget.coreBridge.playShuffledMedia(<MediaItem>[playlist]),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => coordinator.playMediaNext(<MediaItem>[playlist]),
+        onSelected: () =>
+            widget.coreBridge.playMediaNext(<MediaItem>[playlist]),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => coordinator.playMediaLast(<MediaItem>[playlist]),
+        onSelected: () =>
+            widget.coreBridge.playMediaLast(<MediaItem>[playlist]),
       ),
       const ContextMenuAction.separator(),
       ContextMenuAction(
@@ -261,13 +261,12 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
 
   List<ContextMenuAction> _buildArtistMenuActions(Artist artist) {
     final bool isFavorite = _controller.isItemFavorite(artist);
-    final PlaybackCoordinator coordinator = widget.playbackCoordinator;
 
     return <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () => coordinator.playMedia(<MediaItem>[artist]),
+        onSelected: () => widget.coreBridge.playMedia(<MediaItem>[artist]),
       ),
       ContextMenuAction(
         label: 'Radio starten',
@@ -278,12 +277,12 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => coordinator.playMediaNext(<MediaItem>[artist]),
+        onSelected: () => widget.coreBridge.playMediaNext(<MediaItem>[artist]),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => coordinator.playMediaLast(<MediaItem>[artist]),
+        onSelected: () => widget.coreBridge.playMediaLast(<MediaItem>[artist]),
       ),
       if (widget.onOpenArtist != null) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
@@ -338,7 +337,8 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
           isLoading: _controller.isLoading,
           emptyText: 'Keine favorisierten Titel.',
           maxItemsPerPage: 10,
-          playbackCoordinator: widget.playbackCoordinator,
+          coreBridge: widget.coreBridge,
+          coreEvents: widget.coreEvents,
           isRowFavorite: (Track item, int _) =>
               _controller.isItemFavorite(item),
           onRowFavoriteTap: (Track item, int _) =>
@@ -369,7 +369,8 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
           isLoading: _controller.isLoading,
           items: _controller.albums,
           emptyText: 'Keine favorisierten Alben.',
-          playbackCoordinator: widget.playbackCoordinator,
+          coreBridge: widget.coreBridge,
+          coreEvents: widget.coreEvents,
           isRowFavorite: (Album item, int _) =>
               _controller.isItemFavorite(item),
           onRowFavoriteTap: (Album item, int _) =>
@@ -394,7 +395,8 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
           isLoading: _controller.isLoading,
           items: _controller.playlists,
           emptyText: 'Keine favorisierten Playlists.',
-          playbackCoordinator: widget.playbackCoordinator,
+          coreBridge: widget.coreBridge,
+          coreEvents: widget.coreEvents,
           isRowFavorite: (Playlist item, int _) =>
               _controller.isItemFavorite(item),
           onRowFavoriteTap: (Playlist item, int _) =>
@@ -419,7 +421,8 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
           isLoading: _controller.isLoading,
           items: _controller.artists,
           emptyText: 'Keine favorisierten Artists.',
-          playbackCoordinator: widget.playbackCoordinator,
+          coreBridge: widget.coreBridge,
+          coreEvents: widget.coreEvents,
           isRowFavorite: (Artist item, int _) =>
               _controller.isItemFavorite(item),
           onRowFavoriteTap: (Artist item, int _) =>

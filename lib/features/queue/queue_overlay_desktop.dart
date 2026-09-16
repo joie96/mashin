@@ -3,10 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_theme.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_events.dart';
 import '../shared/context_menu/context_menu_controller.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_userdata.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
 import '../shared/widgets/media_image.dart';
 
@@ -19,8 +20,9 @@ class QueueOverlayDesktop extends StatefulWidget {
   final bool dontStopTheMusicEnabled;
   final List<QueueItem> queueItems;
   final int? currentQueueIndex;
-  final PlaybackCoordinator playbackCoordinator;
-  final UserDataController? userDataController;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
+  final UserData? userDataController;
   final VoidCallback onClose;
   final Future<void> Function() onToggleDontStopTheMusic;
   final ValueChanged<Artist>? onOpenArtist;
@@ -35,7 +37,8 @@ class QueueOverlayDesktop extends StatefulWidget {
     required this.dontStopTheMusicEnabled,
     required this.queueItems,
     required this.currentQueueIndex,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     this.userDataController,
     required this.onClose,
     required this.onToggleDontStopTheMusic,
@@ -62,8 +65,8 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
   bool get dontStopTheMusicEnabled => widget.dontStopTheMusicEnabled;
   List<QueueItem> get queueItems => widget.queueItems;
   int? get currentQueueIndex => widget.currentQueueIndex;
-  PlaybackCoordinator get playbackCoordinator => widget.playbackCoordinator;
-  UserDataController? get userDataController => widget.userDataController;
+  MashinCoreBridgeEvents get coreEvents => widget.coreEvents;
+  UserData? get userDataController => widget.userDataController;
   VoidCallback get onClose => widget.onClose;
   Future<void> Function() get onToggleDontStopTheMusic =>
       widget.onToggleDontStopTheMusic;
@@ -120,12 +123,12 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
     if (index == null || index < 0 || index >= queueItems.length) {
       return null;
     }
-    final MediaItem? mediaItem = queueItems[index].mediaItem;
+    final MediaItem mediaItem = queueItems[index].mediaItem;
     return mediaItem is Track ? mediaItem : null;
   }
 
   Future<void> _showAddToPlaylistMenu(BuildContext context, Track track) {
-    final UserDataController? controller = userDataController;
+    final UserData? controller = userDataController;
     if (controller == null) {
       return Future<void>.value();
     }
@@ -175,10 +178,7 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
       }
       final int positionShift = insertPosition - currentPosition;
       if (positionShift != 0) {
-        await playbackCoordinator.moveQueueItem(
-          itemId,
-          posShift: positionShift,
-        );
+        await widget.coreBridge.moveQueueItem(itemId, positionShift);
       }
       itemOrder
         ..removeAt(currentPosition)
@@ -204,10 +204,7 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
       final int targetPosition = itemOrder.length - 1;
       final int positionShift = targetPosition - currentPosition;
       if (positionShift != 0) {
-        await playbackCoordinator.moveQueueItem(
-          itemId,
-          posShift: positionShift,
-        );
+        await widget.coreBridge.moveQueueItem(itemId, positionShift);
       }
       itemOrder
         ..removeAt(currentPosition)
@@ -222,7 +219,7 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
         .whereType<Track>()
         .toList(growable: false);
     final Track? track = tracks.length == 1 ? tracks.single : null;
-    final UserDataController? controller = userDataController;
+    final UserData? controller = userDataController;
     final bool areAllFavorites =
         tracks.isNotEmpty &&
         tracks.every(
@@ -241,7 +238,7 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
           );
           return index < 0
               ? Future<void>.value()
-              : playbackCoordinator.playQueueIndex(index);
+              : widget.coreBridge.playQueueIndex(index);
         },
       ),
       ContextMenuAction(
@@ -261,7 +258,7 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
         onSelected: () async {
           for (final QueueItem target in targets) {
             if (target.queueItemId.isNotEmpty) {
-              await playbackCoordinator.deleteQueueItem(target.queueItemId);
+              await widget.coreBridge.deleteQueueItem(target.queueItemId);
             }
           }
         },
@@ -498,7 +495,8 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
                     emptyText: 'Queue ist leer',
                     maxItemsPerPage: 0,
                     enableSelection: true,
-                    playbackCoordinator: playbackCoordinator,
+                    coreBridge: widget.coreBridge,
+                    coreEvents: coreEvents,
                     scrollController: _queueScrollController,
                     onSelectionChanged: (List<QueueItem> items) {
                       setState(() {

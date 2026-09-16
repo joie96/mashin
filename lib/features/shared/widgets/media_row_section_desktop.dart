@@ -5,8 +5,9 @@ import 'dart:math' as math;
 import 'dart:async';
 
 import '../../../app/theme/app_theme.dart';
-import '../../../data/music_assistant/ma_models.dart';
-import '../../playback/playback_coordinator.dart';
+import '../../core/core_bridge.dart';
+import '../../core/core_models.dart';
+import '../../core/core_events.dart';
 import '../selection/selection_controller.dart';
 import 'media_link_text.dart';
 import 'media_image.dart';
@@ -28,7 +29,8 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
   final double minItemWith;
   final double itemSpacing;
   final int skeletonCount;
-  final PlaybackCoordinator? playbackCoordinator;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents? coreEvents;
   final bool enableSelection;
   final DesktopRowAction<T>? onRowMoreTap;
   final DesktopRowMoreAnchorAction<T>? onRowMoreAnchorTap;
@@ -52,7 +54,8 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
     this.minItemWith = _minItemWidth,
     this.itemSpacing = 8,
     this.skeletonCount = 8,
-    this.playbackCoordinator,
+    required this.coreBridge,
+    this.coreEvents,
     this.enableSelection = true,
     this.onRowMoreTap,
     this.onRowMoreAnchorTap,
@@ -150,7 +153,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
       return resolver(item, index);
     }
     if (item is QueueItem) {
-      return item.mediaItem?.favorite ?? false;
+      return item.mediaItem.favorite;
     }
     return (item as MediaItem?)?.favorite ?? false;
   }
@@ -571,10 +574,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
 
   // Playback actions
   void _onPlayTap(int absoluteIndex) {
-    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
-    if (coordinator == null ||
-        absoluteIndex < 0 ||
-        absoluteIndex >= widget.items.length) {
+    if (absoluteIndex < 0 || absoluteIndex >= widget.items.length) {
       return;
     }
 
@@ -587,7 +587,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
 
     unawaited(() async {
       try {
-        await coordinator.playMedia(<MediaItem>[item]);
+        await widget.coreBridge.playMedia(<MediaItem>[item]);
       } catch (_) {
         // Ignore failures to keep row interactions responsive.
       }
@@ -595,11 +595,6 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
   }
 
   void _onPlayAllTap() {
-    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
-    if (coordinator == null) {
-      return;
-    }
-
     final List<MediaItem> playItems = _playableItemsFromIndex(0);
     if (playItems.isEmpty) {
       return;
@@ -607,7 +602,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
 
     unawaited(() async {
       try {
-        await coordinator.playMedia(
+        await widget.coreBridge.playMedia(
           _isTrackSection ? playItems : <MediaItem>[playItems.first],
         );
       } catch (_) {
@@ -617,11 +612,6 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
   }
 
   void _onShuffleAllTap() {
-    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
-    if (coordinator == null) {
-      return;
-    }
-
     final List<MediaItem> playItems = _playableItemsFromIndex(0);
     if (playItems.isEmpty) {
       return;
@@ -630,13 +620,13 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
     unawaited(() async {
       try {
         if (_isTrackSection) {
-          await coordinator.shufflePlayMedia(playItems);
+          await widget.coreBridge.playShuffledMedia(playItems);
           return;
         }
 
         final MediaItem item =
             playItems[math.Random().nextInt(playItems.length)];
-        await coordinator.playMedia(<MediaItem>[item]);
+        await widget.coreBridge.playMedia(<MediaItem>[item]);
       } catch (_) {
         // Ignore failures to keep header interactions responsive.
       }
@@ -775,7 +765,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
     if (item is Track) {
       return _buildDesktopMediaRowTrack(
         item: item,
-        playbackCoordinator: widget.playbackCoordinator,
+        coreEvents: widget.coreEvents,
         index: absoluteIndex,
         itemWidth: itemWidth,
         coverSize: coverSize,
@@ -1047,7 +1037,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         final bool hasPlayableContent =
             !widget.isLoading && widget.items.isNotEmpty;
         final bool showHeaderRow =
-            hasTitle || widget.playbackCoordinator != null || isPagingEnabled;
+            hasTitle || widget.coreEvents != null || isPagingEnabled;
         final bool canToggleExpand = _canToggleExpand;
         final Widget collapsedContent = widget.isLoading
             ? SizedBox(
@@ -1190,7 +1180,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
                   const SizedBox(width: 16),
                   const Expanded(child: SectionHeaderDivider()),
                   const SizedBox(width: 16),
-                  if (widget.playbackCoordinator != null) ...<Widget>[
+                  if (widget.coreEvents != null) ...<Widget>[
                     SectionHeaderIconButton(
                       icon: Icons.play_arrow,
                       tooltip: 'Abspielen',
@@ -1550,7 +1540,7 @@ Widget _buildDesktopMediaRowArtist({
 
 Widget _buildDesktopMediaRowTrack({
   required Track item,
-  required PlaybackCoordinator? playbackCoordinator,
+  MashinCoreBridgeEvents? coreEvents,
   required int index,
   required double itemWidth,
   required double coverSize,
@@ -1589,7 +1579,7 @@ Widget _buildDesktopMediaRowTrack({
     isSelected: isSelected,
     onSelectTap: onSelectTap,
     onSelectPointerDown: onSelectPointerDown,
-    playbackCoordinator: playbackCoordinator,
+    coreEvents: coreEvents,
     playbackItem: item,
   );
 }
@@ -1655,7 +1645,7 @@ Widget _buildDesktopMediaRowItemBase({
   ValueChanged<MediaItem>? onTitleTap,
   bool showPlayOverlay = true,
   bool isCircularCover = false,
-  PlaybackCoordinator? playbackCoordinator,
+  MashinCoreBridgeEvents? coreEvents,
   MediaItem? playbackItem,
 }) {
   return Builder(
@@ -1704,7 +1694,7 @@ Widget _buildDesktopMediaRowItemBase({
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   PlaybackAwareBuilder(
-                    coordinator: playbackCoordinator,
+                    coreEvents: coreEvents,
                     item: playbackItem,
                     builder: (BuildContext context, bool isCurrent) {
                       final TextStyle? titleStyle = Theme.of(context)
@@ -2374,7 +2364,7 @@ String _albumSubtitle(Album album) {
   if (artist != '-') {
     return artist;
   }
-  return _mediaTypeLabel(album.albumType);
+  return _mediaTypeLabel(album.albumType.name);
 }
 
 String _trackSubtitle(Track track) {

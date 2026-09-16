@@ -2,9 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_userdata.dart';
 
 class ExploreSimilarArtistSection {
   const ExploreSimilarArtistSection({
@@ -17,10 +17,10 @@ class ExploreSimilarArtistSection {
 }
 
 class ExploreController extends ChangeNotifier {
-  ExploreController({required this.client, this.userDataController});
+  ExploreController({required this.coreBridge, this.userDataController});
 
-  final MusicAssistantClient client;
-  final UserDataController? userDataController;
+  final MashinCoreBridgeApi coreBridge;
+  final UserData? userDataController;
 
   bool _isDisposed = false;
   bool _isLoadingSimilarArtists = true;
@@ -43,8 +43,7 @@ class ExploreController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await client.getProviderManifests();
-      final List<RecommendationFolder> folders = await client
+      final List<RecommendationFolder> folders = await coreBridge
           .getRecommendations();
       final List<RecommendationFolder> listenBrainzFolders = folders
           .where(_isListenBrainzFolder)
@@ -79,7 +78,7 @@ class ExploreController extends ChangeNotifier {
   }
 
   List<T> _withFavoriteStatuses<T extends MediaItem>(List<T> items) {
-    final UserDataController? controller = userDataController;
+    final UserData? controller = userDataController;
     if (controller == null) {
       return items;
     }

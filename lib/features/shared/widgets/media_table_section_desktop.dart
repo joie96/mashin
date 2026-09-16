@@ -8,9 +8,9 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import '../../../app/theme/app_theme.dart';
-import '../../../data/music_assistant/ma_models.dart';
-import '../../playback/playback_coordinator.dart';
-import '../../playback/playback_models.dart';
+import '../../core/core_bridge.dart';
+import '../../core/core_events.dart';
+import '../../core/core_models.dart';
 import '../selection/selection_controller.dart';
 import 'media_link_text.dart';
 import 'media_image.dart';
@@ -42,7 +42,8 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
   final DesktopRowAction<T>? onRowFavoriteTap;
   final DesktopRowAction<T>? onRowDoubleTap;
   final DesktopRowFavoriteResolver<T>? isRowFavorite;
-  final PlaybackCoordinator? playbackCoordinator;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
   final ScrollController? scrollController;
   final ValueChanged<Artist>? onArtistTap;
   final ValueChanged<Album>? onAlbumTap;
@@ -67,7 +68,8 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
     this.onRowFavoriteTap,
     this.onRowDoubleTap,
     this.isRowFavorite,
-    this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     this.scrollController,
     this.onArtistTap,
     this.onAlbumTap,
@@ -171,7 +173,7 @@ class _MediaTableSectionDesktopState<T>
       return resolver(item, index);
     }
     if (item is QueueItem) {
-      return item.mediaItem?.favorite ?? false;
+      return item.mediaItem.favorite;
     }
     return (item as MediaItem?)?.favorite ?? false;
   }
@@ -250,15 +252,14 @@ class _MediaTableSectionDesktopState<T>
   }
 
   Future<bool> _handleRowActivate({required T item, required int index}) async {
-    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
-    if (coordinator == null || index < 0 || index >= widget.items.length) {
+    if (index < 0 || index >= widget.items.length) {
       return false;
     }
 
     final Object? rawItem = item;
     if (rawItem is QueueItem) {
       try {
-        await coordinator.playQueueIndex(index);
+        await widget.coreBridge.playQueueIndex(index);
         return true;
       } catch (_) {
         return false;
@@ -271,7 +272,7 @@ class _MediaTableSectionDesktopState<T>
     }
 
     try {
-      await coordinator.playMedia(playItems);
+      await widget.coreBridge.playMedia(playItems);
       return true;
     } catch (_) {
       return false;
@@ -535,11 +536,6 @@ class _MediaTableSectionDesktopState<T>
 
   // Playback actions
   void _onPlayAllTap() {
-    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
-    if (coordinator == null) {
-      return;
-    }
-
     final List<MediaItem> playItems = _playableItemsFromIndex(0);
     if (playItems.isEmpty) {
       return;
@@ -547,7 +543,7 @@ class _MediaTableSectionDesktopState<T>
 
     unawaited(() async {
       try {
-        await coordinator.playMedia(
+        await widget.coreBridge.playMedia(
           _isTrackSection ? playItems : <MediaItem>[playItems.first],
         );
       } catch (_) {
@@ -557,11 +553,6 @@ class _MediaTableSectionDesktopState<T>
   }
 
   void _onShuffleAllTap() {
-    final PlaybackCoordinator? coordinator = widget.playbackCoordinator;
-    if (coordinator == null) {
-      return;
-    }
-
     final List<MediaItem> playItems = _playableItemsFromIndex(0);
     if (playItems.isEmpty) {
       return;
@@ -570,13 +561,13 @@ class _MediaTableSectionDesktopState<T>
     unawaited(() async {
       try {
         if (_isTrackSection) {
-          await coordinator.shufflePlayMedia(playItems);
+          await widget.coreBridge.playShuffledMedia(playItems);
           return;
         }
 
         final MediaItem item =
             playItems[math.Random().nextInt(playItems.length)];
-        await coordinator.playMedia(<MediaItem>[item]);
+        await widget.coreBridge.playMedia(<MediaItem>[item]);
       } catch (_) {
         // Ignore failures to keep header interactions responsive.
       }
@@ -626,7 +617,7 @@ class _MediaTableSectionDesktopState<T>
                   const SizedBox(width: 16),
                   const Expanded(child: SectionHeaderDivider()),
                   const SizedBox(width: 16),
-                  if (widget.playbackCoordinator != null) ...<Widget>[
+                  ...<Widget>[
                     SectionHeaderIconButton(
                       icon: Icons.play_arrow,
                       tooltip: 'Abspielen',
@@ -1010,7 +1001,7 @@ class _MediaTableSectionDesktopState<T>
     if (typedItem is Track) {
       return _buildDesktopTableRowTrack(
         item: typedItem,
-        playbackCoordinator: widget.playbackCoordinator,
+        coreEvents: widget.coreEvents,
         index: index,
         isFirst: isFirst,
         isSelected: isSelected,
@@ -1034,7 +1025,7 @@ class _MediaTableSectionDesktopState<T>
     if (typedItem is QueueItem) {
       return _buildDesktopTableRowQueue(
         item: typedItem,
-        playbackCoordinator: widget.playbackCoordinator,
+        coreEvents: widget.coreEvents,
         index: index,
         isFirst: isFirst,
         isSelected: isSelected,
@@ -1353,7 +1344,7 @@ Widget _buildDesktopTableHeaderArtist({
 
 Widget _buildDesktopTableRowTrack({
   required Track item,
-  required PlaybackCoordinator? playbackCoordinator,
+  required MashinCoreBridgeEvents coreEvents,
   required int index,
   required bool isFirst,
   required bool isSelected,
@@ -1375,7 +1366,7 @@ Widget _buildDesktopTableRowTrack({
         width: 40,
         child: Center(
           child: DesktopPlaybackIndicator(
-            coordinator: playbackCoordinator,
+            coreEvents: coreEvents,
             item: item,
             fallback: '${index + 1}',
           ),
@@ -1394,7 +1385,7 @@ Widget _buildDesktopTableRowTrack({
       _buildDesktopTableSizedCell(
         flex: 5,
         child: _buildDesktopTrackTitleCell(
-          playbackCoordinator: playbackCoordinator,
+          coreEvents: coreEvents,
           playbackItem: item,
           title: _prefer(item.name, 'Unknown Track'),
         ),
@@ -1513,7 +1504,7 @@ Widget _buildDesktopTableRowAlbum({
       _buildDesktopTableSizedCell(
         flex: 2,
         child: _buildDesktopBodyText(
-          _mediaTypeLabel(item.albumType),
+          _mediaTypeLabel(item.albumType.name),
           TextAlign.left,
           DesktopTextTone.secondary,
         ),
@@ -1723,7 +1714,7 @@ Widget _buildDesktopTableRowArtist({
 
 Widget _buildDesktopTableRowQueue({
   required QueueItem item,
-  required PlaybackCoordinator? playbackCoordinator,
+  required MashinCoreBridgeEvents coreEvents,
   required int index,
   required bool isFirst,
   required bool isSelected,
@@ -1740,12 +1731,14 @@ Widget _buildDesktopTableRowQueue({
   ValueChanged<Album>? onAlbumTap,
 }) {
   final String provider = _resolveQueueProvider(item);
-  final String title = (item.mediaItem?.name.trim().isNotEmpty == true)
-      ? item.mediaItem!.name.trim()
+  final MediaItem mediaItem = item.mediaItem;
+  final Track? track = mediaItem is Track ? mediaItem : null;
+  final String title = mediaItem.name.trim().isNotEmpty
+      ? mediaItem.name.trim()
       : item.name.trim().isNotEmpty
       ? item.name.trim()
       : 'Unbekannter Titel';
-  final List<Artist> artists = item.mediaItem?.artists ?? const <Artist>[];
+  final List<Artist> artists = track?.artists ?? const <Artist>[];
   final String artistsFallbackText = artists
       .map((artist) => artist.name.trim())
       .where((name) => name.isNotEmpty)
@@ -1757,7 +1750,7 @@ Widget _buildDesktopTableRowQueue({
         width: 40,
         child: Center(
           child: DesktopPlaybackIndicator(
-            coordinator: playbackCoordinator,
+            coreEvents: coreEvents,
             item: item.mediaItem,
             fallback: '${(item.sortIndex ?? index) + 1}',
           ),
@@ -1766,7 +1759,7 @@ Widget _buildDesktopTableRowQueue({
       _buildDesktopTableSizedCell(
         width: 48,
         child: MediaTableCover(
-          coverUrl: item.mediaItem?.imageUriForSize(80),
+          coverUrl: mediaItem.imageUriForSize(80),
           fallbackIcon: Icons.music_note_outlined,
           size: 48,
           radius: 8,
@@ -1776,7 +1769,7 @@ Widget _buildDesktopTableRowQueue({
       _buildDesktopTableSizedCell(
         flex: 5,
         child: _buildDesktopTrackTitleCell(
-          playbackCoordinator: playbackCoordinator,
+          coreEvents: coreEvents,
           playbackItem: item.mediaItem,
           title: title,
         ),
@@ -1792,7 +1785,7 @@ Widget _buildDesktopTableRowQueue({
       _buildDesktopTableSizedCell(
         flex: 3,
         child: _buildDesktopAlbumLinkCell(
-          album: item.mediaItem?.album,
+          album: track?.album,
           onAlbumTap: onAlbumTap,
         ),
       ),
@@ -2440,12 +2433,12 @@ Widget _buildDesktopBodyText(
 
 // Colors the title accent when it matches the currently playing track.
 Widget _buildDesktopTrackTitleCell({
-  required PlaybackCoordinator? playbackCoordinator,
+  required MashinCoreBridgeEvents coreEvents,
   required MediaItem? playbackItem,
   required String title,
 }) {
   return PlaybackAwareBuilder(
-    coordinator: playbackCoordinator,
+    coreEvents: coreEvents,
     item: playbackItem,
     builder: (BuildContext context, bool isCurrent) {
       final textStyles = context.mashinTableTextStyles;
@@ -2836,14 +2829,14 @@ class _ExpandRevealRowState extends State<_ExpandRevealRow> {
 enum DesktopTextTone { primary, secondary, tertiary }
 
 class DesktopPlaybackIndicator extends StatelessWidget {
-  final PlaybackCoordinator? coordinator;
+  final MashinCoreBridgeEvents coreEvents;
   final MediaItem? item;
   final String? fallback;
   final double width;
 
   const DesktopPlaybackIndicator({
     super.key,
-    required this.coordinator,
+    required this.coreEvents,
     required this.item,
     required this.fallback,
     this.width = 40,
@@ -2851,20 +2844,17 @@ class DesktopPlaybackIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final playbackCoordinator = coordinator;
     final mediaItem = item;
-    if (playbackCoordinator == null || mediaItem == null) {
+    if (mediaItem == null) {
       return _fallback(context);
     }
 
     return ListenableBuilder(
-      listenable: Listenable.merge(<Listenable>[
-        playbackCoordinator.playbackStateChanges,
-        playbackCoordinator.playbackQueueChanges,
-      ]),
+      listenable: coreEvents,
       builder: (BuildContext context, Widget? child) {
-        final currentIndex = playbackCoordinator.currentQueueIndex;
-        final queueItems = playbackCoordinator.queueItems;
+        final mediaSessionState = coreEvents.mediaSessionState;
+        final currentIndex = mediaSessionState.queue.currentIndex;
+        final queueItems = mediaSessionState.queue.items;
         final currentItem =
             currentIndex != null &&
                 currentIndex >= 0 &&
@@ -2877,10 +2867,9 @@ class DesktopPlaybackIndicator extends StatelessWidget {
           return _fallback(context);
         }
 
-        final playbackStateType =
-            playbackCoordinator.playbackState.playbackState;
-        if (playbackStateType == PlaybackStateType.buffering ||
-            playbackStateType == PlaybackStateType.seeking) {
+        final playbackStateType = mediaSessionState.playerState.playbackState;
+        if (playbackStateType == PlayState.buffering ||
+            playbackStateType == PlayState.seeking) {
           return SizedBox(
             width: width,
             height: 20,
@@ -2902,7 +2891,7 @@ class DesktopPlaybackIndicator extends StatelessWidget {
           height: 20,
           child: Center(
             child: Icon(
-              playbackStateType == PlaybackStateType.playing
+              playbackStateType == PlayState.playing
                   ? Icons.pause
                   : Icons.play_arrow,
               size: 16,
@@ -2954,30 +2943,31 @@ bool isSamePlaybackTrack(MediaItem left, MediaItem right) {
 /// track, so callers can style it (e.g. accent-colored title) without
 /// showing a separate indicator icon.
 class PlaybackAwareBuilder extends StatelessWidget {
-  final PlaybackCoordinator? coordinator;
+  final MashinCoreBridgeEvents? coreEvents;
   final MediaItem? item;
   final Widget Function(BuildContext context, bool isCurrent) builder;
 
   const PlaybackAwareBuilder({
     super.key,
-    required this.coordinator,
+    this.coreEvents,
     required this.item,
     required this.builder,
   });
 
   @override
   Widget build(BuildContext context) {
-    final PlaybackCoordinator? playbackCoordinator = coordinator;
+    final MashinCoreBridgeEvents? controller = coreEvents;
     final MediaItem? mediaItem = item;
-    if (playbackCoordinator == null || mediaItem == null) {
+    if (controller == null || mediaItem == null) {
       return builder(context, false);
     }
 
     return ListenableBuilder(
-      listenable: playbackCoordinator.playbackQueueChanges,
+      listenable: controller,
       builder: (BuildContext context, Widget? child) {
-        final int? currentIndex = playbackCoordinator.currentQueueIndex;
-        final List<QueueItem> queueItems = playbackCoordinator.queueItems;
+        final queue = controller.mediaSessionState.queue;
+        final int? currentIndex = queue.currentIndex;
+        final List<QueueItem> queueItems = queue.items;
         final MediaItem? currentItem =
             currentIndex != null &&
                 currentIndex >= 0 &&
@@ -3391,7 +3381,7 @@ String _inlineSvgClassFillColors(String svg) {
     normalized = normalized.replaceAll(classAttribute, 'fill="$fillColor"');
   }
 
-  return normalized;
+  return normalized.replaceAll(RegExp(r'<style\b[^>]*>[\s\S]*?</style\s*>'), '');
 }
 
 // Helper Functions
@@ -3412,7 +3402,7 @@ String _albumSubtitle(Album album) {
   if (artist != '-') {
     return artist;
   }
-  return _mediaTypeLabel(album.albumType);
+  return _mediaTypeLabel(album.albumType.name);
 }
 
 String _trackSubtitle(Track track) {
@@ -3470,13 +3460,12 @@ String formatDuration(int seconds) {
 }
 
 String _resolveQueueProvider(QueueItem item) {
-  final String directProvider = _stripOrEmpty(item.mediaItem?.provider);
+  final String directProvider = _stripOrEmpty(item.mediaItem.provider);
   if (directProvider.isNotEmpty) {
     return directProvider;
   }
 
-  final List<ProviderMapping> mappings =
-      item.mediaItem?.providerMappings ?? const <ProviderMapping>[];
+  final List<ProviderMapping> mappings = item.mediaItem.providerMappings;
   for (final ProviderMapping mapping in mappings) {
     final String domain = _stripOrEmpty(mapping.providerDomain);
     if (domain.isNotEmpty) {

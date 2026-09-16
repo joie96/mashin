@@ -1,18 +1,18 @@
 import 'package:flutter/material.dart';
 
-import '../../app/config/app_config.dart';
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
-import '../shared/userdata_controller.dart';
+import '../../app/layout/layout_utils.dart';
+import '../core/core_bridge.dart';
+import '../core/core_models.dart';
+import '../core/core_events.dart';
+import '../core/core_userdata.dart';
 import 'album_detail_page_desktop.dart';
 import 'album_detail_page_mobile.dart';
 
 class AlbumDetailPage extends StatelessWidget {
   const AlbumDetailPage({
     super.key,
-    required this.client,
-    required this.playbackCoordinator,
+    required this.coreBridge,
+    required this.coreEvents,
     required this.itemId,
     required this.providerInstanceIdOrDomain,
     this.userDataController,
@@ -20,20 +20,20 @@ class AlbumDetailPage extends StatelessWidget {
     this.onOpenAlbum,
   });
 
-  final MusicAssistantClient client;
-  final PlaybackCoordinator playbackCoordinator;
+  final MashinCoreBridgeApi coreBridge;
+  final MashinCoreBridgeEvents coreEvents;
   final String itemId;
   final String providerInstanceIdOrDomain;
-  final UserDataController? userDataController;
+  final UserData? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
 
   @override
   Widget build(BuildContext context) {
-    if (AppConfig.isMobile()) {
+    if (isCompactLayout(context)) {
       return AlbumDetailPageMobile(
-        client: client,
-        playbackCoordinator: playbackCoordinator,
+        coreBridge: coreBridge,
+        coreEvents: coreEvents,
         itemId: itemId,
         providerInstanceIdOrDomain: providerInstanceIdOrDomain,
         userDataController: userDataController,
@@ -43,8 +43,8 @@ class AlbumDetailPage extends StatelessWidget {
     }
 
     return AlbumDetailPageDesktop(
-      client: client,
-      playbackCoordinator: playbackCoordinator,
+      coreBridge: coreBridge,
+      coreEvents: coreEvents,
       itemId: itemId,
       providerInstanceIdOrDomain: providerInstanceIdOrDomain,
       userDataController: userDataController,

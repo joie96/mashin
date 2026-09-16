@@ -3,10 +3,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
-import '../../data/music_assistant/ma_client.dart';
-import '../../data/music_assistant/ma_models.dart';
-import '../playback/playback_coordinator.dart';
-import '../shared/userdata_controller.dart';
+import '../core/core_models.dart';
+import '../core/core_bridge.dart';
+import '../core/core_userdata.dart';
 
 class HomeSimilarArtistSection {
   const HomeSimilarArtistSection({required this.title, required this.artists});
@@ -16,15 +15,10 @@ class HomeSimilarArtistSection {
 }
 
 class HomeController extends ChangeNotifier {
-  HomeController({
-    required this.client,
-    required this.playbackCoordinator,
-    this.userDataController,
-  });
+  HomeController({required this.coreBridge, this.userDataController});
 
-  final MusicAssistantClient client;
-  final PlaybackCoordinator playbackCoordinator;
-  final UserDataController? userDataController;
+  final MashinCoreBridgeApi coreBridge;
+  final UserData? userDataController;
 
   bool _isDisposed = false;
   final ChangeNotifier _recommendationsNotifier = ChangeNotifier();
@@ -113,13 +107,6 @@ class HomeController extends ChangeNotifier {
   }
 
   Future<void> load() async {
-    try {
-      await client.getProviderManifests();
-      notifyListeners();
-    } catch (_) {
-      // Provider icons fall back when manifests are unavailable.
-    }
-
     unawaited(_loadRecommendationFolders());
     unawaited(_loadRecentListens());
   }
@@ -157,7 +144,7 @@ class HomeController extends ChangeNotifier {
     }
 
     try {
-      await playbackCoordinator.playMedia(playable);
+      await coreBridge.playMedia(playable);
     } catch (_) {
       // Playback failures should not break the home feed.
     }
@@ -170,7 +157,7 @@ class HomeController extends ChangeNotifier {
     }
 
     try {
-      await playbackCoordinator.shufflePlayMedia(playable);
+      await coreBridge.playShuffledMedia(playable);
     } catch (_) {
       // Playback failures should not break the home feed.
     }
@@ -187,7 +174,7 @@ class HomeController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final List<RecommendationFolder> folders = await client
+      final List<RecommendationFolder> folders = await coreBridge
           .getRecommendations();
       final List<RecommendationFolder> listenBrainzFolders = folders
           .where(_isListenBrainzFolder)
@@ -244,17 +231,10 @@ class HomeController extends ChangeNotifier {
     _notifySection(_recentListensNotifier);
     notifyListeners();
     try {
-      final List<MediaItem> recent = await client.getRecentlyPlayedItems(
-        limit: 40,
-        mediaTypes: <MediaType>[MediaType.track],
-      );
-      final List<Track> references = recent.whereType<Track>().toList();
-      final List<Track?> resolved = await Future.wait(
-        references.map(_loadFullTrack),
-      );
-      _recentListens = _withFavoriteStatuses(
-        resolved.whereType<Track>().toList(growable: false),
-      );
+      final List<Track> recent = (await coreBridge.getRecentlyPlayedTracks())
+          .whereType<Track>()
+          .toList(growable: false);
+      _recentListens = _withFavoriteStatuses(recent);
     } catch (_) {
       _recentListens = const <Track>[];
     } finally {
@@ -265,7 +245,7 @@ class HomeController extends ChangeNotifier {
   }
 
   List<T> _withFavoriteStatuses<T extends MediaItem>(List<T> items) {
-    final UserDataController? controller = userDataController;
+    final UserData? controller = userDataController;
     if (controller == null) {
       return items;
     }
@@ -350,15 +330,6 @@ class HomeController extends ChangeNotifier {
         .where((HomeSimilarArtistSection section) => section.artists.isNotEmpty)
         .take(5)
         .toList(growable: false);
-  }
-
-  Future<Track?> _loadFullTrack(Track reference) async {
-    try {
-      return await client.getTrack(reference.itemId, reference.provider) ??
-          reference;
-    } catch (_) {
-      return reference;
-    }
   }
 
   Playlist _withNormalizedPlaylistName(Playlist playlist) {
