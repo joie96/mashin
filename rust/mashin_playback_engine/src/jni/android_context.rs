@@ -1,34 +1,65 @@
 //! Android application-context initialization required by CPAL and AAudio.
 
-use jni::objects::{JObject, JString, JValue};
+use jni::objects::{JClass, JObject, JString, JValue};
 use jni::JavaVM;
 use once_cell::sync::Lazy;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+// JVM and application-class references retained for native worker threads.
 static ANDROID_APP_CONTEXT: Lazy<Mutex<Option<jni::objects::GlobalRef>>> =
+    Lazy::new(|| Mutex::new(None));
+static ANDROID_NATIVE_CORE_BRIDGE: Lazy<Mutex<Option<jni::objects::GlobalRef>>> =
+    Lazy::new(|| Mutex::new(None));
+static ANDROID_SECURE_SESSION_STORE: Lazy<Mutex<Option<jni::objects::GlobalRef>>> =
     Lazy::new(|| Mutex::new(None));
 static ANDROID_JAVA_VM: Lazy<Mutex<Option<Arc<JavaVM>>>> = Lazy::new(|| Mutex::new(None));
 static ANDROID_NDK_CONTEXT_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
-pub(crate) fn initialize_android_context(env: jni::JNIEnv, context: JObject) {
-    let Ok(java_vm) = env.get_java_vm() else {
-        return;
-    };
-    let Ok(global_ref) = env.new_global_ref(context) else {
-        return;
-    };
+// Android JNI lifecycle initialization.
+pub(crate) fn initialize_android_context(
+    env: &mut jni::JNIEnv,
+    context: JObject,
+    native_core_bridge_class: JClass,
+) -> Result<(), String> {
+    let java_vm = env
+        .get_java_vm()
+        .map_err(|error| format!("access Android JavaVM failed: {error}"))?;
+    let global_ref = env
+        .new_global_ref(context)
+        .map_err(|error| format!("retain Android application context failed: {error}"))?;
+    let native_core_bridge = env
+        .new_global_ref(native_core_bridge_class)
+        .map_err(|error| format!("retain Android native core bridge failed: {error}"))?;
+    let secure_session_store = env
+        .find_class("com/example/mashin_flutter/SecureSessionStore")
+        .and_then(|class| env.new_global_ref(class))
+        .map_err(|error| format!("resolve Android secure session store failed: {error}"))?;
+    validate_static_method(
+        env,
+        &native_core_bridge,
+        "deliverCoreEvent",
+        "(Ljava/lang/String;)V",
+    )?;
+    validate_static_method(env, &secure_session_store, "read", "()Ljava/lang/String;")?;
+    validate_static_method(env, &secure_session_store, "write", "(Ljava/lang/String;)V")?;
+    validate_static_method(env, &secure_session_store, "clear", "()V")?;
     let context_pointer = global_ref.as_obj().as_raw().cast();
     let java_vm_pointer = java_vm.get_java_vm_pointer().cast();
-    {
-        let Ok(mut stored) = ANDROID_APP_CONTEXT.lock() else {
-            return;
-        };
-        *stored = Some(global_ref);
-    }
-    if let Ok(mut stored) = ANDROID_JAVA_VM.lock() {
-        *stored = Some(Arc::new(java_vm));
-    }
+    *ANDROID_APP_CONTEXT
+        .lock()
+        .map_err(|_| "Android application context lock poisoned".to_string())? = Some(global_ref);
+    *ANDROID_NATIVE_CORE_BRIDGE
+        .lock()
+        .map_err(|_| "Android native core bridge lock poisoned".to_string())? =
+        Some(native_core_bridge);
+    *ANDROID_SECURE_SESSION_STORE
+        .lock()
+        .map_err(|_| "Android secure session store lock poisoned".to_string())? =
+        Some(secure_session_store);
+    *ANDROID_JAVA_VM
+        .lock()
+        .map_err(|_| "Android JavaVM lock poisoned".to_string())? = Some(Arc::new(java_vm));
     // CPAL accesses `ndk_context` after AAudio opens, so initialize it exactly once.
     if ANDROID_NDK_CONTEXT_INITIALIZED
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -38,14 +69,16 @@ pub(crate) fn initialize_android_context(env: jni::JNIEnv, context: JObject) {
             ndk_context::initialize_android_context(java_vm_pointer, context_pointer);
         }
     }
+    Ok(())
 }
 
 // Android session persistence crosses the boundary only as one serialized SessionConfig value.
 pub(crate) fn read_secure_session() -> Result<Option<String>, String> {
     with_attached_environment(|env| {
+        let secure_session_store = secure_session_store_global_class()?;
         let value = env
             .call_static_method(
-                "com/example/mashin_flutter/SecureSessionStore",
+                global_class_as_jclass(&secure_session_store),
                 "read",
                 "()Ljava/lang/String;",
                 &[],
@@ -64,11 +97,12 @@ pub(crate) fn read_secure_session() -> Result<Option<String>, String> {
 
 pub(crate) fn write_secure_session(serialized_session: &str) -> Result<(), String> {
     with_attached_environment(|env| {
+        let secure_session_store = secure_session_store_global_class()?;
         let value = env
             .new_string(serialized_session)
             .map_err(|error| format!("encode Android secure session failed: {error}"))?;
         env.call_static_method(
-            "com/example/mashin_flutter/SecureSessionStore",
+            global_class_as_jclass(&secure_session_store),
             "write",
             "(Ljava/lang/String;)V",
             &[JValue::Object(&JObject::from(value))],
@@ -80,8 +114,9 @@ pub(crate) fn write_secure_session(serialized_session: &str) -> Result<(), Strin
 
 pub(crate) fn clear_secure_session() -> Result<(), String> {
     with_attached_environment(|env| {
+        let secure_session_store = secure_session_store_global_class()?;
         env.call_static_method(
-            "com/example/mashin_flutter/SecureSessionStore",
+            global_class_as_jclass(&secure_session_store),
             "clear",
             "()V",
             &[],
@@ -91,6 +126,48 @@ pub(crate) fn clear_secure_session() -> Result<(), String> {
     })
 }
 
+// Cached application-class references and JNI error handling.
+pub(crate) fn native_core_bridge_global_class() -> Result<jni::objects::GlobalRef, String> {
+    ANDROID_NATIVE_CORE_BRIDGE
+        .lock()
+        .map_err(|_| "Android native core bridge lock poisoned".to_string())?
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| "Android native core bridge is not initialized".to_string())
+}
+
+fn secure_session_store_global_class() -> Result<jni::objects::GlobalRef, String> {
+    ANDROID_SECURE_SESSION_STORE
+        .lock()
+        .map_err(|_| "Android secure session store lock poisoned".to_string())?
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| "Android secure session store is not initialized".to_string())
+}
+
+// A GlobalRef retains the application class across thread attachments.
+pub(crate) fn global_class_as_jclass(global_ref: &jni::objects::GlobalRef) -> JClass<'_> {
+    unsafe { JClass::from_raw(global_ref.as_obj().as_raw()) }
+}
+
+fn validate_static_method(
+    env: &mut jni::JNIEnv,
+    class: &jni::objects::GlobalRef,
+    name: &str,
+    signature: &str,
+) -> Result<(), String> {
+    env.get_static_method_id(global_class_as_jclass(class), name, signature)
+        .map(|_| ())
+        .map_err(|error| format!("resolve Android JNI method {name}{signature} failed: {error}"))
+}
+
+pub(crate) fn clear_pending_exception(env: &mut jni::JNIEnv) {
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_clear();
+    }
+}
+
+// Worker-thread attachment and controlled JNI error cleanup.
 pub(crate) fn with_attached_environment<T>(
     operation: impl FnOnce(&mut jni::JNIEnv) -> Result<T, String>,
 ) -> Result<T, String> {
@@ -103,5 +180,9 @@ pub(crate) fn with_attached_environment<T>(
     let mut env = java_vm
         .attach_current_thread()
         .map_err(|error| format!("attach Android JNI thread failed: {error}"))?;
-    operation(&mut env)
+    let result = operation(&mut env);
+    if result.is_err() {
+        clear_pending_exception(&mut env);
+    }
+    result
 }

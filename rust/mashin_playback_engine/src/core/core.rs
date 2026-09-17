@@ -10,7 +10,9 @@ use super::models::{
 use crate::music_assistant::auth_store::{platform_auth_store, AuthStore};
 use crate::music_assistant::client::{get_radio_tracks, MusicAssistantClient};
 use crate::music_assistant::models::identifiers::{AccessToken, MediaId, QueueItemId};
-use crate::music_assistant::models::media::{MediaItem, Track};
+use crate::music_assistant::models::media::{
+    Album, Artist, MediaItem, MusicAssistantSearchResults, Playlist, Track,
+};
 use crate::music_assistant::models::queue::{QueueItem, RepeatMode};
 use crate::music_assistant::models::recommendation::MusicAssistantRecommendationFolder;
 use crate::music_assistant::models::session::ProviderManifest;
@@ -698,6 +700,172 @@ pub(crate) fn start_music_assistant_query(
         }
     });
     Ok(())
+}
+
+// Synchronous Music Assistant reads for Android MediaLibrary browse callbacks.
+pub(crate) fn read_music_assistant_recommendations(
+) -> Result<Vec<MusicAssistantRecommendationFolder>, CoreError> {
+    let client = music_assistant_client_for_query("read Music Assistant recommendations")?;
+    CORE_NETWORK_RUNTIME
+        .block_on(client.get_recommendations())
+        .map_err(CoreError::command_failed)
+}
+
+pub(crate) fn read_music_assistant_recently_played_tracks(
+    limit: u32,
+) -> Result<Vec<Track>, CoreError> {
+    let client = music_assistant_client_for_query("read recently played tracks")?;
+    CORE_NETWORK_RUNTIME
+        .block_on(client.get_recently_played_tracks(limit.clamp(1, 100)))
+        .map_err(CoreError::command_failed)
+}
+
+pub(crate) fn search_music_assistant(
+    query: &str,
+    limit: u32,
+) -> Result<MusicAssistantSearchResults, CoreError> {
+    let client = music_assistant_client_for_query("search Music Assistant")?;
+    CORE_NETWORK_RUNTIME
+        .block_on(client.search(query, limit.clamp(1, 100)))
+        .map_err(CoreError::command_failed)
+}
+
+pub(crate) fn read_music_assistant_provider_manifests() -> Result<Vec<ProviderManifest>, CoreError>
+{
+    let client = music_assistant_client_for_query("read Music Assistant provider manifests")?;
+    CORE_NETWORK_RUNTIME
+        .block_on(client.get_provider_manifests())
+        .map_err(CoreError::command_failed)
+}
+
+pub(crate) fn read_music_assistant_provider_icon_data(
+    provider: &str,
+) -> Result<Option<String>, CoreError> {
+    let client = music_assistant_client_for_query("read Music Assistant provider icon")?;
+    CORE_NETWORK_RUNTIME
+        .block_on(client.get_provider_icon_data(provider))
+        .map_err(CoreError::command_failed)
+}
+
+pub(crate) fn read_music_assistant_artist(
+    item_id: &str,
+    provider: &str,
+) -> Result<Artist, CoreError> {
+    let client = music_assistant_client_for_query("read Music Assistant artist")?;
+    CORE_NETWORK_RUNTIME
+        .block_on(client.get_artist(&MediaId(item_id.to_string()), provider))
+        .map_err(CoreError::command_failed)
+}
+
+pub(crate) fn read_music_assistant_album(
+    item_id: &str,
+    provider: &str,
+) -> Result<Album, CoreError> {
+    let client = music_assistant_client_for_query("read Music Assistant album")?;
+    CORE_NETWORK_RUNTIME
+        .block_on(client.get_album(&MediaId(item_id.to_string()), provider))
+        .map_err(CoreError::command_failed)
+}
+
+pub(crate) fn read_music_assistant_album_tracks(
+    item_id: &str,
+    provider: &str,
+) -> Result<Vec<Track>, CoreError> {
+    let client = music_assistant_client_for_query("read Music Assistant album tracks")?;
+    CORE_NETWORK_RUNTIME
+        .block_on(client.get_album_tracks(&MediaId(item_id.to_string()), provider))
+        .map_err(CoreError::command_failed)
+}
+
+pub(crate) fn read_music_assistant_playlist(
+    item_id: &str,
+    provider: &str,
+) -> Result<Playlist, CoreError> {
+    let client = music_assistant_client_for_query("read Music Assistant playlist")?;
+    CORE_NETWORK_RUNTIME
+        .block_on(client.get_playlist(&MediaId(item_id.to_string()), provider))
+        .map_err(CoreError::command_failed)
+}
+
+pub(crate) fn read_music_assistant_playlist_tracks(
+    item_id: &str,
+    provider: &str,
+    force_refresh: bool,
+    allow_dynamic_tracks: bool,
+) -> Result<Vec<Track>, CoreError> {
+    let client = music_assistant_client_for_query("read Music Assistant playlist tracks")?;
+    CORE_NETWORK_RUNTIME
+        .block_on(client.get_playlist_tracks(
+            &MediaId(item_id.to_string()),
+            provider,
+            force_refresh,
+            allow_dynamic_tracks,
+        ))
+        .map_err(CoreError::command_failed)
+}
+
+pub(crate) fn read_music_assistant_artist_albums(
+    item_id: &str,
+    provider: &str,
+) -> Result<Vec<Album>, CoreError> {
+    let client = music_assistant_client_for_query("read Music Assistant artist albums")?;
+    CORE_NETWORK_RUNTIME
+        .block_on(client.get_artist_albums(&MediaId(item_id.to_string()), provider))
+        .map_err(CoreError::command_failed)
+}
+
+pub(crate) fn read_music_assistant_artist_top_tracks(
+    item_id: &str,
+    provider: &str,
+) -> Result<Vec<Track>, CoreError> {
+    let client = music_assistant_client_for_query("read Music Assistant artist top tracks")?;
+    CORE_NETWORK_RUNTIME
+        .block_on(client.get_artist_top_tracks(&MediaId(item_id.to_string()), provider))
+        .map_err(CoreError::command_failed)
+}
+
+pub(crate) fn read_music_assistant_similar_artists(
+    item_id: &str,
+    provider: &str,
+    limit: u32,
+) -> Result<Vec<Artist>, CoreError> {
+    let client = music_assistant_client_for_query("read similar Music Assistant artists")?;
+    CORE_NETWORK_RUNTIME
+        .block_on(client.get_similar_artists(
+            &MediaId(item_id.to_string()),
+            provider,
+            serde_json::json!({ "limit": limit.clamp(1, 100) }),
+        ))
+        .map_err(CoreError::command_failed)
+}
+
+pub(crate) fn read_music_assistant_similar_tracks(
+    item_id: &str,
+    provider: &str,
+    limit: u32,
+    allow_lookup: bool,
+) -> Result<Vec<Track>, CoreError> {
+    let client = music_assistant_client_for_query("read similar Music Assistant tracks")?;
+    CORE_NETWORK_RUNTIME
+        .block_on(client.get_similar_tracks(
+            &MediaId(item_id.to_string()),
+            provider,
+            serde_json::json!({
+                "limit": limit.clamp(1, 100),
+                "allow_lookup": allow_lookup,
+            }),
+        ))
+        .map_err(CoreError::command_failed)
+}
+
+pub(crate) fn read_music_assistant_track_versions(
+    item_id: &str,
+    provider: &str,
+) -> Result<Vec<Track>, CoreError> {
+    let client = music_assistant_client_for_query("read Music Assistant track versions")?;
+    CORE_NETWORK_RUNTIME
+        .block_on(client.get_track_versions(&MediaId(item_id.to_string()), provider))
+        .map_err(CoreError::command_failed)
 }
 
 // Playlist mutations use the configured Music Assistant session without changing playback state.

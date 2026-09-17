@@ -6,8 +6,14 @@ pub(crate) mod models;
 
 pub(crate) use core::{
     add_playlist_tracks, execute_command_and_collect_events, load_user_data, mutate_user_data,
-    read_player_state, read_queue, read_session_settings, read_user_data, remove_playlist_tracks,
-    resolve_media_and_execute_command, resolve_sendspin_radio_and_execute_command,
-    restore_persisted_session_and_collect_events, shutdown, start_music_assistant_query,
-    CoreCoordinator,
+    read_music_assistant_album, read_music_assistant_album_tracks, read_music_assistant_artist,
+    read_music_assistant_artist_albums, read_music_assistant_artist_top_tracks,
+    read_music_assistant_playlist, read_music_assistant_playlist_tracks,
+    read_music_assistant_provider_icon_data, read_music_assistant_provider_manifests,
+    read_music_assistant_recently_played_tracks, read_music_assistant_recommendations,
+    read_music_assistant_similar_artists, read_music_assistant_similar_tracks,
+    read_music_assistant_track_versions, read_player_state, read_queue, read_session_settings,
+    read_user_data, remove_playlist_tracks, resolve_media_and_execute_command,
+    resolve_sendspin_radio_and_execute_command, restore_persisted_session_and_collect_events,
+    search_music_assistant, shutdown, start_music_assistant_query, CoreCoordinator,
 };

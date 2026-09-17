@@ -21,12 +21,15 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 @UnstableApi
 class MashinMediaLibraryService : MediaLibraryService() {
-    private lateinit var sessionPlayer: MashinSessionPlayer
+    private var sessionPlayer: MashinSessionPlayer? = null
     private var mediaLibrarySession: MediaLibraryService.MediaLibrarySession? = null
 
+    // Service lifecycle.
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
@@ -43,14 +46,15 @@ class MashinMediaLibraryService : MediaLibraryService() {
                 .setOngoing(true)
                 .build(),
         )
-            NativeCoreBridge.initializeCore(applicationContext)
+        NativeCoreBridge.initializeCore(applicationContext)
         if (NativeCoreBridge.restorePersistedSession()) {
             NativeCoreBridge.command("activate", null)
         }
-            sessionPlayer = MashinSessionPlayer(::dispatchCoreCommand)
+        val initializedSessionPlayer = MashinSessionPlayer(::dispatchCoreCommand)
+        sessionPlayer = initializedSessionPlayer
         mediaLibrarySession = MediaLibraryService.MediaLibrarySession.Builder(
             this,
-            sessionPlayer,
+            initializedSessionPlayer,
             AndroidAutoLibraryCallback(),
         ).build()
         NativeCoreBridge.observeEvents(::applyCoreEvent)
@@ -69,21 +73,26 @@ class MashinMediaLibraryService : MediaLibraryService() {
         NativeCoreBridge.stopObservingEvents()
         mediaLibrarySession?.release()
         mediaLibrarySession = null
-        sessionPlayer.release()
+        sessionPlayer?.release()
+        sessionPlayer = null
         super.onDestroy()
     }
 
+    // Core state synchronization.
     private fun applyCoreEvent(payload: String) {
         val event = JSONObject(payload)
-        if (event.optString("type") == "player_state_changed") {
-            sessionPlayer.updateState(SystemMediaSnapshot.fromPlayerState(event.getJSONObject("player_state")))
-            mediaLibrarySession?.let(::onUpdateNotification)
+        if (event.optString("type") == "player_state_changed" || event.optString("type") == "queue_changed") {
+            updatePlayerState()
         }
     }
 
     private fun updatePlayerState() {
-        NativeCoreBridge.query("playerState", null)?.let { playerState ->
-            sessionPlayer.updateState(SystemMediaSnapshot.fromPlayerState(JSONObject(playerState)))
+        val playerState = NativeCoreBridge.query("playerState", null)
+        val queue = NativeCoreBridge.query("queue", null)
+        if (playerState != null && queue != null) {
+            sessionPlayer?.updateState(
+                SystemMediaSnapshot.fromPlayerState(JSONObject(playerState), JSONObject(queue)),
+            )
         }
         mediaLibrarySession?.let(::onUpdateNotification)
     }
@@ -93,6 +102,7 @@ class MashinMediaLibraryService : MediaLibraryService() {
         updatePlayerState()
     }
 
+    // Notification setup.
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
             DefaultMediaNotificationProvider.DEFAULT_CHANNEL_ID,
@@ -103,8 +113,13 @@ class MashinMediaLibraryService : MediaLibraryService() {
     }
 }
 
+// Android Auto media-library browsing and media-item caching.
 @UnstableApi
 private class AndroidAutoLibraryCallback : MediaLibraryService.MediaLibrarySession.Callback {
+    private val serializedMediaItems = ConcurrentHashMap<String, String>()
+    private val serializedTrackLists = ConcurrentHashMap<String, String>()
+    private val identifierSequence = AtomicLong()
+
     override fun onGetLibraryRoot(
         session: MediaLibraryService.MediaLibrarySession,
         browser: MediaSession.ControllerInfo,
@@ -146,12 +161,20 @@ private class AndroidAutoLibraryCallback : MediaLibraryService.MediaLibrarySessi
         startIndex: Int,
         startPositionMs: Long,
     ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
-        mediaItems.getOrNull(startIndex)?.requestMetadata?.mediaUri?.toString()?.let { serializedItem ->
-            NativeCoreBridge.command("playMediaItems", "[$serializedItem]")
-        }
+        mediaItems.getOrNull(startIndex)?.mediaId?.let(::playMediaId)
         return Futures.immediateFuture(
             MediaSession.MediaItemsWithStartPosition(mediaItems, startIndex, startPositionMs),
         )
+    }
+
+    private fun playMediaId(mediaId: String) {
+        serializedTrackLists[mediaId]?.let { serializedItems ->
+            NativeCoreBridge.command("playMediaItems", serializedItems)
+            return
+        }
+        serializedMediaItems[mediaId]?.let { serializedItem ->
+            NativeCoreBridge.command("playMediaItems", "[$serializedItem]")
+        }
     }
 
     private fun libraryItem(values: Map<String, Any?>): MediaItem = libraryItem(
@@ -183,54 +206,147 @@ private class AndroidAutoLibraryCallback : MediaLibraryService.MediaLibrarySessi
 
     private fun libraryItems(parentId: String): List<MediaItem> = when (parentId) {
         "root" -> listOf(
-            libraryItem("recommendations", "Empfehlungen", false),
-            libraryItem("recentlyPlayed", "Zuletzt gehoert", false),
+            libraryItem("node:home", "Startseite", false),
+            libraryItem("node:playlists", "Playlists", false),
+            libraryItem("node:favorites", "Favoriten", false),
         )
-        "recommendations" -> recommendationItems()
-        "recentlyPlayed" -> mediaItemsFromJson(NativeCoreBridge.query("recentlyPlayed", null))
-        else -> emptyList()
+        "node:home" -> homeItems()
+        "node:playlists" -> playlistItems()
+        "node:favorites" -> favoriteCategoryItems()
+        "home:recommendations" -> recommendationFolders()
+        "home:recent" -> mediaItemsFromJson(NativeCoreBridge.query("recentlyPlayed", null))
+        "favorites:tracks" -> userDataItems("tracks")
+        "favorites:albums" -> userDataItems("albums")
+        "favorites:playlists" -> userDataItems("playlists")
+        "favorites:artists" -> userDataItems("artists")
+        "local:playlists" -> localPlaylistItems()
+        "search:tracks", "search:albums", "search:artists", "search:playlists" -> searchCategoryItems(parentId)
+        else -> dynamicChildren(parentId)
     }
 
-    private fun recommendationItems(): List<MediaItem> {
+    private fun homeItems(): List<MediaItem> = listOf(
+        libraryItem("home:recommendations", "Empfehlungen", false),
+        libraryItem("home:recent", "Zuletzt gehoert", false),
+    )
+
+    private fun favoriteCategoryItems(): List<MediaItem> = listOf(
+        libraryItem("favorites:tracks", "Tracks", false),
+        libraryItem("favorites:albums", "Alben", false),
+        libraryItem("favorites:playlists", "Playlists", false),
+        libraryItem("favorites:artists", "Artists", false),
+    )
+
+    private fun playlistItems(): List<MediaItem> = listOf(
+        libraryItem("local:playlists", "Meine Playlists", false),
+    ) + mediaItemsFromJson(searchResults("", "playlists"))
+
+    private fun recommendationFolders(): List<MediaItem> {
         val folders = JSONArray(NativeCoreBridge.query("recommendations", null) ?: "[]")
         return buildList {
             for (index in 0 until folders.length()) {
                 val folder = folders.optJSONObject(index) ?: continue
-                val items = folder.optJSONArray("items") ?: continue
-                addAll(mediaItemsFromJson(items.toString()))
+                val folderId = folder.optString("item_id").ifEmpty { continue }
+                val id = "recommendation:$folderId"
+                serializedMediaItems[id] = folder.toString()
+                add(libraryItem(id, folder.optString("name", "Empfehlungen"), false, artworkUri = artworkUri(folder)))
             }
         }
     }
 
-    private fun searchItems(query: String): List<MediaItem> {
-        val results = JSONObject(NativeCoreBridge.query("search", query) ?: "{}")
-        return sequenceOf("tracks", "albums", "artists", "playlists")
-            .flatMap { key -> mediaItemsFromJson(results.optJSONArray(key)?.toString()).asSequence() }
-            .toList()
+    private fun dynamicChildren(parentId: String): List<MediaItem> = when {
+        parentId.startsWith("recommendation:") -> recommendationFolderItems(parentId)
+        parentId.startsWith("album:") -> referencedItems(parentId, "albumTracks")
+        parentId.startsWith("playlist:") -> referencedItems(parentId, "playlistTracks")
+        parentId.startsWith("artist:") -> artistChildren(parentId)
+        parentId.startsWith("artistAlbums:") -> referencedItems(parentId.removePrefix("artistAlbums:"), "artistAlbums")
+        parentId.startsWith("artistTopTracks:") -> referencedItems(parentId.removePrefix("artistTopTracks:"), "artistTopTracks")
+        parentId.startsWith("similarArtists:") -> referencedItems(parentId.removePrefix("similarArtists:"), "similarArtists")
+        else -> emptyList()
     }
 
-    private fun mediaItemsFromJson(serializedItems: String?): List<MediaItem> {
+    private fun recommendationFolderItems(parentId: String): List<MediaItem> {
+        val folderId = parentId.removePrefix("recommendation:")
+        val folders = JSONArray(NativeCoreBridge.query("recommendations", null) ?: "[]")
+        val items = (0 until folders.length())
+            .mapNotNull(folders::optJSONObject)
+            .firstOrNull { it.optString("item_id") == folderId }
+            ?.optJSONArray("items")
+            ?: return emptyList()
+        return mediaItemsFromJson(items.toString(), includeTrackListActions = true)
+    }
+
+    private fun searchItems(query: String): List<MediaItem> = listOf(
+        libraryItem("search:tracks?$query", "Tracks", false),
+        libraryItem("search:albums?$query", "Alben", false),
+        libraryItem("search:artists?$query", "Artists", false),
+        libraryItem("search:playlists?$query", "Playlists", false),
+    )
+
+    private fun searchCategoryItems(parentId: String): List<MediaItem> {
+        val category = parentId.substringBefore(':').let { parentId.substringAfter(':').substringBefore('?') }
+        val query = parentId.substringAfter('?', "")
+        return mediaItemsFromJson(searchResults(query, category), includeTrackListActions = category == "tracks")
+    }
+
+    private fun searchResults(query: String, key: String): String {
+        val results = JSONObject(NativeCoreBridge.query("search", query) ?: "{}")
+        return results.optJSONArray(key)?.toString() ?: "[]"
+    }
+
+    private fun userDataItems(category: String): List<MediaItem> {
+        val data = JSONObject(NativeCoreBridge.query("userData", null) ?: "{}")
+        return mediaItemsFromJson(data.optJSONObject("favorites")?.optJSONArray(category)?.toString())
+    }
+
+    private fun localPlaylistItems(): List<MediaItem> {
+        val data = JSONObject(NativeCoreBridge.query("userData", null) ?: "{}")
+        return mediaItemsFromJson(data.optJSONArray("playlists")?.toString())
+    }
+
+    private fun referencedItems(referenceId: String, queryKind: String): List<MediaItem> {
+        val reference = serializedMediaItems[referenceId] ?: return emptyList()
+        val item = JSONObject(reference)
+        if (queryKind == "playlistTracks" && item.optString("provider") == "mashin") {
+            return mediaItemsFromJson(item.optJSONArray("items")?.toString(), true)
+        }
+        return mediaItemsFromJson(NativeCoreBridge.query(queryKind, itemReference(JSONObject(reference))), true)
+    }
+
+    private fun artistChildren(parentId: String): List<MediaItem> {
+        val reference = serializedMediaItems[parentId] ?: return emptyList()
+        return listOf(
+            libraryItem("artistAlbums:$parentId", "Alben", false),
+            libraryItem("artistTopTracks:$parentId", "Top Tracks", false),
+            libraryItem("similarArtists:$parentId", "Aehnliche Artists", false),
+        )
+    }
+
+    private fun mediaItemsFromJson(serializedItems: String?, includeTrackListActions: Boolean = false): List<MediaItem> {
         val items = JSONArray(serializedItems ?: "[]")
+        val parsedItems = (0 until items.length()).mapNotNull(items::optJSONObject)
         return buildList {
-            for (index in 0 until items.length()) {
-                val item = items.optJSONObject(index) ?: continue
-                val itemId = item.optString("itemId").ifEmpty { item.optString("uri") }
+            if (includeTrackListActions) {
+                val tracks = JSONArray(parsedItems.filter { it.optString("media_type") == "track" }.map(JSONObject::toString))
+                if (tracks.length() > 0) {
+                    addAll(createTrackListActions(tracks))
+                }
+            }
+            for (item in parsedItems) {
+                val itemId = item.optString("item_id").ifEmpty { item.optString("uri") }
                 if (itemId.isEmpty()) continue
+                val mediaType = item.optString("media_type")
+                val mediaId = "$mediaType:$itemId:${item.optString("provider")}:${identifierSequence.incrementAndGet()}"
+                serializedMediaItems[mediaId] = item.toString()
                 add(
                     MediaItem.Builder()
-                        .setMediaId(itemId)
-                        .setRequestMetadata(
-                            MediaItem.RequestMetadata.Builder()
-                                .setMediaUri(android.net.Uri.parse(item.toString()))
-                                .build(),
-                        )
+                        .setMediaId(mediaId)
                         .setMediaMetadata(
                             MediaMetadata.Builder()
                                 .setTitle(item.optString("name", itemId))
-                                .setArtist(item.optString("artist"))
-                                .setArtworkUri(item.optString("image").takeIf(String::isNotEmpty)?.let(android.net.Uri::parse))
-                                .setIsPlayable(item.optString("mediaType") == "track")
-                                .setIsBrowsable(item.optString("mediaType") != "track")
+                                .setArtist(itemArtists(item))
+                                .setArtworkUri(artworkUri(item)?.let(android.net.Uri::parse))
+                                .setIsPlayable(mediaType == "track")
+                                .setIsBrowsable(mediaType != "track")
                                 .build(),
                         )
                         .build(),
@@ -238,8 +354,46 @@ private class AndroidAutoLibraryCallback : MediaLibraryService.MediaLibrarySessi
             }
         }
     }
+
+    private fun createTrackListActions(tracks: JSONArray): List<MediaItem> {
+        val playId = "action:play:${identifierSequence.incrementAndGet()}"
+        val shuffleId = "action:shuffle:${identifierSequence.incrementAndGet()}"
+        serializedTrackLists[playId] = tracks.toString()
+        val shuffled = (0 until tracks.length()).mapNotNull(tracks::optJSONObject).shuffled()
+        serializedTrackLists[shuffleId] = JSONArray(shuffled).toString()
+        return listOf(
+            libraryItem(playId, "Abspielen", true, "${tracks.length()} Tracks"),
+            libraryItem(shuffleId, "Zufaellige Wiedergabe", true, "${tracks.length()} Tracks"),
+        )
+    }
+
+    private fun itemReference(item: JSONObject): String = JSONObject()
+        .put("itemId", item.optString("item_id"))
+        .put("provider", item.optString("provider"))
+        .toString()
+
+    private fun itemArtists(item: JSONObject): String? = item.optJSONArray("artists")
+        ?.let { artists -> (0 until artists.length()).mapNotNull(artists::optJSONObject) }
+        ?.joinToString(", ") { artist -> artist.optString("name") }
+        ?.takeIf(String::isNotBlank)
+
+    private fun artworkUri(item: JSONObject): String? {
+        val image = item.optJSONObject("image")
+            ?: item.optJSONObject("album")?.optJSONObject("image")
+            ?: item.optJSONObject("metadata")?.optJSONArray("images")?.optJSONObject(0)
+            ?: return null
+        val proxyId = image.optString("proxy_id")
+        val path = image.optString("path")
+        val source = if (proxyId.isNotEmpty()) {
+            val settings = JSONObject(NativeCoreBridge.query("sessionSettings", null) ?: "{}")
+            val baseUrl = settings.optString("musicAssistantUrl").trimEnd('/')
+            if (baseUrl.isNotEmpty()) "$baseUrl/imageproxy/$proxyId" else path
+        } else path
+        return source.takeIf(String::isNotEmpty)?.let(MediaArtworkContentProvider::buildUri)
+    }
 }
 
+// Android Auto player-state adaptation.
 @UnstableApi
 internal class MashinSessionPlayer(
     private val dispatchCommand: (String, String?) -> Unit,
@@ -347,24 +501,27 @@ internal data class SystemMediaSnapshot(
     companion object {
         fun empty() = SystemMediaSnapshot("idle", 0, null, false, Player.REPEAT_MODE_OFF, null)
 
-        fun fromPlayerState(values: JSONObject): SystemMediaSnapshot {
-            val mediaId = values.optString("currentItemId").takeIf(String::isNotEmpty)
-            val item = mediaId?.let {
+        fun fromPlayerState(values: JSONObject, queue: JSONObject): SystemMediaSnapshot {
+            val queueItemId = values.optString("currentQueueItemId")
+            val queueItem = queue.optJSONArray("items")
+                ?.let { items -> (0 until items.length()).mapNotNull(items::optJSONObject) }
+                ?.firstOrNull { item -> item.optString("queue_item_id") == queueItemId }
+            val item = queueItem?.let { currentItem ->
                 MediaItem.Builder()
-                    .setMediaId(it)
+                    .setMediaId(queueItemId)
                     .setMediaMetadata(
                         MediaMetadata.Builder()
-                            .setTitle(values.optString("currentItemName"))
+                            .setTitle(currentItem.optString("name"))
                             .build(),
                     )
                     .build()
             }
             return SystemMediaSnapshot(
                 status = values.optString("playbackState", "idle"),
-                positionMillis = values.optDouble("positionSeconds", 0.0).times(1_000).toLong(),
-                durationMillis = values.optDouble("durationSeconds", -1.0).takeIf { it >= 0 }?.times(1_000)?.toLong(),
-                shuffleEnabled = values.optBoolean("shuffleEnabled", false),
-                repeatMode = when (values.optString("repeatMode")) {
+                positionMillis = values.optLong("positionMillis", 0L),
+                durationMillis = values.optLong("durationMillis", -1L).takeIf { it >= 0 },
+                shuffleEnabled = queue.optBoolean("shuffleEnabled", false),
+                repeatMode = when (queue.optString("repeatMode")) {
                     "one" -> Player.REPEAT_MODE_ONE
                     "all" -> Player.REPEAT_MODE_ALL
                     else -> Player.REPEAT_MODE_OFF

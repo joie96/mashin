@@ -62,4 +62,7 @@ app.*.map.json
 /windows/native/*.exp
 /windows/native/*.pdb
 
+# Native Android artifacts
+/android/app/src/main/jniLibs/
+
 other_projects
