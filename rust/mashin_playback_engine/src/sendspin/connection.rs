@@ -35,7 +35,7 @@ pub(crate) fn player_support(
     PlayerV1Support {
         supported_formats: supported_audio_formats(preferred_codec.as_str()),
         buffer_capacity: buffer_capacity.min(u32::MAX as u64) as u32,
-        supported_commands: Vec::new(),
+        supported_commands: vec!["volume".to_string(), "mute".to_string()],
     }
 }
 
@@ -63,4 +63,17 @@ pub(crate) fn audio_format_from_stream(
         bit_depth,
         codec_header,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::player_support;
+    use crate::sendspin::models::SendspinAudioCodec;
+
+    #[test]
+    fn declares_volume_and_mute_player_commands() {
+        let support = player_support(SendspinAudioCodec::Pcm, 1_024);
+
+        assert_eq!(support.supported_commands, ["volume", "mute"]);
+    }
 }

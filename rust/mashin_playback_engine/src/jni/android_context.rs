@@ -21,6 +21,7 @@ pub(crate) fn initialize_android_context(
     env: &mut jni::JNIEnv,
     context: JObject,
     native_core_bridge_class: JClass,
+    secure_session_store_class: JClass,
 ) -> Result<(), String> {
     let java_vm = env
         .get_java_vm()
@@ -32,9 +33,8 @@ pub(crate) fn initialize_android_context(
         .new_global_ref(native_core_bridge_class)
         .map_err(|error| format!("retain Android native core bridge failed: {error}"))?;
     let secure_session_store = env
-        .find_class("com/example/mashin_flutter/SecureSessionStore")
-        .and_then(|class| env.new_global_ref(class))
-        .map_err(|error| format!("resolve Android secure session store failed: {error}"))?;
+        .new_global_ref(secure_session_store_class)
+        .map_err(|error| format!("retain Android secure session store failed: {error}"))?;
     validate_static_method(
         env,
         &native_core_bridge,

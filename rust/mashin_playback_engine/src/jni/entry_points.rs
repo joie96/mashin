@@ -10,6 +10,7 @@ pub(crate) extern "system" fn initialize(
     mut env: JNIEnv,
     native_core_bridge: JObject,
     context: JObject,
+    secure_session_store: JObject,
 ) {
     let native_core_bridge_class = match env.get_object_class(&native_core_bridge) {
         Ok(class) => class,
@@ -18,9 +19,19 @@ pub(crate) extern "system" fn initialize(
             return;
         }
     };
-    if let Err(error) =
-        android_context::initialize_android_context(&mut env, context, native_core_bridge_class)
-    {
+    let secure_session_store_class = match env.get_object_class(&secure_session_store) {
+        Ok(class) => class,
+        Err(error) => {
+            throw_core_error(&mut env, &format!("resolve Android secure session store class failed: {error}"));
+            return;
+        }
+    };
+    if let Err(error) = android_context::initialize_android_context(
+        &mut env,
+        context,
+        native_core_bridge_class,
+        secure_session_store_class,
+    ) {
         android_context::clear_pending_exception(&mut env);
         throw_core_error(&mut env, &error);
     }

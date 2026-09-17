@@ -459,15 +459,16 @@ impl MusicAssistantClient {
             .send()
             .await
             .map_err(|error| format!("Music Assistant command failed: {error}"))?;
-        if !response.status().is_success() {
-            return Err(format!(
-                "Music Assistant command returned HTTP {}",
-                response.status()
-            ));
-        }
+        let status = response.status();
         let response_body = response.text().await.map_err(|error| {
             format!("Music Assistant command '{command}' response failed: {error}")
         })?;
+        if !status.is_success() {
+            let response_excerpt = response_body.chars().take(512).collect::<String>();
+            return Err(format!(
+                "Music Assistant command '{command}' returned HTTP {status}: {response_excerpt}",
+            ));
+        }
         serde_json::from_str(&response_body).map_err(|error| {
             let response_excerpt = response_body.chars().take(512).collect::<String>();
             format!(

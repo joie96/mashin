@@ -195,6 +195,10 @@ impl SendspinDownloaderWorker {
                 .player_v1_support(support)
                 .initial_player_state(PlayerState {
                     volume: Some(100),
+                    muted: Some(false),
+                    static_delay_ms: Some(0),
+                    required_lead_time_ms: Some(0),
+                    min_buffer_ms: Some(0),
                     ..PlayerState::default()
                 })
                 .metadata()
@@ -531,9 +535,9 @@ impl SendspinDownloaderWorker {
                                 state.state = CacheStatus::Interrupted;
                             }
                         }
-                        connection_lost.store(true, Ordering::Release);
                     }
                 }
+                connection_lost.store(true, Ordering::Release);
             });
             Ok::<_, String>((controller, connection.guard, task))
         })?;
@@ -1098,6 +1102,8 @@ impl SendspinDownloaderWorker {
         let caches = Arc::clone(&self.caches);
         let cache_change_signal = Arc::clone(&self.cache_change_signal);
         let states = Arc::clone(&self.cache_states);
+        let download_window_refresh = Arc::clone(&self.download_window_refresh);
+        let connection_lost = Arc::clone(&self.connection_lost);
         let append_after_seek = Arc::clone(&reservation.append_after_seek);
         self.runtime.spawn(async move {
             let client = MusicAssistantClient::new(&music_assistant_url, access_token);
@@ -1113,22 +1119,23 @@ impl SendspinDownloaderWorker {
                 ));
             }
             if let Err(error) = result {
-                LOGGER.error(error);
-                release_incomplete_reservation(
-                    &slots,
-                    &caches,
-                    &cache_change_signal,
-                    &states,
-                    slot_index,
-                    &reservation,
-                );
-                return;
-            }
-            if let Some(position) = resume_position_seconds {
-                if let Err(error) =
-                    seek_download_player(&client, &controller, player_id, position).await
-                {
-                    LOGGER.error(format!("failed to resume interrupted download: {error}"));
+                LOGGER.error(&error);
+                if is_player_unavailable_error(&error) {
+                    LOGGER.warn(format!(
+                        "Music Assistant player unavailable for download slot {}; reconnecting Sendspin downloaders",
+                        slot_index + 1
+                    ));
+                    retain_interrupted_reservation(
+                        &slots,
+                        &caches,
+                        &cache_change_signal,
+                        &states,
+                        &download_window_refresh,
+                        slot_index,
+                        &reservation,
+                    );
+                    connection_lost.store(true, Ordering::Release);
+                } else {
                     release_incomplete_reservation(
                         &slots,
                         &caches,
@@ -1137,6 +1144,26 @@ impl SendspinDownloaderWorker {
                         slot_index,
                         &reservation,
                     );
+                }
+                return;
+            }
+            if let Some(position) = resume_position_seconds {
+                if let Err(error) =
+                    seek_download_player(&client, &controller, player_id, position).await
+                {
+                    LOGGER.error(format!("failed to resume interrupted download: {error}"));
+                    // The audio player may still consume cached chunks while the retry is pending.
+                    retain_interrupted_reservation(
+                        &slots,
+                        &caches,
+                        &cache_change_signal,
+                        &states,
+                        &download_window_refresh,
+                        slot_index,
+                        &reservation,
+                    );
+                    // Recreate the closed controller before scheduling another resume attempt.
+                    connection_lost.store(true, Ordering::Release);
                     return;
                 }
                 append_after_seek.store(true, Ordering::Release);
@@ -1576,20 +1603,26 @@ async fn resolve_download_player_ids(
     client: &MusicAssistantClient,
     output_protocol_ids: &[String; 2],
 ) -> Result<[PlayerId; 2], String> {
-    let players = client.get_players(true, true).await?;
-    let first = find_download_player_id(&players, &output_protocol_ids[0]).ok_or_else(|| {
-        format!(
-            "Music Assistant player for Sendspin client {} is not available",
-            output_protocol_ids[0]
-        )
-    })?;
-    let second = find_download_player_id(&players, &output_protocol_ids[1]).ok_or_else(|| {
-        format!(
-            "Music Assistant player for Sendspin client {} is not available",
-            output_protocol_ids[1]
-        )
-    })?;
-    Ok([first, second])
+    for attempt in 0..DOWNLOAD_QUEUE_REGISTRATION_ATTEMPTS {
+        let players = client.get_players(true, true).await?;
+        if let (Some(first), Some(second)) = (
+            find_download_player_id(&players, &output_protocol_ids[0]),
+            find_download_player_id(&players, &output_protocol_ids[1]),
+        ) {
+            return Ok([first, second]);
+        }
+        if attempt + 1 < DOWNLOAD_QUEUE_REGISTRATION_ATTEMPTS {
+            tokio::time::sleep(DOWNLOAD_QUEUE_REGISTRATION_RETRY_DELAY).await;
+        }
+    }
+
+    Err(format!(
+        "Music Assistant players for Sendspin clients {}, {} were not registered within {} milliseconds",
+        output_protocol_ids[0],
+        output_protocol_ids[1],
+        DOWNLOAD_QUEUE_REGISTRATION_ATTEMPTS
+            * DOWNLOAD_QUEUE_REGISTRATION_RETRY_DELAY.as_millis() as usize
+    ))
 }
 
 async fn disable_download_queue_autoplay(
@@ -1788,6 +1821,12 @@ fn normalize_client_id(value: &str) -> String {
         .collect::<String>()
 }
 
+fn is_player_unavailable_error(error: &str) -> bool {
+    error.contains("PlayerUnavailableError")
+        || error.contains("player is not available")
+        || error.contains("Player unavailable")
+}
+
 fn download_duration_reached(
     expected_duration_millis: Option<u64>,
     cached_duration_millis: u64,
@@ -1859,8 +1898,8 @@ fn download_client_name(base_name: &str, slot_number: usize) -> String {
 mod tests {
     use super::{
         cache_reaches_download_pause_threshold, download_client_id, download_client_name,
-        download_duration_reached, normalize_client_id, stream_end_outcome,
-        warm_keepalive_is_current, SendspinDownloader, StreamEndOutcome,
+        download_duration_reached, is_player_unavailable_error, normalize_client_id,
+        stream_end_outcome, warm_keepalive_is_current, SendspinDownloader, StreamEndOutcome,
     };
     use crate::cache::store::{DownloadSlotReservation, DownloadSlots};
     use std::sync::atomic::Ordering;
@@ -1889,6 +1928,16 @@ mod tests {
             "Mashin (Surface Pro 11) DL1"
         );
         assert_eq!(download_client_name("", 2), "Mashin (Device) DL2");
+    }
+
+    #[test]
+    fn recognizes_unavailable_universal_player_errors() {
+        assert!(is_player_unavailable_error(
+            "Music Assistant command 'player_queues/play_media' returned HTTP 500 Internal Server Error: PlayerUnavailableError: Player up3bfa938d is not available"
+        ));
+        assert!(!is_player_unavailable_error(
+            "Music Assistant command 'player_queues/play_media' returned HTTP 400 Bad Request: invalid media"
+        ));
     }
 
     #[test]

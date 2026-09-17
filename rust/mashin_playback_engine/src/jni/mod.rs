@@ -25,7 +25,7 @@ pub extern "system" fn JNI_OnLoad(java_vm: JavaVM, _: *mut c_void) -> jni::sys::
     let methods = [
         NativeMethod {
             name: "initialize".into(),
-            sig: "(Landroid/content/Context;)V".into(),
+            sig: "(Landroid/content/Context;Ljava/lang/Object;)V".into(),
             fn_ptr: entry_points::initialize as *mut c_void,
         },
         NativeMethod {

@@ -13,14 +13,14 @@ object NativeCoreBridge {
         System.loadLibrary("mashin_playback_engine")
     }
 
-    external fun initialize(context: Context)
+    external fun initialize(context: Context, secureSessionStore: Any)
     external fun restorePersistedSession(): Boolean
     external fun query(kind: String, argument: String?): String?
     external fun command(kind: String, argument: String?): Boolean
 
     fun initializeCore(context: Context) {
         SecureSessionStore.initialize(context)
-        initialize(context.applicationContext)
+        initialize(context.applicationContext, SecureSessionStore)
     }
 
     fun observeEvents(listener: (String) -> Unit) {
