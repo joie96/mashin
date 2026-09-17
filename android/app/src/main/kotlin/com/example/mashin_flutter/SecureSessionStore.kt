@@ -13,12 +13,15 @@ object SecureSessionStore {
         applicationContext = context.applicationContext
     }
 
+    @JvmStatic
     fun read(): String? = preferences().getString(sessionKey, null)
 
+    @JvmStatic
     fun write(serializedSession: String) {
         preferences().edit().putString(sessionKey, serializedSession).commit()
     }
 
+    @JvmStatic
     fun clear() {
         preferences().edit().remove(sessionKey).commit()
     }

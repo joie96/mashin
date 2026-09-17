@@ -35,7 +35,7 @@ pub(crate) fn publish_media_session_event(event: MediaSessionEvent) {
 
 pub(crate) fn publish_json_text(text: &str) {
     #[cfg(target_os = "android")]
-    crate::jni::android_core::publish_json_text(text);
+    crate::jni::event_channel::publish_json_text(text);
     let callback = EVENT_CALLBACK.lock().ok().and_then(|callback| *callback);
     let Some(callback) = callback else {
         return;
