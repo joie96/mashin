@@ -1,7 +1,6 @@
 package com.example.mashin_flutter
 
 import android.Manifest
-import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Build
@@ -21,6 +20,7 @@ class MainActivity : FlutterActivity() {
 		private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 1
 	}
 
+		// Activity lifecycle and media-service startup.
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
 		nativeBridgeReady = try {
@@ -41,12 +41,15 @@ class MainActivity : FlutterActivity() {
 			Log.e(TAG, "initialize native core failed", error)
 		}
 		if (hasNotificationPermission()) {
+			Log.d(TAG, "Notification permission granted; starting media service")
 			startMediaLibraryService()
 		} else {
+			Log.w(TAG, "Notification permission missing; requesting it before starting media service")
 			requestNotificationPermission()
 		}
 	}
 
+	// Notification permission handling.
 	private fun requestNotificationPermission() {
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
 			requestPermissions(
@@ -67,17 +70,23 @@ class MainActivity : FlutterActivity() {
 	) {
 		super.onRequestPermissionsResult(requestCode, permissions, grantResults)
 		if (requestCode == NOTIFICATION_PERMISSION_REQUEST_CODE && hasNotificationPermission()) {
+			Log.d(TAG, "Notification permission granted; starting media service")
 			startMediaLibraryService()
+		} else if (requestCode == NOTIFICATION_PERMISSION_REQUEST_CODE) {
+			Log.w(TAG, "Notification permission denied; media service will not start")
 		}
 	}
 
+	// A deliberate app close ends playback, whereas minimizing keeps the service alive.
 	override fun onDestroy() {
 		if (isFinishing) {
+			Log.d(TAG, "Activity is finishing; stopping media service")
 			stopService(Intent(applicationContext, MashinMediaLibraryService::class.java))
 		}
 		super.onDestroy()
 	}
 
+	// Flutter platform integration.
 	override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
 		super.configureFlutterEngine(flutterEngine)
 		MethodChannel(
@@ -102,7 +111,9 @@ class MainActivity : FlutterActivity() {
 
 	}
 
+	// The visible activity may start the service; Media3 promotes it for active playback.
 	private fun startMediaLibraryService() {
-		startForegroundService(Intent(applicationContext, MashinMediaLibraryService::class.java))
+		Log.d(TAG, "Starting media library service")
+		startService(Intent(applicationContext, MashinMediaLibraryService::class.java))
 	}
 }

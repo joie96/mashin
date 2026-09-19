@@ -1,6 +1,5 @@
 package com.example.mashin_flutter.media
 
-import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
@@ -13,11 +12,14 @@ import androidx.media3.common.Player
 import androidx.media3.common.SimpleBasePlayer
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.DefaultMediaNotificationProvider
+import androidx.media3.session.CommandButton
+import androidx.media3.session.MediaNotification
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.LibraryResult
-import com.google.common.util.concurrent.MoreExecutors
+import androidx.core.app.NotificationCompat
 import com.google.common.util.concurrent.Futures
+import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.ListenableFuture
 import org.json.JSONArray
 import org.json.JSONObject
@@ -34,17 +36,9 @@ class MashinMediaLibraryService : MediaLibraryService() {
         super.onCreate()
         createNotificationChannel()
         setMediaNotificationProvider(
-            DefaultMediaNotificationProvider(this).apply {
+            MashinMediaNotificationProvider(this).apply {
                 setSmallIcon(R.drawable.ic_media_notification)
             },
-        )
-        startForeground(
-            DefaultMediaNotificationProvider.DEFAULT_NOTIFICATION_ID,
-            Notification.Builder(this, DefaultMediaNotificationProvider.DEFAULT_CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_media_notification)
-                .setContentTitle(getString(R.string.media_playback_notification_title))
-                .setOngoing(true)
-                .build(),
         )
         NativeCoreBridge.initializeCore(applicationContext)
         if (NativeCoreBridge.restorePersistedSession()) {
@@ -52,11 +46,13 @@ class MashinMediaLibraryService : MediaLibraryService() {
         }
         val initializedSessionPlayer = MashinSessionPlayer(::dispatchCoreCommand)
         sessionPlayer = initializedSessionPlayer
-        mediaLibrarySession = MediaLibraryService.MediaLibrarySession.Builder(
+        val initializedMediaLibrarySession = MediaLibraryService.MediaLibrarySession.Builder(
             this,
             initializedSessionPlayer,
             AndroidAutoLibraryCallback(),
         ).build()
+        mediaLibrarySession = initializedMediaLibrarySession
+        addSession(initializedMediaLibrarySession)
         NativeCoreBridge.observeEvents(::applyCoreEvent)
         updatePlayerState()
     }
@@ -81,7 +77,8 @@ class MashinMediaLibraryService : MediaLibraryService() {
     // Core state synchronization.
     private fun applyCoreEvent(payload: String) {
         val event = JSONObject(payload)
-        if (event.optString("type") == "player_state_changed" || event.optString("type") == "queue_changed") {
+        val eventType = event.optString("type")
+        if (eventType == "player_state_changed" || eventType == "queue_changed") {
             updatePlayerState()
         }
     }
@@ -89,12 +86,15 @@ class MashinMediaLibraryService : MediaLibraryService() {
     private fun updatePlayerState() {
         val playerState = NativeCoreBridge.query("playerState", null)
         val queue = NativeCoreBridge.query("queue", null)
-        if (playerState != null && queue != null) {
-            sessionPlayer?.updateState(
-                SystemMediaSnapshot.fromPlayerState(JSONObject(playerState), JSONObject(queue)),
-            )
+        if (playerState == null || queue == null) {
+            return
         }
-        mediaLibrarySession?.let(::onUpdateNotification)
+
+        val playerStateJson = JSONObject(playerState)
+        val queueJson = JSONObject(queue)
+        val snapshot = SystemMediaSnapshot.fromPlayerState(playerStateJson, queueJson)
+        sessionPlayer?.updateState(snapshot)
+        if (sessionPlayer != null) triggerNotificationUpdate()
     }
 
     private fun dispatchCoreCommand(command: String, argument: String? = null) {
@@ -110,6 +110,34 @@ class MashinMediaLibraryService : MediaLibraryService() {
             NotificationManager.IMPORTANCE_LOW,
         )
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+    }
+}
+
+// Media notification presentation.
+@UnstableApi
+private class MashinMediaNotificationProvider(context: Context) : DefaultMediaNotificationProvider(context) {
+    override fun addNotificationActions(
+        session: MediaSession,
+        mediaButtons: ImmutableList<CommandButton>,
+        builder: NotificationCompat.Builder,
+        actionFactory: MediaNotification.ActionFactory,
+    ): IntArray {
+        val compactViewActionIndices = super.addNotificationActions(
+            session,
+            mediaButtons,
+            builder,
+            actionFactory,
+        )
+        val durationMillis = session.player.duration
+        val positionMillis = session.player.currentPosition
+        if (durationMillis > 0 && durationMillis != C.TIME_UNSET && positionMillis != C.TIME_UNSET) {
+            builder.setProgress(
+                durationMillis.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+                positionMillis.coerceIn(0, durationMillis).toInt(),
+                false,
+            )
+        }
+        return compactViewActionIndices
     }
 }
 
@@ -382,9 +410,9 @@ private class AndroidAutoLibraryCallback : MediaLibraryService.MediaLibrarySessi
             ?: item.optJSONObject("album")?.optJSONObject("image")
             ?: item.optJSONObject("metadata")?.optJSONArray("images")?.optJSONObject(0)
             ?: return null
-        val proxyId = image.optString("proxy_id")
+        val proxyId = image.optString("proxy_id").takeUnless { it == "null" }
         val path = image.optString("path")
-        val source = if (proxyId.isNotEmpty()) {
+        val source = if (!proxyId.isNullOrEmpty()) {
             val settings = JSONObject(NativeCoreBridge.query("sessionSettings", null) ?: "{}")
             val baseUrl = settings.optString("musicAssistantUrl").trimEnd('/')
             if (baseUrl.isNotEmpty()) "$baseUrl/imageproxy/$proxyId" else path
@@ -407,6 +435,9 @@ internal class MashinSessionPlayer(
 
     override fun getState(): State {
         val commands = Player.Commands.Builder()
+            .add(Player.COMMAND_GET_CURRENT_MEDIA_ITEM)
+            .add(Player.COMMAND_GET_TIMELINE)
+            .add(Player.COMMAND_GET_METADATA)
             .add(Player.COMMAND_PLAY_PAUSE)
             .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
             .add(Player.COMMAND_SEEK_TO_NEXT)
@@ -436,8 +467,16 @@ internal class MashinSessionPlayer(
                 listOf(
                     MediaItemData.Builder(item.mediaId)
                         .setMediaItem(item)
+                        .setMediaMetadata(item.mediaMetadata)
                         .setIsSeekable(snapshot.durationMillis != null)
                         .setDurationUs(durationUs)
+                        .setPeriods(
+                            listOf(
+                                PeriodData.Builder(item.mediaId)
+                                    .setDurationUs(durationUs)
+                                    .build(),
+                            ),
+                        )
                         .build(),
                 ),
             )
@@ -502,16 +541,22 @@ internal data class SystemMediaSnapshot(
         fun empty() = SystemMediaSnapshot("idle", 0, null, false, Player.REPEAT_MODE_OFF, null)
 
         fun fromPlayerState(values: JSONObject, queue: JSONObject): SystemMediaSnapshot {
+            val durationMillis = values.optLong("durationMillis", -1L).takeIf { it >= 0 }
             val queueItemId = values.optString("currentQueueItemId")
             val queueItem = queue.optJSONArray("items")
                 ?.let { items -> (0 until items.length()).mapNotNull(items::optJSONObject) }
                 ?.firstOrNull { item -> item.optString("queue_item_id") == queueItemId }
             val item = queueItem?.let { currentItem ->
+                val mediaItem = currentItem.optJSONObject("media_item")
                 MediaItem.Builder()
                     .setMediaId(queueItemId)
                     .setMediaMetadata(
                         MediaMetadata.Builder()
                             .setTitle(currentItem.optString("name"))
+                            .setArtist(mediaItem?.artistNames())
+                            .setAlbumTitle(mediaItem?.optJSONObject("album")?.optString("name"))
+                            .setArtworkUri(currentItem.artworkUri())
+                            .setDurationMs(durationMillis)
                             .build(),
                     )
                     .build()
@@ -519,7 +564,7 @@ internal data class SystemMediaSnapshot(
             return SystemMediaSnapshot(
                 status = values.optString("playbackState", "idle"),
                 positionMillis = values.optLong("positionMillis", 0L),
-                durationMillis = values.optLong("durationMillis", -1L).takeIf { it >= 0 },
+                durationMillis = durationMillis,
                 shuffleEnabled = queue.optBoolean("shuffleEnabled", false),
                 repeatMode = when (queue.optString("repeatMode")) {
                     "one" -> Player.REPEAT_MODE_ONE
@@ -528,6 +573,33 @@ internal data class SystemMediaSnapshot(
                 },
                 mediaItem = item,
             )
+        }
+
+        private fun JSONObject.artistNames(): String? = optJSONArray("artists")
+            ?.let { artists -> (0 until artists.length()).mapNotNull(artists::optJSONObject) }
+            ?.map { artist -> artist.optString("name") }
+            ?.filter(String::isNotBlank)
+            ?.joinToString(", ")
+            ?.takeIf(String::isNotBlank)
+
+        private fun JSONObject.artworkUri(): android.net.Uri? {
+            val mediaItem = optJSONObject("media_item")
+            val image = optJSONObject("image")
+                ?: mediaItem?.optJSONObject("image")
+                ?: mediaItem?.optJSONObject("metadata")?.optJSONArray("images")?.optJSONObject(0)
+                ?: return null
+            val proxyId = image.optString("proxy_id").takeUnless { it == "null" }
+            val path = image.optString("path")
+            val source = if (!proxyId.isNullOrEmpty()) {
+                val settings = JSONObject(NativeCoreBridge.query("sessionSettings", null) ?: "{}")
+                val baseUrl = settings.optString("musicAssistantUrl").trimEnd('/')
+                if (baseUrl.isNotEmpty()) "$baseUrl/imageproxy/$proxyId" else path
+            } else {
+                path
+            }
+            return source.takeIf(String::isNotEmpty)
+                ?.let(MediaArtworkContentProvider::buildUri)
+                ?.let(android.net.Uri::parse)
         }
     }
 }

@@ -5,16 +5,32 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.util.Log
 import java.io.File
 import java.net.URL
 import java.security.MessageDigest
 import java.util.Base64
 
 class MediaArtworkContentProvider : ContentProvider() {
+    companion object {
+        private const val AUTHORITY = "com.example.mashin_flutter.mediaart"
+        private const val SOURCE_PARAMETER = "src"
+        private const val TAG = "MediaArtworkProvider"
+
+        fun buildUri(source: String): String = Uri.Builder()
+            .scheme("content")
+            .authority(AUTHORITY)
+            .appendPath("art")
+            .appendQueryParameter(SOURCE_PARAMETER, source)
+            .build()
+            .toString()
+    }
+
     override fun onCreate(): Boolean = true
 
     override fun getType(uri: Uri): String = "image/*"
 
+    // Resolve remote artwork into the app cache because Media3 requires a readable local descriptor.
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
         val source = uri.getQueryParameter(SOURCE_PARAMETER) ?: return null
         val context = context ?: return null
@@ -22,6 +38,7 @@ class MediaArtworkContentProvider : ContentProvider() {
             val cacheDirectory = File(context.cacheDir, "media-art").apply { mkdirs() }
             val target = File(cacheDirectory, sha256(source) + extensionFor(source))
             if (!target.exists() || target.length() == 0L) {
+                // Populate a temporary file before replacing the cache entry to avoid partial artwork reads.
                 val temporary = File(cacheDirectory, "${target.name}.tmp")
                 if (source.startsWith("data:", ignoreCase = true)) {
                     temporary.writeBytes(decodeDataUri(source))
@@ -34,6 +51,8 @@ class MediaArtworkContentProvider : ContentProvider() {
                 temporary.renameTo(target)
             }
             ParcelFileDescriptor.open(target, ParcelFileDescriptor.MODE_READ_ONLY)
+        }.onFailure { error ->
+            Log.w(TAG, "Unable to load media artwork: ${error::class.java.simpleName}")
         }.getOrNull()
     }
 
@@ -69,16 +88,4 @@ class MediaArtworkContentProvider : ContentProvider() {
         .digest(value.encodeToByteArray())
         .joinToString("") { byte -> "%02x".format(byte) }
 
-    companion object {
-        private const val AUTHORITY = "com.example.mashin_flutter.mediaart"
-        private const val SOURCE_PARAMETER = "src"
-
-        fun buildUri(source: String): String = Uri.Builder()
-            .scheme("content")
-            .authority(AUTHORITY)
-            .appendPath("art")
-            .appendQueryParameter(SOURCE_PARAMETER, source)
-            .build()
-            .toString()
-    }
 }

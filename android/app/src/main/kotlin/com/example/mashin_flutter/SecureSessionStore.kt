@@ -9,6 +9,7 @@ object SecureSessionStore {
     private const val sessionKey = "music_assistant_session"
     private var applicationContext: Context? = null
 
+    // NativeCoreBridge initializes this store before Rust can read or mutate the persisted session.
     fun initialize(context: Context) {
         applicationContext = context.applicationContext
     }

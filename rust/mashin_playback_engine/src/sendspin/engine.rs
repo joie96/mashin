@@ -9,7 +9,9 @@ use crate::logging::Logger;
 use crate::music_assistant::client::MusicAssistantClient;
 use crate::music_assistant::models::identifiers::{CacheContentKey, QueueItemId};
 use crate::music_assistant::models::media::{MediaItem, Track};
-use crate::music_assistant::models::queue::{CacheState, PlayState, QueueItem, RepeatMode};
+use crate::music_assistant::models::queue::{
+    CacheState, CacheStatus, PlayState, QueueItem, RepeatMode,
+};
 use crate::playback::autoplay::{get_autoplay_refill_tracks, AutoplayController};
 use crate::playback::engine::{PlaybackEngine, PreferredCodecConfigurablePlaybackEngine};
 use crate::playback::models::{
@@ -29,6 +31,8 @@ static AUTOPLAY_NETWORK_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
         .build()
         .expect("create Sendspin autoplay network runtime")
 });
+    const INITIAL_RECONNECT_DELAY: Duration = Duration::from_secs(2);
+    const MAXIMUM_RECONNECT_DELAY: Duration = Duration::from_secs(8);
 
 pub(crate) struct SendspinEngine {
     config: Option<SendspinEngineConfiguration>,
@@ -45,6 +49,7 @@ pub(crate) struct SendspinEngine {
     recently_played_content_keys: Vec<String>,
     last_download_status_log: Option<Instant>,
     next_reconnect_attempt: Option<Instant>,
+    reconnect_delay: Duration,
     is_reconnect_in_flight: bool,
     playback_position_offset_millis: i64,
     autoplay: AutoplayController,
@@ -80,6 +85,7 @@ impl SendspinEngine {
             recently_played_content_keys: Vec::new(),
             last_download_status_log: None,
             next_reconnect_attempt: None,
+            reconnect_delay: INITIAL_RECONNECT_DELAY,
             is_reconnect_in_flight: false,
             playback_position_offset_millis: 0,
             autoplay: AutoplayController::new(),
@@ -103,6 +109,7 @@ impl SendspinEngine {
         self.recently_played_content_keys.clear();
         self.last_download_status_log = None;
         self.next_reconnect_attempt = None;
+        self.reconnect_delay = INITIAL_RECONNECT_DELAY;
         self.is_reconnect_in_flight = false;
         self.playback_position_offset_millis = 0;
         self.autoplay = AutoplayController::new();
@@ -204,6 +211,7 @@ impl SendspinEngine {
         self.player_state.playback_state = PlayState::Idle;
         self.current_cache_content_key = None;
         self.next_reconnect_attempt = None;
+        self.reconnect_delay = INITIAL_RECONNECT_DELAY;
         self.is_reconnect_in_flight = false;
     }
 
@@ -607,7 +615,8 @@ impl SendspinEngine {
                     .unwrap_or_else(|| download.queue_item_id.as_str());
                 let expected_duration_millis = download.expected_duration_millis.unwrap_or(0);
                 format!(
-                    "{track_name} {}/{} ms ({:.1}%)",
+                    "{} {track_name} {}/{} ms ({:.1}%)",
+                    download_status_symbol(download.state),
                     download.cached_duration_millis,
                     expected_duration_millis,
                     Self::percentage(download.cached_duration_millis, expected_duration_millis,)
@@ -666,19 +675,35 @@ impl SendspinEngine {
     }
 
     // Background playback processing.
+    fn schedule_reconnect_attempt(&mut self) {
+        let delay = self.reconnect_delay;
+        self.next_reconnect_attempt = Some(Instant::now() + delay);
+        LOGGER.trace(format!(
+            "Sendspin reconnect scheduled in {} seconds",
+            delay.as_secs()
+        ));
+        self.reconnect_delay = self
+            .reconnect_delay
+            .saturating_mul(2)
+            .min(MAXIMUM_RECONNECT_DELAY);
+    }
+
     fn process_connection_state(&mut self) {
         if self.downloader.take_connection_lost() {
+            LOGGER.trace("Sendspin downloader connection lost");
             if self.player_state.connection_state != PlaybackConnectionState::Reconnecting {
                 self.player_state.connection_state = PlaybackConnectionState::Reconnecting;
-                self.next_reconnect_attempt = Some(Instant::now());
+                self.schedule_reconnect_attempt();
             } else if self.is_reconnect_in_flight {
                 self.is_reconnect_in_flight = false;
-                self.next_reconnect_attempt = Some(Instant::now() + Duration::from_secs(2));
+                self.schedule_reconnect_attempt();
             }
         }
         if self.downloader.take_connection_ready() {
+            LOGGER.trace("Sendspin downloaders reconnected");
             self.player_state.connection_state = PlaybackConnectionState::Online;
             self.next_reconnect_attempt = None;
+            self.reconnect_delay = INITIAL_RECONNECT_DELAY;
             self.is_reconnect_in_flight = false;
             if let Err(error) = self.sync_download_window() {
                 LOGGER.error(format!("failed to resume Sendspin downloads: {error}"));
@@ -691,11 +716,12 @@ impl SendspinEngine {
                 .map(|attempt| Instant::now() >= attempt)
                 .unwrap_or(false)
         {
+            LOGGER.trace("starting Sendspin downloader reconnect attempt");
             match self.downloader.reconnect() {
                 Ok(()) => self.is_reconnect_in_flight = true,
                 Err(error) => {
                     LOGGER.error(format!("failed to request Sendspin reconnect: {error}"));
-                    self.next_reconnect_attempt = Some(Instant::now() + Duration::from_secs(2));
+                    self.schedule_reconnect_attempt();
                 }
             }
         }
@@ -1035,6 +1061,13 @@ impl SendspinEngine {
     }
 }
 
+fn download_status_symbol(status: CacheStatus) -> &'static str {
+    match status {
+        CacheStatus::Interrupted => "⏸",
+        _ => "▶",
+    }
+}
+
 impl PlaybackEngine for SendspinEngine {
     fn configure(&mut self, configuration: PlaybackEngineConfiguration) -> Result<(), String> {
         match configuration {
@@ -1276,6 +1309,18 @@ mod tests {
         assert_eq!(player_state.playback_state, PlayState::Uninitialized);
         assert!(queue.items.is_empty());
         assert!(engine.preferred_codec_configuration().is_some());
+    }
+
+    #[test]
+    fn limits_reconnect_delay_to_eight_seconds() {
+        let mut engine = SendspinEngine::new();
+
+        engine.schedule_reconnect_attempt();
+        assert_eq!(engine.reconnect_delay, Duration::from_secs(4));
+        engine.schedule_reconnect_attempt();
+        assert_eq!(engine.reconnect_delay, Duration::from_secs(8));
+        engine.schedule_reconnect_attempt();
+        assert_eq!(engine.reconnect_delay, Duration::from_secs(8));
     }
 
     #[test]

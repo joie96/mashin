@@ -237,6 +237,33 @@ pub(crate) fn cache_interrupted_duration_millis(
     (cache.integrity == CacheIntegrity::Interrupted).then_some(cache.cached_duration_millis)
 }
 
+// Retains the chunk that crosses the resume position without splitting encoded audio frames.
+pub(crate) fn cache_truncate_after_millis(
+    caches: &EncodedCaches,
+    content_key: &str,
+    resume_position_millis: u64,
+) {
+    if let Ok(mut caches) = caches.lock() {
+        let Some(cache) = caches.get_mut(content_key) else {
+            return;
+        };
+        if cache.integrity != CacheIntegrity::Interrupted {
+            return;
+        }
+        while cache
+            .chunks
+            .back()
+            .map(|chunk| chunk.start_position_millis >= resume_position_millis)
+            .unwrap_or(false)
+        {
+            if let Some(chunk) = cache.chunks.pop_back() {
+                cache.byte_len = cache.byte_len.saturating_sub(chunk.data.len());
+            }
+        }
+        cache.cached_duration_millis = resume_position_millis;
+    }
+}
+
 pub(crate) fn cache_discard_interrupted_outside_window(
     caches: &EncodedCaches,
     content_keys: &[String],
@@ -690,5 +717,41 @@ mod tests {
         let caches = caches.lock().expect("cache lock");
         assert!(!caches.contains_key(&interrupted.cache_content_key));
         assert!(caches.contains_key(&healthy.cache_content_key));
+    }
+
+    #[test]
+    fn truncating_for_resume_keeps_only_the_chunk_crossing_the_seek_position() {
+        let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
+        let sequence = Arc::new(AtomicU64::new(0));
+        let reservation = reservation("provider:track:resume", "slot-1-1");
+        let format = AudioFormat {
+            codec: ::sendspin::audio::Codec::Pcm,
+            sample_rate: 48_000,
+            channels: 2,
+            bit_depth: 16,
+            codec_header: None,
+        };
+        for data in [[1_u8], [2], [3], [4]] {
+            cache_append_encoded_chunk(
+                &caches,
+                &sequence,
+                100,
+                &reservation,
+                &format,
+                1_000,
+                &data,
+            );
+        }
+        cache_mark_interrupted(&caches, &reservation.cache_content_key);
+
+        cache_truncate_after_millis(&caches, &reservation.cache_content_key, 2_500);
+
+        let cache = caches.lock().expect("cache lock");
+        let cache = cache
+            .get(&reservation.cache_content_key)
+            .expect("interrupted cache");
+        assert_eq!(cache.chunks.len(), 3);
+        assert_eq!(cache.byte_len, 3);
+        assert_eq!(cache.cached_duration_millis, 2_500);
     }
 }
