@@ -2038,22 +2038,10 @@ mod tests {
         let connection_generation = Arc::new(std::sync::atomic::AtomicU64::new(2));
         let connection_lost = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-        report_connection_lost_if_current(
-            &connection_generation,
-            &connection_lost,
-            1,
-            0,
-            "test",
-        );
+        report_connection_lost_if_current(&connection_generation, &connection_lost, 1, 0, "test");
         assert!(!connection_lost.load(Ordering::Acquire));
 
-        report_connection_lost_if_current(
-            &connection_generation,
-            &connection_lost,
-            2,
-            0,
-            "test",
-        );
+        report_connection_lost_if_current(&connection_generation, &connection_lost, 2, 0, "test");
         assert!(connection_lost.load(Ordering::Acquire));
     }
 

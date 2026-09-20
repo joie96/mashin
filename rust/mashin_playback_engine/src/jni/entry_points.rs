@@ -15,14 +15,20 @@ pub(crate) extern "system" fn initialize(
     let native_core_bridge_class = match env.get_object_class(&native_core_bridge) {
         Ok(class) => class,
         Err(error) => {
-            throw_core_error(&mut env, &format!("resolve Android native core bridge class failed: {error}"));
+            throw_core_error(
+                &mut env,
+                &format!("resolve Android native core bridge class failed: {error}"),
+            );
             return;
         }
     };
     let secure_session_store_class = match env.get_object_class(&secure_session_store) {
         Ok(class) => class,
         Err(error) => {
-            throw_core_error(&mut env, &format!("resolve Android secure session store class failed: {error}"));
+            throw_core_error(
+                &mut env,
+                &format!("resolve Android secure session store class failed: {error}"),
+            );
             return;
         }
     };

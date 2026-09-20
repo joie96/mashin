@@ -179,6 +179,47 @@ pub(crate) struct RemoteOutputConfig {
     pub(crate) player_id: PlayerId,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ThemePreference {
+    Dark,
+    Light,
+}
+
+impl Default for ThemePreference {
+    fn default() -> Self {
+        Self::Dark
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum LogLevelPreference {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl LogLevelPreference {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Trace => "trace",
+            Self::Debug => "debug",
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
+        }
+    }
+}
+
+impl Default for LogLevelPreference {
+    fn default() -> Self {
+        Self::Info
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SessionConfig {
@@ -188,6 +229,10 @@ pub(crate) struct SessionConfig {
     pub(crate) username: String,
     pub(crate) selected_output: SelectedOutput,
     pub(crate) volume: u8,
+    #[serde(default)]
+    pub(crate) theme: ThemePreference,
+    #[serde(default)]
+    pub(crate) log_level: LogLevelPreference,
 }
 
 #[derive(Deserialize)]

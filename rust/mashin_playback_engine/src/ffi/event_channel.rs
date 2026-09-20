@@ -51,3 +51,21 @@ pub(crate) fn publish_json_value(value: Value) {
         publish_json_text(&text);
     }
 }
+
+// Rust logs are intended for Flutter only and must not reach Android's media-session callback.
+pub(crate) fn publish_flutter_log_event(line: &str) -> bool {
+    let callback = EVENT_CALLBACK.lock().ok().and_then(|callback| *callback);
+    let Some(callback) = callback else {
+        return false;
+    };
+    let text = json!({
+        "type": "log",
+        "line": line,
+    })
+    .to_string();
+    let Ok(pointer) = CString::new(text) else {
+        return false;
+    };
+    callback(pointer.into_raw());
+    true
+}

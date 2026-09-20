@@ -20,7 +20,6 @@ import 'package:go_router/go_router.dart';
 import '../navigation/app_router.dart';
 import '../session/app_session_controller.dart';
 import '../theme/app_theme.dart';
-import '../logging/app_logger.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({
@@ -42,9 +41,6 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   static const double _mobileSelectionOverlayBottomInset = 84;
-  final AppLogger _logger = AppLogger('AppShell');
-
-  bool _isDarkTheme = true;
   final SelectionController _selectionSessionController =
       SelectionController.instance;
   bool _isQueueOverlayOpen = false;
@@ -379,7 +375,7 @@ class _AppShellState extends State<AppShell> {
                           canGoBack: _canGoBack,
                           onBack: _onBack,
                           onToggleTheme: _toggleTheme,
-                          isDarkTheme: _isDarkTheme,
+                          isDarkTheme: widget.session.isDarkTheme,
                           searchController: _desktopSearchController,
                           onSearchChanged: _onDesktopSearchChanged,
                           onSearchSubmitted: _submitDesktopSearch,
@@ -945,13 +941,7 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _toggleTheme() {
-    final mode = _isDarkTheme ? ThemeMode.light : ThemeMode.dark;
-    final root = context.findAncestorStateOfType<_MashinAppState>();
-    root?.setThemeMode(mode);
-
-    setState(() {
-      _isDarkTheme = !_isDarkTheme;
-    });
+    unawaited(widget.session.setDarkTheme(!widget.session.isDarkTheme));
   }
 
   void _onBack() {
@@ -1037,10 +1027,10 @@ class _AppShellState extends State<AppShell> {
     try {
       await _coreBridge.setVolume(safeVolume);
     } catch (error, stackTrace) {
-      _logger.error(
-        'Set volume failed: $error',
-        error: error,
-        stackTrace: stackTrace,
+      _coreBridge.log(
+        LogLevelPreference.error,
+        'AppShell',
+        'Set volume failed: $error | $stackTrace',
       );
     }
   }
@@ -1163,6 +1153,8 @@ class _QueueUiScope extends StatelessWidget {
 }
 
 /// Desktop UI components
+enum _DesktopUserMenuAction { settings }
+
 class _DesktopTopBar extends StatelessWidget {
   final bool canGoBack;
   final VoidCallback onBack;
@@ -1294,14 +1286,32 @@ class _DesktopTopBar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          CircleAvatar(
-            radius: 16,
-            backgroundColor: colors.bgTertiary,
-            child: Icon(
-              Icons.person_outlined,
-              size: 18,
-              color: colors.textSecondary,
+          PopupMenuButton<_DesktopUserMenuAction>(
+            tooltip: 'Benutzermenü',
+            icon: CircleAvatar(
+              radius: 16,
+              backgroundColor: colors.bgTertiary,
+              child: Icon(
+                Icons.person_outlined,
+                size: 18,
+                color: colors.textSecondary,
+              ),
             ),
+            onSelected: (_DesktopUserMenuAction action) {
+              if (action == _DesktopUserMenuAction.settings) {
+                context.push(AppRoutes.settings);
+              }
+            },
+            itemBuilder: (BuildContext context) =>
+                const <PopupMenuEntry<_DesktopUserMenuAction>>[
+                  PopupMenuItem<_DesktopUserMenuAction>(
+                    value: _DesktopUserMenuAction.settings,
+                    child: ListTile(
+                      leading: Icon(Icons.settings_outlined),
+                      title: Text('Einstellungen'),
+                    ),
+                  ),
+                ],
           ),
           const SizedBox(width: 24),
         ],
@@ -2334,6 +2344,20 @@ class _MobilePlayerBar extends StatefulWidget {
 class _MobilePlayerBarState extends State<_MobilePlayerBar> {
   bool _isChangingTrack = false;
   bool _isNextTrack = true;
+  bool _hasPendingSwipeTransition = false;
+  bool _usesSlideTransition = false;
+
+  @override
+  void didUpdateWidget(covariant _MobilePlayerBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.trackTransitionKey == widget.trackTransitionKey) {
+      return;
+    }
+
+    // Only a locally initiated swipe should move the incoming track sideways.
+    _usesSlideTransition = _hasPendingSwipeTransition;
+    _hasPendingSwipeTransition = false;
+  }
 
   // Serializes swipe commands until the transport command completes.
   Future<void> _changeTrack({
@@ -2347,6 +2371,7 @@ class _MobilePlayerBarState extends State<_MobilePlayerBar> {
     setState(() {
       _isChangingTrack = true;
       _isNextTrack = isNextTrack;
+      _hasPendingSwipeTransition = true;
     });
     try {
       await change();
@@ -2430,6 +2455,12 @@ class _MobilePlayerBarState extends State<_MobilePlayerBar> {
                           // The incoming track travels opposite to the swipe direction.
                           transitionBuilder:
                               (Widget child, Animation<double> animation) {
+                                if (!_usesSlideTransition) {
+                                  return FadeTransition(
+                                    opacity: animation,
+                                    child: child,
+                                  );
+                                }
                                 final bool isIncoming =
                                     child.key ==
                                     ValueKey<String>(widget.trackTransitionKey);
@@ -2612,6 +2643,12 @@ class _MobileBottomNav extends StatelessWidget {
             selected: selectedSection == AppSection.search,
             onTap: () => onSelected(AppSection.search),
           ),
+          _MobileNavButton(
+            icon: Icons.settings_outlined,
+            selectedIcon: Icons.settings,
+            selected: selectedSection == AppSection.settings,
+            onTap: () => onSelected(AppSection.settings),
+          ),
         ],
       ),
     );
@@ -2636,7 +2673,7 @@ class _MobileNavButton extends StatelessWidget {
     final colors = context.mashinColors;
 
     return SizedBox(
-      width: 60,
+      width: 48,
       height: 42,
       child: Material(
         color: Colors.transparent,
@@ -2700,23 +2737,21 @@ class _MashinAppState extends State<MashinApp> {
     super.initState();
     _session = AppSessionController();
     _appRouter = AppRouter(_session);
+    _session.addListener(_onSessionChanged);
     unawaited(_session.initialize());
   }
 
   @override
   void dispose() {
+    _session.removeListener(_onSessionChanged);
     _appRouter.router.dispose();
     _session.dispose();
     super.dispose();
   }
 
-  void setThemeMode(ThemeMode mode) {
-    if (_themeMode == mode) {
-      return;
-    }
-
+  void _onSessionChanged() {
     setState(() {
-      _themeMode = mode;
+      _themeMode = _session.isDarkTheme ? ThemeMode.dark : ThemeMode.light;
     });
   }
 

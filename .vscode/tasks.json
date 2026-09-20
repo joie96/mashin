@@ -44,8 +44,7 @@
       "args": [
         "build",
         "apk",
-        "--release",
-        "--dart-define=MASHIN_LOG_LEVEL=info"
+        "--release"
       ],
       "dependsOn": "Rust Playback Engine: Android arm64 Release",
       "dependsOrder": "sequence",
@@ -60,8 +59,7 @@
         "build",
         "windows",
         "--release",
-        "--target-platform=windows-x64",
-        "--dart-define=MASHIN_LOG_LEVEL=info"
+        "--target-platform=windows-x64"
       ],
       "dependsOn": "Rust Playback Engine: Windows x64 Release",
       "dependsOrder": "sequence",
@@ -76,8 +74,7 @@
         "build",
         "windows",
         "--release",
-        "--target-platform=windows-arm64",
-        "--dart-define=MASHIN_LOG_LEVEL=info"
+        "--target-platform=windows-arm64"
       ],
       "dependsOn": "Rust Playback Engine: Windows arm64 Release",
       "dependsOrder": "sequence",

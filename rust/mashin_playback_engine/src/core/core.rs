@@ -4,8 +4,8 @@ use super::config::{
     default_sendspin_output, session_settings, SessionSettings, DEFAULT_LOCAL_VOLUME,
 };
 use super::models::{
-    CoreError, LoginConfig, MediaSessionEvent, MusicAssistantQuery, MusicAssistantQueryRequest,
-    SelectedOutput, SessionConfig,
+    CoreError, LogLevelPreference, LoginConfig, MediaSessionEvent, MusicAssistantQuery,
+    MusicAssistantQueryRequest, SelectedOutput, SessionConfig, ThemePreference,
 };
 use crate::music_assistant::auth_store::{platform_auth_store, AuthStore};
 use crate::music_assistant::client::{get_radio_tracks, MusicAssistantClient};
@@ -80,6 +80,7 @@ impl CoreCoordinator {
     pub(crate) fn configure_session(&mut self, session: SessionConfig) -> Result<(), String> {
         self.configure_selected_output(&session)?;
         self.playback.set_volume(session.volume);
+        crate::logging::set_minimum_level(session.log_level.as_str())?;
         self.auth_store.save_session(session.clone())?;
         self.invalidate_user_data();
         self.session_configuration = Some(session);
@@ -92,6 +93,7 @@ impl CoreCoordinator {
         };
         self.configure_selected_output(&session)?;
         self.playback.set_volume(session.volume);
+        crate::logging::set_minimum_level(session.log_level.as_str())?;
         self.invalidate_user_data();
         self.session_configuration = Some(session);
         Ok(true)
@@ -127,6 +129,8 @@ impl CoreCoordinator {
             username: login.username,
             selected_output,
             volume: DEFAULT_LOCAL_VOLUME,
+            theme: ThemePreference::Dark,
+            log_level: LogLevelPreference::Info,
         })
     }
 
@@ -152,6 +156,49 @@ impl CoreCoordinator {
             .0
             .clone();
         self.select_output(default_sendspin_output(&music_assistant_url)?)
+    }
+
+    pub(crate) fn set_local_cache_size_bytes(
+        &mut self,
+        cache_size_bytes: usize,
+    ) -> Result<(), String> {
+        const MINIMUM_CACHE_SIZE_BYTES: usize = 25 * 1024 * 1024;
+        const MAXIMUM_CACHE_SIZE_BYTES: usize = 1_000 * 1024 * 1024;
+        if !(MINIMUM_CACHE_SIZE_BYTES..=MAXIMUM_CACHE_SIZE_BYTES).contains(&cache_size_bytes) {
+            return Err("local cache size must be between 25 and 1000 MB".to_string());
+        }
+        let mut session = self.session_configuration.clone().ok_or_else(|| {
+            "a restored session is required before changing the local cache size".to_string()
+        })?;
+        let SelectedOutput::Sendspin(configuration) = &mut session.selected_output else {
+            return Err("the local cache is available only with the Sendspin output".to_string());
+        };
+        configuration.cache_bytes = cache_size_bytes;
+        self.configure_selected_output(&session)?;
+        self.auth_store.save_session(session.clone())?;
+        self.session_configuration = Some(session);
+        Ok(())
+    }
+
+    pub(crate) fn set_theme(&mut self, theme: ThemePreference) -> Result<(), String> {
+        let mut session = self.session_configuration.clone().ok_or_else(|| {
+            "a restored session is required before changing the theme".to_string()
+        })?;
+        session.theme = theme;
+        self.auth_store.save_session(session.clone())?;
+        self.session_configuration = Some(session);
+        Ok(())
+    }
+
+    pub(crate) fn set_log_level(&mut self, log_level: LogLevelPreference) -> Result<(), String> {
+        let mut session = self.session_configuration.clone().ok_or_else(|| {
+            "a restored session is required before changing the log level".to_string()
+        })?;
+        session.log_level = log_level;
+        self.auth_store.save_session(session.clone())?;
+        crate::logging::set_minimum_level(log_level.as_str())?;
+        self.session_configuration = Some(session);
+        Ok(())
     }
 
     // A failed engine configuration leaves the current session and selected output unchanged.
@@ -1026,7 +1073,9 @@ fn tracks_from_queue(queue_items: &[QueueItem]) -> Vec<Track> {
 #[cfg(test)]
 mod tests {
     use super::CoreCoordinator;
-    use crate::core::models::{SelectedOutput, SendspinOutputConfig, SessionConfig};
+    use crate::core::models::{
+        LogLevelPreference, SelectedOutput, SendspinOutputConfig, SessionConfig, ThemePreference,
+    };
     use crate::music_assistant::auth_store::AuthStore;
     use crate::music_assistant::models::identifiers::AccessToken;
     use crate::music_assistant::models::queue::PlayState;
@@ -1088,6 +1137,8 @@ mod tests {
                 preferred_codec: SendspinAudioCodec::Pcm,
             }),
             volume: 100,
+            theme: ThemePreference::Dark,
+            log_level: LogLevelPreference::Info,
         }
     }
 
@@ -1134,6 +1185,75 @@ mod tests {
         assert_eq!(
             coordinator.player_state().active_engine_kind,
             crate::playback::models::PlaybackEngineKind::Sendspin
+        );
+    }
+
+    #[test]
+    fn local_cache_size_is_reconfigured_and_persisted_in_the_session() {
+        let mut coordinator = test_coordinator();
+        coordinator
+            .configure_session(session_config())
+            .expect("configure session");
+
+        coordinator
+            .set_local_cache_size_bytes(512 * 1024 * 1024)
+            .expect("update local cache size");
+
+        let configuration = coordinator
+            .session_configuration
+            .as_ref()
+            .expect("session configuration");
+        let SelectedOutput::Sendspin(output) = &configuration.selected_output else {
+            panic!("test session must select Sendspin");
+        };
+        assert_eq!(output.cache_bytes, 512 * 1024 * 1024);
+        assert_eq!(
+            crate::core::config::session_settings(Some(configuration)).local_cache_size_bytes,
+            512 * 1024 * 1024
+        );
+    }
+
+    #[test]
+    fn theme_is_persisted_in_the_session_settings() {
+        let mut coordinator = test_coordinator();
+        coordinator
+            .configure_session(session_config())
+            .expect("configure session");
+
+        coordinator
+            .set_theme(ThemePreference::Light)
+            .expect("update theme");
+
+        let configuration = coordinator
+            .session_configuration
+            .as_ref()
+            .expect("session configuration");
+        assert_eq!(configuration.theme, ThemePreference::Light);
+        assert_eq!(
+            crate::core::config::session_settings(Some(configuration)).theme,
+            ThemePreference::Light
+        );
+    }
+
+    #[test]
+    fn log_level_is_persisted_in_the_session_settings() {
+        let mut coordinator = test_coordinator();
+        coordinator
+            .configure_session(session_config())
+            .expect("configure session");
+
+        coordinator
+            .set_log_level(LogLevelPreference::Warn)
+            .expect("update log level");
+
+        let configuration = coordinator
+            .session_configuration
+            .as_ref()
+            .expect("session configuration");
+        assert_eq!(configuration.log_level, LogLevelPreference::Warn);
+        assert_eq!(
+            crate::core::config::session_settings(Some(configuration)).log_level,
+            LogLevelPreference::Warn
         );
     }
 

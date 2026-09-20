@@ -154,7 +154,9 @@ impl AuthStore for KeyringAuthStore {
 #[cfg(test)]
 mod tests {
     use super::AuthStore;
-    use crate::core::models::{SelectedOutput, SendspinOutputConfig, SessionConfig};
+    use crate::core::models::{
+        LogLevelPreference, SelectedOutput, SendspinOutputConfig, SessionConfig, ThemePreference,
+    };
     use crate::music_assistant::models::identifiers::AccessToken;
     use crate::music_assistant::models::session::MusicAssistantServerUrl;
     use crate::sendspin::models::SendspinAudioCodec;
@@ -212,6 +214,8 @@ mod tests {
                 preferred_codec: SendspinAudioCodec::Pcm,
             }),
             volume: 100,
+            theme: ThemePreference::Dark,
+            log_level: LogLevelPreference::Info,
         }
     }
 

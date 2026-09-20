@@ -11,6 +11,7 @@ import '../../features/home/home_screen.dart';
 import '../../features/playlist/playlist_detail_page.dart';
 import '../../features/playlist/playlists_page.dart';
 import '../../features/search/search_screen.dart';
+import '../../features/settings/settings_screen.dart';
 import '../layout/layout_utils.dart';
 import '../session/app_session_controller.dart';
 import '../shell/app_shell.dart';
@@ -20,7 +21,7 @@ final GlobalKey<NavigatorState> _shellNavigatorKey =
 final ShellNavigationObserver _shellNavigationObserver =
     ShellNavigationObserver();
 
-enum AppSection { home, explore, favorites, playlists, search }
+enum AppSection { home, explore, favorites, playlists, search, settings }
 
 class ShellNavigationObserver extends NavigatorObserver with ChangeNotifier {
   @override
@@ -50,6 +51,7 @@ abstract final class AppRoutes {
   static const String favorites = '/favorites';
   static const String playlists = '/playlists';
   static const String search = '/search';
+  static const String settings = '/settings';
 
   static String locationFor(AppSection section) {
     return switch (section) {
@@ -58,6 +60,7 @@ abstract final class AppRoutes {
       AppSection.favorites => favorites,
       AppSection.playlists => playlists,
       AppSection.search => search,
+      AppSection.settings => settings,
     };
   }
 
@@ -68,6 +71,7 @@ abstract final class AppRoutes {
       favorites => AppSection.favorites,
       playlists => AppSection.playlists,
       search => AppSection.search,
+      settings => AppSection.settings,
       _ => null,
     };
   }
@@ -141,8 +145,7 @@ class AppRouter {
                 builder: (BuildContext context, GoRouterState state) =>
                     HomeScreen(
                       coreBridge: session.coreBridge,
-                      coreEvents:
-                          session.coreEvents,
+                      coreEvents: session.coreEvents,
                       userDataController: session.userDataController,
                       onOpenArtist: (Artist artist) =>
                           context.push(AppRoutes.artist(artist)),
@@ -157,8 +160,7 @@ class AppRouter {
                 builder: (BuildContext context, GoRouterState state) =>
                     ExploreScreen(
                       coreBridge: session.coreBridge,
-                      coreEvents:
-                          session.coreEvents,
+                      coreEvents: session.coreEvents,
                       userDataController: session.userDataController,
                       onOpenArtist: (Artist artist) =>
                           context.push(AppRoutes.artist(artist)),
@@ -169,8 +171,7 @@ class AppRouter {
                 builder: (BuildContext context, GoRouterState state) =>
                     FavoritesScreen(
                       coreBridge: session.coreBridge,
-                      coreEvents:
-                          session.coreEvents,
+                      coreEvents: session.coreEvents,
                       userDataController: session.userDataController!,
                       onOpenArtist: (Artist artist) =>
                           context.push(AppRoutes.artist(artist)),
@@ -185,8 +186,7 @@ class AppRouter {
                 builder: (BuildContext context, GoRouterState state) =>
                     PlaylistsPage(
                       coreBridge: session.coreBridge,
-                      coreEvents:
-                          session.coreEvents,
+                      coreEvents: session.coreEvents,
                       userDataController: session.userDataController!,
                       onOpenPlaylist: (Playlist playlist) =>
                           context.push(AppRoutes.playlist(playlist)),
@@ -197,8 +197,7 @@ class AppRouter {
                 builder: (BuildContext context, GoRouterState state) =>
                     SearchScreen(
                       coreBridge: session.coreBridge,
-                      coreEvents:
-                          session.coreEvents,
+                      coreEvents: session.coreEvents,
                       userDataController: session.userDataController,
                       desktopSearchDriven: !isCompactLayout(context),
                       desktopSearchQuery: state.uri.queryParameters['q'] ?? '',
@@ -211,13 +210,17 @@ class AppRouter {
                     ),
               ),
               GoRoute(
+                path: AppRoutes.settings,
+                builder: (BuildContext context, GoRouterState state) =>
+                    SettingsScreen(session: session),
+              ),
+              GoRoute(
                 path: '/artist/:provider/:itemId',
                 parentNavigatorKey: _shellNavigatorKey,
                 builder: (BuildContext context, GoRouterState state) =>
                     ArtistDetailPage(
                       coreBridge: session.coreBridge,
-                      coreEvents:
-                          session.coreEvents,
+                      coreEvents: session.coreEvents,
                       itemId: state.pathParameters['itemId']!,
                       providerInstanceIdOrDomain:
                           state.pathParameters['provider']!,
@@ -234,8 +237,7 @@ class AppRouter {
                 builder: (BuildContext context, GoRouterState state) =>
                     AlbumDetailPage(
                       coreBridge: session.coreBridge,
-                      coreEvents:
-                          session.coreEvents,
+                      coreEvents: session.coreEvents,
                       itemId: state.pathParameters['itemId']!,
                       providerInstanceIdOrDomain:
                           state.pathParameters['provider']!,
@@ -252,8 +254,7 @@ class AppRouter {
                 builder: (BuildContext context, GoRouterState state) =>
                     PlaylistDetailPage(
                       coreBridge: session.coreBridge,
-                      coreEvents:
-                          session.coreEvents,
+                      coreEvents: session.coreEvents,
                       itemId: state.pathParameters['itemId']!,
                       providerInstanceIdOrDomain:
                           state.pathParameters['provider']!,

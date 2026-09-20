@@ -28,6 +28,25 @@ enum QueueOption { play, replace, next, replaceNext, add }
 
 enum RepeatMode { off, one, all }
 
+enum LogLevelPreference {
+  trace,
+  debug,
+  info,
+  warn,
+  error;
+
+  static LogLevelPreference parse(String value) {
+    return switch (value.trim().toLowerCase()) {
+      'trace' => LogLevelPreference.trace,
+      'debug' => LogLevelPreference.debug,
+      'info' => LogLevelPreference.info,
+      'warn' || 'warning' => LogLevelPreference.warn,
+      'error' => LogLevelPreference.error,
+      _ => LogLevelPreference.info,
+    };
+  }
+}
+
 enum PlayState {
   uninitialized,
   idle,
@@ -2272,17 +2291,27 @@ class SessionSettings {
     required this.musicAssistantUrl,
     required this.username,
     required this.preferredCodec,
+    required this.localCacheSizeBytes,
+    required this.isDarkTheme,
+    required this.logLevel,
   });
 
   final String musicAssistantUrl;
   final String? username;
   final String preferredCodec;
+  final int localCacheSizeBytes;
+  final bool isDarkTheme;
+  final LogLevelPreference logLevel;
 
   factory SessionSettings.fromJson(Map<String, dynamic> json) {
     return SessionSettings(
       musicAssistantUrl: json['musicAssistantUrl'] as String? ?? '',
       username: json['username'] as String?,
       preferredCodec: json['preferredCodec'] as String? ?? '',
+      localCacheSizeBytes:
+          (json['localCacheSizeBytes'] as num?)?.toInt() ?? 250 * 1024 * 1024,
+      isDarkTheme: json['theme'] != 'light',
+      logLevel: LogLevelPreference.parse(json['logLevel'] as String? ?? 'info'),
     );
   }
 }

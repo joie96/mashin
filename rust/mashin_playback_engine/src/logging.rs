@@ -46,6 +46,14 @@ pub(crate) fn set_minimum_level(value: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn log_external(level: &str, category: &str, message: &str) -> Result<(), String> {
+    let level = LogLevel::parse(level).ok_or_else(|| {
+        format!("invalid log level: {level}; expected trace, debug, info, warn, or error")
+    })?;
+    emit_log(level, category, message);
+    Ok(())
+}
+
 pub(crate) struct Logger {
     category: &'static str,
 }
@@ -76,22 +84,27 @@ impl Logger {
     }
 
     fn log(&self, level: LogLevel, message: impl fmt::Display) {
-        if (level as u8) < MINIMUM_LOG_LEVEL.load(Ordering::Relaxed) {
-            return;
-        }
-
-        let message = message.to_string().replace('\n', " ");
-        let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
-        let text = format!(
-            "[{timestamp}] [{}] {}: {message}",
-            level.short_name(),
-            self.category,
-        );
-        #[cfg(target_os = "android")]
-        android_log(level, &text);
-        let mut stderr = io::stderr().lock();
-        let _ = writeln!(stderr, "{text}");
+        emit_log(level, self.category, &message.to_string());
     }
+}
+
+fn emit_log(level: LogLevel, category: &str, message: &str) {
+    if (level as u8) < MINIMUM_LOG_LEVEL.load(Ordering::Relaxed) {
+        return;
+    }
+
+    let message = message.replace('\n', " ");
+    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+    let text = format!(
+        "[{timestamp}] [{}] {}: {message}",
+        level.short_name(),
+        category,
+    );
+    #[cfg(target_os = "android")]
+    android_log(level, &text);
+    let mut stderr = io::stderr().lock();
+    let _ = writeln!(stderr, "{text}");
+    crate::ffi::event_channel::publish_flutter_log_event(&text);
 }
 
 #[cfg(target_os = "android")]
@@ -131,7 +144,7 @@ unsafe extern "C" {
 
 #[cfg(test)]
 mod tests {
-    use super::{set_minimum_level, LogLevel, MINIMUM_LOG_LEVEL};
+    use super::{log_external, set_minimum_level, LogLevel, MINIMUM_LOG_LEVEL};
     use std::sync::atomic::Ordering;
 
     #[test]
@@ -151,5 +164,13 @@ mod tests {
             LogLevel::Trace as u8
         );
         assert!(set_minimum_level("verbose").is_err());
+    }
+
+    #[test]
+    fn accepts_flutter_log_messages() {
+        set_minimum_level("trace").unwrap();
+
+        assert!(log_external("info", "Flutter", "widget updated").is_ok());
+        assert!(log_external("verbose", "Flutter", "widget updated").is_err());
     }
 }

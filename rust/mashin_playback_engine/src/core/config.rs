@@ -1,6 +1,8 @@
 //! Authoritative default configuration for core-owned playback settings.
 
-use super::models::{SelectedOutput, SendspinOutputConfig, SessionConfig};
+use super::models::{
+    LogLevelPreference, SelectedOutput, SendspinOutputConfig, SessionConfig, ThemePreference,
+};
 use crate::sendspin::models::SendspinAudioCodec;
 use rand::Rng;
 use serde::Serialize;
@@ -8,7 +10,8 @@ use serde::Serialize;
 pub(crate) const DEFAULT_MUSIC_ASSISTANT_URL: &str = "http://192.168.1.2:8095";
 pub(crate) const DEFAULT_LOCAL_VOLUME: u8 = 100;
 const DEFAULT_SENDSPIN_DOWNLOADER_BUFFER_BYTES: u64 = 50 * 1024 * 1024;
-const DEFAULT_SENDSPIN_CACHE_BYTES: usize = 250 * 1024 * 1024;
+pub(crate) const DEFAULT_LOCAL_CACHE_SIZE_BYTES: usize = 250 * 1024 * 1024;
+const DEFAULT_SENDSPIN_CACHE_BYTES: usize = DEFAULT_LOCAL_CACHE_SIZE_BYTES;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,30 +19,50 @@ pub(crate) struct SessionSettings {
     pub(crate) music_assistant_url: String,
     pub(crate) username: Option<String>,
     pub(crate) preferred_codec: String,
+    pub(crate) local_cache_size_bytes: usize,
+    pub(crate) theme: ThemePreference,
+    pub(crate) log_level: LogLevelPreference,
 }
 
 pub(crate) fn session_settings(session: Option<&SessionConfig>) -> SessionSettings {
-    let (music_assistant_url, username, preferred_codec) = match session {
-        Some(session) => (
-            session.music_assistant_url.0.clone(),
-            Some(session.username.clone()),
-            match &session.selected_output {
-                SelectedOutput::Sendspin(configuration) => configuration.preferred_codec.as_str(),
-                SelectedOutput::Offline(_) | SelectedOutput::Remote(_) => {
-                    SendspinAudioCodec::Pcm.as_str()
-                }
-            },
-        ),
-        None => (
-            DEFAULT_MUSIC_ASSISTANT_URL.to_string(),
-            None,
-            SendspinAudioCodec::Pcm.as_str(),
-        ),
-    };
+    let (music_assistant_url, username, preferred_codec, local_cache_size_bytes, theme, log_level) =
+        match session {
+            Some(session) => (
+                session.music_assistant_url.0.clone(),
+                Some(session.username.clone()),
+                match &session.selected_output {
+                    SelectedOutput::Sendspin(configuration) => {
+                        configuration.preferred_codec.as_str()
+                    }
+                    SelectedOutput::Offline(_) | SelectedOutput::Remote(_) => {
+                        SendspinAudioCodec::Pcm.as_str()
+                    }
+                },
+                match &session.selected_output {
+                    SelectedOutput::Sendspin(configuration) => configuration.cache_bytes,
+                    SelectedOutput::Offline(_) | SelectedOutput::Remote(_) => {
+                        DEFAULT_LOCAL_CACHE_SIZE_BYTES
+                    }
+                },
+                session.theme,
+                session.log_level,
+            ),
+            None => (
+                DEFAULT_MUSIC_ASSISTANT_URL.to_string(),
+                None,
+                SendspinAudioCodec::Pcm.as_str(),
+                DEFAULT_LOCAL_CACHE_SIZE_BYTES,
+                ThemePreference::Dark,
+                LogLevelPreference::Info,
+            ),
+        };
     SessionSettings {
         music_assistant_url,
         username,
         preferred_codec: preferred_codec.to_string(),
+        local_cache_size_bytes,
+        theme,
+        log_level,
     }
 }
 
@@ -78,8 +101,13 @@ pub(crate) fn default_sendspin_output(music_assistant_url: &str) -> Result<Selec
 
 #[cfg(test)]
 mod tests {
-    use super::{default_sendspin_output, session_settings, DEFAULT_MUSIC_ASSISTANT_URL};
-    use crate::core::models::{SelectedOutput, SendspinOutputConfig, SessionConfig};
+    use super::{
+        default_sendspin_output, session_settings, DEFAULT_LOCAL_CACHE_SIZE_BYTES,
+        DEFAULT_MUSIC_ASSISTANT_URL,
+    };
+    use crate::core::models::{
+        LogLevelPreference, SelectedOutput, SendspinOutputConfig, SessionConfig, ThemePreference,
+    };
     use crate::music_assistant::models::identifiers::AccessToken;
     use crate::music_assistant::models::session::MusicAssistantServerUrl;
     use crate::sendspin::models::SendspinAudioCodec;
@@ -109,6 +137,9 @@ mod tests {
                 music_assistant_url: DEFAULT_MUSIC_ASSISTANT_URL.to_string(),
                 username: None,
                 preferred_codec: "pcm".to_string(),
+                local_cache_size_bytes: DEFAULT_LOCAL_CACHE_SIZE_BYTES,
+                theme: ThemePreference::Dark,
+                log_level: LogLevelPreference::Info,
             }
         );
     }
@@ -129,6 +160,8 @@ mod tests {
                 preferred_codec: SendspinAudioCodec::Flac,
             }),
             volume: 100,
+            theme: ThemePreference::Light,
+            log_level: LogLevelPreference::Error,
         };
 
         let configuration = session_settings(Some(&session));
@@ -136,5 +169,8 @@ mod tests {
         assert_eq!(configuration.music_assistant_url, "https://stored.example");
         assert_eq!(configuration.username.as_deref(), Some("mashin"));
         assert_eq!(configuration.preferred_codec, "flac");
+        assert_eq!(configuration.local_cache_size_bytes, 1_024);
+        assert_eq!(configuration.theme, ThemePreference::Light);
+        assert_eq!(configuration.log_level, LogLevelPreference::Error);
     }
 }

@@ -22,8 +22,9 @@ pub extern "C" fn mashin_core_start_operation(request_json: *const c_char) -> i3
     let request = match read_required_c_string(request_json, "operation request")
         .map_err(CoreError::command_failed)
         .and_then(|value| {
-            serde_json::from_str::<CoreOperationRequest>(&value)
-                .map_err(|error| CoreError::command_failed(format!("decode operation request failed: {error}")))
+            serde_json::from_str::<CoreOperationRequest>(&value).map_err(|error| {
+                CoreError::command_failed(format!("decode operation request failed: {error}"))
+            })
         }) {
         Ok(request) => request,
         Err(error) => {
@@ -36,9 +37,16 @@ pub extern "C" fn mashin_core_start_operation(request_json: *const c_char) -> i3
         let mut query_payload = request.arguments.clone();
         query_payload.insert("requestId".to_string(), json!(request.request_id));
         query_payload.insert("kind".to_string(), json!(request.kind));
-        return match serde_json::from_value(query_payload.into_iter().collect::<serde_json::Map<_, _>>().into())
-            .map_err(|error| CoreError::command_failed(format!("decode query operation failed: {error}")))
-            .and_then(core::start_music_assistant_query)
+        return match serde_json::from_value(
+            query_payload
+                .into_iter()
+                .collect::<serde_json::Map<_, _>>()
+                .into(),
+        )
+        .map_err(|error| {
+            CoreError::command_failed(format!("decode query operation failed: {error}"))
+        })
+        .and_then(core::start_music_assistant_query)
         {
             Ok(()) => 0,
             Err(error) => {
@@ -67,10 +75,24 @@ pub extern "C" fn mashin_core_start_operation(request_json: *const c_char) -> i3
 }
 
 fn is_music_assistant_query(kind: &str) -> bool {
-    matches!(kind, "recommendations" | "providerManifests" | "providerIconData" |
-        "recentlyPlayedTracks" | "searchMusic" | "artist" | "album" | "albumTracks" |
-        "playlist" | "playlistTracks" | "artistAlbums" | "artistTopTracks" |
-        "similarArtists" | "similarTracks" | "trackVersions")
+    matches!(
+        kind,
+        "recommendations"
+            | "providerManifests"
+            | "providerIconData"
+            | "recentlyPlayedTracks"
+            | "searchMusic"
+            | "artist"
+            | "album"
+            | "albumTracks"
+            | "playlist"
+            | "playlistTracks"
+            | "artistAlbums"
+            | "artistTopTracks"
+            | "similarArtists"
+            | "similarTracks"
+            | "trackVersions"
+    )
 }
 
 fn execute_async_operation(request: CoreOperationRequest) -> Result<Value, CoreError> {
@@ -78,9 +100,17 @@ fn execute_async_operation(request: CoreOperationRequest) -> Result<Value, CoreE
     match request.kind.as_str() {
         "login" => execute_json_command(mashin_core_login, &arguments),
         "restorePersistedSession" => execute_restore_persisted_session(),
-        "selectDefaultSendspinOutput" => execute_void_command(mashin_core_select_default_sendspin_output),
-        "selectOfflineLibrary" => execute_text_command(mashin_core_select_offline_library, &arguments, "libraryRoot"),
-        "selectRemotePlayer" => execute_text_command(mashin_core_select_remote_player, &arguments, "playerId"),
+        "selectDefaultSendspinOutput" => {
+            execute_void_command(mashin_core_select_default_sendspin_output)
+        }
+        "selectOfflineLibrary" => execute_text_command(
+            mashin_core_select_offline_library,
+            &arguments,
+            "libraryRoot",
+        ),
+        "selectRemotePlayer" => {
+            execute_text_command(mashin_core_select_remote_player, &arguments, "playerId")
+        }
         "activateEngine" => execute_void_command(mashin_core_activate_engine),
         "deactivateEngine" => execute_void_command(mashin_core_deactivate_engine),
         "shutdown" => execute_void_command(mashin_core_shutdown),
@@ -89,70 +119,298 @@ fn execute_async_operation(request: CoreOperationRequest) -> Result<Value, CoreE
         "transportStop" => execute_void_command(mashin_core_transport_stop),
         "transportNext" => execute_void_command(mashin_core_transport_next),
         "transportPrevious" => execute_void_command(mashin_core_transport_previous),
-        "transportSeek" => execute_number_command(mashin_core_transport_seek, &arguments, "seconds"),
-        "transportRepeatMode" => execute_integer_command(mashin_core_set_repeat_mode, &arguments, "mode"),
-        "transportShuffle" => execute_boolean_command(mashin_core_set_shuffle, &arguments, "enabled"),
+        "transportSeek" => {
+            execute_number_command(mashin_core_transport_seek, &arguments, "seconds")
+        }
+        "transportRepeatMode" => {
+            execute_integer_command(mashin_core_set_repeat_mode, &arguments, "mode")
+        }
+        "transportShuffle" => {
+            execute_boolean_command(mashin_core_set_shuffle, &arguments, "enabled")
+        }
         "setAutoplay" => execute_boolean_command(mashin_core_set_autoplay, &arguments, "enabled"),
         "setVolume" => execute_integer_command(mashin_core_set_volume, &arguments, "volume"),
         "setMuted" => execute_boolean_command(mashin_core_set_muted, &arguments, "muted"),
-        "playMedia" => execute_json_text_command(mashin_core_queue_replace, &arguments, "mediaItems"),
-        "playShuffledMedia" => execute_json_text_command(mashin_core_queue_replace_shuffled, &arguments, "mediaItems"),
-        "playSendspinRadioNext" => execute_json_text_command(mashin_core_sendspin_queue_radio_next, &arguments, "mediaItems"),
-        "playMediaNext" => execute_json_text_command(mashin_core_queue_insert_next, &arguments, "mediaItems"),
-        "playMediaReplaceNext" => execute_json_text_command(mashin_core_queue_replace_next, &arguments, "mediaItems"),
-        "playMediaLast" => execute_json_text_command(mashin_core_queue_append, &arguments, "mediaItems"),
+        "setTheme" => execute_text_command(mashin_core_set_theme, &arguments, "theme"),
+        "setLogLevel" => {
+            execute_text_command(mashin_core_set_session_log_level, &arguments, "logLevel")
+        }
+        "playMedia" => {
+            execute_json_text_command(mashin_core_queue_replace, &arguments, "mediaItems")
+        }
+        "playShuffledMedia" => {
+            execute_json_text_command(mashin_core_queue_replace_shuffled, &arguments, "mediaItems")
+        }
+        "playSendspinRadioNext" => execute_json_text_command(
+            mashin_core_sendspin_queue_radio_next,
+            &arguments,
+            "mediaItems",
+        ),
+        "playMediaNext" => {
+            execute_json_text_command(mashin_core_queue_insert_next, &arguments, "mediaItems")
+        }
+        "playMediaReplaceNext" => {
+            execute_json_text_command(mashin_core_queue_replace_next, &arguments, "mediaItems")
+        }
+        "playMediaLast" => {
+            execute_json_text_command(mashin_core_queue_append, &arguments, "mediaItems")
+        }
         "clearQueue" => execute_void_command(mashin_core_queue_clear),
-        "moveQueueItem" => execute_text_integer_command(mashin_core_queue_move, &arguments, "itemId", "shift"),
+        "moveQueueItem" => {
+            execute_text_integer_command(mashin_core_queue_move, &arguments, "itemId", "shift")
+        }
         "deleteQueueItem" => execute_text_command(mashin_core_queue_remove, &arguments, "itemId"),
         "playQueueIndex" => execute_integer_command(mashin_core_queue_play, &arguments, "index"),
         "requestCodec" => execute_text_command(mashin_core_set_codec, &arguments, "codec"),
-        "addPlaylistTracks" => execute_two_json_text_command(mashin_core_add_playlist_tracks, &arguments, "playlistId", "uris"),
-        "removePlaylistTracks" => execute_two_json_text_command(mashin_core_remove_playlist_tracks, &arguments, "playlistId", "positions"),
-        "setUserDataFavorites" => execute_json_boolean_command(mashin_core_set_user_data_favorites, &arguments, "mediaItems", "favorite"),
-        "createLocalPlaylist" => execute_text_command(mashin_core_create_local_playlist, &arguments, "name"),
-        "renameLocalPlaylist" => execute_two_text_command(mashin_core_rename_local_playlist, &arguments, "playlistId", "name"),
-        "removeLocalPlaylist" => execute_text_command(mashin_core_remove_local_playlist, &arguments, "playlistId"),
-        "addLocalPlaylistTracks" => execute_two_json_text_command(mashin_core_add_local_playlist_tracks, &arguments, "playlistId", "tracks"),
-        "removeLocalPlaylistTracks" => execute_two_json_text_command(mashin_core_remove_local_playlist_tracks, &arguments, "playlistId", "uris"),
+        "setLocalCacheSizeBytes" => execute_integer_command(
+            mashin_core_set_local_cache_size_bytes,
+            &arguments,
+            "cacheSizeBytes",
+        ),
+        "addPlaylistTracks" => execute_two_json_text_command(
+            mashin_core_add_playlist_tracks,
+            &arguments,
+            "playlistId",
+            "uris",
+        ),
+        "removePlaylistTracks" => execute_two_json_text_command(
+            mashin_core_remove_playlist_tracks,
+            &arguments,
+            "playlistId",
+            "positions",
+        ),
+        "setUserDataFavorites" => execute_json_boolean_command(
+            mashin_core_set_user_data_favorites,
+            &arguments,
+            "mediaItems",
+            "favorite",
+        ),
+        "createLocalPlaylist" => {
+            execute_text_command(mashin_core_create_local_playlist, &arguments, "name")
+        }
+        "renameLocalPlaylist" => execute_two_text_command(
+            mashin_core_rename_local_playlist,
+            &arguments,
+            "playlistId",
+            "name",
+        ),
+        "removeLocalPlaylist" => {
+            execute_text_command(mashin_core_remove_local_playlist, &arguments, "playlistId")
+        }
+        "addLocalPlaylistTracks" => execute_two_json_text_command(
+            mashin_core_add_local_playlist_tracks,
+            &arguments,
+            "playlistId",
+            "tracks",
+        ),
+        "removeLocalPlaylistTracks" => execute_two_json_text_command(
+            mashin_core_remove_local_playlist_tracks,
+            &arguments,
+            "playlistId",
+            "uris",
+        ),
         "getSessionSettings" => serialize_operation_result(core::read_session_settings()),
         "refreshQueue" => serialize_operation_result(core::read_queue()),
         "refreshPlayerState" => serialize_operation_result(core::read_player_state()),
         "loadUserData" => serialize_operation_result(core::load_user_data()),
         "getUserData" => serialize_operation_result(core::read_user_data()),
-        _ => Err(CoreError::command_failed(format!("unsupported async operation '{}'", request.kind))),
+        _ => Err(CoreError::command_failed(format!(
+            "unsupported async operation '{}'",
+            request.kind
+        ))),
     }
 }
 
-fn serialize_operation_result<T: serde::Serialize>(result: Result<T, CoreError>) -> Result<Value, CoreError> {
-    result.and_then(|value| serde_json::to_value(value).map_err(|error| CoreError::internal(format!("serialize operation result failed: {error}"))))
+fn serialize_operation_result<T: serde::Serialize>(
+    result: Result<T, CoreError>,
+) -> Result<Value, CoreError> {
+    result.and_then(|value| {
+        serde_json::to_value(value).map_err(|error| {
+            CoreError::internal(format!("serialize operation result failed: {error}"))
+        })
+    })
 }
 
 fn execute_restore_persisted_session() -> Result<Value, CoreError> {
     match mashin_core_restore_persisted_session() {
         0 => Ok(Value::Bool(true)),
         1 => Ok(Value::Bool(false)),
-        _ => Err(CoreError::command_failed(super::errors::last_error_message())),
+        _ => Err(CoreError::command_failed(
+            super::errors::last_error_message(),
+        )),
     }
 }
 
-fn execute_void_command(command: extern "C" fn() -> i32) -> Result<Value, CoreError> { command_result(command()) }
-fn execute_text_command(command: extern "C" fn(*const c_char) -> i32, arguments: &serde_json::Map<String, Value>, key: &str) -> Result<Value, CoreError> { with_text(arguments, key, |value| command_result(command(value.as_ptr()))) }
-fn execute_json_command(command: extern "C" fn(*const c_char) -> i32, arguments: &serde_json::Map<String, Value>) -> Result<Value, CoreError> { with_json(arguments, |value| command_result(command(value.as_ptr()))) }
-fn execute_json_text_command(command: extern "C" fn(*const c_char) -> i32, arguments: &serde_json::Map<String, Value>, key: &str) -> Result<Value, CoreError> { with_json_value(arguments, key, |value| command_result(command(value.as_ptr()))) }
-fn execute_number_command(command: extern "C" fn(f64) -> i32, arguments: &serde_json::Map<String, Value>, key: &str) -> Result<Value, CoreError> { command_result(command(required_f64(arguments, key)?)) }
-fn execute_integer_command(command: extern "C" fn(i32) -> i32, arguments: &serde_json::Map<String, Value>, key: &str) -> Result<Value, CoreError> { command_result(command(required_i32(arguments, key)?)) }
-fn execute_boolean_command(command: extern "C" fn(i32) -> i32, arguments: &serde_json::Map<String, Value>, key: &str) -> Result<Value, CoreError> { command_result(command(if required_bool(arguments, key)? { 1 } else { 0 })) }
-fn execute_text_integer_command(command: extern "C" fn(*const c_char, i32) -> i32, arguments: &serde_json::Map<String, Value>, text_key: &str, integer_key: &str) -> Result<Value, CoreError> { with_text(arguments, text_key, |value| command_result(command(value.as_ptr(), required_i32(arguments, integer_key)?))) }
-fn execute_json_boolean_command(command: extern "C" fn(*const c_char, i32) -> i32, arguments: &serde_json::Map<String, Value>, json_key: &str, boolean_key: &str) -> Result<Value, CoreError> { with_json_value(arguments, json_key, |value| command_result(command(value.as_ptr(), if required_bool(arguments, boolean_key)? { 1 } else { 0 }))) }
-fn execute_two_text_command(command: extern "C" fn(*const c_char, *const c_char) -> i32, arguments: &serde_json::Map<String, Value>, first_key: &str, second_key: &str) -> Result<Value, CoreError> { with_text(arguments, first_key, |first| with_text(arguments, second_key, |second| command_result(command(first.as_ptr(), second.as_ptr())))) }
-fn execute_two_json_text_command(command: extern "C" fn(*const c_char, *const c_char) -> i32, arguments: &serde_json::Map<String, Value>, text_key: &str, json_key: &str) -> Result<Value, CoreError> { with_text(arguments, text_key, |text| with_json_value(arguments, json_key, |json| command_result(command(text.as_ptr(), json.as_ptr())))) }
-fn command_result(code: i32) -> Result<Value, CoreError> { if code == 0 { Ok(Value::Null) } else { Err(CoreError::command_failed(super::errors::last_error_message())) } }
-fn with_text<T>(arguments: &serde_json::Map<String, Value>, key: &str, operation: impl FnOnce(std::ffi::CString) -> Result<T, CoreError>) -> Result<T, CoreError> { let value = arguments.get(key).and_then(Value::as_str).ok_or_else(|| CoreError::command_failed(format!("operation argument '{key}' must be a string")))?; let value = std::ffi::CString::new(value).map_err(|_| CoreError::command_failed(format!("operation argument '{key}' contains a null byte")))?; operation(value) }
-fn with_json<T>(arguments: &serde_json::Map<String, Value>, operation: impl FnOnce(std::ffi::CString) -> Result<T, CoreError>) -> Result<T, CoreError> { let value = serde_json::to_string(arguments).map_err(|error| CoreError::internal(format!("serialize operation arguments failed: {error}")))?; let value = std::ffi::CString::new(value).map_err(|_| CoreError::command_failed("operation arguments contain a null byte"))?; operation(value) }
-fn with_json_value<T>(arguments: &serde_json::Map<String, Value>, key: &str, operation: impl FnOnce(std::ffi::CString) -> Result<T, CoreError>) -> Result<T, CoreError> { let value = arguments.get(key).ok_or_else(|| CoreError::command_failed(format!("missing operation argument '{key}'")))?; let value = serde_json::to_string(value).map_err(|error| CoreError::internal(format!("serialize operation argument failed: {error}")))?; let value = std::ffi::CString::new(value).map_err(|_| CoreError::command_failed(format!("operation argument '{key}' contains a null byte")))?; operation(value) }
-fn required_i32(arguments: &serde_json::Map<String, Value>, key: &str) -> Result<i32, CoreError> { arguments.get(key).and_then(Value::as_i64).and_then(|value| i32::try_from(value).ok()).ok_or_else(|| CoreError::command_failed(format!("operation argument '{key}' must be an integer"))) }
-fn required_f64(arguments: &serde_json::Map<String, Value>, key: &str) -> Result<f64, CoreError> { arguments.get(key).and_then(Value::as_f64).ok_or_else(|| CoreError::command_failed(format!("operation argument '{key}' must be a number"))) }
-fn required_bool(arguments: &serde_json::Map<String, Value>, key: &str) -> Result<bool, CoreError> { arguments.get(key).and_then(Value::as_bool).ok_or_else(|| CoreError::command_failed(format!("operation argument '{key}' must be a boolean"))) }
+fn execute_void_command(command: extern "C" fn() -> i32) -> Result<Value, CoreError> {
+    command_result(command())
+}
+fn execute_text_command(
+    command: extern "C" fn(*const c_char) -> i32,
+    arguments: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Value, CoreError> {
+    with_text(arguments, key, |value| {
+        command_result(command(value.as_ptr()))
+    })
+}
+fn execute_json_command(
+    command: extern "C" fn(*const c_char) -> i32,
+    arguments: &serde_json::Map<String, Value>,
+) -> Result<Value, CoreError> {
+    with_json(arguments, |value| command_result(command(value.as_ptr())))
+}
+fn execute_json_text_command(
+    command: extern "C" fn(*const c_char) -> i32,
+    arguments: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Value, CoreError> {
+    with_json_value(arguments, key, |value| {
+        command_result(command(value.as_ptr()))
+    })
+}
+fn execute_number_command(
+    command: extern "C" fn(f64) -> i32,
+    arguments: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Value, CoreError> {
+    command_result(command(required_f64(arguments, key)?))
+}
+fn execute_integer_command(
+    command: extern "C" fn(i32) -> i32,
+    arguments: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Value, CoreError> {
+    command_result(command(required_i32(arguments, key)?))
+}
+fn execute_boolean_command(
+    command: extern "C" fn(i32) -> i32,
+    arguments: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Value, CoreError> {
+    command_result(command(if required_bool(arguments, key)? { 1 } else { 0 }))
+}
+fn execute_text_integer_command(
+    command: extern "C" fn(*const c_char, i32) -> i32,
+    arguments: &serde_json::Map<String, Value>,
+    text_key: &str,
+    integer_key: &str,
+) -> Result<Value, CoreError> {
+    with_text(arguments, text_key, |value| {
+        command_result(command(
+            value.as_ptr(),
+            required_i32(arguments, integer_key)?,
+        ))
+    })
+}
+fn execute_json_boolean_command(
+    command: extern "C" fn(*const c_char, i32) -> i32,
+    arguments: &serde_json::Map<String, Value>,
+    json_key: &str,
+    boolean_key: &str,
+) -> Result<Value, CoreError> {
+    with_json_value(arguments, json_key, |value| {
+        command_result(command(
+            value.as_ptr(),
+            if required_bool(arguments, boolean_key)? {
+                1
+            } else {
+                0
+            },
+        ))
+    })
+}
+fn execute_two_text_command(
+    command: extern "C" fn(*const c_char, *const c_char) -> i32,
+    arguments: &serde_json::Map<String, Value>,
+    first_key: &str,
+    second_key: &str,
+) -> Result<Value, CoreError> {
+    with_text(arguments, first_key, |first| {
+        with_text(arguments, second_key, |second| {
+            command_result(command(first.as_ptr(), second.as_ptr()))
+        })
+    })
+}
+fn execute_two_json_text_command(
+    command: extern "C" fn(*const c_char, *const c_char) -> i32,
+    arguments: &serde_json::Map<String, Value>,
+    text_key: &str,
+    json_key: &str,
+) -> Result<Value, CoreError> {
+    with_text(arguments, text_key, |text| {
+        with_json_value(arguments, json_key, |json| {
+            command_result(command(text.as_ptr(), json.as_ptr()))
+        })
+    })
+}
+fn command_result(code: i32) -> Result<Value, CoreError> {
+    if code == 0 {
+        Ok(Value::Null)
+    } else {
+        Err(CoreError::command_failed(
+            super::errors::last_error_message(),
+        ))
+    }
+}
+fn with_text<T>(
+    arguments: &serde_json::Map<String, Value>,
+    key: &str,
+    operation: impl FnOnce(std::ffi::CString) -> Result<T, CoreError>,
+) -> Result<T, CoreError> {
+    let value = arguments.get(key).and_then(Value::as_str).ok_or_else(|| {
+        CoreError::command_failed(format!("operation argument '{key}' must be a string"))
+    })?;
+    let value = std::ffi::CString::new(value).map_err(|_| {
+        CoreError::command_failed(format!("operation argument '{key}' contains a null byte"))
+    })?;
+    operation(value)
+}
+fn with_json<T>(
+    arguments: &serde_json::Map<String, Value>,
+    operation: impl FnOnce(std::ffi::CString) -> Result<T, CoreError>,
+) -> Result<T, CoreError> {
+    let value = serde_json::to_string(arguments).map_err(|error| {
+        CoreError::internal(format!("serialize operation arguments failed: {error}"))
+    })?;
+    let value = std::ffi::CString::new(value)
+        .map_err(|_| CoreError::command_failed("operation arguments contain a null byte"))?;
+    operation(value)
+}
+fn with_json_value<T>(
+    arguments: &serde_json::Map<String, Value>,
+    key: &str,
+    operation: impl FnOnce(std::ffi::CString) -> Result<T, CoreError>,
+) -> Result<T, CoreError> {
+    let value = arguments
+        .get(key)
+        .ok_or_else(|| CoreError::command_failed(format!("missing operation argument '{key}'")))?;
+    let value = serde_json::to_string(value).map_err(|error| {
+        CoreError::internal(format!("serialize operation argument failed: {error}"))
+    })?;
+    let value = std::ffi::CString::new(value).map_err(|_| {
+        CoreError::command_failed(format!("operation argument '{key}' contains a null byte"))
+    })?;
+    operation(value)
+}
+fn required_i32(arguments: &serde_json::Map<String, Value>, key: &str) -> Result<i32, CoreError> {
+    arguments
+        .get(key)
+        .and_then(Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok())
+        .ok_or_else(|| {
+            CoreError::command_failed(format!("operation argument '{key}' must be an integer"))
+        })
+}
+fn required_f64(arguments: &serde_json::Map<String, Value>, key: &str) -> Result<f64, CoreError> {
+    arguments.get(key).and_then(Value::as_f64).ok_or_else(|| {
+        CoreError::command_failed(format!("operation argument '{key}' must be a number"))
+    })
+}
+fn required_bool(arguments: &serde_json::Map<String, Value>, key: &str) -> Result<bool, CoreError> {
+    arguments.get(key).and_then(Value::as_bool).ok_or_else(|| {
+        CoreError::command_failed(format!("operation argument '{key}' must be a boolean"))
+    })
+}
 
 // Core configuration and engine lifecycle commands.
 #[no_mangle]
@@ -160,6 +418,27 @@ pub extern "C" fn mashin_core_set_log_level(level: *const c_char) -> i32 {
     match read_required_c_string(level, "log_level")
         .and_then(|level| crate::logging::set_minimum_level(&level))
     {
+        Ok(()) => 0,
+        Err(error) => {
+            record_and_publish_error(error);
+            -1
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn mashin_core_log(
+    level: *const c_char,
+    category: *const c_char,
+    message: *const c_char,
+) -> i32 {
+    let result = read_required_c_string(level, "log_level").and_then(|level| {
+        read_required_c_string(category, "log_category").and_then(|category| {
+            read_required_c_string(message, "log_message")
+                .and_then(|message| crate::logging::log_external(&level, &category, &message))
+        })
+    });
+    match result {
         Ok(()) => 0,
         Err(error) => {
             record_and_publish_error(error);
@@ -515,6 +794,67 @@ pub extern "C" fn mashin_core_sendspin_queue_radio_next(media_items_json: *const
 pub extern "C" fn mashin_core_set_codec(codec: *const c_char) -> i32 {
     match read_required_c_string(codec, "codec") {
         Ok(codec) => execute_core_command(|coordinator| coordinator.set_preferred_codec(&codec)),
+        Err(error) => {
+            record_and_publish_error(error);
+            -1
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn mashin_core_set_local_cache_size_bytes(cache_size_bytes: i32) -> i32 {
+    match usize::try_from(cache_size_bytes) {
+        Ok(cache_size_bytes) => execute_core_command(|coordinator| {
+            coordinator.set_local_cache_size_bytes(cache_size_bytes)
+        }),
+        Err(_) => {
+            record_and_publish_error("local cache size must not be negative".to_string());
+            -1
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn mashin_core_set_theme(theme: *const c_char) -> i32 {
+    match read_required_c_string(theme, "theme") {
+        Ok(theme) => match theme.as_str() {
+            "dark" => execute_core_command(|coordinator| {
+                coordinator.set_theme(crate::core::models::ThemePreference::Dark)
+            }),
+            "light" => execute_core_command(|coordinator| {
+                coordinator.set_theme(crate::core::models::ThemePreference::Light)
+            }),
+            _ => {
+                record_and_publish_error("theme must be 'dark' or 'light'".to_string());
+                -1
+            }
+        },
+        Err(error) => {
+            record_and_publish_error(error);
+            -1
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn mashin_core_set_session_log_level(log_level: *const c_char) -> i32 {
+    match read_required_c_string(log_level, "log_level") {
+        Ok(log_level) => {
+            let log_level = match log_level.as_str() {
+                "trace" => crate::core::models::LogLevelPreference::Trace,
+                "debug" => crate::core::models::LogLevelPreference::Debug,
+                "info" => crate::core::models::LogLevelPreference::Info,
+                "warn" => crate::core::models::LogLevelPreference::Warn,
+                "error" => crate::core::models::LogLevelPreference::Error,
+                _ => {
+                    record_and_publish_error(
+                        "log level must be trace, debug, info, warn, or error".to_string(),
+                    );
+                    return -1;
+                }
+            };
+            execute_core_command(|coordinator| coordinator.set_log_level(log_level))
+        }
         Err(error) => {
             record_and_publish_error(error);
             -1

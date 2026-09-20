@@ -1,16 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-
 import '../../features/core/core_events.dart';
 import '../../features/core/core_bridge.dart';
 import '../../features/core/core_models.dart';
 import '../../features/core/core_userdata.dart';
-import '../logging/app_logger.dart';
 
 class AppSessionController extends ChangeNotifier {
-  final AppLogger _logger = AppLogger('AppSessionController');
-
   AppSessionController() {
     coreBridge = MashinCoreBridge();
     coreEvents = MashinCoreBridgeEvents(coreBridge: coreBridge);
@@ -29,6 +25,9 @@ class AppSessionController extends ChangeNotifier {
   bool _isAuthenticated = false;
   bool _isLoading = true;
   bool _isDisposed = false;
+  late int _localCacheSizeBytes;
+  bool _isDarkTheme = true;
+  LogLevelPreference _logLevel = LogLevelPreference.info;
 
   UserData? get userDataController => _userDataController;
   String get baseUrl => _baseUrl;
@@ -36,6 +35,9 @@ class AppSessionController extends ChangeNotifier {
   String get preferredCodec => _preferredCodec;
   bool get isLoading => _isLoading;
   bool get isAuthenticated => _isAuthenticated;
+  int get localCacheSizeBytes => _localCacheSizeBytes;
+  bool get isDarkTheme => _isDarkTheme;
+  LogLevelPreference get logLevel => _logLevel;
 
   Future<void> initialize() async {
     try {
@@ -45,10 +47,10 @@ class AppSessionController extends ChangeNotifier {
       await _initializeUserData();
       await coreEvents.start();
     } catch (error, stackTrace) {
-      _logger.error(
-        'Startup bootstrap failed: $error',
-        error: error,
-        stackTrace: stackTrace,
+      coreBridge.log(
+        LogLevelPreference.error,
+        'AppSessionController',
+        'Startup bootstrap failed: $error | $stackTrace',
       );
     } finally {
       if (!_isDisposed) {
@@ -97,6 +99,36 @@ class AppSessionController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setLocalCacheSizeBytes(int cacheSizeBytes) async {
+    if (cacheSizeBytes == _localCacheSizeBytes) {
+      return;
+    }
+
+    await coreBridge.setLocalCacheSizeBytes(cacheSizeBytes);
+    _localCacheSizeBytes = cacheSizeBytes;
+    notifyListeners();
+  }
+
+  Future<void> setDarkTheme(bool isDarkTheme) async {
+    if (isDarkTheme == _isDarkTheme) {
+      return;
+    }
+
+    await coreBridge.setTheme(isDarkTheme);
+    _isDarkTheme = isDarkTheme;
+    notifyListeners();
+  }
+
+  Future<void> setLogLevel(LogLevelPreference logLevel) async {
+    if (logLevel == _logLevel) {
+      return;
+    }
+
+    await coreBridge.setLogLevel(logLevel);
+    _logLevel = logLevel;
+    notifyListeners();
+  }
+
   Future<void> _restoreSession() async {
     _isAuthenticated = await coreBridge.restorePersistedSession();
   }
@@ -107,6 +139,9 @@ class AppSessionController extends ChangeNotifier {
     MediaItemImage.configureProxyBaseUrl(_baseUrl);
     _username = settings.username;
     _preferredCodec = settings.preferredCodec;
+    _localCacheSizeBytes = settings.localCacheSizeBytes;
+    _isDarkTheme = settings.isDarkTheme;
+    _logLevel = settings.logLevel;
   }
 
   Future<void> _initializeUserData() async {

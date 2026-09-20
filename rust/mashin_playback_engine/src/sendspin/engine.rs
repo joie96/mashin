@@ -31,8 +31,8 @@ static AUTOPLAY_NETWORK_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
         .build()
         .expect("create Sendspin autoplay network runtime")
 });
-    const INITIAL_RECONNECT_DELAY: Duration = Duration::from_secs(2);
-    const MAXIMUM_RECONNECT_DELAY: Duration = Duration::from_secs(8);
+const INITIAL_RECONNECT_DELAY: Duration = Duration::from_secs(2);
+const MAXIMUM_RECONNECT_DELAY: Duration = Duration::from_secs(8);
 
 pub(crate) struct SendspinEngine {
     config: Option<SendspinEngineConfiguration>,

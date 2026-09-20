@@ -5,6 +5,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
+import '../../app/logging/app_log_buffer.dart';
 import 'core_models.dart';
 
 typedef _NativeVoidFn = ffi.Int32 Function();
@@ -20,6 +21,10 @@ typedef _NativeMutedFn = ffi.Int32 Function(ffi.Int32);
 typedef _DartMutedFn = int Function(int);
 typedef _NativeCodecFn = ffi.Int32 Function(ffi.Pointer<Utf8>);
 typedef _DartCodecFn = int Function(ffi.Pointer<Utf8>);
+typedef _NativeLogFn =
+    ffi.Int32 Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+typedef _DartLogFn =
+    int Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
 typedef _NativeQueueMoveFn = ffi.Int32 Function(ffi.Pointer<Utf8>, ffi.Int32);
 typedef _DartQueueMoveFn = int Function(ffi.Pointer<Utf8>, int);
 typedef _NativeGetStringFn = ffi.Pointer<Utf8> Function();
@@ -117,6 +122,10 @@ abstract class MashinCoreBridgeApi {
   Future<void> deleteQueueItem(String itemId);
   Future<void> playQueueIndex(int index);
   Future<void> requestCodec(String codec);
+  Future<void> setLocalCacheSizeBytes(int cacheSizeBytes);
+  Future<void> setTheme(bool isDarkTheme);
+  Future<void> setLogLevel(LogLevelPreference logLevel);
+  void log(LogLevelPreference level, String category, String message);
   Future<void> addPlaylistTracks(String playlistId, List<String> uris);
   Future<void> removePlaylistTracks(
     String playlistId,
@@ -136,15 +145,9 @@ abstract class MashinCoreBridgeApi {
 class MashinCoreBridge implements MashinCoreBridgeApi {
   MashinCoreBridge() : _bindings = _RustBindings(_openLibrary()) {
     _instance = this;
-    final logLevel = const String.fromEnvironment(
-      'MASHIN_LOG_LEVEL',
-      defaultValue: 'info',
-    ).toNativeUtf8();
-    try {
-      _throwIfError(_bindings.setLogLevel(logLevel), 'setLogLevel');
-    } finally {
-      calloc.free(logLevel);
-    }
+    _setRustLogLevel(
+      const String.fromEnvironment('MASHIN_LOG_LEVEL', defaultValue: 'info'),
+    );
     _nativeEventCallback = ffi.NativeCallable<_NativeEventCallbackFn>.listener(
       _dispatchNativeEvent,
     );
@@ -153,6 +156,31 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
       _nativeEventCallback.nativeFunction,
     );
     _throwIfError(code, 'registerEventCallback');
+  }
+
+  static const bool _hasRuntimeLogLevelOverride = bool.hasEnvironment(
+    'MASHIN_LOG_LEVEL',
+  );
+  static const String _runtimeLogLevel = String.fromEnvironment(
+    'MASHIN_LOG_LEVEL',
+    defaultValue: 'info',
+  );
+
+  // Core session restoration can change the Rust logger, so the runtime
+  // override is reapplied after every persisted log-level operation.
+  void _setRustLogLevel(String logLevel) {
+    final pointer = logLevel.toNativeUtf8();
+    try {
+      _throwIfError(_bindings.setLogLevel(pointer), 'setLogLevel');
+    } finally {
+      calloc.free(pointer);
+    }
+  }
+
+  void _reapplyRuntimeLogLevelOverride() {
+    if (_hasRuntimeLogLevelOverride) {
+      _setRustLogLevel(_runtimeLogLevel);
+    }
   }
 
   // The native callback can dispatch only to the currently active bridge.
@@ -193,11 +221,15 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   }, (_) {});
 
   @override
-  Future<bool> restorePersistedSession() => _submitOperation<bool>(
-    'restorePersistedSession',
-    const <String, Object?>{},
-    (Object? result) => result as bool,
-  );
+  Future<bool> restorePersistedSession() async {
+    final bool restored = await _submitOperation<bool>(
+      'restorePersistedSession',
+      const <String, Object?>{},
+      (Object? result) => result as bool,
+    );
+    _reapplyRuntimeLogLevelOverride();
+    return restored;
+  }
 
   @override
   Future<SessionSettings> getSessionSettings() =>
@@ -646,6 +678,41 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   Future<void> requestCodec(String codec) =>
       _submitVoidOperation('requestCodec', <String, Object?>{'codec': codec});
 
+  @override
+  Future<void> setLocalCacheSizeBytes(int cacheSizeBytes) =>
+      _submitVoidOperation('setLocalCacheSizeBytes', <String, Object?>{
+        'cacheSizeBytes': cacheSizeBytes,
+      });
+
+  @override
+  Future<void> setTheme(bool isDarkTheme) => _submitVoidOperation(
+    'setTheme',
+    <String, Object?>{'theme': isDarkTheme ? 'dark' : 'light'},
+  );
+
+  @override
+  Future<void> setLogLevel(LogLevelPreference logLevel) async {
+    await _submitVoidOperation('setLogLevel', <String, Object?>{
+      'logLevel': logLevel.name,
+    });
+    _reapplyRuntimeLogLevelOverride();
+  }
+
+  @override
+  void log(LogLevelPreference level, String category, String message) {
+    final levelPointer = level.name.toNativeUtf8();
+    final categoryPointer = category.toNativeUtf8();
+    final messagePointer = message.toNativeUtf8();
+    try {
+      _bindings.log(levelPointer, categoryPointer, messagePointer);
+    } finally {
+      calloc
+        ..free(levelPointer)
+        ..free(categoryPointer)
+        ..free(messagePointer);
+    }
+  }
+
   // Playlist mutations.
   @override
   Future<void> addPlaylistTracks(String playlistId, List<String> uris) =>
@@ -778,6 +845,10 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
 
       final statePayload = decoded;
 
+      if (_recordRustLogEvent(statePayload)) {
+        return;
+      }
+
       if (_completePendingOperation(statePayload)) {
         return;
       }
@@ -788,6 +859,18 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     } catch (_) {
       return;
     }
+  }
+
+  bool _recordRustLogEvent(Map<String, dynamic> payload) {
+    if (payload['type'] != 'log') {
+      return false;
+    }
+
+    final String? line = payload['line'] as String?;
+    if (line != null) {
+      AppLogBuffer.shared.add(line);
+    }
+    return true;
   }
 
   bool _completePendingOperation(Map<String, dynamic> payload) {
@@ -970,6 +1053,7 @@ class _RustBindings {
       setLogLevel = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
         'mashin_core_set_log_level',
       ),
+      log = library.lookupFunction<_NativeLogFn, _DartLogFn>('mashin_core_log'),
       activateEngine = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
         'mashin_core_activate_engine',
       ),
@@ -1122,6 +1206,7 @@ class _RustBindings {
   final _DartCodecFn selectOfflineLibrary;
   final _DartCodecFn selectRemotePlayer;
   final _DartCodecFn setLogLevel;
+  final _DartLogFn log;
   final _DartVoidFn activateEngine;
   final _DartVoidFn deactivateEngine;
   final _DartVoidFn shutdown;
