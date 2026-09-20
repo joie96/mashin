@@ -186,103 +186,65 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     required String musicAssistantUrl,
     required String username,
     required String password,
-  }) async {
-    final config = <String, Object?>{
-      'musicAssistantUrl': musicAssistantUrl.trim(),
-      'username': username.trim(),
-      'password': password,
-    };
-
-    final pointer = jsonEncode(config).toNativeUtf8();
-    try {
-      final code = _bindings.login(pointer);
-      _throwIfError(code, 'login');
-    } finally {
-      calloc.free(pointer);
-    }
-    await refreshQueue();
-    await refreshPlayerState();
-  }
+  }) => _submitOperation<void>('login', <String, Object?>{
+    'musicAssistantUrl': musicAssistantUrl.trim(),
+    'username': username.trim(),
+    'password': password,
+  }, (_) {});
 
   @override
-  Future<bool> restorePersistedSession() async {
-    final code = _bindings.restorePersistedSession();
-    if (code == 1) {
-      return false;
-    }
-    _throwIfError(code, 'restorePersistedSession');
-    await refreshQueue();
-    await refreshPlayerState();
-    return true;
-  }
+  Future<bool> restorePersistedSession() => _submitOperation<bool>(
+    'restorePersistedSession',
+    const <String, Object?>{},
+    (Object? result) => result as bool,
+  );
 
   @override
-  Future<SessionSettings> getSessionSettings() async {
-    final settings = _decodeNativeObject(
-      _bindings.getSessionSettings(),
-      'getSessionSettings',
-    );
-    return SessionSettings.fromJson(settings);
-  }
+  Future<SessionSettings> getSessionSettings() =>
+      _submitOperation<SessionSettings>(
+        'getSessionSettings',
+        const <String, Object?>{},
+        (Object? result) =>
+            SessionSettings.fromJson(result! as Map<String, dynamic>),
+      );
 
   @override
-  Future<void> selectDefaultSendspinOutput() async {
-    _throwIfError(
-      _bindings.selectDefaultSendspinOutput(),
-      'selectDefaultSendspinOutput',
-    );
-    await refreshQueue();
-    await refreshPlayerState();
-  }
+  Future<void> selectDefaultSendspinOutput() => _submitOperation<void>(
+    'selectDefaultSendspinOutput',
+    const <String, Object?>{},
+    (_) {},
+  );
 
   @override
-  Future<void> selectOfflineLibrary(String libraryRoot) async {
-    await _selectOutputValue(
-      _bindings.selectOfflineLibrary,
-      libraryRoot,
-      'selectOfflineLibrary',
-    );
-  }
+  Future<void> selectOfflineLibrary(String libraryRoot) =>
+      _submitOperation<void>('selectOfflineLibrary', <String, Object?>{
+        'libraryRoot': libraryRoot,
+      }, (_) {});
 
   @override
-  Future<void> selectRemotePlayer(String playerId) async {
-    await _selectOutputValue(
-      _bindings.selectRemotePlayer,
-      playerId,
-      'selectRemotePlayer',
-    );
-  }
-
-  Future<void> _selectOutputValue(
-    _DartCodecFn command,
-    String value,
-    String operation,
-  ) async {
-    final pointer = value.toNativeUtf8();
-    try {
-      _throwIfError(command(pointer), operation);
-    } finally {
-      calloc.free(pointer);
-    }
-    await refreshQueue();
-    await refreshPlayerState();
-  }
+  Future<void> selectRemotePlayer(String playerId) => _submitOperation<void>(
+    'selectRemotePlayer',
+    <String, Object?>{'playerId': playerId},
+    (_) {},
+  );
 
   // Playback state reads and named queries.
   @override
-  Future<void> refreshQueue() async {
-    final queue = _decodeNativeObject(_bindings.getQueue(), 'getQueue');
-    _queueController.add(Queue.fromJson(queue));
-  }
+  Future<void> refreshQueue() => _submitOperation<void>(
+    'refreshQueue',
+    const <String, Object?>{},
+    (Object? result) =>
+        _queueController.add(Queue.fromJson(result! as Map<String, dynamic>)),
+  );
 
   @override
-  Future<void> refreshPlayerState() async {
-    final playerState = _decodeNativeObject(
-      _bindings.getPlayerState(),
-      'getPlayerState',
-    );
-    _playerStateController.add(PlayerState.fromJson(playerState));
-  }
+  Future<void> refreshPlayerState() => _submitOperation<void>(
+    'refreshPlayerState',
+    const <String, Object?>{},
+    (Object? result) => _playerStateController.add(
+      PlayerState.fromJson(result! as Map<String, dynamic>),
+    ),
+  );
 
   @override
   Future<List<RecommendationFolder>> getRecommendations() =>
@@ -497,6 +459,12 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     String kind,
     Map<String, Object?> arguments,
     T Function(Object? decoded) decoder,
+  ) => _submitOperation<T>(kind, arguments, decoder);
+
+  Future<T> _submitOperation<T>(
+    String kind,
+    Map<String, Object?> arguments,
+    T Function(Object? result) decoder,
   ) async {
     final int requestId = ++_nextMusicAssistantQueryId;
     final Completer<Object?> completer = Completer<Object?>();
@@ -510,7 +478,7 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     try {
       _throwIfError(
         _bindings.startMusicAssistantQuery(pointer),
-        'startMusicAssistantQuery',
+        'startOperation',
       );
     } catch (_) {
       _pendingMusicAssistantQueries.remove(requestId);
@@ -553,365 +521,210 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
 
   // Engine lifecycle.
   @override
-  Future<void> activateEngine() async {
-    final code = _bindings.activateEngine();
-    _throwIfError(code, 'activateEngine');
-  }
+  Future<void> activateEngine() => _submitVoidOperation('activateEngine');
 
   @override
-  Future<void> deactivateEngine() async {
-    final code = _bindings.deactivateEngine();
-    _throwIfError(code, 'deactivateEngine');
-  }
+  Future<void> deactivateEngine() => _submitVoidOperation('deactivateEngine');
 
   @override
-  Future<void> shutdown() async {
-    final code = _bindings.shutdown();
-    _throwIfError(code, 'shutdown');
-  }
+  Future<void> shutdown() => _submitVoidOperation('shutdown');
 
   // Playback transport commands.
   @override
-  Future<void> transportPlay() async {
-    final code = _bindings.transportPlay();
-    _throwIfError(code, 'transportPlay');
-  }
+  Future<void> transportPlay() => _submitVoidOperation('transportPlay');
 
   @override
-  Future<void> transportPause() async {
-    final code = _bindings.transportPause();
-    _throwIfError(code, 'transportPause');
-  }
+  Future<void> transportPause() => _submitVoidOperation('transportPause');
 
   @override
-  Future<void> transportStop() async {
-    final code = _bindings.transportStop();
-    _throwIfError(code, 'transportStop');
-  }
+  Future<void> transportStop() => _submitVoidOperation('transportStop');
 
   @override
-  Future<void> transportNext() async {
-    final code = _bindings.transportNext();
-    _throwIfError(code, 'transportNext');
-  }
+  Future<void> transportNext() => _submitVoidOperation('transportNext');
 
   @override
-  Future<void> transportPrevious() async {
-    final code = _bindings.transportPrevious();
-    _throwIfError(code, 'transportPrevious');
-  }
+  Future<void> transportPrevious() => _submitVoidOperation('transportPrevious');
 
   @override
-  Future<void> transportSeek(double seconds) async {
-    final code = _bindings.transportSeek(seconds);
-    _throwIfError(code, 'transportSeek');
-  }
+  Future<void> transportSeek(double seconds) => _submitVoidOperation(
+    'transportSeek',
+    <String, Object?>{'seconds': seconds},
+  );
 
   @override
-  Future<void> transportRepeatMode(RepeatMode mode) async {
+  Future<void> transportRepeatMode(RepeatMode mode) {
     final int value = switch (mode) {
       RepeatMode.off => 0,
       RepeatMode.one => 1,
       RepeatMode.all => 2,
     };
 
-    final code = _bindings.setRepeatMode(value);
-    _throwIfError(code, 'transportRepeatMode');
+    return _submitVoidOperation('transportRepeatMode', <String, Object?>{
+      'mode': value,
+    });
   }
 
   @override
-  Future<void> transportShuffle(bool enabled) async {
-    final code = _bindings.setShuffle(enabled ? 1 : 0);
-    _throwIfError(code, 'transportShuffle');
-  }
+  Future<void> transportShuffle(bool enabled) => _submitVoidOperation(
+    'transportShuffle',
+    <String, Object?>{'enabled': enabled},
+  );
 
   // Playback preferences.
   @override
-  Future<void> setAutoplay(bool enabled) async {
-    final code = _bindings.setAutoplay(enabled ? 1 : 0);
-    _throwIfError(code, 'setAutoplay');
-  }
+  Future<void> setAutoplay(bool enabled) => _submitVoidOperation(
+    'setAutoplay',
+    <String, Object?>{'enabled': enabled},
+  );
 
   @override
-  Future<void> setVolume(int volume) async {
+  Future<void> setVolume(int volume) {
     final clamped = volume.clamp(0, 100);
-    final code = _bindings.setVolume(clamped);
-    _throwIfError(code, 'setVolume');
+    return _submitVoidOperation('setVolume', <String, Object?>{
+      'volume': clamped,
+    });
   }
 
   @override
-  Future<void> setMuted(bool muted) async {
-    final code = _bindings.setMuted(muted ? 1 : 0);
-    _throwIfError(code, 'setMuted');
-  }
+  Future<void> setMuted(bool muted) =>
+      _submitVoidOperation('setMuted', <String, Object?>{'muted': muted});
 
   // Queue commands resolve media in Rust before mutating the canonical queue.
   @override
   Future<void> playMedia(List<MediaItem> mediaItems) =>
-      _playMediaJson(_encodeMediaItems(mediaItems));
+      _submitMediaOperation('playMedia', mediaItems);
 
   @override
   Future<void> playShuffledMedia(List<MediaItem> mediaItems) =>
-      _playShuffledMediaJson(_encodeMediaItems(mediaItems));
+      _submitMediaOperation('playShuffledMedia', mediaItems);
 
   @override
   Future<void> playSendspinRadioNext(List<MediaItem> mediaItems) =>
-      _playSendspinRadioNextJson(_encodeMediaItems(mediaItems));
+      _submitMediaOperation('playSendspinRadioNext', mediaItems);
 
   @override
   Future<void> playMediaNext(List<MediaItem> mediaItems) =>
-      _playMediaNextJson(_encodeMediaItems(mediaItems));
+      _submitMediaOperation('playMediaNext', mediaItems);
 
   @override
   Future<void> playMediaReplaceNext(List<MediaItem> mediaItems) =>
-      _playMediaReplaceNextJson(_encodeMediaItems(mediaItems));
+      _submitMediaOperation('playMediaReplaceNext', mediaItems);
 
   @override
   Future<void> playMediaLast(List<MediaItem> mediaItems) =>
-      _playMediaLastJson(_encodeMediaItems(mediaItems));
+      _submitMediaOperation('playMediaLast', mediaItems);
 
-  Future<void> _playMediaJson(String mediaItemsJson) async {
-    final pointer = mediaItemsJson.toNativeUtf8();
-    try {
-      final code = _bindings.queueReplace(pointer);
-      _throwIfError(code, 'playMedia');
-    } finally {
-      calloc.free(pointer);
-    }
-  }
+  Future<void> _submitMediaOperation(String kind, List<MediaItem> mediaItems) =>
+      _submitVoidOperation(kind, <String, Object?>{
+        'mediaItems': mediaItems
+            .map(createMusicAssistantMediaItemPayload)
+            .toList(),
+      });
   // Queue item mutations.
 
-  Future<void> _playShuffledMediaJson(String mediaItemsJson) => _sendMediaItems(
-    _bindings.queueReplaceShuffled,
-    mediaItemsJson,
-    'queueReplaceShuffled',
+  @override
+  Future<void> clearQueue() => _submitVoidOperation('clearQueue');
+
+  @override
+  Future<void> moveQueueItem(String itemId, int shift) => _submitVoidOperation(
+    'moveQueueItem',
+    <String, Object?>{'itemId': itemId, 'shift': shift},
   );
 
-  Future<void> _playMediaNextJson(String mediaItemsJson) => _sendMediaItems(
-    _bindings.queueInsertNext,
-    mediaItemsJson,
-    'queueInsertNext',
+  @override
+  Future<void> deleteQueueItem(String itemId) => _submitVoidOperation(
+    'deleteQueueItem',
+    <String, Object?>{'itemId': itemId},
   );
 
-  Future<void> _playMediaReplaceNextJson(String mediaItemsJson) =>
-      _sendMediaItems(
-        _bindings.queueReplaceNext,
-        mediaItemsJson,
-        'queueReplaceNext',
-      );
-
-  Future<void> _playMediaLastJson(String mediaItemsJson) =>
-      _sendMediaItems(_bindings.queueAppend, mediaItemsJson, 'queueAppend');
-
-  Future<void> _playSendspinRadioNextJson(String mediaItemsJson) =>
-      _sendMediaItems(
-        _bindings.queueRadioNext,
-        mediaItemsJson,
-        'queueSendspinRadioNext',
-      );
-
   @override
-  Future<void> clearQueue() async {
-    _throwIfError(_bindings.queueClear(), 'queueClear');
-  }
-
-  @override
-  Future<void> moveQueueItem(String itemId, int shift) async {
-    final pointer = itemId.toNativeUtf8();
-    try {
-      _throwIfError(_bindings.queueMove(pointer, shift), 'queueMove');
-    } finally {
-      calloc.free(pointer);
-    }
-  }
-
-  @override
-  Future<void> deleteQueueItem(String itemId) async {
-    final pointer = itemId.toNativeUtf8();
-    try {
-      _throwIfError(_bindings.queueRemove(pointer), 'queueRemove');
-    } finally {
-      calloc.free(pointer);
-    }
-  }
-
-  @override
-  Future<void> playQueueIndex(int index) async {
-    _throwIfError(_bindings.queuePlay(index), 'queuePlay');
-  }
-
-  Future<void> _sendMediaItems(
-    _DartCodecFn function,
-    String mediaItemsJson,
-    String operation,
-  ) async {
-    final pointer = mediaItemsJson.toNativeUtf8();
-    try {
-      _throwIfError(function(pointer), operation);
-    } finally {
-      calloc.free(pointer);
-    }
-  }
-
-  String _encodeMediaItems(List<MediaItem> mediaItems) => jsonEncode(
-    mediaItems
-        .map(createMusicAssistantMediaItemPayload)
-        .toList(growable: false),
-  );
+  Future<void> playQueueIndex(int index) =>
+      _submitVoidOperation('playQueueIndex', <String, Object?>{'index': index});
 
   // Output codec selection.
   @override
-  Future<void> requestCodec(String codec) async {
-    final pointer = codec.toNativeUtf8();
-    try {
-      _throwIfError(_bindings.setCodec(pointer), 'requestCodec');
-    } finally {
-      calloc.free(pointer);
-    }
-  }
+  Future<void> requestCodec(String codec) =>
+      _submitVoidOperation('requestCodec', <String, Object?>{'codec': codec});
 
   // Playlist mutations.
   @override
-  Future<void> addPlaylistTracks(String playlistId, List<String> uris) {
-    return _executePlaylistMutation(
-      _bindings.addPlaylistTracks,
-      playlistId,
-      jsonEncode(uris),
-      'addPlaylistTracks',
-    );
-  }
+  Future<void> addPlaylistTracks(String playlistId, List<String> uris) =>
+      _submitVoidOperation('addPlaylistTracks', <String, Object?>{
+        'playlistId': playlistId,
+        'uris': uris,
+      });
 
   @override
   Future<void> removePlaylistTracks(
     String playlistId,
     List<int> positionsToRemove,
-  ) {
-    return _executePlaylistMutation(
-      _bindings.removePlaylistTracks,
-      playlistId,
-      jsonEncode(positionsToRemove),
-      'removePlaylistTracks',
-    );
-  }
+  ) => _submitVoidOperation('removePlaylistTracks', <String, Object?>{
+    'playlistId': playlistId,
+    'positions': positionsToRemove,
+  });
 
   @override
-  Future<Map<String, dynamic>> loadUserData() async =>
-      _decodeNativeObject(_bindings.loadUserData(), 'loadUserData');
-
-  @override
-  Future<Map<String, dynamic>> getUserData() async =>
-      _decodeNativeObject(_bindings.getUserData(), 'getUserData');
-
-  @override
-  Future<void> setUserDataFavorites(List<MediaItem> items, bool favorite) =>
-      _executeJsonBooleanCommand(
-        _bindings.setUserDataFavorites,
-        _encodeMediaItems(items),
-        favorite,
-        'setUserDataFavorites',
+  Future<Map<String, dynamic>> loadUserData() =>
+      _submitOperation<Map<String, dynamic>>(
+        'loadUserData',
+        const <String, Object?>{},
+        (Object? result) => result! as Map<String, dynamic>,
       );
 
   @override
-  Future<void> createLocalPlaylist(String name) => _executeStringCommand(
-    _bindings.createLocalPlaylist,
-    name,
+  Future<Map<String, dynamic>> getUserData() =>
+      _submitOperation<Map<String, dynamic>>(
+        'getUserData',
+        const <String, Object?>{},
+        (Object? result) => result! as Map<String, dynamic>,
+      );
+
+  @override
+  Future<void> setUserDataFavorites(List<MediaItem> items, bool favorite) =>
+      _submitVoidOperation('setUserDataFavorites', <String, Object?>{
+        'mediaItems': items.map(createMusicAssistantMediaItemPayload).toList(),
+        'favorite': favorite,
+      });
+
+  @override
+  Future<void> createLocalPlaylist(String name) => _submitVoidOperation(
     'createLocalPlaylist',
+    <String, Object?>{'name': name},
   );
 
   @override
   Future<void> renameLocalPlaylist(String playlistId, String name) =>
-      _executeTwoStringCommand(
-        _bindings.renameLocalPlaylist,
-        playlistId,
-        name,
-        'renameLocalPlaylist',
-      );
+      _submitVoidOperation('renameLocalPlaylist', <String, Object?>{
+        'playlistId': playlistId,
+        'name': name,
+      });
 
   @override
-  Future<void> removeLocalPlaylist(String playlistId) => _executeStringCommand(
-    _bindings.removeLocalPlaylist,
-    playlistId,
+  Future<void> removeLocalPlaylist(String playlistId) => _submitVoidOperation(
     'removeLocalPlaylist',
+    <String, Object?>{'playlistId': playlistId},
   );
 
   @override
   Future<void> addLocalPlaylistTracks(String playlistId, List<Track> tracks) =>
-      _executeTwoStringCommand(
-        _bindings.addLocalPlaylistTracks,
-        playlistId,
-        jsonEncode(tracks.map(createMusicAssistantMediaItemPayload).toList()),
-        'addLocalPlaylistTracks',
-      );
+      _submitVoidOperation('addLocalPlaylistTracks', <String, Object?>{
+        'playlistId': playlistId,
+        'tracks': tracks.map(createMusicAssistantMediaItemPayload).toList(),
+      });
 
   @override
   Future<void> removeLocalPlaylistTracks(
     String playlistId,
     List<String> uris,
-  ) => _executeTwoStringCommand(
-    _bindings.removeLocalPlaylistTracks,
-    playlistId,
-    jsonEncode(uris),
-    'removeLocalPlaylistTracks',
-  );
+  ) => _submitVoidOperation('removeLocalPlaylistTracks', <String, Object?>{
+    'playlistId': playlistId,
+    'uris': uris,
+  });
 
-  Future<void> _executeStringCommand(
-    _DartCodecFn command,
-    String value,
-    String operation,
-  ) async {
-    final pointer = value.toNativeUtf8();
-    try {
-      _throwIfError(command(pointer), operation);
-    } finally {
-      calloc.free(pointer);
-    }
-  }
-
-  Future<void> _executeTwoStringCommand(
-    _DartPlaylistMutationFn command,
-    String first,
-    String second,
-    String operation,
-  ) async {
-    final firstPointer = first.toNativeUtf8();
-    final secondPointer = second.toNativeUtf8();
-    try {
-      _throwIfError(command(firstPointer, secondPointer), operation);
-    } finally {
-      calloc.free(secondPointer);
-      calloc.free(firstPointer);
-    }
-  }
-
-  Future<void> _executeJsonBooleanCommand(
-    _DartMediaFavoriteFn command,
-    String json,
-    bool value,
-    String operation,
-  ) async {
-    final jsonPointer = json.toNativeUtf8();
-    try {
-      _throwIfError(command(jsonPointer, value ? 1 : 0), operation);
-    } finally {
-      calloc.free(jsonPointer);
-    }
-  }
-
-  Future<void> _executePlaylistMutation(
-    _DartPlaylistMutationFn command,
-    String playlistId,
-    String valuesJson,
-    String operation,
-  ) async {
-    final playlistPointer = playlistId.toNativeUtf8();
-    final valuesPointer = valuesJson.toNativeUtf8();
-    try {
-      _throwIfError(command(playlistPointer, valuesPointer), operation);
-    } finally {
-      calloc.free(valuesPointer);
-      calloc.free(playlistPointer);
-    }
-  }
+  Future<void> _submitVoidOperation(
+    String kind, [
+    Map<String, Object?> arguments = const <String, Object?>{},
+  ]) => _submitOperation<void>(kind, arguments, (_) {});
 
   // Bridge lifecycle.
   @override
@@ -965,7 +778,7 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
 
       final statePayload = decoded;
 
-      if (_completeMusicAssistantQuery(statePayload)) {
+      if (_completePendingOperation(statePayload)) {
         return;
       }
 
@@ -977,9 +790,12 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     }
   }
 
-  bool _completeMusicAssistantQuery(Map<String, dynamic> payload) {
+  bool _completePendingOperation(Map<String, dynamic> payload) {
     final String? type = payload['type'] as String?;
-    if (type != 'query_completed' && type != 'query_failed') {
+    if (type != 'query_completed' &&
+        type != 'query_failed' &&
+        type != 'operation_completed' &&
+        type != 'operation_failed') {
       return false;
     }
 
@@ -994,7 +810,7 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
       return true;
     }
 
-    if (type == 'query_completed') {
+    if (type == 'query_completed' || type == 'operation_completed') {
       request.complete(payload['result']);
       return true;
     }
@@ -1019,24 +835,6 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
         if (playerState is Map<String, dynamic>) {
           _playerStateController.add(PlayerState.fromJson(playerState));
         }
-    }
-  }
-
-  Map<String, dynamic> _decodeNativeObject(
-    ffi.Pointer<Utf8> pointer,
-    String operation,
-  ) {
-    if (pointer == ffi.nullptr) {
-      _throwIfError(-1, operation);
-    }
-    try {
-      final decoded = jsonDecode(pointer.toDartString());
-      if (decoded is! Map<String, dynamic>) {
-        throw FormatException('$operation must return an object');
-      }
-      return decoded;
-    } finally {
-      _bindings.freeOwnedString(pointer);
     }
   }
 
@@ -1300,7 +1098,7 @@ class _RustBindings {
           .lookupFunction<
             _NativeStartMusicAssistantQueryFn,
             _DartStartMusicAssistantQueryFn
-          >('mashin_core_start_music_assistant_query'),
+          >('mashin_core_start_operation'),
       addPlaylistTracks = library
           .lookupFunction<_NativePlaylistMutationFn, _DartPlaylistMutationFn>(
             'mashin_core_add_playlist_tracks',

@@ -44,6 +44,14 @@ static CORE_NETWORK_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
         .expect("create core network runtime")
 });
 
+/// Schedules blocking FFI-originated work outside the Flutter UI thread.
+pub(crate) fn spawn_blocking_operation<F>(operation: F)
+where
+    F: FnOnce() + Send + 'static,
+{
+    CORE_NETWORK_RUNTIME.spawn_blocking(operation);
+}
+
 pub(crate) struct CoreCoordinator {
     auth_store: Box<dyn AuthStore + Send>,
     playback: PlaybackCoordinator,

@@ -10,14 +10,17 @@ use std::sync::Mutex;
 
 static LAST_ERROR: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
 
+pub(crate) fn last_error_message() -> String {
+    LAST_ERROR
+        .lock()
+        .map(|value| value.clone())
+        .unwrap_or_else(|_| "last error lock poisoned".to_string())
+}
+
 // Error reads and event publication.
 #[no_mangle]
 pub extern "C" fn mashin_core_get_last_error() -> *mut c_char {
-    let error = LAST_ERROR
-        .lock()
-        .map(|value| value.clone())
-        .unwrap_or_else(|_| "last error lock poisoned".to_string());
-    create_owned_string(error)
+    create_owned_string(last_error_message())
 }
 
 pub(crate) fn record_and_publish_error(error: impl Into<CoreError>) {

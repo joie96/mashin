@@ -5,6 +5,7 @@ use crate::music_assistant::models::session::MusicAssistantServerUrl;
 use crate::playback::models::{PlayerState, Queue};
 use crate::sendspin::models::SendspinAudioCodec;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -69,6 +70,16 @@ pub(crate) struct MusicAssistantQueryRequest {
     pub(crate) request_id: u64,
     #[serde(flatten)]
     pub(crate) query: MusicAssistantQuery,
+}
+
+/// A Flutter request that is accepted synchronously and completed through the event channel.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CoreOperationRequest {
+    pub(crate) request_id: u64,
+    pub(crate) kind: String,
+    #[serde(flatten)]
+    pub(crate) arguments: Map<String, Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -193,6 +204,8 @@ pub(crate) struct LoginConfig {
 pub(crate) enum MediaSessionEvent {
     QueueChanged { queue: Queue },
     PlayerStateChanged { player_state: PlayerState },
+    OperationCompleted { request_id: u64, result: Value },
+    OperationFailed { request_id: u64, error: CoreError },
 }
 
 #[cfg(test)]
