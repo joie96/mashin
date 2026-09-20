@@ -30,9 +30,11 @@ const RESUME_SEEK_PREROLL_MILLIS: u64 = 3_000;
 const SEEK_REPLACEMENT_STREAM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const DOWNLOAD_CONNECTION_INACTIVITY_TIMEOUT: std::time::Duration =
     std::time::Duration::from_secs(20);
-const DOWNLOAD_QUEUE_REGISTRATION_ATTEMPTS: usize = 10;
+const DOWNLOAD_QUEUE_REGISTRATION_ATTEMPTS: usize = 4;
 const DOWNLOAD_QUEUE_REGISTRATION_RETRY_DELAY: std::time::Duration =
-    std::time::Duration::from_millis(200);
+    std::time::Duration::from_secs(2);
+const MAXIMUM_DOWNLOAD_QUEUE_REGISTRATION_RETRY_DELAY: std::time::Duration =
+    std::time::Duration::from_secs(8);
 
 #[derive(Clone)]
 pub(crate) struct SendspinDownloaderConfig {
@@ -1659,6 +1661,7 @@ async fn resolve_download_player_ids(
     client: &MusicAssistantClient,
     output_protocol_ids: &[String; 2],
 ) -> Result<[PlayerId; 2], String> {
+    let mut retry_delay = DOWNLOAD_QUEUE_REGISTRATION_RETRY_DELAY;
     for attempt in 0..DOWNLOAD_QUEUE_REGISTRATION_ATTEMPTS {
         let players = client.get_players(true, true).await?;
         if let (Some(first), Some(second)) = (
@@ -1668,7 +1671,10 @@ async fn resolve_download_player_ids(
             return Ok([first, second]);
         }
         if attempt + 1 < DOWNLOAD_QUEUE_REGISTRATION_ATTEMPTS {
-            tokio::time::sleep(DOWNLOAD_QUEUE_REGISTRATION_RETRY_DELAY).await;
+            tokio::time::sleep(retry_delay).await;
+            retry_delay = retry_delay
+                .saturating_mul(2)
+                .min(MAXIMUM_DOWNLOAD_QUEUE_REGISTRATION_RETRY_DELAY);
         }
     }
 
@@ -1695,13 +1701,17 @@ async fn resolve_download_queue_ids(
     client: &MusicAssistantClient,
     player_ids: &[PlayerId; 2],
 ) -> Result<[QueueId; 2], String> {
+    let mut retry_delay = DOWNLOAD_QUEUE_REGISTRATION_RETRY_DELAY;
     for attempt in 0..DOWNLOAD_QUEUE_REGISTRATION_ATTEMPTS {
         let queues = client.get_player_queues().await?;
         if let Some(queue_ids) = find_download_queue_ids(&queues, player_ids) {
             return Ok(queue_ids);
         }
         if attempt + 1 < DOWNLOAD_QUEUE_REGISTRATION_ATTEMPTS {
-            tokio::time::sleep(DOWNLOAD_QUEUE_REGISTRATION_RETRY_DELAY).await;
+            tokio::time::sleep(retry_delay).await;
+            retry_delay = retry_delay
+                .saturating_mul(2)
+                .min(MAXIMUM_DOWNLOAD_QUEUE_REGISTRATION_RETRY_DELAY);
         }
     }
 

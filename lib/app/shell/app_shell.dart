@@ -56,11 +56,9 @@ class _AppShellState extends State<AppShell> {
   final TextEditingController _desktopSearchController =
       TextEditingController();
 
-    MashinCoreBridgeEvents get _coreEvents =>
-      widget.session.coreEvents;
+  MashinCoreBridgeEvents get _coreEvents => widget.session.coreEvents;
   MashinCoreBridgeApi get _coreBridge => widget.session.coreBridge;
-  UserData? get _userDataController =>
-      widget.session.userDataController;
+  UserData? get _userDataController => widget.session.userDataController;
   String get _preferredCodec => widget.session.preferredCodec;
   bool get _canGoBack => widget.navigatorKey.currentState?.canPop() ?? false;
 
@@ -73,8 +71,7 @@ class _AppShellState extends State<AppShell> {
   /// Current playback and queue state
   QueueItem? get _currentQueueItem {
     final items = _coreEvents.mediaSessionState.queue.items;
-    final index =
-      _coreEvents.mediaSessionState.queue.currentIndex;
+    final index = _coreEvents.mediaSessionState.queue.currentIndex;
     if (index == null || index < 0 || index >= items.length) {
       return null;
     }
@@ -128,12 +125,7 @@ class _AppShellState extends State<AppShell> {
 
   double get _currentTrackMaxSeconds {
     final durationFromStateSeconds =
-        ((_coreEvents
-                .mediaSessionState
-                .playerState
-                .durationMillis ??
-              0) /
-            1000)
+        ((_coreEvents.mediaSessionState.playerState.durationMillis ?? 0) / 1000)
             .toDouble();
     if (durationFromStateSeconds > 0) {
       return durationFromStateSeconds;
@@ -157,15 +149,13 @@ class _AppShellState extends State<AppShell> {
     return url.isEmpty ? null : url;
   }
 
-  int get _queueTrackCount =>
-      _coreEvents.mediaSessionState.queue.items.length;
+  int get _queueTrackCount => _coreEvents.mediaSessionState.queue.items.length;
 
   String get _queueTrackCountText => '$_queueTrackCount Tracks';
 
   String get _queueTotalDurationText {
     int totalSeconds = 0;
-    for (final item
-      in _coreEvents.mediaSessionState.queue.items) {
+    for (final item in _coreEvents.mediaSessionState.queue.items) {
       final int duration = item.duration ?? 0;
       if (duration > 0) {
         totalSeconds += duration;
@@ -184,12 +174,7 @@ class _AppShellState extends State<AppShell> {
 
   double get _currentTrackPositionSeconds {
     final positionFromStateSeconds =
-        ((_coreEvents
-                .mediaSessionState
-                .playerState
-                .positionMillis ??
-              0) /
-            1000)
+        ((_coreEvents.mediaSessionState.playerState.positionMillis ?? 0) / 1000)
             .toDouble();
     if (positionFromStateSeconds > 0) {
       return positionFromStateSeconds;
@@ -431,21 +416,11 @@ class _AppShellState extends State<AppShell> {
                     currentTrackInfo:
                         currentTrackInfo ?? const SizedBox.shrink(),
                     playStateType:
-                        _coreEvents
-                          .mediaSessionState
-                          .playerState
-                          .playbackState,
-                      playbackState: _coreEvents
-                        .mediaSessionState
-                        .playerState,
-                      playbackQueue: _coreEvents
-                        .mediaSessionState
-                        .queue,
+                        _coreEvents.mediaSessionState.playerState.playbackState,
+                    playbackState: _coreEvents.mediaSessionState.playerState,
+                    playbackQueue: _coreEvents.mediaSessionState.queue,
                     dontStopTheMusicEnabled:
-                        _coreEvents
-                          .mediaSessionState
-                          .queue
-                          .autoplayEnabled,
+                        _coreEvents.mediaSessionState.queue.autoplayEnabled,
                     maxSeconds: _currentTrackMaxSeconds,
                     currentSeconds: _currentTrackPositionSeconds,
                     isQueueOpen: _isQueueOverlayOpen,
@@ -476,13 +451,9 @@ class _AppShellState extends State<AppShell> {
             queueTrackCountText: _queueTrackCountText,
             queueTotalDurationText: _queueTotalDurationText,
             dontStopTheMusicEnabled:
-                _coreEvents
-                    .mediaSessionState
-                    .queue
-                    .autoplayEnabled,
+                _coreEvents.mediaSessionState.queue.autoplayEnabled,
             queueItems: _coreEvents.mediaSessionState.queue.items,
-            currentQueueIndex:
-                _coreEvents.mediaSessionState.queue.currentIndex,
+            currentQueueIndex: _coreEvents.mediaSessionState.queue.currentIndex,
             coreBridge: _coreBridge,
             coreEvents: _coreEvents,
             userDataController: _userDataController,
@@ -521,13 +492,13 @@ class _AppShellState extends State<AppShell> {
                     currentTrackInfo:
                         currentTrackInfo ?? const SizedBox.shrink(),
                     playbackState:
-                        _coreEvents
-                          .mediaSessionState
-                          .playerState
-                          .playbackState,
+                        _coreEvents.mediaSessionState.playerState.playbackState,
                     currentSeconds: _currentTrackPositionSeconds,
                     maxSeconds: _currentTrackMaxSeconds,
+                    trackTransitionKey: _currentQueueItem?.queueItemId ?? '',
                     onTogglePlayPause: _togglePlayPause,
+                    onPrevious: _playPrevious,
+                    onNext: _playNext,
                     onOpenPlayerOverlay: _openMobilePlayerOverlay,
                     onPlayerOverlayDragUpdate: _updateMobilePlayerOverlayDrag,
                     onPlayerOverlayDragEnd: _endMobilePlayerOverlayDrag,
@@ -553,21 +524,13 @@ class _AppShellState extends State<AppShell> {
               trackCoverUrl: _currentQueueCoverUrl,
               currentTrack: _currentTrack,
               playbackStateType:
-                    _coreEvents
-                      .mediaSessionState
-                      .playerState
-                      .playbackState,
-                  playbackState: _coreEvents
-                    .mediaSessionState
-                    .playerState,
-                  playbackQueue: _coreEvents.mediaSessionState.queue,
+                  _coreEvents.mediaSessionState.playerState.playbackState,
+              playbackState: _coreEvents.mediaSessionState.playerState,
+              playbackQueue: _coreEvents.mediaSessionState.queue,
               maxSeconds: _currentTrackMaxSeconds,
               currentSeconds: _currentTrackPositionSeconds,
               dontStopTheMusicEnabled:
-                    _coreEvents
-                      .mediaSessionState
-                      .queue
-                      .autoplayEnabled,
+                  _coreEvents.mediaSessionState.queue.autoplayEnabled,
               userDataController: _userDataController,
               onClose: _closeMobilePlayerOverlay,
               onOpenQueue: _openQueueFromMobilePlayerOverlay,
@@ -599,13 +562,9 @@ class _AppShellState extends State<AppShell> {
             queueTrackCountText: _queueTrackCountText,
             queueTotalDurationText: _queueTotalDurationText,
             dontStopTheMusicEnabled:
-                _coreEvents
-                    .mediaSessionState
-                    .queue
-                    .autoplayEnabled,
+                _coreEvents.mediaSessionState.queue.autoplayEnabled,
             queueItems: _coreEvents.mediaSessionState.queue.items,
-            currentQueueIndex:
-                _coreEvents.mediaSessionState.queue.currentIndex,
+            currentQueueIndex: _coreEvents.mediaSessionState.queue.currentIndex,
             coreBridge: _coreBridge,
             coreEvents: _coreEvents,
             userDataController: _userDataController,
@@ -1056,9 +1015,8 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _toggleDontStopTheMusic() async {
     try {
-        final enabled =
-          _coreEvents.mediaSessionState.queue.autoplayEnabled;
-        await _coreBridge.setAutoplay(!enabled);
+      final enabled = _coreEvents.mediaSessionState.queue.autoplayEnabled;
+      await _coreBridge.setAutoplay(!enabled);
     } catch (_) {
       // Ignore playback command failures in shell-level controls.
     }
@@ -2341,12 +2299,15 @@ String _formatSeconds(double seconds) {
 }
 
 /// Mobile UI components
-class _MobilePlayerBar extends StatelessWidget {
+class _MobilePlayerBar extends StatefulWidget {
   final Widget currentTrackInfo;
   final PlayState playbackState;
   final double currentSeconds;
   final double maxSeconds;
+  final String trackTransitionKey;
   final Future<void> Function() onTogglePlayPause;
+  final Future<void> Function() onPrevious;
+  final Future<void> Function() onNext;
   final VoidCallback onOpenPlayerOverlay;
   final void Function(double upwardDelta, double viewportHeight)
   onPlayerOverlayDragUpdate;
@@ -2357,35 +2318,68 @@ class _MobilePlayerBar extends StatelessWidget {
     required this.playbackState,
     this.currentSeconds = 0,
     this.maxSeconds = 0,
+    required this.trackTransitionKey,
     required this.onTogglePlayPause,
+    required this.onPrevious,
+    required this.onNext,
     required this.onOpenPlayerOverlay,
     required this.onPlayerOverlayDragUpdate,
     required this.onPlayerOverlayDragEnd,
   });
 
   @override
+  State<_MobilePlayerBar> createState() => _MobilePlayerBarState();
+}
+
+class _MobilePlayerBarState extends State<_MobilePlayerBar> {
+  bool _isChangingTrack = false;
+  bool _isNextTrack = true;
+
+  // Serializes swipe commands until the transport command completes.
+  Future<void> _changeTrack({
+    required bool isNextTrack,
+    required Future<void> Function() change,
+  }) async {
+    if (_isChangingTrack) {
+      return;
+    }
+
+    setState(() {
+      _isChangingTrack = true;
+      _isNextTrack = isNextTrack;
+    });
+    try {
+      await change();
+    } finally {
+      if (mounted) {
+        setState(() => _isChangingTrack = false);
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
-    final bool isPlaying = playbackState == PlayState.playing;
+    final bool isPlaying = widget.playbackState == PlayState.playing;
     final bool isBusy =
-        playbackState == PlayState.buffering ||
-        playbackState == PlayState.seeking;
-    final double progress = maxSeconds > 0
-        ? (currentSeconds / maxSeconds).clamp(0.0, 1.0)
+        widget.playbackState == PlayState.buffering ||
+        widget.playbackState == PlayState.seeking;
+    final double progress = widget.maxSeconds > 0
+        ? (widget.currentSeconds / widget.maxSeconds).clamp(0.0, 1.0)
         : 0.0;
 
     return GestureDetector(
-      onTap: onOpenPlayerOverlay,
+      onTap: widget.onOpenPlayerOverlay,
       onVerticalDragUpdate: (DragUpdateDetails details) {
         if (details.delta.dy < 0) {
-          onPlayerOverlayDragUpdate(
+          widget.onPlayerOverlayDragUpdate(
             -details.delta.dy * 0.92,
             MediaQuery.sizeOf(context).height,
           );
         }
       },
       onVerticalDragEnd: (DragEndDetails details) {
-        onPlayerOverlayDragEnd(details.primaryVelocity ?? 0);
+        widget.onPlayerOverlayDragEnd(details.primaryVelocity ?? 0);
       },
       behavior: HitTestBehavior.opaque,
       child: Container(
@@ -2399,25 +2393,72 @@ class _MobilePlayerBar extends StatelessWidget {
         ),
         child: Stack(
           children: <Widget>[
-            Positioned.fill(
-              left: 64,
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: FractionallySizedBox(
-                  widthFactor: progress,
-                  heightFactor: 1,
-                  child: ColoredBox(color: colors.selection),
-                ),
-              ),
-            ),
             Row(
               children: <Widget>[
-                currentTrackInfo,
+                Expanded(
+                  child: Dismissible(
+                    key: const ValueKey<String>('mobile-player-track-swipe'),
+                    direction: _isChangingTrack
+                        ? DismissDirection.none
+                        : DismissDirection.horizontal,
+                    resizeDuration: null,
+                    movementDuration: const Duration(milliseconds: 220),
+                    confirmDismiss: (DismissDirection direction) async {
+                      final bool isNextTrack =
+                          direction == DismissDirection.endToStart;
+                      await _changeTrack(
+                        isNextTrack: isNextTrack,
+                        change: isNextTrack ? widget.onNext : widget.onPrevious,
+                      );
+                      return false;
+                    },
+                    child: Stack(
+                      children: <Widget>[
+                        Positioned.fill(
+                          left: 64,
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: FractionallySizedBox(
+                              widthFactor: progress,
+                              heightFactor: 1,
+                              child: ColoredBox(color: colors.selection),
+                            ),
+                          ),
+                        ),
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 220),
+                          // The incoming track travels opposite to the swipe direction.
+                          transitionBuilder:
+                              (Widget child, Animation<double> animation) {
+                                final bool isIncoming =
+                                    child.key ==
+                                    ValueKey<String>(widget.trackTransitionKey);
+                                final double direction = _isNextTrack ? 1 : -1;
+                                return SlideTransition(
+                                  position: Tween<Offset>(
+                                    begin: Offset(
+                                      isIncoming ? direction : -direction,
+                                      0,
+                                    ),
+                                    end: Offset.zero,
+                                  ).animate(animation),
+                                  child: child,
+                                );
+                              },
+                          child: KeyedSubtree(
+                            key: ValueKey<String>(widget.trackTransitionKey),
+                            child: widget.currentTrackInfo,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
                 IconButton(
                   onPressed: isBusy
                       ? null
                       : () {
-                          onTogglePlayPause();
+                          widget.onTogglePlayPause();
                         },
                   icon: isBusy
                       ? SizedBox(
@@ -2470,55 +2511,50 @@ class _MobileCurrentTrackInfo extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
 
-    return Expanded(
-      child: Row(
-        children: <Widget>[
-          Container(
-            width: 64,
-            height: 64,
-            color: colors.bgTertiary,
-            child: ClipRRect(
-              borderRadius: const BorderRadius.horizontal(
-                left: Radius.circular(11),
-              ),
-              child: trackCoverUrl != null
-                  ? MediaImage(
-                      source: trackCoverUrl!,
-                      fit: BoxFit.cover,
-                      fallback: Icon(
-                        Icons.music_note_outlined,
-                        color: colors.textSecondary,
-                      ),
-                    )
-                  : Icon(
+    return Row(
+      children: <Widget>[
+        Container(
+          width: 64,
+          height: 64,
+          color: colors.bgTertiary,
+          child: ClipRRect(
+            borderRadius: const BorderRadius.horizontal(
+              left: Radius.circular(11),
+            ),
+            child: trackCoverUrl != null
+                ? MediaImage(
+                    source: trackCoverUrl!,
+                    fit: BoxFit.cover,
+                    fallback: Icon(
                       Icons.music_note_outlined,
                       color: colors.textSecondary,
                     ),
-            ),
+                  )
+                : Icon(Icons.music_note_outlined, color: colors.textSecondary),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  trackTitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: colors.textPrimary, fontSize: 13),
-                ),
-                Text(
-                  trackSubtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: colors.textSecondary, fontSize: 11),
-                ),
-              ],
-            ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                trackTitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: colors.textPrimary, fontSize: 13),
+              ),
+              Text(
+                trackSubtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: colors.textSecondary, fontSize: 11),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
