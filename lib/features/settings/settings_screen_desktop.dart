@@ -5,6 +5,32 @@ import '../core/core_models.dart';
 import 'settings_log_view.dart';
 
 const double _desktopSettingsControlWidth = 280;
+const BoxConstraints _desktopSettingsFieldConstraints = BoxConstraints.tightFor(
+  height: 36,
+);
+const BoxConstraints _desktopSettingsFieldIconConstraints = BoxConstraints(
+  minWidth: 38,
+  minHeight: 36,
+);
+
+InputDecoration _desktopSettingsFieldDecoration({
+  required MashinColors colors,
+  required IconData icon,
+  String? suffixText,
+}) => InputDecoration(
+  isDense: true,
+  filled: true,
+  fillColor: colors.bgSecondary,
+  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+  constraints: _desktopSettingsFieldConstraints,
+  prefixIcon: Icon(icon, size: 18),
+  prefixIconConstraints: _desktopSettingsFieldIconConstraints,
+  suffixText: suffixText,
+  border: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(6),
+    borderSide: BorderSide.none,
+  ),
+);
 
 class SettingsScreenDesktop extends StatelessWidget {
   const SettingsScreenDesktop({
@@ -29,14 +55,13 @@ class SettingsScreenDesktop extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
-    return Scaffold(
-      backgroundColor: colors.bgPrimary,
-      body: SafeArea(
-        child: DefaultTabController(
-          length: 2,
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
+    return ColoredBox(
+      color: colors.bgPrimary,
+      child: DefaultTabController(
+        length: 2,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(32, 32, 32, 0),
+          child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
@@ -86,7 +111,6 @@ class SettingsScreenDesktop extends StatelessWidget {
             ),
           ),
         ),
-      ),
     );
   }
 }
@@ -106,24 +130,28 @@ class _DesktopLogTab extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         const SizedBox(height: 12),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Row(
-            children: <Widget>[
-              Text('Log-Level', style: Theme.of(context).textTheme.titleMedium),
-              const Spacer(),
-              SizedBox(
-                width: _desktopSettingsControlWidth,
-                child: SettingsLogLevelField(
-                  logLevel: logLevel,
-                  onChanged: onLogLevelChanged,
-                ),
+        Row(
+          children: <Widget>[
+            Text('Log-Level', style: Theme.of(context).textTheme.titleMedium),
+            const Spacer(),
+            SizedBox(
+              width: _desktopSettingsControlWidth,
+              child: SettingsLogLevelField(
+                logLevel: logLevel,
+                onChanged: onLogLevelChanged,
+                shouldShowLabel: false,
+                shouldUseCompactFieldLayout: true,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
         const SizedBox(height: 12),
-        const Expanded(child: SettingsLogOutput()),
+        const Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(bottom: 8),
+            child: SettingsLogOutput(),
+          ),
+        ),
       ],
     );
   }
@@ -160,9 +188,9 @@ class _DesktopSettingsForm extends StatelessWidget {
               child: TextFormField(
                 initialValue: musicAssistantUrl,
                 readOnly: true,
-                decoration: const InputDecoration(
-                  labelText: 'Server-URL',
-                  prefixIcon: Icon(Icons.dns_outlined),
+                decoration: _desktopSettingsFieldDecoration(
+                  colors: colors,
+                  icon: Icons.dns_outlined,
                 ),
               ),
             ),
@@ -181,10 +209,10 @@ class _DesktopSettingsForm extends StatelessWidget {
                 controller: cacheSizeController,
                 keyboardType: TextInputType.number,
                 onChanged: onCacheSizeChanged,
-                decoration: const InputDecoration(
-                  labelText: 'Cache-Größe',
+                decoration: _desktopSettingsFieldDecoration(
+                  colors: colors,
+                  icon: Icons.storage_outlined,
                   suffixText: 'MB',
-                  prefixIcon: Icon(Icons.storage_outlined),
                 ),
               ),
             ),

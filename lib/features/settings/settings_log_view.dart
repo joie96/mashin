@@ -9,18 +9,43 @@ class SettingsLogLevelField extends StatelessWidget {
     super.key,
     required this.logLevel,
     required this.onChanged,
+    this.shouldShowLabel = true,
+    this.shouldUseCompactFieldLayout = false,
   });
 
   final LogLevelPreference logLevel;
   final ValueChanged<LogLevelPreference> onChanged;
+  final bool shouldShowLabel;
+  final bool shouldUseCompactFieldLayout;
 
   @override
   Widget build(BuildContext context) {
     return DropdownButtonFormField<LogLevelPreference>(
       initialValue: logLevel,
-      decoration: const InputDecoration(
-        labelText: 'Log-Level',
-        prefixIcon: Icon(Icons.tune_outlined),
+      isDense: shouldUseCompactFieldLayout,
+      decoration: InputDecoration(
+        labelText: shouldShowLabel ? 'Log-Level' : null,
+        isDense: shouldUseCompactFieldLayout,
+        filled: shouldUseCompactFieldLayout,
+        fillColor: shouldUseCompactFieldLayout
+            ? context.mashinColors.bgSecondary
+            : null,
+        contentPadding: shouldUseCompactFieldLayout
+            ? const EdgeInsets.symmetric(horizontal: 12, vertical: 0)
+            : null,
+        constraints: shouldUseCompactFieldLayout
+            ? const BoxConstraints.tightFor(height: 36)
+            : null,
+        prefixIconConstraints: shouldUseCompactFieldLayout
+            ? const BoxConstraints(minWidth: 38, minHeight: 36)
+            : null,
+        prefixIcon: const Icon(Icons.tune_outlined, size: 18),
+        border: shouldUseCompactFieldLayout
+            ? OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+                borderSide: BorderSide.none,
+              )
+            : null,
       ),
       items: const <DropdownMenuItem<LogLevelPreference>>[
         DropdownMenuItem(value: LogLevelPreference.trace, child: Text('Trace')),
