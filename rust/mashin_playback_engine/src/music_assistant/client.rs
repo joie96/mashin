@@ -435,6 +435,12 @@ impl MusicAssistantClient {
         .map(|_| ())
     }
 
+    pub(crate) async fn player_stop(&self, player_id: &PlayerId) -> Result<(), String> {
+        self.execute_command::<Value>("players/cmd/stop", json!({ "player_id": player_id }))
+            .await
+            .map(|_| ())
+    }
+
     // HTTP command transport.
     async fn execute_command<Response>(
         &self,

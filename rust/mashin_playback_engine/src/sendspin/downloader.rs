@@ -1,3 +1,8 @@
+//! Owns the two Sendspin download slots and their encoded caches.
+//!
+//! Public commands are serialized through a dedicated worker thread. Its I/O tasks publish
+//! cache, stream, and generated connection state through shared synchronization primitives.
+
 use super::connection::{audio_format_from_stream, player_support};
 use super::models::{
     CacheItemState, SendspinAudioCodec, SendspinDownloadPlan, SendspinDownloadPlanItem,
@@ -10,11 +15,11 @@ use crate::music_assistant::models::identifiers::{AccessToken, PlayerId, QueueId
 use crate::music_assistant::models::player::MusicAssistantPlayer;
 use crate::music_assistant::models::queue::{CacheStatus, MusicAssistantQueue};
 use ::sendspin::audio::AudioFormat;
-use ::sendspin::protocol::client::{ConnectionGuard, Controller};
+use ::sendspin::protocol::client::{ConnectionGuard, Controller, WsSender};
 use ::sendspin::protocol::messages::{GoodbyeReason, Message, PlayerState};
 use ::sendspin::ProtocolClientBuilder;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
@@ -24,12 +29,13 @@ static LOGGER: Logger = Logger::new(module_path!());
 
 const CACHE_COMPLETION_TOLERANCE_MILLIS: u64 = 500;
 const CACHE_DOWNLOAD_PAUSE_PERCENT: usize = 95;
-const DOWNLOAD_KEEPALIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(20);
-const DOWNLOAD_KEEPALIVE_PLAY_DURATION: std::time::Duration = std::time::Duration::from_secs(1);
+const CACHE_DOWNLOAD_RESUME_PERCENT: usize = 90;
+const CACHE_PAUSE_KEEPALIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(20);
+const CACHE_PAUSE_KEEPALIVE_PLAY_DURATION: std::time::Duration = std::time::Duration::from_secs(1);
+const CONNECTION_LIVENESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
+const CONNECTION_LIVENESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const RESUME_SEEK_PREROLL_MILLIS: u64 = 3_000;
 const SEEK_REPLACEMENT_STREAM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-const DOWNLOAD_CONNECTION_INACTIVITY_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(20);
 const DOWNLOAD_QUEUE_REGISTRATION_ATTEMPTS: usize = 4;
 const DOWNLOAD_QUEUE_REGISTRATION_RETRY_DELAY: std::time::Duration =
     std::time::Duration::from_secs(2);
@@ -56,6 +62,35 @@ pub(crate) struct ActiveDownloadStatus {
     pub(crate) state: CacheStatus,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DownloaderConnectionStatus {
+    Ready,
+    Lost,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DownloaderConnectionEvent {
+    pub(crate) generation: u64,
+    pub(crate) status: DownloaderConnectionStatus,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DownloaderSlotConnectionState {
+    generation: u64,
+    is_transport_connected: bool,
+    is_stream_active: bool,
+}
+
+impl DownloaderSlotConnectionState {
+    fn disconnected(generation: u64) -> Self {
+        Self {
+            generation,
+            is_transport_connected: false,
+            is_stream_active: false,
+        }
+    }
+}
+
 struct SendspinDownloaderWorker {
     runtime: Runtime,
     config: Option<SendspinDownloaderConfig>,
@@ -64,19 +99,24 @@ struct SendspinDownloaderWorker {
     caches: crate::cache::store::EncodedCaches,
     cache_change_signal: crate::cache::store::CacheChangeSignal,
     retention_policy: Arc<Mutex<CacheRetentionPolicy>>,
+    capacity_aborted_content_keys: Arc<Mutex<HashSet<String>>>,
     cache_sequence: Arc<std::sync::atomic::AtomicU64>,
     download_window_refresh: Arc<AtomicBool>,
     download_status_refresh: Arc<AtomicBool>,
-    connection_lost: Arc<AtomicBool>,
-    connection_ready: Arc<AtomicBool>,
-    connection_generation: Arc<std::sync::atomic::AtomicU64>,
+    connection_event: Arc<Mutex<Option<DownloaderConnectionEvent>>>,
+    connection_generation: Arc<AtomicU64>,
+    // Updated by I/O tasks and used to validate a generated Ready event.
+    slot_connection_states: [Arc<Mutex<DownloaderSlotConnectionState>>; 2],
     slots: crate::cache::store::DownloadSlots,
     player_ids: [Option<PlayerId>; 2],
     queue_ids: [Option<QueueId>; 2],
     controllers: Arc<Mutex<[Option<Controller>; 2]>>,
     guards: [Option<ConnectionGuard>; 2],
     io_tasks: [Option<JoinHandle<()>>; 2],
-    keepalive_tasks: [Option<JoinHandle<()>>; 2],
+    liveness_tasks: [Option<JoinHandle<()>>; 2],
+    cache_pause_keepalive_tasks: [Option<JoinHandle<()>>; 2],
+    download_request_tasks: [Option<JoinHandle<()>>; 2],
+    downloads_paused_for_capacity: [bool; 2],
     pending_current_seek_seconds: Option<i64>,
 }
 
@@ -94,19 +134,26 @@ impl SendspinDownloaderWorker {
             caches: Arc::new(Mutex::new(HashMap::new())),
             cache_change_signal: crate::cache::store::new_cache_change_signal(),
             retention_policy: Arc::new(Mutex::new(CacheRetentionPolicy::default())),
+            capacity_aborted_content_keys: Arc::new(Mutex::new(HashSet::new())),
             cache_sequence: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             download_window_refresh: Arc::new(AtomicBool::new(false)),
             download_status_refresh: Arc::new(AtomicBool::new(false)),
-            connection_lost: Arc::new(AtomicBool::new(false)),
-            connection_ready: Arc::new(AtomicBool::new(false)),
-            connection_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            connection_event: Arc::new(Mutex::new(None)),
+            connection_generation: Arc::new(AtomicU64::new(0)),
+            slot_connection_states: [
+                Arc::new(Mutex::new(DownloaderSlotConnectionState::disconnected(0))),
+                Arc::new(Mutex::new(DownloaderSlotConnectionState::disconnected(0))),
+            ],
             slots: Arc::new(Mutex::new([None, None])),
             player_ids: [None, None],
             queue_ids: [None, None],
             controllers: Arc::new(Mutex::new([None, None])),
             guards: [None, None],
             io_tasks: [None, None],
-            keepalive_tasks: [None, None],
+            liveness_tasks: [None, None],
+            cache_pause_keepalive_tasks: [None, None],
+            download_request_tasks: [None, None],
+            downloads_paused_for_capacity: [false, false],
             pending_current_seek_seconds: None,
         }
     }
@@ -130,8 +177,6 @@ impl SendspinDownloaderWorker {
         {
             return Ok(());
         }
-        self.connect_slot(0)?;
-        self.connect_slot(1)?;
         let config = self
             .config
             .clone()
@@ -140,6 +185,13 @@ impl SendspinDownloaderWorker {
             &config.music_assistant_url,
             config.music_assistant_auth_token.clone(),
         );
+        let connection_generation = self.connection_generation.load(Ordering::Acquire);
+        if connection_generation > 0 {
+            self.runtime
+                .block_on(stop_previous_download_players(&client, &self.player_ids))?;
+        }
+        self.connect_slot(0)?;
+        self.connect_slot(1)?;
         let client_ids = [
             download_client_id(&config.client_id, 1),
             download_client_id(&config.client_id, 2),
@@ -152,6 +204,11 @@ impl SendspinDownloaderWorker {
             .block_on(resolve_download_queue_ids(&client, &player_ids))?;
         self.runtime
             .block_on(disable_download_queue_autoplay(&client, &queue_ids))?;
+        if !slots_are_ready(&self.slot_connection_states, connection_generation) {
+            return Err(
+                "Sendspin downloader transport disconnected during connection setup".to_string(),
+            );
+        }
         for slot_index in 0..2 {
             LOGGER.info(format!(
                 "Sendspin downloader slot {} connected: client ID {}, Music Assistant player ID {}, queue ID {}",
@@ -188,16 +245,16 @@ impl SendspinDownloaderWorker {
         let caches = Arc::clone(&self.caches);
         let states = Arc::clone(&self.cache_states);
         let cache_change_signal = Arc::clone(&self.cache_change_signal);
-        let retention_policy = Arc::clone(&self.retention_policy);
-        let controllers = Arc::clone(&self.controllers);
         let sequence = Arc::clone(&self.cache_sequence);
         let download_window_refresh = Arc::clone(&self.download_window_refresh);
         let download_status_refresh = Arc::clone(&self.download_status_refresh);
-        let connection_lost = Arc::clone(&self.connection_lost);
+        let connection_event = Arc::clone(&self.connection_event);
         let connection_generation = Arc::clone(&self.connection_generation);
         let task_connection_generation = connection_generation.load(Ordering::Acquire);
+        let slot_connection_state = Arc::clone(&self.slot_connection_states[slot_index]);
+        publish_slot_transport_connected(&slot_connection_state, task_connection_generation);
         let capacity = config.cache_bytes;
-        let (controller, guard, task) = self.runtime.block_on(async move {
+        let (controller, sender, guard, task) = self.runtime.block_on(async move {
             let client = ProtocolClientBuilder::builder()
                 .client_id(client_id)
                 .name(client_name)
@@ -223,6 +280,8 @@ impl SendspinDownloaderWorker {
                 .ok_or_else(|| "Sendspin server did not grant controller role".to_string())?;
             let mut messages = connection.messages;
             let mut audio = connection.audio;
+            let sender = connection.sender.clone();
+            // This task owns the stream-local reservation until it is completed, interrupted, or superseded.
             let task = tokio::spawn(async move {
                 let mut format = None;
                 let mut reservation = None;
@@ -234,19 +293,8 @@ impl SendspinDownloaderWorker {
                 let mut seek_gate_reported = false;
                 let mut first_chunk_reported = false;
                 let mut seek_replacement_deadline = None;
-                let mut last_received_at = tokio::time::Instant::now();
                 loop {
                     tokio::select! {
-                        _ = tokio::time::sleep_until(
-                            last_received_at + DOWNLOAD_CONNECTION_INACTIVITY_TIMEOUT,
-                        ) => {
-                            LOGGER.warn(format!(
-                                "Sendspin downloader connection inactive for {} seconds: slot {}; reconnecting",
-                                DOWNLOAD_CONNECTION_INACTIVITY_TIMEOUT.as_secs(),
-                                slot_index + 1
-                            ));
-                            break;
-                        }
                         _ = async {
                             match seek_replacement_deadline {
                                 Some(deadline) => tokio::time::sleep_until(deadline).await,
@@ -281,9 +329,13 @@ impl SendspinDownloaderWorker {
                         }
                         message = messages.recv() => {
                             let Some(message) = message else { break; };
-                            last_received_at = tokio::time::Instant::now();
                             match message {
                                 Message::StreamStart(start) => {
+                                    publish_slot_stream_state(
+                                        &slot_connection_state,
+                                        task_connection_generation,
+                                        true,
+                                    );
                                     format = start.player.as_ref().and_then(|player| {
                                         audio_format_from_stream(
                                             &player.codec,
@@ -333,6 +385,11 @@ impl SendspinDownloaderWorker {
                                     }
                                 }
                                 Message::StreamEnd(_) => {
+                                    publish_slot_stream_state(
+                                        &slot_connection_state,
+                                        task_connection_generation,
+                                        false,
+                                    );
                                     let mut released_reservation = false;
                                     if let Some(value) = reservation.as_ref() {
                                         if crate::cache::store::slot_reservation_is_current(
@@ -389,6 +446,11 @@ impl SendspinDownloaderWorker {
                                     last_timestamp = None;
                                 }
                                 Message::StreamClear(_) => {
+                                    publish_slot_stream_state(
+                                        &slot_connection_state,
+                                        task_connection_generation,
+                                        false,
+                                    );
                                     LOGGER.warn(format!("stream cleared on slot {}", slot_index + 1));
                                     if let Some(value) = reservation.as_ref() {
                                         if crate::cache::store::slot_reservation_is_current(
@@ -417,7 +479,6 @@ impl SendspinDownloaderWorker {
                         }
                         chunk = audio.recv() => {
                             let Some(chunk) = chunk else { break; };
-                            last_received_at = tokio::time::Instant::now();
                             let (Some(reservation), Some(format)) = (reservation.as_ref(), format.as_ref()) else { continue; };
                             let duration = last_timestamp
                                 .map(|previous| chunk.timestamp.saturating_sub(previous).max(0) as u64 / 1_000)
@@ -432,39 +493,6 @@ impl SendspinDownloaderWorker {
                                     ));
                                     seek_gate_reported = true;
                                 }
-                                continue;
-                            }
-                            if crate::cache::store::slot_reservation_is_current(&slots, slot_index, reservation) {
-                                let policy = retention_policy.lock().map(|policy| policy.clone()).unwrap_or_default();
-                                let evicted = crate::cache::store::cache_evict_to_fit(
-                                    &caches,
-                                    &policy,
-                                    capacity,
-                                    chunk.data.len(),
-                                );
-                                if !evicted.is_empty() {
-                                    LOGGER.trace(format!(
-                                        "cache eviction on slot {}: {} item(s) for {} incoming bytes",
-                                        slot_index + 1,
-                                        evicted.len(),
-                                        chunk.data.len()
-                                    ));
-                                }
-                                stop_evicted_slot_downloads(
-                                    Arc::clone(&slots),
-                                    Arc::clone(&controllers),
-                                    evicted.clone(),
-                                )
-                                .await;
-                                if let Ok(mut states) = states.lock() {
-                                    for cache_content_key in evicted {
-                                        if let Some(state) = states.get_mut(&cache_content_key) {
-                                            state.state = CacheStatus::Evicted;
-                                        }
-                                    }
-                                }
-                            }
-                            if !crate::cache::store::slot_reservation_is_current(&slots, slot_index, reservation) {
                                 continue;
                             }
                             let result = crate::cache::store::cache_append_encoded_chunk(
@@ -536,11 +564,12 @@ impl SendspinDownloaderWorker {
                                 }
                             } else if !hard_limit_reported {
                                 LOGGER.trace(format!(
-                                    "cache capacity reached: slot {}, cache key {}, rejecting further chunks",
+                                    "cache capacity reached before soft-limit handling: slot {}, cache key {}",
                                     slot_index + 1,
                                     reservation.cache_content_key
                                 ));
                                 hard_limit_reported = true;
+                                download_window_refresh.store(true, Ordering::Release);
                             }
                         }
                     }
@@ -559,22 +588,37 @@ impl SendspinDownloaderWorker {
                         }
                     }
                 }
+                publish_slot_transport_disconnected(
+                    &slot_connection_state,
+                    task_connection_generation,
+                );
                 if connection_generation.load(Ordering::Acquire) == task_connection_generation {
                     LOGGER.trace(format!(
                         "Sendspin downloader connection ended unexpectedly: slot {}, generation {}",
                         slot_index + 1,
                         task_connection_generation
                     ));
-                    connection_lost.store(true, Ordering::Release);
+                    publish_connection_event(
+                        &connection_event,
+                        task_connection_generation,
+                        DownloaderConnectionStatus::Lost,
+                    );
                 }
             });
-            Ok::<_, String>((controller, connection.guard, task))
+            Ok::<_, String>((controller, sender, connection.guard, task))
         })?;
         if let Ok(mut controllers) = self.controllers.lock() {
             controllers[slot_index] = Some(controller);
         }
         self.guards[slot_index] = Some(guard);
         self.io_tasks[slot_index] = Some(task);
+        self.liveness_tasks[slot_index] = Some(self.runtime.spawn(run_slot_liveness_check(
+            sender,
+            Arc::clone(&self.connection_event),
+            Arc::clone(&self.connection_generation),
+            task_connection_generation,
+            slot_index,
+        )));
         Ok(())
     }
 
@@ -595,22 +639,21 @@ impl SendspinDownloaderWorker {
             .map(|slots| slots.iter().flatten().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
         for reservation in active_reservations {
-            reservation
-                .warm_keepalive_cancel
-                .store(true, Ordering::Relaxed);
             crate::cache::store::cache_discard_incomplete(
                 &self.caches,
                 &reservation.cache_content_key,
             );
         }
         crate::cache::store::notify_cache_changed(&self.cache_change_signal);
+        self.cancel_cache_pause_keepalives();
+        self.cancel_download_request_tasks();
         self.runtime.block_on(async {
             for task in self.io_tasks.iter_mut() {
                 if let Some(task) = task.take() {
                     task.abort();
                 }
             }
-            for task in self.keepalive_tasks.iter_mut() {
+            for task in self.liveness_tasks.iter_mut() {
                 if let Some(task) = task.take() {
                     task.abort();
                 }
@@ -627,6 +670,7 @@ impl SendspinDownloaderWorker {
         if let Ok(mut slots) = self.slots.lock() {
             *slots = [None, None];
         }
+        self.downloads_paused_for_capacity = [false, false];
         self.player_ids = [None, None];
         self.queue_ids = [None, None];
     }
@@ -655,7 +699,13 @@ impl SendspinDownloaderWorker {
     fn pause_for_reconnect(&mut self) {
         LOGGER.warn("pausing Sendspin downloads for reconnection");
         self.connection_generation.fetch_add(1, Ordering::AcqRel);
-        self.cancel_warm_keepalives();
+        self.cancel_liveness_checks();
+        self.cancel_cache_pause_keepalives();
+        self.cancel_download_request_tasks();
+        let connection_generation = self.connection_generation.load(Ordering::Acquire);
+        for slot_connection_state in &self.slot_connection_states {
+            reset_slot_connection_state(slot_connection_state, connection_generation);
+        }
         let reservations = self
             .slots
             .lock()
@@ -693,13 +743,13 @@ impl SendspinDownloaderWorker {
         if let Ok(mut slots) = self.slots.lock() {
             *slots = [None, None];
         }
-        self.player_ids = [None, None];
+        self.downloads_paused_for_capacity = [false, false];
         self.queue_ids = [None, None];
+        // Keep these identities until connect stops their server-side queue flows.
     }
 
     // Download plan configuration.
     pub(crate) fn apply_download_plan(&mut self, plan: SendspinDownloadPlan) -> Result<(), String> {
-        self.cancel_warm_keepalives();
         LOGGER.debug(format!(
             "downloader plan accepted: version {}, {} items",
             plan.version,
@@ -707,6 +757,9 @@ impl SendspinDownloaderWorker {
         ));
         if let Ok(mut states) = self.cache_states.lock() {
             states.clear();
+        }
+        if let Ok(mut content_keys) = self.capacity_aborted_content_keys.lock() {
+            content_keys.clear();
         }
         for item in &plan.items {
             if let Ok(mut states) = self.cache_states.lock() {
@@ -743,29 +796,34 @@ impl SendspinDownloaderWorker {
         recently_played: Vec<String>,
     ) {
         let next = upcoming.first().cloned();
-        let mut protected = current.iter().cloned().collect::<Vec<_>>();
-        if let Some(next) = next.as_ref() {
-            protected.push(next.clone());
-        }
+        let last = recently_played.last().cloned();
         if let Ok(mut policy) = self.retention_policy.lock() {
             *policy = CacheRetentionPolicy {
                 current,
-                protected,
-                prefetch: upcoming.into_iter().skip(1).collect(),
+                next,
+                last,
+                upcoming: upcoming.into_iter().skip(1).collect(),
                 recently_played,
             };
         }
-        self.evict_to_capacity(0);
     }
 
     pub(crate) fn ensure_download_window(&mut self, content_keys: &[String]) -> Result<(), String> {
-        self.evict_to_capacity(0);
-        self.pause_downloads_near_capacity();
+        self.resume_downloads_below_capacity();
+        if self.enforce_soft_cache_capacity() {
+            return Ok(());
+        }
         let Some(plan) = self.plan.as_ref() else {
             return Ok(());
         };
         let candidates = content_keys
             .iter()
+            .filter(|content_key| {
+                self.capacity_aborted_content_keys
+                    .lock()
+                    .map(|aborted| !aborted.contains(*content_key))
+                    .unwrap_or(false)
+            })
             .filter_map(|content_key| {
                 plan.items
                     .iter()
@@ -806,13 +864,6 @@ impl SendspinDownloaderWorker {
         }
 
         for item in candidates {
-            if cache_reaches_download_pause_threshold(
-                crate::cache::store::cache_total_bytes(&self.caches),
-                config.cache_bytes,
-            ) {
-                self.pause_downloads_near_capacity();
-                break;
-            }
             if crate::cache::store::cache_complete_duration_millis(
                 &self.caches,
                 &item.cache_content_key,
@@ -872,9 +923,6 @@ impl SendspinDownloaderWorker {
         }
 
         for (slot_index, reservation) in &preempted {
-            reservation
-                .warm_keepalive_cancel
-                .store(true, Ordering::Relaxed);
             crate::cache::store::cache_discard_incomplete(
                 &self.caches,
                 &reservation.cache_content_key,
@@ -894,6 +942,9 @@ impl SendspinDownloaderWorker {
         crate::cache::store::notify_cache_changed(&self.cache_change_signal);
 
         let controllers = Arc::clone(&self.controllers);
+        for (slot_index, _) in &preempted {
+            self.cancel_cache_pause_keepalive(*slot_index);
+        }
         self.runtime.block_on(async {
             for (slot_index, _) in preempted {
                 let controller = controllers
@@ -907,10 +958,45 @@ impl SendspinDownloaderWorker {
         });
     }
 
-    fn evict_to_capacity(&mut self, incoming_bytes: usize) {
-        let Some(config) = self.config.as_ref() else {
-            return;
+    // Cache-capacity pause and resume.
+    fn enforce_soft_cache_capacity(&mut self) -> bool {
+        let Some(cache_capacity_bytes) = self.config.as_ref().map(|config| config.cache_bytes)
+        else {
+            return false;
         };
+        if !cache_reaches_download_pause_threshold(
+            crate::cache::store::cache_total_bytes(&self.caches),
+            cache_capacity_bytes,
+        ) {
+            return false;
+        }
+
+        self.pause_downloads_near_capacity();
+        let current = self
+            .retention_policy
+            .lock()
+            .ok()
+            .and_then(|policy| policy.current.clone());
+        let Some(current) = current else {
+            return true;
+        };
+        let is_current_downloading = self
+            .slots
+            .lock()
+            .map(|slots| {
+                slots
+                    .iter()
+                    .flatten()
+                    .any(|slot| slot.cache_content_key == current)
+            })
+            .unwrap_or(false);
+        if !is_current_downloading {
+            return true;
+        }
+
+        let target_capacity_bytes = cache_capacity_bytes
+            .saturating_mul(CACHE_DOWNLOAD_RESUME_PERCENT)
+            .saturating_div(100);
         let policy = self
             .retention_policy
             .lock()
@@ -919,22 +1005,52 @@ impl SendspinDownloaderWorker {
         let evicted = crate::cache::store::cache_evict_to_fit(
             &self.caches,
             &policy,
-            config.cache_bytes,
-            incoming_bytes,
+            target_capacity_bytes,
+            &current,
+            0,
         );
-        if !evicted.is_empty() {
-            let slots = Arc::clone(&self.slots);
-            let controllers = Arc::clone(&self.controllers);
-            self.runtime.spawn(stop_evicted_slot_downloads(
-                slots,
-                controllers,
-                evicted.clone(),
-            ));
+        self.abort_evicted_downloads(evicted);
+        true
+    }
+
+    fn abort_evicted_downloads(&mut self, evicted_content_keys: Vec<String>) {
+        if evicted_content_keys.is_empty() {
+            return;
+        }
+        let slot_indexes = self
+            .slots
+            .lock()
+            .map(|slots| {
+                slots
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(slot_index, reservation)| {
+                        reservation
+                            .as_ref()
+                            .filter(|value| evicted_content_keys.contains(&value.cache_content_key))
+                            .map(|_| slot_index)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for slot_index in slot_indexes {
+            self.cancel_cache_pause_keepalive(slot_index);
+        }
+        let slots = Arc::clone(&self.slots);
+        let controllers = Arc::clone(&self.controllers);
+        self.runtime.block_on(stop_evicted_slot_downloads(
+            slots,
+            controllers,
+            evicted_content_keys.clone(),
+        ));
+        if let Ok(mut aborted) = self.capacity_aborted_content_keys.lock() {
+            aborted.extend(evicted_content_keys.iter().cloned());
         }
         if let Ok(mut states) = self.cache_states.lock() {
-            for cache_content_key in evicted {
+            for cache_content_key in evicted_content_keys {
                 if let Some(state) = states.get_mut(&cache_content_key) {
                     state.state = CacheStatus::Evicted;
+                    state.cached_duration_millis = 0;
                 }
             }
         }
@@ -956,11 +1072,19 @@ impl SendspinDownloaderWorker {
             .lock()
             .map(|slots| slots.clone())
             .unwrap_or([None, None]);
+        let current = self
+            .retention_policy
+            .lock()
+            .ok()
+            .and_then(|policy| policy.current.clone());
         for (slot_index, reservation) in reservations.iter().enumerate() {
             let Some(reservation) = reservation else {
                 continue;
             };
-            if self.keepalive_tasks[slot_index].is_some() {
+            if current.as_deref() == Some(reservation.cache_content_key.as_str()) {
+                continue;
+            }
+            if self.downloads_paused_for_capacity[slot_index] {
                 continue;
             }
             let controller = self
@@ -971,14 +1095,10 @@ impl SendspinDownloaderWorker {
             let Some(controller) = controller else {
                 continue;
             };
-            let cancel = Arc::clone(&reservation.warm_keepalive_cancel);
             let cache_content_key = reservation.cache_content_key.clone();
-            let lease = reservation.clone();
-            let slots = Arc::clone(&self.slots);
-            self.keepalive_tasks[slot_index] = Some(self.runtime.spawn(async move {
-                if !warm_keepalive_is_current(&slots, slot_index, &lease) {
-                    return;
-                }
+            self.downloads_paused_for_capacity[slot_index] = true;
+            // Music Assistant expires a paused queue; briefly resume and pause it to retain the server-side stream.
+            self.cache_pause_keepalive_tasks[slot_index] = Some(self.runtime.spawn(async move {
                 if controller.pause().await.is_err() {
                     return;
                 }
@@ -988,42 +1108,90 @@ impl SendspinDownloaderWorker {
                     cache_content_key
                 ));
                 loop {
-                    tokio::time::sleep(DOWNLOAD_KEEPALIVE_INTERVAL).await;
-                    if cancel.load(Ordering::Relaxed)
-                        || !warm_keepalive_is_current(&slots, slot_index, &lease)
-                    {
-                        break;
-                    }
+                    tokio::time::sleep(CACHE_PAUSE_KEEPALIVE_INTERVAL).await;
                     if controller.play().await.is_err() {
-                        break;
+                        return;
                     }
-                    tokio::time::sleep(DOWNLOAD_KEEPALIVE_PLAY_DURATION).await;
-                    if cancel.load(Ordering::Relaxed)
-                        || !warm_keepalive_is_current(&slots, slot_index, &lease)
-                    {
-                        break;
-                    }
+                    tokio::time::sleep(CACHE_PAUSE_KEEPALIVE_PLAY_DURATION).await;
                     if controller.pause().await.is_err() {
-                        break;
+                        return;
                     }
+                    LOGGER.trace(format!(
+                        "cache-pause keepalive sent: slot {}",
+                        slot_index + 1
+                    ));
                 }
             }));
         }
     }
 
-    fn cancel_warm_keepalives(&mut self) {
-        if let Ok(slots) = self.slots.lock() {
-            for reservation in slots.iter().flatten() {
-                reservation
-                    .warm_keepalive_cancel
-                    .store(true, Ordering::Relaxed);
+    fn resume_downloads_below_capacity(&mut self) {
+        let Some(config) = self.config.as_ref() else {
+            return;
+        };
+        if crate::cache::store::cache_total_bytes(&self.caches).saturating_mul(100)
+            >= config
+                .cache_bytes
+                .saturating_mul(CACHE_DOWNLOAD_RESUME_PERCENT)
+        {
+            return;
+        }
+        for slot_index in 0..self.downloads_paused_for_capacity.len() {
+            if !self.downloads_paused_for_capacity[slot_index] {
+                continue;
+            }
+            self.downloads_paused_for_capacity[slot_index] = false;
+            if let Some(task) = self.cache_pause_keepalive_tasks[slot_index].take() {
+                task.abort();
+            }
+            let controller = self
+                .controllers
+                .lock()
+                .ok()
+                .and_then(|controllers| controllers[slot_index].clone());
+            if let Some(controller) = controller {
+                self.runtime.spawn(async move {
+                    let _ = controller.play().await;
+                });
             }
         }
-        for task in self.keepalive_tasks.iter_mut() {
+    }
+
+    fn cancel_liveness_checks(&mut self) {
+        for task in self.liveness_tasks.iter_mut() {
             if let Some(task) = task.take() {
                 task.abort();
             }
         }
+    }
+
+    fn cancel_cache_pause_keepalives(&mut self) {
+        for slot_index in 0..self.cache_pause_keepalive_tasks.len() {
+            self.cancel_cache_pause_keepalive(slot_index);
+        }
+    }
+
+    fn cancel_cache_pause_keepalive(&mut self, slot_index: usize) {
+        self.downloads_paused_for_capacity[slot_index] = false;
+        if let Some(task) = self.cache_pause_keepalive_tasks[slot_index].take() {
+            task.abort();
+        }
+    }
+
+    // Background task coordination.
+    fn cancel_download_request_tasks(&mut self) {
+        let tasks = self
+            .download_request_tasks
+            .iter_mut()
+            .filter_map(Option::take)
+            .collect::<Vec<_>>();
+        // Await cancellation so stale requests cannot issue a seek after the reconnect resets slot ownership.
+        self.runtime.block_on(async {
+            for task in tasks {
+                task.abort();
+                let _ = task.await;
+            }
+        });
     }
 
     // Download-slot startup.
@@ -1033,6 +1201,9 @@ impl SendspinDownloaderWorker {
         item: &SendspinDownloadPlanItem,
         config: &SendspinDownloaderConfig,
     ) -> Result<(), String> {
+        if let Some(task) = self.download_request_tasks[slot_index].take() {
+            task.abort();
+        }
         if crate::cache::store::cache_complete_duration_millis(
             &self.caches,
             item.cache_content_key.as_str(),
@@ -1089,7 +1260,6 @@ impl SendspinDownloaderWorker {
                     slot_index + 1,
                     self.cache_sequence.fetch_add(1, Ordering::Relaxed)
                 ),
-                warm_keepalive_cancel: Arc::new(AtomicBool::new(false)),
             };
             slots[slot_index] = Some(reservation.clone());
             reservation
@@ -1133,17 +1303,36 @@ impl SendspinDownloaderWorker {
         let cache_change_signal = Arc::clone(&self.cache_change_signal);
         let states = Arc::clone(&self.cache_states);
         let download_window_refresh = Arc::clone(&self.download_window_refresh);
-        let connection_lost = Arc::clone(&self.connection_lost);
+        let connection_event = Arc::clone(&self.connection_event);
         let connection_generation = Arc::clone(&self.connection_generation);
         let request_connection_generation = connection_generation.load(Ordering::Acquire);
         let append_after_seek = Arc::clone(&reservation.append_after_seek);
         let should_truncate_interrupted_cache =
             interrupted_resume_after_millis.is_some() && requested_seek_seconds.is_none();
-        self.runtime.spawn(async move {
+        // The generation and reservation checks make this request harmless after preemption or reconnection.
+        self.download_request_tasks[slot_index] = Some(self.runtime.spawn(async move {
+            if !download_request_is_current(
+                &slots,
+                slot_index,
+                &reservation,
+                &connection_generation,
+                request_connection_generation,
+            ) {
+                return;
+            }
             let client = MusicAssistantClient::new(&music_assistant_url, access_token);
             let result = client
                 .queue_play_media(queue_id, vec![media_item], "replace", false)
                 .await;
+            if !download_request_is_current(
+                &slots,
+                slot_index,
+                &reservation,
+                &connection_generation,
+                request_connection_generation,
+            ) {
+                return;
+            }
             if result.is_ok() {
                 LOGGER.trace(format!(
                     "download requested: slot {}, queue ID {}, cache key {}",
@@ -1170,7 +1359,7 @@ impl SendspinDownloaderWorker {
                     );
                     report_connection_lost_if_current(
                         &connection_generation,
-                        &connection_lost,
+                        &connection_event,
                         request_connection_generation,
                         slot_index,
                         "player unavailable",
@@ -1188,9 +1377,27 @@ impl SendspinDownloaderWorker {
                 return;
             }
             if let Some(position) = resume_position_seconds {
+                if !download_request_is_current(
+                    &slots,
+                    slot_index,
+                    &reservation,
+                    &connection_generation,
+                    request_connection_generation,
+                ) {
+                    return;
+                }
                 if let Err(error) =
                     seek_download_player(&client, &controller, player_id, position).await
                 {
+                    if !download_request_is_current(
+                        &slots,
+                        slot_index,
+                        &reservation,
+                        &connection_generation,
+                        request_connection_generation,
+                    ) {
+                        return;
+                    }
                     LOGGER.error(format!("failed to resume interrupted download: {error}"));
                     // The audio player may still consume cached chunks while the retry is pending.
                     retain_interrupted_reservation(
@@ -1205,7 +1412,7 @@ impl SendspinDownloaderWorker {
                     // Signal the engine to recreate the controller before another resume attempt.
                     report_connection_lost_if_current(
                         &connection_generation,
-                        &connection_lost,
+                        &connection_event,
                         request_connection_generation,
                         slot_index,
                         "resume seek failure",
@@ -1219,7 +1426,6 @@ impl SendspinDownloaderWorker {
                         &reservation,
                     )
                 {
-                    // Preserve the crossing encoded chunk only after the replacement stream is ready.
                     crate::cache::store::cache_truncate_after_millis(
                         &caches,
                         &reservation.cache_content_key,
@@ -1234,7 +1440,7 @@ impl SendspinDownloaderWorker {
                 }
                 append_after_seek.store(true, Ordering::Release);
             }
-        });
+        }));
         Ok(())
     }
 
@@ -1254,6 +1460,7 @@ impl SendspinDownloaderWorker {
             .ok_or_else(|| {
                 "track is not assigned to an active Sendspin download slot".to_string()
             })?;
+        self.cancel_cache_pause_keepalive(slot_index);
         let reservation = {
             let mut slots = self
                 .slots
@@ -1262,7 +1469,6 @@ impl SendspinDownloaderWorker {
             let current = slots[slot_index]
                 .as_ref()
                 .ok_or_else(|| "Sendspin download slot reservation is unavailable".to_string())?;
-            current.warm_keepalive_cancel.store(true, Ordering::Relaxed);
             let replacement = crate::cache::store::DownloadSlotReservation {
                 cache_content_key: current.cache_content_key.clone(),
                 expected_duration_millis: current.expected_duration_millis,
@@ -1273,7 +1479,6 @@ impl SendspinDownloaderWorker {
                     slot_index + 1,
                     self.cache_sequence.fetch_add(1, Ordering::Relaxed)
                 ),
-                warm_keepalive_cancel: Arc::new(AtomicBool::new(false)),
             };
             slots[slot_index] = Some(replacement.clone());
             replacement
@@ -1355,11 +1560,9 @@ pub(crate) struct SendspinDownloader {
     download_plan: Arc<Mutex<Option<SendspinDownloadPlan>>>,
     cache_states: Arc<Mutex<HashMap<String, CacheItemState>>>,
     caches: crate::cache::store::EncodedCaches,
-    slots: crate::cache::store::DownloadSlots,
     download_window_refresh: Arc<AtomicBool>,
     download_status_refresh: Arc<AtomicBool>,
-    connection_lost: Arc<AtomicBool>,
-    connection_ready: Arc<AtomicBool>,
+    connection_event: Arc<Mutex<Option<DownloaderConnectionEvent>>>,
     cache_bytes: Arc<AtomicUsize>,
 }
 
@@ -1369,11 +1572,9 @@ impl SendspinDownloader {
         let worker = SendspinDownloaderWorker::new();
         let cache_states = Arc::clone(&worker.cache_states);
         let caches = Arc::clone(&worker.caches);
-        let slots = Arc::clone(&worker.slots);
         let download_window_refresh = Arc::clone(&worker.download_window_refresh);
         let download_status_refresh = Arc::clone(&worker.download_status_refresh);
-        let connection_lost = Arc::clone(&worker.connection_lost);
-        let connection_ready = Arc::clone(&worker.connection_ready);
+        let connection_event = Arc::clone(&worker.connection_event);
         let cache_bytes = Arc::new(AtomicUsize::new(0));
         let download_plan = Arc::new(Mutex::new(None));
         let (commands, receiver) = mpsc::channel();
@@ -1383,11 +1584,9 @@ impl SendspinDownloader {
             download_plan,
             cache_states,
             caches,
-            slots,
             download_window_refresh,
             download_status_refresh,
-            connection_lost,
-            connection_ready,
+            connection_event,
             cache_bytes,
         }
     }
@@ -1451,12 +1650,11 @@ impl SendspinDownloader {
         self.download_status_refresh.swap(false, Ordering::AcqRel)
     }
 
-    pub(crate) fn take_connection_lost(&self) -> bool {
-        self.connection_lost.swap(false, Ordering::AcqRel)
-    }
-
-    pub(crate) fn take_connection_ready(&self) -> bool {
-        self.connection_ready.swap(false, Ordering::AcqRel)
+    pub(crate) fn take_connection_event(&self) -> Option<DownloaderConnectionEvent> {
+        self.connection_event
+            .lock()
+            .ok()
+            .and_then(|mut event| event.take())
     }
 
     pub(crate) fn download_status(&self) -> (Vec<ActiveDownloadStatus>, usize, usize) {
@@ -1523,6 +1721,10 @@ impl SendspinDownloader {
         crate::cache::store::cache_read_chunk_with_duration(&self.caches, content_key, chunk_index)
     }
 
+    pub(crate) fn trim_played_current_cache(&self, content_key: &str, next_chunk_index: usize) {
+        crate::cache::store::cache_trim_before_chunk(&self.caches, content_key, next_chunk_index);
+    }
+
     pub(crate) fn local_cache_seek_target(
         &self,
         content_key: &str,
@@ -1581,6 +1783,7 @@ fn run_downloader_worker(
     mut worker: SendspinDownloaderWorker,
     receiver: mpsc::Receiver<DownloaderCommand>,
 ) {
+    // This receiver is the serialization boundary for all mutable worker state.
     while let Ok(command) = receiver.recv() {
         let is_connection_command = matches!(
             command,
@@ -1634,11 +1837,19 @@ fn run_downloader_worker(
             LOGGER.error(format!(
                 "Sendspin downloader worker command failed: {error}"
             ));
-            worker.connection_ready.store(false, Ordering::Release);
-            worker.connection_lost.store(true, Ordering::Release);
+            publish_connection_event(
+                &worker.connection_event,
+                worker.connection_generation.load(Ordering::Acquire),
+                DownloaderConnectionStatus::Lost,
+            );
         } else if is_connection_command {
-            worker.connection_lost.store(false, Ordering::Release);
-            worker.connection_ready.store(true, Ordering::Release);
+            let connection_generation = worker.connection_generation.load(Ordering::Acquire);
+            let status = if slots_are_ready(&worker.slot_connection_states, connection_generation) {
+                DownloaderConnectionStatus::Ready
+            } else {
+                DownloaderConnectionStatus::Lost
+            };
+            publish_connection_event(&worker.connection_event, connection_generation, status);
         }
     }
 }
@@ -1656,7 +1867,79 @@ async fn seek_download_player(
     client.player_seek(player_id, position).await
 }
 
+fn reset_slot_connection_state(
+    slot_connection_state: &Arc<Mutex<DownloaderSlotConnectionState>>,
+    generation: u64,
+) {
+    if let Ok(mut value) = slot_connection_state.lock() {
+        *value = DownloaderSlotConnectionState::disconnected(generation);
+    }
+}
+
+fn publish_slot_transport_connected(
+    slot_connection_state: &Arc<Mutex<DownloaderSlotConnectionState>>,
+    generation: u64,
+) {
+    if let Ok(mut value) = slot_connection_state.lock() {
+        *value = DownloaderSlotConnectionState {
+            generation,
+            is_transport_connected: true,
+            is_stream_active: false,
+        };
+    }
+}
+
+fn publish_slot_stream_state(
+    slot_connection_state: &Arc<Mutex<DownloaderSlotConnectionState>>,
+    generation: u64,
+    is_stream_active: bool,
+) {
+    if let Ok(mut value) = slot_connection_state.lock() {
+        if value.generation == generation && value.is_transport_connected {
+            value.is_stream_active = is_stream_active;
+        }
+    }
+}
+
+fn publish_slot_transport_disconnected(
+    slot_connection_state: &Arc<Mutex<DownloaderSlotConnectionState>>,
+    generation: u64,
+) {
+    if let Ok(mut value) = slot_connection_state.lock() {
+        if value.generation == generation {
+            value.is_transport_connected = false;
+            value.is_stream_active = false;
+        }
+    }
+}
+
+fn slots_are_ready(
+    slot_connection_states: &[Arc<Mutex<DownloaderSlotConnectionState>>; 2],
+    connection_generation: u64,
+) -> bool {
+    slot_connection_states.iter().all(|state| {
+        state
+            .lock()
+            .map(|value| {
+                value.generation == connection_generation
+                    && value.is_transport_connected
+                    && !value.is_stream_active
+            })
+            .unwrap_or(false)
+    })
+}
+
 // Music Assistant configuration for Sendspin download slots.
+async fn stop_previous_download_players(
+    client: &MusicAssistantClient,
+    player_ids: &[Option<PlayerId>; 2],
+) -> Result<(), String> {
+    for player_id in player_ids.iter().flatten() {
+        client.player_stop(player_id).await?;
+    }
+    Ok(())
+}
+
 async fn resolve_download_player_ids(
     client: &MusicAssistantClient,
     output_protocol_ids: &[String; 2],
@@ -1764,9 +2047,6 @@ fn release_incomplete_reservation(
     slot_index: usize,
     reservation: &crate::cache::store::DownloadSlotReservation,
 ) {
-    reservation
-        .warm_keepalive_cancel
-        .store(true, Ordering::Relaxed);
     if !crate::cache::store::slot_release_reservation_if_current(slots, slot_index, reservation) {
         return;
     }
@@ -1780,6 +2060,17 @@ fn release_incomplete_reservation(
     }
 }
 
+fn download_request_is_current(
+    slots: &crate::cache::store::DownloadSlots,
+    slot_index: usize,
+    reservation: &crate::cache::store::DownloadSlotReservation,
+    connection_generation: &Arc<std::sync::atomic::AtomicU64>,
+    request_connection_generation: u64,
+) -> bool {
+    connection_generation.load(Ordering::Acquire) == request_connection_generation
+        && crate::cache::store::slot_reservation_is_current(slots, slot_index, reservation)
+}
+
 fn retain_interrupted_reservation(
     slots: &crate::cache::store::DownloadSlots,
     caches: &crate::cache::store::EncodedCaches,
@@ -1789,9 +2080,6 @@ fn retain_interrupted_reservation(
     slot_index: usize,
     reservation: &crate::cache::store::DownloadSlotReservation,
 ) {
-    reservation
-        .warm_keepalive_cancel
-        .store(true, Ordering::Relaxed);
     if !crate::cache::store::slot_release_reservation_if_current(slots, slot_index, reservation) {
         return;
     }
@@ -1818,9 +2106,6 @@ fn complete_stream_reservation(
     slot_index: usize,
     reservation: &crate::cache::store::DownloadSlotReservation,
 ) {
-    reservation
-        .warm_keepalive_cancel
-        .store(true, Ordering::Relaxed);
     if !crate::cache::store::slot_release_reservation_if_current(slots, slot_index, reservation) {
         return;
     }
@@ -1864,10 +2149,7 @@ async fn stop_evicted_slot_downloads(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    for (slot_index, reservation) in slot_indexes {
-        reservation
-            .warm_keepalive_cancel
-            .store(true, Ordering::Relaxed);
+    for (slot_index, _) in slot_indexes {
         let controller = controllers
             .lock()
             .ok()
@@ -1895,8 +2177,8 @@ fn is_player_unavailable_error(error: &str) -> bool {
 
 // Only the current connection generation may trigger a global downloader reconnect.
 fn report_connection_lost_if_current(
-    connection_generation: &Arc<std::sync::atomic::AtomicU64>,
-    connection_lost: &Arc<AtomicBool>,
+    connection_generation: &Arc<AtomicU64>,
+    connection_event: &Arc<Mutex<Option<DownloaderConnectionEvent>>>,
     request_connection_generation: u64,
     slot_index: usize,
     source: &str,
@@ -1916,7 +2198,41 @@ fn report_connection_lost_if_current(
         slot_index + 1,
         request_connection_generation
     ));
-    connection_lost.store(true, Ordering::Release);
+    publish_connection_event(
+        connection_event,
+        request_connection_generation,
+        DownloaderConnectionStatus::Lost,
+    );
+}
+
+fn publish_connection_event(
+    connection_event: &Arc<Mutex<Option<DownloaderConnectionEvent>>>,
+    generation: u64,
+    status: DownloaderConnectionStatus,
+) {
+    let Ok(mut event) = connection_event.lock() else {
+        return;
+    };
+    if event
+        .as_ref()
+        .map(|current| current.generation > generation)
+        .unwrap_or(false)
+    {
+        return;
+    }
+    // A loss is terminal for its generation; a late ready result must not restore it.
+    if event
+        .as_ref()
+        .map(|current| {
+            current.generation == generation
+                && current.status == DownloaderConnectionStatus::Lost
+                && status == DownloaderConnectionStatus::Ready
+        })
+        .unwrap_or(false)
+    {
+        return;
+    }
+    *event = Some(DownloaderConnectionEvent { generation, status });
 }
 
 fn download_duration_reached(
@@ -1957,13 +2273,32 @@ fn cache_reaches_download_pause_threshold(cache_used_bytes: usize, cache_bytes: 
             >= cache_bytes.saturating_mul(CACHE_DOWNLOAD_PAUSE_PERCENT)
 }
 
-fn warm_keepalive_is_current(
-    slots: &crate::cache::store::DownloadSlots,
+async fn run_slot_liveness_check(
+    sender: WsSender,
+    connection_event: Arc<Mutex<Option<DownloaderConnectionEvent>>>,
+    connection_generation: Arc<AtomicU64>,
+    task_connection_generation: u64,
     slot_index: usize,
-    reservation: &crate::cache::store::DownloadSlotReservation,
-) -> bool {
-    !reservation.warm_keepalive_cancel.load(Ordering::Relaxed)
-        && crate::cache::store::slot_reservation_is_current(slots, slot_index, reservation)
+) {
+    // Transport liveness is determined by Ping/Pong, not by whether audio payload is currently flowing.
+    loop {
+        tokio::time::sleep(CONNECTION_LIVENESS_INTERVAL).await;
+        if sender
+            .ping_and_wait(CONNECTION_LIVENESS_TIMEOUT)
+            .await
+            .is_ok()
+        {
+            continue;
+        }
+        report_connection_lost_if_current(
+            &connection_generation,
+            &connection_event,
+            task_connection_generation,
+            slot_index,
+            "ping timeout",
+        );
+        break;
+    }
 }
 
 fn download_client_id(base_id: &str, slot_number: usize) -> String {
@@ -1991,10 +2326,11 @@ mod tests {
     use super::{
         cache_reaches_download_pause_threshold, download_client_id, download_client_name,
         download_duration_reached, is_player_unavailable_error, normalize_client_id,
-        report_connection_lost_if_current, stream_end_outcome, warm_keepalive_is_current,
-        SendspinDownloader, StreamEndOutcome,
+        publish_connection_event, report_connection_lost_if_current, stream_end_outcome,
+        DownloaderConnectionEvent, DownloaderConnectionStatus, SendspinDownloader,
+        StreamEndOutcome,
     };
-    use crate::cache::store::{DownloadSlotReservation, DownloadSlots};
+    use crate::cache::store::DownloadSlotReservation;
     use std::sync::atomic::Ordering;
     use std::sync::{Arc, Mutex};
 
@@ -2036,13 +2372,35 @@ mod tests {
     #[test]
     fn ignores_connection_losses_from_an_older_generation() {
         let connection_generation = Arc::new(std::sync::atomic::AtomicU64::new(2));
-        let connection_lost = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let connection_event = Arc::new(Mutex::new(None));
 
-        report_connection_lost_if_current(&connection_generation, &connection_lost, 1, 0, "test");
-        assert!(!connection_lost.load(Ordering::Acquire));
+        report_connection_lost_if_current(&connection_generation, &connection_event, 1, 0, "test");
+        assert!(connection_event.lock().unwrap().is_none());
 
-        report_connection_lost_if_current(&connection_generation, &connection_lost, 2, 0, "test");
-        assert!(connection_lost.load(Ordering::Acquire));
+        report_connection_lost_if_current(&connection_generation, &connection_event, 2, 0, "test");
+        assert!(matches!(
+            *connection_event.lock().unwrap(),
+            Some(DownloaderConnectionEvent {
+                generation: 2,
+                status: DownloaderConnectionStatus::Lost,
+            })
+        ));
+    }
+
+    #[test]
+    fn lost_connection_event_overrides_ready_for_the_same_generation() {
+        let connection_event = Arc::new(Mutex::new(None));
+
+        publish_connection_event(&connection_event, 2, DownloaderConnectionStatus::Lost);
+        publish_connection_event(&connection_event, 2, DownloaderConnectionStatus::Ready);
+
+        assert!(matches!(
+            *connection_event.lock().unwrap(),
+            Some(DownloaderConnectionEvent {
+                generation: 2,
+                status: DownloaderConnectionStatus::Lost,
+            })
+        ));
     }
 
     #[test]
@@ -2084,37 +2442,11 @@ mod tests {
             resume_after_millis: 10_500,
             append_after_seek: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             lease_id: "slot-1-1".to_string(),
-            warm_keepalive_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
 
         assert!(!reservation.append_after_seek.load(Ordering::Acquire));
         reservation.append_after_seek.store(true, Ordering::Release);
         assert!(reservation.append_after_seek.load(Ordering::Acquire));
-    }
-
-    #[test]
-    fn warm_keepalive_stops_when_its_slot_lease_is_replaced() {
-        let first = DownloadSlotReservation {
-            cache_content_key: "provider:track:first".to_string(),
-            expected_duration_millis: None,
-            resume_after_millis: 0,
-            append_after_seek: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            lease_id: "slot-1-1".to_string(),
-            warm_keepalive_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        };
-        let replacement = DownloadSlotReservation {
-            cache_content_key: "provider:track:second".to_string(),
-            expected_duration_millis: None,
-            resume_after_millis: 0,
-            append_after_seek: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            lease_id: "slot-1-2".to_string(),
-            warm_keepalive_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        };
-        let slots: DownloadSlots = Arc::new(Mutex::new([Some(first.clone()), None]));
-
-        assert!(warm_keepalive_is_current(&slots, 0, &first));
-        slots.lock().expect("slot lock")[0] = Some(replacement);
-        assert!(!warm_keepalive_is_current(&slots, 0, &first));
     }
 
     #[test]

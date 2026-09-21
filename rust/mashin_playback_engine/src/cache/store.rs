@@ -24,7 +24,6 @@ pub(crate) struct DownloadSlotReservation {
     pub(crate) resume_after_millis: u64,
     pub(crate) append_after_seek: Arc<AtomicBool>,
     pub(crate) lease_id: String,
-    pub(crate) warm_keepalive_cancel: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +41,7 @@ struct EncodedCacheChunk {
 
 pub(crate) struct EncodedTrackCache {
     chunks: VecDeque<EncodedCacheChunk>,
+    first_chunk_index: usize,
     byte_len: usize,
     cached_duration_millis: u64,
     last_touched: u64,
@@ -88,8 +88,9 @@ pub(crate) enum CacheAppendResult {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CacheRetentionPolicy {
     pub(crate) current: Option<String>,
-    pub(crate) protected: Vec<String>,
-    pub(crate) prefetch: Vec<String>,
+    pub(crate) next: Option<String>,
+    pub(crate) last: Option<String>,
+    pub(crate) upcoming: Vec<String>,
     pub(crate) recently_played: Vec<String>,
 }
 
@@ -168,6 +169,7 @@ pub(crate) fn cache_append_encoded_chunk(
             .entry(reservation.cache_content_key.clone())
             .or_insert_with(|| EncodedTrackCache {
                 chunks: VecDeque::new(),
+                first_chunk_index: 0,
                 byte_len: 0,
                 cached_duration_millis: reservation.resume_after_millis,
                 last_touched: touch,
@@ -315,11 +317,9 @@ pub(crate) fn cache_read_chunk(
         .get_mut(content_key)
         .ok_or_else(|| "encoded track cache is unavailable".to_string())?;
     cache.last_touched = cache.last_touched.saturating_add(1);
+    let deque_index = chunk_index.checked_sub(cache.first_chunk_index);
     Ok((
-        cache
-            .chunks
-            .get(chunk_index)
-            .map(|chunk| Arc::clone(&chunk.data)),
+        deque_index.and_then(|index| cache.chunks.get(index).map(|chunk| Arc::clone(&chunk.data))),
         cache.integrity == CacheIntegrity::Complete,
     ))
 }
@@ -336,13 +336,39 @@ pub(crate) fn cache_read_chunk_with_duration(
         .get_mut(content_key)
         .ok_or_else(|| "encoded track cache is unavailable".to_string())?;
     cache.last_touched = cache.last_touched.saturating_add(1);
+    let deque_index = chunk_index.checked_sub(cache.first_chunk_index);
     Ok((
-        cache
-            .chunks
-            .get(chunk_index)
-            .map(|chunk| (Arc::clone(&chunk.data), chunk.duration_millis)),
+        deque_index.and_then(|index| {
+            cache
+                .chunks
+                .get(index)
+                .map(|chunk| (Arc::clone(&chunk.data), chunk.duration_millis))
+        }),
         cache.integrity == CacheIntegrity::Complete,
     ))
+}
+
+pub(crate) fn cache_trim_before_chunk(
+    caches: &EncodedCaches,
+    content_key: &str,
+    next_chunk_index: usize,
+) -> usize {
+    let Ok(mut caches) = caches.lock() else {
+        return 0;
+    };
+    let Some(cache) = caches.get_mut(content_key) else {
+        return 0;
+    };
+    let mut removed_bytes: usize = 0;
+    while cache.first_chunk_index < next_chunk_index {
+        let Some(chunk) = cache.chunks.pop_front() else {
+            break;
+        };
+        cache.first_chunk_index = cache.first_chunk_index.saturating_add(1);
+        cache.byte_len = cache.byte_len.saturating_sub(chunk.data.len());
+        removed_bytes = removed_bytes.saturating_add(chunk.data.len());
+    }
+    removed_bytes
 }
 
 pub(crate) fn cache_local_seek_target(
@@ -361,7 +387,7 @@ pub(crate) fn cache_local_seek_target(
     })?;
     cache.last_touched = cache.last_touched.saturating_add(1);
     Some(LocalCacheSeekTarget {
-        chunk_index,
+        chunk_index: cache.first_chunk_index.saturating_add(chunk_index),
         chunk_start_position_millis: chunk.start_position_millis,
         skip_within_chunk_millis: target_position_millis
             .saturating_sub(chunk.start_position_millis),
@@ -373,12 +399,26 @@ pub(crate) fn cache_evict_to_fit(
     caches: &EncodedCaches,
     policy: &CacheRetentionPolicy,
     cache_capacity_bytes: usize,
+    incoming_content_key: &str,
     incoming_bytes: usize,
 ) -> Vec<String> {
     let Ok(mut caches) = caches.lock() else {
         return Vec::new();
     };
     let mut evicted = Vec::new();
+    let incoming_rank = eviction_rank(
+        incoming_content_key,
+        &EncodedTrackCache {
+            chunks: VecDeque::new(),
+            first_chunk_index: 0,
+            byte_len: 0,
+            cached_duration_millis: 0,
+            last_touched: 0,
+            format: None,
+            integrity: CacheIntegrity::Partial,
+        },
+        policy,
+    );
     while caches
         // Cache metadata queries.
         .values()
@@ -389,10 +429,8 @@ pub(crate) fn cache_evict_to_fit(
     {
         let candidate = caches
             .iter()
-            .filter(|(key, _)| {
-                policy.current.as_deref() != Some(key.as_str())
-                    && !policy.protected.iter().any(|value| value == *key)
-            })
+            .filter(|(key, _)| policy.current.as_deref() != Some(key.as_str()))
+            .filter(|(key, cache)| eviction_rank(key, cache, policy) < incoming_rank)
             .min_by_key(|(key, cache)| eviction_rank(key, cache, policy))
             .map(|(key, _)| key.clone());
         let Some(key) = candidate else {
@@ -409,21 +447,39 @@ fn eviction_rank(
     cache: &EncodedTrackCache,
     policy: &CacheRetentionPolicy,
 ) -> (u8, i64) {
-    if policy
-        .recently_played
-        .iter()
-        .any(|key| key == cache_content_key)
-    {
-        return (30, cache.last_touched as i64);
+    let is_known = policy.current.as_deref() == Some(cache_content_key)
+        || policy.next.as_deref() == Some(cache_content_key)
+        || policy.last.as_deref() == Some(cache_content_key)
+        || policy.upcoming.iter().any(|key| key == cache_content_key)
+        || policy
+            .recently_played
+            .iter()
+            .any(|key| key == cache_content_key);
+    if !is_known {
+        return (0, cache.last_touched as i64);
     }
-    let Some(index) = policy
-        .prefetch
+    if policy.last.as_deref() != Some(cache_content_key)
+        && policy
+            .recently_played
+            .iter()
+            .any(|key| key == cache_content_key)
+    {
+        return (1, cache.last_touched as i64);
+    }
+    if let Some(index) = policy
+        .upcoming
         .iter()
         .position(|key| key == cache_content_key)
-    else {
-        return (0, cache.last_touched as i64);
-    };
-    (20, -(index as i64))
+    {
+        return (2, -(index as i64));
+    }
+    if policy.last.as_deref() == Some(cache_content_key) {
+        return (3, cache.last_touched as i64);
+    }
+    if policy.next.as_deref() == Some(cache_content_key) {
+        return (4, cache.last_touched as i64);
+    }
+    (5, cache.last_touched as i64)
 }
 
 pub(crate) fn cache_complete_duration_millis(
@@ -453,7 +509,6 @@ mod tests {
             resume_after_millis: 0,
             append_after_seek: Arc::new(AtomicBool::new(true)),
             lease_id: lease_id.to_string(),
-            warm_keepalive_cancel: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -573,25 +628,105 @@ mod tests {
         }
         let policy = CacheRetentionPolicy {
             current: Some("provider:track:current".to_string()),
-            protected: vec![
-                "provider:track:current".to_string(),
-                "provider:track:next".to_string(),
-            ],
-            prefetch: vec!["provider:track:future".to_string()],
+            next: Some("provider:track:next".to_string()),
+            last: Some("provider:track:past".to_string()),
+            upcoming: vec!["provider:track:future".to_string()],
             recently_played: vec!["provider:track:past".to_string()],
         };
         assert_eq!(
-            cache_evict_to_fit(&caches, &policy, 40, 0),
+            cache_evict_to_fit(&caches, &policy, 40, "provider:track:current", 0),
             vec!["provider:track:orphan"]
         );
         assert_eq!(
-            cache_evict_to_fit(&caches, &policy, 30, 0),
+            cache_evict_to_fit(&caches, &policy, 30, "provider:track:current", 0),
             vec!["provider:track:future"]
         );
         let caches = caches.lock().expect("cache lock");
         assert!(caches.contains_key("provider:track:past"));
         assert!(caches.contains_key("provider:track:current"));
         assert!(caches.contains_key("provider:track:next"));
+    }
+
+    #[test]
+    fn evicts_complete_caches_in_playback_priority_order() {
+        let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
+        let sequence = Arc::new(AtomicU64::new(0));
+        let format = AudioFormat {
+            codec: ::sendspin::audio::Codec::Pcm,
+            sample_rate: 48_000,
+            channels: 2,
+            bit_depth: 16,
+            codec_header: None,
+        };
+        for key in ["stale", "recent", "far", "near", "last", "next", "current"] {
+            let reservation = reservation(&format!("provider:track:{key}"), "slot-1-1");
+            cache_append_encoded_chunk(
+                &caches,
+                &sequence,
+                100,
+                &reservation,
+                &format,
+                10,
+                &[1; 10],
+            );
+        }
+        let policy = CacheRetentionPolicy {
+            current: Some("provider:track:current".to_string()),
+            next: Some("provider:track:next".to_string()),
+            last: Some("provider:track:last".to_string()),
+            upcoming: vec![
+                "provider:track:near".to_string(),
+                "provider:track:far".to_string(),
+            ],
+            recently_played: vec![
+                "provider:track:recent".to_string(),
+                "provider:track:last".to_string(),
+            ],
+        };
+
+        assert_eq!(
+            cache_evict_to_fit(&caches, &policy, 10, "provider:track:current", 10),
+            vec![
+                "provider:track:stale",
+                "provider:track:recent",
+                "provider:track:far",
+                "provider:track:near",
+                "provider:track:last",
+                "provider:track:next",
+            ]
+        );
+    }
+
+    #[test]
+    fn trims_played_chunks_without_reusing_logical_indices() {
+        let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
+        let sequence = Arc::new(AtomicU64::new(0));
+        let reservation = reservation("provider:track:current", "slot-1-1");
+        let format = AudioFormat {
+            codec: ::sendspin::audio::Codec::Pcm,
+            sample_rate: 48_000,
+            channels: 2,
+            bit_depth: 16,
+            codec_header: None,
+        };
+        cache_append_encoded_chunk(&caches, &sequence, 100, &reservation, &format, 10, &[1; 10]);
+        cache_append_encoded_chunk(&caches, &sequence, 100, &reservation, &format, 10, &[2; 10]);
+
+        assert_eq!(
+            cache_trim_before_chunk(&caches, &reservation.cache_content_key, 1),
+            10
+        );
+        assert!(cache_read_chunk(&caches, &reservation.cache_content_key, 0)
+            .expect("trimmed chunk read")
+            .0
+            .is_none());
+        assert_eq!(
+            cache_read_chunk(&caches, &reservation.cache_content_key, 1)
+                .expect("remaining chunk read")
+                .0
+                .expect("remaining chunk")[0],
+            2
+        );
     }
 
     #[test]

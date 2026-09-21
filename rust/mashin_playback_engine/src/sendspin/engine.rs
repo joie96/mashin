@@ -1,4 +1,4 @@
-use super::downloader::{SendspinDownloader, SendspinDownloaderConfig};
+use super::downloader::{DownloaderConnectionStatus, SendspinDownloader, SendspinDownloaderConfig};
 use super::models::{
     SendspinAudioCodec, SendspinDownloadPlan, SendspinDownloadPlanItem, SendspinDownloadRole,
     SendspinEngineConfiguration,
@@ -51,6 +51,8 @@ pub(crate) struct SendspinEngine {
     next_reconnect_attempt: Option<Instant>,
     reconnect_delay: Duration,
     is_reconnect_in_flight: bool,
+    last_connection_event_generation: Option<u64>,
+    lost_connection_generation: Option<u64>,
     playback_position_offset_millis: i64,
     autoplay: AutoplayController,
     autoplay_result_sender: Sender<Vec<Track>>,
@@ -87,6 +89,8 @@ impl SendspinEngine {
             next_reconnect_attempt: None,
             reconnect_delay: INITIAL_RECONNECT_DELAY,
             is_reconnect_in_flight: false,
+            last_connection_event_generation: None,
+            lost_connection_generation: None,
             playback_position_offset_millis: 0,
             autoplay: AutoplayController::new(),
             autoplay_result_sender,
@@ -111,6 +115,8 @@ impl SendspinEngine {
         self.next_reconnect_attempt = None;
         self.reconnect_delay = INITIAL_RECONNECT_DELAY;
         self.is_reconnect_in_flight = false;
+        self.last_connection_event_generation = None;
+        self.lost_connection_generation = None;
         self.playback_position_offset_millis = 0;
         self.autoplay = AutoplayController::new();
         self.last_player_state_event_at = None;
@@ -689,24 +695,47 @@ impl SendspinEngine {
     }
 
     fn process_connection_state(&mut self) {
-        if self.downloader.take_connection_lost() {
-            LOGGER.trace("Sendspin downloader connection lost");
-            if self.player_state.connection_state != PlaybackConnectionState::Reconnecting {
-                self.player_state.connection_state = PlaybackConnectionState::Reconnecting;
-                self.schedule_reconnect_attempt();
-            } else if self.is_reconnect_in_flight {
-                self.is_reconnect_in_flight = false;
-                self.schedule_reconnect_attempt();
+        if let Some(event) = self.downloader.take_connection_event() {
+            if self
+                .last_connection_event_generation
+                .map(|generation| event.generation < generation)
+                .unwrap_or(false)
+            {
+                return;
             }
-        }
-        if self.downloader.take_connection_ready() {
-            LOGGER.trace("Sendspin downloaders reconnected");
-            self.player_state.connection_state = PlaybackConnectionState::Online;
-            self.next_reconnect_attempt = None;
-            self.reconnect_delay = INITIAL_RECONNECT_DELAY;
-            self.is_reconnect_in_flight = false;
-            if let Err(error) = self.sync_download_window() {
-                LOGGER.error(format!("failed to resume Sendspin downloads: {error}"));
+            match event.status {
+                DownloaderConnectionStatus::Lost => {
+                    self.last_connection_event_generation = Some(event.generation);
+                    self.lost_connection_generation = Some(event.generation);
+                    LOGGER.trace(format!(
+                        "Sendspin downloader connection lost: generation {}",
+                        event.generation
+                    ));
+                    if self.player_state.connection_state != PlaybackConnectionState::Reconnecting {
+                        self.player_state.connection_state = PlaybackConnectionState::Reconnecting;
+                        self.schedule_reconnect_attempt();
+                    } else if self.is_reconnect_in_flight {
+                        self.is_reconnect_in_flight = false;
+                        self.schedule_reconnect_attempt();
+                    }
+                }
+                DownloaderConnectionStatus::Ready => {
+                    if self.lost_connection_generation == Some(event.generation) {
+                        return;
+                    }
+                    self.last_connection_event_generation = Some(event.generation);
+                    LOGGER.trace(format!(
+                        "Sendspin downloaders reconnected: generation {}",
+                        event.generation
+                    ));
+                    self.player_state.connection_state = PlaybackConnectionState::Online;
+                    self.next_reconnect_attempt = None;
+                    self.reconnect_delay = INITIAL_RECONNECT_DELAY;
+                    self.is_reconnect_in_flight = false;
+                    if let Err(error) = self.sync_download_window() {
+                        LOGGER.error(format!("failed to resume Sendspin downloads: {error}"));
+                    }
+                }
             }
         }
         if self.player_state.connection_state == PlaybackConnectionState::Reconnecting
@@ -872,6 +901,8 @@ impl SendspinEngine {
                 Err(error) => SourceReadResult::Error(error),
             }
         });
+        self.downloader
+            .trim_played_current_cache(content_key, self.audio_player.next_chunk_index());
     }
 
     fn start_prepared_audio_if_available(&mut self, content_key: &str) {

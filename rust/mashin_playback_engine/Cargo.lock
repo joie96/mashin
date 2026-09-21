@@ -2122,8 +2122,8 @@ checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
 name = "sendspin"
-version = "0.3.6"
-source = "git+https://github.com/Sendspin/sendspin-rs#cca6cc116b83f9301787fba4d0e76b8f65e3f785"
+version = "0.3.7"
+source = "git+https://github.com/joie96/sendspin-rs?branch=mashin%2Fliveness-ping-pong#86075744486c616b62e7db533f7f831ab7bd409d"
 dependencies = [
  "cpal",
  "crossbeam",
