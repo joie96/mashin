@@ -135,6 +135,9 @@ fn execute_async_operation(request: CoreOperationRequest) -> Result<Value, CoreE
         "setLogLevel" => {
             execute_text_command(mashin_core_set_session_log_level, &arguments, "logLevel")
         }
+        "saveLogSnapshot" => serialize_operation_result(
+            crate::logging::save_log_snapshot().map_err(CoreError::internal),
+        ),
         "playMedia" => {
             execute_json_text_command(mashin_core_queue_replace, &arguments, "mediaItems")
         }

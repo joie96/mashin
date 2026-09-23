@@ -5,7 +5,7 @@ class AppLogBuffer extends ChangeNotifier {
 
   static final AppLogBuffer shared = AppLogBuffer._();
 
-  static const int _capacity = 200;
+  static const int _capacity = 10000;
   final List<String> _lines = <String>[];
 
   List<String> get lines => List<String>.unmodifiable(_lines);

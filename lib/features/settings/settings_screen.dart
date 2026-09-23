@@ -63,6 +63,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onCacheSizeChanged: _setCacheSize,
             onThemeChanged: widget.session.setDarkTheme,
             onLogLevelChanged: widget.session.setLogLevel,
+            onSaveLogSnapshot: widget.session.coreBridge.saveLogSnapshot,
           )
         : SettingsScreenDesktop(
             musicAssistantUrl: widget.session.baseUrl,
@@ -72,6 +73,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onCacheSizeChanged: _setCacheSize,
             onThemeChanged: widget.session.setDarkTheme,
             onLogLevelChanged: widget.session.setLogLevel,
+            onSaveLogSnapshot: widget.session.coreBridge.saveLogSnapshot,
           );
     return screen;
   }

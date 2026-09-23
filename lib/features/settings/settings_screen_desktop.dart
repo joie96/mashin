@@ -42,6 +42,7 @@ class SettingsScreenDesktop extends StatelessWidget {
     required this.onCacheSizeChanged,
     required this.onThemeChanged,
     required this.onLogLevelChanged,
+    required this.onSaveLogSnapshot,
   });
 
   final String musicAssistantUrl;
@@ -51,6 +52,7 @@ class SettingsScreenDesktop extends StatelessWidget {
   final ValueChanged<String> onCacheSizeChanged;
   final ValueChanged<bool> onThemeChanged;
   final ValueChanged<LogLevelPreference> onLogLevelChanged;
+  final Future<String> Function() onSaveLogSnapshot;
 
   @override
   Widget build(BuildContext context) {
@@ -62,55 +64,56 @@ class SettingsScreenDesktop extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(32, 32, 32, 0),
           child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  'Einstellungen',
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Einstellungen',
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
                 ),
-                const SizedBox(height: 20),
-                TabBar(
-                  isScrollable: true,
-                  tabAlignment: TabAlignment.start,
-                  labelPadding: const EdgeInsets.symmetric(horizontal: 24),
-                  indicatorSize: TabBarIndicatorSize.tab,
-                  indicatorColor: colors.accent,
-                  dividerColor: colors.border,
-                  labelColor: colors.textPrimary,
-                  unselectedLabelColor: colors.textPrimary,
-                  labelStyle: const TextStyle(fontWeight: FontWeight.bold),
-                  unselectedLabelStyle: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                  ),
-                  tabs: <Widget>[
-                    const Tab(text: 'Allgemein'),
-                    const Tab(text: 'Log'),
+              ),
+              const SizedBox(height: 20),
+              TabBar(
+                isScrollable: true,
+                tabAlignment: TabAlignment.start,
+                labelPadding: const EdgeInsets.symmetric(horizontal: 24),
+                indicatorSize: TabBarIndicatorSize.tab,
+                indicatorColor: colors.accent,
+                dividerColor: colors.border,
+                labelColor: colors.textPrimary,
+                unselectedLabelColor: colors.textPrimary,
+                labelStyle: const TextStyle(fontWeight: FontWeight.bold),
+                unselectedLabelStyle: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                ),
+                tabs: <Widget>[
+                  const Tab(text: 'Allgemein'),
+                  const Tab(text: 'Log'),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: TabBarView(
+                  children: <Widget>[
+                    _DesktopSettingsForm(
+                      musicAssistantUrl: musicAssistantUrl,
+                      cacheSizeController: cacheSizeController,
+                      isDarkTheme: isDarkTheme,
+                      onCacheSizeChanged: onCacheSizeChanged,
+                      onThemeChanged: onThemeChanged,
+                    ),
+                    _DesktopLogTab(
+                      logLevel: logLevel,
+                      onLogLevelChanged: onLogLevelChanged,
+                      onSaveLogSnapshot: onSaveLogSnapshot,
+                    ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: TabBarView(
-                    children: <Widget>[
-                      _DesktopSettingsForm(
-                        musicAssistantUrl: musicAssistantUrl,
-                        cacheSizeController: cacheSizeController,
-                        isDarkTheme: isDarkTheme,
-                        onCacheSizeChanged: onCacheSizeChanged,
-                        onThemeChanged: onThemeChanged,
-                      ),
-                      _DesktopLogTab(
-                        logLevel: logLevel,
-                        onLogLevelChanged: onLogLevelChanged,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
+      ),
     );
   }
 }
@@ -119,10 +122,12 @@ class _DesktopLogTab extends StatelessWidget {
   const _DesktopLogTab({
     required this.logLevel,
     required this.onLogLevelChanged,
+    required this.onSaveLogSnapshot,
   });
 
   final LogLevelPreference logLevel;
   final ValueChanged<LogLevelPreference> onLogLevelChanged;
+  final Future<String> Function() onSaveLogSnapshot;
 
   @override
   Widget build(BuildContext context) {
@@ -143,6 +148,8 @@ class _DesktopLogTab extends StatelessWidget {
                 shouldUseCompactFieldLayout: true,
               ),
             ),
+            const SizedBox(width: 8),
+            SettingsSaveLogButton(onSave: onSaveLogSnapshot),
           ],
         ),
         const SizedBox(height: 12),

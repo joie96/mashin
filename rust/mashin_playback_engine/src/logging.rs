@@ -1,9 +1,17 @@
-use chrono::Local;
+use chrono::{DateTime, Local};
+use once_cell::sync::Lazy;
+use std::collections::VecDeque;
+use std::env;
 use std::fmt;
+use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Mutex;
 
 static MINIMUM_LOG_LEVEL: AtomicU8 = AtomicU8::new(LogLevel::Info as u8);
+const LOG_CAPACITY: usize = 10_000;
+static LOG_LINES: Lazy<Mutex<VecDeque<String>>> = Lazy::new(|| Mutex::new(VecDeque::new()));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -54,6 +62,82 @@ pub(crate) fn log_external(level: &str, category: &str, message: &str) -> Result
     Ok(())
 }
 
+// Export a snapshot without holding the logger lock across filesystem I/O.
+pub(crate) fn save_log_snapshot() -> Result<String, String> {
+    let lines: Vec<String> = LOG_LINES
+        .lock()
+        .map_err(|_| "log buffer lock poisoned".to_string())?
+        .iter()
+        .cloned()
+        .collect();
+    if lines.is_empty() {
+        return Err("no log entries to save".to_string());
+    }
+    let directory = log_directory()?;
+    let path = write_log_snapshot(&lines, &directory, Local::now())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+fn write_log_snapshot(
+    lines: &[String],
+    directory: &Path,
+    timestamp: DateTime<Local>,
+) -> Result<PathBuf, String> {
+    fs::create_dir_all(directory).map_err(|error| {
+        format!(
+            "create log directory {} failed: {error}",
+            directory.display()
+        )
+    })?;
+    let path = directory.join(format!(
+        "mashin-{}.log",
+        timestamp.format("%Y-%m-%d_%H-%M-%S-%6f")
+    ));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|error| format!("create log file {} failed: {error}", path.display()))?;
+    for line in lines {
+        writeln!(file, "{line}")
+            .map_err(|error| format!("write log file {} failed: {error}", path.display()))?;
+    }
+    Ok(path)
+}
+
+#[cfg(target_os = "android")]
+fn log_directory() -> Result<PathBuf, String> {
+    crate::jni::android_context::application_files_directory().map(|path| path.join("Logs"))
+}
+
+#[cfg(target_os = "windows")]
+fn log_directory() -> Result<PathBuf, String> {
+    env::var_os("LOCALAPPDATA")
+        .map(|path| PathBuf::from(path).join("Mashin").join("Logs"))
+        .ok_or_else(|| "LOCALAPPDATA is not set".to_string())
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn log_directory() -> Result<PathBuf, String> {
+    env::var_os("HOME")
+        .map(|path| {
+            PathBuf::from(path)
+                .join("Library")
+                .join("Logs")
+                .join("Mashin")
+        })
+        .ok_or_else(|| "HOME is not set".to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn log_directory() -> Result<PathBuf, String> {
+    let state_directory = env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|path| PathBuf::from(path).join(".local/state")))
+        .ok_or_else(|| "neither XDG_STATE_HOME nor HOME is set".to_string())?;
+    Ok(state_directory.join("mashin").join("logs"))
+}
+
 pub(crate) struct Logger {
     category: &'static str,
 }
@@ -100,11 +184,21 @@ fn emit_log(level: LogLevel, category: &str, message: &str) {
         level.short_name(),
         category,
     );
+    if let Ok(mut lines) = LOG_LINES.lock() {
+        retain_log_line(&mut lines, text.clone());
+    }
     #[cfg(target_os = "android")]
     android_log(level, &text);
     let mut stderr = io::stderr().lock();
     let _ = writeln!(stderr, "{text}");
     crate::ffi::event_channel::publish_flutter_log_event(&text);
+}
+
+fn retain_log_line(lines: &mut VecDeque<String>, text: String) {
+    if lines.len() == LOG_CAPACITY {
+        lines.pop_front();
+    }
+    lines.push_back(text);
 }
 
 #[cfg(target_os = "android")]
@@ -144,7 +238,13 @@ unsafe extern "C" {
 
 #[cfg(test)]
 mod tests {
-    use super::{log_external, set_minimum_level, LogLevel, MINIMUM_LOG_LEVEL};
+    use super::{
+        log_external, retain_log_line, set_minimum_level, write_log_snapshot, LogLevel,
+        LOG_CAPACITY, MINIMUM_LOG_LEVEL,
+    };
+    use chrono::{Local, TimeZone};
+    use std::collections::VecDeque;
+    use std::fs;
     use std::sync::atomic::Ordering;
 
     #[test]
@@ -172,5 +272,36 @@ mod tests {
 
         assert!(log_external("info", "Flutter", "widget updated").is_ok());
         assert!(log_external("verbose", "Flutter", "widget updated").is_err());
+    }
+
+    #[test]
+    fn retains_only_the_newest_log_lines() {
+        let mut lines = VecDeque::new();
+        for index in 0..=LOG_CAPACITY {
+            retain_log_line(&mut lines, format!("line {index}"));
+        }
+        assert_eq!(lines.len(), LOG_CAPACITY);
+        assert_eq!(lines.front().unwrap(), "line 1");
+        assert_eq!(lines.back().unwrap(), "line 10000");
+    }
+
+    #[test]
+    fn writes_a_dated_snapshot_without_overwriting_it() {
+        let directory =
+            std::env::temp_dir().join(format!("mashin-log-test-{}", std::process::id()));
+        let timestamp = Local
+            .with_ymd_and_hms(2026, 9, 23, 15, 4, 5)
+            .single()
+            .unwrap();
+        let lines = vec!["first".to_string(), "second".to_string()];
+        let path = write_log_snapshot(&lines, &directory, timestamp).unwrap();
+        assert_eq!(
+            path.file_name().unwrap(),
+            "mashin-2026-09-23_15-04-05-000000.log"
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), "first\nsecond\n");
+        assert!(write_log_snapshot(&lines, &directory, timestamp).is_err());
+        fs::remove_file(path).unwrap();
+        fs::remove_dir(directory).unwrap();
     }
 }

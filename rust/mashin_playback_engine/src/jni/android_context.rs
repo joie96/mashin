@@ -3,6 +3,7 @@
 use jni::objects::{JClass, JObject, JString, JValue};
 use jni::JavaVM;
 use once_cell::sync::Lazy;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -123,6 +124,33 @@ pub(crate) fn clear_secure_session() -> Result<(), String> {
         )
         .map_err(|error| format!("clear Android secure session failed: {error}"))?;
         Ok(())
+    })
+}
+
+// FilesDir belongs to the installed application and needs no storage permission.
+pub(crate) fn application_files_directory() -> Result<PathBuf, String> {
+    with_attached_environment(|env| {
+        let context = ANDROID_APP_CONTEXT
+            .lock()
+            .map_err(|_| "Android application context lock poisoned".to_string())?
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "Android application context is not initialized".to_string())?;
+        let directory = env
+            .call_method(context.as_obj(), "getFilesDir", "()Ljava/io/File;", &[])
+            .map_err(|error| format!("read Android files directory failed: {error}"))?
+            .l()
+            .map_err(|error| format!("read Android files directory result failed: {error}"))?;
+        let path = env
+            .call_method(directory, "getAbsolutePath", "()Ljava/lang/String;", &[])
+            .map_err(|error| format!("read Android files path failed: {error}"))?
+            .l()
+            .map_err(|error| format!("read Android files path result failed: {error}"))?;
+        let path: String = env
+            .get_string(&JString::from(path))
+            .map_err(|error| format!("decode Android files path failed: {error}"))?
+            .into();
+        Ok(PathBuf::from(path))
     })
 }
 

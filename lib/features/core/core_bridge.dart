@@ -125,6 +125,7 @@ abstract class MashinCoreBridgeApi {
   Future<void> setLocalCacheSizeBytes(int cacheSizeBytes);
   Future<void> setTheme(bool isDarkTheme);
   Future<void> setLogLevel(LogLevelPreference logLevel);
+  Future<String> saveLogSnapshot();
   void log(LogLevelPreference level, String category, String message);
   Future<void> addPlaylistTracks(String playlistId, List<String> uris);
   Future<void> removePlaylistTracks(
@@ -697,6 +698,13 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     });
     _reapplyRuntimeLogLevelOverride();
   }
+
+  @override
+  Future<String> saveLogSnapshot() => _submitOperation<String>(
+    'saveLogSnapshot',
+    const <String, Object?>{},
+    (Object? result) => result! as String,
+  );
 
   @override
   void log(LogLevelPreference level, String category, String message) {

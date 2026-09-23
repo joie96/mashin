@@ -14,6 +14,7 @@ class SettingsScreenMobile extends StatelessWidget {
     required this.onCacheSizeChanged,
     required this.onThemeChanged,
     required this.onLogLevelChanged,
+    required this.onSaveLogSnapshot,
   });
 
   final String musicAssistantUrl;
@@ -23,6 +24,7 @@ class SettingsScreenMobile extends StatelessWidget {
   final ValueChanged<String> onCacheSizeChanged;
   final ValueChanged<bool> onThemeChanged;
   final ValueChanged<LogLevelPreference> onLogLevelChanged;
+  final Future<String> Function() onSaveLogSnapshot;
 
   @override
   Widget build(BuildContext context) {
@@ -115,9 +117,17 @@ class SettingsScreenMobile extends StatelessWidget {
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 12),
-                  SettingsLogLevelField(
-                    logLevel: logLevel,
-                    onChanged: onLogLevelChanged,
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: SettingsLogLevelField(
+                          logLevel: logLevel,
+                          onChanged: onLogLevelChanged,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      SettingsSaveLogButton(onSave: onSaveLogSnapshot),
+                    ],
                   ),
                   const SizedBox(height: 28),
                   Text(
