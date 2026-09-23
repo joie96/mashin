@@ -52,10 +52,11 @@ pub(crate) struct EncodedTrackCache {
 }
 
 impl EncodedTrackCache {
-    fn append(&mut self, chunk: Arc<[u8]>, duration_millis: u64) {
+    fn append(&mut self, chunk: Arc<[u8]>, start_position_millis: u64, duration_millis: u64) {
         self.byte_len = self.byte_len.saturating_add(chunk.len());
-        let start_position_millis = self.cached_duration_millis;
-        self.cached_duration_millis = self.cached_duration_millis.saturating_add(duration_millis);
+        self.cached_duration_millis = self
+            .cached_duration_millis
+            .max(start_position_millis.saturating_add(duration_millis));
         self.chunks.push_back(EncodedCacheChunk {
             data: chunk,
             start_position_millis,
@@ -86,6 +87,9 @@ pub(crate) enum CacheAppendResult {
     Appended,
     Completed,
     IgnoredComplete,
+    IgnoredConnectionLost,
+    IgnoredOverlap,
+    IgnoredPendingSeek,
     IgnoredStaleLease,
     WriteUnavailable,
 }
@@ -169,6 +173,7 @@ pub(crate) fn cache_append_encoded_chunk(
     cache_sequence: &Arc<AtomicU64>,
     reservation: &DownloadSlotReservation,
     format: &AudioFormat,
+    start_position_millis: u64,
     duration_millis: u64,
     data: &[u8],
 ) -> CacheAppendResult {
@@ -194,14 +199,19 @@ pub(crate) fn cache_append_encoded_chunk(
         let Some(cache) = caches.get_mut(&reservation.cache_content_key) else {
             return CacheAppendResult::IgnoredStaleLease;
         };
+        if !cache.chunks.is_empty()
+            && start_position_millis.saturating_add(duration_millis) <= cache.cached_duration_millis
+        {
+            return CacheAppendResult::IgnoredOverlap;
+        }
         cache.last_touched = touch;
         cache.format = Some(format.clone());
-        cache.append(Arc::from(data), duration_millis);
+        cache.append(Arc::from(data), start_position_millis, duration_millis);
         if reservation
             .expected_duration_millis
             .map(|expected| {
-                cache
-                    .cached_duration_millis
+                start_position_millis
+                    .saturating_add(duration_millis)
                     .saturating_add(CACHE_COMPLETION_TOLERANCE_MILLIS)
                     >= expected
             })
@@ -260,30 +270,105 @@ pub(crate) fn cache_interrupted_duration_millis(
     (cache.integrity == CacheIntegrity::Interrupted).then_some(cache.cached_duration_millis)
 }
 
-// Retains the chunk that crosses the resume position without splitting encoded audio frames.
-pub(crate) fn cache_truncate_after_millis(
-    caches: &EncodedCaches,
-    content_key: &str,
-    resume_position_millis: u64,
-) {
-    if let Ok(mut caches) = caches.lock() {
-        let Some(cache) = caches.get_mut(content_key) else {
-            return;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resume_keeps_old_indexes_and_appends_chunk_crossing_the_cached_end() {
+        let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
+        let sequence = Arc::new(AtomicU64::new(0));
+        let reservation = DownloadSlotReservation {
+            cache_content_key: "track".to_string(),
+            expected_duration_millis: Some(6_000),
+            resume_after_millis: 2_000,
+            append_after_seek: Arc::new(AtomicBool::new(true)),
+            lease_id: "slot-1-1".to_string(),
         };
-        if cache.integrity != CacheIntegrity::Interrupted {
-            return;
+        let format = AudioFormat {
+            codec: ::sendspin::audio::Codec::Pcm,
+            sample_rate: 48_000,
+            channels: 2,
+            bit_depth: 16,
+            codec_header: None,
+        };
+        cache_add_key(&caches, "track".to_string(), 0);
+        for (start, duration, data) in [
+            (0, 1_500, b"a".as_slice()),
+            (1_500, 1_000, b"b"),
+            (2_500, 1_000, b"c"),
+        ] {
+            assert_eq!(
+                cache_append_encoded_chunk(
+                    &caches,
+                    &sequence,
+                    &reservation,
+                    &format,
+                    start,
+                    duration,
+                    data
+                ),
+                CacheAppendResult::Appended
+            );
         }
-        while cache
-            .chunks
-            .back()
-            .map(|chunk| chunk.start_position_millis >= resume_position_millis)
-            .unwrap_or(false)
-        {
-            if let Some(chunk) = cache.chunks.pop_back() {
-                cache.byte_len = cache.byte_len.saturating_sub(chunk.data.len());
-            }
-        }
-        cache.cached_duration_millis = resume_position_millis;
+        assert_eq!(cache_mark_interrupted(&caches, "track"), Some(3_500));
+        assert_eq!(
+            cache_append_encoded_chunk(
+                &caches,
+                &sequence,
+                &reservation,
+                &format,
+                2_000,
+                1_000,
+                b"duplicate"
+            ),
+            CacheAppendResult::IgnoredOverlap
+        );
+        assert_eq!(cache_cached_duration_millis(&caches, "track"), Some(3_500));
+        assert_eq!(
+            cache_append_encoded_chunk(
+                &caches,
+                &sequence,
+                &reservation,
+                &format,
+                3_000,
+                1_000,
+                b"new"
+            ),
+            CacheAppendResult::Appended
+        );
+        assert_eq!(cache_cached_duration_millis(&caches, "track"), Some(4_000));
+        assert_eq!(
+            cache_local_seek_target(&caches, "track", 3_750)
+                .unwrap()
+                .chunk_index,
+            3
+        );
+        assert_eq!(
+            cache_read_chunk_with_duration(&caches, "track", 3)
+                .unwrap()
+                .0
+                .unwrap()
+                .0
+                .as_ref(),
+            b"new"
+        );
+        assert_eq!(
+            cache_append_encoded_chunk(
+                &caches,
+                &sequence,
+                &reservation,
+                &format,
+                4_000,
+                2_000,
+                b"end"
+            ),
+            CacheAppendResult::Completed
+        );
+        assert_eq!(
+            cache_complete_duration_millis(&caches, "track"),
+            Some(6_000)
+        );
     }
 }
 

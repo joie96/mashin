@@ -375,6 +375,15 @@ impl MusicAssistantClient {
         .map(|_| ())
     }
 
+    pub(crate) async fn queue_clear(&self, queue_id: &QueueId) -> Result<(), String> {
+        self.execute_command::<Value>(
+            "player_queues/clear",
+            json!({ "queue_id": queue_id, "skip_stop": true }),
+        )
+        .await
+        .map(|_| ())
+    }
+
     pub(crate) async fn queue_play_media(
         &self,
         queue_id: QueueId,
@@ -391,6 +400,19 @@ impl MusicAssistantClient {
                 "radio_mode": radio_mode,
                 "sort_by": "original",
             }),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    pub(crate) async fn queue_play_index(
+        &self,
+        queue_id: QueueId,
+        index: usize,
+    ) -> Result<(), String> {
+        self.execute_command::<Value>(
+            "player_queues/play_index",
+            json!({ "queue_id": queue_id, "index": index }),
         )
         .await
         .map(|_| ())
