@@ -1,6 +1,6 @@
 use super::downloader::{DownloaderConnectionStatus, SendspinDownloader, SendspinDownloaderConfig};
 use super::models::{
-    SendspinAudioCodec, SendspinDownloadPlan, SendspinDownloadPlanItem, SendspinDownloadRole,
+    SendspinAudioCodec, SendspinDownloadPlanRequest, SendspinDownloadQueueItem,
     SendspinEngineConfiguration,
 };
 use crate::audio::player::{AudioPlayer, AudioPlayerState};
@@ -46,7 +46,6 @@ pub(crate) struct SendspinEngine {
     queue_revision: u64,
     current_cache_content_key: Option<String>,
     queue_content_keys: Vec<String>,
-    recently_played_content_keys: Vec<String>,
     last_download_status_log: Option<Instant>,
     next_reconnect_attempt: Option<Instant>,
     reconnect_delay: Duration,
@@ -84,7 +83,6 @@ impl SendspinEngine {
             queue_revision: 0,
             current_cache_content_key: None,
             queue_content_keys: Vec::new(),
-            recently_played_content_keys: Vec::new(),
             last_download_status_log: None,
             next_reconnect_attempt: None,
             reconnect_delay: INITIAL_RECONNECT_DELAY,
@@ -110,7 +108,6 @@ impl SendspinEngine {
         self.next_original_index = 0;
         self.current_cache_content_key = None;
         self.queue_content_keys.clear();
-        self.recently_played_content_keys.clear();
         self.last_download_status_log = None;
         self.next_reconnect_attempt = None;
         self.reconnect_delay = INITIAL_RECONNECT_DELAY;
@@ -185,7 +182,7 @@ impl SendspinEngine {
             self.downloader.configure(downloader_config);
         }
         if let Some(current_index) = current_index {
-            let plan = self.build_queue_download_plan(queue_items, current_index)?;
+            let plan = self.build_download_plan_request(queue_items, current_index)?;
             self.downloader
                 .set_pending_current_seek(playback_position_millis / 1_000)?;
             self.apply_queue_download_plan(plan)?;
@@ -229,24 +226,15 @@ impl SendspinEngine {
     }
 
     // Queue commands.
+    // Applies the queue snapshot after the downloader accepts the corresponding download plan.
     pub(crate) fn apply_queue_download_plan(
         &mut self,
-        plan: SendspinDownloadPlan,
+        request: SendspinDownloadPlanRequest,
     ) -> Result<(), String> {
-        self.downloader.apply_download_plan(plan.clone())?;
-        self.download_plan_version = plan.version;
-        self.current_cache_content_key = plan
-            .items
-            .iter()
-            .find(|item| item.role == SendspinDownloadRole::Current)
-            .map(|item| item.cache_content_key.as_str().to_string());
-        self.queue_content_keys = plan
-            .items
-            .iter()
-            .map(|item| item.cache_content_key.as_str().to_string())
-            .collect();
-        self.queue.items = plan
-            .items
+        self.downloader.apply_download_plan(request.clone())?;
+        self.download_plan_version = request.queue_revision;
+        self.queue.items = request
+            .queue_items
             .iter()
             .map(|item| {
                 QueueItem::local(
@@ -257,18 +245,30 @@ impl SendspinEngine {
                 )
             })
             .collect();
-        self.queue.current_index = plan
-            .items
+        self.queue.current_index = request.current_index;
+        self.current_cache_content_key = request.current_index.and_then(|index| {
+            request.queue_items.get(index).and_then(|item| {
+                self.config.as_ref().and_then(|config| {
+                    queue_cache_content_key(&item.media_item, config.preferred_codec).ok()
+                })
+            })
+        });
+        self.queue_content_keys = request
+            .queue_items
             .iter()
-            .position(|item| item.role == SendspinDownloadRole::Current);
+            .filter_map(|item| {
+                self.config.as_ref().and_then(|config| {
+                    queue_cache_content_key(&item.media_item, config.preferred_codec).ok()
+                })
+            })
+            .collect();
         LOGGER.debug(format!(
             "queue download plan applied: version {}, {} items, current index {:?}",
-            plan.version,
-            plan.items.len(),
+            request.queue_revision,
+            request.queue_items.len(),
             self.queue.current_index
         ));
         self.queue_revision = self.queue_revision.saturating_add(1);
-        self.sync_download_window()?;
         self.refresh_queue_cache_states();
         Ok(())
     }
@@ -284,7 +284,7 @@ impl SendspinEngine {
 
         let seed_tracks = tracks_from_media_items(&media_items);
         let queue_items = self.new_queue_media_items(media_items);
-        let plan = self.build_queue_download_plan(queue_items, 0)?;
+        let plan = self.build_download_plan_request(queue_items, 0)?;
         self.apply_queue_download_plan(plan)?;
         let content_key = self
             .current_cache_content_key
@@ -402,10 +402,11 @@ impl SendspinEngine {
             return Err("queue index is out of range".to_string());
         };
         let content_key = content_key.clone();
-        self.record_recently_played_track(&content_key);
         self.queue.current_index = Some(index);
         self.play_cached_content(&content_key)?;
-        self.sync_download_window()
+        self.apply_queue_download_plan(
+            self.build_download_plan_request(self.queue_media_items(), index)?,
+        )
     }
 
     // Queue planning helpers.
@@ -440,6 +441,7 @@ impl SendspinEngine {
             .collect()
     }
 
+    // Preserves the current item when possible, then rebuilds the authoritative queue snapshot.
     fn replace_queue_media_items(
         &mut self,
         media_items: Vec<QueueMediaItem>,
@@ -460,7 +462,7 @@ impl SendspinEngine {
                 previous_current_index.map(|index| index.min(media_items.len().saturating_sub(1)))
             })
             .unwrap_or(0);
-        let plan = self.build_queue_download_plan(media_items, current_index)?;
+        let plan = self.build_download_plan_request(media_items, current_index)?;
         self.apply_queue_download_plan(plan)?;
         let current_queue_item_id = self.current_queue_item_id();
         if previous_current_queue_item_id.as_ref() != current_queue_item_id {
@@ -480,103 +482,23 @@ impl SendspinEngine {
             .map(|item| &item.queue_item_id)
     }
 
-    fn build_queue_download_plan(
+    fn build_download_plan_request(
         &self,
         media_items: Vec<QueueMediaItem>,
         current_index: usize,
-    ) -> Result<SendspinDownloadPlan, String> {
-        let preferred_codec = self
-            .config
-            .as_ref()
-            .ok_or_else(|| "Sendspin engine is not configured".to_string())?
-            .preferred_codec;
-
-        let items = media_items
-            .into_iter()
-            .enumerate()
-            .map(
-                |(index, queue_item)| -> Result<SendspinDownloadPlanItem, String> {
-                    let QueueMediaItem {
-                        queue_item_id,
-                        original_index,
-                        media_item,
-                    } = queue_item;
-                    let fields = media_item.fields();
-                    let provider = fields.provider.as_str().trim();
-                    let item_id = fields.item_id.as_str().trim();
-                    if provider.is_empty() || item_id.is_empty() {
-                        return Err(format!(
-                            "queue item {} has no Music Assistant provider or item ID",
-                            queue_item_id.as_str()
-                        ));
-                    }
-                    let cache_content_key = CacheContentKey(format!(
-                        "{provider}:{item_id}:{}:48000:16:2",
-                        preferred_codec.as_str()
-                    ));
-                    let expected_duration_millis = media_item
-                        .duration_seconds()
-                        .filter(|duration| *duration > 0)
-                        .map(|duration| u64::from(duration).saturating_mul(1_000));
-                    let role = if index == current_index {
-                        SendspinDownloadRole::Current
-                    } else if index == current_index.saturating_add(1) {
-                        SendspinDownloadRole::Next
-                    } else {
-                        SendspinDownloadRole::Future
-                    };
-                    let priority = match role {
-                        SendspinDownloadRole::Current => 100,
-                        SendspinDownloadRole::Next => 90,
-                        SendspinDownloadRole::Future => 50,
-                    };
-                    Ok(SendspinDownloadPlanItem {
-                        queue_item_id,
-                        original_index,
-                        role,
-                        priority,
-                        cache_content_key,
-                        expected_duration_millis,
-                        media_item,
-                    })
-                },
-            )
-            .collect::<Result<Vec<_>, String>>()?;
-
-        Ok(SendspinDownloadPlan {
-            version: self.download_plan_version.saturating_add(1),
-            items,
+    ) -> Result<SendspinDownloadPlanRequest, String> {
+        Ok(SendspinDownloadPlanRequest {
+            queue_revision: self.download_plan_version.saturating_add(1),
+            queue_items: media_items
+                .into_iter()
+                .map(|item| SendspinDownloadQueueItem {
+                    queue_item_id: item.queue_item_id,
+                    original_index: item.original_index,
+                    media_item: item.media_item,
+                })
+                .collect(),
+            current_index: Some(current_index),
         })
-    }
-
-    // Download-window and cache synchronization.
-    fn sync_download_window(&mut self) -> Result<(), String> {
-        let download_window = self
-            .queue_content_keys
-            .iter()
-            .skip(self.queue.current_index.unwrap_or(0))
-            .map(String::clone)
-            .collect::<Vec<_>>();
-        let current = download_window.first().cloned();
-        let upcoming = download_window.iter().skip(1).cloned().collect::<Vec<_>>();
-        self.downloader.update_playback_window(
-            current,
-            upcoming.clone(),
-            self.recently_played_content_keys.clone(),
-        );
-        self.downloader.ensure_download_window(&download_window)
-    }
-
-    fn record_recently_played_track(&mut self, next_content_key: &str) {
-        let Some(current) = self.current_cache_content_key.as_ref() else {
-            return;
-        };
-        if current == next_content_key {
-            return;
-        }
-        self.recently_played_content_keys
-            .retain(|key| key != current);
-        self.recently_played_content_keys.push(current.clone());
     }
 
     fn refresh_queue_cache_states(&mut self) {
@@ -604,7 +526,8 @@ impl SendspinEngine {
             return;
         }
         self.refresh_queue_cache_states();
-        let (active_downloads, cache_used_bytes, cache_bytes) = self.downloader.download_status();
+        let (active_downloads, cache_used_bytes, cache_bytes, capacity_mode) =
+            self.downloader.download_status();
         let completed_cache_items = self
             .downloader
             .completed_cache_item_count(&self.queue_content_keys);
@@ -621,8 +544,7 @@ impl SendspinEngine {
                     .unwrap_or_else(|| download.queue_item_id.as_str());
                 let expected_duration_millis = download.expected_duration_millis.unwrap_or(0);
                 format!(
-                    "{} {track_name} {}/{} ms ({:.1}%)",
-                    download_status_symbol(download.state),
+                    "{track_name} {}/{} ms ({:.1}%)",
                     download.cached_duration_millis,
                     expected_duration_millis,
                     Self::percentage(download.cached_duration_millis, expected_duration_millis,)
@@ -631,7 +553,8 @@ impl SendspinEngine {
             .collect::<Vec<_>>();
         let cache_usage_percent = Self::percentage(cache_used_bytes as u64, cache_bytes as u64);
         LOGGER.info(format!(
-            "download status: {}/{} complete queue item(s), [{}], cache {} KiB/{} KiB ({:.1}%)",
+            "download status: capacity mode {capacity_mode}, {} active download(s), {}/{} complete queue item(s), [{}], cache {} KiB/{} KiB ({:.1}%)",
+            active_downloads.len(),
             completed_cache_items,
             self.queue_content_keys.len(),
             active_downloads.join(", "),
@@ -694,6 +617,7 @@ impl SendspinEngine {
             .min(MAXIMUM_RECONNECT_DELAY);
     }
 
+    // Consumes downloader transport events and schedules a generation-safe reconnect when needed.
     fn process_connection_state(&mut self) {
         if let Some(event) = self.downloader.take_connection_event() {
             if self
@@ -732,7 +656,13 @@ impl SendspinEngine {
                     self.next_reconnect_attempt = None;
                     self.reconnect_delay = INITIAL_RECONNECT_DELAY;
                     self.is_reconnect_in_flight = false;
-                    if let Err(error) = self.sync_download_window() {
+                    let request = self.build_download_plan_request(
+                        self.queue_media_items(),
+                        self.queue.current_index.unwrap_or(0),
+                    );
+                    if let Err(error) =
+                        request.and_then(|request| self.apply_queue_download_plan(request))
+                    {
                         LOGGER.error(format!("failed to resume Sendspin downloads: {error}"));
                     }
                 }
@@ -756,20 +686,14 @@ impl SendspinEngine {
         }
     }
 
-    fn process_download_window(&mut self) {
-        if self.downloader.take_download_window_refresh() {
-            if let Err(error) = self.sync_download_window() {
-                LOGGER.error(format!(
-                    "failed to refresh Sendspin download window: {error}"
-                ));
-            }
-        }
+    fn process_download_status(&mut self) {
         if self.downloader.take_download_status_refresh() {
             self.refresh_queue_cache_states();
         }
         self.refresh_and_log_download_status();
     }
 
+    // Advances local cached playback, updates player state, and selects the next queue item on end.
     fn process_cached_playback(&mut self, content_key: &str) {
         self.start_prepared_audio_if_available(&content_key);
         if !self.audio_player.is_started() {
@@ -901,8 +825,18 @@ impl SendspinEngine {
                 Err(error) => SourceReadResult::Error(error),
             }
         });
-        self.downloader
-            .trim_played_current_cache(content_key, self.audio_player.next_chunk_index());
+        let position_millis = self
+            .playback_position_offset_millis
+            .saturating_add(self.audio_player.playback_position_millis())
+            .max(0) as u64;
+        if let Err(error) = self
+            .downloader
+            .record_playback_position(content_key, position_millis)
+        {
+            LOGGER.error(format!(
+                "failed to update Sendspin playback progress: {error}"
+            ));
+        }
     }
 
     fn start_prepared_audio_if_available(&mut self, content_key: &str) {
@@ -1092,11 +1026,20 @@ impl SendspinEngine {
     }
 }
 
-fn download_status_symbol(status: CacheStatus) -> &'static str {
-    match status {
-        CacheStatus::Interrupted => "⏸",
-        _ => "▶",
+fn queue_cache_content_key(
+    media_item: &MediaItem,
+    codec: SendspinAudioCodec,
+) -> Result<String, String> {
+    let fields = media_item.fields();
+    let provider = fields.provider.as_str().trim();
+    let item_id = fields.item_id.as_str().trim();
+    if provider.is_empty() || item_id.is_empty() {
+        return Err("queue item has no Music Assistant provider or item ID".to_string());
     }
+    Ok(format!(
+        "{provider}:{item_id}:{}:48000:16:2",
+        codec.as_str()
+    ))
 }
 
 impl PlaybackEngine for SendspinEngine {
@@ -1246,7 +1189,7 @@ impl PlaybackEngine for SendspinEngine {
         self.process_autoplay_results();
         self.process_connection_state();
         if let Some(content_key) = self.current_cache_content_key.clone() {
-            self.process_download_window();
+            self.process_download_status();
             self.process_cached_playback(&content_key);
         }
         self.request_autoplay_refill_if_needed();
@@ -1407,7 +1350,7 @@ mod tests {
     }
 
     #[test]
-    fn queue_download_plan_keeps_the_selected_item_current() {
+    fn queue_download_snapshot_keeps_the_selected_item_current() {
         let mut engine = SendspinEngine::new();
         engine.config = Some(configuration());
         let queue_items = engine.new_queue_media_items(vec![
@@ -1417,29 +1360,31 @@ mod tests {
         ]);
 
         let plan = engine
-            .build_queue_download_plan(queue_items, 1)
+            .build_download_plan_request(queue_items, 1)
             .expect("build queue plan");
-        assert_eq!(plan.items[0].role, SendspinDownloadRole::Future);
-        assert_eq!(plan.items[1].role, SendspinDownloadRole::Current);
-        assert_eq!(plan.items[2].role, SendspinDownloadRole::Next);
+        assert_eq!(plan.current_index, Some(1));
+        assert_eq!(plan.queue_items.len(), 3);
+        assert_eq!(plan.queue_items[1].queue_item_id.as_str(), "local-2");
     }
 
     #[test]
-    fn queue_download_plan_uses_music_assistant_item_ids_for_cache_keys() {
+    fn queue_cache_keys_use_music_assistant_item_ids() {
         let mut engine = SendspinEngine::new();
         engine.config = Some(configuration());
         let queue_items =
             engine.new_queue_media_items(vec![track("deezer", "first"), track("deezer", "second")]);
 
         let plan = engine
-            .build_queue_download_plan(queue_items, 0)
+            .build_download_plan_request(queue_items, 0)
             .expect("build queue plan");
         assert_eq!(
-            plan.items[0].cache_content_key.as_str(),
+            queue_cache_content_key(&plan.queue_items[0].media_item, SendspinAudioCodec::Pcm)
+                .expect("first cache key"),
             "deezer:first:pcm:48000:16:2"
         );
         assert_eq!(
-            plan.items[1].cache_content_key.as_str(),
+            queue_cache_content_key(&plan.queue_items[1].media_item, SendspinAudioCodec::Pcm)
+                .expect("second cache key"),
             "deezer:second:pcm:48000:16:2"
         );
     }
@@ -1549,7 +1494,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             original_upcoming_ids,
         );
-        assert_eq!(downloader_plan.items[0].role, SendspinDownloadRole::Current);
-        assert_eq!(downloader_plan.items[1].role, SendspinDownloadRole::Next);
+        assert_eq!(
+            downloader_plan
+                .current_content_key
+                .as_ref()
+                .map(|key| key.as_str()),
+            Some("test:first:pcm:48000:16:2")
+        );
+        assert!(downloader_plan.items[0].priority > downloader_plan.items[1].priority);
     }
 }

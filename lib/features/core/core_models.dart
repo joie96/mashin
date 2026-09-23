@@ -2061,6 +2061,7 @@ enum CacheStatus {
   prepared,
   buffering,
   downloading,
+  paused,
   complete,
   interrupted,
   evicted,

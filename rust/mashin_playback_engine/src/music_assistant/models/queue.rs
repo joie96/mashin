@@ -52,6 +52,7 @@ pub(crate) enum CacheStatus {
     Prepared,
     Buffering,
     Downloading,
+    Paused,
     Complete,
     Interrupted,
     Evicted,

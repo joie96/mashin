@@ -283,8 +283,4 @@ impl AudioPlayer {
             .map(AudioOutput::playback_position_millis)
             .unwrap_or(0)
     }
-
-    pub(crate) fn next_chunk_index(&self) -> usize {
-        self.next_chunk_index
-    }
 }

@@ -40,24 +40,34 @@ pub(crate) struct CacheItemState {
     pub(crate) state: CacheStatus,
     pub(crate) cached_duration_millis: u64,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SendspinDownloadRole {
-    Current,
-    Next,
-    Future,
+#[derive(Debug, Clone)]
+pub(crate) struct SendspinDownloadPlanRequest {
+    pub(crate) queue_revision: u64,
+    pub(crate) queue_items: Vec<SendspinDownloadQueueItem>,
+    pub(crate) current_index: Option<usize>,
 }
+
+#[derive(Debug, Clone)]
+pub(crate) struct SendspinDownloadQueueItem {
+    pub(crate) queue_item_id: QueueItemId,
+    pub(crate) original_index: usize,
+    pub(crate) media_item: MediaItem,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct SendspinDownloadPlan {
     pub(crate) version: u64,
+    pub(crate) current_content_key: Option<CacheContentKey>,
     pub(crate) items: Vec<SendspinDownloadPlanItem>,
 }
 #[derive(Debug, Clone)]
 pub(crate) struct SendspinDownloadPlanItem {
     pub(crate) queue_item_id: QueueItemId,
     pub(crate) original_index: usize,
-    pub(crate) role: SendspinDownloadRole,
-    pub(crate) priority: u8,
+    pub(crate) queue_index: usize,
+    pub(crate) priority: u32,
     pub(crate) cache_content_key: CacheContentKey,
     pub(crate) expected_duration_millis: Option<u64>,
+    pub(crate) estimated_bytes: usize,
     pub(crate) media_item: MediaItem,
 }
