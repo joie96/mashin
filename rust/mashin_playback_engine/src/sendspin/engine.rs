@@ -528,9 +528,8 @@ impl SendspinEngine {
         self.refresh_queue_cache_states();
         let (active_downloads, cache_used_bytes, cache_bytes, capacity_mode) =
             self.downloader.download_status();
-        let completed_cache_items = self
-            .downloader
-            .completed_cache_item_count(&self.queue_content_keys);
+        let (completed_cache_items, partly_cached_items) =
+            self.downloader.cache_item_counts(&self.queue_content_keys);
         let active_downloads = active_downloads
             .iter()
             .map(|download| {
@@ -553,10 +552,7 @@ impl SendspinEngine {
             .collect::<Vec<_>>();
         let cache_usage_percent = Self::percentage(cache_used_bytes as u64, cache_bytes as u64);
         LOGGER.info(format!(
-            "download status: capacity mode {capacity_mode}, {} active download(s), {}/{} complete queue item(s), [{}], cache {} KiB/{} KiB ({:.1}%)",
-            active_downloads.len(),
-            completed_cache_items,
-            self.queue_content_keys.len(),
+            "download status: capacity mode {capacity_mode}, cached items: {completed_cache_items} completed, {partly_cached_items} partly, [{}], cache {} KiB/{} KiB ({:.1}%)",
             active_downloads.join(", "),
             cache_used_bytes / 1024,
             cache_bytes / 1024,

@@ -1,5 +1,5 @@
 use ::sendspin::audio::AudioFormat;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -167,6 +167,25 @@ pub(crate) fn cache_keys(caches: &EncodedCaches) -> Vec<String> {
         .unwrap_or_default()
 }
 
+pub(crate) fn cache_item_counts(caches: &EncodedCaches, content_keys: &[String]) -> (usize, usize) {
+    let Ok(caches) = caches.lock() else {
+        return (0, 0);
+    };
+    content_keys
+        .iter()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .fold((0, 0), |(completed, partly), key| {
+            match caches.get(key).filter(|cache| cache.byte_len > 0) {
+                Some(cache) if cache.integrity == CacheIntegrity::Complete => {
+                    (completed + 1, partly)
+                }
+                Some(_) => (completed, partly + 1),
+                None => (completed, partly),
+            }
+        })
+}
+
 // Appends an encoded chunk only to an explicitly reserved cache key and marks completed streams.
 pub(crate) fn cache_append_encoded_chunk(
     caches: &EncodedCaches,
@@ -273,6 +292,44 @@ pub(crate) fn cache_interrupted_duration_millis(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn counts_only_distinct_cached_items_with_audio() {
+        let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
+        let sequence = Arc::new(AtomicU64::new(0));
+        let format = AudioFormat {
+            codec: ::sendspin::audio::Codec::Pcm,
+            sample_rate: 48_000,
+            channels: 2,
+            bit_depth: 16,
+            codec_header: None,
+        };
+        for (key, expected_duration_millis) in [("partial", 2_000), ("complete", 1_000)] {
+            cache_add_key(&caches, key.to_string(), 0);
+            let reservation = DownloadSlotReservation {
+                cache_content_key: key.to_string(),
+                expected_duration_millis: Some(expected_duration_millis),
+                resume_after_millis: 0,
+                append_after_seek: Arc::new(AtomicBool::new(true)),
+                lease_id: key.to_string(),
+            };
+            cache_append_encoded_chunk(
+                &caches,
+                &sequence,
+                &reservation,
+                &format,
+                0,
+                1_000,
+                b"audio",
+            );
+        }
+        cache_add_key(&caches, "empty".to_string(), 1_000);
+        let keys = ["partial", "complete", "empty", "missing", "partial"].map(str::to_string);
+
+        assert_eq!(cache_item_counts(&caches, &keys), (1, 1));
+        cache_remove_key(&caches, "partial");
+        assert_eq!(cache_item_counts(&caches, &keys), (1, 0));
+    }
 
     #[test]
     fn resume_keeps_old_indexes_and_appends_chunk_crossing_the_cached_end() {

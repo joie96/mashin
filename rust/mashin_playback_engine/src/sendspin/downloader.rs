@@ -2064,13 +2064,8 @@ impl SendspinDownloader {
         )
     }
 
-    pub(crate) fn completed_cache_item_count(&self, content_keys: &[String]) -> usize {
-        content_keys
-            .iter()
-            .filter(|key| {
-                crate::cache::store::cache_complete_duration_millis(&self.caches, key).is_some()
-            })
-            .count()
+    pub(crate) fn cache_item_counts(&self, content_keys: &[String]) -> (usize, usize) {
+        crate::cache::store::cache_item_counts(&self.caches, content_keys)
     }
 
     // Cache access commands and queries.
