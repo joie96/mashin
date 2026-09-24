@@ -552,7 +552,7 @@ impl SendspinEngine {
             .collect::<Vec<_>>();
         let cache_usage_percent = Self::percentage(cache_used_bytes as u64, cache_bytes as u64);
         LOGGER.info(format!(
-            "download status: capacity mode {capacity_mode}, cached items: {completed_cache_items} completed, {partly_cached_items} partly, [{}], cache {} KiB/{} KiB ({:.1}%)",
+            "download status: mode {capacity_mode}, cached items: {completed_cache_items} completed, {partly_cached_items} partly, [{}], cache {} KiB/{} KiB ({:.1}%)",
             active_downloads.join(", "),
             cache_used_bytes / 1024,
             cache_bytes / 1024,

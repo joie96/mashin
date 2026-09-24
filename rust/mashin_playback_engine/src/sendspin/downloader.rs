@@ -2055,11 +2055,11 @@ impl SendspinDownloader {
             self.download_capacity_mode
                 .lock()
                 .map(|mode| match &*mode {
-                    DownloadCapacityMode::Dual => "Dual",
-                    DownloadCapacityMode::Single { .. } => "Single",
-                    DownloadCapacityMode::Zero => "Zero",
+                    DownloadCapacityMode::Dual => "dual",
+                    DownloadCapacityMode::Single { .. } => "single",
+                    DownloadCapacityMode::Zero => "zero",
                 })
-                .unwrap_or("Unknown")
+                .unwrap_or("unknown")
                 .to_string(),
         )
     }
