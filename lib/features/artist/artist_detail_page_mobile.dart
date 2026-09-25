@@ -298,7 +298,7 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
               ),
             ),
           ),
-          const SliverToBoxAdapter(child: SizedBox(height: 28)),
+          const SliverToBoxAdapter(child: SizedBox(height: 32)),
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -307,6 +307,7 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
                 isLoading: _controller.isLoadingAlbums,
                 items: _controller.albums,
                 emptyText: 'Keine Veröffentlichungen gefunden.',
+                showAlbumArtist: false,
                 coreBridge: widget.coreBridge,
                 coreEvents: widget.coreEvents,
                 onItemTap: widget.onOpenAlbum,
@@ -315,7 +316,7 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
               ),
             ),
           ),
-          const SliverToBoxAdapter(child: SizedBox(height: 28)),
+          const SliverToBoxAdapter(child: SizedBox(height: 32)),
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -332,7 +333,7 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
               ),
             ),
           ),
-          const SliverToBoxAdapter(child: SizedBox(height: 16)),
+          const SliverToBoxAdapter(child: SizedBox(height: 32)),
           SliverPadding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             sliver: MediaTableSectionMobile<Track>(

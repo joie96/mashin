@@ -25,6 +25,7 @@ class MediaRowSectionMobile<T> extends StatefulWidget {
   final MashinCoreBridgeEvents? coreEvents;
   final ValueChanged<T>? onItemTap;
   final ValueChanged<List<T>>? onSelectionMenuTap;
+  final bool showAlbumArtist;
   final bool showPlaylistDetails;
 
   const MediaRowSectionMobile({
@@ -41,6 +42,7 @@ class MediaRowSectionMobile<T> extends StatefulWidget {
     this.coreEvents,
     this.onItemTap,
     this.onSelectionMenuTap,
+    this.showAlbumArtist = true,
     this.showPlaylistDetails = true,
   });
 
@@ -50,10 +52,6 @@ class MediaRowSectionMobile<T> extends StatefulWidget {
 }
 
 class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
-  static const double _rowTitleHeight = 20;
-  static const double _rowSecondaryHeight = 18;
-  static const double _rowTertiaryHeight = 15;
-
   late final MobileSectionSelectionState _selectionController;
 
   String get title => widget.title;
@@ -66,6 +64,7 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
   int get skeletonCount => widget.skeletonCount;
   MashinCoreBridgeEvents? get coreEvents => widget.coreEvents;
   ValueChanged<T>? get onItemTap => widget.onItemTap;
+  bool get showAlbumArtist => widget.showAlbumArtist;
   bool get showPlaylistDetails => widget.showPlaylistDetails;
 
   @override
@@ -241,21 +240,75 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
         if (!isLoading && items.isEmpty)
           Text(emptyText, style: TextStyle(color: colors.textSecondary))
         else
-          SizedBox(height: _sectionHeight, child: _buildHorizontalRows()),
+          SizedBox(
+            height: _sectionHeight(context),
+            child: _buildHorizontalRows(),
+          ),
       ],
     );
   }
 
-  double get _sectionHeight {
-    final int metadataLineCount = _metadataLineCount;
-    final double metadataHeight =
-        _rowTitleHeight +
-        (metadataLineCount > 1 ? 2 + _rowSecondaryHeight : 0) +
-        (metadataLineCount > 2 ? 2 + _rowTertiaryHeight : 0);
-    return coverSize + 8 + metadataHeight;
+  // Row viewport layout
+  double _sectionHeight(BuildContext context) {
+    if (isLoading) {
+      final int lineCount = _skeletonLineCount;
+      return coverSize + 8 + 10 + (lineCount - 1) * 16;
+    }
+
+    final TextStyle defaultStyle = DefaultTextStyle.of(context).style;
+    final TextStyle titleStyle = defaultStyle.merge(
+      Theme.of(
+        context,
+      ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+    );
+    final TextStyle secondaryStyle = defaultStyle.merge(
+      const TextStyle(fontSize: 12),
+    );
+    final TextStyle tertiaryStyle = defaultStyle.merge(
+      const TextStyle(fontSize: 11),
+    );
+    final TextPainter painter = TextPainter(
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+      ellipsis: '\u2026',
+    );
+
+    double lineHeight(String text, TextStyle style) {
+      painter.text = TextSpan(text: text, style: style);
+      painter.layout(maxWidth: itemWidth);
+      return painter.height;
+    }
+
+    double maxMetadataHeight = 0;
+    try {
+      for (final T item in items) {
+        final _MobileRowText rowText = _mobileRowText(
+          item,
+          showAlbumArtist: showAlbumArtist,
+          showPlaylistDetails: showPlaylistDetails,
+        );
+        double metadataHeight = lineHeight(rowText.title, titleStyle);
+        if (rowText.secondary case final String secondary
+            when secondary.trim().isNotEmpty) {
+          metadataHeight += 2 + lineHeight(secondary, secondaryStyle);
+        }
+        if (rowText.tertiary case final String tertiary
+            when tertiary.trim().isNotEmpty) {
+          metadataHeight += 2 + lineHeight(tertiary, tertiaryStyle);
+        }
+        maxMetadataHeight = math.max(maxMetadataHeight, metadataHeight);
+      }
+    } finally {
+      painter.dispose();
+    }
+    return coverSize + 8 + maxMetadataHeight;
   }
 
-  int get _metadataLineCount {
+  int get _skeletonLineCount {
+    if (T == Album) {
+      return showAlbumArtist ? 3 : 2;
+    }
     if (T == Artist) {
       return 1;
     }
@@ -317,6 +370,7 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
         item: item,
         itemWidth: itemWidth,
         coverSize: coverSize,
+        showArtist: showAlbumArtist,
         onPlayTap: () => _onPlayTap(index),
         onItemTap: onItemTap,
       );
@@ -363,6 +417,7 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
       return _buildMobileMediaRowAlbumSkeleton(
         itemWidth: itemWidth,
         coverSize: coverSize,
+        showArtist: showAlbumArtist,
       );
     }
     if (T == Playlist) {
@@ -403,16 +458,21 @@ Widget _buildMobileMediaRowAlbum({
   required Album item,
   required double itemWidth,
   required double coverSize,
+  required bool showArtist,
   required VoidCallback? onPlayTap,
   required VoidCallback? onItemTap,
 }) {
+  final _MobileRowText rowText = _mobileRowText(
+    item,
+    showAlbumArtist: showArtist,
+  );
   return _buildMobileMediaRowItemBase(
     itemWidth: itemWidth,
     coverSize: coverSize,
     icon: Icons.album_outlined,
-    title: _prefer(item.name, 'Unknown Album'),
-    secondaryText: _albumSubtitle(item),
-    tertiaryText: _albumTertiary(item),
+    title: rowText.title,
+    secondaryText: rowText.secondary,
+    tertiaryText: rowText.tertiary,
     coverUrl: item.imageUriForSize(256) ?? '',
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
@@ -429,13 +489,17 @@ Widget _buildMobileMediaRowPlaylist({
   required VoidCallback? onItemTap,
   required bool showDetails,
 }) {
+  final _MobileRowText rowText = _mobileRowText(
+    item,
+    showPlaylistDetails: showDetails,
+  );
   return _buildMobileMediaRowItemBase(
     itemWidth: itemWidth,
     coverSize: coverSize,
     icon: Icons.queue_music_outlined,
-    title: _prefer(item.name, 'Unknown Playlist'),
-    secondaryText: showDetails ? _playlistSubtitle(item) : null,
-    tertiaryText: null,
+    title: rowText.title,
+    secondaryText: rowText.secondary,
+    tertiaryText: rowText.tertiary,
     coverUrl: item.imageUriForSize(256) ?? '',
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
@@ -451,14 +515,15 @@ Widget _buildMobileMediaRowArtist({
   required VoidCallback? onPlayTap,
   required VoidCallback? onItemTap,
 }) {
+  final _MobileRowText rowText = _mobileRowText(item);
   return _buildMobileMediaRowItemBase(
     itemWidth: itemWidth,
     coverSize: coverSize,
     coverBorderRadius: coverSize / 2,
     icon: Icons.person_outlined,
-    title: _prefer(item.name, 'Unknown Artist'),
-    secondaryText: null,
-    tertiaryText: null,
+    title: rowText.title,
+    secondaryText: rowText.secondary,
+    tertiaryText: rowText.tertiary,
     coverUrl: item.imageUriForSize(256) ?? '',
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
@@ -475,13 +540,14 @@ Widget _buildMobileMediaRowTrack({
   required VoidCallback? onItemTap,
   MashinCoreBridgeEvents? coreEvents,
 }) {
+  final _MobileRowText rowText = _mobileRowText(item);
   return _buildMobileMediaRowItemBase(
     itemWidth: itemWidth,
     coverSize: coverSize,
     icon: Icons.music_note_outlined,
-    title: _prefer(item.name, 'Unknown Track'),
-    secondaryText: _trackSubtitle(item),
-    tertiaryText: null,
+    title: rowText.title,
+    secondaryText: rowText.secondary,
+    tertiaryText: rowText.tertiary,
     coverUrl: item.imageUriForSize(256) ?? '',
     providerLabel: _providerLabelFromId(item.provider),
     providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
@@ -498,13 +564,14 @@ Widget _buildMobileMediaRowUnknown({
   required VoidCallback? onPlayTap,
   required VoidCallback? onItemTap,
 }) {
+  final _MobileRowText rowText = _mobileRowText(null);
   return _buildMobileMediaRowItemBase(
     itemWidth: itemWidth,
     coverSize: coverSize,
     icon: Icons.music_note_outlined,
-    title: 'Unknown Item',
-    secondaryText: '-',
-    tertiaryText: '-',
+    title: rowText.title,
+    secondaryText: rowText.secondary,
+    tertiaryText: rowText.tertiary,
     coverUrl: '',
     providerLabel: '-',
     providerIconSvg: null,
@@ -741,11 +808,13 @@ class _DeferredRowMediaImageState extends State<_DeferredRowMediaImage> {
 Widget _buildMobileMediaRowAlbumSkeleton({
   required double itemWidth,
   required double coverSize,
+  required bool showArtist,
 }) {
   return _buildMobileMediaRowSkeletonBase(
     itemWidth: itemWidth,
     coverSize: coverSize,
     icon: Icons.album_outlined,
+    lineCount: showArtist ? 3 : 2,
   );
 }
 
@@ -758,7 +827,7 @@ Widget _buildMobileMediaRowPlaylistSkeleton({
     itemWidth: itemWidth,
     coverSize: coverSize,
     icon: Icons.queue_music_outlined,
-    lineCount: showDetails ? 3 : 1,
+    lineCount: showDetails ? 2 : 1,
   );
 }
 
@@ -866,6 +935,44 @@ Widget _buildMobileMediaRowSkeletonBase({
 }
 
 // Helper
+typedef _MobileRowText = ({String title, String? secondary, String? tertiary});
+
+_MobileRowText _mobileRowText(
+  Object? item, {
+  bool showAlbumArtist = true,
+  bool showPlaylistDetails = true,
+}) {
+  if (item is Album) {
+    return (
+      title: _prefer(item.name, 'Unknown Album'),
+      secondary: showAlbumArtist ? _albumSubtitle(item) : null,
+      tertiary: _albumTertiary(item),
+    );
+  }
+  if (item is Playlist) {
+    return (
+      title: _prefer(item.name, 'Unknown Playlist'),
+      secondary: showPlaylistDetails ? _playlistSubtitle(item) : null,
+      tertiary: null,
+    );
+  }
+  if (item is Artist) {
+    return (
+      title: _prefer(item.name, 'Unknown Artist'),
+      secondary: null,
+      tertiary: null,
+    );
+  }
+  if (item is Track) {
+    return (
+      title: _prefer(item.name, 'Unknown Track'),
+      secondary: _trackSubtitle(item),
+      tertiary: null,
+    );
+  }
+  return (title: 'Unknown Item', secondary: '-', tertiary: '-');
+}
+
 String _stripOrEmpty(String? value) {
   return value?.trim() ?? '';
 }

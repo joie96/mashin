@@ -28,9 +28,10 @@ class MobileSectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final TextStyle titleStyle =
-        Theme.of(
-          context,
-        ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700) ??
+        Theme.of(context).textTheme.titleMedium?.copyWith(
+          fontSize: 20,
+          fontWeight: FontWeight.normal,
+        ) ??
         DefaultTextStyle.of(context).style;
 
     return LayoutBuilder(

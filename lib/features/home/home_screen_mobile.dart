@@ -36,7 +36,7 @@ class HomeScreenMobile extends StatefulWidget {
 }
 
 class _HomeScreenMobileState extends State<HomeScreenMobile> {
-  static const double _sectionGap = 28;
+  static const double _sectionGap = 32;
   static const double _headingToFirstSectionGap = 20;
 
   late final HomeController _controller;

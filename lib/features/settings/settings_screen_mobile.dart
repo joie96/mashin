@@ -64,7 +64,7 @@ class SettingsScreenMobile extends StatelessWidget {
                   'Die URL wird mit der Anmeldung gespeichert.',
                   style: TextStyle(color: colors.textSecondary),
                 ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 32),
                 Text(
                   'Lokaler Cache',
                   style: Theme.of(context).textTheme.titleMedium,
@@ -85,10 +85,21 @@ class SettingsScreenMobile extends StatelessWidget {
                   'Zwischen 25 und 1000 MB. Die Einstellung wird in der aktiven Sendspin-Konfiguration gespeichert.',
                   style: TextStyle(color: colors.textSecondary),
                 ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 32),
                 Text('Theme', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 12),
                 SegmentedButton<bool>(
+                  style: ButtonStyle(
+                    backgroundColor: WidgetStateProperty.resolveWith<Color?>(
+                      (Set<WidgetState> states) =>
+                          states.contains(WidgetState.selected)
+                          ? colors.selection
+                          : colors.bgSecondary,
+                    ),
+                    foregroundColor: WidgetStatePropertyAll<Color>(
+                      colors.textPrimary,
+                    ),
+                  ),
                   segments: const <ButtonSegment<bool>>[
                     ButtonSegment<bool>(
                       value: false,
@@ -129,7 +140,7 @@ class SettingsScreenMobile extends StatelessWidget {
                       SettingsSaveLogButton(onSave: onSaveLogSnapshot),
                     ],
                   ),
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 32),
                   Text(
                     'Logausgabe',
                     style: Theme.of(context).textTheme.titleMedium,

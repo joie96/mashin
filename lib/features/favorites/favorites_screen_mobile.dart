@@ -317,7 +317,7 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
             ],
           ),
         ),
-        const SizedBox(height: 28),
+        const SizedBox(height: 32),
         MediaRowSectionMobile<Album>(
           title: 'Alben',
           isLoading: _controller.isLoading,
@@ -329,7 +329,7 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
           onSelectionMenuTap: (List<Album> items) =>
               unawaited(_showSelectionMenu(items)),
         ),
-        const SizedBox(height: 28),
+        const SizedBox(height: 32),
         MediaRowSectionMobile<Playlist>(
           title: 'Playlists',
           isLoading: _controller.isLoading,
@@ -341,7 +341,7 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
           onSelectionMenuTap: (List<Playlist> items) =>
               unawaited(_showSelectionMenu(items)),
         ),
-        const SizedBox(height: 28),
+        const SizedBox(height: 32),
         MediaRowSectionMobile<Artist>(
           title: 'Artists',
           isLoading: _controller.isLoading,

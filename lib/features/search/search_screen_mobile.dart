@@ -289,7 +289,7 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
               ],
             ),
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 32),
           MediaRowSectionMobile<Album>(
             title: 'Alben',
             isLoading: _controller.isLoadingAlbums,
@@ -301,7 +301,7 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
             onSelectionMenuTap: (List<Album> items) =>
                 unawaited(_showSelectionMenu(items)),
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 32),
           MediaRowSectionMobile<Playlist>(
             title: 'Playlists',
             isLoading: _controller.isLoadingPlaylists,
@@ -313,7 +313,7 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
             onSelectionMenuTap: (List<Playlist> items) =>
                 unawaited(_showSelectionMenu(items)),
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 32),
           MediaRowSectionMobile<Artist>(
             title: 'Artists',
             isLoading: _controller.isLoadingArtists,
