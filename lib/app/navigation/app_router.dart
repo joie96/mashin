@@ -143,127 +143,144 @@ class AppRouter {
               GoRoute(
                 path: AppRoutes.home,
                 builder: (BuildContext context, GoRouterState state) =>
-                    HomeScreen(
-                      coreBridge: session.coreBridge,
-                      coreEvents: session.coreEvents,
-                      userDataController: session.userDataController,
-                      onOpenArtist: (Artist artist) =>
-                          context.push(AppRoutes.artist(artist)),
-                      onOpenAlbum: (Album album) =>
-                          context.push(AppRoutes.album(album)),
-                      onOpenPlaylist: (Playlist playlist) =>
-                          context.push(AppRoutes.playlist(playlist)),
+                    ShellBackScope(
+                      child: HomeScreen(
+                        coreBridge: session.coreBridge,
+                        coreEvents: session.coreEvents,
+                        userDataController: session.userDataController,
+                        onOpenArtist: (Artist artist) =>
+                            context.push(AppRoutes.artist(artist)),
+                        onOpenAlbum: (Album album) =>
+                            context.push(AppRoutes.album(album)),
+                        onOpenPlaylist: (Playlist playlist) =>
+                            context.push(AppRoutes.playlist(playlist)),
+                      ),
                     ),
               ),
               GoRoute(
                 path: AppRoutes.explore,
                 builder: (BuildContext context, GoRouterState state) =>
-                    ExploreScreen(
-                      coreBridge: session.coreBridge,
-                      coreEvents: session.coreEvents,
-                      userDataController: session.userDataController,
-                      onOpenArtist: (Artist artist) =>
-                          context.push(AppRoutes.artist(artist)),
+                    ShellBackScope(
+                      child: ExploreScreen(
+                        coreBridge: session.coreBridge,
+                        coreEvents: session.coreEvents,
+                        userDataController: session.userDataController,
+                        onOpenArtist: (Artist artist) =>
+                            context.push(AppRoutes.artist(artist)),
+                      ),
                     ),
               ),
               GoRoute(
                 path: AppRoutes.favorites,
                 builder: (BuildContext context, GoRouterState state) =>
-                    FavoritesScreen(
-                      coreBridge: session.coreBridge,
-                      coreEvents: session.coreEvents,
-                      userDataController: session.userDataController!,
-                      onOpenArtist: (Artist artist) =>
-                          context.push(AppRoutes.artist(artist)),
-                      onOpenAlbum: (Album album) =>
-                          context.push(AppRoutes.album(album)),
-                      onOpenPlaylist: (Playlist playlist) =>
-                          context.push(AppRoutes.playlist(playlist)),
+                    ShellBackScope(
+                      child: FavoritesScreen(
+                        coreBridge: session.coreBridge,
+                        coreEvents: session.coreEvents,
+                        userDataController: session.userDataController!,
+                        onOpenArtist: (Artist artist) =>
+                            context.push(AppRoutes.artist(artist)),
+                        onOpenAlbum: (Album album) =>
+                            context.push(AppRoutes.album(album)),
+                        onOpenPlaylist: (Playlist playlist) =>
+                            context.push(AppRoutes.playlist(playlist)),
+                      ),
                     ),
               ),
               GoRoute(
                 path: AppRoutes.playlists,
                 builder: (BuildContext context, GoRouterState state) =>
-                    PlaylistsPage(
-                      coreBridge: session.coreBridge,
-                      coreEvents: session.coreEvents,
-                      userDataController: session.userDataController!,
-                      onOpenPlaylist: (Playlist playlist) =>
-                          context.push(AppRoutes.playlist(playlist)),
+                    ShellBackScope(
+                      child: PlaylistsPage(
+                        coreBridge: session.coreBridge,
+                        coreEvents: session.coreEvents,
+                        userDataController: session.userDataController!,
+                        onOpenPlaylist: (Playlist playlist) =>
+                            context.push(AppRoutes.playlist(playlist)),
+                      ),
                     ),
               ),
               GoRoute(
                 path: AppRoutes.search,
                 builder: (BuildContext context, GoRouterState state) =>
-                    SearchScreen(
-                      coreBridge: session.coreBridge,
-                      coreEvents: session.coreEvents,
-                      userDataController: session.userDataController,
-                      desktopSearchDriven: !isCompactLayout(context),
-                      desktopSearchQuery: state.uri.queryParameters['q'] ?? '',
-                      onOpenArtist: (Artist artist) =>
-                          context.push(AppRoutes.artist(artist)),
-                      onOpenAlbum: (Album album) =>
-                          context.push(AppRoutes.album(album)),
-                      onOpenPlaylist: (Playlist playlist) =>
-                          context.push(AppRoutes.playlist(playlist)),
+                    ShellBackScope(
+                      child: SearchScreen(
+                        coreBridge: session.coreBridge,
+                        coreEvents: session.coreEvents,
+                        userDataController: session.userDataController,
+                        desktopSearchDriven: !isCompactLayout(context),
+                        desktopSearchQuery:
+                            state.uri.queryParameters['q'] ?? '',
+                        onOpenArtist: (Artist artist) =>
+                            context.push(AppRoutes.artist(artist)),
+                        onOpenAlbum: (Album album) =>
+                            context.push(AppRoutes.album(album)),
+                        onOpenPlaylist: (Playlist playlist) =>
+                            context.push(AppRoutes.playlist(playlist)),
+                      ),
                     ),
               ),
               GoRoute(
                 path: AppRoutes.settings,
                 builder: (BuildContext context, GoRouterState state) =>
-                    SettingsScreen(session: session),
+                    ShellBackScope(child: SettingsScreen(session: session)),
               ),
               GoRoute(
                 path: '/artist/:provider/:itemId',
                 parentNavigatorKey: _shellNavigatorKey,
                 builder: (BuildContext context, GoRouterState state) =>
-                    ArtistDetailPage(
-                      coreBridge: session.coreBridge,
-                      coreEvents: session.coreEvents,
-                      itemId: state.pathParameters['itemId']!,
-                      providerInstanceIdOrDomain:
-                          state.pathParameters['provider']!,
-                      userDataController: session.userDataController,
-                      onOpenArtist: (Artist artist) =>
-                          context.push(AppRoutes.artist(artist)),
-                      onOpenAlbum: (Album album) =>
-                          context.push(AppRoutes.album(album)),
+                    ShellBackScope(
+                      child: ArtistDetailPage(
+                        coreBridge: session.coreBridge,
+                        coreEvents: session.coreEvents,
+                        itemId: state.pathParameters['itemId']!,
+                        providerInstanceIdOrDomain:
+                            state.pathParameters['provider']!,
+                        userDataController: session.userDataController,
+                        onOpenArtist: (Artist artist) =>
+                            context.push(AppRoutes.artist(artist)),
+                        onOpenAlbum: (Album album) =>
+                            context.push(AppRoutes.album(album)),
+                      ),
                     ),
               ),
               GoRoute(
                 path: '/album/:provider/:itemId',
                 parentNavigatorKey: _shellNavigatorKey,
                 builder: (BuildContext context, GoRouterState state) =>
-                    AlbumDetailPage(
-                      coreBridge: session.coreBridge,
-                      coreEvents: session.coreEvents,
-                      itemId: state.pathParameters['itemId']!,
-                      providerInstanceIdOrDomain:
-                          state.pathParameters['provider']!,
-                      userDataController: session.userDataController,
-                      onOpenArtist: (Artist artist) =>
-                          context.push(AppRoutes.artist(artist)),
-                      onOpenAlbum: (Album album) =>
-                          context.push(AppRoutes.album(album)),
+                    ShellBackScope(
+                      child: AlbumDetailPage(
+                        coreBridge: session.coreBridge,
+                        coreEvents: session.coreEvents,
+                        itemId: state.pathParameters['itemId']!,
+                        providerInstanceIdOrDomain:
+                            state.pathParameters['provider']!,
+                        userDataController: session.userDataController,
+                        onOpenArtist: (Artist artist) =>
+                            context.push(AppRoutes.artist(artist)),
+                        onOpenAlbum: (Album album) =>
+                            context.push(AppRoutes.album(album)),
+                      ),
                     ),
               ),
               GoRoute(
                 path: '/playlist/:provider/:itemId',
                 parentNavigatorKey: _shellNavigatorKey,
                 builder: (BuildContext context, GoRouterState state) =>
-                    PlaylistDetailPage(
-                      coreBridge: session.coreBridge,
-                      coreEvents: session.coreEvents,
-                      itemId: state.pathParameters['itemId']!,
-                      providerInstanceIdOrDomain:
-                          state.pathParameters['provider']!,
-                      userDataController: session.userDataController,
-                      onOpenArtist: (Artist artist) =>
-                          context.push(AppRoutes.artist(artist)),
-                      onOpenAlbum: (Album album) =>
-                          context.push(AppRoutes.album(album)),
-                      onPlaylistDeleted: context.pop,
+                    ShellBackScope(
+                      child: PlaylistDetailPage(
+                        coreBridge: session.coreBridge,
+                        coreEvents: session.coreEvents,
+                        itemId: state.pathParameters['itemId']!,
+                        providerInstanceIdOrDomain:
+                            state.pathParameters['provider']!,
+                        userDataController: session.userDataController,
+                        onOpenArtist: (Artist artist) =>
+                            context.push(AppRoutes.artist(artist)),
+                        onOpenAlbum: (Album album) =>
+                            context.push(AppRoutes.album(album)),
+                        onPlaylistDeleted: context.pop,
+                      ),
                     ),
               ),
             ],

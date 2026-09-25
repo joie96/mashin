@@ -7,12 +7,20 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:mashin_flutter/app/navigation/app_router.dart';
+import 'package:mashin_flutter/app/session/app_session_controller.dart';
 import 'package:mashin_flutter/app/shell/app_shell.dart';
+import 'package:mashin_flutter/app/theme/app_theme.dart';
+import 'package:mashin_flutter/features/playerbar/playerbar_overlay.dart';
+import 'package:mashin_flutter/features/queue/queue_overlay.dart';
 
 void main() {
-  testWidgets('shows login screen when no session exists', (WidgetTester tester) async {
+  testWidgets('shows login screen when no session exists', (
+    WidgetTester tester,
+  ) async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
 
     await tester.pumpWidget(const MashinApp());
@@ -21,5 +29,90 @@ void main() {
     expect(find.text('Bei Music Assistant anmelden'), findsOneWidget);
     expect(find.byType(TextFormField), findsNWidgets(3));
     expect(find.widgetWithText(FilledButton, 'Anmelden'), findsOneWidget);
+  });
+
+  testWidgets('Android back closes mobile overlays before the detail route', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(540, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final AppSessionController session = AppSessionController();
+    final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+    final ShellNavigationObserver observer = ShellNavigationObserver();
+    final GoRouter router = GoRouter(
+      initialLocation: AppRoutes.home,
+      routes: <RouteBase>[
+        ShellRoute(
+          navigatorKey: navigatorKey,
+          observers: <NavigatorObserver>[observer],
+          builder: (BuildContext context, GoRouterState state, Widget child) =>
+              AppShell(
+                session: session,
+                navigatorKey: navigatorKey,
+                navigationObserver: observer,
+                child: child,
+              ),
+          routes: <RouteBase>[
+            GoRoute(
+              path: AppRoutes.home,
+              builder: (BuildContext context, GoRouterState state) =>
+                  const ShellBackScope(child: Center(child: Text('Home'))),
+            ),
+            GoRoute(
+              path: '/artist/:provider/:itemId',
+              builder: (BuildContext context, GoRouterState state) =>
+                  const ShellBackScope(child: Center(child: Text('Artist'))),
+            ),
+          ],
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    addTearDown(session.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp.router(routerConfig: router, theme: AppTheme.dark()),
+    );
+    router.push('/artist/test/1');
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey<String>('mobile-player-track-swipe')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(PlayerBarOverlay),
+        matching: find.byIcon(Icons.queue_music_outlined),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<QueueOverlay>(find.byType(QueueOverlay)).isOpen,
+      isTrue,
+    );
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Artist'), findsOneWidget);
+    expect(
+      tester.widget<QueueOverlay>(find.byType(QueueOverlay)).isOpen,
+      isFalse,
+    );
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Artist'), findsOneWidget);
+    expect(
+      tester.widget<PlayerBarOverlay>(find.byType(PlayerBarOverlay)).isOpen,
+      isFalse,
+    );
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Home'), findsOneWidget);
   });
 }

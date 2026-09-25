@@ -39,6 +39,42 @@ class AppShell extends StatefulWidget {
   State<AppShell> createState() => _AppShellState();
 }
 
+class ShellBackScope extends StatelessWidget {
+  const ShellBackScope({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final _ShellBackState? backState = context
+        .dependOnInheritedWidgetOfExactType<_ShellBackState>();
+    return PopScope<void>(
+      canPop: !(backState?.hasOverlayBackAction ?? false),
+      onPopInvokedWithResult: (bool didPop, void _) {
+        if (!didPop) {
+          backState?.onBack();
+        }
+      },
+      child: child,
+    );
+  }
+}
+
+class _ShellBackState extends InheritedWidget {
+  const _ShellBackState({
+    required this.hasOverlayBackAction,
+    required this.onBack,
+    required super.child,
+  });
+
+  final bool hasOverlayBackAction;
+  final VoidCallback onBack;
+
+  @override
+  bool updateShouldNotify(_ShellBackState oldWidget) =>
+      hasOverlayBackAction != oldWidget.hasOverlayBackAction;
+}
+
 class _AppShellState extends State<AppShell> {
   static const double _mobileSelectionOverlayBottomInset = 84;
   final SelectionController _selectionSessionController =
@@ -201,29 +237,32 @@ class _AppShellState extends State<AppShell> {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final isDesktop = !isCompactLayout(context);
-        final bool hasMobileBackAction =
+        final bool hasMobileOverlayBackAction =
             _isQueueOverlayOpen ||
             _mobileQueueOverlayOpenProgress > 0 ||
             _isMobilePlayerOverlayOpen ||
             _mobilePlayerOverlayOpenProgress > 0 ||
             _isAudioOptionsOpen ||
-            _selectionSessionController.isVisible ||
-            _canGoBack;
-        return PopScope<void>(
-          canPop: isDesktop || !hasMobileBackAction,
-          onPopInvokedWithResult: (bool didPop, void _) {
-            if (!didPop && !isDesktop) {
-              _handleMobileBack();
-            }
-          },
-          child: Scaffold(
-            backgroundColor: context.mashinColors.bgPrimary,
-            body: SafeArea(
-              top: true,
-              bottom: false,
-              child: isDesktop
-                  ? _buildDesktopLayout(context)
-                  : _buildMobileLayout(context),
+            _selectionSessionController.isVisible;
+        return _ShellBackState(
+          hasOverlayBackAction: !isDesktop && hasMobileOverlayBackAction,
+          onBack: _handleMobileBack,
+          child: PopScope<void>(
+            canPop: isDesktop || !(hasMobileOverlayBackAction || _canGoBack),
+            onPopInvokedWithResult: (bool didPop, void _) {
+              if (!didPop && !isDesktop) {
+                _handleMobileBack();
+              }
+            },
+            child: Scaffold(
+              backgroundColor: context.mashinColors.bgPrimary,
+              body: SafeArea(
+                top: true,
+                bottom: false,
+                child: isDesktop
+                    ? _buildDesktopLayout(context)
+                    : _buildMobileLayout(context),
+              ),
             ),
           ),
         );
@@ -736,6 +775,7 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _openArtistFromQueue(Artist artist) async {
     _closeQueueOverlay();
+    _closeMobilePlayerOverlay();
     await Future<void>.delayed(QueueOverlay.animationDuration);
     if (!mounted) {
       return;
@@ -745,6 +785,7 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _openAlbumFromQueue(Album album) async {
     _closeQueueOverlay();
+    _closeMobilePlayerOverlay();
     await Future<void>.delayed(QueueOverlay.animationDuration);
     if (!mounted) {
       return;
