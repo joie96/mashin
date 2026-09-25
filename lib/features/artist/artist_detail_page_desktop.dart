@@ -617,13 +617,13 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
           height: _coverSize,
           color: colors.bgTertiary,
           child: imageUri == null || imageUri.trim().isEmpty
-              ? Icon(Icons.person_outlined, color: colors.accent, size: 72)
+              ? Icon(Icons.person_outlined, color: colors.textSecondary, size: 72)
               : MediaImage(
                   source: imageUri,
                   fit: BoxFit.cover,
                   fallback: Icon(
                     Icons.person_outlined,
-                    color: colors.accent,
+                    color: colors.textSecondary,
                     size: 72,
                   ),
                 ),

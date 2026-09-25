@@ -3050,13 +3050,13 @@ class _MediaTableCoverState extends State<MediaTableCover> {
                         fit: BoxFit.cover,
                         fallback: Icon(
                           widget.fallbackIcon,
-                          color: colors.accent,
+                          color: colors.textSecondary,
                           size: widget.size * 0.5,
                         ),
                       )
                     : Icon(
                         widget.fallbackIcon,
-                        color: colors.accent,
+                        color: colors.textSecondary,
                         size: widget.size * 0.5,
                       ),
               ),

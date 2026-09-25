@@ -1,4 +1,4 @@
-import 'dart:async';
+etimport 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -639,7 +639,7 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
               : imageUri == null || imageUri.trim().isEmpty
               ? Icon(
                   Icons.queue_music_outlined,
-                  color: colors.accent,
+                  color: colors.textSecondary,
                   size: size * 0.36,
                 )
               : MediaImage(
@@ -647,7 +647,7 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
                   fit: BoxFit.cover,
                   fallback: Icon(
                     Icons.queue_music_outlined,
-                    color: colors.accent,
+                    color: colors.textSecondary,
                     size: size * 0.36,
                   ),
                 ),

@@ -960,11 +960,9 @@ class _MobileTableRowBase extends StatelessWidget {
                     padding: const EdgeInsets.fromLTRB(8, 6, 58, 6),
                     child: Row(
                       children: <Widget>[
-                        MediaTableCover(
+                        _DeferredMobileTableCover(
                           coverUrl: coverUrl,
                           fallbackIcon: fallbackIcon,
-                          size: 52,
-                          radius: 8,
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -1057,6 +1055,52 @@ class _MobileTableRowBase extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _DeferredMobileTableCover extends StatefulWidget {
+  const _DeferredMobileTableCover({
+    required this.coverUrl,
+    required this.fallbackIcon,
+  });
+
+  final String? coverUrl;
+  final IconData fallbackIcon;
+
+  @override
+  State<_DeferredMobileTableCover> createState() =>
+      _DeferredMobileTableCoverState();
+}
+
+class _DeferredMobileTableCoverState extends State<_DeferredMobileTableCover> {
+  Timer? _recheckTimer;
+
+  @override
+  void dispose() {
+    _recheckTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool shouldDefer =
+        widget.coverUrl?.trim().isNotEmpty == true &&
+        Scrollable.recommendDeferredLoadingForContext(context);
+    if (shouldDefer && _recheckTimer == null) {
+      _recheckTimer = Timer(const Duration(milliseconds: 80), () {
+        _recheckTimer = null;
+        if (mounted) {
+          setState(() {});
+        }
+      });
+    }
+
+    return MediaTableCover(
+      coverUrl: shouldDefer ? null : widget.coverUrl,
+      fallbackIcon: widget.fallbackIcon,
+      size: 52,
+      radius: 8,
     );
   }
 }

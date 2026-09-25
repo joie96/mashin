@@ -1936,11 +1936,11 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
                               fit: BoxFit.cover,
                               fallback: Icon(
                                 widget.icon,
-                                color: colors.accent,
+                                color: colors.textSecondary,
                                 size: 34,
                               ),
                             )
-                          : Icon(widget.icon, color: colors.accent, size: 34),
+                          : Icon(widget.icon, color: colors.textSecondary, size: 34),
                     ),
                   )
                 : Container(
@@ -1951,11 +1951,11 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
                             fit: BoxFit.cover,
                             fallback: Icon(
                               widget.icon,
-                              color: colors.accent,
+                              color: colors.textSecondary,
                               size: 34,
                             ),
                           )
-                        : Icon(widget.icon, color: colors.accent, size: 34),
+                        : Icon(widget.icon, color: colors.textSecondary, size: 34),
                   ),
           ),
           Positioned(

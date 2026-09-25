@@ -567,13 +567,13 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
           child: isLoading
               ? null
               : uri == null || uri.trim().isEmpty
-              ? Icon(Icons.album_outlined, color: colors.accent, size: 72)
+              ? Icon(Icons.album_outlined, color: colors.textSecondary, size: 72)
               : MediaImage(
                   source: uri,
                   fit: BoxFit.cover,
                   fallback: Icon(
                     Icons.album_outlined,
-                    color: colors.accent,
+                    color: colors.textSecondary,
                     size: 72,
                   ),
                 ),
