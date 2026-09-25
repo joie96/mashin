@@ -14,8 +14,7 @@ import '../shared/widgets/media_image.dart';
 import 'playlist_detail_controller.dart';
 import 'playlist_name_dialog.dart';
 
-/// Desktop playlist detail page: the header stays pinned (expandable/collapsible)
-/// while only the track table scrolls internally.
+/// Desktop playlist detail page with a shared scroll area for header and tracks.
 class PlaylistDetailPageDesktop extends StatefulWidget {
   const PlaylistDetailPageDesktop({
     super.key,
@@ -45,11 +44,9 @@ class PlaylistDetailPageDesktop extends StatefulWidget {
 
 class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
   static const double _coverSize = 200;
-  static const double _collapsedCoverSize = 48;
 
   late final PlaylistDetailController _controller;
-  final GlobalKey _expandedMenuAnchorKey = GlobalKey();
-  final GlobalKey _collapsedMenuAnchorKey = GlobalKey();
+  final GlobalKey _headerMenuAnchorKey = GlobalKey();
 
   @override
   void initState() {
@@ -352,45 +349,31 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
 
     return Container(
       color: colors.bgPrimary,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          AnimatedSize(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeInOutCubic,
-            alignment: Alignment.topCenter,
-            child: _controller.isHeaderCollapsed
-                ? _buildCollapsedHeader(context, colors)
-                : _buildExpandedHeader(context, colors),
-          ),
-          SizedBox(height: _controller.isHeaderCollapsed ? 4 : 24),
-          // Only the table scrolls; the bounded height puts the section into
-          // its internal-scroll mode.
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: MediaTableSectionDesktop<Track>(
-                title: ' ',
-                isLoading: _controller.isLoadingTracks,
-                items: _controller.tracks,
-                emptyText: 'Keine Titel in dieser Wiedergabeliste.',
-                maxItemsPerPage: 0,
-                coreBridge: widget.coreBridge,
-                coreEvents: widget.coreEvents,
-                isRowFavorite: (Track item, int _) =>
-                    _controller.isItemFavorite(item),
-                onRowFavoriteTap: (Track item, int _) =>
-                    _controller.toggleItemFavorite(item),
-                onRowMoreAnchorTap: (Track item, int _, BuildContext anchor) =>
-                    _showItemMenu(item, anchorContext: anchor),
-                onRowContextMenu: (Track item, int _, Offset position) =>
-                    _showItemMenuAtPosition(item, position),
-                onRowSelectionContextMenu:
-                    (List<Track> items, Offset position) =>
-                        _showItemMenuAtPosition(items.first, position, items),
-                onArtistTap: widget.onOpenArtist,
-                onAlbumTap: widget.onOpenAlbum,
-              ),
+      child: CustomScrollView(
+        slivers: <Widget>[
+          SliverToBoxAdapter(child: _buildHeader(context, colors)),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+            sliver: MediaTableSectionDesktop<Track>(
+              title: ' ',
+              isLoading: _controller.isLoadingTracks,
+              items: _controller.tracks,
+              emptyText: 'Keine Titel in dieser Wiedergabeliste.',
+              maxItemsPerPage: 0,
+              coreBridge: widget.coreBridge,
+              coreEvents: widget.coreEvents,
+              isRowFavorite: (Track item, int _) =>
+                  _controller.isItemFavorite(item),
+              onRowFavoriteTap: (Track item, int _) =>
+                  _controller.toggleItemFavorite(item),
+              onRowMoreAnchorTap: (Track item, int _, BuildContext anchor) =>
+                  _showItemMenu(item, anchorContext: anchor),
+              onRowContextMenu: (Track item, int _, Offset position) =>
+                  _showItemMenuAtPosition(item, position),
+              onRowSelectionContextMenu: (List<Track> items, Offset position) =>
+                  _showItemMenuAtPosition(items.first, position, items),
+              onArtistTap: widget.onOpenArtist,
+              onAlbumTap: widget.onOpenAlbum,
             ),
           ),
         ],
@@ -399,7 +382,7 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
   }
 
   // Header
-  Widget _buildExpandedHeader(BuildContext context, MashinColors colors) {
+  Widget _buildHeader(BuildContext context, MashinColors colors) {
     final Playlist? playlist = _controller.playlist;
     final bool isLoading = _controller.isLoadingMetadata;
     final String? imageUri = playlist?.imageUri;
@@ -407,14 +390,13 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
         !isLoading && imageUri != null && imageUri.trim().isNotEmpty;
 
     return SizedBox(
-      key: const ValueKey<String>('playlist-header-expanded'),
-      height: _coverSize + 24,
+      height: _coverSize + 32,
       child: Stack(
         fit: StackFit.expand,
         children: <Widget>[
           if (showBlurredBackground) _buildBlurBackdrop(colors, imageUri),
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
@@ -422,7 +404,6 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
                   colors,
                   imageUri,
                   isLoading,
-                  _coverSize,
                   showShadow: showBlurredBackground,
                 ),
                 const SizedBox(width: 30),
@@ -451,65 +432,14 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
                       _buildMetaLine(colors),
                       const SizedBox(height: 16),
                       if (!isLoading)
-                        _buildActions(anchorKey: _expandedMenuAnchorKey),
+                        _buildActions(anchorKey: _headerMenuAnchorKey),
                     ],
-                  ),
-                ),
-                Align(
-                  alignment: Alignment.bottomRight,
-                  child: _CollapseToggleButton(
-                    isCollapsed: false,
-                    onTap: _controller.toggleHeaderCollapsed,
                   ),
                 ),
               ],
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildCollapsedHeader(BuildContext context, MashinColors colors) {
-    final Playlist? playlist = _controller.playlist;
-    final bool isLoading = _controller.isLoadingMetadata;
-
-    return SizedBox(
-      key: const ValueKey<String>('playlist-header-collapsed'),
-      height: _collapsedCoverSize + 18,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 12, 24, 6),
-        child: Row(
-          children: <Widget>[
-            _buildCover(
-              colors,
-              playlist?.imageUri,
-              isLoading,
-              _collapsedCoverSize,
-              borderRadius: 4,
-            ),
-            const SizedBox(width: 12),
-            Flexible(
-              child: Text(
-                _controller.playlistName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-              ),
-            ),
-            const SizedBox(width: 12),
-            _buildMetaLine(colors),
-            const SizedBox(width: 24),
-            if (!isLoading) _buildActions(anchorKey: _collapsedMenuAnchorKey),
-            const Spacer(),
-            _CollapseToggleButton(
-              isCollapsed: true,
-              onTap: _controller.toggleHeaderCollapsed,
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -610,14 +540,12 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
   Widget _buildCover(
     MashinColors colors,
     String? imageUri,
-    bool isLoading,
-    double size, {
-    double borderRadius = 8,
+    bool isLoading, {
     bool showShadow = false,
   }) {
     return Container(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(borderRadius),
+        borderRadius: BorderRadius.circular(8),
         boxShadow: showShadow
             ? <BoxShadow>[
                 BoxShadow(
@@ -629,10 +557,10 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
             : null,
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(borderRadius),
+        borderRadius: BorderRadius.circular(8),
         child: Container(
-          width: size,
-          height: size,
+          width: _coverSize,
+          height: _coverSize,
           color: colors.bgTertiary,
           child: isLoading
               ? null
@@ -640,7 +568,7 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
               ? Icon(
                   Icons.queue_music_outlined,
                   color: colors.textSecondary,
-                  size: size * 0.36,
+                  size: _coverSize * 0.36,
                 )
               : MediaImage(
                   source: imageUri,
@@ -648,45 +576,9 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
                   fallback: Icon(
                     Icons.queue_music_outlined,
                     color: colors.textSecondary,
-                    size: size * 0.36,
+                    size: _coverSize * 0.36,
                   ),
                 ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CollapseToggleButton extends StatelessWidget {
-  const _CollapseToggleButton({required this.isCollapsed, required this.onTap});
-
-  final bool isCollapsed;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final MashinColors colors = context.mashinColors;
-    return Tooltip(
-      message: isCollapsed ? 'Header ausklappen' : 'Header einklappen',
-      child: Material(
-        color: Colors.transparent,
-        shape: const CircleBorder(),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          customBorder: const CircleBorder(),
-          hoverColor: colors.hover,
-          splashColor: Colors.transparent,
-          highlightColor: Colors.transparent,
-          child: SizedBox(
-            width: 32,
-            height: 32,
-            child: Icon(
-              isCollapsed ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up,
-              size: 22,
-              color: colors.textPrimary,
-            ),
-          ),
         ),
       ),
     );

@@ -488,37 +488,44 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
                 ),
                 const SizedBox(height: 16),
                 Expanded(
-                  child: MediaTableSectionDesktop<QueueItem>(
-                    title: ' ',
-                    items: queueItems,
-                    isLoading: false,
-                    emptyText: 'Queue ist leer',
-                    maxItemsPerPage: 0,
-                    enableSelection: true,
-                    coreBridge: widget.coreBridge,
-                    coreEvents: coreEvents,
-                    scrollController: _queueScrollController,
-                    onSelectionChanged: (List<QueueItem> items) {
-                      setState(() {
-                        _selectedItems = items;
-                      });
-                    },
-                    onRowMoreAnchorTap:
-                        (QueueItem item, int _, BuildContext anchorContext) =>
-                            _showMenu(
+                  child: CustomScrollView(
+                    controller: _queueScrollController,
+                    slivers: <Widget>[
+                      MediaTableSectionDesktop<QueueItem>(
+                        title: ' ',
+                        items: queueItems,
+                        isLoading: false,
+                        emptyText: 'Queue ist leer',
+                        maxItemsPerPage: 0,
+                        enableSelection: true,
+                        coreBridge: widget.coreBridge,
+                        coreEvents: coreEvents,
+                        onSelectionChanged: (List<QueueItem> items) {
+                          setState(() {
+                            _selectedItems = items;
+                          });
+                        },
+                        onRowMoreAnchorTap:
+                            (
+                              QueueItem item,
+                              int _,
+                              BuildContext anchorContext,
+                            ) => _showMenu(
                               context,
                               item,
                               anchorContext: anchorContext,
                             ),
-                    onRowContextMenu:
-                        (QueueItem item, int _, Offset globalPosition) =>
-                            _showMenu(
-                              context,
-                              item,
-                              globalPosition: globalPosition,
-                            ),
-                    onArtistTap: onOpenArtist,
-                    onAlbumTap: onOpenAlbum,
+                        onRowContextMenu:
+                            (QueueItem item, int _, Offset globalPosition) =>
+                                _showMenu(
+                                  context,
+                                  item,
+                                  globalPosition: globalPosition,
+                                ),
+                        onArtistTap: onOpenArtist,
+                        onAlbumTap: onOpenAlbum,
+                      ),
+                    ],
                   ),
                 ),
               ],

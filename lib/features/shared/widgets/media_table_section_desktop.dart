@@ -44,7 +44,6 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
   final DesktopRowFavoriteResolver<T>? isRowFavorite;
   final MashinCoreBridgeApi coreBridge;
   final MashinCoreBridgeEvents coreEvents;
-  final ScrollController? scrollController;
   final ValueChanged<Artist>? onArtistTap;
   final ValueChanged<Album>? onAlbumTap;
   final ValueChanged<Playlist>? onPlaylistTap;
@@ -70,11 +69,10 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
     this.isRowFavorite,
     required this.coreBridge,
     required this.coreEvents,
-    this.scrollController,
     this.onArtistTap,
     this.onAlbumTap,
     this.onPlaylistTap,
-  });
+  }) : assert(maxItemsPerPage >= 0);
 
   @override
   State<MediaTableSectionDesktop<T>> createState() =>
@@ -580,20 +578,58 @@ class _MediaTableSectionDesktopState<T>
     final colors = context.mashinColors;
     final bool hasTitle = widget.title.trim().isNotEmpty;
 
+    if (widget.maxItemsPerPage == 0) {
+      final Widget rows = widget.isLoading
+          ? SliverFixedExtentList.builder(
+              itemExtent: _desktopRowExtent,
+              itemCount: widget.skeletonRowCount,
+              itemBuilder: (BuildContext context, int index) =>
+                  _buildDesktopTypedSkeletonRow(isFirst: index == 0),
+            )
+          : widget.items.isEmpty
+          ? SliverToBoxAdapter(
+              child: Text(
+                widget.emptyText,
+                style: context.mashinTableTextStyles.emptyState,
+              ),
+            )
+          : SliverFixedExtentList.builder(
+              itemExtent: _desktopRowExtent,
+              itemCount: widget.items.length,
+              itemBuilder: (BuildContext context, int index) => Listener(
+                onPointerDown: _handleSectionPointerDown,
+                child: _buildDesktopTypedRow(
+                  item: widget.items[index],
+                  index: index,
+                  isFirst: index == 0,
+                  isSelected: _selectedIndexes.contains(index),
+                  onToggleSelected: () => _toggleSelectedIndex(index),
+                  onPointerDown: (PointerDownEvent event) =>
+                      _handleRowPointerDown(index, event),
+                ),
+              ),
+            );
+
+      final Widget content = SliverMainAxisGroup(
+        slivers: <Widget>[
+          SliverToBoxAdapter(child: _buildSliverSectionHeader(hasTitle)),
+          rows,
+        ],
+      );
+      return content;
+    }
+
     // Ohne Titel entfällt die komplette Kopfzeile (Trenner, Play/Shuffle, Paging).
     final bool showHeaderRow = hasTitle;
 
     final Widget content = LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final bool hasBoundedHeight = constraints.maxHeight.isFinite;
-        final bool fillScrollableViewport =
-            hasBoundedHeight && !_isPagingEnabled;
 
         final Widget tableContent = _buildDesktopContent(
           context,
           colors,
           constrainToHeight: hasBoundedHeight,
-          fillScrollableViewport: fillScrollableViewport,
         );
 
         return Column(
@@ -699,20 +735,67 @@ class _MediaTableSectionDesktopState<T>
     );
   }
 
+  Widget _buildSliverSectionHeader(bool hasTitle) {
+    final Widget header = Focus(
+      focusNode: _sectionFocusNode,
+      child: Listener(
+        onPointerDown: _handleSectionPointerDown,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (hasTitle)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text(widget.title),
+              ),
+            if (widget.isLoading || widget.items.isNotEmpty)
+              _buildDesktopTypedHeader(),
+          ],
+        ),
+      ),
+    );
+
+    if (!widget.enableSelection) {
+      return header;
+    }
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.keyA, control: true):
+            _SelectAllIntent(),
+        SingleActivator(LogicalKeyboardKey.escape): _ClearSelectionIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          _SelectAllIntent: CallbackAction<_SelectAllIntent>(
+            onInvoke: (_SelectAllIntent intent) {
+              _toggleAllSelectedIndexes();
+              return null;
+            },
+          ),
+          _ClearSelectionIntent: CallbackAction<_ClearSelectionIntent>(
+            onInvoke: (_ClearSelectionIntent intent) {
+              _clearSelectionFromController();
+              return null;
+            },
+          ),
+        },
+        child: header,
+      ),
+    );
+  }
+
   Widget _buildDesktopContent(
     BuildContext context,
     MashinColors colors, {
     required bool constrainToHeight,
-    required bool fillScrollableViewport,
   }) {
-    final bool useInternalScroll = fillScrollableViewport || constrainToHeight;
+    final bool useInternalScroll = constrainToHeight;
     final int visibleRowCount = _isExpanded ? widget.items.length : _chunkSize;
     final double pagedContentHeight = visibleRowCount * _desktopRowExtent;
 
     if (widget.isLoading) {
       final Widget body = ListView.builder(
         primary: false,
-        controller: widget.scrollController,
         shrinkWrap: !useInternalScroll,
         physics: useInternalScroll
             ? const ClampingScrollPhysics()
@@ -750,7 +833,6 @@ class _MediaTableSectionDesktopState<T>
       // the list structure, while expanding keeps row identities intact.
       key: ValueKey<String>('table-rows-$T-paged-$_isExpanded'),
       primary: false,
-      controller: widget.scrollController,
       shrinkWrap: !useInternalScroll,
       physics: useInternalScroll
           ? const ClampingScrollPhysics()
@@ -790,8 +872,9 @@ class _MediaTableSectionDesktopState<T>
       },
     );
 
-    final Widget list = _isPagingEnabled && !_isExpanded
-        ? AnimatedOpacity(
+    final Widget list = _isExpanded
+        ? expandedList
+        : AnimatedOpacity(
             duration: _desktopPageFadeDuration,
             curve: Curves.easeOut,
             opacity: _isPageFading ? 0 : 1,
@@ -802,8 +885,7 @@ class _MediaTableSectionDesktopState<T>
                 useInternalScroll: useInternalScroll,
               ),
             ),
-          )
-        : expandedList;
+          );
 
     return Column(
       mainAxisSize: useInternalScroll ? MainAxisSize.max : MainAxisSize.min,
@@ -811,7 +893,7 @@ class _MediaTableSectionDesktopState<T>
         _buildDesktopTypedHeader(),
         if (useInternalScroll)
           Expanded(child: list)
-        else if (_isPagingEnabled)
+        else
           // Only animates while _pageHeightAnimationDuration is non-zero, i.e.
           // during an explicit expand/collapse; otherwise resizes instantly.
           AnimatedContainer(
@@ -834,9 +916,7 @@ class _MediaTableSectionDesktopState<T>
                 ),
               ),
             ),
-          )
-        else
-          list,
+          ),
       ],
     );
   }
@@ -851,7 +931,6 @@ class _MediaTableSectionDesktopState<T>
 
     return ListView.builder(
       primary: false,
-      controller: widget.scrollController,
       shrinkWrap: !useInternalScroll,
       physics: useInternalScroll
           ? const ClampingScrollPhysics()
@@ -3381,7 +3460,10 @@ String _inlineSvgClassFillColors(String svg) {
     normalized = normalized.replaceAll(classAttribute, 'fill="$fillColor"');
   }
 
-  return normalized.replaceAll(RegExp(r'<style\b[^>]*>[\s\S]*?</style\s*>'), '');
+  return normalized.replaceAll(
+    RegExp(r'<style\b[^>]*>[\s\S]*?</style\s*>'),
+    '',
+  );
 }
 
 // Helper Functions

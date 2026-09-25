@@ -286,14 +286,14 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
                   return const SizedBox.shrink();
                 }
                 return Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+                  padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
                   child: _buildDescription(context, colors),
                 );
               },
             ),
           ),
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+            padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
             sliver: SliverToBoxAdapter(
               child: ListenableBuilder(
                 listenable: _controller.tracksListenable,
@@ -395,7 +395,7 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
     final bool showBlurredBackground =
         !isLoading && imageUri != null && imageUri.trim().isNotEmpty;
     return SizedBox(
-      height: _coverSize + 24,
+      height: _coverSize + 32,
       child: Stack(
         fit: StackFit.expand,
         children: <Widget>[
@@ -439,7 +439,7 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
               ),
             ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[

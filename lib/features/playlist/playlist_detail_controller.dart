@@ -28,7 +28,6 @@ class PlaylistDetailController extends ChangeNotifier {
   bool _isLoadingMetadata = true;
   bool _isLoadingTracks = true;
   bool _isPlaylistFavorite = false;
-  bool _isHeaderCollapsed = false;
   bool _isDisposed = false;
 
   @override
@@ -50,7 +49,6 @@ class PlaylistDetailController extends ChangeNotifier {
   bool get isLoadingMetadata => _isLoadingMetadata;
   bool get isLoadingTracks => _isLoadingTracks;
   bool get isPlaylistFavorite => _isPlaylistFavorite;
-  bool get isHeaderCollapsed => _isHeaderCollapsed;
   bool get isEditable => _playlist?.isEditable ?? false;
   bool get isLocalPlaylist =>
       _playlist?.provider.trim().toLowerCase() ==
@@ -179,12 +177,6 @@ class PlaylistDetailController extends ChangeNotifier {
     } catch (_) {
       _tracks = const <Track>[];
     }
-  }
-
-  // Header state
-  void toggleHeaderCollapsed() {
-    _isHeaderCollapsed = !_isHeaderCollapsed;
-    notifyListeners();
   }
 
   // Playback
