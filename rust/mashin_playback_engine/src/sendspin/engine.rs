@@ -3,6 +3,7 @@ use super::models::{
     SendspinAudioCodec, SendspinDownloadPlanRequest, SendspinDownloadQueueItem,
     SendspinEngineConfiguration,
 };
+use super::queue_store::{queue_snapshot_path, QueueSnapshot, QueueStore, SNAPSHOT_VERSION};
 use crate::audio::player::{AudioPlayer, AudioPlayerState};
 use crate::audio::source::{AudioSource, SourceReadResult};
 use crate::logging::Logger;
@@ -44,11 +45,14 @@ pub(crate) struct SendspinEngine {
     next_queue_item_id: u64,
     next_original_index: usize,
     queue_revision: u64,
+    queue_store: Option<QueueStore>,
+    is_queue_restored: bool,
     current_cache_content_key: Option<String>,
     queue_content_keys: Vec<String>,
     last_download_status_log: Option<Instant>,
     next_reconnect_attempt: Option<Instant>,
     reconnect_delay: Duration,
+    last_confirmed_download_progress: u64,
     is_reconnect_in_flight: bool,
     last_connection_event_generation: Option<u64>,
     lost_connection_generation: Option<u64>,
@@ -81,11 +85,14 @@ impl SendspinEngine {
             next_queue_item_id: 1,
             next_original_index: 0,
             queue_revision: 0,
+            queue_store: None,
+            is_queue_restored: false,
             current_cache_content_key: None,
             queue_content_keys: Vec::new(),
             last_download_status_log: None,
             next_reconnect_attempt: None,
             reconnect_delay: INITIAL_RECONNECT_DELAY,
+            last_confirmed_download_progress: 0,
             is_reconnect_in_flight: false,
             last_connection_event_generation: None,
             lost_connection_generation: None,
@@ -99,6 +106,9 @@ impl SendspinEngine {
     }
 
     pub(crate) fn init(&mut self, config: SendspinEngineConfiguration) {
+        if let Some(store) = self.queue_store.take() {
+            store.finish();
+        }
         let downloader_config = Self::downloader_config(&config);
         self.config = Some(config);
         self.queue = Queue::default();
@@ -106,11 +116,13 @@ impl SendspinEngine {
         self.download_plan_version = 0;
         self.next_queue_item_id = 1;
         self.next_original_index = 0;
+        self.is_queue_restored = false;
         self.current_cache_content_key = None;
         self.queue_content_keys.clear();
         self.last_download_status_log = None;
         self.next_reconnect_attempt = None;
         self.reconnect_delay = INITIAL_RECONNECT_DELAY;
+        self.last_confirmed_download_progress = 0;
         self.is_reconnect_in_flight = false;
         self.last_connection_event_generation = None;
         self.lost_connection_generation = None;
@@ -144,6 +156,15 @@ impl SendspinEngine {
             config.preferred_codec.as_str()
         ));
         self.init(config);
+        match queue_snapshot_path().and_then(QueueStore::start) {
+            Ok((store, snapshot)) => {
+                if let Some(snapshot) = snapshot {
+                    self.restore_queue(snapshot);
+                }
+                self.queue_store = Some(store);
+            }
+            Err(error) => LOGGER.error(format!("queue snapshot unavailable: {error}")),
+        }
         Ok(())
     }
 
@@ -181,7 +202,7 @@ impl SendspinEngine {
         } else {
             self.downloader.configure(downloader_config);
         }
-        if let Some(current_index) = current_index {
+        if let Some(current_index) = current_index.filter(|_| !self.is_queue_restored) {
             let plan = self.build_download_plan_request(queue_items, current_index)?;
             self.downloader
                 .set_pending_current_seek(playback_position_millis / 1_000)?;
@@ -222,6 +243,9 @@ impl SendspinEngine {
     pub(crate) fn shutdown(&mut self) {
         self.stop_background_work();
         self.disconnect();
+        if let Some(store) = self.queue_store.take() {
+            store.finish();
+        }
         *self = Self::new();
     }
 
@@ -270,6 +294,8 @@ impl SendspinEngine {
         ));
         self.queue_revision = self.queue_revision.saturating_add(1);
         self.refresh_queue_cache_states();
+        self.is_queue_restored = false;
+        self.persist_queue();
         Ok(())
     }
 
@@ -357,6 +383,8 @@ impl SendspinEngine {
         self.autoplay = AutoplayController::new();
         self.queue_revision = self.queue_revision.saturating_add(1);
         self.player_state.playback_state = PlayState::Idle;
+        self.is_queue_restored = false;
+        self.persist_queue();
         Ok(())
     }
 
@@ -398,6 +426,19 @@ impl SendspinEngine {
     }
 
     pub(crate) fn play_queue_index(&mut self, index: usize) -> Result<(), String> {
+        if self.is_queue_restored {
+            if index >= self.queue.items.len() {
+                return Err("queue index is out of range".to_string());
+            }
+            self.apply_queue_download_plan(
+                self.build_download_plan_request(self.queue_media_items(), index)?,
+            )?;
+            let content_key = self
+                .current_cache_content_key
+                .clone()
+                .ok_or("queue has no current item")?;
+            return self.play_cached_content(&content_key);
+        }
         let Some(content_key) = self.queue_content_keys.get(index) else {
             return Err("queue index is out of range".to_string());
         };
@@ -462,6 +503,24 @@ impl SendspinEngine {
                 previous_current_index.map(|index| index.min(media_items.len().saturating_sub(1)))
             })
             .unwrap_or(0);
+        if self.is_queue_restored {
+            self.queue.items = media_items
+                .into_iter()
+                .map(|item| {
+                    let mut queue_item = QueueItem::local(
+                        self.queue.queue_id.clone(),
+                        item.queue_item_id,
+                        item.original_index,
+                        item.media_item,
+                    );
+                    queue_item.cache = None;
+                    queue_item
+                })
+                .collect();
+            self.queue.current_index = Some(current_index);
+            self.persist_queue();
+            return Ok(());
+        }
         let plan = self.build_download_plan_request(media_items, current_index)?;
         self.apply_queue_download_plan(plan)?;
         let current_queue_item_id = self.current_queue_item_id();
@@ -650,20 +709,16 @@ impl SendspinEngine {
                     ));
                     self.player_state.connection_state = PlaybackConnectionState::Online;
                     self.next_reconnect_attempt = None;
-                    self.reconnect_delay = INITIAL_RECONNECT_DELAY;
+                    self.last_confirmed_download_progress =
+                        self.downloader.confirmed_download_progress();
                     self.is_reconnect_in_flight = false;
-                    let request = self.build_download_plan_request(
-                        self.queue_media_items(),
-                        self.queue.current_index.unwrap_or(0),
-                    );
-                    if let Err(error) =
-                        request.and_then(|request| self.apply_queue_download_plan(request))
-                    {
-                        LOGGER.error(format!("failed to resume Sendspin downloads: {error}"));
-                    }
+                    self.resume_downloads_if_active();
                 }
             }
         }
+        self.reset_reconnect_backoff_after_download_progress(
+            self.downloader.confirmed_download_progress(),
+        );
         if self.player_state.connection_state == PlaybackConnectionState::Reconnecting
             && !self.is_reconnect_in_flight
             && self
@@ -679,6 +734,30 @@ impl SendspinEngine {
                     self.schedule_reconnect_attempt();
                 }
             }
+        }
+    }
+
+    // A ready transport alone does not prove that a repeatedly stalled download recovered.
+    fn reset_reconnect_backoff_after_download_progress(&mut self, progress: u64) {
+        if self.player_state.connection_state == PlaybackConnectionState::Online
+            && progress > self.last_confirmed_download_progress
+        {
+            self.last_confirmed_download_progress = progress;
+            self.reconnect_delay = INITIAL_RECONNECT_DELAY;
+        }
+    }
+
+    // A restored queue is visible before playback but must not create a download plan on connect.
+    fn resume_downloads_if_active(&mut self) {
+        if self.is_queue_restored || self.current_cache_content_key.is_none() {
+            return;
+        }
+        let request = self.build_download_plan_request(
+            self.queue_media_items(),
+            self.queue.current_index.unwrap_or(0),
+        );
+        if let Err(error) = request.and_then(|request| self.apply_queue_download_plan(request)) {
+            LOGGER.error(format!("failed to resume Sendspin downloads: {error}"));
         }
     }
 
@@ -836,7 +915,7 @@ impl SendspinEngine {
     }
 
     fn start_prepared_audio_if_available(&mut self, content_key: &str) {
-        if self.audio_player.is_started() {
+        if self.audio_player.is_started() || !self.audio_player.has_prepared_source() {
             return;
         }
         let Ok(format) = self.downloader.cache_format(content_key) else {
@@ -853,6 +932,13 @@ impl SendspinEngine {
 
     // Playback transport commands.
     pub(crate) fn transport_play(&mut self) -> Result<(), String> {
+        if self.is_queue_restored {
+            let index = self
+                .queue
+                .current_index
+                .ok_or("cannot play without an active track")?;
+            return self.play_queue_index(index);
+        }
         if self.audio_player.state() == AudioPlayerState::Idle {
             let content_key = self
                 .current_cache_content_key
@@ -882,6 +968,25 @@ impl SendspinEngine {
         } else {
             0
         };
+        if self.is_queue_restored {
+            let index = self
+                .queue
+                .current_index
+                .ok_or("cannot seek without an active track")?;
+            // The restored downloader has no slot; start its first plan at the seek position.
+            self.downloader.set_pending_current_seek(position / 1_000)?;
+            self.apply_queue_download_plan(
+                self.build_download_plan_request(self.queue_media_items(), index)?,
+            )?;
+            let content_key = self
+                .current_cache_content_key
+                .clone()
+                .ok_or("queue has no current item")?;
+            self.play_cached_content(&content_key)?;
+            self.playback_position_offset_millis = position;
+            self.player_state.position_millis = Some(position);
+            return Ok(());
+        }
         let content_key = self
             .current_cache_content_key
             .clone()
@@ -1019,6 +1124,60 @@ impl SendspinEngine {
 
     pub(crate) fn queue_revision(&self) -> u64 {
         self.queue_revision
+    }
+
+    // Queue snapshot mapping stays separate from playback and downloader commands.
+    fn restore_queue(&mut self, snapshot: QueueSnapshot) {
+        let Some(config) = self.config.as_ref() else {
+            return;
+        };
+        if snapshot.music_assistant_url != config.music_assistant_url
+            || snapshot.username != config.username
+        {
+            return;
+        }
+        let mut items = snapshot.items;
+        if items.iter().any(|item| item.media_item.is_none()) {
+            LOGGER.error("queue snapshot contains an item without media");
+            return;
+        }
+        for item in &mut items {
+            item.cache = None;
+        }
+        self.queue.current_index = snapshot
+            .current_index
+            .filter(|index| *index < items.len())
+            .or_else(|| (!items.is_empty()).then_some(0));
+        self.next_original_index = items
+            .iter()
+            .map(|item| item.sort_index as usize)
+            .max()
+            .map_or(0, |index| index.saturating_add(1));
+        self.next_queue_item_id = items
+            .iter()
+            .filter_map(|item| item.queue_item_id.as_str().strip_prefix("local-"))
+            .filter_map(|id| id.parse::<u64>().ok())
+            .max()
+            .map_or(1, |id| id.saturating_add(1));
+        self.queue.items = items;
+        self.is_queue_restored = !self.queue.items.is_empty();
+    }
+
+    fn persist_queue(&self) {
+        let (Some(store), Some(config)) = (&self.queue_store, &self.config) else {
+            return;
+        };
+        let mut items = self.queue.items.clone();
+        for item in &mut items {
+            item.cache = None;
+        }
+        store.save(QueueSnapshot {
+            version: SNAPSHOT_VERSION,
+            music_assistant_url: config.music_assistant_url.clone(),
+            username: config.username.clone(),
+            current_index: self.queue.current_index,
+            items,
+        });
     }
 }
 
@@ -1260,6 +1419,7 @@ mod tests {
         SendspinEngineConfiguration {
             sendspin_url: "ws://localhost".to_string(),
             music_assistant_url: "http://localhost".to_string(),
+            username: "test".to_string(),
             music_assistant_auth_token: None,
             client_id: "test".to_string(),
             client_name: "Test".to_string(),
@@ -1267,6 +1427,254 @@ mod tests {
             cache_bytes: 1024,
             preferred_codec: SendspinAudioCodec::Pcm,
         }
+    }
+
+    #[test]
+    fn restored_queue_does_not_download_until_play() {
+        let path = queue_snapshot_path().expect("test queue path");
+        let config = configuration();
+        QueueSnapshot {
+            version: SNAPSHOT_VERSION,
+            music_assistant_url: config.music_assistant_url.clone(),
+            username: config.username.clone(),
+            items: vec![
+                QueueItem::local(
+                    Queue::default().queue_id,
+                    QueueItemId("local-7".into()),
+                    0,
+                    track("test", "first"),
+                ),
+                QueueItem::local(
+                    Queue::default().queue_id,
+                    QueueItemId("local-8".into()),
+                    1,
+                    track("test", "second"),
+                ),
+            ],
+            current_index: Some(1),
+        }
+        .save(&path)
+        .expect("save queue before restart");
+
+        let mut engine = SendspinEngine::new();
+        engine.configure(config).expect("configure restored engine");
+        assert_eq!(engine.queue.items.len(), 2);
+        assert_eq!(engine.queue.current_index, Some(1));
+        assert_eq!(
+            engine.player_state().playback_state,
+            PlayState::Uninitialized
+        );
+        assert!(engine.current_cache_content_key.is_none());
+        assert!(engine.downloader.download_plan().is_none());
+        engine.resume_downloads_if_active();
+        assert_eq!(engine.download_plan_version, 0);
+        assert!(engine.downloader.download_plan().is_none());
+        assert_eq!(engine.queue.items.len(), 2);
+
+        engine
+            .play_media_last(vec![track("test", "third")])
+            .expect("append without activating playback");
+        assert!(engine.current_cache_content_key.is_none());
+        assert_eq!(engine.next_queue_item_id, 10);
+        engine
+            .set_preferred_codec("flac")
+            .expect("change codec without playback");
+        assert!(engine.current_cache_content_key.is_none());
+        engine.transport_play().expect("start restored track");
+        assert_eq!(engine.queue.current_index, Some(1));
+        assert!(engine.current_cache_content_key.is_some());
+        engine.resume_downloads_if_active();
+        assert_eq!(engine.download_plan_version, 2);
+        engine.shutdown();
+
+        let mut restarted = SendspinEngine::new();
+        restarted
+            .configure(configuration())
+            .expect("restore queue again");
+        assert!(restarted.current_cache_content_key.is_none());
+        restarted.play_queue_index(2).expect("select restored item");
+        assert_eq!(restarted.queue.current_index, Some(2));
+        assert!(restarted.current_cache_content_key.is_some());
+        restarted.shutdown();
+        std::fs::remove_file(path).expect("remove test snapshot");
+    }
+
+    #[test]
+    fn stopped_queue_keeps_selection_without_restarting_unprepared_audio() {
+        let mut engine = SendspinEngine::new();
+        engine.configure(configuration()).expect("configure engine");
+        engine
+            .play_media(vec![track("test", "first")])
+            .expect("prepare queue playback");
+        assert!(engine.audio_player.has_prepared_source());
+        let content_key = engine
+            .current_cache_content_key
+            .clone()
+            .expect("current track");
+
+        engine.transport_stop();
+        assert_eq!(engine.queue.current_index, Some(0));
+        assert!(!engine.audio_player.has_prepared_source());
+        engine.start_prepared_audio_if_available(&content_key);
+        assert_eq!(engine.audio_player.state(), AudioPlayerState::Idle);
+        assert_eq!(engine.player_state.playback_state, PlayState::Idle);
+        engine.shutdown();
+        std::fs::remove_file(queue_snapshot_path().expect("test queue path"))
+            .expect("remove test snapshot");
+    }
+
+    #[test]
+    fn restored_queue_activates_for_seek_and_track_navigation() {
+        let path = queue_snapshot_path().expect("test queue path");
+        let config = configuration();
+        let snapshot = QueueSnapshot {
+            version: SNAPSHOT_VERSION,
+            music_assistant_url: config.music_assistant_url.clone(),
+            username: config.username.clone(),
+            items: vec![
+                QueueItem::local(
+                    Queue::default().queue_id,
+                    QueueItemId("local-1".into()),
+                    0,
+                    track("test", "first"),
+                ),
+                QueueItem::local(
+                    Queue::default().queue_id,
+                    QueueItemId("local-2".into()),
+                    1,
+                    track("test", "second"),
+                ),
+            ],
+            current_index: Some(0),
+        };
+        for (action, expected_index) in
+            [("seek", 0), ("next", 1), ("previous", 0), ("play_index", 1)]
+        {
+            snapshot.save(&path).expect("reset stored queue");
+            let mut engine = SendspinEngine::new();
+            engine.configure(config.clone()).expect("restore queue");
+            engine.transport_pause();
+            engine.transport_stop();
+            assert!(engine.downloader.download_plan().is_none());
+            assert!(engine.current_cache_content_key.is_none());
+
+            match action {
+                "seek" => engine.transport_seek(15.0).expect("seek restored queue"),
+                "next" => engine.transport_next().expect("skip restored queue"),
+                "previous" => engine.transport_previous().expect("restart restored queue"),
+                "play_index" => engine.play_queue_index(1).expect("select restored track"),
+                _ => unreachable!(),
+            }
+            assert_eq!(engine.queue.current_index, Some(expected_index));
+            assert!(engine.current_cache_content_key.is_some());
+            if action == "seek" {
+                assert_eq!(engine.player_state.position_millis, Some(15_000));
+            }
+            engine.shutdown();
+        }
+        std::fs::remove_file(path).expect("remove test snapshot");
+    }
+
+    #[test]
+    fn snapshot_with_duplicate_tracks_restores_selected_occurrence() {
+        let path = queue_snapshot_path().expect("test queue path");
+        let config = configuration();
+        let items = vec![
+            QueueItem::local(
+                Queue::default().queue_id,
+                QueueItemId("local-1".into()),
+                0,
+                track("test", "same"),
+            ),
+            QueueItem::local(
+                Queue::default().queue_id,
+                QueueItemId("local-2".into()),
+                1,
+                track("test", "same"),
+            ),
+        ];
+        QueueSnapshot {
+            version: SNAPSHOT_VERSION,
+            music_assistant_url: config.music_assistant_url,
+            username: config.username,
+            items,
+            current_index: Some(1),
+        }
+        .save(&path)
+        .expect("save queue snapshot");
+
+        let mut engine = SendspinEngine::new();
+        engine.configure(configuration()).expect("restore queue");
+        assert_eq!(engine.queue.current_index, Some(1));
+        assert_eq!(
+            engine.queue.items[0].media_item,
+            engine.queue.items[1].media_item
+        );
+        assert!(engine.current_cache_content_key.is_none());
+        engine.transport_play().expect("play selected occurrence");
+        engine.shutdown();
+
+        let snapshot = QueueSnapshot::load(&path)
+            .expect("load queue snapshot")
+            .expect("saved snapshot");
+        assert_eq!(snapshot.version, SNAPSHOT_VERSION);
+        assert_eq!(snapshot.current_index, Some(1));
+        std::fs::remove_file(path).expect("remove test snapshot");
+    }
+
+    #[test]
+    fn queue_changes_and_current_track_survive_engine_restart() {
+        let path = queue_snapshot_path().expect("test queue path");
+        let mut engine = SendspinEngine::new();
+        engine.configure(configuration()).expect("configure engine");
+        engine
+            .play_media(vec![track("test", "first"), track("test", "second")])
+            .expect("start queue");
+        engine.play_queue_index(1).expect("select second track");
+        engine.shutdown();
+
+        let mut restarted = SendspinEngine::new();
+        restarted.configure(configuration()).expect("restore queue");
+        assert_eq!(restarted.queue.items.len(), 2);
+        assert_eq!(restarted.queue.current_index, Some(1));
+        assert!(restarted.current_cache_content_key.is_none());
+        restarted.clear_queue().expect("clear restored queue");
+        restarted.shutdown();
+
+        let mut after_clear = SendspinEngine::new();
+        after_clear
+            .configure(configuration())
+            .expect("restore empty queue");
+        assert!(after_clear.queue.items.is_empty());
+        after_clear.shutdown();
+        std::fs::remove_file(path).expect("remove test snapshot");
+    }
+
+    #[test]
+    fn another_account_does_not_restore_the_saved_queue() {
+        let path = queue_snapshot_path().expect("test queue path");
+        let config = configuration();
+        QueueSnapshot {
+            version: SNAPSHOT_VERSION,
+            music_assistant_url: config.music_assistant_url.clone(),
+            username: "another-listener".into(),
+            items: vec![QueueItem::local(
+                Queue::default().queue_id,
+                QueueItemId("local-1".into()),
+                0,
+                track("test", "private-track"),
+            )],
+            current_index: Some(0),
+        }
+        .save(&path)
+        .expect("save another user's queue");
+
+        let mut engine = SendspinEngine::new();
+        engine.configure(config).expect("configure current user");
+        assert!(engine.queue.items.is_empty());
+        assert!(engine.current_cache_content_key.is_none());
+        engine.shutdown();
+        std::fs::remove_file(path).expect("remove test snapshot");
     }
 
     #[test]
@@ -1291,6 +1699,24 @@ mod tests {
         assert_eq!(engine.reconnect_delay, Duration::from_secs(8));
         engine.schedule_reconnect_attempt();
         assert_eq!(engine.reconnect_delay, Duration::from_secs(8));
+    }
+
+    #[test]
+    fn resets_reconnect_backoff_only_after_online_download_progress() {
+        let mut engine = SendspinEngine::new();
+        engine.schedule_reconnect_attempt();
+        engine.player_state.connection_state = PlaybackConnectionState::Online;
+
+        engine.reset_reconnect_backoff_after_download_progress(0);
+        assert_eq!(engine.reconnect_delay, Duration::from_secs(4));
+
+        engine.player_state.connection_state = PlaybackConnectionState::Reconnecting;
+        engine.reset_reconnect_backoff_after_download_progress(1);
+        assert_eq!(engine.reconnect_delay, Duration::from_secs(4));
+
+        engine.player_state.connection_state = PlaybackConnectionState::Online;
+        engine.reset_reconnect_backoff_after_download_progress(1);
+        assert_eq!(engine.reconnect_delay, INITIAL_RECONNECT_DELAY);
     }
 
     #[test]

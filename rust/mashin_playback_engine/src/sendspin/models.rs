@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct SendspinEngineConfiguration {
     pub(crate) sendspin_url: String,
     pub(crate) music_assistant_url: String,
+    pub(crate) username: String,
     #[serde(default)]
     pub(crate) music_assistant_auth_token: Option<AccessToken>,
     pub(crate) client_id: String,

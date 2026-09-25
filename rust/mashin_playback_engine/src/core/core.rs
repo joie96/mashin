@@ -216,6 +216,7 @@ impl CoreCoordinator {
                 PlaybackEngineConfiguration::Sendspin(SendspinEngineConfiguration {
                     sendspin_url: configuration.sendspin_url.clone(),
                     music_assistant_url: session.music_assistant_url.0.clone(),
+                    username: session.username.clone(),
                     music_assistant_auth_token: session.access_token.clone(),
                     client_id: configuration.client_id.clone(),
                     client_name: configuration.client_name.clone(),

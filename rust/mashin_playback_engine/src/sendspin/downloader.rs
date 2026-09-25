@@ -32,6 +32,8 @@ const CACHE_CAPACITY_RECOVERY_PERCENT: usize = 90;
 const CONNECTION_LIVENESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
 const CONNECTION_LIVENESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const SEEK_REPLACEMENT_STREAM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const SEEK_CONFIRMATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+const DOWNLOAD_PROGRESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 const MAXIMUM_PENDING_SEEK_AUDIO_BYTES: usize = 8 * 1024 * 1024;
 const DOWNLOAD_QUEUE_REGISTRATION_ATTEMPTS: usize = 4;
 const DOWNLOAD_QUEUE_REGISTRATION_RETRY_DELAY: std::time::Duration =
@@ -108,6 +110,7 @@ struct SendspinDownloaderWorker {
     cache_touch_sequence: Arc<std::sync::atomic::AtomicU64>,
     next_reservation_id: u64,
     download_status_refresh: Arc<AtomicBool>,
+    confirmed_download_progress: Arc<AtomicU64>,
     event_sender: Sender<DownloaderCommand>,
     connection_event: Arc<Mutex<Option<DownloaderConnectionEvent>>>,
     connection_generation: Arc<AtomicU64>,
@@ -148,6 +151,7 @@ impl SendspinDownloaderWorker {
             cache_touch_sequence: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             next_reservation_id: 0,
             download_status_refresh: Arc::new(AtomicBool::new(false)),
+            confirmed_download_progress: Arc::new(AtomicU64::new(0)),
             event_sender,
             connection_event: Arc::new(Mutex::new(None)),
             connection_generation: Arc::new(AtomicU64::new(0)),
@@ -274,6 +278,7 @@ impl SendspinDownloaderWorker {
         let cache_touch_sequence = Arc::clone(&self.cache_touch_sequence);
         let event_sender = self.event_sender.clone();
         let download_status_refresh = Arc::clone(&self.download_status_refresh);
+        let confirmed_download_progress = Arc::clone(&self.confirmed_download_progress);
         let connection_event = Arc::clone(&self.connection_event);
         let connection_generation = Arc::clone(&self.connection_generation);
         let downloads_allowed = Arc::clone(&self.downloads_allowed);
@@ -323,7 +328,26 @@ impl SendspinDownloaderWorker {
                 let mut seek_gate_reported = false;
                 let mut first_chunk_reported = false;
                 let mut seek_replacement_deadline = None;
+                let mut seek_confirmation_deadline: Option<(String, tokio::time::Instant)> = None;
+                let mut stalled_content_key: Option<String> = None;
+                let mut download_progress_deadline = None;
+                let mut observed_cached_bytes = 0;
                 loop {
+                    if cached_bytes > observed_cached_bytes {
+                        observed_cached_bytes = cached_bytes;
+                        confirmed_download_progress.fetch_add(1, Ordering::Release);
+                        download_progress_deadline = Some(
+                            tokio::time::Instant::now() + DOWNLOAD_PROGRESS_TIMEOUT,
+                        );
+                    }
+                    if seek_confirmation_deadline.as_ref().is_some_and(|(lease_id, _)| {
+                        reservation.as_ref().is_none_or(|value| {
+                            value.lease_id != *lease_id
+                                || value.append_after_seek.load(Ordering::Acquire)
+                        })
+                    }) {
+                        seek_confirmation_deadline = None;
+                    }
                     if !downloads_allowed.load(Ordering::Acquire) {
                         buffered_audio_chunks.clear();
                         buffered_audio_bytes = 0;
@@ -382,6 +406,56 @@ impl SendspinDownloaderWorker {
                         }
                     }
                     tokio::select! {
+                        _ = async {
+                            match (download_progress_deadline, reservation.as_ref()) {
+                                (Some(deadline), Some(_)) if downloads_allowed.load(Ordering::Acquire) => {
+                                    tokio::time::sleep_until(deadline).await
+                                }
+                                _ => std::future::pending::<()>().await,
+                            }
+                        } => {
+                            if let Some(value) = reservation.as_ref() {
+                                if connection_generation.load(Ordering::Acquire) == task_connection_generation
+                                    && crate::cache::store::slot_reservation_is_current(&slots, slot_index, value) {
+                                    LOGGER.warn(format!(
+                                        "download stalled on slot {} for cache key {}",
+                                        slot_index + 1,
+                                        value.cache_content_key
+                                    ));
+                                    downloads_allowed.store(false, Ordering::Release);
+                                    report_connection_lost_if_current(
+                                        &connection_generation, &connection_event,
+                                        task_connection_generation, slot_index, "download progress timeout",
+                                    );
+                                }
+                            }
+                            download_progress_deadline = None;
+                        }
+                        _ = async {
+                            match seek_confirmation_deadline.as_ref() {
+                                Some((_, deadline)) => tokio::time::sleep_until(*deadline).await,
+                                None => std::future::pending::<()>().await,
+                            }
+                        } => {
+                            if let Some(value) = reservation.as_ref() {
+                                if connection_generation.load(Ordering::Acquire) == task_connection_generation
+                                    && crate::cache::store::slot_reservation_is_current(&slots, slot_index, value)
+                                    && !value.append_after_seek.load(Ordering::Acquire)
+                                {
+                                    LOGGER.warn(format!(
+                                        "seek confirmation timed out on slot {} for cache key {}",
+                                        slot_index + 1,
+                                        value.cache_content_key
+                                    ));
+                                    downloads_allowed.store(false, Ordering::Release);
+                                    report_connection_lost_if_current(
+                                        &connection_generation, &connection_event,
+                                        task_connection_generation, slot_index, "seek confirmation timeout",
+                                    );
+                                }
+                            }
+                            seek_confirmation_deadline = None;
+                        }
                         _ = async {
                             match seek_replacement_deadline {
                                 Some(deadline) => tokio::time::sleep_until(deadline).await,
@@ -442,6 +516,7 @@ impl SendspinDownloaderWorker {
                                     buffered_audio_bytes = 0;
                                     stream_ended_before_seek_confirmation = false;
                                     cached_bytes = 0;
+                                    observed_cached_bytes = 0;
                                     last_chunk_duration_millis = 0;
                                     cached_duration_millis = reservation
                                         .as_ref()
@@ -451,6 +526,15 @@ impl SendspinDownloaderWorker {
                                     seek_gate_reported = false;
                                     first_chunk_reported = false;
                                     seek_replacement_deadline = None;
+                                    if let Some(value) = reservation.as_ref() {
+                                        download_progress_deadline = Some(watchdog_deadline(
+                                            stalled_content_key.as_deref().zip(download_progress_deadline),
+                                            &value.cache_content_key,
+                                            tokio::time::Instant::now(),
+                                            DOWNLOAD_PROGRESS_TIMEOUT,
+                                        ));
+                                        stalled_content_key = Some(value.cache_content_key.clone());
+                                    }
                                     if let Some(format) = format.as_ref() {
                                         LOGGER.trace(format!(
                                             "stream started on slot {}: {:?}, {} Hz, {} channels",
@@ -632,6 +716,13 @@ impl SendspinDownloaderWorker {
                                 / 1_000;
                             last_chunk_duration_millis = duration;
                             if !value.append_after_seek.load(Ordering::Acquire) {
+                                let deadline = watchdog_deadline(
+                                    seek_confirmation_deadline.as_ref().map(|(lease_id, deadline)| (lease_id.as_str(), *deadline)),
+                                    &value.lease_id,
+                                    tokio::time::Instant::now(),
+                                    SEEK_CONFIRMATION_TIMEOUT,
+                                );
+                                seek_confirmation_deadline = Some((value.lease_id.clone(), deadline));
                                 if !seek_gate_reported {
                                     LOGGER.debug(format!(
                                         "download chunks are buffered until seek confirmation: slot {}, cache key {}",
@@ -1855,7 +1946,12 @@ impl SendspinDownloaderWorker {
         );
 
         let seek_result = self.runtime.block_on(async {
-            seek_download_player(&client, &controller, player_id, position).await
+            tokio::time::timeout(
+                SEEK_CONFIRMATION_TIMEOUT,
+                seek_download_player(&client, &controller, player_id, position),
+            )
+            .await
+            .map_err(|_| "Sendspin seek command timed out".to_string())?
         });
         match seek_result {
             Ok(()) => {
@@ -1905,6 +2001,7 @@ pub(crate) struct SendspinDownloader {
     cache_states: Arc<Mutex<HashMap<String, CacheItemState>>>,
     caches: crate::cache::store::EncodedCaches,
     download_status_refresh: Arc<AtomicBool>,
+    confirmed_download_progress: Arc<AtomicU64>,
     connection_event: Arc<Mutex<Option<DownloaderConnectionEvent>>>,
     slots: crate::cache::store::DownloadSlots,
     cache_bytes: Arc<AtomicUsize>,
@@ -1926,6 +2023,7 @@ impl SendspinDownloader {
         let caches = Arc::clone(&worker.caches);
         let slots = Arc::clone(&worker.slots);
         let download_status_refresh = Arc::clone(&worker.download_status_refresh);
+        let confirmed_download_progress = Arc::clone(&worker.confirmed_download_progress);
         let connection_event = Arc::clone(&worker.connection_event);
         let cache_bytes = Arc::new(AtomicUsize::new(0));
         std::thread::spawn(move || run_downloader_worker(worker, receiver));
@@ -1939,6 +2037,7 @@ impl SendspinDownloader {
             slots,
             cache_bytes,
             download_capacity_mode,
+            confirmed_download_progress,
         }
     }
 
@@ -1950,6 +2049,10 @@ impl SendspinDownloader {
 
     pub(crate) fn connect(&self) -> Result<(), String> {
         self.send(DownloaderCommand::Connect)
+    }
+
+    pub(crate) fn confirmed_download_progress(&self) -> u64 {
+        self.confirmed_download_progress.load(Ordering::Acquire)
     }
 
     pub(crate) fn reconnect(&self) -> Result<(), String> {
@@ -2788,6 +2891,18 @@ fn stream_end_outcome(seek_completed: bool) -> StreamEndOutcome {
     }
 }
 
+fn watchdog_deadline(
+    previous: Option<(&str, tokio::time::Instant)>,
+    identity: &str,
+    now: tokio::time::Instant,
+    timeout: std::time::Duration,
+) -> tokio::time::Instant {
+    previous
+        .filter(|(previous_identity, _)| *previous_identity == identity)
+        .map(|(_, deadline)| deadline)
+        .unwrap_or(now + timeout)
+}
+
 fn terminal_chunk_duration_millis(
     last_chunk_duration_millis: u64,
     expected_duration_millis: Option<u64>,
@@ -2878,7 +2993,8 @@ mod tests {
         normalize_client_id, publish_connection_event, remaining_download_duration_millis,
         report_connection_lost_if_current, retain_interrupted_reservation,
         should_admit_non_current_downloads, stream_end_outcome, terminal_chunk_duration_millis,
-        DownloaderConnectionEvent, DownloaderConnectionStatus, StreamEndOutcome,
+        watchdog_deadline, DownloaderConnectionEvent, DownloaderConnectionStatus, StreamEndOutcome,
+        DOWNLOAD_PROGRESS_TIMEOUT, SEEK_CONFIRMATION_TIMEOUT,
     };
     use crate::cache::store::{self, CacheAppendResult, DownloadSlotReservation};
     use crate::sendspin::models::SendspinAudioCodec;
@@ -2952,6 +3068,56 @@ mod tests {
             StreamEndOutcome::AwaitingSeekStream
         );
         assert_eq!(stream_end_outcome(true), StreamEndOutcome::Interrupted);
+    }
+
+    #[test]
+    fn repeated_stream_starts_do_not_extend_the_download_stall_deadline() {
+        let now = tokio::time::Instant::now();
+        let original = watchdog_deadline(None, "track", now, DOWNLOAD_PROGRESS_TIMEOUT);
+
+        assert_eq!(
+            watchdog_deadline(
+                Some(("track", original)),
+                "track",
+                now + DOWNLOAD_PROGRESS_TIMEOUT,
+                DOWNLOAD_PROGRESS_TIMEOUT
+            ),
+            original,
+        );
+        assert_eq!(
+            watchdog_deadline(
+                Some(("track", original)),
+                "next",
+                now,
+                DOWNLOAD_PROGRESS_TIMEOUT
+            ),
+            now + DOWNLOAD_PROGRESS_TIMEOUT,
+        );
+    }
+
+    #[test]
+    fn repeated_seek_chunks_do_not_extend_the_lease_deadline() {
+        let now = tokio::time::Instant::now();
+        let original = watchdog_deadline(None, "lease-1", now, SEEK_CONFIRMATION_TIMEOUT);
+
+        assert_eq!(
+            watchdog_deadline(
+                Some(("lease-1", original)),
+                "lease-1",
+                now + SEEK_CONFIRMATION_TIMEOUT,
+                SEEK_CONFIRMATION_TIMEOUT
+            ),
+            original,
+        );
+        assert_eq!(
+            watchdog_deadline(
+                Some(("lease-1", original)),
+                "lease-2",
+                now,
+                SEEK_CONFIRMATION_TIMEOUT
+            ),
+            now + SEEK_CONFIRMATION_TIMEOUT,
+        );
     }
 
     #[test]

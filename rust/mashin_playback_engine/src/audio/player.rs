@@ -200,6 +200,10 @@ impl AudioPlayer {
     }
 
     // Player state queries.
+    pub(crate) fn has_prepared_source(&self) -> bool {
+        self.source.is_some()
+    }
+
     pub(crate) fn is_started(&self) -> bool {
         self.decoder.is_some() && self.output.is_some()
     }
@@ -282,5 +286,22 @@ impl AudioPlayer {
             .as_ref()
             .map(AudioOutput::playback_position_millis)
             .unwrap_or(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AudioPlayer, AudioPlayerState};
+    use crate::audio::source::AudioSource;
+
+    #[test]
+    fn stopped_player_has_no_prepared_source() {
+        let mut player = AudioPlayer::new();
+        player.prepare_with_seek(AudioSource::cached_content("track"), 0, 0);
+        assert!(player.has_prepared_source());
+
+        player.stop();
+        assert!(!player.has_prepared_source());
+        assert_eq!(player.state(), AudioPlayerState::Idle);
     }
 }
