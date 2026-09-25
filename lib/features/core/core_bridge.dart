@@ -998,7 +998,7 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
 
     throw StateError(
       'Mashin-Core-Bibliothek konnte nicht geladen werden. '
-      'Gepruefte Pfade: ${candidates.join(' | ')}. '
+      'Geprüfte Pfade: ${candidates.join(' | ')}. '
       'Letzter Fehler: $lastError',
     );
   }

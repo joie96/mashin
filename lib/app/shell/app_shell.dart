@@ -94,7 +94,7 @@ class _AppShellState extends State<AppShell> {
   String get _currentTrackSubtitle {
     final item = _currentQueueItem;
     if (item == null) {
-      return 'Waehle einen Titel zum Starten';
+      return 'Wähle einen Titel zum Starten';
     }
 
     final Track? track = item.mediaItem is Track
@@ -1217,7 +1217,7 @@ class _DesktopTopBar extends StatelessWidget {
                 style: const TextStyle(fontSize: 14),
                 decoration: InputDecoration(
                   isDense: true,
-                  hintText: 'Kuenstler:innen, Songs, Alben ...',
+                  hintText: 'Künstler:innen, Songs, Alben ...',
                   hintStyle: TextStyle(
                     color: colors.textTertiary,
                     fontSize: 14,

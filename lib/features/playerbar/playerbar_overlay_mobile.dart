@@ -292,10 +292,19 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
                               const SizedBox(height: 16),
                               Expanded(
                                 child: Center(
-                                  child: AspectRatio(
-                                    aspectRatio: 1,
-                                    child: _PlayerOverlayArtwork(
-                                      coverUrl: widget.trackCoverUrl,
+                                  child: OverflowBox(
+                                    maxWidth: MediaQuery.sizeOf(context).width,
+                                    child: SizedBox(
+                                      width: MediaQuery.sizeOf(context).width,
+                                      child: _SwipeablePlayerArtwork(
+                                        key: ValueKey(
+                                          widget.playbackQueue.queueId,
+                                        ),
+                                        coverUrl: widget.trackCoverUrl,
+                                        queue: widget.playbackQueue,
+                                        onPrevious: widget.onPrevious,
+                                        onNext: widget.onNext,
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -586,8 +595,170 @@ class _PlayerOverlayLinkText extends StatelessWidget {
   }
 }
 
+class _SwipeablePlayerArtwork extends StatefulWidget {
+  const _SwipeablePlayerArtwork({
+    super.key,
+    required this.coverUrl,
+    required this.queue,
+    required this.onPrevious,
+    required this.onNext,
+  });
+
+  final String? coverUrl;
+  final Queue queue;
+  final Future<void> Function() onPrevious;
+  final Future<void> Function() onNext;
+
+  @override
+  State<_SwipeablePlayerArtwork> createState() =>
+      _SwipeablePlayerArtworkState();
+}
+
+class _SwipeablePlayerArtworkState extends State<_SwipeablePlayerArtwork> {
+  late final PageController _pageController;
+  Timer? _syncTimer;
+  late int _requestedIndex;
+  bool _isResetting = false;
+
+  int get _currentIndex {
+    final int? index = widget.queue.currentIndex;
+    return index != null && index >= 0 && index < widget.queue.items.length
+        ? index
+        : 0;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _requestedIndex = _currentIndex;
+    _pageController = PageController(initialPage: _requestedIndex);
+  }
+
+  @override
+  void didUpdateWidget(covariant _SwipeablePlayerArtwork oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.queue.currentIndex == _requestedIndex) {
+      _syncTimer?.cancel();
+      _syncTimer = null;
+    } else if (_syncTimer == null &&
+        oldWidget.queue.currentIndex != widget.queue.currentIndex) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _pageController.hasClients) {
+          _resetToCurrentIndex();
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _syncTimer?.cancel();
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  void _resetToCurrentIndex() {
+    _isResetting = true;
+    _requestedIndex = _currentIndex;
+    _pageController.jumpToPage(_requestedIndex);
+    _isResetting = false;
+  }
+
+  void _handlePointerDown(PointerDownEvent event) {
+    if (!_pageController.hasClients || widget.queue.items.isEmpty) {
+      return;
+    }
+    final double currentPage =
+        _pageController.page ?? _requestedIndex.toDouble();
+    final int page = currentPage.round().clamp(
+      0,
+      widget.queue.items.length - 1,
+    );
+    if ((currentPage - page).abs() < 0.01) {
+      return;
+    }
+
+    _isResetting = true;
+    _pageController.jumpToPage(page);
+    _isResetting = false;
+    if (page != _requestedIndex) {
+      _requestPage(page);
+    }
+  }
+
+  void _requestPage(int page) {
+    final int previousIndex = _requestedIndex;
+    _requestedIndex = page;
+    _syncTimer?.cancel();
+    _syncTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted && _pageController.hasClients) {
+        _resetToCurrentIndex();
+      }
+    });
+    for (int index = previousIndex; index < page; index++) {
+      unawaited(widget.onNext());
+    }
+    for (int index = previousIndex; index > page; index--) {
+      unawaited(widget.onPrevious());
+    }
+  }
+
+  bool _onScrollEnd(ScrollEndNotification notification) {
+    if (_isResetting || !_pageController.hasClients) {
+      return false;
+    }
+    final int page = _pageController.page?.round() ?? _requestedIndex;
+    if (page == _requestedIndex) {
+      return false;
+    }
+
+    _requestPage(page);
+    return false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final List<String?> covers = widget.queue.items.isEmpty
+        ? <String?>[widget.coverUrl]
+        : <String?>[
+            for (int index = 0; index < widget.queue.items.length; index++)
+              index == widget.queue.currentIndex
+                  ? widget.coverUrl
+                  : widget.queue.items[index].mediaItem.imageUriForSize(512),
+          ];
+
+    return ClipRect(
+      child: NotificationListener<ScrollEndNotification>(
+        onNotification: _onScrollEnd,
+        child: Listener(
+          onPointerDown: _handlePointerDown,
+          child: PageView.builder(
+            controller: _pageController,
+            itemCount: covers.length,
+            physics: covers.length == 1
+                ? const NeverScrollableScrollPhysics()
+                : const PageScrollPhysics(),
+            itemBuilder: (BuildContext context, int index) => Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: AspectRatio(
+                  aspectRatio: 1,
+                  child: _PlayerOverlayArtwork(
+                    key: ValueKey(covers[index]),
+                    coverUrl: covers[index],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _PlayerOverlayArtwork extends StatelessWidget {
-  const _PlayerOverlayArtwork({required this.coverUrl});
+  const _PlayerOverlayArtwork({super.key, required this.coverUrl});
 
   final String? coverUrl;
 

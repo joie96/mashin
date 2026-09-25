@@ -86,7 +86,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                       final uri = Uri.tryParse(text);
                       if (uri == null || (!uri.hasScheme || !uri.hasAuthority)) {
-                        return 'Bitte eine gueltige URL eingeben';
+                        return 'Bitte eine gültige URL eingeben';
                       }
 
                       return null;

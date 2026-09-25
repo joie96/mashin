@@ -47,8 +47,23 @@ void main() {
     await tester.pumpWidget(section<Album>(items: <Album>[]));
 
     final Text heading = tester.widget<Text>(find.text('Medien'));
-    expect(heading.style?.fontSize, 18);
+    expect(heading.style?.fontSize, 20);
     expect(heading.style?.fontWeight, FontWeight.normal);
+  });
+
+  testWidgets('mobile row title uses normal font weight', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      section<Artist>(
+        items: <Artist>[
+          Artist(itemId: 'artist', provider: 'test', name: 'Artist name'),
+        ],
+      ),
+    );
+
+    final Text title = tester.widget<Text>(find.text('Artist name'));
+    expect(title.style?.fontWeight, FontWeight.normal);
   });
 
   testWidgets('row ends at the last line for each media type', (

@@ -254,7 +254,7 @@ private class AndroidAutoLibraryCallback : MediaLibraryService.MediaLibrarySessi
 
     private fun homeItems(): List<MediaItem> = listOf(
         libraryItem("home:recommendations", "Empfehlungen", false),
-        libraryItem("home:recent", "Zuletzt gehoert", false),
+        libraryItem("home:recent", "Zuletzt gehört", false),
     )
 
     private fun favoriteCategoryItems(): List<MediaItem> = listOf(
@@ -345,7 +345,7 @@ private class AndroidAutoLibraryCallback : MediaLibraryService.MediaLibrarySessi
         return listOf(
             libraryItem("artistAlbums:$parentId", "Alben", false),
             libraryItem("artistTopTracks:$parentId", "Top Tracks", false),
-            libraryItem("similarArtists:$parentId", "Aehnliche Artists", false),
+            libraryItem("similarArtists:$parentId", "Ähnliche Artists", false),
         )
     }
 
@@ -391,7 +391,7 @@ private class AndroidAutoLibraryCallback : MediaLibraryService.MediaLibrarySessi
         serializedTrackLists[shuffleId] = JSONArray(shuffled).toString()
         return listOf(
             libraryItem(playId, "Abspielen", true, "${tracks.length()} Tracks"),
-            libraryItem(shuffleId, "Zufaellige Wiedergabe", true, "${tracks.length()} Tracks"),
+            libraryItem(shuffleId, "Zufällige Wiedergabe", true, "${tracks.length()} Tracks"),
         )
     }
 

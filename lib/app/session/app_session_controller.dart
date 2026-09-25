@@ -85,7 +85,7 @@ class AppSessionController extends ChangeNotifier {
       notifyListeners();
       return null;
     } catch (_) {
-      return 'Verbindung fehlgeschlagen. Bitte Server-URL pruefen.';
+      return 'Verbindung fehlgeschlagen. Bitte Server-URL prüfen.';
     }
   }
 

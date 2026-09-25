@@ -259,7 +259,7 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
     final TextStyle titleStyle = defaultStyle.merge(
       Theme.of(
         context,
-      ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+      ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.normal),
     );
     final TextStyle secondaryStyle = defaultStyle.merge(
       const TextStyle(fontSize: 12),
@@ -741,7 +741,7 @@ class _MobileRowTitleText extends StatelessWidget {
       textAlign: TextAlign.center,
       overflow: TextOverflow.ellipsis,
       style: Theme.of(context).textTheme.titleSmall?.copyWith(
-        fontWeight: FontWeight.w600,
+        fontWeight: FontWeight.normal,
         color: isCurrent ? colors.accent : null,
       ),
     );
