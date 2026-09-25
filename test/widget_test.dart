@@ -16,6 +16,7 @@ import 'package:mashin_flutter/app/shell/app_shell.dart';
 import 'package:mashin_flutter/app/theme/app_theme.dart';
 import 'package:mashin_flutter/features/playerbar/playerbar_overlay.dart';
 import 'package:mashin_flutter/features/queue/queue_overlay.dart';
+import 'package:mashin_flutter/features/search/search_screen_mobile.dart';
 
 void main() {
   testWidgets('shows login screen when no session exists', (
@@ -114,5 +115,47 @@ void main() {
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     expect(find.text('Home'), findsOneWidget);
+  });
+
+  testWidgets('mobile search focuses on entry and unfocuses on outside tap', (
+    WidgetTester tester,
+  ) async {
+    final AppSessionController session = AppSessionController();
+    addTearDown(session.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark(),
+        home: Builder(
+          builder: (BuildContext context) => Scaffold(
+            body: TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (BuildContext context) => Scaffold(
+                    body: SearchScreenMobile(
+                      coreBridge: session.coreBridge,
+                      coreEvents: session.coreEvents,
+                    ),
+                  ),
+                ),
+              ),
+              child: const Text('Suche öffnen'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Suche öffnen'));
+    await tester.pumpAndSettle();
+
+    final Finder input = find.byType(EditableText);
+    expect(tester.widget<EditableText>(input).focusNode.hasFocus, isTrue);
+    expect(tester.testTextInput.isVisible, isTrue);
+
+    await tester.tap(find.text('Suche'));
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<EditableText>(input).focusNode.hasFocus, isFalse);
+    expect(tester.testTextInput.isVisible, isFalse);
   });
 }

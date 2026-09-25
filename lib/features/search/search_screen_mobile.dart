@@ -37,7 +37,6 @@ class SearchScreenMobile extends StatefulWidget {
 
 class _SearchScreenMobileState extends State<SearchScreenMobile> {
   final TextEditingController _queryController = TextEditingController();
-  Timer? _debounce;
 
   late final feature_search.SearchController _controller;
 
@@ -59,7 +58,6 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
 
   @override
   void dispose() {
-    _debounce?.cancel();
     _queryController.dispose();
     _controller.removeListener(_onControllerChanged);
     _controller.dispose();
@@ -229,6 +227,7 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
         const SizedBox(height: 20),
         TextField(
           controller: _queryController,
+          autofocus: true,
           textInputAction: TextInputAction.search,
           decoration: InputDecoration(
             hintText: 'Tracks, Alben, Playlists, Artists',
@@ -251,8 +250,9 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
                     ],
                   ),
           ),
-          onChanged: _onQueryChanged,
+          onChanged: (_) => setState(() {}),
           onSubmitted: (_) => _submitSearch(),
+          onTapOutside: (_) => FocusScope.of(context).unfocus(),
         ),
         const SizedBox(height: 20),
         if (!_controller.hasSearchRequest)
@@ -330,21 +330,11 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
     );
   }
 
-  void _onQueryChanged(String value) {
-    setState(() {});
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 320), () {
-      unawaited(_controller.runSearch(value.trim()));
-    });
-  }
-
   void _submitSearch() {
-    _debounce?.cancel();
     unawaited(_controller.runSearch(_queryController.text.trim()));
   }
 
   void _clearSearch() {
-    _debounce?.cancel();
     _queryController.clear();
     _controller.resetResults();
     setState(() {});

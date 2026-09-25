@@ -81,7 +81,7 @@ fn is_music_assistant_query(kind: &str) -> bool {
             | "providerManifests"
             | "providerIconData"
             | "recentlyPlayedTracks"
-            | "searchMusic"
+            | "searchMedia"
             | "artist"
             | "album"
             | "albumTracks"

@@ -1,6 +1,6 @@
 use super::models::identifiers::{AccessToken, MediaId, PlayerId, QueueId};
 use super::models::media::{
-    Album, Artist, MediaItem, MusicAssistantSearchResults, Playlist, Track,
+    Album, Artist, MediaItem, MediaType, MusicAssistantSearchResults, Playlist, Track,
 };
 use super::models::player::MusicAssistantPlayer;
 use super::models::queue::{MusicAssistantQueue, QueueItem, RepeatMode};
@@ -282,16 +282,17 @@ impl MusicAssistantClient {
             .await
     }
 
-    pub(crate) async fn search(
+    pub(crate) async fn search_media(
         &self,
         search_query: &str,
+        media_types: &[MediaType],
         limit: u32,
     ) -> Result<MusicAssistantSearchResults, String> {
         self.execute_command(
             "music/search",
             json!({
                 "search_query": search_query,
-                "media_types": ["artist", "album", "track", "playlist"],
+                "media_types": media_types,
                 "limit": limit,
                 "library_only": false,
             }),

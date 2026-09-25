@@ -63,31 +63,62 @@ class SearchController extends ChangeNotifier {
     _artists = const <Artist>[];
     _notifyListenersIfAlive();
 
+    await Future.wait<void>(<Future<void>>[
+      _searchMedia(query, MediaType.track, requestId),
+      _searchMedia(query, MediaType.album, requestId),
+      _searchMedia(query, MediaType.playlist, requestId),
+      _searchMedia(query, MediaType.artist, requestId),
+    ]);
+  }
+
+  // Completes each result group independently, including failed requests.
+  Future<void> _searchMedia(
+    String query,
+    MediaType mediaType,
+    int requestId,
+  ) async {
     try {
-      final SearchResults results = await coreBridge.searchMusic(query);
-      if (requestId != _requestId) {
+      final SearchResults results = await coreBridge.searchMedia(
+        query,
+        mediaType,
+      );
+      if (requestId != _requestId || _isDisposed) {
         return;
       }
-      _tracks = _withFavoriteStatuses(results.tracks);
-      _albums = _withFavoriteStatuses(results.albums);
-      _playlists = _withFavoriteStatuses(results.playlists);
-      _artists = _withFavoriteStatuses(results.artists);
+      switch (mediaType) {
+        case MediaType.track:
+          _tracks = _withFavoriteStatuses(results.tracks);
+        case MediaType.album:
+          _albums = _withFavoriteStatuses(results.albums);
+        case MediaType.playlist:
+          _playlists = _withFavoriteStatuses(results.playlists);
+        case MediaType.artist:
+          _artists = _withFavoriteStatuses(results.artists);
+        default:
+          throw ArgumentError.value(mediaType, 'mediaType');
+      }
     } catch (_) {
-      if (requestId != _requestId) {
-        return;
-      }
     } finally {
-      if (requestId == _requestId) {
-        _isLoadingTracks = false;
-        _isLoadingAlbums = false;
-        _isLoadingPlaylists = false;
-        _isLoadingArtists = false;
+      if (requestId == _requestId && !_isDisposed) {
+        switch (mediaType) {
+          case MediaType.track:
+            _isLoadingTracks = false;
+          case MediaType.album:
+            _isLoadingAlbums = false;
+          case MediaType.playlist:
+            _isLoadingPlaylists = false;
+          case MediaType.artist:
+            _isLoadingArtists = false;
+          default:
+            break;
+        }
+        _notifyListenersIfAlive();
       }
-      _notifyListenersIfAlive();
     }
   }
 
   void resetResults() {
+    _requestId++;
     _hasSearchRequest = false;
     _isLoadingTracks = false;
     _isLoadingAlbums = false;

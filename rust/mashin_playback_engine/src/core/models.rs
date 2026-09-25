@@ -1,6 +1,7 @@
 //! Typed application-core configuration, event, and error contracts.
 
 use crate::music_assistant::models::identifiers::{AccessToken, PlayerId, UserId};
+use crate::music_assistant::models::media::MediaType;
 use crate::music_assistant::models::session::MusicAssistantServerUrl;
 use crate::playback::models::{PlayerState, Queue};
 use crate::sendspin::models::SendspinAudioCodec;
@@ -97,8 +98,9 @@ pub(crate) enum MusicAssistantQuery {
     RecentlyPlayedTracks {
         limit: u32,
     },
-    SearchMusic {
+    SearchMedia {
         query: String,
+        media_type: MediaType,
         limit: u32,
     },
     Artist {
@@ -256,6 +258,7 @@ pub(crate) enum MediaSessionEvent {
 #[cfg(test)]
 mod tests {
     use super::{MediaSessionEvent, MusicAssistantQuery, MusicAssistantQueryRequest};
+    use crate::music_assistant::models::media::MediaType;
     use crate::playback::models::PlayerState;
 
     #[test]
@@ -295,5 +298,37 @@ mod tests {
                 allow_dynamic_tracks: false,
             } if item_id == "playlist-1" && provider == "library"
         ));
+    }
+
+    #[test]
+    fn decodes_filtered_search_queries_and_serializes_server_media_types() {
+        for (name, media_type) in [
+            ("track", MediaType::Track),
+            ("album", MediaType::Album),
+            ("playlist", MediaType::Playlist),
+            ("artist", MediaType::Artist),
+        ] {
+            let request = serde_json::from_value::<MusicAssistantQueryRequest>(serde_json::json!({
+                "requestId": 42,
+                "kind": "searchMedia",
+                "query": "jazz",
+                "mediaType": name,
+                "limit": 50,
+            }))
+            .expect("decode filtered search query");
+
+            assert!(matches!(
+                request.query,
+                MusicAssistantQuery::SearchMedia {
+                    query,
+                    media_type: decoded_type,
+                    limit: 50,
+                } if query == "jazz" && decoded_type == media_type
+            ));
+            assert_eq!(
+                serde_json::to_value([media_type]).expect("serialize media type"),
+                serde_json::json!([name]),
+            );
+        }
     }
 }

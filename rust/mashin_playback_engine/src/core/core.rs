@@ -11,7 +11,7 @@ use crate::music_assistant::auth_store::{platform_auth_store, AuthStore};
 use crate::music_assistant::client::{get_radio_tracks, MusicAssistantClient};
 use crate::music_assistant::models::identifiers::{AccessToken, MediaId, QueueItemId};
 use crate::music_assistant::models::media::{
-    Album, Artist, MediaItem, MusicAssistantSearchResults, Playlist, Track,
+    Album, Artist, MediaItem, MediaType, MusicAssistantSearchResults, Playlist, Track,
 };
 use crate::music_assistant::models::queue::{QueueItem, RepeatMode};
 use crate::music_assistant::models::recommendation::MusicAssistantRecommendationFolder;
@@ -683,8 +683,12 @@ pub(crate) fn start_music_assistant_query(
                     .await
                     .map(|tracks| tracks.into_iter().map(MediaItem::Track).collect::<Vec<_>>())
             }),
-            MusicAssistantQuery::SearchMusic { query, limit } => {
-                serialize_query!(client.search(&query, limit.clamp(1, 100)))
+            MusicAssistantQuery::SearchMedia {
+                query,
+                media_type,
+                limit,
+            } => {
+                serialize_query!(client.search_media(&query, &[media_type], limit.clamp(1, 100)))
             }
             MusicAssistantQuery::Artist { item_id, provider } => {
                 serialize_query!(client.get_artist(&MediaId(item_id), &provider))
@@ -782,7 +786,16 @@ pub(crate) fn search_music_assistant(
 ) -> Result<MusicAssistantSearchResults, CoreError> {
     let client = music_assistant_client_for_query("search Music Assistant")?;
     CORE_NETWORK_RUNTIME
-        .block_on(client.search(query, limit.clamp(1, 100)))
+        .block_on(client.search_media(
+            query,
+            &[
+                MediaType::Track,
+                MediaType::Album,
+                MediaType::Playlist,
+                MediaType::Artist,
+            ],
+            limit.clamp(1, 100),
+        ))
         .map_err(CoreError::command_failed)
 }
 

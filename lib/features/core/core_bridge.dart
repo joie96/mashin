@@ -72,7 +72,11 @@ abstract class MashinCoreBridgeApi {
   Future<List<ProviderManifest>> getProviderManifests();
   Future<String?> getProviderIconData(String provider);
   Future<List<MediaItem>> getRecentlyPlayedTracks({int limit = 40});
-  Future<SearchResults> searchMusic(String query, {int limit = 50});
+  Future<SearchResults> searchMedia(
+    String query,
+    MediaType mediaType, {
+    int limit = 50,
+  });
   Future<Artist> getArtist(String itemId, String provider);
   Future<Album> getAlbum(String itemId, String provider);
   Future<List<Track>> getAlbumTracks(String itemId, String provider);
@@ -345,17 +349,24 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
       );
 
   @override
-  Future<SearchResults> searchMusic(String query, {int limit = 50}) =>
-      _startMusicAssistantQuery<SearchResults>(
-        'searchMusic',
-        <String, Object?>{'query': query, 'limit': limit.clamp(1, 100)},
-        (Object? decoded) {
-          if (decoded is! Map<String, dynamic>) {
-            throw const FormatException('search results must be an object');
-          }
-          return SearchResults.fromJson(decoded);
-        },
-      );
+  Future<SearchResults> searchMedia(
+    String query,
+    MediaType mediaType, {
+    int limit = 50,
+  }) => _startMusicAssistantQuery<SearchResults>(
+    'searchMedia',
+    <String, Object?>{
+      'query': query,
+      'mediaType': mediaType.name,
+      'limit': limit.clamp(1, 100),
+    },
+    (Object? decoded) {
+      if (decoded is! Map<String, dynamic>) {
+        throw const FormatException('search results must be an object');
+      }
+      return SearchResults.fromJson(decoded);
+    },
+  );
 
   @override
   Future<Artist> getArtist(String itemId, String provider) {
