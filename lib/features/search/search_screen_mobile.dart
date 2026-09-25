@@ -37,6 +37,7 @@ class SearchScreenMobile extends StatefulWidget {
 
 class _SearchScreenMobileState extends State<SearchScreenMobile> {
   final TextEditingController _queryController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
 
   late final feature_search.SearchController _controller;
 
@@ -48,6 +49,11 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
       userDataController: widget.userDataController,
     )..addListener(_onControllerChanged);
     widget.userDataController?.addListener(_onUserDataChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _searchFocusNode.requestFocus();
+      }
+    });
   }
 
   void _onControllerChanged() {
@@ -59,6 +65,7 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
   @override
   void dispose() {
     _queryController.dispose();
+    _searchFocusNode.dispose();
     _controller.removeListener(_onControllerChanged);
     _controller.dispose();
     widget.userDataController?.removeListener(_onUserDataChanged);
@@ -227,7 +234,7 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
         const SizedBox(height: 20),
         TextField(
           controller: _queryController,
-          autofocus: true,
+          focusNode: _searchFocusNode,
           textInputAction: TextInputAction.search,
           decoration: InputDecoration(
             hintText: 'Tracks, Alben, Playlists, Artists',

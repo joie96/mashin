@@ -141,6 +141,63 @@ void main() {
     await tester.pump();
     expect(coreBridge.query, 'rock');
   });
+
+  testWidgets('mobile search does not refocus after scrolling', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final coreBridge = _FakeSearchCoreBridge();
+    final coreEvents = MashinCoreBridgeEvents(coreBridge: coreBridge);
+    addTearDown(coreEvents.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark(),
+        home: Builder(
+          builder: (BuildContext context) => Scaffold(
+            body: TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (BuildContext context) => Scaffold(
+                    body: SearchScreenMobile(
+                      coreBridge: coreBridge,
+                      coreEvents: coreEvents,
+                    ),
+                  ),
+                ),
+              ),
+              child: const Text('Suche öffnen'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Suche öffnen'));
+    await tester.pumpAndSettle();
+
+    final input = find.byType(EditableText);
+    expect(tester.widget<EditableText>(input).focusNode.hasFocus, isTrue);
+
+    await tester.enterText(find.byType(TextField), 'jazz');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Suche'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<EditableText>(input).focusNode.hasFocus, isFalse);
+
+    final scrollView = find.byType(ListView).first;
+    await tester.drag(scrollView, const Offset(0, -1000));
+    await tester.pumpAndSettle();
+    await tester.drag(scrollView, const Offset(0, 1000));
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<EditableText>(input).focusNode.hasFocus, isFalse);
+    expect(tester.testTextInput.isVisible, isFalse);
+  });
 }
 
 class _FakeSearchCoreBridge extends Fake implements MashinCoreBridgeApi {
