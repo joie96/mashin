@@ -2762,24 +2762,26 @@ class _MobileNavButton extends StatelessWidget {
 /// App root
 
 class MashinApp extends StatefulWidget {
-  const MashinApp({super.key});
+  const MashinApp({super.key, required this.session});
+
+  final AppSessionController session;
 
   @override
   State<MashinApp> createState() => _MashinAppState();
 }
 
 class _MashinAppState extends State<MashinApp> {
-  ThemeMode _themeMode = ThemeMode.dark;
+  late ThemeMode _themeMode;
   late final AppSessionController _session;
   late final AppRouter _appRouter;
 
   @override
   void initState() {
     super.initState();
-    _session = AppSessionController();
+    _session = widget.session;
+    _themeMode = _session.isDarkTheme ? ThemeMode.dark : ThemeMode.light;
     _appRouter = AppRouter(_session);
     _session.addListener(_onSessionChanged);
-    unawaited(_session.initialize());
   }
 
   @override

@@ -7,6 +7,8 @@ import '../../features/core/core_models.dart';
 import '../../features/core/core_userdata.dart';
 
 class AppSessionController extends ChangeNotifier {
+  static const Duration _startupTimeout = Duration(seconds: 5);
+
   AppSessionController() {
     coreBridge = MashinCoreBridge();
     coreEvents = MashinCoreBridgeEvents(coreBridge: coreBridge);
@@ -19,7 +21,7 @@ class AppSessionController extends ChangeNotifier {
   late final MashinCoreBridgeEvents coreEvents;
 
   UserData? _userDataController;
-  late String _baseUrl;
+  String _baseUrl = '';
   String? _username;
   late String _preferredCodec;
   bool _isAuthenticated = false;
@@ -28,6 +30,7 @@ class AppSessionController extends ChangeNotifier {
   late int _localCacheSizeBytes;
   bool _isDarkTheme = true;
   LogLevelPreference _logLevel = LogLevelPreference.info;
+  final Completer<void> _initialSettingsReady = Completer<void>();
 
   UserData? get userDataController => _userDataController;
   String get baseUrl => _baseUrl;
@@ -38,21 +41,29 @@ class AppSessionController extends ChangeNotifier {
   int get localCacheSizeBytes => _localCacheSizeBytes;
   bool get isDarkTheme => _isDarkTheme;
   LogLevelPreference get logLevel => _logLevel;
+  Future<void> get initialSettingsReady => _initialSettingsReady.future;
 
   Future<void> initialize() async {
     try {
       await _restoreSession();
       await _refreshSessionSettings();
-      await _loadProviderIcons();
-      await _initializeUserData();
-      await coreEvents.start();
+      _initialSettingsReady.complete();
+      await _loadProviderIcons().timeout(_startupTimeout);
+      await _initializeUserData().timeout(_startupTimeout);
+      await coreEvents.start().timeout(_startupTimeout);
     } catch (error, stackTrace) {
+      if (!_initialSettingsReady.isCompleted) {
+        _isAuthenticated = false;
+      }
       coreBridge.log(
         LogLevelPreference.error,
         'AppSessionController',
         'Startup bootstrap failed: $error | $stackTrace',
       );
     } finally {
+      if (!_initialSettingsReady.isCompleted) {
+        _initialSettingsReady.complete();
+      }
       if (!_isDisposed) {
         _isLoading = false;
         notifyListeners();
@@ -130,11 +141,15 @@ class AppSessionController extends ChangeNotifier {
   }
 
   Future<void> _restoreSession() async {
-    _isAuthenticated = await coreBridge.restorePersistedSession();
+    _isAuthenticated = await coreBridge.restorePersistedSession().timeout(
+      _startupTimeout,
+    );
   }
 
   Future<void> _refreshSessionSettings() async {
-    final settings = await coreBridge.getSessionSettings();
+    final settings = await coreBridge.getSessionSettings().timeout(
+      _startupTimeout,
+    );
     _baseUrl = settings.musicAssistantUrl;
     MediaItemImage.configureProxyBaseUrl(_baseUrl);
     _username = settings.username;

@@ -18,13 +18,33 @@ import 'package:mashin_flutter/features/playerbar/playerbar_overlay.dart';
 import 'package:mashin_flutter/features/queue/queue_overlay.dart';
 import 'package:mashin_flutter/features/search/search_screen_mobile.dart';
 
+class _LightThemeSession extends AppSessionController {
+  @override
+  bool get isDarkTheme => false;
+}
+
 void main() {
+  testWidgets('uses restored light theme on the first frame', (
+    WidgetTester tester,
+  ) async {
+    final session = _LightThemeSession();
+
+    await tester.pumpWidget(MashinApp(session: session));
+
+    expect(
+      tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
+      ThemeMode.light,
+    );
+  });
+
   testWidgets('shows login screen when no session exists', (
     WidgetTester tester,
   ) async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
 
-    await tester.pumpWidget(const MashinApp());
+    final session = AppSessionController();
+    await tester.pumpWidget(MashinApp(session: session));
+    await session.initialize();
     await tester.pumpAndSettle();
 
     expect(find.text('Bei Music Assistant anmelden'), findsOneWidget);
