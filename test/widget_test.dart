@@ -8,19 +8,103 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image/image.dart' as img;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mashin_flutter/app/navigation/app_router.dart';
 import 'package:mashin_flutter/app/session/app_session_controller.dart';
 import 'package:mashin_flutter/app/shell/app_shell.dart';
 import 'package:mashin_flutter/app/theme/app_theme.dart';
+import 'package:mashin_flutter/features/core/core_bridge.dart';
+import 'package:mashin_flutter/features/core/core_models.dart';
+import 'package:mashin_flutter/features/core/core_userdata.dart';
 import 'package:mashin_flutter/features/playerbar/playerbar_overlay.dart';
 import 'package:mashin_flutter/features/queue/queue_overlay.dart';
 import 'package:mashin_flutter/features/search/search_screen_mobile.dart';
+import 'package:mashin_flutter/features/shared/widgets/media_image.dart';
+import 'dart:convert';
 
 class _LightThemeSession extends AppSessionController {
   @override
   bool get isDarkTheme => false;
+}
+
+class _PlaylistShellSession extends AppSessionController {
+  _PlaylistShellSession(MashinCoreBridgeApi bridge)
+    : userData = UserData(coreBridge: bridge);
+
+  final UserData userData;
+
+  @override
+  UserData get userDataController => userData;
+
+  @override
+  void dispose() {
+    userData.dispose();
+    super.dispose();
+  }
+}
+
+class _PlaylistShellBridge implements MashinCoreBridgeApi {
+  final List<Map<String, dynamic>> _playlists = <Map<String, dynamic>>[];
+  String? cover;
+
+  @override
+  Future<Map<String, dynamic>> getUserData() async => <String, dynamic>{
+    'favorites': <String, dynamic>{},
+    'playlists': _playlists,
+  };
+
+  @override
+  Future<void> createLocalPlaylist(String name) async {
+    _playlists.add(<String, dynamic>{
+      'item_id': '1',
+      'provider': UserData.localPlaylistProvider,
+      'name': name,
+      'items': <Map<String, dynamic>>[],
+    });
+  }
+
+  @override
+  Future<void> renameLocalPlaylist(String playlistId, String name) async {
+    _playlists.singleWhere(
+      (playlist) => playlist['item_id'] == playlistId,
+    )['name'] = name;
+  }
+
+  @override
+  Future<void> addLocalPlaylistTracks(
+    String playlistId,
+    List<Track> tracks,
+  ) async {
+    final Map<String, dynamic> playlist = _playlists.singleWhere(
+      (playlist) => playlist['item_id'] == playlistId,
+    );
+    (playlist['items'] as List<Map<String, dynamic>>).addAll(
+      tracks.map(
+        (Track track) => <String, dynamic>{
+          'item_id': track.itemId,
+          'provider': track.provider,
+          'name': track.name,
+          'uri': track.uri,
+          'duration': track.duration,
+        },
+      ),
+    );
+    playlist['metadata'] = <String, dynamic>{
+      'images': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'type': 'thumb',
+          'path': cover,
+          'provider': UserData.localPlaylistProvider,
+        },
+      ],
+    };
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError(invocation.memberName.toString());
 }
 
 void main() {
@@ -51,6 +135,109 @@ void main() {
     expect(find.byType(TextFormField), findsNWidgets(3));
     expect(find.widgetWithText(FilledButton, 'Anmelden'), findsOneWidget);
   });
+
+  testWidgets(
+    'desktop sidebar updates when a playlist is created and its cover changes',
+    (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final _PlaylistShellBridge bridge = _PlaylistShellBridge();
+      final _PlaylistShellSession session = _PlaylistShellSession(bridge);
+      final GlobalKey<NavigatorState> navigatorKey =
+          GlobalKey<NavigatorState>();
+      final ShellNavigationObserver observer = ShellNavigationObserver();
+      final GoRouter router = GoRouter(
+        initialLocation: AppRoutes.home,
+        routes: <RouteBase>[
+          ShellRoute(
+            navigatorKey: navigatorKey,
+            observers: <NavigatorObserver>[observer],
+            builder:
+                (BuildContext context, GoRouterState state, Widget child) =>
+                    AppShell(
+                      session: session,
+                      navigatorKey: navigatorKey,
+                      navigationObserver: observer,
+                      child: child,
+                    ),
+            routes: <RouteBase>[
+              GoRoute(
+                path: AppRoutes.home,
+                builder: (BuildContext context, GoRouterState state) =>
+                    const ShellBackScope(child: Text('Home')),
+              ),
+            ],
+          ),
+        ],
+      );
+      addTearDown(router.dispose);
+      addTearDown(session.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp.router(routerConfig: router, theme: AppTheme.dark()),
+      );
+      expect(find.text('Neue Playlist'), findsNothing);
+
+      final Playlist playlist = (await session.userData.createLocalPlaylist(
+        'Neue Playlist',
+      ))!;
+      await tester.pump();
+      expect(find.text('Neue Playlist'), findsOneWidget);
+
+      final String artwork =
+          'data:image/jpeg;base64,${base64Encode(img.encodeJpg(img.Image(width: 2, height: 2)))}';
+      bridge.cover = artwork;
+      await session.userData.addPlaylistTracks('1', <Track>[
+        const Track(
+          itemId: 'track-1',
+          provider: 'library',
+          name: 'Titel',
+          artists: <Artist>[],
+          uri: 'library://track/1',
+          duration: 180,
+        ),
+      ]);
+      await tester.pump();
+      expect(find.text('1 Titel • 3 Min.'), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (Widget widget) => widget is MediaImage && widget.source == artwork,
+        ),
+        findsOneWidget,
+      );
+
+      final String updatedArtwork =
+          'data:image/jpeg;base64,${base64Encode(img.encodeJpg(img.Image(width: 3, height: 2)))}';
+      bridge.cover = updatedArtwork;
+      await session.userData.addPlaylistTracks('1', <Track>[
+        const Track(
+          itemId: 'track-2',
+          provider: 'library',
+          name: 'Weiterer Titel',
+          artists: <Artist>[],
+          uri: 'library://track/2',
+          duration: 180,
+        ),
+      ]);
+      await tester.pump();
+      expect(find.text('2 Titel • 6 Min.'), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (Widget widget) =>
+              widget is MediaImage && widget.source == updatedArtwork,
+        ),
+        findsOneWidget,
+      );
+
+      await session.userData.renamePlaylist(playlist, 'Umbenannt');
+      await tester.pump();
+      expect(find.text('Neue Playlist'), findsNothing);
+      expect(find.text('Umbenannt'), findsOneWidget);
+    },
+  );
 
   testWidgets('Android back closes mobile overlays before the detail route', (
     WidgetTester tester,

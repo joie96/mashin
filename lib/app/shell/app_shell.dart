@@ -87,6 +87,7 @@ class _AppShellState extends State<AppShell> {
   bool _isNavigationRefreshScheduled = false;
   final TextEditingController _desktopSearchController =
       TextEditingController();
+  UserData? _observedUserData;
 
   MashinCoreBridgeEvents get _coreEvents => widget.session.coreEvents;
   MashinCoreBridgeApi get _coreBridge => widget.session.coreBridge;
@@ -221,11 +222,23 @@ class _AppShellState extends State<AppShell> {
     super.initState();
     widget.session.addListener(_onSessionChanged);
     widget.navigationObserver.addListener(_onNavigationChanged);
+    _observeUserData();
+  }
+
+  @override
+  void didUpdateWidget(covariant AppShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.session != widget.session) {
+      oldWidget.session.removeListener(_onSessionChanged);
+      widget.session.addListener(_onSessionChanged);
+    }
+    _observeUserData();
   }
 
   @override
   void dispose() {
     _desktopSearchController.dispose();
+    _observedUserData?.removeListener(_onUserDataChanged);
     widget.session.removeListener(_onSessionChanged);
     widget.navigationObserver.removeListener(_onNavigationChanged);
     super.dispose();
@@ -1127,6 +1140,20 @@ class _AppShellState extends State<AppShell> {
     if (!mounted) {
       return;
     }
+    _observeUserData();
+    setState(() {});
+  }
+
+  void _observeUserData() {
+    final UserData? controller = _userDataController;
+    if (identical(controller, _observedUserData)) return;
+    _observedUserData?.removeListener(_onUserDataChanged);
+    _observedUserData = controller;
+    controller?.addListener(_onUserDataChanged);
+  }
+
+  void _onUserDataChanged() {
+    if (!mounted) return;
     setState(() {});
   }
 
