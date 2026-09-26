@@ -10,7 +10,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $workspaceRoot = Split-Path -Parent $PSScriptRoot
-$engineRoot = Join-Path $workspaceRoot 'rust/mashin_playback_engine'
+$engineRoot = Join-Path $workspaceRoot 'rust/mashin_engine'
 $isRelease = $Profile -eq 'Release'
 
 function Build-WindowsEngine([string]$target) {
@@ -30,10 +30,10 @@ function Build-WindowsEngine([string]$target) {
     }
 
     $profileDirectory = if ($isRelease) { 'release' } else { 'debug' }
-    $source = Join-Path $engineRoot "target/$target/$profileDirectory/mashin_playback_engine.dll"
+    $source = Join-Path $engineRoot "target/$target/$profileDirectory/mashin_engine.dll"
     $destinationDirectory = Join-Path $workspaceRoot 'windows/native'
     New-Item -ItemType Directory -Path $destinationDirectory -Force | Out-Null
-    Copy-Item $source (Join-Path $destinationDirectory 'mashin_playback_engine.dll') -Force
+    Copy-Item $source (Join-Path $destinationDirectory 'mashin_engine.dll') -Force
 }
 
 function Build-AndroidEngine {

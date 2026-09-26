@@ -2,39 +2,39 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Rust Playback Engine: Android arm64 Debug",
+      "label": "Rust Mashin Engine: Android arm64 Debug",
       "type": "shell",
-      "command": "& '${workspaceFolder}/scripts/build_rust_playback_engine.ps1' -Profile Debug -PlatformSelection AndroidArm64",
+      "command": "& '${workspaceFolder}/scripts/build_mashin_engine.ps1' -Profile Debug -PlatformSelection AndroidArm64",
       "problemMatcher": []
     },
     {
-      "label": "Rust Playback Engine: Windows x64 Debug",
+      "label": "Rust Mashin Engine: Windows x64 Debug",
       "type": "shell",
-      "command": "& '${workspaceFolder}/scripts/build_rust_playback_engine.ps1' -Profile Debug -PlatformSelection WindowsX64",
+      "command": "& '${workspaceFolder}/scripts/build_mashin_engine.ps1' -Profile Debug -PlatformSelection WindowsX64",
       "problemMatcher": []
     },
     {
-      "label": "Rust Playback Engine: Windows arm64 Debug",
+      "label": "Rust Mashin Engine: Windows arm64 Debug",
       "type": "shell",
-      "command": "& '${workspaceFolder}/scripts/build_rust_playback_engine.ps1' -Profile Debug -PlatformSelection WindowsArm64",
+      "command": "& '${workspaceFolder}/scripts/build_mashin_engine.ps1' -Profile Debug -PlatformSelection WindowsArm64",
       "problemMatcher": []
     },
     {
-      "label": "Rust Playback Engine: Windows x64 Release",
+      "label": "Rust Mashin Engine: Windows x64 Release",
       "type": "shell",
-      "command": "& '${workspaceFolder}/scripts/build_rust_playback_engine.ps1' -Profile Release -PlatformSelection WindowsX64",
+      "command": "& '${workspaceFolder}/scripts/build_mashin_engine.ps1' -Profile Release -PlatformSelection WindowsX64",
       "problemMatcher": []
     },
     {
-      "label": "Rust Playback Engine: Windows arm64 Release",
+      "label": "Rust Mashin Engine: Windows arm64 Release",
       "type": "shell",
-      "command": "& '${workspaceFolder}/scripts/build_rust_playback_engine.ps1' -Profile Release -PlatformSelection WindowsArm64",
+      "command": "& '${workspaceFolder}/scripts/build_mashin_engine.ps1' -Profile Release -PlatformSelection WindowsArm64",
       "problemMatcher": []
     },
     {
-      "label": "Rust Playback Engine: Android arm64 Release",
+      "label": "Rust Mashin Engine: Android arm64 Release",
       "type": "shell",
-      "command": "& '${workspaceFolder}/scripts/build_rust_playback_engine.ps1' -Profile Release -PlatformSelection AndroidArm64",
+      "command": "& '${workspaceFolder}/scripts/build_mashin_engine.ps1' -Profile Release -PlatformSelection AndroidArm64",
       "problemMatcher": []
     },
     {
@@ -46,7 +46,7 @@
         "apk",
         "--release"
       ],
-      "dependsOn": "Rust Playback Engine: Android arm64 Release",
+      "dependsOn": "Rust Mashin Engine: Android arm64 Release",
       "dependsOrder": "sequence",
       "group": "build",
       "problemMatcher": []
@@ -61,7 +61,7 @@
         "--release",
         "--target-platform=windows-x64"
       ],
-      "dependsOn": "Rust Playback Engine: Windows x64 Release",
+      "dependsOn": "Rust Mashin Engine: Windows x64 Release",
       "dependsOrder": "sequence",
       "group": "build",
       "problemMatcher": []
@@ -76,7 +76,7 @@
         "--release",
         "--target-platform=windows-arm64"
       ],
-      "dependsOn": "Rust Playback Engine: Windows arm64 Release",
+      "dependsOn": "Rust Mashin Engine: Windows arm64 Release",
       "dependsOrder": "sequence",
       "group": "build",
       "problemMatcher": []

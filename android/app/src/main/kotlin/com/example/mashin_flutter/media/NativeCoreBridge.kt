@@ -12,7 +12,7 @@ object NativeCoreBridge {
     private var eventListener: ((String) -> Unit)? = null
 
     init {
-        System.loadLibrary("mashin_playback_engine")
+        System.loadLibrary("mashin_engine")
     }
 
     external fun initialize(context: Context, secureSessionStore: Any)

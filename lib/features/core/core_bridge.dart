@@ -981,7 +981,7 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
       _joinPath(
         cwd,
         'rust',
-        'mashin_playback_engine',
+        'mashin_engine',
         'target',
         'debug',
         fileName,
@@ -991,7 +991,7 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
       _joinPath(
         cwd,
         'rust',
-        'mashin_playback_engine',
+        'mashin_engine',
         'target',
         'release',
         fileName,
@@ -1016,15 +1016,15 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
 
   static String _libraryFileNameForPlatform() {
     if (Platform.isWindows) {
-      return 'mashin_playback_engine.dll';
+      return 'mashin_engine.dll';
     }
 
     if (Platform.isMacOS || Platform.isIOS) {
-      return 'libmashin_playback_engine.dylib';
+      return 'libmashin_engine.dylib';
     }
 
     if (Platform.isAndroid || Platform.isLinux) {
-      return 'libmashin_playback_engine.so';
+      return 'libmashin_engine.so';
     }
 
     throw UnsupportedError('Mashin core is not supported on this platform.');

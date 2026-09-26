@@ -24,7 +24,7 @@ class MainActivity : FlutterActivity() {
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
 		nativeBridgeReady = try {
-			System.loadLibrary("mashin_playback_engine")
+			System.loadLibrary("mashin_engine")
 			true
 		} catch (error: UnsatisfiedLinkError) {
 			Log.e(TAG, "Native bridge library not available", error)

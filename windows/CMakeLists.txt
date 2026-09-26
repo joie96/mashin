@@ -82,7 +82,7 @@ install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
 # Install the shared Rust playback engine DLL when present in windows/native.
-set(PLAYBACK_ENGINE_WINDOWS_DLL "${CMAKE_CURRENT_SOURCE_DIR}/native/mashin_playback_engine.dll")
+set(PLAYBACK_ENGINE_WINDOWS_DLL "${CMAKE_CURRENT_SOURCE_DIR}/native/mashin_engine.dll")
 install(FILES "${PLAYBACK_ENGINE_WINDOWS_DLL}"
   DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   OPTIONAL

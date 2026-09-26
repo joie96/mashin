@@ -1,5 +1,5 @@
 [package]
-name = "mashin_playback_engine"
+name = "mashin_engine"
 version = "0.1.0"
 edition = "2021"
 

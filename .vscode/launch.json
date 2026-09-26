@@ -7,7 +7,7 @@
       "request": "launch",
       "program": "lib/main.dart",
       "toolArgs": ["--dart-define=MASHIN_LOG_LEVEL=debug"],
-      "preLaunchTask": "Rust Playback Engine: Android arm64 Debug"
+      "preLaunchTask": "Rust Mashin Engine: Android arm64 Debug"
     },
     {
       "name": "Debug (Android, Trace)",
@@ -15,7 +15,7 @@
       "request": "launch",
       "program": "lib/main.dart",
       "toolArgs": ["--dart-define=MASHIN_LOG_LEVEL=trace"],
-      "preLaunchTask": "Rust Playback Engine: Android arm64 Debug"
+      "preLaunchTask": "Rust Mashin Engine: Android arm64 Debug"
     },
     {
       "name": "Debug (Windows x64)",
@@ -23,7 +23,7 @@
       "request": "launch",
       "program": "lib/main.dart",
       "toolArgs": ["--dart-define=MASHIN_LOG_LEVEL=debug"],
-      "preLaunchTask": "Rust Playback Engine: Windows x64 Debug"
+      "preLaunchTask": "Rust Mashin Engine: Windows x64 Debug"
     },
     {
       "name": "Debug (Windows x64, Trace)",
@@ -31,7 +31,7 @@
       "request": "launch",
       "program": "lib/main.dart",
       "toolArgs": ["--dart-define=MASHIN_LOG_LEVEL=trace"],
-      "preLaunchTask": "Rust Playback Engine: Windows x64 Debug"
+      "preLaunchTask": "Rust Mashin Engine: Windows x64 Debug"
     },
     {
       "name": "Debug (Windows arm64)",
@@ -39,7 +39,7 @@
       "request": "launch",
       "program": "lib/main.dart",
       "toolArgs": ["--dart-define=MASHIN_LOG_LEVEL=debug"],
-      "preLaunchTask": "Rust Playback Engine: Windows arm64 Debug"
+      "preLaunchTask": "Rust Mashin Engine: Windows arm64 Debug"
     },
     {
       "name": "Debug (Windows arm64, Trace)",
@@ -47,7 +47,7 @@
       "request": "launch",
       "program": "lib/main.dart",
       "toolArgs": ["--dart-define=MASHIN_LOG_LEVEL=trace"],
-      "preLaunchTask": "Rust Playback Engine: Windows arm64 Debug"
+      "preLaunchTask": "Rust Mashin Engine: Windows arm64 Debug"
     }
   ]
 }
