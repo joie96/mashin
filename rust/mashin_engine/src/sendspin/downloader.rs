@@ -1919,6 +1919,11 @@ impl SendspinDownloaderWorker {
             replacement
         };
         crate::cache::store::cache_discard(&self.caches, content_key);
+        crate::cache::store::cache_add_key(
+            &self.caches,
+            content_key.to_string(),
+            reservation.resume_after_millis,
+        );
         crate::cache::store::notify_cache_changed(&self.cache_change_signal);
         if let Ok(mut states) = self.cache_states.lock() {
             if let Some(state) = states.get_mut(content_key) {
