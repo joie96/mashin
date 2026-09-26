@@ -8,6 +8,7 @@ import '../../features/core/core_userdata.dart';
 
 class AppSessionController extends ChangeNotifier {
   static const Duration _startupTimeout = Duration(seconds: 5);
+  static const Duration _userDataMigrationTimeout = Duration(minutes: 2);
 
   AppSessionController() {
     coreBridge = MashinCoreBridge();
@@ -49,7 +50,7 @@ class AppSessionController extends ChangeNotifier {
       await _refreshSessionSettings();
       _initialSettingsReady.complete();
       await _loadProviderIcons().timeout(_startupTimeout);
-      await _initializeUserData().timeout(_startupTimeout);
+      await _initializeUserData().timeout(_userDataMigrationTimeout);
       await coreEvents.start().timeout(_startupTimeout);
     } catch (error, stackTrace) {
       if (!_initialSettingsReady.isCompleted) {

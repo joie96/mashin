@@ -5,8 +5,9 @@ pub(crate) mod core;
 pub(crate) mod models;
 
 pub(crate) use core::{
-    add_playlist_tracks, execute_command_and_collect_events, load_user_data, mutate_user_data,
-    read_music_assistant_album, read_music_assistant_album_tracks, read_music_assistant_artist,
+    add_playlist_tracks, execute_command_and_collect_events, load_user_data,
+    mutate_local_playlist_tracks, mutate_user_data, read_music_assistant_album,
+    read_music_assistant_album_tracks, read_music_assistant_artist,
     read_music_assistant_artist_albums, read_music_assistant_artist_top_tracks,
     read_music_assistant_playlist, read_music_assistant_playlist_tracks,
     read_music_assistant_provider_icon_data, read_music_assistant_provider_manifests,

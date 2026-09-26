@@ -97,8 +97,8 @@ Album _album(String itemId, String name, {String version = ''}) => Album(
   provider: 'library',
   name: name,
   version: version,
-  artists: <ArtistReference>[
-    ArtistReference.fromJson(<String, dynamic>{
+  artists: <Artist>[
+    Artist.fromJson(<String, dynamic>{
       'item_id': 'artist-1',
       'provider': 'library',
       'name': 'Album Artist',
@@ -112,8 +112,8 @@ Track _track(String itemId, String provider, {String artistId = 'artist-1'}) =>
       provider: provider,
       name: 'Track',
       duration: 120,
-      artists: <ArtistReference>[
-        ArtistReference.fromJson(<String, dynamic>{
+      artists: <Artist>[
+        Artist.fromJson(<String, dynamic>{
           'item_id': artistId,
           'provider': 'library',
           'name': artistId == 'artist-1' ? 'Album Artist' : 'Similar Artist',

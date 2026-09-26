@@ -222,78 +222,37 @@ Map<String, dynamic> createMusicAssistantMediaItemPayload(MediaItem mediaItem) {
   if (mediaItem is Track) {
     payload['duration'] = mediaItem.duration;
     payload['artists'] = mediaItem.artists
-        .map(createMusicAssistantMediaItemMappingPayload)
+        .map(createMusicAssistantMediaItemPayload)
         .toList(growable: false);
     payload['album'] = mediaItem.album == null
         ? null
-        : createMusicAssistantMediaItemMappingPayload(mediaItem.album!);
+        : createMusicAssistantMediaItemPayload(mediaItem.album!);
     payload['image'] = _createMusicAssistantMediaItemImagePayload(
       mediaItem.image,
     );
+    payload['disc_number'] = mediaItem.discNumber;
+    payload['track_number'] = mediaItem.trackNumber;
   } else if (mediaItem is Album) {
     payload['year'] = mediaItem.year;
     payload['album_type'] = mediaItem.albumType.name;
     payload['artists'] = mediaItem.artists
-        .map(createMusicAssistantMediaItemMappingPayload)
+        .map(createMusicAssistantMediaItemPayload)
         .toList(growable: false);
+  } else if (mediaItem is Artist) {
+    payload['artist_type'] = mediaItem.artistType;
+  } else if (mediaItem is PodcastEpisode) {
+    payload['podcast'] = createMusicAssistantMediaItemPayload(mediaItem.podcast);
+    payload['duration'] = mediaItem.duration;
+    payload['resume_position_ms'] = mediaItem.resumePositionMs;
+  } else if (mediaItem is Podcast) {
+    payload['publisher'] = mediaItem.publisher;
+    payload['total_episodes'] = mediaItem.totalEpisodes;
   } else if (mediaItem is Playlist) {
     payload['owner'] = mediaItem.owner;
     payload['is_editable'] = mediaItem.isEditable;
   }
 
   return payload;
-}
-
-Map<String, dynamic> createMusicAssistantMediaItemMappingPayload(
-  MediaItem mediaItem,
-) {
-  final ItemMapping? itemMapping = switch (mediaItem) {
-    ArtistReference(:final itemMapping) => itemMapping,
-    AlbumReference(:final itemMapping) => itemMapping,
-    PodcastReference(:final itemMapping) => itemMapping,
-    _ => null,
-  };
-  if (itemMapping != null) {
-    return _createMusicAssistantItemMappingPayload(itemMapping);
-  }
-
-  return <String, dynamic>{
-    'item_id': mediaItem.itemId,
-    'provider': mediaItem.provider,
-    'name': mediaItem.name.trim().isEmpty ? mediaItem.itemId : mediaItem.name,
-    'version': mediaItem.version,
-    'sort_name': mediaItem.sortName,
-    'uri': mediaItem.uri,
-    'external_ids': mediaItem.externalIds,
-    'is_playable': mediaItem.isPlayable,
-    'available': true,
-    'metadata': _createMusicAssistantMediaItemMetadataPayload(
-      mediaItem.metadata,
-    ),
-    'media_type': mediaTypeToJson(mediaItem.mediaType),
-  };
-}
-
-Map<String, dynamic> _createMusicAssistantItemMappingPayload(
-  ItemMapping itemMapping,
-) {
-  return <String, dynamic>{
-    'item_id': itemMapping.itemId,
-    'provider': itemMapping.provider,
-    'name': itemMapping.name.trim().isEmpty
-        ? itemMapping.itemId
-        : itemMapping.name,
-    'version': itemMapping.version,
-    'sort_name': itemMapping.sortName,
-    'uri': itemMapping.uri,
-    'external_ids': itemMapping.externalIds,
-    'is_playable': itemMapping.isPlayable,
-    'media_type': mediaTypeToJson(itemMapping.mediaType),
-    'translation_key': itemMapping.translationKey,
-    'available': itemMapping.available,
-    'image': _createMusicAssistantMediaItemImagePayload(itemMapping.image),
-    'year': itemMapping.year,
-  };
 }
 
 Map<String, dynamic>? _createMusicAssistantMediaItemImagePayload(
@@ -323,14 +282,7 @@ Map<String, dynamic>? _createMusicAssistantMediaItemMetadataPayload(
     'description': metadata.description,
     'description_language': metadata.descriptionLanguage,
     'images': metadata.images
-        .map(
-          (image) => <String, dynamic>{
-            'type': image.type,
-            'path': image.path,
-            'provider': image.provider,
-            'remotely_accessible': image.remotelyAccessible,
-          },
-        )
+        .map(_createMusicAssistantMediaItemImagePayload)
         .toList(growable: false),
     'genres': metadata.genres,
     'label': metadata.label,
@@ -393,11 +345,6 @@ class MediaItem {
   });
 
   factory MediaItem.fromJson(Map<String, dynamic> json) {
-    final metadataJson = json['metadata'];
-    final metadata = metadataJson is Map<String, dynamic>
-        ? MediaItemMetadata.fromJson(metadataJson)
-        : null;
-
     return MediaItem(
       itemId: (json['item_id'] as String?)?.trim() ?? '',
       provider: (json['provider'] as String?)?.trim() ?? '',
@@ -414,7 +361,7 @@ class MediaItem {
               .map(ProviderMapping.fromJson)
               .toList() ??
           const <ProviderMapping>[],
-      metadata: metadata,
+      metadata: _metadataFromJson(json),
       favorite: json['favorite'] == true,
       position: (json['position'] as num?)?.toInt(),
       dateAdded: (json['date_added'] as String?)?.trim(),
@@ -614,6 +561,23 @@ class MediaItemMetadata {
   }
 }
 
+MediaItemMetadata? _metadataFromJson(Map<String, dynamic> json) {
+  final metadataJson = json['metadata'];
+  final imageJson = json['image'];
+  if (metadataJson is! Map<String, dynamic> &&
+      imageJson is! Map<String, dynamic>) {
+    return null;
+  }
+  final metadata = metadataJson is Map<String, dynamic>
+      ? Map<String, dynamic>.from(metadataJson)
+      : <String, dynamic>{};
+  if ((metadata['images'] is! List || (metadata['images'] as List).isEmpty) &&
+      imageJson is Map<String, dynamic>) {
+    metadata['images'] = <Map<String, dynamic>>[imageJson];
+  }
+  return MediaItemMetadata.fromJson(metadata);
+}
+
 class Artist implements MediaItem {
   @override
   final String itemId;
@@ -679,11 +643,6 @@ class Artist implements MediaItem {
   }
 
   factory Artist.fromJson(Map<String, dynamic> json) {
-    final metadataJson = json['metadata'];
-    final metadata = metadataJson is Map<String, dynamic>
-        ? MediaItemMetadata.fromJson(metadataJson)
-        : null;
-
     return Artist(
       itemId: (json['item_id'] as String?)?.trim() ?? '',
       provider: (json['provider'] as String?)?.trim() ?? '',
@@ -699,7 +658,7 @@ class Artist implements MediaItem {
               .map(ProviderMapping.fromJson)
               .toList() ??
           const <ProviderMapping>[],
-      metadata: metadata,
+      metadata: _metadataFromJson(json),
       favorite: json['favorite'] == true,
       position: (json['position'] as num?)?.toInt(),
       dateAdded: (json['date_added'] as String?)?.trim(),
@@ -727,7 +686,7 @@ class Album implements MediaItem {
   final bool isPlayable;
   final int? year;
   final AlbumType albumType;
-  final List<ArtistReference> artists;
+  final List<Artist> artists;
   @override
   final List<ProviderMapping> providerMappings;
   @override
@@ -777,11 +736,6 @@ class Album implements MediaItem {
   }
 
   factory Album.fromJson(Map<String, dynamic> json) {
-    final metadataJson = json['metadata'];
-    final metadata = metadataJson is Map<String, dynamic>
-        ? MediaItemMetadata.fromJson(metadataJson)
-        : null;
-
     return Album(
       itemId: (json['item_id'] as String?)?.trim() ?? '',
       provider: (json['provider'] as String?)?.trim() ?? '',
@@ -796,16 +750,16 @@ class Album implements MediaItem {
       artists:
           (json['artists'] as List?)
               ?.whereType<Map<String, dynamic>>()
-              .map(ArtistReference.fromJson)
+              .map(Artist.fromJson)
               .toList() ??
-          const <ArtistReference>[],
+          const <Artist>[],
       providerMappings:
           (json['provider_mappings'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .map(ProviderMapping.fromJson)
               .toList() ??
           const <ProviderMapping>[],
-      metadata: metadata,
+      metadata: _metadataFromJson(json),
       favorite: json['favorite'] == true,
       position: (json['position'] as num?)?.toInt(),
       dateAdded: (json['date_added'] as String?)?.trim(),
@@ -831,8 +785,8 @@ class Track implements MediaItem {
   @override
   final bool isPlayable;
   final int duration;
-  final List<ArtistReference> artists;
-  final AlbumReference? album;
+  final List<Artist> artists;
+  final Album? album;
   final MediaItemImage? image;
   @override
   final List<ProviderMapping> providerMappings;
@@ -911,11 +865,6 @@ class Track implements MediaItem {
 
   factory Track.fromJson(Map<String, dynamic> json) {
     final albumJson = json['album'];
-    final metadataJson = json['metadata'];
-    final metadata = metadataJson is Map<String, dynamic>
-        ? MediaItemMetadata.fromJson(metadataJson)
-        : null;
-
     return Track(
       itemId: (json['item_id'] as String?)?.trim() ?? '',
       provider: (json['provider'] as String?)?.trim() ?? '',
@@ -929,11 +878,11 @@ class Track implements MediaItem {
       artists:
           (json['artists'] as List?)
               ?.whereType<Map<String, dynamic>>()
-              .map(ArtistReference.fromJson)
+              .map(Artist.fromJson)
               .toList() ??
-          const <ArtistReference>[],
+          const <Artist>[],
       album: albumJson is Map<String, dynamic>
-          ? AlbumReference.fromJson(albumJson)
+          ? Album.fromJson(albumJson)
           : null,
       image: json['image'] is Map<String, dynamic>
           ? MediaItemImage.fromJson(json['image'] as Map<String, dynamic>)
@@ -944,7 +893,7 @@ class Track implements MediaItem {
               .map(ProviderMapping.fromJson)
               .toList() ??
           const <ProviderMapping>[],
-      metadata: metadata,
+      metadata: _metadataFromJson(json),
       favorite: json['favorite'] == true,
       position: (json['position'] as num?)?.toInt(),
       dateAdded: (json['date_added'] as String?)?.trim(),
@@ -952,166 +901,6 @@ class Track implements MediaItem {
       trackNumber: (json['track_number'] as num?)?.toInt() ?? 0,
     );
   }
-}
-
-class ItemMapping {
-  final String itemId;
-  final String provider;
-  final String name;
-  final String version;
-  final String? sortName;
-  final String? uri;
-  final List<List<String>> externalIds;
-  final bool isPlayable;
-  final MediaType mediaType;
-  final String? translationKey;
-  final bool available;
-  final MediaItemImage? image;
-  final int? year;
-
-  const ItemMapping({
-    required this.itemId,
-    required this.provider,
-    required this.name,
-    required this.mediaType,
-    this.version = '',
-    this.sortName,
-    this.uri,
-    this.externalIds = const <List<String>>[],
-    this.isPlayable = true,
-    this.translationKey,
-    this.available = true,
-    this.image,
-    this.year,
-  });
-
-  factory ItemMapping.fromJson(Map<String, dynamic> json) => ItemMapping(
-    itemId: (json['item_id'] as String?)?.trim() ?? '',
-    provider: (json['provider'] as String?)?.trim() ?? '',
-    name: (json['name'] as String?)?.trim() ?? '',
-    version: (json['version'] as String?)?.trim() ?? '',
-    sortName: (json['sort_name'] as String?)?.trim(),
-    uri: (json['uri'] as String?)?.trim(),
-    externalIds: _stringPairsFromJson(json['external_ids']),
-    isPlayable: json['is_playable'] != false,
-    mediaType: mediaTypeFromJson(json['media_type'] as String?),
-    translationKey: (json['translation_key'] as String?)?.trim(),
-    available: json['available'] != false,
-    image: json['image'] is Map<String, dynamic>
-        ? MediaItemImage.fromJson(json['image'] as Map<String, dynamic>)
-        : null,
-    year: (json['year'] as num?)?.toInt(),
-  );
-}
-
-bool _isItemMappingJson(Map<String, dynamic> json) =>
-    json.containsKey('translation_key') ||
-    json.containsKey('image') ||
-    (json.containsKey('available') && !json.containsKey('provider_mappings'));
-
-class ArtistReference extends Artist {
-  final ItemMapping? itemMapping;
-
-  ArtistReference._fromArtist(Artist artist)
-    : itemMapping = null,
-      super(
-        itemId: artist.itemId,
-        provider: artist.provider,
-        name: artist.name,
-        version: artist.version,
-        sortName: artist.sortName,
-        uri: artist.uri,
-        externalIds: artist.externalIds,
-        isPlayable: artist.isPlayable,
-        providerMappings: artist.providerMappings,
-        metadata: artist.metadata,
-        favorite: artist.favorite,
-        position: artist.position,
-        dateAdded: artist.dateAdded,
-        artistType: artist.artistType,
-      );
-
-  ArtistReference._fromMapping(ItemMapping mapping)
-    : itemMapping = mapping,
-      super(
-        itemId: mapping.itemId,
-        provider: mapping.provider,
-        name: mapping.name,
-        version: mapping.version,
-        sortName: mapping.sortName,
-        uri: mapping.uri,
-        externalIds: mapping.externalIds,
-        isPlayable: mapping.isPlayable,
-        metadata: mapping.image == null
-            ? null
-            : MediaItemMetadata(
-                images: <MediaItemImage>[mapping.image!],
-                genres: const <String>[],
-              ),
-      );
-
-  bool get isItemMapping => itemMapping != null;
-
-  factory ArtistReference.fromJson(Map<String, dynamic> json) =>
-      _isItemMappingJson(json)
-      ? ArtistReference._fromMapping(ItemMapping.fromJson(json))
-      : ArtistReference._fromArtist(Artist.fromJson(json));
-}
-
-class AlbumReference extends Album {
-  final ItemMapping? itemMapping;
-
-  AlbumReference._fromAlbum(Album album)
-    : itemMapping = null,
-      super(
-        itemId: album.itemId,
-        provider: album.provider,
-        name: album.name,
-        artists: album.artists,
-        version: album.version,
-        sortName: album.sortName,
-        uri: album.uri,
-        externalIds: album.externalIds,
-        isPlayable: album.isPlayable,
-        year: album.year,
-        albumType: album.albumType,
-        providerMappings: album.providerMappings,
-        metadata: album.metadata,
-        favorite: album.favorite,
-        position: album.position,
-        dateAdded: album.dateAdded,
-      );
-
-  AlbumReference._fromMapping(ItemMapping mapping)
-    : itemMapping = mapping,
-      super(
-        itemId: mapping.itemId,
-        provider: mapping.provider,
-        name: mapping.name,
-        artists: const <ArtistReference>[],
-        version: mapping.version,
-        sortName: mapping.sortName,
-        uri: mapping.uri,
-        externalIds: mapping.externalIds,
-        isPlayable: mapping.isPlayable,
-        year: mapping.year,
-        metadata: mapping.image == null
-            ? null
-            : MediaItemMetadata(
-                images: <MediaItemImage>[mapping.image!],
-                genres: const <String>[],
-              ),
-      );
-
-  bool get isItemMapping => itemMapping != null;
-
-  factory AlbumReference.fromAlbum(Album album) =>
-      AlbumReference._fromAlbum(album);
-
-  factory AlbumReference.fromJson(Map<String, dynamic> json) =>
-      _isItemMappingJson(json)
-      ? AlbumReference._fromMapping(ItemMapping.fromJson(json))
-      : AlbumReference._fromAlbum(Album.fromJson(json));
 }
 
 class Radio extends MediaItem {
@@ -1201,49 +990,8 @@ class Podcast extends MediaItem {
   );
 }
 
-class PodcastReference extends Podcast {
-  final ItemMapping? itemMapping;
-
-  PodcastReference._fromPodcast(Podcast super.podcast)
-    : itemMapping = null,
-      super._(
-        publisher: podcast.publisher,
-        totalEpisodes: podcast.totalEpisodes,
-      );
-
-  PodcastReference._fromMapping(ItemMapping mapping)
-    : itemMapping = mapping,
-      super._(
-        MediaItem(
-          itemId: mapping.itemId,
-          provider: mapping.provider,
-          name: mapping.name,
-          mediaType: MediaType.podcast,
-          providerMappings: const <ProviderMapping>[],
-          version: mapping.version,
-          sortName: mapping.sortName,
-          uri: mapping.uri,
-          externalIds: mapping.externalIds,
-          isPlayable: mapping.isPlayable,
-          metadata: mapping.image == null
-              ? null
-              : MediaItemMetadata(
-                  images: <MediaItemImage>[mapping.image!],
-                  genres: const <String>[],
-                ),
-        ),
-      );
-
-  bool get isItemMapping => itemMapping != null;
-
-  factory PodcastReference.fromJson(Map<String, dynamic> json) =>
-      _isItemMappingJson(json)
-      ? PodcastReference._fromMapping(ItemMapping.fromJson(json))
-      : PodcastReference._fromPodcast(Podcast.fromJson(json));
-}
-
 class PodcastEpisode extends MediaItem {
-  final PodcastReference podcast;
+  final Podcast podcast;
   final int duration;
   final int? resumePositionMs;
 
@@ -1278,7 +1026,7 @@ class PodcastEpisode extends MediaItem {
     }
     return PodcastEpisode._(
       MediaItem.fromJson(json),
-      podcast: PodcastReference.fromJson(podcastJson),
+      podcast: Podcast.fromJson(podcastJson),
       duration: (json['duration'] as num?)?.toInt() ?? 0,
       resumePositionMs: (json['resume_position_ms'] as num?)?.toInt(),
     );

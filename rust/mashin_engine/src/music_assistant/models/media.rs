@@ -1,5 +1,5 @@
 use super::identifiers::{MediaId, MediaUri, ProviderId, ProviderInstanceId};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize};
 
 pub(crate) fn deserialize_nullable_vec<'de, D, Item>(deserializer: D) -> Result<Vec<Item>, D::Error>
 where
@@ -191,48 +191,21 @@ pub(crate) struct MediaItemFields {
     pub(crate) date_added: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct ItemMapping {
-    pub(crate) item_id: MediaId,
-    pub(crate) provider: ProviderInstanceId,
-    pub(crate) name: String,
-    #[serde(default)]
-    pub(crate) version: String,
-    #[serde(default)]
-    pub(crate) sort_name: Option<String>,
-    #[serde(default)]
-    pub(crate) uri: Option<MediaUri>,
-    #[serde(default, deserialize_with = "deserialize_nullable_vec")]
-    pub(crate) external_ids: Vec<Vec<String>>,
-    #[serde(default = "default_true")]
-    pub(crate) is_playable: bool,
-    #[serde(default)]
-    pub(crate) media_type: MediaType,
-    #[serde(default)]
-    pub(crate) translation_key: Option<String>,
-    #[serde(default = "default_true")]
-    pub(crate) available: bool,
-    #[serde(default)]
-    pub(crate) image: Option<MediaItemImage>,
-    #[serde(default)]
-    pub(crate) year: Option<i32>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct Artist {
     #[serde(flatten)]
     pub(crate) media: MediaItemFields,
     #[serde(default)]
     pub(crate) artist_type: Option<String>,
 }
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct Album {
     #[serde(flatten)]
     pub(crate) media: MediaItemFields,
     #[serde(default)]
     pub(crate) year: Option<i32>,
     #[serde(default, deserialize_with = "deserialize_nullable_vec")]
-    pub(crate) artists: Vec<ArtistReference>,
+    pub(crate) artists: Vec<Artist>,
     #[serde(default)]
     pub(crate) album_type: AlbumType,
 }
@@ -243,9 +216,9 @@ pub(crate) struct Track {
     #[serde(default)]
     pub(crate) duration: u32,
     #[serde(default, deserialize_with = "deserialize_nullable_vec")]
-    pub(crate) artists: Vec<ArtistReference>,
+    pub(crate) artists: Vec<Artist>,
     #[serde(default)]
-    pub(crate) album: Option<AlbumReference>,
+    pub(crate) album: Option<Album>,
     #[serde(default)]
     pub(crate) image: Option<MediaItemImage>,
     #[serde(default)]
@@ -297,7 +270,7 @@ pub(crate) struct Audiobook {
     #[serde(default)]
     pub(crate) resume_position_ms: Option<u64>,
 }
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct Podcast {
     #[serde(flatten)]
     pub(crate) media: MediaItemFields,
@@ -310,7 +283,7 @@ pub(crate) struct Podcast {
 pub(crate) struct PodcastEpisode {
     #[serde(flatten)]
     pub(crate) media: MediaItemFields,
-    pub(crate) podcast: PodcastReference,
+    pub(crate) podcast: Podcast,
     #[serde(default)]
     pub(crate) duration: u32,
     #[serde(default)]
@@ -334,61 +307,92 @@ pub(crate) struct BrowseFolder {
     pub(crate) image: Option<MediaItemImage>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum ArtistReference {
-    Artist(Artist),
-    Mapping(ItemMapping),
-}
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum AlbumReference {
-    Album(Album),
-    Mapping(ItemMapping),
+#[derive(Deserialize)]
+struct ArtistInput {
+    #[serde(flatten)]
+    media: MediaItemFields,
+    #[serde(default)]
+    artist_type: Option<String>,
+    #[serde(default)]
+    image: Option<MediaItemImage>,
 }
 
-macro_rules! impl_flat_reference_serialization {
-    ($reference:ident, $item:ident, $mapping_field:literal) => {
-        impl Serialize for $reference {
-            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-            where
-                S: Serializer,
-            {
-                match self {
-                    Self::$item(item) => item.serialize(serializer),
-                    Self::Mapping(mapping) => mapping.serialize(serializer),
-                }
-            }
+#[derive(Deserialize)]
+struct AlbumInput {
+    #[serde(flatten)]
+    media: MediaItemFields,
+    #[serde(default)]
+    year: Option<i32>,
+    #[serde(default, deserialize_with = "deserialize_nullable_vec")]
+    artists: Vec<Artist>,
+    #[serde(default)]
+    album_type: AlbumType,
+    #[serde(default)]
+    image: Option<MediaItemImage>,
+}
+
+#[derive(Deserialize)]
+struct PodcastInput {
+    #[serde(flatten)]
+    media: MediaItemFields,
+    #[serde(default)]
+    publisher: Option<String>,
+    #[serde(default)]
+    total_episodes: Option<u32>,
+    #[serde(default)]
+    image: Option<MediaItemImage>,
+}
+
+// Music Assistant mappings put the preview image beside the media fields.
+fn include_mapping_image(media: &mut MediaItemFields, image: Option<MediaItemImage>) {
+    if let Some(image) = image {
+        let metadata = media
+            .metadata
+            .get_or_insert_with(MediaItemMetadata::default);
+        if metadata.images.is_empty() {
+            metadata.images.push(image);
         }
-
-        impl<'de> Deserialize<'de> for $reference {
-            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-            where
-                D: Deserializer<'de>,
-            {
-                let value = serde_json::Value::deserialize(deserializer)?;
-                if value.get($mapping_field).is_some() {
-                    return ItemMapping::deserialize(value)
-                        .map(Self::Mapping)
-                        .map_err(serde::de::Error::custom);
-                }
-
-                $item::deserialize(value)
-                    .map(Self::$item)
-                    .map_err(serde::de::Error::custom)
-            }
-        }
-    };
+    }
 }
 
-impl_flat_reference_serialization!(ArtistReference, Artist, "image");
-impl_flat_reference_serialization!(AlbumReference, Album, "image");
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum PodcastReference {
-    Podcast(Podcast),
-    Mapping(ItemMapping),
+impl<'de> Deserialize<'de> for Artist {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let input = ArtistInput::deserialize(deserializer)?;
+        let mut media = input.media;
+        include_mapping_image(&mut media, input.image);
+        Ok(Self {
+            media,
+            artist_type: input.artist_type,
+        })
+    }
 }
 
-impl_flat_reference_serialization!(PodcastReference, Podcast, "image");
+impl<'de> Deserialize<'de> for Album {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let input = AlbumInput::deserialize(deserializer)?;
+        let mut media = input.media;
+        include_mapping_image(&mut media, input.image);
+        Ok(Self {
+            media,
+            year: input.year,
+            artists: input.artists,
+            album_type: input.album_type,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for Podcast {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let input = PodcastInput::deserialize(deserializer)?;
+        let mut media = input.media;
+        include_mapping_image(&mut media, input.image);
+        Ok(Self {
+            media,
+            publisher: input.publisher,
+            total_episodes: input.total_episodes,
+        })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "media_type", rename_all = "snake_case")]
@@ -471,7 +475,7 @@ mod tests {
     }
 
     #[test]
-    fn preserves_mapping_fields_for_media_references() {
+    fn normalizes_mapping_images_into_complete_media_models() {
         let track: MediaItem = serde_json::from_value(json!({
             "media_type": "track",
             "item_id": "track-1",
@@ -511,10 +515,13 @@ mod tests {
         .expect("track with album mapping should deserialize");
 
         let serialized = serde_json::to_value(track).expect("track should serialize");
-        assert_eq!(serialized["album"]["image"]["proxy_id"], "cover-proxy-id");
+        assert_eq!(
+            serialized["album"]["metadata"]["images"][0]["proxy_id"],
+            "cover-proxy-id"
+        );
 
         assert_eq!(
-            serialized["artists"][0]["image"]["proxy_id"],
+            serialized["artists"][0]["metadata"]["images"][0]["proxy_id"],
             "artist-proxy-id"
         );
         assert_eq!(serialized["image"]["proxy_id"], "track-proxy-id");
@@ -541,7 +548,7 @@ mod tests {
 
         let serialized = serde_json::to_value(episode).expect("episode should serialize");
         assert_eq!(
-            serialized["podcast"]["image"]["proxy_id"],
+            serialized["podcast"]["metadata"]["images"][0]["proxy_id"],
             "podcast-proxy-id"
         );
     }

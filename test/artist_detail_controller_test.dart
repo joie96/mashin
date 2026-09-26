@@ -56,7 +56,7 @@ class _FakeArtistCoreBridge extends Fake implements MashinCoreBridgeApi {
         itemId: 'album-1',
         provider: provider,
         name: 'Album',
-        artists: <ArtistReference>[ArtistReference.fromJson(_artistJson())],
+        artists: <Artist>[Artist.fromJson(_artistJson())],
         year: 2025,
       ),
     ];
@@ -108,8 +108,8 @@ Track _track(String itemId, String provider, {String artistId = 'artist-1'}) =>
       provider: provider,
       name: itemId == 'track-1' ? 'Top Track' : 'Fallback Track',
       duration: 120,
-      artists: <ArtistReference>[
-        ArtistReference.fromJson(_artistJson(artistId)),
+      artists: <Artist>[
+        Artist.fromJson(_artistJson(artistId)),
       ],
     );
 

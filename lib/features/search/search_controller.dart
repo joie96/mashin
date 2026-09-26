@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../core/core_bridge.dart';
@@ -88,6 +90,7 @@ class SearchController extends ChangeNotifier {
       switch (mediaType) {
         case MediaType.track:
           _tracks = _withFavoriteStatuses(results.tracks);
+          unawaited(_loadTrackAlbums(requestId, _tracks));
         case MediaType.album:
           _albums = _withFavoriteStatuses(results.albums);
         case MediaType.playlist:
@@ -114,6 +117,95 @@ class SearchController extends ChangeNotifier {
         }
         _notifyListenersIfAlive();
       }
+    }
+  }
+
+  // Album details arrive after the initial track results are visible.
+  Future<void> _loadTrackAlbums(
+    int requestId,
+    List<Track> initialTracks,
+  ) async {
+    final Set<(String, String)> artistKeys = <(String, String)>{};
+    for (final Track track in initialTracks) {
+      if (track.album == null || track.album!.year != null) {
+        continue;
+      }
+      for (final Artist artist in track.artists) {
+        if (artist.itemId.isNotEmpty && artist.provider.isNotEmpty) {
+          artistKeys.add((artist.provider, artist.itemId));
+        }
+      }
+    }
+    if (artistKeys.isEmpty) {
+      return;
+    }
+
+    final List<List<Album>> albumGroups = await Future.wait(
+      artistKeys.map((artistKey) async {
+        try {
+          return await coreBridge.getArtistAlbums(artistKey.$2, artistKey.$1);
+        } catch (_) {
+          return <Album>[];
+        }
+      }),
+    );
+    if (_isDisposed || requestId != _requestId) {
+      return;
+    }
+
+    final Map<(String, String), Album> albumsByKey =
+        <(String, String), Album>{};
+    for (final List<Album> albums in albumGroups) {
+      for (final Album album in albums) {
+        albumsByKey[(
+              album.provider.toLowerCase(),
+              album.itemId.toLowerCase(),
+            )] =
+            album;
+      }
+    }
+    bool hasChanges = false;
+    final List<Track> enriched = _tracks
+        .map((Track track) {
+            final Album? reference = track.album;
+            if (reference == null || reference.year != null) {
+            return track;
+          }
+          final Album? album =
+              albumsByKey[(
+                reference.provider.toLowerCase(),
+                reference.itemId.toLowerCase(),
+              )];
+          if (album == null) {
+            return track;
+          }
+          hasChanges = true;
+          return Track(
+            itemId: track.itemId,
+            provider: track.provider,
+            name: track.name,
+            duration: track.duration,
+            artists: track.artists,
+            version: track.version,
+            sortName: track.sortName,
+            uri: track.uri,
+            externalIds: track.externalIds,
+            isPlayable: track.isPlayable,
+            album: album,
+            image: track.image,
+            providerMappings: track.providerMappings,
+            metadata: track.metadata,
+            favorite: track.favorite,
+            position: track.position,
+            dateAdded: track.dateAdded,
+            discNumber: track.discNumber,
+            trackNumber: track.trackNumber,
+          );
+        })
+        .toList(growable: false);
+    if (hasChanges) {
+      _tracks = enriched;
+      _notifyListenersIfAlive();
     }
   }
 

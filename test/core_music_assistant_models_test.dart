@@ -1,3 +1,4 @@
+// ignore_for_file: prefer_const_constructors
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mashin_flutter/features/core/core_models.dart';
 
@@ -75,7 +76,7 @@ void main() {
     );
   });
 
-  test('decodes media fields, audio formats, and item mapping references', () {
+  test('decodes compact nested media as complete typed models', () {
     final track = Track.fromJson(<String, dynamic>{
       ..._mediaJson('track'),
       'artists': <Map<String, dynamic>>[
@@ -112,8 +113,10 @@ void main() {
       ContentType.flac,
     );
     expect(track.providerMappings.single.inLibrary, isTrue);
-    expect(track.artists.single.isItemMapping, isTrue);
-    expect(track.album?.isItemMapping, isTrue);
+    expect(track.artists.single, isA<Artist>());
+    expect(track.artists.single.metadata, isNull);
+    expect(track.album, isA<Album>());
+    expect(track.album?.year, isNull);
     expect(track.album?.primaryImage?.path, 'cover.jpg');
   });
 
@@ -172,56 +175,132 @@ void main() {
     );
   });
 
-  test('encodes direct track and reference images for typed Rust commands', () {
-    final Track track = Track.fromJson(<String, dynamic>{
-      ..._mediaJson('track'),
-      'image': <String, dynamic>{
+  test(
+    'encodes direct track and nested model images for typed Rust commands',
+    () {
+      final Track track = Track.fromJson(<String, dynamic>{
+        ..._mediaJson('track'),
+        'image': <String, dynamic>{
+          'type': 'thumb',
+          'path': 'track.jpg',
+          'provider': 'library',
+          'proxy_id': 'track-image',
+        },
+        'artists': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'media_type': 'artist',
+            'item_id': 'artist-id',
+            'provider': 'library',
+            'name': 'Artist',
+            'image': <String, dynamic>{
+              'type': 'thumb',
+              'path': 'artist.jpg',
+              'provider': 'library',
+              'proxy_id': 'artist-image',
+            },
+          },
+        ],
+        'album': <String, dynamic>{
+          'media_type': 'album',
+          'item_id': 'album-id',
+          'provider': 'library',
+          'name': 'Album',
+          'image': <String, dynamic>{
+            'type': 'thumb',
+            'path': 'album.jpg',
+            'provider': 'library',
+            'proxy_id': 'album-image',
+          },
+        },
+      });
+
+      final Map<String, dynamic> payload = createMusicAssistantMediaItemPayload(
+        track,
+      );
+
+      expect(payload['image'], <String, dynamic>{
         'type': 'thumb',
         'path': 'track.jpg',
         'provider': 'library',
+        'remotely_accessible': false,
         'proxy_id': 'track-image',
-      },
+      });
+      expect(
+        payload['artists'][0]['metadata']['images'][0]['proxy_id'],
+        'artist-image',
+      );
+      expect(payload['artists'][0]['artist_type'], isNull);
+      expect(
+        payload['album']['metadata']['images'][0]['proxy_id'],
+        'album-image',
+      );
+      expect(payload['album']['year'], isNull);
+    },
+  );
+
+  test('retains complete album metadata in a queued track payload', () {
+    final track = Track.fromJson(<String, dynamic>{
+      ..._mediaJson('track'),
+      'disc_number': 2,
+      'track_number': 3,
       'artists': <Map<String, dynamic>>[
         <String, dynamic>{
-          'media_type': 'artist',
-          'item_id': 'artist-id',
+          'item_id': 'artist-1',
           'provider': 'library',
           'name': 'Artist',
-          'image': <String, dynamic>{
-            'type': 'thumb',
-            'path': 'artist.jpg',
-            'provider': 'library',
-            'proxy_id': 'artist-image',
-          },
+          'metadata': <String, dynamic>{'images': <Object>[]},
         },
       ],
       'album': <String, dynamic>{
-        'media_type': 'album',
-        'item_id': 'album-id',
+        'item_id': 'album-1',
         'provider': 'library',
-        'name': 'Album',
+        'name': 'Complete album',
+        'year': 2014,
+        'album_type': 'album',
+        'artists': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'item_id': 'artist-1',
+            'provider': 'library',
+            'name': 'Artist',
+            'metadata': <String, dynamic>{'images': <Object>[]},
+          },
+        ],
+        'metadata': <String, dynamic>{'images': <Object>[]},
+      },
+    });
+
+    final payload = createMusicAssistantMediaItemPayload(track);
+
+    expect(payload['album']['year'], 2014);
+    expect(payload['album']['album_type'], 'album');
+    expect(payload['album']['artists'][0]['metadata'], isNotNull);
+    expect(payload['artists'][0]['metadata'], isNotNull);
+    expect(payload['disc_number'], 2);
+    expect(payload['track_number'], 3);
+  });
+
+  test('encodes a compact podcast as a complete episode payload', () {
+    final episode = PodcastEpisode.fromJson(<String, dynamic>{
+      ..._mediaJson('podcast_episode'),
+      'podcast': <String, dynamic>{
+        'item_id': 'podcast-1',
+        'provider': 'library',
+        'name': 'Podcast',
         'image': <String, dynamic>{
           'type': 'thumb',
-          'path': 'album.jpg',
+          'path': 'podcast.jpg',
           'provider': 'library',
-          'proxy_id': 'album-image',
+          'proxy_id': 'podcast-proxy-id',
         },
       },
     });
 
-    final Map<String, dynamic> payload = createMusicAssistantMediaItemPayload(
-      track,
-    );
-
-    expect(payload['image'], <String, dynamic>{
-      'type': 'thumb',
-      'path': 'track.jpg',
-      'provider': 'library',
-      'remotely_accessible': false,
-      'proxy_id': 'track-image',
-    });
-    expect(payload['artists'][0]['image']['proxy_id'], 'artist-image');
-    expect(payload['album']['image']['proxy_id'], 'album-image');
+    final payload = createMusicAssistantMediaItemPayload(episode);
+    expect(episode.podcast, isA<Podcast>());
+    expect(payload['podcast']['media_type'], 'podcast');
+    expect(payload['podcast']['publisher'], isNull);
+    expect(payload['podcast']['total_episodes'], isNull);
+    expect(payload['podcast']['metadata']['images'][0]['proxy_id'], 'podcast-proxy-id');
   });
 
   test('decodes canonical Music Assistant player and session contracts', () {

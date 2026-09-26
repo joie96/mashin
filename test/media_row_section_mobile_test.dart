@@ -86,13 +86,13 @@ void main() {
       provider: 'test',
       name: 'Track name',
       duration: 120,
-      artists: const <ArtistReference>[],
+      artists: const <Artist>[],
     );
     final Album album = Album(
       itemId: 'album',
       provider: 'test',
       name: 'Album name',
-      artists: const <ArtistReference>[],
+      artists: const <Artist>[],
       year: 2026,
     );
 
@@ -157,8 +157,8 @@ void main() {
       itemId: 'album',
       provider: 'test',
       name: 'Album name',
-      artists: <ArtistReference>[
-        ArtistReference.fromJson(<String, dynamic>{
+      artists: <Artist>[
+        Artist.fromJson(<String, dynamic>{
           'item_id': 'artist',
           'provider': 'test',
           'name': 'Artist name',

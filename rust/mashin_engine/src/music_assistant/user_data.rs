@@ -2,14 +2,18 @@
 
 use super::client::MusicAssistantClient;
 use super::models::identifiers::{MediaId, MediaUri, ProviderInstanceId};
-use super::models::media::{Album, Artist, MediaItem, MediaItemFields, Playlist, Track};
+use super::models::media::{
+    Album, Artist, MediaItem, MediaItemFields, MediaItemImage, MediaItemMetadata, Playlist, Track,
+};
 use super::models::session::MusicAssistantUser;
+use super::user_data_store::StoredUserData;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::time::{Duration, Instant};
 
-const FAVORITES_PREFERENCE_KEY: &str = "mashin.favorites";
-const PLAYLISTS_PREFERENCE_KEY: &str = "mashin.playlists";
+const VERSION_PREFERENCE_KEY: &str = "mashin.user_data_version";
+const USER_DATA_PREFERENCE_KEY: &str = "mashin.user_data";
+const USER_DATA_VERSION: u64 = 4;
 pub(crate) const LOCAL_PLAYLIST_PROVIDER: &str = "mashin";
 pub(crate) const WRITE_DEBOUNCE: Duration = Duration::from_secs(2);
 
@@ -106,15 +110,30 @@ pub(crate) struct UserDataController {
 impl UserDataController {
     // Construction and snapshot reads.
     pub(crate) fn from_preferences(mut preferences: Map<String, Value>) -> Result<Self, String> {
-        let favorites = parse_preference(&mut preferences, FAVORITES_PREFERENCE_KEY)?;
-        let mut playlists: Vec<LocalPlaylist> = parse_playlist_preference(&mut preferences)?;
-        playlists.sort_by(compare_local_playlists);
+        let version = preferences.remove(VERSION_PREFERENCE_KEY);
+        let stored_data = preferences.remove(USER_DATA_PREFERENCE_KEY);
+        if preferences.contains_key("mashin.favorites")
+            || preferences.contains_key("mashin.playlists")
+        {
+            return Err("unsupported legacy user data preferences".to_string());
+        }
+        let snapshot = match (version, stored_data) {
+            (None, None) => UserDataSnapshot::default(),
+            (Some(version), stored_data) => {
+                let version = version.as_u64().ok_or("invalid user data version")?;
+                if version != USER_DATA_VERSION {
+                    return Err(format!("unsupported user data version {version}"));
+                }
+                let stored_data = stored_data.ok_or("missing version four user data")?;
+                serde_json::from_value::<StoredUserData>(stored_data)
+                    .map_err(|error| format!("decode version four user data failed: {error}"))?
+                    .to_snapshot()?
+            }
+            (None, Some(_)) => return Err("missing user data version".to_string()),
+        };
         Ok(Self {
             additional_preferences: preferences,
-            snapshot: UserDataSnapshot {
-                favorites,
-                playlists,
-            },
+            snapshot,
             mutation_revision: 0,
             last_mutated_at: None,
             write_is_scheduled: false,
@@ -128,14 +147,13 @@ impl UserDataController {
     pub(crate) fn preferences(&self) -> Result<Map<String, Value>, String> {
         let mut preferences = self.additional_preferences.clone();
         preferences.insert(
-            FAVORITES_PREFERENCE_KEY.to_string(),
-            serialize_reduced_music_assistant_value(&self.snapshot.favorites)?,
+            VERSION_PREFERENCE_KEY.to_string(),
+            Value::from(USER_DATA_VERSION),
         );
         preferences.insert(
-            PLAYLISTS_PREFERENCE_KEY.to_string(),
-            serde_json::json!({
-                "playlists": serialize_reduced_music_assistant_value(&self.snapshot.playlists)?,
-            }),
+            USER_DATA_PREFERENCE_KEY.to_string(),
+            serde_json::to_value(StoredUserData::from_snapshot(&self.snapshot))
+                .map_err(|error| format!("serialize user data failed: {error}"))?,
         );
         Ok(preferences)
     }
@@ -299,6 +317,34 @@ impl UserDataController {
         Ok(())
     }
 
+    pub(crate) fn set_local_playlist_cover(
+        &mut self,
+        playlist_id: &str,
+        data_uri: Option<String>,
+        clear_when_empty: bool,
+    ) -> Result<(), String> {
+        let playlist = self.local_playlist_mut(playlist_id)?;
+        if let Some(data_uri) = data_uri {
+            let metadata = playlist
+                .playlist
+                .media
+                .metadata
+                .get_or_insert_with(MediaItemMetadata::default);
+            metadata.images = vec![MediaItemImage {
+                image_type: "thumb".to_string(),
+                path: data_uri,
+                provider: ProviderInstanceId(LOCAL_PLAYLIST_PROVIDER.to_string()),
+                remotely_accessible: false,
+                proxy_id: None,
+            }];
+        } else if clear_when_empty {
+            if let Some(metadata) = playlist.playlist.media.metadata.as_mut() {
+                metadata.images.clear();
+            }
+        }
+        Ok(())
+    }
+
     fn local_playlist_mut(&mut self, playlist_id: &str) -> Result<&mut LocalPlaylist, String> {
         self.snapshot
             .playlists
@@ -323,70 +369,6 @@ impl UserDataController {
             .unwrap_or(0)
             .saturating_add(1)
             .to_string()
-    }
-}
-
-fn parse_preference<T: for<'de> Deserialize<'de> + Default>(
-    preferences: &mut Map<String, Value>,
-    key: &str,
-) -> Result<T, String> {
-    let value = preferences
-        .remove(key)
-        .unwrap_or_else(|| serde_json::json!({}));
-    serde_json::from_value(value)
-        .map_err(|error| format!("decode {key} preferences failed: {error}"))
-}
-
-fn parse_playlist_preference(
-    preferences: &mut Map<String, Value>,
-) -> Result<Vec<LocalPlaylist>, String> {
-    let value = preferences
-        .remove(PLAYLISTS_PREFERENCE_KEY)
-        .unwrap_or_else(|| serde_json::json!({}));
-    #[derive(Deserialize, Default)]
-    struct PlaylistPreference {
-        #[serde(default)]
-        playlists: Vec<LocalPlaylist>,
-    }
-    serde_json::from_value::<PlaylistPreference>(value)
-        .map(|value| value.playlists)
-        .map_err(|error| format!("decode local playlist preferences failed: {error}"))
-}
-
-// Converts typed Music Assistant models to compact preference data without local UI state.
-fn serialize_reduced_music_assistant_value<T: Serialize>(value: &T) -> Result<Value, String> {
-    let mut value = serde_json::to_value(value)
-        .map_err(|error| format!("serialize Music Assistant preference failed: {error}"))?;
-    reduce_music_assistant_value(&mut value);
-    Ok(value)
-}
-
-fn reduce_music_assistant_value(value: &mut Value) {
-    const DEFAULT_TRUE_FIELDS: &[&str] = &["available", "is_playable"];
-    const DEFAULT_FALSE_FIELDS: &[&str] = &["is_dynamic", "is_editable", "remotely_accessible"];
-    const DEFAULT_ZERO_FIELDS: &[&str] = &["disc_number", "duration", "track_number"];
-
-    match value {
-        Value::Array(values) => values.iter_mut().for_each(reduce_music_assistant_value),
-        Value::Object(values) => {
-            values.values_mut().for_each(reduce_music_assistant_value);
-            values.retain(|key, value| {
-                if key == "favorite"
-                    || value.is_null()
-                    || value.as_array().is_some_and(Vec::is_empty)
-                {
-                    return false;
-                }
-                if DEFAULT_TRUE_FIELDS.contains(&key.as_str()) && value == &Value::Bool(true) {
-                    return false;
-                }
-                if DEFAULT_FALSE_FIELDS.contains(&key.as_str()) && value == &Value::Bool(false) {
-                    return false;
-                }
-                !DEFAULT_ZERO_FIELDS.contains(&key.as_str()) || value.as_u64() != Some(0)
-            });
-        }
-        _ => {}
     }
 }
 
@@ -525,8 +507,8 @@ mod tests {
             .expect("preferences must serialize");
 
         assert_eq!(preferences["music_assistant.theme"], "dark");
-        assert!(preferences.contains_key(FAVORITES_PREFERENCE_KEY));
-        assert!(preferences.contains_key(PLAYLISTS_PREFERENCE_KEY));
+        assert_eq!(preferences[VERSION_PREFERENCE_KEY], USER_DATA_VERSION);
+        assert!(preferences.contains_key(USER_DATA_PREFERENCE_KEY));
     }
 
     #[test]
@@ -569,7 +551,7 @@ mod tests {
     }
 
     #[test]
-    fn preferences_store_compact_tracks_with_images_and_references() {
+    fn preferences_store_compact_tracks_with_nested_display_media() {
         let mut controller =
             UserDataController::from_preferences(Map::new()).expect("preferences must load");
         let track: Track = serde_json::from_value(serde_json::json!({
@@ -608,18 +590,149 @@ mod tests {
         let preferences = controller
             .preferences()
             .expect("preferences must serialize");
-        let favorite_track = &preferences[FAVORITES_PREFERENCE_KEY]["tracks"][0];
-        let playlist_track = &preferences[PLAYLISTS_PREFERENCE_KEY]["playlists"][0]["items"][0];
+        assert_eq!(preferences[VERSION_PREFERENCE_KEY], USER_DATA_VERSION);
+        let data = &preferences[USER_DATA_PREFERENCE_KEY];
+        assert_eq!(data["tracks"].as_object().unwrap().len(), 1);
+        assert_eq!(data["albums"].as_object().unwrap().len(), 1);
+        assert_eq!(data["artists"].as_object().unwrap().len(), 1);
+        assert!(!preferences.contains_key("mashin.favorites"));
+        assert!(!preferences.contains_key("mashin.playlists"));
 
-        for stored_track in [favorite_track, playlist_track] {
-            assert!(stored_track.get("favorite").is_none());
-            assert_eq!(stored_track["image"]["proxy_id"], "track-image");
-            assert_eq!(
-                stored_track["artists"][0]["image"]["proxy_id"],
-                "artist-image"
-            );
-            assert_eq!(stored_track["album"]["image"]["proxy_id"], "album-image");
-            assert!(stored_track.get("duration").is_none());
-        }
+        let restored = UserDataController::from_preferences(preferences)
+            .expect("compact preferences must deserialize");
+        let snapshot = restored.snapshot();
+        assert_eq!(
+            snapshot.favorites.tracks[0]
+                .image
+                .as_ref()
+                .unwrap()
+                .proxy_id
+                .as_deref(),
+            Some("track-image")
+        );
+        assert_eq!(
+            snapshot.playlists[0].items[0].artists[0]
+                .media
+                .metadata
+                .as_ref()
+                .unwrap()
+                .images[0]
+                .proxy_id
+                .as_deref(),
+            Some("artist-image")
+        );
+        assert_eq!(
+            snapshot.playlists[0].items[0]
+                .album
+                .as_ref()
+                .unwrap()
+                .media
+                .metadata
+                .as_ref()
+                .unwrap()
+                .images[0]
+                .proxy_id
+                .as_deref(),
+            Some("album-image")
+        );
+    }
+
+    #[test]
+    fn version_four_playlist_jpeg_survives_roundtrip() {
+        let mut controller = UserDataController::from_preferences(Map::new()).unwrap();
+        let playlist = controller
+            .create_local_playlist("Local".to_string())
+            .unwrap();
+        let id = playlist.media.item_id.as_str();
+        controller
+            .add_local_playlist_tracks(id, vec![track("library://track/1")])
+            .unwrap();
+        controller
+            .set_local_playlist_cover(id, Some("data:image/jpeg;base64,/9j/".to_string()), false)
+            .unwrap();
+
+        let restored =
+            UserDataController::from_preferences(controller.preferences().unwrap()).unwrap();
+        assert_eq!(
+            restored.snapshot().playlists[0]
+                .playlist
+                .media
+                .metadata
+                .as_ref()
+                .unwrap()
+                .images[0]
+                .path,
+            "data:image/jpeg;base64,/9j/"
+        );
+        assert_eq!(restored.snapshot().playlists[0].items.len(), 1);
+    }
+
+    #[test]
+    fn unsupported_or_incomplete_user_data_is_not_overwritten() {
+        let mut preferences = Map::new();
+        preferences.insert(VERSION_PREFERENCE_KEY.into(), Value::from(3));
+        assert!(UserDataController::from_preferences(preferences)
+            .unwrap_err()
+            .contains("unsupported user data version 3"));
+
+        let mut preferences = Map::new();
+        preferences.insert("mashin.favorites".into(), serde_json::json!({}));
+        assert!(UserDataController::from_preferences(preferences)
+            .unwrap_err()
+            .contains("unsupported legacy user data"));
+
+        let mut preferences = Map::new();
+        preferences.insert(
+            VERSION_PREFERENCE_KEY.into(),
+            Value::from(USER_DATA_VERSION),
+        );
+        assert!(UserDataController::from_preferences(preferences)
+            .unwrap_err()
+            .contains("missing version four user data"));
+
+        let mut preferences = Map::new();
+        preferences.insert(USER_DATA_PREFERENCE_KEY.into(), serde_json::json!({}));
+        assert!(UserDataController::from_preferences(preferences)
+            .unwrap_err()
+            .contains("missing user data version"));
+    }
+
+    #[test]
+    fn removing_last_cover_source_clears_playlist_image_in_version_four() {
+        let mut controller = UserDataController::from_preferences(Map::new()).unwrap();
+        let playlist = controller
+            .create_local_playlist("Local".to_string())
+            .unwrap();
+        let id = playlist.media.item_id.as_str();
+        controller
+            .add_local_playlist_tracks(id, vec![track("library://track/1")])
+            .unwrap();
+        controller
+            .set_local_playlist_cover(id, Some("data:image/jpeg;base64,/9j/".to_string()), false)
+            .unwrap();
+        assert_eq!(
+            controller.snapshot().playlists[0]
+                .playlist
+                .media
+                .metadata
+                .as_ref()
+                .unwrap()
+                .images
+                .len(),
+            1
+        );
+        controller
+            .remove_local_playlist_tracks(id, vec!["library://track/1".to_string()])
+            .unwrap();
+        controller.set_local_playlist_cover(id, None, true).unwrap();
+        let restored =
+            UserDataController::from_preferences(controller.preferences().unwrap()).unwrap();
+        assert!(restored.snapshot().playlists[0].items.is_empty());
+        assert!(restored.snapshot().playlists[0]
+            .playlist
+            .media
+            .metadata
+            .as_ref()
+            .is_none_or(|metadata| metadata.images.is_empty()));
     }
 }

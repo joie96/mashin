@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mashin_flutter/app/theme/app_theme.dart';
@@ -8,6 +10,33 @@ import 'package:mashin_flutter/features/playlist/playlist_detail_controller.dart
 import 'package:mashin_flutter/features/playlist/playlist_detail_page_desktop.dart';
 
 void main() {
+  test('shows playlist tracks before their album details arrive', () async {
+    final coreBridge = _DeferredAlbumPlaylistCoreBridge();
+    final controller = PlaylistDetailController(
+      coreBridge: coreBridge,
+      itemId: 'playlist-1',
+      providerInstanceIdOrDomain: 'library',
+    );
+    addTearDown(controller.dispose);
+
+    await controller.loadPlaylist();
+    expect(controller.isLoadingTracks, isFalse);
+    expect(controller.tracks.single.album?.year, isNull);
+    expect(coreBridge.requestedArtists, <String>['artist-1:library']);
+
+    coreBridge.albums.complete(<Album>[
+      Album(
+        itemId: 'album-1',
+        provider: 'library',
+        name: 'Complete album',
+        artists: const <Artist>[],
+        year: 2014,
+      ),
+    ]);
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.tracks.single.album?.year, 2014);
+  });
+
   test(
     'loads and edits an online playlist through core bridge methods',
     () async {
@@ -127,11 +156,51 @@ class _FakePlaylistCoreBridge extends Fake implements MashinCoreBridgeApi {
   }
 }
 
+class _DeferredAlbumPlaylistCoreBridge extends _FakePlaylistCoreBridge {
+  final Completer<List<Album>> albums = Completer<List<Album>>();
+  final List<String> requestedArtists = <String>[];
+
+  @override
+  Future<List<Track>> getPlaylistTracks(
+    String itemId,
+    String provider, {
+    bool forceRefresh = false,
+    bool allowDynamicTracks = false,
+  }) async => <Track>[
+    Track(
+      itemId: 'track-1',
+      provider: 'library',
+      name: 'Track',
+      duration: 120,
+      artists: <Artist>[
+        Artist.fromJson(<String, dynamic>{
+          'item_id': 'artist-1',
+          'provider': 'library',
+          'name': 'Artist',
+          'image': null,
+        }),
+      ],
+      album: Album.fromJson(<String, dynamic>{
+        'item_id': 'album-1',
+        'provider': 'library',
+        'name': 'Incomplete album',
+        'image': null,
+      }),
+    ),
+  ];
+
+  @override
+  Future<List<Album>> getArtistAlbums(String itemId, String provider) {
+    requestedArtists.add('$itemId:$provider');
+    return albums.future;
+  }
+}
+
 Track _track(String itemId, {required String uri}) => Track(
   itemId: itemId,
   provider: 'library',
   name: itemId,
   duration: 180,
   uri: uri,
-  artists: const <ArtistReference>[],
+  artists: const <Artist>[],
 );

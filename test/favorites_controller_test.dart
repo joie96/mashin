@@ -36,7 +36,7 @@ class _FakeFavoritesCoreBridge extends Fake implements MashinCoreBridgeApi {
     provider: 'library',
     name: 'Top Track',
     duration: 180,
-    artists: const <ArtistReference>[],
+    artists: const <Artist>[],
   );
 
   @override

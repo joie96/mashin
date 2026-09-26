@@ -29,6 +29,7 @@ class PlaylistDetailController extends ChangeNotifier {
   bool _isLoadingTracks = true;
   bool _isPlaylistFavorite = false;
   bool _isDisposed = false;
+  int _loadGeneration = 0;
 
   @override
   void notifyListeners() {
@@ -40,6 +41,7 @@ class PlaylistDetailController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
+    _loadGeneration++;
     super.dispose();
   }
 
@@ -88,6 +90,7 @@ class PlaylistDetailController extends ChangeNotifier {
 
   // Data loading
   Future<void> loadPlaylist() async {
+    final int loadGeneration = ++_loadGeneration;
     _isLoadingMetadata = true;
     _isLoadingTracks = true;
     notifyListeners();
@@ -118,11 +121,15 @@ class PlaylistDetailController extends ChangeNotifier {
       }
 
       await _loadMetadata();
-      await _loadTracks();
+      if (!_isDisposed && loadGeneration == _loadGeneration) {
+        await _loadTracks(loadGeneration);
+      }
     } finally {
-      _isLoadingMetadata = false;
-      _isLoadingTracks = false;
-      notifyListeners();
+      if (!_isDisposed && loadGeneration == _loadGeneration) {
+        _isLoadingMetadata = false;
+        _isLoadingTracks = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -156,13 +163,16 @@ class PlaylistDetailController extends ChangeNotifier {
     }
   }
 
-  Future<void> _loadTracks() async {
+  Future<void> _loadTracks(int loadGeneration) async {
     try {
       final List<Track> loaded = await coreBridge.getPlaylistTracks(
         itemId,
         providerInstanceIdOrDomain,
         forceRefresh: true,
       );
+      if (_isDisposed || loadGeneration != _loadGeneration) {
+        return;
+      }
 
       _tracks = List<Track>.unmodifiable(
         loaded
@@ -174,8 +184,100 @@ class PlaylistDetailController extends ChangeNotifier {
             })
             .toList(growable: false),
       );
+      unawaited(_loadTrackAlbums(loadGeneration, _tracks));
     } catch (_) {
-      _tracks = const <Track>[];
+      if (!_isDisposed && loadGeneration == _loadGeneration) {
+        _tracks = const <Track>[];
+      }
+    }
+  }
+
+  // Enriches online tracks without delaying the initial playlist display.
+  Future<void> _loadTrackAlbums(
+    int loadGeneration,
+    List<Track> initialTracks,
+  ) async {
+    final Set<(String, String)> artistKeys = <(String, String)>{};
+    for (final Track track in initialTracks) {
+      if (track.album == null || track.album!.year != null) {
+        continue;
+      }
+      for (final Artist artist in track.artists) {
+        if (artist.itemId.isNotEmpty && artist.provider.isNotEmpty) {
+          artistKeys.add((artist.provider, artist.itemId));
+        }
+      }
+    }
+    if (artistKeys.isEmpty) {
+      return;
+    }
+
+    final List<List<Album>> albumGroups = await Future.wait(
+      artistKeys.map((artistKey) async {
+        try {
+          return await coreBridge.getArtistAlbums(artistKey.$2, artistKey.$1);
+        } catch (_) {
+          return <Album>[];
+        }
+      }),
+    );
+    if (_isDisposed || loadGeneration != _loadGeneration) {
+      return;
+    }
+
+    final Map<(String, String), Album> albumsByKey =
+        <(String, String), Album>{};
+    for (final List<Album> albums in albumGroups) {
+      for (final Album album in albums) {
+        albumsByKey[(
+              album.provider.toLowerCase(),
+              album.itemId.toLowerCase(),
+            )] =
+            album;
+      }
+    }
+    bool hasChanges = false;
+    final List<Track> enriched = _tracks
+        .map((Track track) {
+            final Album? reference = track.album;
+            if (reference == null || reference.year != null) {
+            return track;
+          }
+          final Album? album =
+              albumsByKey[(
+                reference.provider.toLowerCase(),
+                reference.itemId.toLowerCase(),
+              )];
+          if (album == null) {
+            return track;
+          }
+          hasChanges = true;
+          return Track(
+            itemId: track.itemId,
+            provider: track.provider,
+            name: track.name,
+            duration: track.duration,
+            artists: track.artists,
+            version: track.version,
+            sortName: track.sortName,
+            uri: track.uri,
+            externalIds: track.externalIds,
+            isPlayable: track.isPlayable,
+            album: album,
+            image: track.image,
+            providerMappings: track.providerMappings,
+            metadata: track.metadata,
+            favorite: track.favorite,
+            position: track.position,
+            dateAdded: track.dateAdded,
+            discNumber: track.discNumber,
+            trackNumber: track.trackNumber,
+          );
+        })
+        .toList(growable: false);
+    if (hasChanges) {
+      _tracks = List<Track>.unmodifiable(enriched);
+      notifyListeners();
     }
   }
 

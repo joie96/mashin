@@ -397,7 +397,7 @@ class ArtistDetailController extends ChangeNotifier {
       uri: track.uri,
       externalIds: track.externalIds,
       isPlayable: track.isPlayable,
-      album: AlbumReference.fromAlbum(albumWithYear),
+      album: albumWithYear,
       image: track.image,
       providerMappings: track.providerMappings,
       metadata: track.metadata,

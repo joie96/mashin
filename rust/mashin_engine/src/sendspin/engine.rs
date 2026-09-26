@@ -1055,6 +1055,7 @@ impl SendspinEngine {
         }
         let Some(current_index) = self.queue.current_index else {
             self.queue.shuffle_enabled = enabled;
+            self.persist_queue();
             return;
         };
         let mut queue = self.queue_media_items();
@@ -1071,6 +1072,7 @@ impl SendspinEngine {
             return;
         }
         self.queue.shuffle_enabled = enabled;
+        self.persist_queue();
     }
 
     fn shuffle_items(items: &mut [QueueMediaItem]) {
@@ -1101,7 +1103,11 @@ impl SendspinEngine {
     }
 
     pub(crate) fn set_repeat_mode(&mut self, mode: RepeatMode) {
+        if self.queue.repeat_mode == mode {
+            return;
+        }
         self.queue.repeat_mode = mode;
+        self.persist_queue();
     }
 
     pub(crate) fn set_autoplay(&mut self, is_enabled: bool) {
@@ -1160,6 +1166,8 @@ impl SendspinEngine {
             .max()
             .map_or(1, |id| id.saturating_add(1));
         self.queue.items = items;
+        self.queue.shuffle_enabled = snapshot.shuffle_enabled;
+        self.queue.repeat_mode = snapshot.repeat_mode;
         self.is_queue_restored = !self.queue.items.is_empty();
     }
 
@@ -1177,6 +1185,8 @@ impl SendspinEngine {
             username: config.username.clone(),
             current_index: self.queue.current_index,
             items,
+            shuffle_enabled: self.queue.shuffle_enabled,
+            repeat_mode: self.queue.repeat_mode,
         });
     }
 }
@@ -1452,6 +1462,8 @@ mod tests {
                 ),
             ],
             current_index: Some(1),
+            shuffle_enabled: false,
+            repeat_mode: RepeatMode::Off,
         }
         .save(&path)
         .expect("save queue before restart");
@@ -1546,6 +1558,8 @@ mod tests {
                 ),
             ],
             current_index: Some(0),
+            shuffle_enabled: false,
+            repeat_mode: RepeatMode::Off,
         };
         for (action, expected_index) in
             [("seek", 0), ("next", 1), ("previous", 0), ("play_index", 1)]
@@ -1599,6 +1613,8 @@ mod tests {
             username: config.username,
             items,
             current_index: Some(1),
+            shuffle_enabled: false,
+            repeat_mode: RepeatMode::Off,
         }
         .save(&path)
         .expect("save queue snapshot");
@@ -1627,16 +1643,110 @@ mod tests {
         let path = queue_snapshot_path().expect("test queue path");
         let mut engine = SendspinEngine::new();
         engine.configure(configuration()).expect("configure engine");
+        let first_track: MediaItem = serde_json::from_value(serde_json::json!({
+            "media_type": "track",
+            "item_id": "first",
+            "provider": "test",
+            "name": "first",
+            "artists": [{
+                "item_id": "artist-1",
+                "provider": "test",
+                "name": "Track artist",
+                "artist_type": "group",
+                "metadata": { "images": [{ "type": "thumb", "path": "artist.jpg", "provider": "test", "proxy_id": "artist-image" }] }
+            }],
+            "album": {
+                "item_id": "album-1",
+                "provider": "test",
+                "name": "Complete album",
+                "year": 2014,
+                "artists": [{ "item_id": "artist-2", "provider": "test", "name": "Album artist" }],
+                "metadata": { "description": "Complete metadata", "images": [{ "type": "thumb", "path": "album.jpg", "provider": "test", "proxy_id": "album-image" }] }
+            }
+        }))
+        .expect("track with complete album");
         engine
-            .play_media(vec![track("test", "first"), track("test", "second")])
+            .play_media(vec![
+                first_track,
+                track("test", "second"),
+                track("test", "third"),
+                track("test", "fourth"),
+            ])
             .expect("start queue");
         engine.play_queue_index(1).expect("select second track");
+        engine.set_shuffle(true);
+        engine.set_repeat_mode(RepeatMode::All);
+        let mut saved_items = engine.queue.items.clone();
+        for item in &mut saved_items {
+            item.cache = None;
+        }
         engine.shutdown();
+
+        let saved_snapshot = QueueSnapshot::load(&path)
+            .expect("load saved queue")
+            .expect("saved queue snapshot");
+        let saved_media = serde_json::to_value(&saved_snapshot.items[0].media_item)
+            .expect("serialize saved media");
+        assert_eq!(
+            saved_media["artists"][0]["metadata"]["images"][0]["proxy_id"],
+            "artist-image"
+        );
+        assert_eq!(saved_media["album"]["artists"][0]["name"], "Album artist");
+        assert_eq!(
+            saved_media["album"]["metadata"]["description"],
+            "Complete metadata"
+        );
 
         let mut restarted = SendspinEngine::new();
         restarted.configure(configuration()).expect("restore queue");
-        assert_eq!(restarted.queue.items.len(), 2);
+        assert_eq!(restarted.queue.items, saved_items);
         assert_eq!(restarted.queue.current_index, Some(1));
+        assert!(restarted.queue.shuffle_enabled);
+        assert_eq!(restarted.queue.repeat_mode, RepeatMode::All);
+        let MediaItem::Track(restored_track) = restarted.queue.items[0]
+            .media_item
+            .as_ref()
+            .expect("restored track")
+        else {
+            panic!("expected restored track");
+        };
+        assert_eq!(
+            restored_track.album.as_ref().and_then(|album| album.year),
+            Some(2014)
+        );
+        assert_eq!(
+            restored_track.artists[0].artist_type.as_deref(),
+            Some("group")
+        );
+        assert_eq!(
+            restored_track.artists[0]
+                .media
+                .metadata
+                .as_ref()
+                .unwrap()
+                .images[0]
+                .proxy_id
+                .as_deref(),
+            Some("artist-image")
+        );
+        assert_eq!(
+            restored_track.album.as_ref().unwrap().artists[0].media.name,
+            "Album artist"
+        );
+        assert_eq!(
+            restored_track
+                .album
+                .as_ref()
+                .unwrap()
+                .media
+                .metadata
+                .as_ref()
+                .unwrap()
+                .images[0]
+                .proxy_id
+                .as_deref(),
+            Some("album-image")
+        );
         assert!(restarted.current_cache_content_key.is_none());
         restarted.clear_queue().expect("clear restored queue");
         restarted.shutdown();
@@ -1647,6 +1757,26 @@ mod tests {
             .expect("restore empty queue");
         assert!(after_clear.queue.items.is_empty());
         after_clear.shutdown();
+        std::fs::remove_file(path).expect("remove test snapshot");
+    }
+
+    #[test]
+    fn playback_modes_survive_restart_without_queue_items() {
+        let path = queue_snapshot_path().expect("test queue path");
+        let mut engine = SendspinEngine::new();
+        engine.configure(configuration()).expect("configure engine");
+        engine.set_shuffle(true);
+        engine.set_repeat_mode(RepeatMode::One);
+        engine.shutdown();
+
+        let mut restarted = SendspinEngine::new();
+        restarted
+            .configure(configuration())
+            .expect("restore playback modes");
+        assert!(restarted.queue.items.is_empty());
+        assert!(restarted.queue.shuffle_enabled);
+        assert_eq!(restarted.queue.repeat_mode, RepeatMode::One);
+        restarted.shutdown();
         std::fs::remove_file(path).expect("remove test snapshot");
     }
 
@@ -1665,6 +1795,8 @@ mod tests {
                 track("test", "private-track"),
             )],
             current_index: Some(0),
+            shuffle_enabled: false,
+            repeat_mode: RepeatMode::Off,
         }
         .save(&path)
         .expect("save another user's queue");

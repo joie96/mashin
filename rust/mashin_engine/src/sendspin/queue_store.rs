@@ -1,6 +1,6 @@
 //! Persistent Sendspin queue snapshots, separate from downloader and playback state.
 
-use crate::music_assistant::models::queue::QueueItem;
+use crate::music_assistant::models::queue::{QueueItem, RepeatMode};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -122,6 +122,10 @@ pub(crate) struct QueueSnapshot {
     pub(crate) username: String,
     pub(crate) items: Vec<QueueItem>,
     pub(crate) current_index: Option<usize>,
+    #[serde(default)]
+    pub(crate) shuffle_enabled: bool,
+    #[serde(default)]
+    pub(crate) repeat_mode: RepeatMode,
 }
 
 impl QueueSnapshot {
@@ -175,6 +179,8 @@ mod tests {
             username: "listener".into(),
             items: Vec::new(),
             current_index: None,
+            shuffle_enabled: true,
+            repeat_mode: super::RepeatMode::All,
         };
         snapshot.save(&path).expect("save queue snapshot");
         assert_eq!(
@@ -187,6 +193,8 @@ mod tests {
             username: "another-listener".into(),
             items: Vec::new(),
             current_index: None,
+            shuffle_enabled: false,
+            repeat_mode: super::RepeatMode::Off,
         };
         empty.save(&path).expect("replace snapshot");
         assert_eq!(QueueSnapshot::load(&path).expect("load empty"), Some(empty));
@@ -205,6 +213,8 @@ mod tests {
             username: "listener".into(),
             items: Vec::new(),
             current_index: None,
+            shuffle_enabled: false,
+            repeat_mode: super::RepeatMode::Off,
         };
         store.save(snapshot);
         store.finish();
@@ -212,5 +222,20 @@ mod tests {
             .expect("load replacement")
             .is_some());
         std::fs::remove_file(path).expect("remove test snapshot");
+    }
+
+    #[test]
+    fn older_snapshot_defaults_playback_modes() {
+        let snapshot: QueueSnapshot = serde_json::from_value(serde_json::json!({
+            "version": super::SNAPSHOT_VERSION,
+            "music_assistant_url": "https://example.test",
+            "username": "listener",
+            "items": [],
+            "current_index": null
+        }))
+        .expect("decode older snapshot");
+
+        assert!(!snapshot.shuffle_enabled);
+        assert_eq!(snapshot.repeat_mode, super::RepeatMode::Off);
     }
 }

@@ -7,6 +7,7 @@ use super::models::{
     CoreError, LogLevelPreference, LoginConfig, MediaSessionEvent, MusicAssistantQuery,
     MusicAssistantQueryRequest, SelectedOutput, SessionConfig, ThemePreference,
 };
+use crate::logging::Logger;
 use crate::music_assistant::auth_store::{platform_auth_store, AuthStore};
 use crate::music_assistant::client::{get_radio_tracks, MusicAssistantClient};
 use crate::music_assistant::models::identifiers::{AccessToken, MediaId, QueueItemId};
@@ -16,6 +17,7 @@ use crate::music_assistant::models::media::{
 use crate::music_assistant::models::queue::{QueueItem, RepeatMode};
 use crate::music_assistant::models::recommendation::MusicAssistantRecommendationFolder;
 use crate::music_assistant::models::session::ProviderManifest;
+use crate::music_assistant::playlist_collage::build_playlist_collage;
 use crate::music_assistant::user_data::{
     flush_scheduled_write_after_debounce, persist_write_request, UserDataController,
     UserDataSnapshot, UserDataWriteRequest,
@@ -37,6 +39,7 @@ use tokio::runtime::Runtime;
 pub(crate) static CORE_COORDINATOR: Lazy<Mutex<CoreCoordinator>> =
     Lazy::new(|| Mutex::new(CoreCoordinator::new()));
 static CORE_COMMAND_SERIALIZER: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+static LOGGER: Logger = Logger::new(module_path!());
 static CORE_NETWORK_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -551,10 +554,10 @@ pub(crate) fn load_user_data() -> Result<UserDataSnapshot, CoreError> {
     let user_data = UserDataController::from_preferences(user.preferences)
         .map_err(CoreError::command_failed)?;
     let snapshot = user_data.snapshot();
-    CORE_COORDINATOR
+    let mut coordinator = CORE_COORDINATOR
         .lock()
-        .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?
-        .replace_user_data(user_data);
+        .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
+    coordinator.replace_user_data(user_data);
     Ok(snapshot)
 }
 
@@ -596,16 +599,96 @@ where
     };
 
     if should_schedule {
-        CORE_NETWORK_RUNTIME.spawn(async move {
-            flush_scheduled_write_after_debounce(
-                || user_data_write_delay(session_generation),
-                || user_data_write_request(session_generation),
-                |revision, response| finish_user_data_write(session_generation, revision, response),
-            )
-            .await;
-        });
+        start_user_data_write_worker(session_generation);
     }
     Ok(snapshot)
+}
+
+/// Applies a local playlist mutation, renders its cover outside the coordinator lock, then persists both.
+pub(crate) fn mutate_local_playlist_tracks<F>(
+    playlist_id: &str,
+    clear_cover_when_empty: bool,
+    operation: F,
+) -> Result<UserDataSnapshot, CoreError>
+where
+    F: FnOnce(&mut UserDataController) -> Result<(), String>,
+{
+    let _command_guard = CORE_COMMAND_SERIALIZER
+        .lock()
+        .map_err(|_| CoreError::internal("core command serializer lock poisoned"))?;
+    let (tracks, base_url, session_generation) = {
+        let mut coordinator = CORE_COORDINATOR
+            .lock()
+            .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
+        let base_url = coordinator
+            .session_configuration
+            .as_ref()
+            .ok_or_else(|| {
+                CoreError::command_failed("a restored session is required to modify user data")
+            })?
+            .music_assistant_url
+            .0
+            .clone();
+        coordinator
+            .mutate_user_data(operation)
+            .map_err(CoreError::command_failed)?;
+        let tracks = coordinator
+            .user_data_snapshot()
+            .map_err(CoreError::command_failed)?
+            .playlists
+            .into_iter()
+            .find(|playlist| {
+                playlist
+                    .playlist
+                    .media
+                    .item_id
+                    .as_str()
+                    .eq_ignore_ascii_case(playlist_id)
+            })
+            .ok_or_else(|| CoreError::command_failed("local playlist was not found"))?
+            .items;
+        (tracks, base_url, coordinator.user_data_session_generation)
+    };
+    let cover = CORE_NETWORK_RUNTIME.block_on(build_playlist_collage(&tracks, &base_url));
+    let (snapshot, should_schedule) = {
+        let mut coordinator = CORE_COORDINATOR
+            .lock()
+            .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
+        if coordinator.user_data_session_generation != session_generation {
+            return Err(CoreError::command_failed(
+                "user data session changed during cover generation",
+            ));
+        }
+        coordinator
+            .mutate_user_data(|user_data| {
+                user_data.set_local_playlist_cover(playlist_id, cover, clear_cover_when_empty)
+            })
+            .map_err(CoreError::command_failed)?;
+        let snapshot = coordinator
+            .user_data_snapshot()
+            .map_err(CoreError::command_failed)?;
+        let should_schedule = coordinator
+            .user_data
+            .as_mut()
+            .expect("user data was checked above")
+            .schedule_write();
+        (snapshot, should_schedule)
+    };
+    if should_schedule {
+        start_user_data_write_worker(session_generation);
+    }
+    Ok(snapshot)
+}
+
+fn start_user_data_write_worker(session_generation: u64) {
+    CORE_NETWORK_RUNTIME.spawn(async move {
+        flush_scheduled_write_after_debounce(
+            || user_data_write_delay(session_generation),
+            || user_data_write_request(session_generation),
+            |revision, response| finish_user_data_write(session_generation, revision, response),
+        )
+        .await;
+    });
 }
 
 fn user_data_write_delay(session_generation: u64) -> Option<Duration> {

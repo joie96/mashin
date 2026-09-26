@@ -61,7 +61,7 @@ void main() {
             provider: 'library',
             name: 'Track',
             duration: 120,
-            artists: const <ArtistReference>[],
+            artists: const <Artist>[],
           ),
         ],
         playlists: const <Playlist>[],
@@ -81,6 +81,67 @@ void main() {
     await search;
     expect(controller.isLoadingAlbums, isFalse);
     expect(controller.tracks.single.name, 'Track');
+  });
+
+  test('shows tracks before deduplicated artist albums arrive', () async {
+    final coreBridge = _AlbumSearchCoreBridge();
+    final controller = SearchController(coreBridge: coreBridge);
+    addTearDown(controller.dispose);
+
+    await controller.runSearch('jazz');
+    expect(controller.isLoadingTracks, isFalse);
+    expect(controller.tracks.first.album?.year, isNull);
+    expect(coreBridge.requestedArtists, <String>['artist-1:library']);
+
+    coreBridge.pendingAlbums.single.complete(<Album>[
+      Album(
+        itemId: 'album-1',
+        provider: 'library',
+        name: 'Complete album',
+        artists: const <Artist>[],
+        year: 2014,
+      ),
+    ]);
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.tracks.first.album?.year, 2014);
+    expect(controller.tracks.first.album, isA<Album>());
+    expect(controller.tracks.last.album?.year, 2014);
+    expect(controller.tracks.last.discNumber, 2);
+  });
+
+  test('ignores album responses from a previous search', () async {
+    final coreBridge = _AlbumSearchCoreBridge();
+    final controller = SearchController(coreBridge: coreBridge);
+    addTearDown(controller.dispose);
+
+    await controller.runSearch('old');
+    await controller.runSearch('new');
+    coreBridge.pendingAlbums.last.complete(<Album>[
+      Album(
+        itemId: 'album-1',
+        provider: 'library',
+        name: 'New album',
+        artists: const <Artist>[],
+        year: 2020,
+      ),
+    ]);
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.tracks.first.album?.year, 2020);
+
+    coreBridge.pendingAlbums.first.complete(<Album>[
+      Album(
+        itemId: 'album-1',
+        provider: 'library',
+        name: 'Old album',
+        artists: const <Artist>[],
+        year: 2014,
+      ),
+    ]);
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.tracks.first.album?.year, 2020);
+
+    controller.resetResults();
+    expect(controller.tracks, isEmpty);
   });
 
   test('ignores outdated results after a new search or reset', () async {
@@ -200,6 +261,65 @@ void main() {
   });
 }
 
+class _AlbumSearchCoreBridge extends _FakeSearchCoreBridge {
+  final List<Completer<List<Album>>> pendingAlbums = <Completer<List<Album>>>[];
+  final List<String> requestedArtists = <String>[];
+
+  @override
+  Future<SearchResults> searchMedia(
+    String searchQuery,
+    MediaType mediaType, {
+    int limit = 50,
+  }) async {
+    final SearchResults results = await super.searchMedia(
+      searchQuery,
+      mediaType,
+      limit: limit,
+    );
+    if (mediaType != MediaType.track) {
+      return results;
+    }
+    final artist = Artist.fromJson(<String, dynamic>{
+      'item_id': 'artist-1',
+      'provider': 'library',
+      'name': 'Artist',
+      'image': null,
+    });
+    final album = Album.fromJson(<String, dynamic>{
+      'item_id': 'album-1',
+      'provider': 'library',
+      'name': 'Incomplete album',
+      'image': null,
+    });
+    return SearchResults(
+      artists: results.artists,
+      albums: results.albums,
+      playlists: results.playlists,
+      radio: results.radio,
+      tracks: <Track>[
+        for (final String itemId in <String>['first', 'second'])
+          Track(
+            itemId: itemId,
+            provider: 'library',
+            name: itemId,
+            duration: 120,
+            artists: <Artist>[artist],
+            album: album,
+            discNumber: 2,
+          ),
+      ],
+    );
+  }
+
+  @override
+  Future<List<Album>> getArtistAlbums(String itemId, String provider) {
+    requestedArtists.add('$itemId:$provider');
+    final completer = Completer<List<Album>>();
+    pendingAlbums.add(completer);
+    return completer.future;
+  }
+}
+
 class _FakeSearchCoreBridge extends Fake implements MashinCoreBridgeApi {
   String? query;
   final List<MediaType> requestedTypes = <MediaType>[];
@@ -221,7 +341,7 @@ class _FakeSearchCoreBridge extends Fake implements MashinCoreBridgeApi {
           itemId: 'album-1',
           provider: 'library',
           name: 'Album',
-          artists: const <ArtistReference>[],
+          artists: const <Artist>[],
         ),
       ],
       tracks: <Track>[
@@ -230,7 +350,7 @@ class _FakeSearchCoreBridge extends Fake implements MashinCoreBridgeApi {
           provider: 'library',
           name: 'Track',
           duration: 120,
-          artists: const <ArtistReference>[],
+          artists: const <Artist>[],
         ),
       ],
       playlists: <Playlist>[

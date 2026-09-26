@@ -645,7 +645,7 @@ pub extern "C" fn mashin_core_add_local_playlist_tracks(
         .and_then(|playlist_id| parse_tracks(tracks_json).map(|tracks| (playlist_id, tracks)))
         .map_err(CoreError::command_failed)
         .and_then(|(playlist_id, tracks)| {
-            core::mutate_user_data(|user_data| {
+            core::mutate_local_playlist_tracks(&playlist_id, false, |user_data| {
                 user_data.add_local_playlist_tracks(&playlist_id, tracks)
             })
         });
@@ -663,7 +663,7 @@ pub extern "C" fn mashin_core_remove_local_playlist_tracks(
         })
         .map_err(CoreError::command_failed)
         .and_then(|(playlist_id, uris)| {
-            core::mutate_user_data(|user_data| {
+            core::mutate_local_playlist_tracks(&playlist_id, true, |user_data| {
                 user_data.remove_local_playlist_tracks(&playlist_id, uris)
             })
         });

@@ -53,7 +53,7 @@ void main() {
         provider: 'test',
         name: 'Wheel track $index',
         duration: 120,
-        artists: const <ArtistReference>[],
+        artists: const <Artist>[],
         image: const MediaItemImage(
           type: 'thumb',
           path:
@@ -126,7 +126,7 @@ void main() {
       provider: 'test',
       name: 'Track with cover',
       duration: 120,
-      artists: const <ArtistReference>[],
+      artists: const <Artist>[],
       image: const MediaItemImage(
         type: 'thumb',
         path:
@@ -187,7 +187,7 @@ void main() {
         provider: 'test',
         name: 'Track $index',
         duration: 120,
-        artists: const <ArtistReference>[],
+        artists: const <Artist>[],
       ),
     );
 
@@ -240,7 +240,7 @@ void main() {
         provider: 'test',
         name: 'Track $index',
         duration: 120,
-        artists: const <ArtistReference>[],
+        artists: const <Artist>[],
       ),
     );
 
@@ -299,7 +299,7 @@ void main() {
           provider: 'test',
           name: 'Queue track $index',
           duration: 120,
-          artists: const <ArtistReference>[],
+          artists: const <Artist>[],
         ),
       ),
     );
