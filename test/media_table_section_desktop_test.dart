@@ -6,6 +6,7 @@ import 'package:mashin_flutter/app/theme/app_theme.dart';
 import 'package:mashin_flutter/features/core/core_bridge.dart';
 import 'package:mashin_flutter/features/core/core_events.dart';
 import 'package:mashin_flutter/features/core/core_models.dart';
+import 'package:mashin_flutter/features/shared/selection/selection_controller.dart';
 import 'package:mashin_flutter/features/shared/widgets/media_image.dart';
 import 'package:mashin_flutter/features/shared/widgets/media_table_section_desktop.dart';
 
@@ -359,5 +360,71 @@ void main() {
     await tester.pump();
     expect(selectedItems.length, 100);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('closing queue selection during route build waits for frame', (
+    WidgetTester tester,
+  ) async {
+    final MashinCoreBridgeApi coreBridge = _UnusedCoreBridge();
+    final MashinCoreBridgeEvents coreEvents = MashinCoreBridgeEvents(
+      coreBridge: coreBridge,
+    );
+    addTearDown(coreEvents.dispose);
+    final QueueItem queueItem = QueueItem(
+      queueItemId: 'queue-1',
+      mediaItem: Track(
+        itemId: 'track-1',
+        provider: 'test',
+        name: 'Queue track',
+        duration: 120,
+        artists: const <Artist>[],
+      ),
+    );
+
+    Widget buildPage({required bool closeDuringBuild}) => MaterialApp(
+      theme: AppTheme.dark(),
+      home: Scaffold(
+        body: Column(
+          children: <Widget>[
+            Expanded(
+              child: CustomScrollView(
+                slivers: <Widget>[
+                  MediaTableSectionDesktop<QueueItem>(
+                    title: ' ',
+                    items: <QueueItem>[queueItem],
+                    isLoading: false,
+                    emptyText: 'Leer',
+                    maxItemsPerPage: 0,
+                    coreBridge: coreBridge,
+                    coreEvents: coreEvents,
+                  ),
+                ],
+              ),
+            ),
+            Builder(
+              builder: (BuildContext context) {
+                if (closeDuringBuild) {
+                  SelectionController.instance.onClose();
+                }
+                return const SizedBox.shrink();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(buildPage(closeDuringBuild: false));
+    await tester.tap(find.text('Queue track'));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(SelectionController.instance.isVisible, isTrue);
+
+    await tester.pumpWidget(buildPage(closeDuringBuild: true));
+    expect(tester.takeException(), isNull);
+    expect(SelectionController.instance.isVisible, isFalse);
+    await tester.pump(const Duration(milliseconds: 50));
   });
 }

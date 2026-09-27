@@ -103,7 +103,16 @@ class SelectionController extends ChangeNotifier {
   }
 
   void onClose() {
-    _activeRegistration?.onClose();
+    final Object? owner = _activeOwner;
+    final VoidCallback? close = _activeRegistration?.onClose;
+    if (owner == null || close == null) {
+      return;
+    }
+    _runAfterBuild(() {
+      if (identical(_activeOwner, owner)) {
+        close();
+      }
+    });
   }
 }
 

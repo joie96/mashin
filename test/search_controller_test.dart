@@ -7,6 +7,7 @@ import 'package:mashin_flutter/features/core/core_bridge.dart';
 import 'package:mashin_flutter/features/core/core_events.dart';
 import 'package:mashin_flutter/features/core/core_models.dart';
 import 'package:mashin_flutter/features/search/search_controller.dart';
+import 'package:mashin_flutter/features/search/search_screen_desktop.dart';
 import 'package:mashin_flutter/features/search/search_screen_mobile.dart';
 
 void main() {
@@ -258,6 +259,57 @@ void main() {
 
     expect(tester.widget<EditableText>(input).focusNode.hasFocus, isFalse);
     expect(tester.testTextInput.isVisible, isFalse);
+  });
+
+  testWidgets('desktop search keeps scroll extent stable with results', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1100, 320);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final _FakeSearchCoreBridge coreBridge = _FakeSearchCoreBridge();
+    final MashinCoreBridgeEvents coreEvents = MashinCoreBridgeEvents(
+      coreBridge: coreBridge,
+    );
+    addTearDown(coreEvents.dispose);
+
+    Widget searchPage(String query) => MaterialApp(
+      theme: AppTheme.dark(),
+      home: Scaffold(
+        body: SearchScreenDesktop(
+          coreBridge: coreBridge,
+          coreEvents: coreEvents,
+          desktopSearchDriven: true,
+          desktopSearchQuery: query,
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(searchPage(''));
+    expect(
+      find.text('Nutze die Suchleiste oben, um Ergebnisse anzuzeigen.'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(searchPage('jazz'));
+    await tester.pumpAndSettle();
+    expect(coreBridge.query, 'jazz');
+    expect(find.byType(CustomScrollView), findsOneWidget);
+
+    final ScrollPosition position = tester
+        .state<ScrollableState>(find.byType(Scrollable).first)
+        .position;
+    final double loadedExtent = position.maxScrollExtent;
+    expect(loadedExtent, greaterThan(0));
+    for (final double target in <double>[loadedExtent, 0, loadedExtent]) {
+      position.jumpTo(target);
+      await tester.pump();
+      expect(position.maxScrollExtent, closeTo(loadedExtent, 0.1));
+    }
+    expect(tester.takeException(), isNull);
   });
 }
 
