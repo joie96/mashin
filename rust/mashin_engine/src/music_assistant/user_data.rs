@@ -601,6 +601,18 @@ mod tests {
         let restored = UserDataController::from_preferences(preferences)
             .expect("compact preferences must deserialize");
         let snapshot = restored.snapshot();
+        let serialized = serde_json::to_value(&snapshot).expect("serialize user data snapshot");
+        assert!(serialized["favorites"]["tracks"][0].get("media_type").is_none());
+        let mut android_track = serialized["favorites"]["tracks"][0].clone();
+        android_track["media_type"] = serde_json::json!("track");
+        assert!(matches!(
+            serde_json::from_value::<MediaItem>(android_track).expect("decode Android track"),
+            MediaItem::Track(_)
+        ));
+        assert_eq!(
+            serialized["favorites"]["tracks"][0]["album"]["metadata"]["images"][0]["proxy_id"],
+            "album-image"
+        );
         assert_eq!(
             snapshot.favorites.tracks[0]
                 .image

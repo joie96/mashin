@@ -74,6 +74,17 @@ pub(crate) fn execute_command(kind: &str, argument: Option<&str>) -> Result<(), 
     let events = match kind {
         "activate" => activate_engine(),
         "playMediaItems" => replace_queue(required_text_argument(argument)?),
+        "startSendspinRadio" => {
+            let media_items = parse_media_items(required_text_argument(argument)?)
+                .map_err(|error| error.message)?;
+            let events = core::start_sendspin_radio_and_execute_command(
+                media_items,
+                publish_media_session_events,
+            )
+            .map_err(|error| error.message)?;
+            publish_media_session_events(events);
+            return Ok(());
+        }
         "play" => play(),
         "pause" => pause(),
         "stop" => stop(),
@@ -119,4 +130,20 @@ fn required_text_argument(argument: Option<&str>) -> Result<&str, String> {
 fn parse_media_items(serialized_items: &str) -> Result<Vec<MediaItem>, CoreError> {
     serde_json::from_str(serialized_items)
         .map_err(|error| CoreError::command_failed(format!("invalid Android media items: {error}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::execute_command;
+
+    #[test]
+    fn android_artist_radio_requires_valid_media_items() {
+        assert_eq!(
+            execute_command("startSendspinRadio", None).unwrap_err(),
+            "missing Android core command argument"
+        );
+        assert!(execute_command("startSendspinRadio", Some("not JSON"))
+            .unwrap_err()
+            .starts_with("invalid Android media items:"));
+    }
 }

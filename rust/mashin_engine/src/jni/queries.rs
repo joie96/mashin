@@ -32,7 +32,7 @@ pub(crate) fn execute_query(kind: &str, argument: Option<&str>) -> Result<String
         "sessionSettings" => serialize_query(get_session_settings()),
         "queue" => serialize_query(get_queue()),
         "playerState" => serialize_query(get_player_state()),
-        "userData" => serialize_query(get_user_data()),
+        "userData" => serialize_query(core::read_or_load_user_data()),
         "recommendations" => serialize_query(get_recommendations()),
         "providerManifests" => serialize_query(get_provider_manifests()),
         "providerIconData" => {

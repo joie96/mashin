@@ -2,7 +2,7 @@
 
 #[cfg(target_os = "android")]
 pub(crate) mod android_context;
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", test))]
 pub(crate) mod commands;
 #[cfg(target_os = "android")]
 pub(crate) mod entry_points;

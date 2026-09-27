@@ -40,6 +40,7 @@ use tokio::runtime::Runtime;
 pub(crate) static CORE_COORDINATOR: Lazy<Mutex<CoreCoordinator>> =
     Lazy::new(|| Mutex::new(CoreCoordinator::new()));
 static CORE_COMMAND_SERIALIZER: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+static CORE_USER_DATA_LOAD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 static LOGGER: Logger = Logger::new(module_path!());
 static CORE_NETWORK_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
     tokio::runtime::Builder::new_multi_thread()
@@ -92,6 +93,9 @@ impl CoreCoordinator {
     }
 
     pub(crate) fn restore_persisted_session(&mut self) -> Result<bool, String> {
+        if self.session_configuration.is_some() {
+            return Ok(true);
+        }
         let Some(session) = self.auth_store.load_session()? else {
             return Ok(false);
         };
@@ -394,6 +398,18 @@ impl CoreCoordinator {
         self.user_data = Some(user_data);
     }
 
+    fn replace_user_data_for_session(
+        &mut self,
+        session_generation: u64,
+        user_data: UserDataController,
+    ) -> Result<(), String> {
+        if self.user_data_session_generation != session_generation {
+            return Err("session changed while loading user data".to_string());
+        }
+        self.replace_user_data(user_data);
+        Ok(())
+    }
+
     fn invalidate_user_data(&mut self) {
         self.user_data = None;
         self.user_data_session_generation = self.user_data_session_generation.wrapping_add(1);
@@ -448,9 +464,17 @@ where
         .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
     let queue_before = coordinator.queue();
     let player_state_before = coordinator.player_state();
-    operation(&mut coordinator)
-        .map_err(CoreError::command_failed)
-        .map(|()| collect_media_session_events(&coordinator, queue_before, player_state_before))
+    let session_generation = coordinator.user_data_session_generation;
+    operation(&mut coordinator).map_err(CoreError::command_failed)?;
+    let should_load_user_data = coordinator.user_data_session_generation != session_generation
+        && coordinator.session_configuration.is_some();
+    let events = collect_media_session_events(&coordinator, queue_before, player_state_before);
+    drop(coordinator);
+    drop(_command_guard);
+    if should_load_user_data {
+        start_user_data_load();
+    }
+    Ok(events)
 }
 
 /// Stops native work after attempting the final coalesced UserData write for a bounded duration.
@@ -486,8 +510,22 @@ pub(crate) fn restore_persisted_session_and_collect_events(
     let has_restored_session = coordinator
         .restore_persisted_session()
         .map_err(CoreError::command_failed)?;
+    let should_load_user_data = has_restored_session && coordinator.user_data.is_none();
     let events = collect_media_session_events(&coordinator, queue_before, player_state_before);
+    drop(coordinator);
+    drop(_command_guard);
+    if should_load_user_data {
+        start_user_data_load();
+    }
     Ok((has_restored_session, events))
+}
+
+fn start_user_data_load() {
+    spawn_blocking_operation(|| {
+        if let Err(error) = read_or_load_user_data() {
+            LOGGER.warn(format!("load user data failed: {}", error.message));
+        }
+    });
 }
 
 // Resolves remote media before acquiring the coordinator for its final queue mutation.
@@ -547,8 +585,19 @@ fn music_assistant_client_for_query(operation: &str) -> Result<MusicAssistantCli
 }
 
 // User-data queries and delayed persistence keep Music Assistant I/O outside the coordinator lock.
-pub(crate) fn load_user_data() -> Result<UserDataSnapshot, CoreError> {
-    let client = music_assistant_client_for_query("load user data")?;
+fn load_user_data() -> Result<UserDataSnapshot, CoreError> {
+    let (client, session_generation) = {
+        let coordinator = CORE_COORDINATOR
+            .lock()
+            .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
+        let session = coordinator.session_configuration.as_ref().ok_or_else(|| {
+            CoreError::command_failed("a restored session is required to load user data")
+        })?;
+        (
+            MusicAssistantClient::new(&session.music_assistant_url.0, session.access_token.clone()),
+            coordinator.user_data_session_generation,
+        )
+    };
     let user = CORE_NETWORK_RUNTIME
         .block_on(client.get_current_user())
         .map_err(CoreError::command_failed)?;
@@ -558,7 +607,9 @@ pub(crate) fn load_user_data() -> Result<UserDataSnapshot, CoreError> {
     let mut coordinator = CORE_COORDINATOR
         .lock()
         .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
-    coordinator.replace_user_data(user_data);
+    coordinator
+        .replace_user_data_for_session(session_generation, user_data)
+        .map_err(CoreError::command_failed)?;
     Ok(snapshot)
 }
 
@@ -568,6 +619,22 @@ pub(crate) fn read_user_data() -> Result<UserDataSnapshot, CoreError> {
         .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?
         .user_data_snapshot()
         .map_err(CoreError::command_failed)
+}
+
+pub(crate) fn read_or_load_user_data() -> Result<UserDataSnapshot, CoreError> {
+    let _load_guard = CORE_USER_DATA_LOAD
+        .lock()
+        .map_err(|_| CoreError::internal("user data load lock poisoned"))?;
+    let user_data = CORE_COORDINATOR
+        .lock()
+        .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?
+        .user_data
+        .as_ref()
+        .map(UserDataController::snapshot);
+    match user_data {
+        Some(snapshot) => Ok(snapshot),
+        None => load_user_data(),
+    }
 }
 
 pub(crate) fn mutate_user_data<F>(operation: F) -> Result<UserDataSnapshot, CoreError>
@@ -1481,6 +1548,44 @@ mod tests {
             .expect("restore session");
 
         assert_eq!(coordinator.player_state().volume, 37);
+    }
+
+    #[test]
+    fn restoring_an_active_session_keeps_loaded_user_data() {
+        let mut coordinator = test_coordinator();
+        coordinator
+            .configure_session(session_config())
+            .expect("configure session");
+        coordinator.user_data = Some(
+            super::UserDataController::from_preferences(serde_json::Map::new())
+                .expect("empty preferences"),
+        );
+        let generation = coordinator.user_data_session_generation;
+
+        assert!(coordinator
+            .restore_persisted_session()
+            .expect("restore session"));
+        assert!(coordinator.user_data.is_some());
+        assert_eq!(coordinator.user_data_session_generation, generation);
+    }
+
+    #[test]
+    fn old_user_data_load_cannot_replace_a_new_session() {
+        let mut coordinator = test_coordinator();
+        coordinator
+            .configure_session(session_config())
+            .expect("configure session");
+        let old_generation = coordinator.user_data_session_generation;
+        coordinator
+            .configure_session(session_config())
+            .expect("replace session");
+
+        let user_data = super::UserDataController::from_preferences(serde_json::Map::new())
+            .expect("empty preferences");
+        assert!(coordinator
+            .replace_user_data_for_session(old_generation, user_data)
+            .is_err());
+        assert!(coordinator.user_data.is_none());
     }
 
     #[test]

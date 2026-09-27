@@ -27,7 +27,7 @@ pub extern "C" fn mashin_core_get_session_settings() -> *mut c_char {
 
 #[no_mangle]
 pub extern "C" fn mashin_core_load_user_data() -> *mut c_char {
-    serialize_query_response("load user data", core::load_user_data())
+    serialize_query_response("load user data", core::read_or_load_user_data())
 }
 
 #[no_mangle]
