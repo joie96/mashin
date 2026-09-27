@@ -107,7 +107,8 @@ fn write_log_snapshot(
 
 #[cfg(target_os = "android")]
 fn log_directory() -> Result<PathBuf, String> {
-    crate::jni::android_context::application_files_directory().map(|path| path.join("Logs"))
+    crate::jni::android_context::external_application_files_directory()
+        .map(|path| path.join("Logs"))
 }
 
 #[cfg(target_os = "windows")]

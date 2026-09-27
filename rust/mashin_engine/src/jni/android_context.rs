@@ -154,6 +154,41 @@ pub(crate) fn application_files_directory() -> Result<PathBuf, String> {
     })
 }
 
+// ExternalFilesDir is app-specific shared storage and requires no storage permission.
+pub(crate) fn external_application_files_directory() -> Result<PathBuf, String> {
+    with_attached_environment(|env| {
+        let context = ANDROID_APP_CONTEXT
+            .lock()
+            .map_err(|_| "Android application context lock poisoned".to_string())?
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "Android application context is not initialized".to_string())?;
+        let directory = env
+            .call_method(
+                context.as_obj(),
+                "getExternalFilesDir",
+                "(Ljava/lang/String;)Ljava/io/File;",
+                &[JValue::Object(&JObject::null())],
+            )
+            .map_err(|error| format!("read Android external files directory failed: {error}"))?
+            .l()
+            .map_err(|error| format!("read Android external files directory result failed: {error}"))?;
+        if directory.is_null() {
+            return Err("Android external files directory is unavailable".to_string());
+        }
+        let path = env
+            .call_method(directory, "getAbsolutePath", "()Ljava/lang/String;", &[])
+            .map_err(|error| format!("read Android external files path failed: {error}"))?
+            .l()
+            .map_err(|error| format!("read Android external files path result failed: {error}"))?;
+        let path: String = env
+            .get_string(&JString::from(path))
+            .map_err(|error| format!("decode Android external files path failed: {error}"))?
+            .into();
+        Ok(PathBuf::from(path))
+    })
+}
+
 // Cached application-class references and JNI error handling.
 pub(crate) fn native_core_bridge_global_class() -> Result<jni::objects::GlobalRef, String> {
     ANDROID_NATIVE_CORE_BRIDGE
