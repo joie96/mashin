@@ -1,5 +1,3 @@
-import 'dart:math';
-
 import 'package:flutter/foundation.dart';
 
 import '../core/core_bridge.dart';
@@ -20,7 +18,6 @@ class FavoritesController extends ChangeNotifier {
   final MashinCoreBridgeApi coreBridge;
   final UserData userDataController;
 
-  final Random _shuffleRandom = Random();
   bool _isDisposed = false;
 
   @override
@@ -57,8 +54,7 @@ class FavoritesController extends ChangeNotifier {
     }
 
     try {
-      await coreBridge.playMedia(<MediaItem>[track]);
-      await coreBridge.playSendspinRadioNext(<MediaItem>[track]);
+      await coreBridge.startSendspinRadio(<MediaItem>[track]);
     } catch (_) {
       // Ignore playback failures to keep the UI responsive.
     }
@@ -70,8 +66,7 @@ class FavoritesController extends ChangeNotifier {
     }
 
     try {
-      await coreBridge.playMedia(<MediaItem>[item]);
-      await coreBridge.playSendspinRadioNext(<MediaItem>[item]);
+      await coreBridge.startSendspinRadio(<MediaItem>[item]);
     } catch (_) {
       // Ignore playback failures to keep the UI responsive.
     }
@@ -83,18 +78,7 @@ class FavoritesController extends ChangeNotifier {
     }
 
     try {
-      final List<Track> topTracks = await coreBridge.getArtistTopTracks(
-        artist.itemId,
-        artist.provider,
-      );
-      if (topTracks.isEmpty) {
-        return;
-      }
-
-      final Track startTrack =
-          topTracks[_shuffleRandom.nextInt(topTracks.length)];
-      await coreBridge.playMedia(<MediaItem>[startTrack]);
-      await coreBridge.playSendspinRadioNext(<MediaItem>[artist]);
+      await coreBridge.startSendspinRadio(<MediaItem>[artist]);
     } catch (_) {
       // Ignore playback failures to keep the UI responsive.
     }

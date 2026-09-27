@@ -346,13 +346,11 @@ class AlbumDetailController extends ChangeNotifier {
   }
 
   Future<void> startTrackRadio(Track track) async {
-    await coreBridge.playMedia(<MediaItem>[track]);
-    await coreBridge.playSendspinRadioNext(<MediaItem>[track]);
+    await coreBridge.startSendspinRadio(<MediaItem>[track]);
   }
 
   Future<void> startItemRadio(MediaItem item) async {
-    await coreBridge.playMedia(<MediaItem>[item]);
-    await coreBridge.playSendspinRadioNext(<MediaItem>[item]);
+    await coreBridge.startSendspinRadio(<MediaItem>[item]);
   }
 
   String _favoriteKey(MediaItem item) =>

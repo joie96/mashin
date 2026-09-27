@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -15,7 +14,6 @@ import '../core/core_userdata.dart';
 class ArtistDetailController extends ChangeNotifier {
   static const int descriptionCollapsedMaxLines = 4;
   static final http.Client _deezerHttpClient = http.Client();
-  final Random _shuffleRandom = Random();
 
   final MashinCoreBridgeApi coreBridge;
   final String itemId;
@@ -576,46 +574,38 @@ class ArtistDetailController extends ChangeNotifier {
 
   Future<void> startArtistRadio() async {
     final Artist? currentArtist = _artist;
-    final List<MediaItem> items = _playableTracks(_topTracks);
-    if (currentArtist == null || items.isEmpty) {
+    if (currentArtist == null) {
       return;
     }
 
     try {
-      final MediaItem startItem = items[_shuffleRandom.nextInt(items.length)];
-      await coreBridge.playMedia(<MediaItem>[startItem]);
-      await coreBridge.playSendspinRadioNext(<MediaItem>[currentArtist]);
+      await coreBridge.startSendspinRadio(<MediaItem>[currentArtist]);
     } catch (_) {
       // Ignore playback failures to keep the UI responsive.
     }
   }
 
   /// Starts radio for an arbitrary media item (similar artist, album, ...).
-  /// Mirrors MAUI's artist context menu: play the item, then queue radio next.
   Future<void> startItemRadio(MediaItem item) async {
     if (item.itemId.trim().isEmpty || item.provider.trim().isEmpty) {
       return;
     }
 
     try {
-      await coreBridge.playMedia(<MediaItem>[item]);
-      await coreBridge.playSendspinRadioNext(<MediaItem>[item]);
+      await coreBridge.startSendspinRadio(<MediaItem>[item]);
     } catch (_) {
       // Ignore playback failures to keep the UI responsive.
     }
   }
 
-  /// Starts radio from a track. Mirrors MAUI's track context menu: play the
-  /// track, queue radio next, then remove the duplicate queue entry that the
-  /// radio command creates right after the played track.
+  /// Starts radio from a track.
   Future<void> startTrackRadio(Track track) async {
     if (track.itemId.trim().isEmpty || track.provider.trim().isEmpty) {
       return;
     }
 
     try {
-      await coreBridge.playMedia(<MediaItem>[track]);
-      await coreBridge.playSendspinRadioNext(<MediaItem>[track]);
+      await coreBridge.startSendspinRadio(<MediaItem>[track]);
     } catch (_) {
       // Ignore playback failures to keep the UI responsive.
     }

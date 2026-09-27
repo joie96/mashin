@@ -95,14 +95,11 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
           icon: Icons.shuffle_outlined,
           onSelected: () => widget.coreBridge.playShuffledMedia(targets),
         ),
-      if (item is! Playlist && (isSingleTarget || tracks.isNotEmpty))
-        ContextMenuAction(
-          label: 'Radio starten',
-          icon: Icons.radio_outlined,
-          onSelected: () => tracks.isNotEmpty
-              ? widget.coreBridge.playSendspinRadioNext(tracks)
-              : _controller.startItemRadio(item),
-        ),
+      ContextMenuAction(
+        label: 'Radio starten',
+        icon: Icons.radio_outlined,
+        onSelected: () => widget.coreBridge.startSendspinRadio(targets),
+      ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,

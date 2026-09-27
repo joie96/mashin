@@ -109,7 +109,7 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
       ContextMenuAction(
         label: 'Radio starten',
         icon: Icons.radio_outlined,
-        onSelected: () => widget.coreBridge.playSendspinRadioNext(tracks),
+        onSelected: () => widget.coreBridge.startSendspinRadio(tracks),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
@@ -232,6 +232,12 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
         icon: Icons.shuffle_outlined,
         onSelected: () =>
             widget.coreBridge.playShuffledMedia(<MediaItem>[playlist]),
+      ),
+      ContextMenuAction(
+        label: 'Radio starten',
+        icon: Icons.radio_outlined,
+        onSelected: () =>
+            widget.coreBridge.startSendspinRadio(<MediaItem>[playlist]),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',

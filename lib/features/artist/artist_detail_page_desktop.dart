@@ -111,16 +111,15 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
           onSelected: () =>
               widget.coreBridge.playShuffledMedia(<MediaItem>[item]),
         ),
-      if (item is! Playlist)
-        ContextMenuAction(
-          label: 'Radio starten',
-          icon: Icons.radio_outlined,
-          onSelected: () => item is Track
-              ? widget.coreBridge.playSendspinRadioNext(
-                  tracks.isEmpty ? <MediaItem>[item] : tracks,
-                )
-              : _controller.startItemRadio(item),
-        ),
+      ContextMenuAction(
+        label: 'Radio starten',
+        icon: Icons.radio_outlined,
+        onSelected: () => item is Track
+            ? widget.coreBridge.startSendspinRadio(
+                tracks.isEmpty ? <MediaItem>[item] : tracks,
+              )
+            : _controller.startItemRadio(item),
+      ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,

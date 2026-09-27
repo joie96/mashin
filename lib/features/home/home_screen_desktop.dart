@@ -93,13 +93,12 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
           onSelected: () =>
               widget.coreBridge.playShuffledMedia(<MediaItem>[item]),
         ),
-      if (item is! Playlist)
-        ContextMenuAction(
-          label: 'Radio starten',
-          icon: Icons.radio_outlined,
-          onSelected: () =>
-              widget.coreBridge.playSendspinRadioNext(<MediaItem>[item]),
-        ),
+      ContextMenuAction(
+        label: 'Radio starten',
+        icon: Icons.radio_outlined,
+        onSelected: () =>
+            widget.coreBridge.startSendspinRadio(<MediaItem>[item]),
+      ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,

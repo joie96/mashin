@@ -12,6 +12,7 @@ pub(crate) trait PlaybackEngine: Send {
     fn deactivate(&mut self);
     fn shutdown(&mut self);
     fn queue_replace(&mut self, media_items: Vec<MediaItem>) -> Result<(), String>;
+    fn queue_start_radio(&mut self, started_tracks: Vec<MediaItem>) -> Result<(), String>;
     fn queue_insert_next(
         &mut self,
         media_items: Vec<MediaItem>,

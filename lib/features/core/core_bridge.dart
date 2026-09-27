@@ -117,7 +117,7 @@ abstract class MashinCoreBridgeApi {
   Future<void> setMuted(bool muted);
   Future<void> playMedia(List<MediaItem> mediaItems);
   Future<void> playShuffledMedia(List<MediaItem> mediaItems);
-  Future<void> playSendspinRadioNext(List<MediaItem> mediaItems);
+  Future<void> startSendspinRadio(List<MediaItem> mediaItems);
   Future<void> playMediaNext(List<MediaItem> mediaItems);
   Future<void> playMediaReplaceNext(List<MediaItem> mediaItems);
   Future<void> playMediaLast(List<MediaItem> mediaItems);
@@ -643,8 +643,8 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
       _submitMediaOperation('playShuffledMedia', mediaItems);
 
   @override
-  Future<void> playSendspinRadioNext(List<MediaItem> mediaItems) =>
-      _submitMediaOperation('playSendspinRadioNext', mediaItems);
+  Future<void> startSendspinRadio(List<MediaItem> mediaItems) =>
+      _submitMediaOperation('startSendspinRadio', mediaItems);
 
   @override
   Future<void> playMediaNext(List<MediaItem> mediaItems) =>
@@ -1131,8 +1131,8 @@ class _RustBindings {
       queueAppend = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
         'mashin_core_queue_append',
       ),
-      queueRadioNext = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
-        'mashin_core_sendspin_queue_radio_next',
+      startSendspinRadio = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
+        'mashin_core_start_sendspin_radio',
       ),
       queueClear = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
         'mashin_core_queue_clear',
@@ -1245,7 +1245,7 @@ class _RustBindings {
   final _DartCodecFn queueInsertNext;
   final _DartCodecFn queueReplaceNext;
   final _DartCodecFn queueAppend;
-  final _DartCodecFn queueRadioNext;
+  final _DartCodecFn startSendspinRadio;
   final _DartVoidFn queueClear;
   final _DartQueueMoveFn queueMove;
   final _DartCodecFn queueRemove;

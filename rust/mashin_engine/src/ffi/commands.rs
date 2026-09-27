@@ -144,11 +144,9 @@ fn execute_async_operation(request: CoreOperationRequest) -> Result<Value, CoreE
         "playShuffledMedia" => {
             execute_json_text_command(mashin_core_queue_replace_shuffled, &arguments, "mediaItems")
         }
-        "playSendspinRadioNext" => execute_json_text_command(
-            mashin_core_sendspin_queue_radio_next,
-            &arguments,
-            "mediaItems",
-        ),
+        "startSendspinRadio" => {
+            execute_json_text_command(mashin_core_start_sendspin_radio, &arguments, "mediaItems")
+        }
         "playMediaNext" => {
             execute_json_text_command(mashin_core_queue_insert_next, &arguments, "mediaItems")
         }
@@ -777,10 +775,10 @@ pub extern "C" fn mashin_core_queue_replace_shuffled(media_items_json: *const c_
 }
 
 #[no_mangle]
-pub extern "C" fn mashin_core_sendspin_queue_radio_next(media_items_json: *const c_char) -> i32 {
+pub extern "C" fn mashin_core_start_sendspin_radio(media_items_json: *const c_char) -> i32 {
     match read_required_c_string(media_items_json, "media_items_json") {
         Ok(media_items) => match parse_media_items(&media_items) {
-            Ok(media_items) => resolve_sendspin_radio_and_execute_core_command(media_items),
+            Ok(media_items) => start_sendspin_radio_and_execute_core_command(media_items),
             Err(error) => {
                 record_and_publish_error(error);
                 -1
@@ -1007,9 +1005,14 @@ where
     ))
 }
 
-fn resolve_sendspin_radio_and_execute_core_command(media_items: Vec<MediaItem>) -> i32 {
-    publish_command_result(core::resolve_sendspin_radio_and_execute_command(
+fn start_sendspin_radio_and_execute_core_command(media_items: Vec<MediaItem>) -> i32 {
+    publish_command_result(core::start_sendspin_radio_and_execute_command(
         media_items,
+        |events| {
+            for event in events {
+                publish_media_session_event(event);
+            }
+        },
     ))
 }
 

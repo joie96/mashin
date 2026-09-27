@@ -321,6 +321,13 @@ impl SendspinEngine {
         Ok(())
     }
 
+    // Autoplay must not fill the new queue before radio recommendations arrive.
+    pub(crate) fn start_radio(&mut self, started_tracks: Vec<MediaItem>) -> Result<(), String> {
+        self.play_media(started_tracks)?;
+        self.autoplay.replace_seed_tracks(Vec::new());
+        Ok(())
+    }
+
     pub(crate) fn play_media_next(
         &mut self,
         media_items: Vec<MediaItem>,
@@ -1236,6 +1243,10 @@ impl PlaybackEngine for SendspinEngine {
         SendspinEngine::play_media(self, media_items)
     }
 
+    fn queue_start_radio(&mut self, started_tracks: Vec<MediaItem>) -> Result<(), String> {
+        SendspinEngine::start_radio(self, started_tracks)
+    }
+
     fn queue_insert_next(
         &mut self,
         media_items: Vec<MediaItem>,
@@ -1437,6 +1448,47 @@ mod tests {
             cache_bytes: 1024,
             preferred_codec: SendspinAudioCodec::Pcm,
         }
+    }
+
+    #[test]
+    fn radio_replaces_the_queue_with_started_tracks_before_appending_recommendations() {
+        let mut engine = SendspinEngine::new();
+        engine.configure(configuration()).expect("configure engine");
+        engine.set_autoplay(true);
+        engine
+            .play_media(vec![track("test", "old")])
+            .expect("seed old queue");
+        engine
+            .start_radio(vec![track("test", "started")])
+            .expect("start radio");
+        assert!(engine.autoplay.reserve_refill(1, Some(0)).is_none());
+        let seed_track = match track("test", "seed") {
+            MediaItem::Track(track) => track,
+            _ => unreachable!(),
+        };
+        let radio_track = match track("test", "radio") {
+            MediaItem::Track(track) => track,
+            _ => unreachable!(),
+        };
+        engine
+            .append_radio_tracks(vec![seed_track], vec![radio_track])
+            .expect("append radio tracks");
+
+        assert_eq!(
+            engine
+                .queue
+                .items
+                .iter()
+                .filter_map(|item| item.media_item.as_ref())
+                .map(|item| item.fields().item_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["started", "radio"]
+        );
+        assert_eq!(engine.queue.current_index, Some(0));
+        assert!(engine.autoplay.reserve_refill(2, Some(0)).is_some());
+        engine.shutdown();
+        std::fs::remove_file(queue_snapshot_path().expect("test queue path"))
+            .expect("remove test snapshot");
     }
 
     #[test]

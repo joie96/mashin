@@ -181,14 +181,13 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
           icon: Icons.shuffle_outlined,
           onSelected: () => widget.coreBridge.playShuffledMedia(targets),
         ),
-      if (item is Track || item is Artist)
-        ContextMenuAction(
-          label: 'Radio starten',
-          icon: Icons.radio_outlined,
-          onSelected: () => item is Artist && isSingleTarget
-              ? _controller.startArtistRadio(item)
-              : widget.coreBridge.playSendspinRadioNext(targets),
-        ),
+      ContextMenuAction(
+        label: 'Radio starten',
+        icon: Icons.radio_outlined,
+        onSelected: () => item is Artist && isSingleTarget
+            ? _controller.startArtistRadio(item)
+            : widget.coreBridge.startSendspinRadio(targets),
+      ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,

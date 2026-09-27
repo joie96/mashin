@@ -6,6 +6,7 @@ use super::models::player::MusicAssistantPlayer;
 use super::models::queue::{MusicAssistantQueue, QueueItem, RepeatMode};
 use super::models::recommendation::MusicAssistantRecommendationFolder;
 use super::models::session::{MusicAssistantUser, ProviderManifest, ServerInfo};
+use futures_util::stream::{self, StreamExt, TryStreamExt};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -546,27 +547,36 @@ fn tag_media_type(media_item: &mut Value, media_type: &str) {
 pub(crate) async fn get_radio_tracks(
     client: &MusicAssistantClient,
     media_items: Vec<MediaItem>,
-    seed_tracks: Vec<Track>,
+    started_tracks: Vec<Track>,
 ) -> Result<Vec<Track>, String> {
-    let seed_track_keys = seed_tracks.iter().map(track_key).collect::<HashSet<_>>();
-    let mut radio_tracks = Vec::new();
-    for media_item in media_items {
-        let Some(seed_uri) = radio_seed_uri(&media_item) else {
-            continue;
-        };
-        radio_tracks.extend(
-            client
-                .get_playlist_tracks(&MediaId(seed_uri), "radio_playlist", true, true)
-                .await?,
-        );
-    }
+    let radio_tracks = stream::iter(
+        media_items
+            .into_iter()
+            .filter_map(|item| radio_seed_uri(&item)),
+    )
+    .map(|seed_uri| async move {
+        client
+            .get_playlist_tracks(&MediaId(seed_uri), "radio_playlist", true, true)
+            .await
+    })
+    .buffered(4)
+    .try_collect::<Vec<Vec<Track>>>()
+    .await?
+    .into_iter()
+    .flatten()
+    .collect();
+    Ok(filter_radio_tracks(radio_tracks, &started_tracks))
+}
+
+fn filter_radio_tracks(radio_tracks: Vec<Track>, started_tracks: &[Track]) -> Vec<Track> {
+    let started_track_keys = started_tracks.iter().map(track_key).collect::<HashSet<_>>();
     let mut track_keys = HashSet::new();
-    Ok(radio_tracks
+    radio_tracks
         .into_iter()
-        .filter(|track| !seed_track_keys.contains(&track_key(track)))
+        .filter(|track| !started_track_keys.contains(&track_key(track)))
         .filter(|track| track.duration <= RADIO_MAXIMUM_TRACK_DURATION_SECONDS)
         .filter(|track| track_keys.insert(track_key(track)))
-        .collect())
+        .collect()
 }
 
 fn item_reference_arguments(item_id: &MediaId, provider: &str) -> Value {
@@ -628,10 +638,40 @@ fn merge_item_reference_arguments(item_id: &MediaId, provider: &str, arguments: 
 
 #[cfg(test)]
 mod tests {
-    use super::{item_reference_arguments, merge_item_reference_arguments, queue_media_payload};
+    use super::{
+        filter_radio_tracks, item_reference_arguments, merge_item_reference_arguments,
+        queue_media_payload,
+    };
     use crate::music_assistant::models::identifiers::MediaId;
-    use crate::music_assistant::models::media::MediaItem;
+    use crate::music_assistant::models::media::{MediaItem, Track};
     use serde_json::json;
+
+    #[test]
+    fn radio_keeps_seed_tracks_that_were_not_started() {
+        let track = |item_id: &str, duration: u32| -> Track {
+            serde_json::from_value(json!({
+                "media_type": "track",
+                "item_id": item_id,
+                "provider": "library",
+                "name": item_id,
+                "duration": duration,
+            }))
+            .expect("deserialize radio track")
+        };
+        let started = track("started", 180);
+        let result = filter_radio_tracks(
+            vec![
+                started.clone(),
+                track("other-seed", 180),
+                track("other-seed", 180),
+                track("too-long", 1201),
+            ],
+            &[started],
+        );
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].media.item_id.as_str(), "other-seed");
+    }
 
     #[test]
     fn serializes_complete_queue_media_with_nested_types() {

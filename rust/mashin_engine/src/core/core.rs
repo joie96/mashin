@@ -23,7 +23,7 @@ use crate::music_assistant::user_data::{
     UserDataSnapshot, UserDataWriteRequest,
 };
 use crate::playback::coordinator::PlaybackCoordinator;
-use crate::playback::media_resolver::resolve_music_assistant_media_items;
+use crate::playback::media_resolver::{resolve_music_assistant_media_items, resolve_radio_tracks};
 use crate::playback::models::{
     MediaSessionState, OfflinePlaybackConfiguration, PlaybackEngineConfiguration, PlayerState,
     Queue, RemotePlaybackConfiguration,
@@ -31,6 +31,7 @@ use crate::playback::models::{
 use crate::sendspin::models::SendspinEngineConfiguration;
 use once_cell::sync::Lazy;
 use rand::seq::SliceRandom;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -1038,21 +1039,41 @@ pub(crate) fn remove_playlist_tracks(
         .map_err(CoreError::command_failed)
 }
 
-// Resolves dynamic radio tracks before appending them to the canonical queue.
-pub(crate) fn resolve_sendspin_radio_and_execute_command(
+// Starts selected radio tracks before loading and appending dynamic recommendations.
+pub(crate) fn start_sendspin_radio_and_execute_command(
     media_items: Vec<MediaItem>,
+    publish_start_events: impl FnOnce(Vec<MediaSessionEvent>),
 ) -> Result<Vec<MediaSessionEvent>, CoreError> {
     let _command_guard = CORE_COMMAND_SERIALIZER
         .lock()
         .map_err(|_| CoreError::internal("core command serializer lock poisoned"))?;
-    let (session, active_engine_kind) = {
+    let (session, active_engine_kind, local_playlist_tracks) = {
         let coordinator = CORE_COORDINATOR
             .lock()
             .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
         let session = coordinator.session_configuration.clone().ok_or_else(|| {
             CoreError::command_failed("a restored session is required to resolve radio media")
         })?;
-        (session, coordinator.playback.active_engine_kind())
+        let local_playlist_tracks = if media_items.iter().any(|item| matches!(
+            item,
+            MediaItem::Playlist(playlist)
+                if playlist.media.provider.as_str().eq_ignore_ascii_case(crate::music_assistant::user_data::LOCAL_PLAYLIST_PROVIDER)
+        )) {
+            coordinator
+                .user_data_snapshot()
+                .map_err(CoreError::command_failed)?
+                .playlists
+                .into_iter()
+                .map(|playlist| (playlist.playlist.media.item_id, playlist.items))
+                .collect::<HashMap<_, _>>()
+        } else {
+            HashMap::new()
+        };
+        (
+            session,
+            coordinator.playback.active_engine_kind(),
+            local_playlist_tracks,
+        )
     };
     if active_engine_kind != crate::playback::models::PlaybackEngineKind::Sendspin {
         return Err(CoreError::command_failed(
@@ -1060,13 +1081,44 @@ pub(crate) fn resolve_sendspin_radio_and_execute_command(
         ));
     }
     let client = MusicAssistantClient::new(&session.music_assistant_url.0, session.access_token);
-    let (seed_tracks, radio_tracks) = CORE_NETWORK_RUNTIME
-        .block_on(async {
-            let seed_tracks =
-                resolve_music_assistant_media_items(&client, media_items.clone()).await?;
-            let radio_tracks = get_radio_tracks(&client, media_items, seed_tracks.clone()).await?;
-            Ok::<_, String>((seed_tracks, radio_tracks))
-        })
+    let selection = CORE_NETWORK_RUNTIME
+        .block_on(resolve_radio_tracks(
+            &client,
+            media_items,
+            &local_playlist_tracks,
+        ))
+        .map_err(CoreError::command_failed)?;
+    let start_events = {
+        let mut coordinator = CORE_COORDINATOR
+            .lock()
+            .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
+        let queue_before = coordinator.queue();
+        let player_state_before = coordinator.player_state();
+        coordinator
+            .playback
+            .start_radio(
+                selection
+                    .started_tracks
+                    .iter()
+                    .cloned()
+                    .map(MediaItem::Track)
+                    .collect(),
+            )
+            .map_err(CoreError::command_failed)?;
+        collect_media_session_events(&coordinator, queue_before, player_state_before)
+    };
+    publish_start_events(start_events);
+    let radio_tracks = CORE_NETWORK_RUNTIME
+        .block_on(get_radio_tracks(
+            &client,
+            selection
+                .seed_tracks
+                .iter()
+                .cloned()
+                .map(MediaItem::Track)
+                .collect(),
+            selection.started_tracks,
+        ))
         .map_err(CoreError::command_failed)?;
     let mut coordinator = CORE_COORDINATOR
         .lock()
@@ -1075,7 +1127,7 @@ pub(crate) fn resolve_sendspin_radio_and_execute_command(
     let player_state_before = coordinator.player_state();
     coordinator
         .playback
-        .append_radio_tracks(seed_tracks, radio_tracks)
+        .append_radio_tracks(selection.seed_tracks, radio_tracks)
         .map_err(CoreError::command_failed)
         .map(|()| collect_media_session_events(&coordinator, queue_before, player_state_before))
 }

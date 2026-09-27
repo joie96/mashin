@@ -155,7 +155,7 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
       ContextMenuAction(
         label: 'Radio starten',
         icon: Icons.radio_outlined,
-        onSelected: () => widget.coreBridge.playSendspinRadioNext(tracks),
+        onSelected: () => widget.coreBridge.startSendspinRadio(tracks),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
@@ -282,6 +282,12 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             widget.coreBridge.playShuffledMedia(<MediaItem>[playlist]),
       ),
       ContextMenuAction(
+        label: 'Radio starten',
+        icon: Icons.radio_outlined,
+        onSelected: () =>
+            widget.coreBridge.startSendspinRadio(<MediaItem>[playlist]),
+      ),
+      ContextMenuAction(
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
@@ -328,7 +334,7 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
         label: 'Radio starten',
         icon: Icons.radio_outlined,
         onSelected: () =>
-            widget.coreBridge.playSendspinRadioNext(<MediaItem>[artist]),
+            widget.coreBridge.startSendspinRadio(<MediaItem>[artist]),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',

@@ -99,6 +99,10 @@ impl PlaybackCoordinator {
         self.with_active_engine_mut(|engine| engine.queue_replace(media_items))
     }
 
+    pub(crate) fn start_radio(&mut self, started_tracks: Vec<MediaItem>) -> Result<(), String> {
+        self.with_active_engine_mut(|engine| engine.queue_start_radio(started_tracks))
+    }
+
     pub(crate) fn play_media_next(
         &mut self,
         media_items: Vec<MediaItem>,
