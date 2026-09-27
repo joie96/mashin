@@ -1111,12 +1111,7 @@ pub(crate) fn start_sendspin_radio_and_execute_command(
     let radio_tracks = CORE_NETWORK_RUNTIME
         .block_on(get_radio_tracks(
             &client,
-            selection
-                .seed_tracks
-                .iter()
-                .cloned()
-                .map(MediaItem::Track)
-                .collect(),
+            &selection.radio_seed,
             selection.started_tracks,
         ))
         .map_err(CoreError::command_failed)?;
@@ -1127,7 +1122,7 @@ pub(crate) fn start_sendspin_radio_and_execute_command(
     let player_state_before = coordinator.player_state();
     coordinator
         .playback
-        .append_radio_tracks(selection.seed_tracks, radio_tracks)
+        .append_radio_tracks(selection.autoplay_seed_tracks, radio_tracks)
         .map_err(CoreError::command_failed)
         .map(|()| collect_media_session_events(&coordinator, queue_before, player_state_before))
 }

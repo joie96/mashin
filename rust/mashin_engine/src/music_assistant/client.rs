@@ -6,7 +6,6 @@ use super::models::player::MusicAssistantPlayer;
 use super::models::queue::{MusicAssistantQueue, QueueItem, RepeatMode};
 use super::models::recommendation::MusicAssistantRecommendationFolder;
 use super::models::session::{MusicAssistantUser, ProviderManifest, ServerInfo};
-use futures_util::stream::{self, StreamExt, TryStreamExt};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -546,25 +545,14 @@ fn tag_media_type(media_item: &mut Value, media_type: &str) {
 // Radio helpers use Music Assistant's dynamic radio playlists.
 pub(crate) async fn get_radio_tracks(
     client: &MusicAssistantClient,
-    media_items: Vec<MediaItem>,
+    radio_seed: &MediaItem,
     started_tracks: Vec<Track>,
 ) -> Result<Vec<Track>, String> {
-    let radio_tracks = stream::iter(
-        media_items
-            .into_iter()
-            .filter_map(|item| radio_seed_uri(&item)),
-    )
-    .map(|seed_uri| async move {
-        client
-            .get_playlist_tracks(&MediaId(seed_uri), "radio_playlist", true, true)
-            .await
-    })
-    .buffered(4)
-    .try_collect::<Vec<Vec<Track>>>()
-    .await?
-    .into_iter()
-    .flatten()
-    .collect();
+    let seed_uri = radio_seed_uri(radio_seed)
+        .ok_or_else(|| "radio seed has no Music Assistant URI".to_string())?;
+    let radio_tracks = client
+        .get_playlist_tracks(&MediaId(seed_uri), "radio_playlist", true, true)
+        .await?;
     Ok(filter_radio_tracks(radio_tracks, &started_tracks))
 }
 
@@ -640,11 +628,29 @@ fn merge_item_reference_arguments(item_id: &MediaId, provider: &str, arguments: 
 mod tests {
     use super::{
         filter_radio_tracks, item_reference_arguments, merge_item_reference_arguments,
-        queue_media_payload,
+        queue_media_payload, radio_seed_uri,
     };
     use crate::music_assistant::models::identifiers::MediaId;
     use crate::music_assistant::models::media::{MediaItem, Track};
     use serde_json::json;
+
+    #[test]
+    fn radio_uses_the_original_media_uri_as_playlist_item_id() {
+        for media_type in ["track", "album", "artist", "playlist"] {
+            let media_item: MediaItem = serde_json::from_value(json!({
+                "media_type": media_type,
+                "item_id": "item-1",
+                "provider": "library",
+                "name": "Seed",
+                "uri": format!("library://{media_type}/item-1"),
+            }))
+            .expect("deserialize media item");
+            assert_eq!(
+                radio_seed_uri(&media_item).as_deref(),
+                Some(format!("library://{media_type}/item-1").as_str())
+            );
+        }
+    }
 
     #[test]
     fn radio_keeps_seed_tracks_that_were_not_started() {

@@ -13,100 +13,102 @@ const RADIO_ARTIST_START_LIMIT: usize = 10;
 
 pub(crate) struct RadioTrackSelection {
     pub(crate) started_tracks: Vec<Track>,
-    pub(crate) seed_tracks: Vec<Track>,
+    pub(crate) autoplay_seed_tracks: Vec<Track>,
+    pub(crate) radio_seed: MediaItem,
 }
 
-// Radio starts from explicit tracks or one random track per non-track media type.
+// Radio starts from explicit tracks or a track in one randomly chosen container.
 pub(crate) async fn resolve_radio_tracks(
     client: &MusicAssistantClient,
     media_items: Vec<MediaItem>,
     local_playlist_tracks: &HashMap<MediaId, Vec<Track>>,
 ) -> Result<RadioTrackSelection, String> {
-    let mut started_tracks = Vec::new();
-    let mut seed_tracks = Vec::new();
-    let mut album_tracks = Vec::new();
-    let mut playlist_tracks = Vec::new();
-    let mut artist_start_groups = Vec::new();
-    for media_item in media_items {
-        match media_item {
-            MediaItem::Track(track) => {
-                started_tracks.push(track.clone());
-                seed_tracks.push(track);
-            }
-            MediaItem::Playlist(playlist)
-                if playlist
-                    .media
-                    .provider
-                    .as_str()
-                    .eq_ignore_ascii_case(LOCAL_PLAYLIST_PROVIDER) =>
-            {
-                let tracks = local_playlist_tracks
-                    .get(&playlist.media.item_id)
-                    .ok_or_else(|| {
-                        format!(
-                            "local playlist '{}' is not loaded",
-                            playlist.media.item_id.as_str()
-                        )
-                    })?;
-                playlist_tracks.extend(tracks.iter().cloned());
-                seed_tracks.extend(tracks.iter().cloned());
-            }
-            MediaItem::Album(_) | MediaItem::Playlist(_) | MediaItem::Artist(_) => {
-                let is_album = matches!(media_item, MediaItem::Album(_));
-                let is_playlist = matches!(media_item, MediaItem::Playlist(_));
-                let mut tracks =
-                    resolve_music_assistant_media_items(client, vec![media_item]).await?;
-                if is_album {
-                    album_tracks.extend(tracks.iter().cloned());
-                } else if is_playlist {
-                    playlist_tracks.extend(tracks.iter().cloned());
-                } else {
-                    tracks.truncate(RADIO_ARTIST_SEED_LIMIT);
-                    artist_start_groups.push(tracks.clone());
-                }
-                seed_tracks.extend(tracks);
-            }
-            _ => {}
+    let radio_seed = select_radio_seed(&media_items)?;
+    if matches!(radio_seed, MediaItem::Track(_)) {
+        let started_tracks = media_items
+            .into_iter()
+            .filter_map(|item| match item {
+                MediaItem::Track(track) => Some(track),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let MediaItem::Track(seed_track) = &radio_seed else {
+            unreachable!()
+        };
+        return Ok(RadioTrackSelection {
+            started_tracks,
+            autoplay_seed_tracks: vec![seed_track.clone()],
+            radio_seed,
+        });
+    }
+
+    let mut source_tracks = match &radio_seed {
+        MediaItem::Playlist(playlist)
+            if playlist
+                .media
+                .provider
+                .as_str()
+                .eq_ignore_ascii_case(LOCAL_PLAYLIST_PROVIDER) =>
+        {
+            local_playlist_tracks
+                .get(&playlist.media.item_id)
+                .cloned()
+                .ok_or_else(|| {
+                    format!(
+                        "local playlist '{}' is not loaded",
+                        playlist.media.item_id.as_str()
+                    )
+                })?
         }
+        _ => resolve_music_assistant_media_items(client, vec![radio_seed.clone()]).await?,
+    };
+    if matches!(radio_seed, MediaItem::Artist(_)) {
+        source_tracks.truncate(RADIO_ARTIST_SEED_LIMIT);
     }
-    started_tracks.extend(select_radio_start_tracks(
-        &album_tracks,
-        &artist_start_groups,
-        &playlist_tracks,
-    ));
-    if started_tracks.is_empty() {
-        return Err("radio requires at least one playable seed track".to_string());
-    }
+    let started_track = select_radio_start_track(&radio_seed, &source_tracks)?;
+    let radio_seed = if matches!(&radio_seed, MediaItem::Playlist(playlist) if playlist.media.provider.as_str().eq_ignore_ascii_case(LOCAL_PLAYLIST_PROVIDER))
+    {
+        MediaItem::Track(started_track.clone())
+    } else {
+        radio_seed
+    };
     Ok(RadioTrackSelection {
-        started_tracks,
-        seed_tracks,
+        started_tracks: vec![started_track],
+        autoplay_seed_tracks: source_tracks,
+        radio_seed,
     })
 }
 
-fn select_radio_start_tracks(
-    album_tracks: &[Track],
-    artist_start_groups: &[Vec<Track>],
-    playlist_tracks: &[Track],
-) -> Vec<Track> {
-    let mut random = rand::thread_rng();
-    let mut started_tracks = Vec::new();
-    if let Some(track) = album_tracks.choose(&mut random) {
-        started_tracks.push(track.clone());
-    }
-    let playable_artists = artist_start_groups
+fn select_radio_seed(media_items: &[MediaItem]) -> Result<MediaItem, String> {
+    let radio_seed = media_items
+        .choose(&mut rand::thread_rng())
+        .cloned()
+        .ok_or_else(|| "radio requires at least one media item".to_string())?;
+    if !matches!(
+        radio_seed,
+        MediaItem::Track(_) | MediaItem::Album(_) | MediaItem::Artist(_) | MediaItem::Playlist(_)
+    ) || media_items
         .iter()
-        .filter(|tracks| !tracks.is_empty())
-        .collect::<Vec<_>>();
-    if let Some(track) = playable_artists
-        .choose(&mut random)
-        .and_then(|tracks| tracks[..tracks.len().min(RADIO_ARTIST_START_LIMIT)].choose(&mut random))
+        .any(|item| std::mem::discriminant(item) != std::mem::discriminant(&radio_seed))
     {
-        started_tracks.push(track.clone());
+        return Err("radio requires media items of the same supported type".to_string());
     }
-    if let Some(track) = playlist_tracks.choose(&mut random) {
-        started_tracks.push(track.clone());
-    }
-    started_tracks
+    Ok(radio_seed)
+}
+
+fn select_radio_start_track(
+    radio_seed: &MediaItem,
+    seed_tracks: &[Track],
+) -> Result<Track, String> {
+    let start_candidates = if matches!(radio_seed, MediaItem::Artist(_)) {
+        &seed_tracks[..seed_tracks.len().min(RADIO_ARTIST_START_LIMIT)]
+    } else {
+        seed_tracks
+    };
+    start_candidates
+        .choose(&mut rand::thread_rng())
+        .cloned()
+        .ok_or_else(|| "radio requires at least one playable seed track".to_string())
 }
 
 // Music Assistant media resolution for local playback queues.
@@ -184,7 +186,9 @@ fn resolve_provider(fields: &MediaItemFields) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_provider, resolve_radio_tracks, select_radio_start_tracks};
+    use super::{
+        resolve_provider, resolve_radio_tracks, select_radio_seed, select_radio_start_track,
+    };
     use crate::music_assistant::client::MusicAssistantClient;
     use crate::music_assistant::models::identifiers::{MediaId, ProviderId, ProviderInstanceId};
     use crate::music_assistant::models::media::{
@@ -203,7 +207,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn local_playlist_radio_starts_one_track_and_uses_every_track_as_a_seed() {
+    async fn local_playlist_radio_starts_one_track_and_keeps_all_tracks_for_autoplay() {
         let client = MusicAssistantClient::new("http://localhost", None);
         let playlist = serde_json::from_value(serde_json::json!({
             "media_type": "playlist",
@@ -221,9 +225,15 @@ mod tests {
         .await
         .expect("resolve local playlist");
 
-        assert_eq!(selection.seed_tracks, tracks);
+        assert_eq!(selection.autoplay_seed_tracks, tracks);
         assert_eq!(selection.started_tracks.len(), 1);
-        assert!(selection.seed_tracks.contains(&selection.started_tracks[0]));
+        assert!(selection
+            .autoplay_seed_tracks
+            .contains(&selection.started_tracks[0]));
+        assert_eq!(
+            selection.radio_seed,
+            MediaItem::Track(selection.started_tracks[0].clone())
+        );
     }
 
     #[tokio::test]
@@ -239,26 +249,47 @@ mod tests {
         .expect("resolve supplied tracks");
 
         assert_eq!(selection.started_tracks, tracks);
-        assert_eq!(selection.seed_tracks, tracks);
+        assert_eq!(selection.autoplay_seed_tracks.len(), 1);
+        assert_eq!(
+            selection.radio_seed,
+            MediaItem::Track(selection.autoplay_seed_tracks[0].clone())
+        );
+        assert!(tracks.contains(&selection.autoplay_seed_tracks[0]));
     }
 
     #[test]
-    fn radio_starts_one_album_and_playlist_track_and_an_artist_top_ten_track() {
-        let artist_tracks = (0..20).map(track).collect::<Vec<_>>();
-        let artist_groups = vec![artist_tracks];
-        for _ in 0..20 {
-            let selected = select_radio_start_tracks(
-                &[track(20), track(21)],
-                &artist_groups,
-                &[track(22), track(23)],
-            );
-            assert_eq!(selected.len(), 3);
-            assert!(["track-20", "track-21"].contains(&selected[0].media.item_id.as_str()));
-            assert!(
-                (0..10).any(|index| selected[1].media.item_id.as_str() == format!("track-{index}"))
-            );
-            assert!(["track-22", "track-23"].contains(&selected[2].media.item_id.as_str()));
+    fn radio_chooses_one_supplied_container_and_one_of_its_tracks() {
+        for media_type in ["album", "playlist", "artist"] {
+            let items = (0..2)
+                .map(|index| {
+                    serde_json::from_value(serde_json::json!({
+                        "media_type": media_type,
+                        "item_id": format!("item-{index}"),
+                        "provider": "library",
+                        "name": format!("Item {index}"),
+                    }))
+                    .expect("deserialize radio seed")
+                })
+                .collect::<Vec<MediaItem>>();
+            let tracks = (0..20).map(track).collect::<Vec<_>>();
+            for _ in 0..20 {
+                let selected = select_radio_seed(&items).expect("select radio seed");
+                assert!(items.contains(&selected));
+                let started =
+                    select_radio_start_track(&selected, &tracks).expect("select start track");
+                let limit = if media_type == "artist" { 10 } else { 20 };
+                assert!(tracks[..limit].contains(&started));
+            }
         }
+    }
+
+    #[test]
+    fn radio_rejects_mixed_media_types() {
+        let album = serde_json::from_value(serde_json::json!({
+            "media_type": "album", "item_id": "album-1", "provider": "library", "name": "Album",
+        }))
+        .expect("deserialize album");
+        assert!(select_radio_seed(&[MediaItem::Track(track(1)), album]).is_err());
     }
 
     fn fields(provider: &str, mappings: Vec<ProviderMapping>) -> MediaItemFields {
