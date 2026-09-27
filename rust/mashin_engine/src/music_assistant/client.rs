@@ -392,6 +392,10 @@ impl MusicAssistantClient {
         option: &str,
         radio_mode: bool,
     ) -> Result<(), String> {
+        let media = media
+            .into_iter()
+            .map(queue_media_payload)
+            .collect::<Vec<_>>();
         self.execute_command::<Value>(
             "player_queues/play_media",
             json!({
@@ -507,6 +511,37 @@ impl MusicAssistantClient {
     }
 }
 
+fn queue_media_payload(media_item: MediaItem) -> Value {
+    let mut payload = json!(&media_item);
+    match media_item {
+        MediaItem::Track(track) => {
+            tag_artists(&mut payload["artists"]);
+            if track.album.is_some() {
+                tag_media_type(&mut payload["album"], "album");
+                tag_artists(&mut payload["album"]["artists"]);
+            }
+        }
+        MediaItem::Album(_) => tag_artists(&mut payload["artists"]),
+        MediaItem::PodcastEpisode(_) => tag_media_type(&mut payload["podcast"], "podcast"),
+        _ => {}
+    }
+    payload
+}
+
+fn tag_artists(artists: &mut Value) {
+    if let Some(artists) = artists.as_array_mut() {
+        for artist in artists {
+            tag_media_type(artist, "artist");
+        }
+    }
+}
+
+fn tag_media_type(media_item: &mut Value, media_type: &str) {
+    if let Some(fields) = media_item.as_object_mut() {
+        fields.insert("media_type".to_string(), json!(media_type));
+    }
+}
+
 // Radio helpers use Music Assistant's dynamic radio playlists.
 pub(crate) async fn get_radio_tracks(
     client: &MusicAssistantClient,
@@ -593,8 +628,77 @@ fn merge_item_reference_arguments(item_id: &MediaId, provider: &str, arguments: 
 
 #[cfg(test)]
 mod tests {
-    use super::{item_reference_arguments, merge_item_reference_arguments};
+    use super::{item_reference_arguments, merge_item_reference_arguments, queue_media_payload};
     use crate::music_assistant::models::identifiers::MediaId;
+    use crate::music_assistant::models::media::MediaItem;
+    use serde_json::json;
+
+    #[test]
+    fn serializes_complete_queue_media_with_nested_types() {
+        let track: MediaItem = serde_json::from_value(json!({
+            "media_type": "track",
+            "item_id": "track-1",
+            "provider": "ytmusic",
+            "name": "Take on Me",
+            "duration": 232,
+            "artists": [{
+                "media_type": "artist",
+                "item_id": "artist-1",
+                "provider": "ytmusic",
+                "name": "a-ha"
+            }],
+            "album": {
+                "media_type": "album",
+                "item_id": "album-1",
+                "provider": "ytmusic",
+                "name": "Hunting High and Low"
+            }
+        }))
+        .expect("deserialize track with nested media");
+
+        let payload = queue_media_payload(track);
+        assert_eq!(payload["media_type"], "track");
+        assert_eq!(payload["duration"], 232);
+        assert_eq!(payload["album"]["media_type"], "album");
+        assert_eq!(payload["album"]["item_id"], "album-1");
+        assert_eq!(payload["artists"][0]["media_type"], "artist");
+        assert_eq!(payload["artists"][0]["name"], "a-ha");
+
+        let album: MediaItem = serde_json::from_value(json!({
+            "media_type": "album",
+            "item_id": "album-1",
+            "provider": "ytmusic",
+            "name": "Hunting High and Low",
+            "artists": [{
+                "media_type": "artist",
+                "item_id": "artist-1",
+                "provider": "ytmusic",
+                "name": "a-ha"
+            }]
+        }))
+        .expect("deserialize album with artist");
+        let payload = queue_media_payload(album);
+        assert_eq!(payload["media_type"], "album");
+        assert_eq!(payload["artists"][0]["media_type"], "artist");
+
+        let episode: MediaItem = serde_json::from_value(json!({
+            "media_type": "podcast_episode",
+            "item_id": "episode-1",
+            "provider": "library",
+            "name": "Episode one",
+            "podcast": {
+                "media_type": "podcast",
+                "item_id": "podcast-1",
+                "provider": "library",
+                "name": "Podcast one"
+            }
+        }))
+        .expect("deserialize episode with podcast");
+        let payload = queue_media_payload(episode);
+        assert_eq!(payload["media_type"], "podcast_episode");
+        assert_eq!(payload["podcast"]["media_type"], "podcast");
+        assert_eq!(payload["podcast"]["name"], "Podcast one");
+    }
 
     #[test]
     fn builds_library_track_query_arguments() {

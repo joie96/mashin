@@ -22,6 +22,7 @@ pub(crate) fn notify_cache_changed(signal: &CacheChangeSignal) {
 #[derive(Debug, Clone)]
 pub(crate) struct DownloadSlotReservation {
     pub(crate) cache_content_key: String,
+    pub(crate) title: String,
     pub(crate) expected_duration_millis: Option<u64>,
     pub(crate) resume_after_millis: u64,
     pub(crate) append_after_seek: Arc<AtomicBool>,
@@ -308,6 +309,7 @@ mod tests {
             cache_add_key(&caches, key.to_string(), 0);
             let reservation = DownloadSlotReservation {
                 cache_content_key: key.to_string(),
+                title: "Track".to_string(),
                 expected_duration_millis: Some(expected_duration_millis),
                 resume_after_millis: 0,
                 append_after_seek: Arc::new(AtomicBool::new(true)),
@@ -337,6 +339,7 @@ mod tests {
         let sequence = Arc::new(AtomicU64::new(0));
         let reservation = DownloadSlotReservation {
             cache_content_key: "track".to_string(),
+            title: "Track".to_string(),
             expected_duration_millis: Some(6_000),
             resume_after_millis: 2_000,
             append_after_seek: Arc::new(AtomicBool::new(true)),

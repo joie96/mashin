@@ -418,9 +418,10 @@ impl SendspinDownloaderWorker {
                                 if connection_generation.load(Ordering::Acquire) == task_connection_generation
                                     && crate::cache::store::slot_reservation_is_current(&slots, slot_index, value) {
                                     LOGGER.warn(format!(
-                                        "download stalled on slot {} for cache key {}",
+                                        "download stalled on slot {} for cache key {} ({})",
                                         slot_index + 1,
-                                        value.cache_content_key
+                                        value.cache_content_key,
+                                        value.title
                                     ));
                                     downloads_allowed.store(false, Ordering::Release);
                                     report_connection_lost_if_current(
@@ -443,9 +444,10 @@ impl SendspinDownloaderWorker {
                                     && !value.append_after_seek.load(Ordering::Acquire)
                                 {
                                     LOGGER.warn(format!(
-                                        "seek confirmation timed out on slot {} for cache key {}",
+                                        "seek confirmation timed out on slot {} for cache key {} ({})",
                                         slot_index + 1,
-                                        value.cache_content_key
+                                        value.cache_content_key,
+                                        value.title
                                     ));
                                     downloads_allowed.store(false, Ordering::Release);
                                     report_connection_lost_if_current(
@@ -551,9 +553,10 @@ impl SendspinDownloaderWorker {
                                     }
                                     if let Some(reservation) = reservation.as_ref() {
                                         LOGGER.trace(format!(
-                                            "download stream bound: slot {}, cache key {}",
+                                            "download stream bound: slot {}, cache key {} ({})",
                                             slot_index + 1,
-                                            reservation.cache_content_key
+                                            reservation.cache_content_key,
+                                            reservation.title
                                         ));
                                     } else {
                                         LOGGER.warn(format!(
@@ -725,9 +728,10 @@ impl SendspinDownloaderWorker {
                                 seek_confirmation_deadline = Some((value.lease_id.clone(), deadline));
                                 if !seek_gate_reported {
                                     LOGGER.debug(format!(
-                                        "download chunks are buffered until seek confirmation: slot {}, cache key {}",
+                                        "download chunks are buffered until seek confirmation: slot {}, cache key {} ({})",
                                         slot_index + 1,
-                                        value.cache_content_key
+                                        value.cache_content_key,
+                                        value.title
                                     ));
                                     seek_gate_reported = true;
                                 }
@@ -1347,9 +1351,10 @@ impl SendspinDownloaderWorker {
                 }
             }
             LOGGER.trace(format!(
-                "download retained for resume after playback-priority preemption: slot {}, cache key {}",
+                "download retained for resume after playback-priority preemption: slot {}, cache key {} ({})",
                 slot_index + 1,
-                reservation.cache_content_key
+                reservation.cache_content_key,
+                reservation.title
             ));
         }
         crate::cache::store::notify_cache_changed(&self.cache_change_signal);
@@ -1564,8 +1569,9 @@ impl SendspinDownloaderWorker {
         .is_some()
         {
             LOGGER.trace(format!(
-                "download skipped: cache hit for {}",
-                item.cache_content_key.as_str()
+                "download skipped: cache hit for {} ({})",
+                item.cache_content_key.as_str(),
+                item.media_item.fields().name
             ));
             return Ok(());
         }
@@ -1608,6 +1614,7 @@ impl SendspinDownloaderWorker {
                 .map_err(|_| "Sendspin downloader slot lock poisoned".to_string())?;
             let reservation = crate::cache::store::DownloadSlotReservation {
                 cache_content_key: item.cache_content_key.as_str().to_string(),
+                title: item.media_item.fields().name.clone(),
                 expected_duration_millis: item.expected_duration_millis,
                 resume_after_millis,
                 append_after_seek: Arc::new(AtomicBool::new(false)),
@@ -1622,9 +1629,10 @@ impl SendspinDownloaderWorker {
             reservation.resume_after_millis,
         );
         LOGGER.trace(format!(
-            "download prepared: slot {}, cache key {}",
+            "download prepared: slot {}, cache key {} ({})",
             slot_index + 1,
-            reservation.cache_content_key
+            reservation.cache_content_key,
+            reservation.title
         ));
         if let Ok(mut states) = self.cache_states.lock() {
             if let Some(state) = states.get_mut(item.cache_content_key.as_str()) {
@@ -1640,11 +1648,12 @@ impl SendspinDownloaderWorker {
             .ok_or_else(|| "Music Assistant player ID is not resolved".to_string())?;
         let queue_id_for_log = queue_id.0.clone();
         LOGGER.trace(format!(
-            "download request prepared: slot {}, priority {}, queue ID {}, cache key {}",
+            "download request prepared: slot {}, priority {}, queue ID {}, cache key {} ({})",
             slot_index + 1,
             item.priority,
             queue_id_for_log,
-            reservation.cache_content_key
+            reservation.cache_content_key,
+            reservation.title
         ));
         let media_item = item.media_item.clone();
         let music_assistant_url = config.music_assistant_url.clone();
@@ -1762,10 +1771,11 @@ impl SendspinDownloaderWorker {
             }
             if result.is_ok() {
                 LOGGER.trace(format!(
-                    "download requested: slot {}, queue ID {}, cache key {}",
+                    "download requested: slot {}, queue ID {}, cache key {} ({})",
                     slot_index + 1,
                     queue_id_for_log,
-                    reservation.cache_content_key
+                    reservation.cache_content_key,
+                    reservation.title
                 ));
             }
             if let Err(error) = result {
@@ -1910,6 +1920,7 @@ impl SendspinDownloaderWorker {
                 .ok_or_else(|| "Sendspin download slot reservation is unavailable".to_string())?;
             let replacement = crate::cache::store::DownloadSlotReservation {
                 cache_content_key: current.cache_content_key.clone(),
+                title: current.title.clone(),
                 expected_duration_millis: current.expected_duration_millis,
                 resume_after_millis: (seconds.max(0) as u64).saturating_mul(1_000),
                 append_after_seek: Arc::new(AtomicBool::new(false)),
@@ -2463,9 +2474,10 @@ fn append_download_chunk(
 
     if !*first_chunk_reported {
         LOGGER.trace(format!(
-            "download cache write started: slot {}, cache key {}",
+            "download cache write started: slot {}, cache key {} ({})",
             slot_index + 1,
-            reservation.cache_content_key
+            reservation.cache_content_key,
+            reservation.title
         ));
         *first_chunk_reported = true;
     }
@@ -2488,9 +2500,10 @@ fn append_download_chunk(
             }
         }
         LOGGER.trace(format!(
-            "download complete from stream timestamps: slot {}, cache key {}, {} ms, {} bytes",
+            "download complete from stream timestamps: slot {}, cache key {} ({}), {} ms, {} bytes",
             slot_index + 1,
             reservation.cache_content_key,
+            reservation.title,
             *cached_duration_millis,
             *cached_bytes
         ));
@@ -2498,9 +2511,10 @@ fn append_download_chunk(
     if *cached_duration_millis >= *next_progress_millis {
         download_status_refresh.store(true, Ordering::Release);
         LOGGER.trace(format!(
-            "download progress: slot {}, cache key {}, {} ms, {} bytes",
+            "download progress: slot {}, cache key {} ({}), {} ms, {} bytes",
             slot_index + 1,
             reservation.cache_content_key,
+            reservation.title,
             *cached_duration_millis,
             *cached_bytes
         ));
@@ -3162,6 +3176,7 @@ mod tests {
     fn superseded_download_request_cannot_modify_direct_seek_gate() {
         let reservation = DownloadSlotReservation {
             cache_content_key: "track".to_string(),
+            title: "Track".to_string(),
             expected_duration_millis: None,
             resume_after_millis: 2_000,
             append_after_seek: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -3200,6 +3215,7 @@ mod tests {
     fn resumed_chunks_commit_only_after_seek_and_stop_after_lost() {
         let reservation = DownloadSlotReservation {
             cache_content_key: "track".to_string(),
+            title: "Track".to_string(),
             expected_duration_millis: None,
             resume_after_millis: 3_000,
             append_after_seek: Arc::new(std::sync::atomic::AtomicBool::new(false)),
