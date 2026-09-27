@@ -327,126 +327,153 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
-      children: <Widget>[
-        Text(
-          'Favoriten',
-          style: Theme.of(
-            context,
-          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 20),
-        MediaTableSectionDesktop<Track>(
-          title: 'Titel',
-          items: _controller.tracks,
-          isLoading: _controller.isLoading,
-          emptyText: 'Keine favorisierten Titel.',
-          maxItemsPerPage: 10,
-          coreBridge: widget.coreBridge,
-          coreEvents: widget.coreEvents,
-          isRowFavorite: (Track item, int _) =>
-              _controller.isItemFavorite(item),
-          onRowFavoriteTap: (Track item, int _) =>
-              _controller.setFavorite(item, !_controller.isItemFavorite(item)),
-          onRowMoreAnchorTap: (Track item, int _, BuildContext anchor) =>
-              _showMenu(
-                context,
-                anchorContext: anchor,
-                actions: _buildTrackMenuActions(item),
-              ),
-          onRowContextMenu: (Track item, int _, Offset position) => _showMenu(
-            context,
-            globalPosition: position,
-            actions: _buildTrackMenuActions(item),
+    return CustomScrollView(
+      slivers: <Widget>[
+        const SliverPadding(padding: EdgeInsets.only(top: 18)),
+        _sectionSliver(
+          Text(
+            'Favoriten',
+            style: Theme.of(
+              context,
+            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
           ),
-          onRowSelectionContextMenu: (List<Track> items, Offset position) =>
-              _showMenu(
-                context,
-                globalPosition: position,
-                actions: _buildTrackMenuActions(items.first, items),
-              ),
-          onArtistTap: widget.onOpenArtist,
-          onAlbumTap: widget.onOpenAlbum,
         ),
-        const SizedBox(height: 20),
-        MediaRowSectionDesktop<Album>(
-          title: 'Alben',
-          isLoading: _controller.isLoading,
-          items: _controller.albums,
-          emptyText: 'Keine favorisierten Alben.',
-          coreBridge: widget.coreBridge,
-          coreEvents: widget.coreEvents,
-          isRowFavorite: (Album item, int _) =>
-              _controller.isItemFavorite(item),
-          onRowFavoriteTap: (Album item, int _) =>
-              _controller.setFavorite(item, !_controller.isItemFavorite(item)),
-          onRowMoreAnchorTap: (Album item, int _, BuildContext anchor) =>
-              _showMenu(
-                context,
-                anchorContext: anchor,
-                actions: _buildAlbumMenuActions(item),
-              ),
-          onRowContextMenu: (Album item, int _, Offset position) => _showMenu(
-            context,
-            globalPosition: position,
-            actions: _buildAlbumMenuActions(item),
+        const SliverPadding(padding: EdgeInsets.only(top: 20)),
+        _sectionSliver(
+          MediaTableSectionDesktop<Track>(
+            title: 'Titel',
+            items: _controller.tracks,
+            isLoading: _controller.isLoading,
+            emptyText: 'Keine favorisierten Titel.',
+            maxItemsPerPage: 10,
+            coreBridge: widget.coreBridge,
+            coreEvents: widget.coreEvents,
+            isRowFavorite: (Track item, int _) =>
+                _controller.isItemFavorite(item),
+            onRowFavoriteTap: (Track item, int _) => _controller.setFavorite(
+              item,
+              !_controller.isItemFavorite(item),
+            ),
+            onRowMoreAnchorTap: (Track item, int _, BuildContext anchor) =>
+                _showMenu(
+                  context,
+                  anchorContext: anchor,
+                  actions: _buildTrackMenuActions(item),
+                ),
+            onRowContextMenu: (Track item, int _, Offset position) => _showMenu(
+              context,
+              globalPosition: position,
+              actions: _buildTrackMenuActions(item),
+            ),
+            onRowSelectionContextMenu: (List<Track> items, Offset position) =>
+                _showMenu(
+                  context,
+                  globalPosition: position,
+                  actions: _buildTrackMenuActions(items.first, items),
+                ),
+            onArtistTap: widget.onOpenArtist,
+            onAlbumTap: widget.onOpenAlbum,
           ),
-          onArtistTap: widget.onOpenArtist,
-          onAlbumTap: widget.onOpenAlbum,
         ),
-        const SizedBox(height: 20),
-        MediaRowSectionDesktop<Playlist>(
-          title: 'Playlists',
-          isLoading: _controller.isLoading,
-          items: _controller.playlists,
-          emptyText: 'Keine favorisierten Playlists.',
-          coreBridge: widget.coreBridge,
-          coreEvents: widget.coreEvents,
-          isRowFavorite: (Playlist item, int _) =>
-              _controller.isItemFavorite(item),
-          onRowFavoriteTap: (Playlist item, int _) =>
-              _controller.setFavorite(item, !_controller.isItemFavorite(item)),
-          onRowMoreAnchorTap: (Playlist item, int _, BuildContext anchor) =>
-              _showMenu(
-                context,
-                anchorContext: anchor,
-                actions: _buildPlaylistMenuActions(item),
-              ),
-          onRowContextMenu: (Playlist item, int _, Offset position) =>
-              _showMenu(
-                context,
-                globalPosition: position,
-                actions: _buildPlaylistMenuActions(item),
-              ),
-          onPlaylistTap: widget.onOpenPlaylist,
-        ),
-        const SizedBox(height: 20),
-        MediaRowSectionDesktop<Artist>(
-          title: 'Artists',
-          isLoading: _controller.isLoading,
-          items: _controller.artists,
-          emptyText: 'Keine favorisierten Artists.',
-          coreBridge: widget.coreBridge,
-          coreEvents: widget.coreEvents,
-          isRowFavorite: (Artist item, int _) =>
-              _controller.isItemFavorite(item),
-          onRowFavoriteTap: (Artist item, int _) =>
-              _controller.setFavorite(item, !_controller.isItemFavorite(item)),
-          onRowMoreAnchorTap: (Artist item, int _, BuildContext anchor) =>
-              _showMenu(
-                context,
-                anchorContext: anchor,
-                actions: _buildArtistMenuActions(item),
-              ),
-          onRowContextMenu: (Artist item, int _, Offset position) => _showMenu(
-            context,
-            globalPosition: position,
-            actions: _buildArtistMenuActions(item),
+        const SliverPadding(padding: EdgeInsets.only(top: 20)),
+        _sectionSliver(
+          MediaRowSectionDesktop<Album>(
+            title: 'Alben',
+            isLoading: _controller.isLoading,
+            items: _controller.albums,
+            emptyText: 'Keine favorisierten Alben.',
+            coreBridge: widget.coreBridge,
+            coreEvents: widget.coreEvents,
+            isRowFavorite: (Album item, int _) =>
+                _controller.isItemFavorite(item),
+            onRowFavoriteTap: (Album item, int _) => _controller.setFavorite(
+              item,
+              !_controller.isItemFavorite(item),
+            ),
+            onRowMoreAnchorTap: (Album item, int _, BuildContext anchor) =>
+                _showMenu(
+                  context,
+                  anchorContext: anchor,
+                  actions: _buildAlbumMenuActions(item),
+                ),
+            onRowContextMenu: (Album item, int _, Offset position) => _showMenu(
+              context,
+              globalPosition: position,
+              actions: _buildAlbumMenuActions(item),
+            ),
+            onArtistTap: widget.onOpenArtist,
+            onAlbumTap: widget.onOpenAlbum,
           ),
-          onArtistTap: widget.onOpenArtist,
         ),
+        const SliverPadding(padding: EdgeInsets.only(top: 20)),
+        _sectionSliver(
+          MediaRowSectionDesktop<Playlist>(
+            title: 'Playlists',
+            isLoading: _controller.isLoading,
+            items: _controller.playlists,
+            emptyText: 'Keine favorisierten Playlists.',
+            coreBridge: widget.coreBridge,
+            coreEvents: widget.coreEvents,
+            isRowFavorite: (Playlist item, int _) =>
+                _controller.isItemFavorite(item),
+            onRowFavoriteTap: (Playlist item, int _) => _controller.setFavorite(
+              item,
+              !_controller.isItemFavorite(item),
+            ),
+            onRowMoreAnchorTap: (Playlist item, int _, BuildContext anchor) =>
+                _showMenu(
+                  context,
+                  anchorContext: anchor,
+                  actions: _buildPlaylistMenuActions(item),
+                ),
+            onRowContextMenu: (Playlist item, int _, Offset position) =>
+                _showMenu(
+                  context,
+                  globalPosition: position,
+                  actions: _buildPlaylistMenuActions(item),
+                ),
+            onPlaylistTap: widget.onOpenPlaylist,
+          ),
+        ),
+        const SliverPadding(padding: EdgeInsets.only(top: 20)),
+        _sectionSliver(
+          MediaRowSectionDesktop<Artist>(
+            title: 'Artists',
+            isLoading: _controller.isLoading,
+            items: _controller.artists,
+            emptyText: 'Keine favorisierten Artists.',
+            coreBridge: widget.coreBridge,
+            coreEvents: widget.coreEvents,
+            isRowFavorite: (Artist item, int _) =>
+                _controller.isItemFavorite(item),
+            onRowFavoriteTap: (Artist item, int _) => _controller.setFavorite(
+              item,
+              !_controller.isItemFavorite(item),
+            ),
+            onRowMoreAnchorTap: (Artist item, int _, BuildContext anchor) =>
+                _showMenu(
+                  context,
+                  anchorContext: anchor,
+                  actions: _buildArtistMenuActions(item),
+                ),
+            onRowContextMenu: (Artist item, int _, Offset position) =>
+                _showMenu(
+                  context,
+                  globalPosition: position,
+                  actions: _buildArtistMenuActions(item),
+                ),
+            onArtistTap: widget.onOpenArtist,
+          ),
+        ),
+        const SliverPadding(padding: EdgeInsets.only(bottom: 28)),
       ],
+    );
+  }
+
+  Widget _sectionSliver(Widget child) {
+    return SliverPadding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      sliver: SliverToBoxAdapter(child: child),
     );
   }
 }

@@ -386,144 +386,165 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
-      children: <Widget>[
-        Text(
-          'Suche',
-          style: Theme.of(
-            context,
-          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+    return CustomScrollView(
+      slivers: <Widget>[
+        const SliverPadding(padding: EdgeInsets.only(top: 18)),
+        _sectionSliver(
+          Text(
+            'Suche',
+            style: Theme.of(
+              context,
+            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+          ),
         ),
-        const SizedBox(height: 20),
+        const SliverPadding(padding: EdgeInsets.only(top: 20)),
         if (!_controller.hasSearchRequest)
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: colors.bgSecondary,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: colors.border),
-            ),
-            child: Text(
-              'Nutze die Suchleiste oben, um Ergebnisse anzuzeigen.',
-              style: TextStyle(color: colors.textSecondary),
+          _sectionSliver(
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: colors.bgSecondary,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: colors.border),
+              ),
+              child: Text(
+                'Nutze die Suchleiste oben, um Ergebnisse anzuzeigen.',
+                style: TextStyle(color: colors.textSecondary),
+              ),
             ),
           )
         else ...<Widget>[
-          MediaTableSectionDesktop<Track>(
-            title: 'Tracks',
-            items: _controller.tracks,
-            isLoading: _controller.isLoadingTracks,
-            emptyText: 'Keine Tracks gefunden.',
-            maxItemsPerPage: 10,
-            coreBridge: widget.coreBridge,
-            coreEvents: widget.coreEvents,
-            isRowFavorite: (Track item, int _) => _isItemFavorite(item),
-            onRowFavoriteTap: widget.userDataController == null
-                ? null
-                : (Track item, int _) => _toggleFavorite(item),
-            onRowMoreAnchorTap:
-                (Track item, int _, BuildContext anchorContext) => _showMenu(
-                  context,
-                  anchorContext: anchorContext,
-                  actions: _buildTrackMenuActions(item),
-                ),
-            onRowContextMenu: (Track item, int _, Offset globalPosition) =>
-                _showMenu(
-                  context,
-                  globalPosition: globalPosition,
-                  actions: _buildTrackMenuActions(item),
-                ),
-            onRowSelectionContextMenu:
-                (List<Track> items, Offset globalPosition) => _showMenu(
-                  context,
-                  globalPosition: globalPosition,
-                  actions: _buildTrackMenuActions(items.first, items),
-                ),
-            onArtistTap: widget.onOpenArtist,
-            onAlbumTap: widget.onOpenAlbum,
+          _sectionSliver(
+            MediaTableSectionDesktop<Track>(
+              title: 'Tracks',
+              items: _controller.tracks,
+              isLoading: _controller.isLoadingTracks,
+              emptyText: 'Keine Tracks gefunden.',
+              maxItemsPerPage: 10,
+              coreBridge: widget.coreBridge,
+              coreEvents: widget.coreEvents,
+              isRowFavorite: (Track item, int _) => _isItemFavorite(item),
+              onRowFavoriteTap: widget.userDataController == null
+                  ? null
+                  : (Track item, int _) => _toggleFavorite(item),
+              onRowMoreAnchorTap:
+                  (Track item, int _, BuildContext anchorContext) => _showMenu(
+                    context,
+                    anchorContext: anchorContext,
+                    actions: _buildTrackMenuActions(item),
+                  ),
+              onRowContextMenu: (Track item, int _, Offset globalPosition) =>
+                  _showMenu(
+                    context,
+                    globalPosition: globalPosition,
+                    actions: _buildTrackMenuActions(item),
+                  ),
+              onRowSelectionContextMenu:
+                  (List<Track> items, Offset globalPosition) => _showMenu(
+                    context,
+                    globalPosition: globalPosition,
+                    actions: _buildTrackMenuActions(items.first, items),
+                  ),
+              onArtistTap: widget.onOpenArtist,
+              onAlbumTap: widget.onOpenAlbum,
+            ),
           ),
-          const SizedBox(height: 20),
-          MediaRowSectionDesktop<Album>(
-            title: 'Alben',
-            isLoading: _controller.isLoadingAlbums,
-            items: _controller.albums,
-            emptyText: 'Keine Alben gefunden.',
-            coreBridge: widget.coreBridge,
-            coreEvents: widget.coreEvents,
-            isRowFavorite: (Album item, int _) => _isItemFavorite(item),
-            onRowFavoriteTap: widget.userDataController == null
-                ? null
-                : (Album item, int _) => _toggleFavorite(item),
-            onRowMoreAnchorTap:
-                (Album item, int _, BuildContext anchorContext) => _showMenu(
-                  context,
-                  anchorContext: anchorContext,
-                  actions: _buildAlbumMenuActions(item),
-                ),
-            onRowContextMenu: (Album item, int _, Offset globalPosition) =>
-                _showMenu(
-                  context,
-                  globalPosition: globalPosition,
-                  actions: _buildAlbumMenuActions(item),
-                ),
-            onArtistTap: widget.onOpenArtist,
-            onAlbumTap: widget.onOpenAlbum,
+          const SliverPadding(padding: EdgeInsets.only(top: 20)),
+          _sectionSliver(
+            MediaRowSectionDesktop<Album>(
+              title: 'Alben',
+              isLoading: _controller.isLoadingAlbums,
+              items: _controller.albums,
+              emptyText: 'Keine Alben gefunden.',
+              coreBridge: widget.coreBridge,
+              coreEvents: widget.coreEvents,
+              isRowFavorite: (Album item, int _) => _isItemFavorite(item),
+              onRowFavoriteTap: widget.userDataController == null
+                  ? null
+                  : (Album item, int _) => _toggleFavorite(item),
+              onRowMoreAnchorTap:
+                  (Album item, int _, BuildContext anchorContext) => _showMenu(
+                    context,
+                    anchorContext: anchorContext,
+                    actions: _buildAlbumMenuActions(item),
+                  ),
+              onRowContextMenu: (Album item, int _, Offset globalPosition) =>
+                  _showMenu(
+                    context,
+                    globalPosition: globalPosition,
+                    actions: _buildAlbumMenuActions(item),
+                  ),
+              onArtistTap: widget.onOpenArtist,
+              onAlbumTap: widget.onOpenAlbum,
+            ),
           ),
-          const SizedBox(height: 20),
-          MediaRowSectionDesktop<Playlist>(
-            title: 'Playlists',
-            isLoading: _controller.isLoadingPlaylists,
-            items: _controller.playlists,
-            emptyText: 'Keine Playlists gefunden.',
-            coreBridge: widget.coreBridge,
-            coreEvents: widget.coreEvents,
-            isRowFavorite: (Playlist item, int _) => _isItemFavorite(item),
-            onRowFavoriteTap: widget.userDataController == null
-                ? null
-                : (Playlist item, int _) => _toggleFavorite(item),
-            onRowMoreAnchorTap:
-                (Playlist item, int _, BuildContext anchorContext) => _showMenu(
-                  context,
-                  anchorContext: anchorContext,
-                  actions: _buildPlaylistMenuActions(item),
-                ),
-            onRowContextMenu: (Playlist item, int _, Offset globalPosition) =>
-                _showMenu(
-                  context,
-                  globalPosition: globalPosition,
-                  actions: _buildPlaylistMenuActions(item),
-                ),
-            onPlaylistTap: widget.onOpenPlaylist,
+          const SliverPadding(padding: EdgeInsets.only(top: 20)),
+          _sectionSliver(
+            MediaRowSectionDesktop<Playlist>(
+              title: 'Playlists',
+              isLoading: _controller.isLoadingPlaylists,
+              items: _controller.playlists,
+              emptyText: 'Keine Playlists gefunden.',
+              coreBridge: widget.coreBridge,
+              coreEvents: widget.coreEvents,
+              isRowFavorite: (Playlist item, int _) => _isItemFavorite(item),
+              onRowFavoriteTap: widget.userDataController == null
+                  ? null
+                  : (Playlist item, int _) => _toggleFavorite(item),
+              onRowMoreAnchorTap:
+                  (Playlist item, int _, BuildContext anchorContext) =>
+                      _showMenu(
+                        context,
+                        anchorContext: anchorContext,
+                        actions: _buildPlaylistMenuActions(item),
+                      ),
+              onRowContextMenu: (Playlist item, int _, Offset globalPosition) =>
+                  _showMenu(
+                    context,
+                    globalPosition: globalPosition,
+                    actions: _buildPlaylistMenuActions(item),
+                  ),
+              onPlaylistTap: widget.onOpenPlaylist,
+            ),
           ),
-          const SizedBox(height: 20),
-          MediaRowSectionDesktop<Artist>(
-            title: 'Artists',
-            isLoading: _controller.isLoadingArtists,
-            items: _controller.artists,
-            emptyText: 'Keine Artists gefunden.',
-            coreBridge: widget.coreBridge,
-            coreEvents: widget.coreEvents,
-            isRowFavorite: (Artist item, int _) => _isItemFavorite(item),
-            onRowFavoriteTap: widget.userDataController == null
-                ? null
-                : (Artist item, int _) => _toggleFavorite(item),
-            onRowMoreAnchorTap:
-                (Artist item, int _, BuildContext anchorContext) => _showMenu(
-                  context,
-                  anchorContext: anchorContext,
-                  actions: _buildArtistMenuActions(item),
-                ),
-            onRowContextMenu: (Artist item, int _, Offset globalPosition) =>
-                _showMenu(
-                  context,
-                  globalPosition: globalPosition,
-                  actions: _buildArtistMenuActions(item),
-                ),
-            onArtistTap: widget.onOpenArtist,
+          const SliverPadding(padding: EdgeInsets.only(top: 20)),
+          _sectionSliver(
+            MediaRowSectionDesktop<Artist>(
+              title: 'Artists',
+              isLoading: _controller.isLoadingArtists,
+              items: _controller.artists,
+              emptyText: 'Keine Artists gefunden.',
+              coreBridge: widget.coreBridge,
+              coreEvents: widget.coreEvents,
+              isRowFavorite: (Artist item, int _) => _isItemFavorite(item),
+              onRowFavoriteTap: widget.userDataController == null
+                  ? null
+                  : (Artist item, int _) => _toggleFavorite(item),
+              onRowMoreAnchorTap:
+                  (Artist item, int _, BuildContext anchorContext) => _showMenu(
+                    context,
+                    anchorContext: anchorContext,
+                    actions: _buildArtistMenuActions(item),
+                  ),
+              onRowContextMenu: (Artist item, int _, Offset globalPosition) =>
+                  _showMenu(
+                    context,
+                    globalPosition: globalPosition,
+                    actions: _buildArtistMenuActions(item),
+                  ),
+              onArtistTap: widget.onOpenArtist,
+            ),
           ),
         ],
+        const SliverPadding(padding: EdgeInsets.only(bottom: 28)),
       ],
+    );
+  }
+
+  Widget _sectionSliver(Widget child) {
+    return SliverPadding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      sliver: SliverToBoxAdapter(child: child),
     );
   }
 
