@@ -23,6 +23,7 @@ class MainActivity : FlutterActivity() {
 		// Activity lifecycle and media-service startup.
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
+		NativeCoreBridge.retainFlutterActivity()
 		nativeBridgeReady = try {
 			System.loadLibrary("mashin_engine")
 			true
@@ -79,6 +80,7 @@ class MainActivity : FlutterActivity() {
 
 	// A deliberate app close ends playback, whereas minimizing keeps the service alive.
 	override fun onDestroy() {
+		NativeCoreBridge.releaseFlutterActivity()
 		if (isFinishing) {
 			Log.d(TAG, "Activity is finishing; stopping media service")
 			stopService(Intent(applicationContext, MashinMediaLibraryService::class.java))

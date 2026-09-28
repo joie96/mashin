@@ -3,6 +3,7 @@
 use crate::core;
 use crate::core::models::{CoreError, MediaSessionEvent};
 use crate::ffi::event_channel;
+use crate::music_assistant::models::identifiers::QueueItemId;
 use crate::music_assistant::models::media::MediaItem;
 use crate::music_assistant::models::queue::RepeatMode;
 
@@ -20,6 +21,21 @@ pub(crate) fn replace_queue(serialized_items: &str) -> Result<Vec<MediaSessionEv
     let media_items = parse_media_items(serialized_items)?;
     core::resolve_media_and_execute_command(media_items, false, |coordinator, tracks| {
         coordinator.play_media(tracks)
+    })
+}
+
+pub(crate) fn replace_queue_shuffled(
+    serialized_items: &str,
+) -> Result<Vec<MediaSessionEvent>, CoreError> {
+    let media_items = parse_media_items(serialized_items)?;
+    core::resolve_media_and_execute_command(media_items, true, |coordinator, tracks| {
+        coordinator.play_media(tracks)
+    })
+}
+
+pub(crate) fn play_queue_item(item_id: &str) -> Result<Vec<MediaSessionEvent>, CoreError> {
+    execute_core_command(|coordinator| {
+        coordinator.play_queue_item(QueueItemId(item_id.to_string()))
     })
 }
 
@@ -74,6 +90,8 @@ pub(crate) fn execute_command(kind: &str, argument: Option<&str>) -> Result<(), 
     let events = match kind {
         "activate" => activate_engine(),
         "playMediaItems" => replace_queue(required_text_argument(argument)?),
+        "playShuffledMedia" => replace_queue_shuffled(required_text_argument(argument)?),
+        "playQueueItem" => play_queue_item(required_text_argument(argument)?),
         "startSendspinRadio" => {
             let media_items = parse_media_items(required_text_argument(argument)?)
                 .map_err(|error| error.message)?;
@@ -101,6 +119,7 @@ pub(crate) fn execute_command(kind: &str, argument: Option<&str>) -> Result<(), 
             "all" => RepeatMode::All,
             _ => RepeatMode::Off,
         }),
+        "shutdown" => return core::shutdown().map_err(|error| error.message),
         _ => return Err(format!("unsupported Android core command '{kind}'")),
     };
     events
@@ -145,5 +164,28 @@ mod tests {
         assert!(execute_command("startSendspinRadio", Some("not JSON"))
             .unwrap_err()
             .starts_with("invalid Android media items:"));
+    }
+
+    #[test]
+    fn android_shuffle_routes_to_the_core_queue_replacement() {
+        assert_eq!(
+            execute_command("playShuffledMedia", None).unwrap_err(),
+            "missing Android core command argument"
+        );
+        assert!(execute_command("playShuffledMedia", Some("not JSON"))
+            .unwrap_err()
+            .starts_with("invalid Android media items:"));
+    }
+
+    #[test]
+    fn android_queue_selection_requires_an_item_id() {
+        assert_eq!(
+            execute_command("playQueueItem", None).unwrap_err(),
+            "missing Android core command argument"
+        );
+        assert_eq!(
+            execute_command("playQueueItem", Some("missing-item")).unwrap_err(),
+            "queue item is no longer available"
+        );
     }
 }

@@ -305,6 +305,19 @@ impl CoreCoordinator {
         self.playback.play_queue_index(index)
     }
 
+    pub(crate) fn play_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {
+        let index = Self::queue_item_index(&self.playback.queue(), &item_id)?;
+        self.playback.play_queue_index(index)
+    }
+
+    fn queue_item_index(queue: &Queue, item_id: &QueueItemId) -> Result<usize, String> {
+        queue
+            .items
+            .iter()
+            .position(|item| &item.queue_item_id == item_id)
+            .ok_or_else(|| "queue item is no longer available".to_string())
+    }
+
     // Playback transport commands.
     pub(crate) fn transport_play(&mut self) -> Result<(), String> {
         self.playback.transport_play()
@@ -1202,6 +1215,13 @@ pub(crate) fn read_queue() -> Result<Queue, CoreError> {
     Ok(coordinator.queue())
 }
 
+pub(crate) fn read_media_session_state() -> Result<MediaSessionState, CoreError> {
+    let coordinator = CORE_COORDINATOR
+        .lock()
+        .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
+    Ok(coordinator.media_session_state())
+}
+
 pub(crate) fn read_session_settings() -> Result<SessionSettings, CoreError> {
     let coordinator = CORE_COORDINATOR
         .lock()
@@ -1331,6 +1351,33 @@ mod tests {
 
     fn test_coordinator() -> CoreCoordinator {
         CoreCoordinator::with_auth_store(Box::new(TestAuthStore::new()))
+    }
+
+    #[test]
+    fn queue_item_selection_follows_id_after_reordering() {
+        let first = serde_json::from_value(serde_json::json!({
+            "queue_id": "test", "queue_item_id": "first", "name": "First"
+        }))
+        .expect("first queue item");
+        let second = serde_json::from_value(serde_json::json!({
+            "queue_id": "test", "queue_item_id": "second", "name": "Second"
+        }))
+        .expect("second queue item");
+        let mut queue = crate::playback::models::Queue {
+            items: vec![first, second],
+            ..Default::default()
+        };
+        let selected_id = crate::music_assistant::models::identifiers::QueueItemId("second".into());
+
+        assert_eq!(
+            CoreCoordinator::queue_item_index(&queue, &selected_id),
+            Ok(1)
+        );
+        queue.items.swap(0, 1);
+        assert_eq!(
+            CoreCoordinator::queue_item_index(&queue, &selected_id),
+            Ok(0)
+        );
     }
 
     fn session_config() -> SessionConfig {

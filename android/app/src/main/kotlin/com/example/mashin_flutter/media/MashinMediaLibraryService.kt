@@ -29,10 +29,14 @@ import androidx.core.app.NotificationCompat
 import com.google.common.util.concurrent.Futures
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.SettableFuture
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicLong
 import com.google.common.util.concurrent.MoreExecutors
 
@@ -41,6 +45,12 @@ class MashinMediaLibraryService : MediaLibraryService() {
     private var sessionPlayer: MashinSessionPlayer? = null
     private var mediaLibrarySession: MediaLibraryService.MediaLibrarySession? = null
     private var libraryCallback: AndroidAutoLibraryCallback? = null
+    private var isStoppingUnownedService = false
+    @Volatile private var isShuttingDownCore = false
+    @Volatile private var hasShutDownCore = false
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val stopUnownedServiceRunnable = Runnable { stopUnownedService() }
+    private val commandExecutor = Executors.newSingleThreadExecutor()
     private val audioManager by lazy { getSystemService(AudioManager::class.java) }
     private val audioFocusRequest by lazy {
         AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
@@ -50,7 +60,7 @@ class MashinMediaLibraryService : MediaLibraryService() {
                 .build())
             .setOnAudioFocusChangeListener({ focusChange ->
                 if (focusChange == AudioManager.AUDIOFOCUS_LOSS || focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
-                    NativeCoreBridge.command("pause", null)
+                    dispatchCoreCommand("pause", null)
                 }
             }, Handler(Looper.getMainLooper()))
             .build()
@@ -70,7 +80,11 @@ class MashinMediaLibraryService : MediaLibraryService() {
         if (NativeCoreBridge.restorePersistedSession()) {
             NativeCoreBridge.command("activate", null)
         }
-        val initializedLibraryCallback = AndroidAutoLibraryCallback(applicationContext, ::requestPlaybackFocus)
+        val initializedLibraryCallback = AndroidAutoLibraryCallback(
+            applicationContext,
+            ::dispatchCoreCommand,
+            ::onAndroidAutoDisconnected,
+        )
         libraryCallback = initializedLibraryCallback
         val initializedSessionPlayer = MashinSessionPlayer(::dispatchCoreCommand, initializedLibraryCallback::startPlayback)
         sessionPlayer = initializedSessionPlayer
@@ -86,18 +100,96 @@ class MashinMediaLibraryService : MediaLibraryService() {
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibraryService.MediaLibrarySession? =
-        mediaLibrarySession
+        mediaLibrarySession?.takeUnless { isShuttingDownCore || hasShutDownCore }
+
+    override fun onTaskRemoved(rootIntent: android.content.Intent?) {
+        if (libraryCallback?.hasAndroidAutoControllers != true) {
+            if (NativeCoreBridge.hasFlutterActivity()) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            } else {
+                stopUnownedService()
+            }
+        }
+    }
+
+    private fun onAndroidAutoDisconnected() {
+        mainHandler.postDelayed(stopUnownedServiceRunnable, 1_000L)
+    }
+
+    private fun stopUnownedService() {
+        if (!NativeCoreBridge.hasFlutterActivity() && libraryCallback?.hasAndroidAutoControllers == false &&
+            !isStoppingUnownedService) {
+            isStoppingUnownedService = true
+            isShuttingDownCore = true
+            commandExecutor.execute {
+                if (!NativeCoreBridge.hasFlutterActivity() &&
+                    libraryCallback?.hasAndroidAutoControllers == false) {
+                    shutDownCore()
+                } else {
+                    isShuttingDownCore = false
+                }
+                mainHandler.post {
+                    if (hasShutDownCore) {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf()
+                    } else {
+                        isStoppingUnownedService = false
+                        if (!NativeCoreBridge.hasFlutterActivity() &&
+                            libraryCallback?.hasAndroidAutoControllers == false) {
+                            mainHandler.postDelayed(stopUnownedServiceRunnable, 5_000L)
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacks(stopUnownedServiceRunnable)
         NativeCoreBridge.stopObservingEvents()
         abandonPlaybackFocus()
         libraryCallback?.close()
         libraryCallback = null
+        val shutdown = if (!NativeCoreBridge.hasFlutterActivity() && !hasShutDownCore) {
+            commandExecutor.submit {
+                if (!NativeCoreBridge.hasFlutterActivity() && !hasShutDownCore) {
+                    shutDownCore()
+                }
+            }
+        } else null
+        commandExecutor.shutdown()
         mediaLibrarySession?.release()
         mediaLibrarySession = null
         sessionPlayer?.release()
         sessionPlayer = null
+        if (shutdown != null) {
+            try {
+                shutdown.get(4, TimeUnit.SECONDS)
+                if (!NativeCoreBridge.hasFlutterActivity() && !hasShutDownCore) {
+                    Log.e("MashinAutoPlayback", "Core shutdown incomplete on service destroy")
+                }
+            } catch (error: TimeoutException) {
+                Log.e("MashinAutoPlayback", "Core shutdown timed out on service destroy", error)
+            } catch (error: InterruptedException) {
+                Thread.currentThread().interrupt()
+                Log.e("MashinAutoPlayback", "Core shutdown interrupted on service destroy", error)
+            } catch (error: Exception) {
+                Log.e("MashinAutoPlayback", "Core shutdown failed on service destroy", error)
+            }
+        }
         super.onDestroy()
+    }
+
+    private fun shutDownCore() {
+        try {
+            hasShutDownCore = NativeCoreBridge.command("shutdown", null)
+            if (!hasShutDownCore) Log.e("MashinAutoPlayback", "Core shutdown failed")
+        } catch (error: Exception) {
+            Log.e("MashinAutoPlayback", "Core shutdown failed", error)
+        } finally {
+            isShuttingDownCore = false
+        }
     }
 
     // Core state synchronization.
@@ -109,31 +201,50 @@ class MashinMediaLibraryService : MediaLibraryService() {
         }
     }
 
-    private fun updatePlayerState() {
-        val playerState = NativeCoreBridge.query("playerState", null)
-        val queue = NativeCoreBridge.query("queue", null)
-        if (playerState == null || queue == null) {
-            return
-        }
-
-        val playerStateJson = JSONObject(playerState)
-        val queueJson = JSONObject(queue)
-        val snapshot = SystemMediaSnapshot.fromPlayerState(playerStateJson, queueJson)
+    private fun updatePlayerState(): Boolean {
+        val state = NativeCoreBridge.query("mediaSessionState", null) ?: return false
+        val stateJson = JSONObject(state)
+        val snapshot = SystemMediaSnapshot.fromPlayerState(
+            stateJson.getJSONObject("playerState"),
+            stateJson.getJSONObject("queue"),
+        )
         if (snapshot.status == "playing" && !requestPlaybackFocus()) {
-            NativeCoreBridge.command("pause", null)
+            dispatchCoreCommand("pause", null)
         } else if (snapshot.status == "paused" || snapshot.status == "idle" || snapshot.status == "error") {
             abandonPlaybackFocus()
         }
         sessionPlayer?.updateState(snapshot)
         if (sessionPlayer != null) triggerNotificationUpdate()
+        return true
     }
 
-    private fun dispatchCoreCommand(command: String, argument: String? = null) {
-        if (command == "play" && !requestPlaybackFocus()) {
-            return
+    private fun dispatchCoreCommand(command: String, argument: String?): ListenableFuture<*> {
+        val completion = SettableFuture.create<Unit>()
+        try {
+            commandExecutor.execute {
+                try {
+                    if (command == "play" || command == "playMediaItems" || command == "playShuffledMedia" ||
+                        command == "startSendspinRadio" || command == "playQueueItem") {
+                        check(requestPlaybackFocus()) { "Audio focus is required to start playback" }
+                    }
+                    check(NativeCoreBridge.command(command, argument)) { "Core command failed: $command" }
+                    mainHandler.post {
+                        try {
+                            check(updatePlayerState()) { "Core media session state unavailable" }
+                            completion.set(Unit)
+                        } catch (error: Exception) {
+                            completion.setException(error)
+                        }
+                    }
+                } catch (error: Exception) {
+                    Log.e("MashinAutoPlayback", "Core command failed: $command", error)
+                    mainHandler.post { completion.setException(error) }
+                }
+            }
+        } catch (error: RejectedExecutionException) {
+            completion.setException(error)
         }
-        NativeCoreBridge.command(command, argument)
-        updatePlayerState()
+        return completion
     }
 
     // Audio focus belongs to the service because Flutter and Android Auto share the native output.
@@ -196,16 +307,35 @@ private class MashinMediaNotificationProvider(context: Context) : DefaultMediaNo
 @UnstableApi
 internal class AndroidAutoLibraryCallback(
     private val context: Context,
-    private val requestPlaybackFocus: () -> Boolean,
+    private val dispatchCommand: (String, String?) -> ListenableFuture<*>,
+    private val onAndroidAutoDisconnected: () -> Unit,
 ) : MediaLibraryService.MediaLibrarySession.Callback {
+    private val androidAutoControllers = mutableSetOf<MediaSession.ControllerInfo>()
     private val browseExecutor = MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor())
     private val libraryItemsById = ConcurrentHashMap<String, MediaItem>()
     private val serializedMediaItems = ConcurrentHashMap<String, String>()
     private val serializedTrackLists = ConcurrentHashMap<String, String>()
     private val identifierSequence = AtomicLong()
 
+    @Volatile var hasAndroidAutoControllers = false
+        private set
+
     fun close() {
         browseExecutor.shutdown()
+    }
+
+    override fun onPostConnect(session: MediaSession, controller: MediaSession.ControllerInfo) {
+        if (controller.packageName == "com.google.android.projection.gearhead") {
+            androidAutoControllers.add(controller)
+            hasAndroidAutoControllers = true
+        }
+    }
+
+    override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) {
+        if (androidAutoControllers.remove(controller) && androidAutoControllers.isEmpty()) {
+            hasAndroidAutoControllers = false
+            onAndroidAutoDisconnected()
+        }
     }
 
     override fun onGetLibraryRoot(
@@ -281,39 +411,23 @@ internal class AndroidAutoLibraryCallback(
         return Futures.immediateFuture(MediaSession.MediaItemsWithStartPosition(resolvedItems, startIndex, startPositionMs))
     }
 
-    fun startPlayback(mediaId: String): ListenableFuture<*> = browseExecutor.submit {
-        try {
-            check(requestPlaybackFocus()) { "Audio focus is required to start Android Auto playback" }
-            playMediaId(mediaId)
-        } catch (error: Exception) {
-            Log.e("MashinAutoPlayback", "Native media selection failed for $mediaId", error)
-            throw error
-        }
-    }
-
-    private fun playMediaId(mediaId: String) {
-        fun startCorePlayback(command: String, argument: String) {
-            check(NativeCoreBridge.command(command, argument)) {
-                "Android media playback command $command failed for $mediaId"
-            }
-        }
-
+    fun startPlayback(mediaId: String): ListenableFuture<*> {
         if (mediaId.startsWith("artistRadio:")) {
-            serializedMediaItems[mediaId.removePrefix("artistRadio:")]?.let { serializedArtist ->
-                startCorePlayback("startSendspinRadio", "[$serializedArtist]")
-            }
-            return
+            val artist = serializedMediaItems[mediaId.removePrefix("artistRadio:")]
+                ?: return Futures.immediateFailedFuture<Any>(IllegalArgumentException("unknown Android media ID: $mediaId"))
+            return dispatchCommand("startSendspinRadio", "[$artist]")
         }
         serializedTrackLists[mediaId]?.let { serializedItems ->
-            startCorePlayback("playMediaItems", serializedItems)
-            return
+            return dispatchCommand(
+                if (mediaId.startsWith("action:shuffle:")) "playShuffledMedia" else "playMediaItems",
+                serializedItems,
+            )
         }
         serializedMediaItems[mediaId]?.let { serializedItem ->
             val command = if (JSONObject(serializedItem).optString("media_type") == "track") "startSendspinRadio" else "playMediaItems"
-            startCorePlayback(command, "[$serializedItem]")
-            return
+            return dispatchCommand(command, "[$serializedItem]")
         }
-        throw IllegalArgumentException("unknown Android media ID: $mediaId")
+        return Futures.immediateFailedFuture<Any>(IllegalArgumentException("unknown Android media ID: $mediaId"))
     }
 
     private fun libraryItem(
@@ -567,8 +681,7 @@ internal class AndroidAutoLibraryCallback(
         val playId = "action:play:${identifierSequence.incrementAndGet()}"
         val shuffleId = "action:shuffle:${identifierSequence.incrementAndGet()}"
         serializedTrackLists[playId] = tracks.toString()
-        val shuffled = (0 until tracks.length()).mapNotNull(tracks::optJSONObject).shuffled()
-        serializedTrackLists[shuffleId] = JSONArray(shuffled).toString()
+        serializedTrackLists[shuffleId] = tracks.toString()
         return listOf(
             libraryItem(playId, "Abspielen", true, "${tracks.length()} Tracks", iconResource = R.drawable.play_arrow),
             libraryItem(shuffleId, "Zufällige Wiedergabe", true, "${tracks.length()} Tracks", iconResource = R.drawable.shuffle),
@@ -605,7 +718,7 @@ internal class AndroidAutoLibraryCallback(
 // Android Auto player-state adaptation.
 @UnstableApi
 internal class MashinSessionPlayer(
-    private val dispatchCommand: (String, String?) -> Unit,
+    private val dispatchCommand: (String, String?) -> ListenableFuture<*>,
     private val startPlayback: (String) -> ListenableFuture<*>,
 ) : SimpleBasePlayer(Looper.getMainLooper()) {
     private var snapshot = SystemMediaSnapshot.empty()
@@ -667,15 +780,26 @@ internal class MashinSessionPlayer(
         mediaItems: List<MediaItem>,
         startIndex: Int,
         startPositionMs: Long,
-    ): ListenableFuture<*> = mediaItems.getOrNull(if (startIndex == C.INDEX_UNSET) 0 else startIndex)
-        ?.let { startPlayback(it.mediaId) }
-        ?: Futures.immediateFailedFuture<Any>(IllegalArgumentException("missing Android media selection"))
+    ): ListenableFuture<*> {
+        val selectedItem = mediaItems.getOrNull(if (startIndex == C.INDEX_UNSET) 0 else startIndex)
+            ?: return Futures.immediateFailedFuture<Any>(IllegalArgumentException("missing Android media selection"))
+        val selection = run {
+            val isQueueItem = snapshot.mediaItems.any { it.mediaId == selectedItem.mediaId }
+            if (isQueueItem) dispatchCommand("playQueueItem", selectedItem.mediaId)
+            else startPlayback(selectedItem.mediaId)
+        }
+        if (startPositionMs <= 0L) return selection
+        return Futures.transformAsync(
+            selection,
+            { dispatchCommand("seekSeconds", (startPositionMs / 1_000.0).toString()) },
+            MoreExecutors.directExecutor(),
+        )
+    }
 
     override fun handlePrepare(): ListenableFuture<*> = Futures.immediateVoidFuture()
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
-        dispatchCommand(if (playWhenReady) "play" else "pause", null)
-        return Futures.immediateVoidFuture()
+        return dispatchCommand(if (playWhenReady) "play" else "pause", null)
     }
 
     override fun handleSeek(
@@ -683,12 +807,11 @@ internal class MashinSessionPlayer(
         positionMs: Long,
         seekCommand: Int,
     ): ListenableFuture<*> {
-        when (seekCommand) {
+        return when (seekCommand) {
             Player.COMMAND_SEEK_TO_NEXT -> dispatchCommand("next", null)
             Player.COMMAND_SEEK_TO_PREVIOUS -> dispatchCommand("previous", null)
             else -> dispatchCommand("seekSeconds", (positionMs / 1_000.0).toString())
         }
-        return Futures.immediateVoidFuture()
     }
 
     override fun handleSetRepeatMode(repeatMode: Int): ListenableFuture<*> {
@@ -697,13 +820,11 @@ internal class MashinSessionPlayer(
             Player.REPEAT_MODE_ALL -> "all"
             else -> "off"
         }
-        dispatchCommand("setRepeatMode", value)
-        return Futures.immediateVoidFuture()
+        return dispatchCommand("setRepeatMode", value)
     }
 
     override fun handleSetShuffleModeEnabled(shuffleModeEnabled: Boolean): ListenableFuture<*> {
-        dispatchCommand("setShuffle", shuffleModeEnabled.toString())
-        return Futures.immediateVoidFuture()
+        return dispatchCommand("setShuffle", shuffleModeEnabled.toString())
     }
 
 }
