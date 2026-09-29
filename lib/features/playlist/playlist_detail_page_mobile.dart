@@ -87,13 +87,13 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () => widget.coreBridge.playMedia(targets),
+        onSelected: () => widget.coreBridge.queuePlayMedia(targets),
       ),
       if (item is Album || item is Playlist || item is Artist)
         ContextMenuAction(
           label: 'Zufällig abspielen',
           icon: Icons.shuffle_outlined,
-          onSelected: () => widget.coreBridge.playShuffledMedia(targets),
+          onSelected: () => widget.coreBridge.queuePlayMedia(targets, shuffle: true),
         ),
       ContextMenuAction(
         label: 'Radio starten',
@@ -104,12 +104,12 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => widget.coreBridge.playMediaNext(targets),
+          onSelected: () => widget.coreBridge.queuePlayMedia(targets, option: QueueOption.next),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => widget.coreBridge.playMediaLast(targets),
+          onSelected: () => widget.coreBridge.queuePlayMedia(targets, option: QueueOption.add),
       ),
     ];
 
@@ -233,13 +233,13 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
         onSelected: () =>
-            widget.coreBridge.playMediaNext(<MediaItem>[playlist]),
+            widget.coreBridge.queuePlayMedia(<MediaItem>[playlist], option: QueueOption.next),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
         onSelected: () =>
-            widget.coreBridge.playMediaLast(<MediaItem>[playlist]),
+            widget.coreBridge.queuePlayMedia(<MediaItem>[playlist], option: QueueOption.add),
       ),
       if (!_controller.isLocalPlaylist) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),

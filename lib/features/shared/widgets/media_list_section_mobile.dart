@@ -109,7 +109,7 @@ class _MediaListSectionMobileState<T extends MediaItem>
 
     unawaited(() async {
       try {
-        await bridge.playMedia(<MediaItem>[playItems.first]);
+        await bridge.queuePlayMedia(<MediaItem>[playItems.first]);
       } catch (_) {
         // Playback failures should not block header actions.
       }
@@ -125,7 +125,7 @@ class _MediaListSectionMobileState<T extends MediaItem>
 
     unawaited(() async {
       try {
-        await bridge.playShuffledMedia(playItems);
+        await bridge.queuePlayMedia(playItems, shuffle: true);
       } catch (_) {
         // Playback failures should not block header actions.
       }
@@ -241,7 +241,7 @@ class _MobileListTile<T extends MediaItem> extends StatelessWidget {
 
     unawaited(() async {
       try {
-        await bridge.playMedia(<MediaItem>[item]);
+        await bridge.queuePlayMedia(<MediaItem>[item]);
       } catch (_) {
         // Playback failures should not block list taps.
       }

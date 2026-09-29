@@ -268,37 +268,35 @@ impl CoreCoordinator {
     }
 
     // Queue commands.
-    pub(crate) fn play_media(&mut self, media_items: Vec<MediaItem>) -> Result<(), String> {
-        self.playback.play_media(media_items)
-    }
-
-    pub(crate) fn play_media_next(
+    pub(crate) fn queue_play_media(
         &mut self,
         media_items: Vec<MediaItem>,
-        replace_following: bool,
+        option: crate::music_assistant::models::queue::QueueOption,
+        start_item: Option<usize>,
+        shuffle: bool,
+        start_download: bool,
     ) -> Result<(), String> {
-        self.playback
-            .play_media_next(media_items, replace_following)
+        self.playback.queue_play_media(media_items, option, start_item, shuffle, start_download)
     }
 
-    pub(crate) fn play_media_last(&mut self, media_items: Vec<MediaItem>) -> Result<(), String> {
-        self.playback.play_media_last(media_items)
+    pub(crate) fn insert_queue_items(&mut self, index: usize, media_items: Vec<MediaItem>) -> Result<(), String> {
+        self.playback.insert_queue_items(index, media_items)
     }
 
-    pub(crate) fn clear_queue(&mut self) -> Result<(), String> {
-        self.playback.clear_queue()
+    pub(crate) fn append_queue_items(&mut self, media_items: Vec<MediaItem>) -> Result<(), String> {
+        self.playback.append_queue_items(media_items)
     }
 
-    pub(crate) fn move_queue_item(
-        &mut self,
-        item_id: QueueItemId,
-        shift: i32,
-    ) -> Result<(), String> {
-        self.playback.move_queue_item(item_id, shift)
+    pub(crate) fn move_queue_items(&mut self, item_ids: Vec<QueueItemId>, target_index: usize) -> Result<(), String> {
+        self.playback.move_queue_items(item_ids, target_index)
     }
 
-    pub(crate) fn delete_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {
-        self.playback.delete_queue_item(item_id)
+    pub(crate) fn delete_queue_items(&mut self, item_ids: Vec<QueueItemId>) -> Result<(), String> {
+        self.playback.delete_queue_items(item_ids)
+    }
+
+    pub(crate) fn select_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {
+        self.playback.select_queue_item(item_id)
     }
 
     pub(crate) fn play_queue_index(&mut self, index: usize) -> Result<(), String> {

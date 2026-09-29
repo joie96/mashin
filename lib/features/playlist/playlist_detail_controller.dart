@@ -286,14 +286,14 @@ class PlaylistDetailController extends ChangeNotifier {
     if (_tracks.isEmpty) {
       return;
     }
-    await coreBridge.playMedia(_tracks);
+    await coreBridge.queuePlayMedia(_tracks);
   }
 
   Future<void> shufflePlaylist() async {
     if (_tracks.isEmpty) {
       return;
     }
-    await coreBridge.playShuffledMedia(_tracks);
+    await coreBridge.queuePlayMedia(_tracks, shuffle: true);
   }
 
   Future<void> startTrackRadio(Track track) async {

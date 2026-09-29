@@ -2,7 +2,7 @@
 
 use crate::music_assistant::models::identifiers::QueueItemId;
 use crate::music_assistant::models::media::{MediaItem, Track};
-use crate::music_assistant::models::queue::RepeatMode;
+use crate::music_assistant::models::queue::{QueueOption, RepeatMode};
 use crate::playback::models::{PlaybackEngineConfiguration, PlayerState, Queue};
 use std::sync::{Arc, Mutex};
 
@@ -11,22 +11,25 @@ pub(crate) trait PlaybackEngine: Send {
     fn activate(&mut self) -> Result<(), String>;
     fn deactivate(&mut self);
     fn shutdown(&mut self);
-    fn queue_replace(&mut self, media_items: Vec<MediaItem>) -> Result<(), String>;
-    fn queue_start_radio(&mut self, started_tracks: Vec<MediaItem>) -> Result<(), String>;
-    fn queue_insert_next(
+    fn queue_play_media(
         &mut self,
         media_items: Vec<MediaItem>,
-        replace_following: bool,
+        option: QueueOption,
+        start_item: Option<usize>,
+        shuffle: bool,
+        start_download: bool,
     ) -> Result<(), String>;
-    fn queue_append(&mut self, media_items: Vec<MediaItem>) -> Result<(), String>;
+    fn queue_start_radio(&mut self, started_tracks: Vec<MediaItem>) -> Result<(), String>;
     fn queue_append_radio_tracks(
         &mut self,
         seed_tracks: Vec<Track>,
         radio_tracks: Vec<Track>,
     ) -> Result<(), String>;
-    fn queue_clear(&mut self) -> Result<(), String>;
-    fn queue_move(&mut self, item_id: QueueItemId, shift: i32) -> Result<(), String>;
-    fn queue_remove(&mut self, item_id: QueueItemId) -> Result<(), String>;
+    fn insert_queue_items(&mut self, index: usize, media_items: Vec<MediaItem>) -> Result<(), String>;
+    fn append_queue_items(&mut self, media_items: Vec<MediaItem>) -> Result<(), String>;
+    fn move_queue_items(&mut self, item_ids: Vec<QueueItemId>, target_index: usize) -> Result<(), String>;
+    fn delete_queue_items(&mut self, item_ids: Vec<QueueItemId>) -> Result<(), String>;
+    fn select_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String>;
     fn queue_play(&mut self, index: usize) -> Result<(), String>;
     fn transport_play(&mut self) -> Result<(), String>;
     fn transport_pause(&mut self);

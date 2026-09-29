@@ -270,7 +270,7 @@ class _MediaTableSectionDesktopState<T>
     }
 
     try {
-      await widget.coreBridge.playMedia(playItems);
+      await widget.coreBridge.queuePlayMedia(playItems);
       return true;
     } catch (_) {
       return false;
@@ -541,7 +541,7 @@ class _MediaTableSectionDesktopState<T>
 
     unawaited(() async {
       try {
-        await widget.coreBridge.playMedia(
+        await widget.coreBridge.queuePlayMedia(
           _isTrackSection ? playItems : <MediaItem>[playItems.first],
         );
       } catch (_) {
@@ -559,13 +559,13 @@ class _MediaTableSectionDesktopState<T>
     unawaited(() async {
       try {
         if (_isTrackSection) {
-          await widget.coreBridge.playShuffledMedia(playItems);
+          await widget.coreBridge.queuePlayMedia(playItems, shuffle: true);
           return;
         }
 
         final MediaItem item =
             playItems[math.Random().nextInt(playItems.length)];
-        await widget.coreBridge.playMedia(<MediaItem>[item]);
+        await widget.coreBridge.queuePlayMedia(<MediaItem>[item]);
       } catch (_) {
         // Ignore failures to keep header interactions responsive.
       }

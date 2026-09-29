@@ -965,22 +965,22 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _playSidebarPlaylist(Playlist playlist) async {
     final List<Track> tracks = _playlistTracks(playlist);
-    if (tracks.isNotEmpty) await _coreBridge.playMedia(tracks);
+    if (tracks.isNotEmpty) await _coreBridge.queuePlayMedia(tracks);
   }
 
   Future<void> _shuffleSidebarPlaylist(Playlist playlist) async {
     final List<Track> tracks = _playlistTracks(playlist);
-    if (tracks.isNotEmpty) await _coreBridge.playShuffledMedia(tracks);
+    if (tracks.isNotEmpty) await _coreBridge.queuePlayMedia(tracks, shuffle: true);
   }
 
   Future<void> _playSidebarPlaylistNext(Playlist playlist) async {
     final List<Track> tracks = _playlistTracks(playlist);
-    if (tracks.isNotEmpty) await _coreBridge.playMediaNext(tracks);
+    if (tracks.isNotEmpty) await _coreBridge.queuePlayMedia(tracks, option: QueueOption.next);
   }
 
   Future<void> _playSidebarPlaylistLast(Playlist playlist) async {
     final List<Track> tracks = _playlistTracks(playlist);
-    if (tracks.isNotEmpty) await _coreBridge.playMediaLast(tracks);
+    if (tracks.isNotEmpty) await _coreBridge.queuePlayMedia(tracks, option: QueueOption.add);
   }
 
   Future<void> _deleteSidebarPlaylist(Playlist playlist) async {

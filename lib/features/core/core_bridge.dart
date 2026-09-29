@@ -25,8 +25,9 @@ typedef _NativeLogFn =
     ffi.Int32 Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
 typedef _DartLogFn =
     int Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
-typedef _NativeQueueMoveFn = ffi.Int32 Function(ffi.Pointer<Utf8>, ffi.Int32);
-typedef _DartQueueMoveFn = int Function(ffi.Pointer<Utf8>, int);
+typedef _NativeQueueIndexedFn =
+    ffi.Int32 Function(ffi.Pointer<Utf8>, ffi.Int32);
+typedef _DartQueueIndexedFn = int Function(ffi.Pointer<Utf8>, int);
 typedef _NativeGetStringFn = ffi.Pointer<Utf8> Function();
 typedef _DartGetStringFn = ffi.Pointer<Utf8> Function();
 typedef _NativeStartMusicAssistantQueryFn =
@@ -115,15 +116,19 @@ abstract class MashinCoreBridgeApi {
   Future<void> setAutoplay(bool enabled);
   Future<void> setVolume(int volume);
   Future<void> setMuted(bool muted);
-  Future<void> playMedia(List<MediaItem> mediaItems);
-  Future<void> playShuffledMedia(List<MediaItem> mediaItems);
+  Future<void> queuePlayMedia(
+    List<MediaItem> mediaItems, {
+    QueueOption option = QueueOption.play,
+    int? startItem,
+    bool shuffle = false,
+    bool startDownload = true,
+  });
   Future<void> startSendspinRadio(List<MediaItem> mediaItems);
-  Future<void> playMediaNext(List<MediaItem> mediaItems);
-  Future<void> playMediaReplaceNext(List<MediaItem> mediaItems);
-  Future<void> playMediaLast(List<MediaItem> mediaItems);
-  Future<void> clearQueue();
-  Future<void> moveQueueItem(String itemId, int shift);
-  Future<void> deleteQueueItem(String itemId);
+  Future<void> insertQueueItems(int index, List<MediaItem> mediaItems);
+  Future<void> appendQueueItems(List<MediaItem> mediaItems);
+  Future<void> moveQueueItems(List<String> itemIds, int targetIndex);
+  Future<void> deleteQueueItems(List<String> itemIds);
+  Future<void> selectQueueItem(String itemId);
   Future<void> playQueueIndex(int index);
   Future<void> requestCodec(String codec);
   Future<void> setLocalCacheSizeBytes(int cacheSizeBytes);
@@ -635,28 +640,30 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
 
   // Queue commands resolve media in Rust before mutating the canonical queue.
   @override
-  Future<void> playMedia(List<MediaItem> mediaItems) =>
-      _submitMediaOperation('playMedia', mediaItems);
-
-  @override
-  Future<void> playShuffledMedia(List<MediaItem> mediaItems) =>
-      _submitMediaOperation('playShuffledMedia', mediaItems);
+  Future<void> queuePlayMedia(
+    List<MediaItem> mediaItems, {
+    QueueOption option = QueueOption.play,
+    int? startItem,
+    bool shuffle = false,
+    bool startDownload = true,
+  }) => _submitVoidOperation('queuePlayMedia', <String, Object?>{
+    'request': <String, Object?>{
+      'mediaItems': mediaItems
+          .map(createMusicAssistantMediaItemPayload)
+          .toList(),
+      'option': option.name.replaceAllMapped(
+        RegExp('[A-Z]'),
+        (match) => '_${match.group(0)!.toLowerCase()}',
+      ),
+      'startItem': startItem,
+      'shuffle': shuffle,
+      'startDownload': startDownload,
+    },
+  });
 
   @override
   Future<void> startSendspinRadio(List<MediaItem> mediaItems) =>
       _submitMediaOperation('startSendspinRadio', mediaItems);
-
-  @override
-  Future<void> playMediaNext(List<MediaItem> mediaItems) =>
-      _submitMediaOperation('playMediaNext', mediaItems);
-
-  @override
-  Future<void> playMediaReplaceNext(List<MediaItem> mediaItems) =>
-      _submitMediaOperation('playMediaReplaceNext', mediaItems);
-
-  @override
-  Future<void> playMediaLast(List<MediaItem> mediaItems) =>
-      _submitMediaOperation('playMediaLast', mediaItems);
 
   Future<void> _submitMediaOperation(String kind, List<MediaItem> mediaItems) =>
       _submitVoidOperation(kind, <String, Object?>{
@@ -667,17 +674,34 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   // Queue item mutations.
 
   @override
-  Future<void> clearQueue() => _submitVoidOperation('clearQueue');
+  Future<void> insertQueueItems(int index, List<MediaItem> mediaItems) =>
+      _submitVoidOperation('insertQueueItems', <String, Object?>{
+        'index': index,
+        'mediaItems': mediaItems
+            .map(createMusicAssistantMediaItemPayload)
+            .toList(),
+      });
 
   @override
-  Future<void> moveQueueItem(String itemId, int shift) => _submitVoidOperation(
-    'moveQueueItem',
-    <String, Object?>{'itemId': itemId, 'shift': shift},
+  Future<void> appendQueueItems(List<MediaItem> mediaItems) =>
+      _submitMediaOperation('appendQueueItems', mediaItems);
+
+  @override
+  Future<void> moveQueueItems(List<String> itemIds, int targetIndex) =>
+      _submitVoidOperation('moveQueueItems', <String, Object?>{
+        'itemIds': itemIds,
+        'targetIndex': targetIndex,
+      });
+
+  @override
+  Future<void> deleteQueueItems(List<String> itemIds) => _submitVoidOperation(
+    'deleteQueueItems',
+    <String, Object?>{'itemIds': itemIds},
   );
 
   @override
-  Future<void> deleteQueueItem(String itemId) => _submitVoidOperation(
-    'deleteQueueItem',
+  Future<void> selectQueueItem(String itemId) => _submitVoidOperation(
+    'selectQueueItem',
     <String, Object?>{'itemId': itemId},
   );
 
@@ -978,24 +1002,10 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     candidates.add(_joinPath(cwd, fileName));
     candidates.add(_joinPath(cwd, 'windows', 'native', fileName));
     candidates.add(
-      _joinPath(
-        cwd,
-        'rust',
-        'mashin_engine',
-        'target',
-        'debug',
-        fileName,
-      ),
+      _joinPath(cwd, 'rust', 'mashin_engine', 'target', 'debug', fileName),
     );
     candidates.add(
-      _joinPath(
-        cwd,
-        'rust',
-        'mashin_engine',
-        'target',
-        'release',
-        fileName,
-      ),
+      _joinPath(cwd, 'rust', 'mashin_engine', 'target', 'release', fileName),
     );
 
     Object? lastError;
@@ -1115,33 +1125,28 @@ class _RustBindings {
       setMuted = library.lookupFunction<_NativeMutedFn, _DartMutedFn>(
         'mashin_core_set_muted',
       ),
-      queueReplace = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
-        'mashin_core_queue_replace',
-      ),
-      queueReplaceShuffled = library
-          .lookupFunction<_NativeCodecFn, _DartCodecFn>(
-            'mashin_core_queue_replace_shuffled',
-          ),
-      queueInsertNext = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
-        'mashin_core_queue_insert_next',
-      ),
-      queueReplaceNext = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
-        'mashin_core_queue_replace_next',
-      ),
-      queueAppend = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
-        'mashin_core_queue_append',
+      queuePlayMedia = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
+        'mashin_core_queue_play_media',
       ),
       startSendspinRadio = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
         'mashin_core_start_sendspin_radio',
       ),
-      queueClear = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
-        'mashin_core_queue_clear',
+      queueInsert = library
+          .lookupFunction<_NativeQueueIndexedFn, _DartQueueIndexedFn>(
+            'mashin_core_insert_queue_items',
+          ),
+      queueAppend = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
+        'mashin_core_append_queue_items',
       ),
-      queueMove = library.lookupFunction<_NativeQueueMoveFn, _DartQueueMoveFn>(
-        'mashin_core_queue_move',
-      ),
+      queueMove = library
+          .lookupFunction<_NativeQueueIndexedFn, _DartQueueIndexedFn>(
+            'mashin_core_move_queue_items',
+          ),
       queueRemove = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
-        'mashin_core_queue_remove',
+        'mashin_core_delete_queue_items',
+      ),
+      queueSelect = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
+        'mashin_core_select_queue_item',
       ),
       queuePlay = library.lookupFunction<_NativeVolumeFn, _DartVolumeFn>(
         'mashin_core_queue_play',
@@ -1240,15 +1245,13 @@ class _RustBindings {
   final _DartMutedFn setAutoplay;
   final _DartVolumeFn setVolume;
   final _DartMutedFn setMuted;
-  final _DartCodecFn queueReplace;
-  final _DartCodecFn queueReplaceShuffled;
-  final _DartCodecFn queueInsertNext;
-  final _DartCodecFn queueReplaceNext;
-  final _DartCodecFn queueAppend;
+  final _DartCodecFn queuePlayMedia;
   final _DartCodecFn startSendspinRadio;
-  final _DartVoidFn queueClear;
-  final _DartQueueMoveFn queueMove;
+  final _DartQueueIndexedFn queueInsert;
+  final _DartCodecFn queueAppend;
+  final _DartQueueIndexedFn queueMove;
   final _DartCodecFn queueRemove;
+  final _DartCodecFn queueSelect;
   final _DartVolumeFn queuePlay;
   final _DartCodecFn setCodec;
   final _DartRegisterEventCallbackFn setEventCallback;

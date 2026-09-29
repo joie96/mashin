@@ -98,7 +98,7 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () => widget.coreBridge.playMedia(<MediaItem>[track]),
+        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[track]),
       ),
       ContextMenuAction(
         label: 'Radio starten',
@@ -109,12 +109,12 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => widget.coreBridge.playMediaNext(<MediaItem>[track]),
+        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[track], option: QueueOption.next),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => widget.coreBridge.playMediaLast(<MediaItem>[track]),
+        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[track], option: QueueOption.add),
       ),
       if (primaryArtist != null || primaryAlbum != null) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
@@ -173,13 +173,13 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () => widget.coreBridge.playMedia(targets),
+        onSelected: () => widget.coreBridge.queuePlayMedia(targets),
       ),
       if (item is Album || item is Playlist || item is Artist)
         ContextMenuAction(
           label: 'Zufällig abspielen',
           icon: Icons.shuffle_outlined,
-          onSelected: () => widget.coreBridge.playShuffledMedia(targets),
+          onSelected: () => widget.coreBridge.queuePlayMedia(targets, shuffle: true),
         ),
       ContextMenuAction(
         label: 'Radio starten',
@@ -192,12 +192,12 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => widget.coreBridge.playMediaNext(targets),
+          onSelected: () => widget.coreBridge.queuePlayMedia(targets, option: QueueOption.next),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => widget.coreBridge.playMediaLast(targets),
+          onSelected: () => widget.coreBridge.queuePlayMedia(targets, option: QueueOption.add),
       ),
     ];
 

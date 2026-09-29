@@ -1,12 +1,26 @@
 //! Typed application-core configuration, event, and error contracts.
 
 use crate::music_assistant::models::identifiers::{AccessToken, PlayerId, UserId};
-use crate::music_assistant::models::media::MediaType;
+use crate::music_assistant::models::media::{MediaItem, MediaType};
+use crate::music_assistant::models::queue::QueueOption;
 use crate::music_assistant::models::session::MusicAssistantServerUrl;
 use crate::playback::models::{PlayerState, Queue};
 use crate::sendspin::models::SendspinAudioCodec;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct QueuePlayMediaRequest {
+    #[serde(default)]
+    pub(crate) media_items: Vec<MediaItem>,
+    pub(crate) option: QueueOption,
+    #[serde(default)]
+    pub(crate) start_item: Option<usize>,
+    #[serde(default)]
+    pub(crate) shuffle: bool,
+    pub(crate) start_download: bool,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

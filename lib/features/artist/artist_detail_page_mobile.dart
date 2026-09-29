@@ -108,13 +108,13 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () => widget.coreBridge.playMedia(targets),
+        onSelected: () => widget.coreBridge.queuePlayMedia(targets),
       ),
       if (item is Album || item is Playlist || item is Artist)
         ContextMenuAction(
           label: 'Zufällig abspielen',
           icon: Icons.shuffle_outlined,
-          onSelected: () => widget.coreBridge.playShuffledMedia(targets),
+          onSelected: () => widget.coreBridge.queuePlayMedia(targets, shuffle: true),
         ),
       ContextMenuAction(
         label: 'Radio starten',
@@ -125,12 +125,12 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => widget.coreBridge.playMediaNext(targets),
+          onSelected: () => widget.coreBridge.queuePlayMedia(targets, option: QueueOption.next),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => widget.coreBridge.playMediaLast(targets),
+          onSelected: () => widget.coreBridge.queuePlayMedia(targets, option: QueueOption.add),
       ),
     ];
 
@@ -208,12 +208,12 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => widget.coreBridge.playMediaNext(<MediaItem>[artist]),
+        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[artist], option: QueueOption.next),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => widget.coreBridge.playMediaLast(<MediaItem>[artist]),
+        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[artist], option: QueueOption.add),
       ),
       const ContextMenuAction.separator(),
       ContextMenuAction(

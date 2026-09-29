@@ -93,8 +93,9 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () => widget.coreBridge.playMedia(
+        onSelected: () => widget.coreBridge.queuePlayMedia(
           tracks.isEmpty ? <MediaItem>[item] : tracks,
+          option: QueueOption.next,
         ),
       ),
       if (item is Album || item is Playlist)
@@ -102,7 +103,7 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
           label: 'Zufällig abspielen',
           icon: Icons.shuffle_outlined,
           onSelected: () =>
-              widget.coreBridge.playShuffledMedia(<MediaItem>[item]),
+              widget.coreBridge.queuePlayMedia(<MediaItem>[item], shuffle: true),
         ),
       ContextMenuAction(
         label: 'Radio starten',
@@ -117,14 +118,15 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => widget.coreBridge.playMediaNext(
+        onSelected: () => widget.coreBridge.queuePlayMedia(
           tracks.isEmpty ? <MediaItem>[item] : tracks,
+          option: QueueOption.add,
         ),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => widget.coreBridge.playMediaLast(
+        onSelected: () => widget.coreBridge.queuePlayMedia(
           tracks.isEmpty ? <MediaItem>[item] : tracks,
         ),
       ),
@@ -219,12 +221,12 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => widget.coreBridge.playMediaNext(<MediaItem>[album]),
+        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[album], option: QueueOption.next),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => widget.coreBridge.playMediaLast(<MediaItem>[album]),
+        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[album], option: QueueOption.add),
       ),
       const ContextMenuAction.separator(),
       ContextMenuAction(

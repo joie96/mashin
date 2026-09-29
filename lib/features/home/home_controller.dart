@@ -144,7 +144,7 @@ class HomeController extends ChangeNotifier {
     }
 
     try {
-      await coreBridge.playMedia(playable);
+      await coreBridge.queuePlayMedia(playable);
     } catch (_) {
       // Playback failures should not break the home feed.
     }
@@ -157,7 +157,7 @@ class HomeController extends ChangeNotifier {
     }
 
     try {
-      await coreBridge.playShuffledMedia(playable);
+      await coreBridge.queuePlayMedia(playable, shuffle: true);
     } catch (_) {
       // Playback failures should not break the home feed.
     }

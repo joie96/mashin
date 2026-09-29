@@ -2,6 +2,7 @@
 
 pub(crate) mod config;
 pub(crate) mod core;
+pub(crate) mod event_channel;
 pub(crate) mod models;
 
 pub(crate) use core::{

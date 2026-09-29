@@ -26,14 +26,14 @@ class PlaylistsController extends ChangeNotifier {
       .toList(growable: false);
 
   // Playlist playback commands.
-  Future<void> play(List<Track> tracks) => coreBridge.playMedia(tracks);
+  Future<void> play(List<Track> tracks) => coreBridge.queuePlayMedia(tracks);
 
   Future<void> shuffle(List<Track> tracks) =>
-      coreBridge.playShuffledMedia(tracks);
+      coreBridge.queuePlayMedia(tracks, shuffle: true);
 
-  Future<void> playNext(List<Track> tracks) => coreBridge.playMediaNext(tracks);
+  Future<void> playNext(List<Track> tracks) => coreBridge.queuePlayMedia(tracks, option: QueueOption.next);
 
-  Future<void> playLast(List<Track> tracks) => coreBridge.playMediaLast(tracks);
+  Future<void> playLast(List<Track> tracks) => coreBridge.queuePlayMedia(tracks, option: QueueOption.add);
 
   Future<Playlist?> createPlaylist(String name) =>
       userDataController.createLocalPlaylist(name);

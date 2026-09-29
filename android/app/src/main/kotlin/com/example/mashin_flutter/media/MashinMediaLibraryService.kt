@@ -86,7 +86,11 @@ class MashinMediaLibraryService : MediaLibraryService() {
             ::onAndroidAutoDisconnected,
         )
         libraryCallback = initializedLibraryCallback
-        val initializedSessionPlayer = MashinSessionPlayer(::dispatchCoreCommand, initializedLibraryCallback::startPlayback)
+        val initializedSessionPlayer = MashinSessionPlayer(
+            ::dispatchCoreCommand,
+            initializedLibraryCallback::startPlayback,
+            initializedLibraryCallback::queueEntry,
+        )
         sessionPlayer = initializedSessionPlayer
         val initializedMediaLibrarySession = MediaLibraryService.MediaLibrarySession.Builder(
             this,
@@ -223,7 +227,7 @@ class MashinMediaLibraryService : MediaLibraryService() {
         try {
             commandExecutor.execute {
                 try {
-                    if (command == "play" || command == "playMediaItems" || command == "playShuffledMedia" ||
+                    if (command == "play" || (command == "queuePlayMedia" && argument?.let { JSONObject(it).optString("option") == "play" } == true) ||
                         command == "startSendspinRadio" || command == "playQueueItem") {
                         check(requestPlaybackFocus()) { "Audio focus is required to start playback" }
                     }
@@ -419,16 +423,30 @@ internal class AndroidAutoLibraryCallback(
         }
         serializedTrackLists[mediaId]?.let { serializedItems ->
             return dispatchCommand(
-                if (mediaId.startsWith("action:shuffle:")) "playShuffledMedia" else "playMediaItems",
-                serializedItems,
+                "queuePlayMedia",
+                JSONObject()
+                    .put("mediaItems", JSONArray(serializedItems))
+                    .put("option", "play")
+                    .put("shuffle", mediaId.startsWith("action:shuffle:"))
+                    .put("startDownload", true)
+                    .toString(),
             )
         }
         serializedMediaItems[mediaId]?.let { serializedItem ->
-            val command = if (JSONObject(serializedItem).optString("media_type") == "track") "startSendspinRadio" else "playMediaItems"
-            return dispatchCommand(command, "[$serializedItem]")
+            if (JSONObject(serializedItem).optString("media_type") == "track") {
+                return dispatchCommand("startSendspinRadio", "[$serializedItem]")
+            }
+            return dispatchCommand(
+                "queuePlayMedia",
+                JSONObject().put("mediaItems", JSONArray().put(JSONObject(serializedItem)))
+                    .put("option", "play").put("startDownload", true).toString(),
+            )
         }
         return Futures.immediateFailedFuture<Any>(IllegalArgumentException("unknown Android media ID: $mediaId"))
     }
+
+    fun queueEntry(mediaId: String): JSONObject? = serializedMediaItems[mediaId]
+        ?.let { JSONObject().put("mediaItem", JSONObject(it)) }
 
     private fun libraryItem(
         id: String,
@@ -650,7 +668,7 @@ internal class AndroidAutoLibraryCallback(
                 val itemId = item.optString("item_id").ifEmpty { item.optString("uri") }
                 if (itemId.isEmpty()) continue
                 val mediaType = item.optString("media_type")
-                val mediaId = "$mediaType:$itemId:${item.optString("provider")}:${identifierSequence.incrementAndGet()}"
+                val mediaId = "browse:$mediaType:${item.optString("provider")}:$itemId"
                 serializedMediaItems[mediaId] = item.toString()
                 add(
                     MediaItem.Builder()
@@ -720,6 +738,7 @@ internal class AndroidAutoLibraryCallback(
 internal class MashinSessionPlayer(
     private val dispatchCommand: (String, String?) -> ListenableFuture<*>,
     private val startPlayback: (String) -> ListenableFuture<*>,
+    private val queueEntry: (String) -> JSONObject?,
 ) : SimpleBasePlayer(Looper.getMainLooper()) {
     private var snapshot = SystemMediaSnapshot.empty()
 
@@ -733,14 +752,20 @@ internal class MashinSessionPlayer(
             .add(Player.COMMAND_GET_CURRENT_MEDIA_ITEM)
             .add(Player.COMMAND_GET_TIMELINE)
             .add(Player.COMMAND_GET_METADATA)
+            .add(Player.COMMAND_GET_VOLUME)
             .add(Player.COMMAND_SET_MEDIA_ITEM)
-            .add(Player.COMMAND_PREPARE)
+            .add(Player.COMMAND_CHANGE_MEDIA_ITEMS)
             .add(Player.COMMAND_PLAY_PAUSE)
+            .add(Player.COMMAND_STOP)
             .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
+            .add(Player.COMMAND_SEEK_TO_MEDIA_ITEM)
             .add(Player.COMMAND_SEEK_TO_NEXT)
+            .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
             .add(Player.COMMAND_SEEK_TO_PREVIOUS)
+            .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
             .add(Player.COMMAND_SET_REPEAT_MODE)
             .add(Player.COMMAND_SET_SHUFFLE_MODE)
+            .add(Player.COMMAND_SET_VOLUME)
             .build()
         val builder = State.Builder()
             .setAvailableCommands(commands)
@@ -749,12 +774,15 @@ internal class MashinSessionPlayer(
                 Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST,
             )
             .setPlaybackState(snapshot.playerState)
+            .setIsLoading(snapshot.playerState == Player.STATE_BUFFERING && snapshot.mediaItems.isNotEmpty())
             .setContentPositionMs(snapshot.positionMillis)
             .setContentBufferedPositionMs(
                 PositionSupplier.getConstant(snapshot.bufferedPositionMillis),
             )
             .setRepeatMode(snapshot.repeatMode)
             .setShuffleModeEnabled(snapshot.shuffleEnabled)
+            .setVolume(if (snapshot.muted) 0f else snapshot.volume / 100f)
+            .setUnmuteVolume((snapshot.volume.takeIf { it > 0 } ?: 100) / 100f)
 
         if (snapshot.mediaItems.isNotEmpty()) {
             builder.setPlaylist(snapshot.mediaItems.mapIndexed { index, item ->
@@ -782,36 +810,148 @@ internal class MashinSessionPlayer(
         startPositionMs: Long,
     ): ListenableFuture<*> {
         val selectedItem = mediaItems.getOrNull(if (startIndex == C.INDEX_UNSET) 0 else startIndex)
-            ?: return Futures.immediateFailedFuture<Any>(IllegalArgumentException("missing Android media selection"))
-        val selection = run {
-            val isQueueItem = snapshot.mediaItems.any { it.mediaId == selectedItem.mediaId }
-            if (isQueueItem) dispatchCommand("playQueueItem", selectedItem.mediaId)
-            else startPlayback(selectedItem.mediaId)
+        if (mediaItems.size == 1 && selectedItem?.mediaId?.let { it.startsWith("action:") || it.startsWith("artistRadio:") } == true) {
+            val selection = startPlayback(selectedItem.mediaId)
+            if (startPositionMs <= 0L) return selection
+            return Futures.transformAsync(
+                selection,
+                { dispatchCommand("seekSeconds", (startPositionMs / 1_000.0).toString()) },
+                MoreExecutors.directExecutor(),
+            )
         }
-        if (startPositionMs <= 0L) return selection
-        return Futures.transformAsync(
-            selection,
-            { dispatchCommand("seekSeconds", (startPositionMs / 1_000.0).toString()) },
-            MoreExecutors.directExecutor(),
-        )
+        val selectedIndex = if (mediaItems.isEmpty()) null else if (startIndex == C.INDEX_UNSET) {
+            if (mediaItems.any { it.mediaId == snapshot.mediaItems.getOrNull(snapshot.currentIndex)?.mediaId }) null else 0
+        } else startIndex
+        if (selectedIndex != null && selectedIndex !in mediaItems.indices) {
+            return Futures.immediateFailedFuture<Any>(IndexOutOfBoundsException("unknown queue item index: $selectedIndex"))
+        }
+        val previousCurrentId = snapshot.mediaItems.getOrNull(snapshot.currentIndex)?.mediaId
+        val existingIds = snapshot.mediaItems.map { it.mediaId }
+        val retainedIds = mediaItems.mapNotNull { it.mediaId.takeIf(existingIds::contains) }
+        if (retainedIds.size != retainedIds.distinct().size) {
+            return Futures.immediateFailedFuture<Any>(IllegalArgumentException("queue item IDs must be distinct"))
+        }
+        val newItems = mutableMapOf<Int, JSONObject>()
+        for ((index, item) in mediaItems.withIndex()) {
+            if (item.mediaId !in existingIds) {
+                newItems[index] = queueEntry(item.mediaId)?.getJSONObject("mediaItem")
+                    ?: return Futures.immediateFailedFuture<Any>(IllegalArgumentException("unknown queue media ID: ${item.mediaId}"))
+            }
+        }
+
+        val commands = mutableListOf<Pair<String, String>>()
+        val removedIds = existingIds.filterNot(retainedIds::contains)
+        if (removedIds.isNotEmpty()) {
+            commands += "deleteQueueItems" to JSONArray(removedIds).toString()
+        }
+        val workingIds = mutableListOf<String?>()
+        workingIds.addAll(existingIds.filter(retainedIds::contains))
+        for ((index, item) in mediaItems.withIndex()) {
+            val newItem = newItems[index]
+            if (newItem != null) {
+                commands += "insertQueueItems" to JSONObject()
+                    .put("index", index).put("mediaItems", JSONArray().put(newItem)).toString()
+                workingIds.add(index, null)
+            } else {
+                val previousIndex = workingIds.indexOf(item.mediaId)
+                if (previousIndex != index) {
+                    commands += "moveQueueItems" to JSONObject()
+                        .put("itemIds", JSONArray().put(item.mediaId)).put("targetIndex", index).toString()
+                    workingIds.removeAt(previousIndex)
+                    workingIds.add(index, item.mediaId)
+                }
+            }
+        }
+        var completion: ListenableFuture<*> = Futures.immediateVoidFuture()
+        for ((command, argument) in commands) {
+            completion = Futures.transformAsync(completion, { dispatchCommand(command, argument) }, MoreExecutors.directExecutor())
+        }
+        if (selectedIndex != null) {
+            completion = Futures.transformAsync(completion, {
+                val itemId = snapshot.mediaItems.getOrNull(selectedIndex)?.mediaId
+                    ?: throw IndexOutOfBoundsException("unknown queue item index: $selectedIndex")
+                if (itemId == previousCurrentId && itemId == snapshot.mediaItems.getOrNull(snapshot.currentIndex)?.mediaId) {
+                    Futures.immediateVoidFuture()
+                } else {
+                    dispatchCommand("selectQueueItem", itemId)
+                }
+            }, MoreExecutors.directExecutor())
+            if (startPositionMs > 0L && startPositionMs != C.TIME_UNSET) {
+                completion = Futures.transformAsync(completion, {
+                    dispatchCommand("seekSeconds", (startPositionMs / 1_000.0).toString())
+                }, MoreExecutors.directExecutor())
+            }
+        }
+        return completion
     }
 
-    override fun handlePrepare(): ListenableFuture<*> = Futures.immediateVoidFuture()
+    override fun handleAddMediaItems(index: Int, mediaItems: List<MediaItem>): ListenableFuture<*> {
+        val items = JSONArray()
+        for (item in mediaItems) {
+            val mediaItem = queueEntry(item.mediaId)?.getJSONObject("mediaItem")
+                ?: return Futures.immediateFailedFuture<Any>(IllegalArgumentException("unknown queue media ID: ${item.mediaId}"))
+            items.put(mediaItem)
+        }
+        return if (index == snapshot.mediaItems.size) {
+            dispatchCommand("appendQueueItems", items.toString())
+        } else {
+            dispatchCommand("insertQueueItems", JSONObject().put("index", index).put("mediaItems", items).toString())
+        }
+    }
+
+    override fun handleRemoveMediaItems(fromIndex: Int, toIndex: Int): ListenableFuture<*> {
+        val itemIds = JSONArray()
+        snapshot.mediaItems.subList(fromIndex, toIndex).forEach { itemIds.put(it.mediaId) }
+        return dispatchCommand("deleteQueueItems", itemIds.toString())
+    }
+
+    override fun handleMoveMediaItems(fromIndex: Int, toIndex: Int, newIndex: Int): ListenableFuture<*> {
+        val itemIds = JSONArray()
+        snapshot.mediaItems.subList(fromIndex, toIndex).forEach { itemIds.put(it.mediaId) }
+        return dispatchCommand("moveQueueItems", JSONObject().put("itemIds", itemIds).put("targetIndex", newIndex).toString())
+    }
+
+    override fun handleReplaceMediaItems(fromIndex: Int, toIndex: Int, mediaItems: List<MediaItem>): ListenableFuture<*> {
+        val items = snapshot.mediaItems.toMutableList()
+        items.subList(fromIndex, toIndex).clear()
+        items.addAll(fromIndex, mediaItems)
+        return handleSetMediaItems(items, C.INDEX_UNSET, 0)
+    }
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
         return dispatchCommand(if (playWhenReady) "play" else "pause", null)
     }
+
+    override fun handleStop(): ListenableFuture<*> = dispatchCommand("stop", null)
 
     override fun handleSeek(
         mediaItemIndex: Int,
         positionMs: Long,
         seekCommand: Int,
     ): ListenableFuture<*> {
-        return when (seekCommand) {
-            Player.COMMAND_SEEK_TO_NEXT -> dispatchCommand("next", null)
-            Player.COMMAND_SEEK_TO_PREVIOUS -> dispatchCommand("previous", null)
-            else -> dispatchCommand("seekSeconds", (positionMs / 1_000.0).toString())
+        if (mediaItemIndex == C.INDEX_UNSET) return Futures.immediateVoidFuture()
+        if (seekCommand == Player.COMMAND_SEEK_TO_NEXT || seekCommand == Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM ||
+            seekCommand == Player.COMMAND_SEEK_TO_PREVIOUS || seekCommand == Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM) {
+            if (mediaItemIndex != snapshot.currentIndex) {
+                val command = if (seekCommand == Player.COMMAND_SEEK_TO_NEXT ||
+                    seekCommand == Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM) "next" else "previous"
+                return dispatchCommand(command, null)
+            }
+            if (seekCommand == Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM ||
+                seekCommand == Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM) return Futures.immediateVoidFuture()
         }
+        if (mediaItemIndex != snapshot.currentIndex) {
+            val item = snapshot.mediaItems.getOrNull(mediaItemIndex)
+                ?: return Futures.immediateFailedFuture<Any>(IndexOutOfBoundsException("unknown queue item index: $mediaItemIndex"))
+            val selection = dispatchCommand("playQueueItem", item.mediaId)
+            if (positionMs <= 0L || positionMs == C.TIME_UNSET) return selection
+            return Futures.transformAsync(
+                selection,
+                { dispatchCommand("seekSeconds", (positionMs / 1_000.0).toString()) },
+                MoreExecutors.directExecutor(),
+            )
+        }
+        return dispatchCommand("seekSeconds", ((if (positionMs == C.TIME_UNSET) 0L else positionMs) / 1_000.0).toString())
     }
 
     override fun handleSetRepeatMode(repeatMode: Int): ListenableFuture<*> {
@@ -827,6 +967,9 @@ internal class MashinSessionPlayer(
         return dispatchCommand("setShuffle", shuffleModeEnabled.toString())
     }
 
+    override fun handleSetVolume(volume: Float, volumeOperationType: Int): ListenableFuture<*> =
+        dispatchCommand("setVolume", (volume.coerceIn(0f, 1f) * 100).toInt().toString())
+
 }
 
 @UnstableApi
@@ -835,6 +978,8 @@ internal data class SystemMediaSnapshot(
     val positionMillis: Long,
     val durationMillis: Long?,
     val bufferedPositionMillis: Long,
+    val volume: Int,
+    val muted: Boolean,
     val shuffleEnabled: Boolean,
     val repeatMode: Int,
     val mediaItems: List<MediaItem>,
@@ -842,14 +987,14 @@ internal data class SystemMediaSnapshot(
 ) {
     val playerState: Int
         get() = when (status) {
-            "buffering" -> Player.STATE_BUFFERING
+            "buffering", "seeking" -> if (mediaItems.isEmpty()) Player.STATE_IDLE else Player.STATE_BUFFERING
             "playing", "paused" -> Player.STATE_READY
             "idle", "uninitialized", "error" -> Player.STATE_IDLE
             else -> Player.STATE_IDLE
         }
 
     companion object {
-        fun empty() = SystemMediaSnapshot("idle", 0, null, 0, false, Player.REPEAT_MODE_OFF, emptyList(), 0)
+        fun empty() = SystemMediaSnapshot("idle", 0, null, 0, 50, false, false, Player.REPEAT_MODE_OFF, emptyList(), 0)
 
         fun fromPlayerState(values: JSONObject, queue: JSONObject): SystemMediaSnapshot {
             val queueItemId = values.optString("currentQueueItemId")
@@ -883,6 +1028,8 @@ internal data class SystemMediaSnapshot(
                 positionMillis = positionMillis,
                 durationMillis = durationMillis,
                 bufferedPositionMillis = bufferedPositionMillis.coerceAtLeast(positionMillis),
+                volume = values.optInt("volume", 50).coerceIn(0, 100),
+                muted = values.optBoolean("muted", false),
                 shuffleEnabled = queue.optBoolean("shuffleEnabled", false),
                 repeatMode = when (queue.optString("repeatMode")) {
                     "one" -> Player.REPEAT_MODE_ONE

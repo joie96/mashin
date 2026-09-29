@@ -45,7 +45,7 @@ class MediaListSectionDesktop<T extends MediaItem> extends StatelessWidget {
 
     unawaited(() async {
       try {
-        await bridge.playMedia(<MediaItem>[playItems.first]);
+        await bridge.queuePlayMedia(<MediaItem>[playItems.first]);
       } catch (_) {
         // Playback failures should not block header actions.
       }
@@ -61,7 +61,7 @@ class MediaListSectionDesktop<T extends MediaItem> extends StatelessWidget {
 
     unawaited(() async {
       try {
-        await bridge.playShuffledMedia(playItems);
+        await bridge.queuePlayMedia(playItems, shuffle: true);
       } catch (_) {
         // Playback failures should not block header actions.
       }
@@ -193,7 +193,7 @@ class _MediaListTileState<T extends MediaItem>
 
     unawaited(() async {
       try {
-        await bridge.playMedia(<MediaItem>[widget.item]);
+        await bridge.queuePlayMedia(<MediaItem>[widget.item]);
       } catch (_) {
         // Playback failures should not block list hover actions.
       }

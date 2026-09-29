@@ -11,7 +11,7 @@ use crate::music_assistant::client::MusicAssistantClient;
 use crate::music_assistant::models::identifiers::{CacheContentKey, QueueItemId};
 use crate::music_assistant::models::media::{MediaItem, Track};
 use crate::music_assistant::models::queue::{
-    CacheState, CacheStatus, PlayState, QueueItem, RepeatMode,
+    CacheState, CacheStatus, PlayState, QueueItem, QueueOption, RepeatMode,
 };
 use crate::playback::autoplay::{get_autoplay_refill_tracks, AutoplayController};
 use crate::playback::engine::{PlaybackEngine, PreferredCodecConfigurablePlaybackEngine};
@@ -299,70 +299,132 @@ impl SendspinEngine {
         Ok(())
     }
 
-    pub(crate) fn play_media(&mut self, media_items: Vec<MediaItem>) -> Result<(), String> {
+    pub(crate) fn queue_play_media(
+        &mut self,
+        media_items: Vec<MediaItem>,
+        option: QueueOption,
+        start_item: Option<usize>,
+        shuffle: bool,
+        start_download: bool,
+    ) -> Result<(), String> {
         if media_items.is_empty() {
-            return Err("play_media requires at least one media item".to_string());
+            return if option == QueueOption::Replace {
+                self.clear_queue()
+            } else {
+                Err("queue_play_media requires at least one media item".to_string())
+            };
         }
-        LOGGER.info(format!(
-            "starting playback for {} media items",
-            media_items.len()
-        ));
-
+        if option == QueueOption::Play && !start_download {
+            return Err("play requires starting the download".to_string());
+        }
+        if matches!(option, QueueOption::Next | QueueOption::ReplaceNext | QueueOption::Add)
+            && start_item.is_some()
+        {
+            return Err("start item is only valid for play or replace".to_string());
+        }
+        if matches!(option, QueueOption::Next | QueueOption::ReplaceNext | QueueOption::Add)
+            && !start_download
+            && !self.is_queue_restored
+            && !self.queue.items.is_empty()
+        {
+            return Err("cannot defer a queue edit while downloading".to_string());
+        }
         let seed_tracks = tracks_from_media_items(&media_items);
-        let queue_items = self.new_queue_media_items(media_items);
-        let plan = self.build_download_plan_request(queue_items, 0)?;
-        self.apply_queue_download_plan(plan)?;
-        let content_key = self
-            .current_cache_content_key
-            .clone()
-            .ok_or_else(|| "play_media plan has no current item".to_string())?;
-        self.play_cached_content(&content_key)?;
-        self.autoplay.replace_seed_tracks(seed_tracks);
+        match option {
+            QueueOption::Play => {
+                let index = start_item.unwrap_or(0);
+                if index >= media_items.len() {
+                    return Err("queue start item is out of range".to_string());
+                }
+                let new_items = self.new_queue_media_items(media_items);
+                let plan = self.build_download_plan_request(new_items, index)?;
+                self.apply_queue_download_plan(plan)?;
+                let content_key = self
+                    .current_cache_content_key
+                    .clone()
+                    .ok_or("queue_play_media plan has no current item")?;
+                self.play_cached_content(&content_key)?;
+                self.autoplay.replace_seed_tracks(seed_tracks);
+            }
+            QueueOption::Replace => {
+                let index = start_item.unwrap_or(0);
+                if index >= media_items.len() {
+                    return Err("queue start index is out of range".to_string());
+                }
+                if !start_download {
+                    self.stop_queue_downloads()?;
+                }
+                let items = self.new_queue_media_items(media_items);
+                self.audio_player.stop();
+                if start_download {
+                    self.apply_queue_download_plan(self.build_download_plan_request(items, index)?)?;
+                } else {
+                    self.queue.items = items.into_iter().map(|item| {
+                        let mut queue_item = QueueItem::local(
+                            self.queue.queue_id.clone(), item.queue_item_id, item.original_index, item.media_item,
+                        );
+                        queue_item.cache = None;
+                        queue_item
+                    }).collect();
+                    self.queue.current_index = Some(index);
+                    self.current_cache_content_key = None;
+                    self.queue_content_keys.clear();
+                    self.is_queue_restored = true;
+                    self.queue_revision = self.queue_revision.saturating_add(1);
+                    self.persist_queue();
+                }
+                self.player_state.playback_state = PlayState::Idle;
+                self.player_state.position_millis = Some(0);
+                self.playback_position_offset_millis = 0;
+                self.autoplay.replace_seed_tracks(tracks_from_queue(&self.queue.items));
+            }
+            QueueOption::Next | QueueOption::ReplaceNext | QueueOption::Add => {
+                if option == QueueOption::Add {
+                    self.append_queue_items(media_items)?;
+                } else if option == QueueOption::Next {
+                    let insertion = self.queue.current_index.map(|index| index.saturating_add(1))
+                        .unwrap_or(self.queue.items.len()).min(self.queue.items.len());
+                    self.insert_queue_items(insertion, media_items)?;
+                } else {
+                    let new_items = self.new_queue_media_items(media_items);
+                    let mut queue = self.queue_media_items();
+                    let was_empty = queue.is_empty();
+                    let insertion = self.queue.current_index.map(|index| index.saturating_add(1))
+                        .unwrap_or(queue.len()).min(queue.len());
+                    queue.truncate(insertion);
+                    queue.extend(new_items);
+                    if was_empty {
+                        self.is_queue_restored = true;
+                    }
+                    self.replace_queue_media_items(queue)?;
+                }
+                if start_download && self.is_queue_restored {
+                    let index = self.queue.current_index.unwrap_or(0);
+                    self.apply_queue_download_plan(
+                        self.build_download_plan_request(self.queue_media_items(), index)?,
+                    )?;
+                }
+                if option == QueueOption::ReplaceNext {
+                    self.autoplay.replace_seed_tracks(seed_tracks);
+                } else {
+                    self.autoplay.append_seed_tracks(seed_tracks);
+                }
+            }
+            QueueOption::Unknown => return Err("unknown queue option".to_string()),
+        }
+        if shuffle {
+            if self.queue.shuffle_enabled {
+                self.set_shuffle(false);
+            }
+            self.set_shuffle(true);
+        }
         Ok(())
     }
 
     // Autoplay must not fill the new queue before radio recommendations arrive.
     pub(crate) fn start_radio(&mut self, started_tracks: Vec<MediaItem>) -> Result<(), String> {
-        self.play_media(started_tracks)?;
+        self.queue_play_media(started_tracks, QueueOption::Play, None, false, true)?;
         self.autoplay.replace_seed_tracks(Vec::new());
-        Ok(())
-    }
-
-    pub(crate) fn play_media_next(
-        &mut self,
-        media_items: Vec<MediaItem>,
-        replace_following: bool,
-    ) -> Result<(), String> {
-        let seed_tracks = tracks_from_media_items(&media_items);
-        let mut queue = self.queue_media_items();
-        let insertion = self
-            .queue
-            .current_index
-            .map(|index| index.saturating_add(1))
-            .unwrap_or(queue.len())
-            .min(queue.len());
-        if replace_following {
-            queue.truncate(insertion);
-        }
-        queue.splice(
-            insertion..insertion,
-            self.new_queue_media_items(media_items),
-        );
-        self.replace_queue_media_items(queue)?;
-        if replace_following {
-            self.autoplay.replace_seed_tracks(seed_tracks);
-        } else {
-            self.autoplay.append_seed_tracks(seed_tracks);
-        }
-        Ok(())
-    }
-
-    pub(crate) fn play_media_last(&mut self, media_items: Vec<MediaItem>) -> Result<(), String> {
-        let seed_tracks = tracks_from_media_items(&media_items);
-        let mut queue = self.queue_media_items();
-        queue.extend(self.new_queue_media_items(media_items));
-        self.replace_queue_media_items(queue)?;
-        self.autoplay.append_seed_tracks(seed_tracks);
         Ok(())
     }
 
@@ -381,6 +443,7 @@ impl SendspinEngine {
 
     pub(crate) fn clear_queue(&mut self) -> Result<(), String> {
         LOGGER.info("clearing playback queue");
+        self.stop_queue_downloads()?;
         self.audio_player.stop();
         self.queue.items.clear();
         self.queue.current_index = None;
@@ -395,41 +458,110 @@ impl SendspinEngine {
         Ok(())
     }
 
-    pub(crate) fn move_queue_item(
+    pub(crate) fn insert_queue_items(
         &mut self,
-        item_id: QueueItemId,
-        shift: i32,
+        index: usize,
+        media_items: Vec<MediaItem>,
+    ) -> Result<(), String> {
+        if index > self.queue.items.len() {
+            return Err("queue insertion index is out of range".to_string());
+        }
+        if media_items.iter().any(|item| !matches!(item, MediaItem::Track(_))) {
+            return Err("queue items must be tracks".to_string());
+        }
+        if media_items.is_empty() {
+            return Ok(());
+        }
+        let was_empty = self.queue.items.is_empty();
+        let new_items = self.new_queue_media_items(media_items);
+        let mut queue = self.queue_media_items();
+        queue.splice(index..index, new_items);
+        if was_empty {
+            self.is_queue_restored = true;
+        }
+        self.replace_queue_media_items(queue)?;
+        if was_empty {
+            self.player_state.playback_state = PlayState::Idle;
+            self.player_state.position_millis = Some(0);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn append_queue_items(&mut self, media_items: Vec<MediaItem>) -> Result<(), String> {
+        self.insert_queue_items(self.queue.items.len(), media_items)
+    }
+
+    // Moves existing entries in queue order; the target index refers to the queue after removal.
+    pub(crate) fn move_queue_items(
+        &mut self,
+        item_ids: Vec<QueueItemId>,
+        target_index: usize,
     ) -> Result<(), String> {
         let mut queue = self.queue_media_items();
-        let Some(source) = self
-            .queue
-            .items
-            .iter()
-            .position(|item| item.queue_item_id == item_id)
-        else {
+        if item_ids.is_empty() {
             return Ok(());
-        };
-        let item = queue.remove(source);
-        let target = (source as i32 + shift).clamp(0, queue.len() as i32) as usize;
-        queue.insert(target, item);
+        }
+        if item_ids.iter().enumerate().any(|(index, id)| {
+            item_ids[..index].contains(id) || !queue.iter().any(|item| &item.queue_item_id == id)
+        }) {
+            return Err("queue items must be distinct existing entries".to_string());
+        }
+        if target_index > queue.len() - item_ids.len() {
+            return Err("queue move target is out of range".to_string());
+        }
+        let mut moved = Vec::with_capacity(item_ids.len());
+        queue.retain(|item| {
+            if item_ids.contains(&item.queue_item_id) {
+                moved.push(item.clone());
+                false
+            } else {
+                true
+            }
+        });
+        queue.splice(target_index..target_index, moved);
         self.replace_queue_media_items(queue)
     }
 
-    pub(crate) fn delete_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {
+    pub(crate) fn delete_queue_items(&mut self, item_ids: Vec<QueueItemId>) -> Result<(), String> {
         let mut queue = self.queue_media_items();
-        let Some(index) = self
-            .queue
-            .items
-            .iter()
-            .position(|item| item.queue_item_id == item_id)
-        else {
+        if item_ids.is_empty() {
             return Ok(());
-        };
-        queue.remove(index);
+        }
+        if item_ids.iter().enumerate().any(|(index, id)| {
+            item_ids[..index].contains(id) || !queue.iter().any(|item| &item.queue_item_id == id)
+        }) {
+            return Err("queue items must be distinct existing entries".to_string());
+        }
+        queue.retain(|item| !item_ids.contains(&item.queue_item_id));
         if queue.is_empty() {
             return self.clear_queue();
         }
         self.replace_queue_media_items(queue)
+    }
+
+    // Selection leaves the queue idle until a transport command starts playback.
+    pub(crate) fn select_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {
+        let index = self
+            .queue
+            .items
+            .iter()
+            .position(|item| item.queue_item_id == item_id)
+            .ok_or("queue item is no longer available")?;
+        self.stop_queue_downloads()?;
+        self.audio_player.stop();
+        self.queue.current_index = Some(index);
+        for item in &mut self.queue.items {
+            item.cache = None;
+        }
+        self.current_cache_content_key = None;
+        self.queue_content_keys.clear();
+        self.is_queue_restored = true;
+        self.player_state.playback_state = PlayState::Idle;
+        self.player_state.position_millis = Some(0);
+        self.playback_position_offset_millis = 0;
+        self.queue_revision = self.queue_revision.saturating_add(1);
+        self.persist_queue();
+        Ok(())
     }
 
     pub(crate) fn play_queue_index(&mut self, index: usize) -> Result<(), String> {
@@ -437,6 +569,7 @@ impl SendspinEngine {
             if index >= self.queue.items.len() {
                 return Err("queue index is out of range".to_string());
             }
+            let start_position_millis = self.player_state.position_millis.unwrap_or(0);
             self.apply_queue_download_plan(
                 self.build_download_plan_request(self.queue_media_items(), index)?,
             )?;
@@ -444,7 +577,10 @@ impl SendspinEngine {
                 .current_cache_content_key
                 .clone()
                 .ok_or("queue has no current item")?;
-            return self.play_cached_content(&content_key);
+            self.play_cached_content(&content_key)?;
+            self.playback_position_offset_millis = start_position_millis;
+            self.player_state.position_millis = Some(start_position_millis);
+            return Ok(());
         }
         let Some(content_key) = self.queue_content_keys.get(index) else {
             return Err("queue index is out of range".to_string());
@@ -458,6 +594,21 @@ impl SendspinEngine {
     }
 
     // Queue planning helpers.
+    // Invalidate the downloader's old plan before leaving an active queue idle.
+    fn stop_queue_downloads(&mut self) -> Result<(), String> {
+        if self.current_cache_content_key.is_none() {
+            return Ok(());
+        }
+        let version = self.download_plan_version.saturating_add(1);
+        self.downloader.apply_download_plan(SendspinDownloadPlanRequest {
+            queue_revision: version,
+            queue_items: Vec::new(),
+            current_index: None,
+        })?;
+        self.download_plan_version = version;
+        Ok(())
+    }
+
     fn queue_media_items(&self) -> Vec<QueueMediaItem> {
         self.queue
             .items
@@ -525,6 +676,10 @@ impl SendspinEngine {
                 })
                 .collect();
             self.queue.current_index = Some(current_index);
+            if previous_current_queue_item_id.as_ref() != self.current_queue_item_id() {
+                self.player_state.position_millis = Some(0);
+                self.playback_position_offset_millis = 0;
+            }
             self.persist_queue();
             return Ok(());
         }
@@ -872,7 +1027,7 @@ impl SendspinEngine {
     fn publish_background_events(&mut self, queue_before: Queue, player_state_before: PlayerState) {
         let queue = self.queue().clone();
         if !queue.has_same_structure_as(&queue_before) {
-            crate::ffi::event_channel::publish_media_session_event(
+            crate::core::event_channel::publish_background_event(
                 crate::core::models::MediaSessionEvent::QueueChanged { queue },
             );
         }
@@ -885,7 +1040,7 @@ impl SendspinEngine {
             && (!player_state.has_same_non_position_as(&player_state_before)
                 || should_publish_position)
         {
-            crate::ffi::event_channel::publish_media_session_event(
+            crate::core::event_channel::publish_background_event(
                 crate::core::models::MediaSessionEvent::PlayerStateChanged { player_state },
             );
             self.last_player_state_event_at = Some(Instant::now());
@@ -1032,6 +1187,9 @@ impl SendspinEngine {
         };
         let next_index = current_index.saturating_add(1);
         if next_index >= self.queue.items.len() {
+            if self.queue.repeat_mode == RepeatMode::All {
+                return self.play_queue_index(0);
+            }
             self.transport_stop();
             return Ok(());
         }
@@ -1042,6 +1200,9 @@ impl SendspinEngine {
         let Some(current_index) = self.queue.current_index else {
             return Ok(());
         };
+        if current_index == 0 && self.queue.repeat_mode == RepeatMode::All {
+            return self.play_queue_index(self.queue.items.len() - 1);
+        }
         self.play_queue_index(current_index.saturating_sub(1))
     }
 
@@ -1239,24 +1400,19 @@ impl PlaybackEngine for SendspinEngine {
         SendspinEngine::shutdown(self);
     }
 
-    fn queue_replace(&mut self, media_items: Vec<MediaItem>) -> Result<(), String> {
-        SendspinEngine::play_media(self, media_items)
+    fn queue_play_media(
+        &mut self,
+        media_items: Vec<MediaItem>,
+        option: QueueOption,
+        start_item: Option<usize>,
+        shuffle: bool,
+        start_download: bool,
+    ) -> Result<(), String> {
+        SendspinEngine::queue_play_media(self, media_items, option, start_item, shuffle, start_download)
     }
 
     fn queue_start_radio(&mut self, started_tracks: Vec<MediaItem>) -> Result<(), String> {
         SendspinEngine::start_radio(self, started_tracks)
-    }
-
-    fn queue_insert_next(
-        &mut self,
-        media_items: Vec<MediaItem>,
-        replace_following: bool,
-    ) -> Result<(), String> {
-        SendspinEngine::play_media_next(self, media_items, replace_following)
-    }
-
-    fn queue_append(&mut self, media_items: Vec<MediaItem>) -> Result<(), String> {
-        SendspinEngine::play_media_last(self, media_items)
     }
 
     fn queue_append_radio_tracks(
@@ -1267,16 +1423,24 @@ impl PlaybackEngine for SendspinEngine {
         SendspinEngine::append_radio_tracks(self, seed_tracks, radio_tracks)
     }
 
-    fn queue_clear(&mut self) -> Result<(), String> {
-        SendspinEngine::clear_queue(self)
+    fn insert_queue_items(&mut self, index: usize, media_items: Vec<MediaItem>) -> Result<(), String> {
+        SendspinEngine::insert_queue_items(self, index, media_items)
     }
 
-    fn queue_move(&mut self, item_id: QueueItemId, shift: i32) -> Result<(), String> {
-        SendspinEngine::move_queue_item(self, item_id, shift)
+    fn append_queue_items(&mut self, media_items: Vec<MediaItem>) -> Result<(), String> {
+        SendspinEngine::append_queue_items(self, media_items)
     }
 
-    fn queue_remove(&mut self, item_id: QueueItemId) -> Result<(), String> {
-        SendspinEngine::delete_queue_item(self, item_id)
+    fn move_queue_items(&mut self, item_ids: Vec<QueueItemId>, target_index: usize) -> Result<(), String> {
+        SendspinEngine::move_queue_items(self, item_ids, target_index)
+    }
+
+    fn delete_queue_items(&mut self, item_ids: Vec<QueueItemId>) -> Result<(), String> {
+        SendspinEngine::delete_queue_items(self, item_ids)
+    }
+
+    fn select_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {
+        SendspinEngine::select_queue_item(self, item_id)
     }
 
     fn queue_play(&mut self, index: usize) -> Result<(), String> {
@@ -1436,6 +1600,223 @@ mod tests {
         })
     }
 
+    #[test]
+    fn queue_item_operations_preserve_ids_and_selected_item() {
+        let mut engine = SendspinEngine::new();
+        engine
+            .queue_play_media(vec![track("test", "first"), track("test", "second")], QueueOption::Replace, Some(1), false, false)
+            .expect("set queue");
+        assert_eq!(engine.queue.current_index, Some(1));
+        assert_eq!(engine.player_state().playback_state, PlayState::Idle);
+        assert!(engine.is_queue_restored);
+        assert_eq!(engine.download_plan_version, 0);
+        let first_id = engine.queue.items[0].queue_item_id.clone();
+        let second_id = engine.queue.items[1].queue_item_id.clone();
+        engine
+            .insert_queue_items(1, vec![track("test", "third"), track("test", "fourth")])
+            .expect("insert before current item");
+        assert_eq!(engine.queue.items[0].queue_item_id, first_id);
+        assert_eq!(engine.queue.items[3].queue_item_id, second_id);
+        assert_eq!(engine.queue.current_index, Some(3));
+        let third_id = engine.queue.items[1].queue_item_id.clone();
+        let fourth_id = engine.queue.items[2].queue_item_id.clone();
+        engine.move_queue_items(vec![third_id.clone(), fourth_id.clone()], 2).expect("move both items");
+        assert_eq!(engine.queue.items[1].queue_item_id, second_id);
+        assert_eq!(engine.queue.items[2].queue_item_id, third_id);
+        assert_eq!(engine.queue.items[3].queue_item_id, fourth_id);
+        assert_eq!(engine.queue.current_index, Some(1));
+        assert!(engine
+            .move_queue_items(vec![first_id.clone(), first_id.clone()], 0)
+            .is_err());
+        assert!(engine.move_queue_items(vec![first_id.clone()], 4).is_err());
+        let next_queue_item_id = engine.next_queue_item_id;
+        assert!(engine.insert_queue_items(5, vec![track("test", "unused")]).is_err());
+        assert_eq!(engine.next_queue_item_id, next_queue_item_id);
+        assert!(engine.delete_queue_items(vec![first_id.clone(), QueueItemId("missing".into())]).is_err());
+        engine
+            .delete_queue_items(vec![first_id, second_id])
+            .expect("delete multiple entries");
+        assert_eq!(engine.queue.current_index, Some(1));
+        assert_eq!(engine.queue.items.len(), 2);
+        assert_eq!(engine.download_plan_version, 0);
+    }
+
+    #[test]
+    fn selecting_queue_item_defers_playback_and_preserves_queue_ids() {
+        let mut engine = SendspinEngine::new();
+        engine.configure(configuration()).expect("configure engine");
+        engine
+            .queue_play_media(vec![track("test", "first"), track("test", "second")], QueueOption::Play, None, false, true)
+            .expect("start playback");
+        let ids = engine.queue.items.iter().map(|item| item.queue_item_id.clone()).collect::<Vec<_>>();
+
+        engine.select_queue_item(ids[1].clone()).expect("select second item");
+
+        assert_eq!(engine.queue.current_index, Some(1));
+        assert_eq!(engine.queue.items.iter().map(|item| item.queue_item_id.clone()).collect::<Vec<_>>(), ids);
+        assert_eq!(engine.player_state().playback_state, PlayState::Idle);
+        assert_eq!(engine.player_state().position_millis, Some(0));
+        assert!(engine.is_queue_restored);
+        assert!(engine.current_cache_content_key.is_none());
+        assert_eq!(engine.select_queue_item(QueueItemId("missing".into())).unwrap_err(), "queue item is no longer available");
+        engine.transport_play().expect("play selected item");
+        assert_eq!(engine.queue.current_index, Some(1));
+        assert!(!engine.is_queue_restored);
+        assert!(engine.current_cache_content_key.is_some());
+        engine.shutdown();
+        std::fs::remove_file(queue_snapshot_path().expect("test queue path"))
+            .expect("remove test snapshot");
+    }
+
+    #[test]
+    fn queue_play_media_can_clear_queue() {
+        let mut engine = SendspinEngine::new();
+        engine
+            .queue_play_media(vec![track("test", "first")], QueueOption::Replace, None, false, false)
+            .expect("set queue");
+        engine
+            .queue_play_media(Vec::new(), QueueOption::Replace, None, false, false)
+            .expect("clear queue with play media");
+        assert!(engine.queue.items.is_empty());
+    }
+
+    #[test]
+    fn inserting_into_empty_queue_defers_playback_and_append_preserves_ids() {
+        let mut engine = SendspinEngine::new();
+        let album: MediaItem = serde_json::from_value(serde_json::json!({
+            "media_type": "album", "item_id": "album", "provider": "test", "name": "Album"
+        })).expect("album media item");
+        assert_eq!(engine.insert_queue_items(0, vec![track("test", "unused"), album]).unwrap_err(), "queue items must be tracks");
+        assert!(engine.queue.items.is_empty());
+        assert_eq!(engine.next_queue_item_id, 1);
+        engine.insert_queue_items(0, vec![track("test", "first")]).expect("insert first item");
+        let first_id = engine.queue.items[0].queue_item_id.clone();
+        assert_eq!(engine.player_state().playback_state, PlayState::Idle);
+        assert!(engine.is_queue_restored);
+        assert_eq!(engine.download_plan_version, 0);
+        engine.append_queue_items(vec![track("test", "second"), track("test", "third")]).expect("append items");
+        assert_eq!(engine.queue.items[0].queue_item_id, first_id);
+        assert_eq!(engine.queue.items.len(), 3);
+        assert_eq!(engine.queue.current_index, Some(0));
+    }
+
+    #[test]
+    fn active_queue_edits_update_the_download_plan() {
+        let mut engine = SendspinEngine::new();
+        engine.configure(configuration()).expect("configure engine");
+        engine
+            .queue_play_media(vec![track("test", "first")], QueueOption::Replace, None, false, true)
+            .expect("start queue download");
+        let first_id = engine.queue.items[0].queue_item_id.clone();
+        engine
+            .append_queue_items(vec![track("test", "second")])
+            .expect("refresh download plan");
+        assert_eq!(engine.queue.items.len(), 2);
+        assert_eq!(engine.queue.items[0].queue_item_id, first_id);
+        assert_eq!(engine.download_plan_version, 2);
+        let second_id = engine.queue.items[1].queue_item_id.clone();
+        engine.move_queue_items(vec![second_id.clone()], 0).expect("move active item");
+        assert_eq!(engine.queue.current_index, Some(1));
+        assert_eq!(engine.download_plan_version, 3);
+        engine.delete_queue_items(vec![second_id]).expect("delete active item");
+        assert_eq!(engine.queue.items[0].queue_item_id, first_id);
+        assert_eq!(engine.download_plan_version, 4);
+        engine.shutdown();
+        std::fs::remove_file(queue_snapshot_path().expect("test queue path"))
+            .expect("remove test snapshot");
+    }
+
+    #[test]
+    fn replace_queue_starts_download_without_playback() {
+        let mut engine = SendspinEngine::new();
+        engine.configure(configuration()).expect("configure engine");
+        engine
+            .queue_play_media(
+                vec![track("test", "first"), track("test", "second")],
+                QueueOption::Replace,
+                Some(1),
+                false,
+                true,
+            )
+            .expect("replace queue");
+
+        assert_eq!(engine.queue.current_index, Some(1));
+        assert_eq!(engine.player_state().playback_state, PlayState::Idle);
+        assert!(!engine.is_queue_restored);
+        assert_eq!(engine.download_plan_version, 1);
+        assert!(engine.current_cache_content_key.is_some());
+        engine.shutdown();
+        std::fs::remove_file(queue_snapshot_path().expect("test queue path"))
+            .expect("remove test snapshot");
+    }
+
+    #[test]
+    fn replace_queue_can_defer_download_until_media_is_added() {
+        let mut engine = SendspinEngine::new();
+        engine.configure(configuration()).expect("configure engine");
+        engine
+            .queue_play_media(
+                vec![track("test", "first"), track("test", "second")],
+                QueueOption::Replace,
+                Some(1),
+                false,
+                false,
+            )
+            .expect("defer queue download");
+
+        assert!(engine.is_queue_restored);
+        assert_eq!(engine.download_plan_version, 0);
+        assert_eq!(engine.queue.current_index, Some(1));
+        engine
+            .queue_play_media(vec![track("test", "third")], QueueOption::Add, None, false, true)
+            .expect("start download for extended queue");
+        assert!(!engine.is_queue_restored);
+        assert_eq!(engine.download_plan_version, 1);
+        assert_eq!(engine.queue.items.len(), 3);
+        assert_eq!(engine.player_state().playback_state, PlayState::Idle);
+        engine.shutdown();
+        std::fs::remove_file(queue_snapshot_path().expect("test queue path"))
+            .expect("remove test snapshot");
+    }
+
+    #[test]
+    fn deferring_or_clearing_an_active_queue_invalidates_its_download_plan() {
+        let mut engine = SendspinEngine::new();
+        engine.configure(configuration()).expect("configure engine");
+        engine.queue_play_media(vec![track("test", "first")], QueueOption::Replace, None, false, true)
+            .expect("start download");
+        engine.queue_play_media(vec![track("test", "second")], QueueOption::Replace, None, false, false)
+            .expect("defer replacement");
+        assert_eq!(engine.download_plan_version, 2);
+        assert!(engine.is_queue_restored);
+        assert!(engine.current_cache_content_key.is_none());
+        engine.transport_play().expect("start replacement");
+        engine.clear_queue().expect("clear active queue");
+        assert_eq!(engine.download_plan_version, 4);
+        assert!(engine.queue.items.is_empty());
+        engine.shutdown();
+        std::fs::remove_file(queue_snapshot_path().expect("test queue path"))
+            .expect("remove test snapshot");
+    }
+
+    #[test]
+    fn active_queue_cannot_skip_download_when_adding_media() {
+        let mut engine = SendspinEngine::new();
+        engine.configure(configuration()).expect("configure engine");
+        engine
+            .queue_play_media(vec![track("test", "first")], QueueOption::Replace, None, false, true)
+            .expect("start queue download");
+        let next_queue_item_id = engine.next_queue_item_id;
+        assert!(engine
+            .queue_play_media(vec![track("test", "second")], QueueOption::Next, None, false, false)
+            .is_err());
+        assert_eq!(engine.queue.items.len(), 1);
+        assert_eq!(engine.next_queue_item_id, next_queue_item_id);
+        engine.shutdown();
+        std::fs::remove_file(queue_snapshot_path().expect("test queue path"))
+            .expect("remove test snapshot");
+    }
+
     fn configuration() -> SendspinEngineConfiguration {
         SendspinEngineConfiguration {
             sendspin_url: "ws://localhost".to_string(),
@@ -1456,7 +1837,7 @@ mod tests {
         engine.configure(configuration()).expect("configure engine");
         engine.set_autoplay(true);
         engine
-            .play_media(vec![track("test", "old")])
+            .queue_play_media(vec![track("test", "old")], QueueOption::Play, None, false, true)
             .expect("seed old queue");
         engine
             .start_radio(vec![track("test", "started")])
@@ -1493,102 +1874,6 @@ mod tests {
 
     #[test]
     fn restored_queue_does_not_download_until_play() {
-        let path = queue_snapshot_path().expect("test queue path");
-        let config = configuration();
-        QueueSnapshot {
-            version: SNAPSHOT_VERSION,
-            music_assistant_url: config.music_assistant_url.clone(),
-            username: config.username.clone(),
-            items: vec![
-                QueueItem::local(
-                    Queue::default().queue_id,
-                    QueueItemId("local-7".into()),
-                    0,
-                    track("test", "first"),
-                ),
-                QueueItem::local(
-                    Queue::default().queue_id,
-                    QueueItemId("local-8".into()),
-                    1,
-                    track("test", "second"),
-                ),
-            ],
-            current_index: Some(1),
-            shuffle_enabled: false,
-            repeat_mode: RepeatMode::Off,
-        }
-        .save(&path)
-        .expect("save queue before restart");
-
-        let mut engine = SendspinEngine::new();
-        engine.configure(config).expect("configure restored engine");
-        assert_eq!(engine.queue.items.len(), 2);
-        assert_eq!(engine.queue.current_index, Some(1));
-        assert_eq!(
-            engine.player_state().playback_state,
-            PlayState::Uninitialized
-        );
-        assert!(engine.current_cache_content_key.is_none());
-        assert!(engine.downloader.download_plan().is_none());
-        engine.resume_downloads_if_active();
-        assert_eq!(engine.download_plan_version, 0);
-        assert!(engine.downloader.download_plan().is_none());
-        assert_eq!(engine.queue.items.len(), 2);
-
-        engine
-            .play_media_last(vec![track("test", "third")])
-            .expect("append without activating playback");
-        assert!(engine.current_cache_content_key.is_none());
-        assert_eq!(engine.next_queue_item_id, 10);
-        engine
-            .set_preferred_codec("flac")
-            .expect("change codec without playback");
-        assert!(engine.current_cache_content_key.is_none());
-        engine.transport_play().expect("start restored track");
-        assert_eq!(engine.queue.current_index, Some(1));
-        assert!(engine.current_cache_content_key.is_some());
-        engine.resume_downloads_if_active();
-        assert_eq!(engine.download_plan_version, 2);
-        engine.shutdown();
-
-        let mut restarted = SendspinEngine::new();
-        restarted
-            .configure(configuration())
-            .expect("restore queue again");
-        assert!(restarted.current_cache_content_key.is_none());
-        restarted.play_queue_index(2).expect("select restored item");
-        assert_eq!(restarted.queue.current_index, Some(2));
-        assert!(restarted.current_cache_content_key.is_some());
-        restarted.shutdown();
-        std::fs::remove_file(path).expect("remove test snapshot");
-    }
-
-    #[test]
-    fn stopped_queue_keeps_selection_without_restarting_unprepared_audio() {
-        let mut engine = SendspinEngine::new();
-        engine.configure(configuration()).expect("configure engine");
-        engine
-            .play_media(vec![track("test", "first")])
-            .expect("prepare queue playback");
-        assert!(engine.audio_player.has_prepared_source());
-        let content_key = engine
-            .current_cache_content_key
-            .clone()
-            .expect("current track");
-
-        engine.transport_stop();
-        assert_eq!(engine.queue.current_index, Some(0));
-        assert!(!engine.audio_player.has_prepared_source());
-        engine.start_prepared_audio_if_available(&content_key);
-        assert_eq!(engine.audio_player.state(), AudioPlayerState::Idle);
-        assert_eq!(engine.player_state.playback_state, PlayState::Idle);
-        engine.shutdown();
-        std::fs::remove_file(queue_snapshot_path().expect("test queue path"))
-            .expect("remove test snapshot");
-    }
-
-    #[test]
-    fn restored_queue_activates_for_seek_and_track_navigation() {
         let path = queue_snapshot_path().expect("test queue path");
         let config = configuration();
         let snapshot = QueueSnapshot {
@@ -1639,6 +1924,44 @@ mod tests {
             engine.shutdown();
         }
         std::fs::remove_file(path).expect("remove test snapshot");
+    }
+
+    #[test]
+    fn restored_repeat_all_queue_wraps_on_next_and_previous() {
+        let path = queue_snapshot_path().expect("test queue path");
+        let config = configuration();
+        let queue_id = Queue::default().queue_id;
+        let snapshot = QueueSnapshot {
+            version: SNAPSHOT_VERSION,
+            music_assistant_url: config.music_assistant_url.clone(),
+            username: config.username.clone(),
+            items: vec![
+                QueueItem::local(
+                    queue_id.clone(),
+                    QueueItemId("repeat-first".into()),
+                    0,
+                    track("test", "first"),
+                ),
+                QueueItem::local(
+                    queue_id,
+                    QueueItemId("repeat-last".into()),
+                    1,
+                    track("test", "last"),
+                ),
+            ],
+            current_index: Some(0),
+            shuffle_enabled: false,
+            repeat_mode: RepeatMode::All,
+        };
+        snapshot.save(&path).expect("store repeat queue");
+        let mut engine = SendspinEngine::new();
+        engine.configure(config).expect("restore repeat queue");
+        engine.transport_previous().expect("wrap to last item");
+        assert_eq!(engine.queue.current_index, Some(1));
+        engine.transport_next().expect("wrap to first item");
+        assert_eq!(engine.queue.current_index, Some(0));
+        engine.shutdown();
+        std::fs::remove_file(path).expect("remove repeat queue snapshot");
     }
 
     #[test]
@@ -1718,12 +2041,12 @@ mod tests {
         }))
         .expect("track with complete album");
         engine
-            .play_media(vec![
+            .queue_play_media(vec![
                 first_track,
                 track("test", "second"),
                 track("test", "third"),
                 track("test", "fourth"),
-            ])
+            ], QueueOption::Play, None, false, true)
             .expect("start queue");
         engine.play_queue_index(1).expect("select second track");
         engine.set_shuffle(true);
@@ -2063,12 +2386,12 @@ mod tests {
         let mut engine = SendspinEngine::new();
         engine.config = Some(configuration());
         engine
-            .play_media(vec![
+            .queue_play_media(vec![
                 track("test", "first"),
                 track("test", "second"),
                 track("test", "third"),
                 track("test", "fourth"),
-            ])
+            ], QueueOption::Play, None, false, true)
             .expect("start playback");
         let original_upcoming_ids = engine.queue.items[1..]
             .iter()

@@ -117,7 +117,7 @@ class _MediaSlideSectionMobileState<T>
 
     unawaited(() async {
       try {
-        await bridge.playMedia(<MediaItem>[item]);
+        await bridge.queuePlayMedia(<MediaItem>[item]);
       } catch (_) {
         // Keep row interactions responsive when playback rejects an item.
       }
@@ -150,7 +150,7 @@ class _MediaSlideSectionMobileState<T>
 
     unawaited(() async {
       try {
-        await bridge.playMedia(
+        await bridge.queuePlayMedia(
           _isTrackSection ? playItems : <MediaItem>[playItems.first],
         );
       } catch (_) {
@@ -172,7 +172,7 @@ class _MediaSlideSectionMobileState<T>
 
     unawaited(() async {
       try {
-        await bridge.playShuffledMedia(playItems);
+        await bridge.queuePlayMedia(playItems, shuffle: true);
       } catch (_) {
         // Keep header interactions responsive when playback rejects an item.
       }

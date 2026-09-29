@@ -176,9 +176,10 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
       if (currentPosition < insertPosition) {
         insertPosition--;
       }
-      final int positionShift = insertPosition - currentPosition;
-      if (positionShift != 0) {
-        await widget.coreBridge.moveQueueItem(itemId, positionShift);
+      if (insertPosition != currentPosition) {
+        await widget.coreBridge.moveQueueItems(<String>[
+          itemId,
+        ], insertPosition);
       }
       itemOrder
         ..removeAt(currentPosition)
@@ -202,9 +203,10 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
         continue;
       }
       final int targetPosition = itemOrder.length - 1;
-      final int positionShift = targetPosition - currentPosition;
-      if (positionShift != 0) {
-        await widget.coreBridge.moveQueueItem(itemId, positionShift);
+      if (targetPosition != currentPosition) {
+        await widget.coreBridge.moveQueueItems(<String>[
+          itemId,
+        ], targetPosition);
       }
       itemOrder
         ..removeAt(currentPosition)
@@ -255,13 +257,12 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
       ContextMenuAction(
         label: 'Aus Queue entfernen',
         icon: Icons.remove_circle_outline,
-        onSelected: () async {
-          for (final QueueItem target in targets) {
-            if (target.queueItemId.isNotEmpty) {
-              await widget.coreBridge.deleteQueueItem(target.queueItemId);
-            }
-          }
-        },
+        onSelected: () => widget.coreBridge.deleteQueueItems(
+          targets
+              .map((QueueItem target) => target.queueItemId)
+              .where((String id) => id.isNotEmpty)
+              .toList(),
+        ),
       ),
       if (track != null &&
           (onOpenArtist != null || onOpenAlbum != null)) ...<ContextMenuAction>[

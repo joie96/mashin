@@ -2,7 +2,7 @@
 
 use crate::music_assistant::models::identifiers::QueueItemId;
 use crate::music_assistant::models::media::{MediaItem, Track};
-use crate::music_assistant::models::queue::RepeatMode;
+use crate::music_assistant::models::queue::{QueueOption, RepeatMode};
 use crate::playback::engine::PlaybackEngine;
 use crate::playback::models::{
     PlaybackConnectionState, PlaybackEngineConfiguration, PlaybackEngineKind, PlayerState, Queue,
@@ -95,26 +95,19 @@ impl PlaybackCoordinator {
     }
 
     // Queue commands.
-    pub(crate) fn play_media(&mut self, media_items: Vec<MediaItem>) -> Result<(), String> {
-        self.with_active_engine_mut(|engine| engine.queue_replace(media_items))
+    pub(crate) fn queue_play_media(
+        &mut self,
+        media_items: Vec<MediaItem>,
+        option: QueueOption,
+        start_item: Option<usize>,
+        shuffle: bool,
+        start_download: bool,
+    ) -> Result<(), String> {
+        self.with_active_engine_mut(|engine| engine.queue_play_media(media_items, option, start_item, shuffle, start_download))
     }
 
     pub(crate) fn start_radio(&mut self, started_tracks: Vec<MediaItem>) -> Result<(), String> {
         self.with_active_engine_mut(|engine| engine.queue_start_radio(started_tracks))
-    }
-
-    pub(crate) fn play_media_next(
-        &mut self,
-        media_items: Vec<MediaItem>,
-        replace_following: bool,
-    ) -> Result<(), String> {
-        self.with_active_engine_mut(|engine| {
-            engine.queue_insert_next(media_items, replace_following)
-        })
-    }
-
-    pub(crate) fn play_media_last(&mut self, media_items: Vec<MediaItem>) -> Result<(), String> {
-        self.with_active_engine_mut(|engine| engine.queue_append(media_items))
     }
 
     pub(crate) fn append_radio_tracks(
@@ -127,20 +120,24 @@ impl PlaybackCoordinator {
         })
     }
 
-    pub(crate) fn clear_queue(&mut self) -> Result<(), String> {
-        self.with_active_engine_mut(|engine| engine.queue_clear())
+    pub(crate) fn insert_queue_items(&mut self, index: usize, media_items: Vec<MediaItem>) -> Result<(), String> {
+        self.with_active_engine_mut(|engine| engine.insert_queue_items(index, media_items))
     }
 
-    pub(crate) fn move_queue_item(
-        &mut self,
-        item_id: QueueItemId,
-        shift: i32,
-    ) -> Result<(), String> {
-        self.with_active_engine_mut(|engine| engine.queue_move(item_id, shift))
+    pub(crate) fn append_queue_items(&mut self, media_items: Vec<MediaItem>) -> Result<(), String> {
+        self.with_active_engine_mut(|engine| engine.append_queue_items(media_items))
     }
 
-    pub(crate) fn delete_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {
-        self.with_active_engine_mut(|engine| engine.queue_remove(item_id))
+    pub(crate) fn move_queue_items(&mut self, item_ids: Vec<QueueItemId>, target_index: usize) -> Result<(), String> {
+        self.with_active_engine_mut(|engine| engine.move_queue_items(item_ids, target_index))
+    }
+
+    pub(crate) fn delete_queue_items(&mut self, item_ids: Vec<QueueItemId>) -> Result<(), String> {
+        self.with_active_engine_mut(|engine| engine.delete_queue_items(item_ids))
+    }
+
+    pub(crate) fn select_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {
+        self.with_active_engine_mut(|engine| engine.select_queue_item(item_id))
     }
 
     pub(crate) fn play_queue_index(&mut self, index: usize) -> Result<(), String> {
