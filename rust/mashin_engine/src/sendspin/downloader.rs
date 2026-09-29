@@ -2257,7 +2257,8 @@ fn run_downloader_worker(
     receiver: mpsc::Receiver<DownloaderCommand>,
 ) {
     // This receiver is the serialization boundary for all mutable worker state.
-    while let Ok(command) = receiver.recv() {
+    let mut pending_command = None;
+    while let Some(command) = next_downloader_command(&receiver, &mut pending_command) {
         let is_connection_command = matches!(
             command,
             DownloaderCommand::Connect
@@ -2324,6 +2325,27 @@ fn run_downloader_worker(
             publish_connection_event(&worker.connection_event, connection_generation, status);
         }
     }
+}
+
+fn next_downloader_command(
+    receiver: &mpsc::Receiver<DownloaderCommand>,
+    pending_command: &mut Option<DownloaderCommand>,
+) -> Option<DownloaderCommand> {
+    let command = pending_command.take().or_else(|| receiver.recv().ok())?;
+    if !matches!(command, DownloaderCommand::ReconcileCacheAndDownloads) {
+        return Some(command);
+    }
+    while let Ok(next) = receiver.try_recv() {
+        match next {
+            DownloaderCommand::ReconcileCacheAndDownloads => {}
+            DownloaderCommand::ApplyDownloadPlan(_) => return Some(next),
+            _ => {
+                *pending_command = Some(next);
+                break;
+            }
+        }
+    }
+    Some(command)
 }
 
 async fn seek_download_player(
@@ -3009,17 +3031,52 @@ mod tests {
     use super::{
         append_download_chunk, cache_reaches_capacity_pressure_threshold, download_client_id,
         download_client_name, download_request_is_current, estimate_cache_size,
-        normalize_client_id, publish_connection_event, remaining_download_duration_millis,
+        next_downloader_command, normalize_client_id, publish_connection_event, remaining_download_duration_millis,
         report_connection_lost_if_current, retain_interrupted_reservation,
         should_admit_non_current_downloads, stream_end_outcome, terminal_chunk_duration_millis,
-        watchdog_deadline, DownloaderConnectionEvent, DownloaderConnectionStatus, StreamEndOutcome,
+        watchdog_deadline, DownloaderCommand, DownloaderConnectionEvent, DownloaderConnectionStatus, StreamEndOutcome,
         DOWNLOAD_PROGRESS_TIMEOUT, SEEK_CONFIRMATION_TIMEOUT,
     };
     use crate::cache::store::{self, CacheAppendResult, DownloadSlotReservation};
-    use crate::sendspin::models::SendspinAudioCodec;
+    use crate::sendspin::models::{SendspinAudioCodec, SendspinDownloadPlanRequest};
     use ::sendspin::audio::{AudioFormat, Codec};
     use std::sync::atomic::Ordering;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{mpsc, Arc, Mutex};
+
+    #[test]
+    fn pending_download_plan_overtakes_redundant_reconciliation() {
+        let (sender, receiver) = mpsc::channel();
+        for _ in 0..50 {
+            sender.send(DownloaderCommand::ReconcileCacheAndDownloads).unwrap();
+        }
+        sender.send(DownloaderCommand::ApplyDownloadPlan(SendspinDownloadPlanRequest {
+            queue_revision: 2,
+            queue_items: Vec::new(),
+            current_index: None,
+        })).unwrap();
+        let mut pending_command = None;
+        assert!(matches!(
+            next_downloader_command(&receiver, &mut pending_command),
+            Some(DownloaderCommand::ApplyDownloadPlan(request)) if request.queue_revision == 2
+        ));
+        assert!(pending_command.is_none());
+    }
+
+    #[test]
+    fn reconciliation_does_not_overtake_other_commands() {
+        let (sender, receiver) = mpsc::channel();
+        sender.send(DownloaderCommand::ReconcileCacheAndDownloads).unwrap();
+        sender.send(DownloaderCommand::SetPendingCurrentSeek(7)).unwrap();
+        let mut pending_command = None;
+        assert!(matches!(
+            next_downloader_command(&receiver, &mut pending_command),
+            Some(DownloaderCommand::ReconcileCacheAndDownloads)
+        ));
+        assert!(matches!(
+            next_downloader_command(&receiver, &mut pending_command),
+            Some(DownloaderCommand::SetPendingCurrentSeek(7))
+        ));
+    }
 
     #[test]
     fn normalizes_client_ids_without_separators() {

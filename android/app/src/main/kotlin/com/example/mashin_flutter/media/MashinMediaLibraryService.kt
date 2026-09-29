@@ -496,7 +496,7 @@ internal class AndroidAutoLibraryCallback(
         "home:playlistSuggestions" -> recommendationItems("artist_playlists", "playlist", normalizePlaylistNames = true)
         "home:topTracks" -> recommendationItems("top_tracks", "track")
         "home:topArtists" -> recommendationItems("top_artists", "artist")
-        "home:recent" -> mediaItemsFromJson(NativeCoreBridge.query("recentlyPlayed", null), true)
+        "home:recent" -> mediaItemsFromJson(NativeCoreBridge.query("recentlyPlayed", null), true, mediaType = "track")
         "favorites:tracks" -> userDataItems("tracks", "track", true)
         "favorites:albums" -> userDataItems("albums", "album")
         "favorites:playlists" -> userDataItems("playlists", "playlist")
@@ -555,9 +555,9 @@ internal class AndroidAutoLibraryCallback(
 
     private fun dynamicChildren(parentId: String): List<MediaItem> = when {
         parentId.startsWith("search:") -> searchCategoryItems(parentId)
-        parentId.startsWith("album:") -> referencedItems(parentId, "albumTracks")
-        parentId.startsWith("playlist:") -> referencedItems(parentId, "playlistTracks")
-        parentId.startsWith("artist:") -> artistChildren(parentId)
+        parentId.startsWith("browse:album:") -> referencedItems(parentId, "albumTracks")
+        parentId.startsWith("browse:playlist:") -> referencedItems(parentId, "playlistTracks")
+        parentId.startsWith("browse:artist:") -> artistChildren(parentId)
         parentId.startsWith("artistAlbums:") -> referencedItems(parentId.removePrefix("artistAlbums:"), "artistAlbums")
         parentId.startsWith("artistTopTracks:") -> referencedItems(parentId.removePrefix("artistTopTracks:"), "artistTopTracks")
         parentId.startsWith("similarArtists:") -> referencedItems(parentId.removePrefix("similarArtists:"), "similarArtists")
@@ -659,7 +659,9 @@ internal class AndroidAutoLibraryCallback(
         }
         return buildList {
             if (includeTrackListActions) {
-                val tracks = JSONArray(parsedItems.filter { it.optString("media_type") == "track" }.map(JSONObject::toString))
+                val tracks = JSONArray().apply {
+                    parsedItems.filter { it.optString("media_type") == "track" }.forEach(::put)
+                }
                 if (tracks.length() > 0) {
                     addAll(createTrackListActions(tracks))
                 }
@@ -770,7 +772,7 @@ internal class MashinSessionPlayer(
         val builder = State.Builder()
             .setAvailableCommands(commands)
             .setPlayWhenReady(
-                snapshot.status == "playing",
+                snapshot.status == "playing" || snapshot.status == "buffering" || snapshot.status == "seeking",
                 Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST,
             )
             .setPlaybackState(snapshot.playerState)
@@ -810,7 +812,9 @@ internal class MashinSessionPlayer(
         startPositionMs: Long,
     ): ListenableFuture<*> {
         val selectedItem = mediaItems.getOrNull(if (startIndex == C.INDEX_UNSET) 0 else startIndex)
-        if (mediaItems.size == 1 && selectedItem?.mediaId?.let { it.startsWith("action:") || it.startsWith("artistRadio:") } == true) {
+        if (mediaItems.size == 1 && selectedItem?.mediaId?.let {
+            it.startsWith("action:") || it.startsWith("artistRadio:") || it.startsWith("browse:track:")
+        } == true) {
             val selection = startPlayback(selectedItem.mediaId)
             if (startPositionMs <= 0L) return selection
             return Futures.transformAsync(
@@ -919,6 +923,9 @@ internal class MashinSessionPlayer(
     }
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
+        if (playWhenReady && (snapshot.mediaItems.isEmpty() || snapshot.status == "buffering" || snapshot.status == "seeking" || snapshot.status == "playing")) {
+            return Futures.immediateVoidFuture()
+        }
         return dispatchCommand(if (playWhenReady) "play" else "pause", null)
     }
 
