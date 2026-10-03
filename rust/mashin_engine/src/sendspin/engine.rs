@@ -332,7 +332,7 @@ impl SendspinEngine {
         {
             return Err("cannot defer a queue edit while downloading".to_string());
         }
-        if shuffle {
+        if shuffle && !self.queue.shuffle_enabled {
             Self::shuffle_items(&mut media_items);
         }
         let seed_tracks = tracks_from_media_items(&media_items);
@@ -627,7 +627,7 @@ impl SendspinEngine {
     }
 
     fn new_queue_media_items(&mut self, media_items: Vec<MediaItem>) -> Vec<QueueMediaItem> {
-        media_items
+        let mut queue_media_items = media_items
             .into_iter()
             .map(|media_item| {
                 let queue_item_id = QueueItemId(format!("local-{}", self.next_queue_item_id));
@@ -640,7 +640,11 @@ impl SendspinEngine {
                     media_item,
                 }
             })
-            .collect()
+            .collect::<Vec<_>>();
+        if self.queue.shuffle_enabled {
+            Self::shuffle_items(&mut queue_media_items);
+        }
+        queue_media_items
     }
 
     // Preserves the current item when possible, then rebuilds the authoritative queue snapshot.
@@ -2563,6 +2567,72 @@ mod tests {
         assert!(!engine.queue.shuffle_enabled);
         assert_ne!(engine.queue.items[3..].iter().map(|item| item.media_item.as_ref().unwrap().fields().item_id.as_str()).collect::<Vec<_>>(), vec!["fourth", "fifth", "sixth"]);
 
+        engine.shutdown();
+        std::fs::remove_file(queue_snapshot_path().expect("test queue path"))
+            .expect("remove test snapshot");
+    }
+
+    #[test]
+    fn queue_play_media_uses_enabled_shuffle_mode_for_new_items() {
+        let mut engine = SendspinEngine::new();
+        engine.configure(configuration()).expect("configure engine");
+        engine.set_shuffle(true);
+        engine
+            .queue_play_media(
+                vec![
+                    track("test", "first"),
+                    track("test", "second"),
+                    track("test", "third"),
+                    track("test", "fourth"),
+                ],
+                QueueOption::Play,
+                None,
+                false,
+                true,
+            )
+            .expect("play items with shuffle mode enabled");
+
+        assert!(engine.queue.shuffle_enabled);
+        assert_ne!(
+            engine
+                .queue
+                .items
+                .iter()
+                .map(|item| item.media_item.as_ref().unwrap().fields().item_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["first", "second", "third", "fourth"],
+        );
+        let mut original_positions = engine
+            .queue
+            .items
+            .iter()
+            .map(|item| item.sort_index)
+            .collect::<Vec<_>>();
+        original_positions.sort_unstable();
+        assert_eq!(original_positions, vec![0, 1, 2, 3]);
+
+        let current_item_id = engine.queue.items[engine.queue.current_index.unwrap()]
+            .media_item
+            .as_ref()
+            .unwrap()
+            .fields()
+            .item_id
+            .clone();
+        engine.set_shuffle(false);
+
+        assert!(!engine.queue.shuffle_enabled);
+        assert_eq!(
+            engine.queue.items[0]
+                .media_item
+                .as_ref()
+                .unwrap()
+                .fields()
+                .item_id,
+            current_item_id,
+        );
+        assert!(engine.queue.items[1..]
+            .windows(2)
+            .all(|items| items[0].sort_index <= items[1].sort_index));
         engine.shutdown();
         std::fs::remove_file(queue_snapshot_path().expect("test queue path"))
             .expect("remove test snapshot");
