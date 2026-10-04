@@ -3,7 +3,9 @@ package com.example.mashin_flutter.media.session
 import android.os.Bundle
 import androidx.media3.common.Player
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
+import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import com.example.mashin_flutter.media.library.MediaLibraryBrowser
 import com.google.common.util.concurrent.Futures
@@ -20,7 +22,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class PlaybackSessionCallbackTest {
     @Test
-    fun appAndNotificationControllersReceivePlaybackAndMetadataCommands() {
+    fun controllersCanBrowseAndControlPlayback() {
         val context = RuntimeEnvironment.getApplication()
         val browser = MediaLibraryBrowser(context) { Futures.immediateVoidFuture() }
         val player = RustSessionPlayer({ Futures.immediateVoidFuture() }, browser::startPlayback, browser::queueEntry)
@@ -29,11 +31,23 @@ class PlaybackSessionCallbackTest {
         }
         val session = MediaLibrarySession.Builder(context, player, callback).build()
         try {
-            for (packageName in listOf(context.packageName, "com.android.systemui")) {
+            for (packageName in listOf(context.packageName, "com.android.systemui", "com.google.android.projection.gearhead")) {
                 val controller = MediaSession.ControllerInfo.createTestOnlyControllerInfo(
                     packageName, 1, 1000, 0, 0, true, Bundle.EMPTY, true)
-                val result = callback.onConnectAsync(session, controller).get()
+                val result = callback.onConnect(session, controller)
                 assertTrue(result.isAccepted)
+                assertTrue("$packageName cannot browse the library root", result.availableSessionCommands.contains(
+                    SessionCommand.COMMAND_CODE_LIBRARY_GET_LIBRARY_ROOT))
+                val libraryRoot = callback.onGetLibraryRoot(session, controller, null).get()
+                assertEquals(LibraryResult.RESULT_SUCCESS, libraryRoot.resultCode)
+                assertEquals("root", libraryRoot.value?.mediaId)
+                val children = callback.onGetChildren(session, controller, "root", 0, 10, null).get()
+                assertEquals(LibraryResult.RESULT_SUCCESS, children.resultCode)
+                assertEquals(listOf("node:home", "node:discover", "node:playlists", "node:favorites"),
+                    children.value?.map { it.mediaId })
+                assertEquals("node:home", callback.onGetItem(session, controller, "node:home").get().value?.mediaId)
+                val resolved = callback.onSetMediaItems(session, controller, listOf(children.value!!.first()), 0, 0).get()
+                assertEquals("mashin", resolved.mediaItems.first().localConfiguration?.uri?.scheme)
                 for (command in listOf(Player.COMMAND_PLAY_PAUSE, Player.COMMAND_SEEK_TO_NEXT,
                     Player.COMMAND_SEEK_TO_PREVIOUS, Player.COMMAND_GET_TIMELINE,
                     Player.COMMAND_GET_CURRENT_MEDIA_ITEM, Player.COMMAND_GET_METADATA)) {
