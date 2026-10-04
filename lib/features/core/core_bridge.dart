@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:ffi/ffi.dart';
 
 import '../../app/logging/app_log_buffer.dart';
+import 'android_bridge.dart';
 import 'core_models.dart';
 
 typedef _NativeVoidFn = ffi.Int32 Function();
@@ -197,6 +198,9 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   static MashinCoreBridge? _instance;
 
   final _RustBindings _bindings;
+  final AndroidBridge? _androidBridge = Platform.isAndroid
+      ? AndroidBridge()
+      : null;
   late final ffi.NativeCallable<_NativeEventCallbackFn> _nativeEventCallback;
   final StreamController<Queue> _queueController =
       StreamController<Queue>.broadcast();
@@ -217,6 +221,8 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
 
   @override
   Stream<Map<String, dynamic>> get events => _eventController.stream;
+
+  bool get isServiceOwnedPlayback => _androidBridge != null;
 
   // Session authentication, restoration, and output configuration.
   @override
@@ -515,6 +521,15 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     Map<String, Object?> arguments,
     T Function(Object? result) decoder,
   ) async {
+    final androidBridge = _androidBridge;
+    if (androidBridge != null) {
+      final commands = AndroidCoreCommand.values.where(
+        (command) => command.name == kind,
+      );
+      if (commands.isNotEmpty) {
+        return decoder(await androidBridge.execute(commands.single, arguments));
+      }
+    }
     final int requestId = ++_nextMusicAssistantQueryId;
     final Completer<Object?> completer = Completer<Object?>();
     _pendingMusicAssistantQueries[requestId] = completer;
@@ -844,17 +859,21 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     }
 
     _disposed = true;
-    _instance = null;
-    for (final Completer<Object?> request
-        in _pendingMusicAssistantQueries.values) {
-      request.completeError(StateError('Mashin core bridge was disposed.'));
+    try {
+      await _androidBridge?.dispose();
+    } finally {
+      if (identical(_instance, this)) _instance = null;
+      for (final Completer<Object?> request
+          in _pendingMusicAssistantQueries.values) {
+        request.completeError(StateError('Mashin core bridge was disposed.'));
+      }
+      _pendingMusicAssistantQueries.clear();
+      _bindings.setEventCallback(ffi.nullptr);
+      _nativeEventCallback.close();
+      await _eventController.close();
+      await _queueController.close();
+      await _playerStateController.close();
     }
-    _pendingMusicAssistantQueries.clear();
-    _bindings.setEventCallback(ffi.nullptr);
-    _nativeEventCallback.close();
-    await _eventController.close();
-    await _queueController.close();
-    await _playerStateController.close();
   }
 
   // The native callback transfers ownership of its string pointer to this bridge.

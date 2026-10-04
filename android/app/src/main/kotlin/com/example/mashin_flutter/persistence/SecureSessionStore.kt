@@ -1,15 +1,16 @@
-package com.example.mashin_flutter
+package com.example.mashin_flutter.persistence
 
 import android.content.Context
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.example.mashin_flutter.core.RustCoreBridge
 
 object SecureSessionStore {
     private const val preferencesName = "mashin_secure_session"
     private const val sessionKey = "music_assistant_session"
     private var applicationContext: Context? = null
 
-    // NativeCoreBridge initializes this store before Rust can read or mutate the persisted session.
+    // RustCoreBridge initializes this store before Rust can read or mutate the persisted session.
     fun initialize(context: Context) {
         applicationContext = context.applicationContext
     }

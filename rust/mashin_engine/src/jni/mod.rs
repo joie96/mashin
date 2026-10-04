@@ -34,6 +34,11 @@ pub extern "system" fn JNI_OnLoad(java_vm: JavaVM, _: *mut c_void) -> jni::sys::
             fn_ptr: entry_points::restore_persisted_session as *mut c_void,
         },
         NativeMethod {
+            name: "unregisterFlutterEventCallback".into(),
+            sig: "()V".into(),
+            fn_ptr: entry_points::unregister_flutter_event_callback as *mut c_void,
+        },
+        NativeMethod {
             name: "query".into(),
             sig: "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;".into(),
             fn_ptr: entry_points::query as *mut c_void,
@@ -45,10 +50,7 @@ pub extern "system" fn JNI_OnLoad(java_vm: JavaVM, _: *mut c_void) -> jni::sys::
         },
     ];
     if env
-        .register_native_methods(
-            "com/example/mashin_flutter/media/NativeCoreBridge",
-            &methods,
-        )
+        .register_native_methods("com/example/mashin_flutter/core/RustCoreBridge", &methods)
         .is_err()
     {
         return 0;

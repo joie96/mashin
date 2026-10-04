@@ -14,6 +14,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.example.mashin_flutter"
@@ -40,6 +44,8 @@ dependencies {
     implementation("androidx.media3:media3-common:1.11.1")
     implementation("androidx.media3:media3-session:1.11.1")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.16.1")
 }
 
 kotlin {
@@ -50,4 +56,12 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+// Resource-backed host tests consume the Flutter asset-copy task's output.
+tasks.configureEach {
+    if (name.startsWith("package") && name.endsWith("UnitTestForUnitTest")) {
+        val variant = name.removePrefix("package").removeSuffix("UnitTestForUnitTest")
+        dependsOn("copyFlutterAssets$variant")
+    }
 }

@@ -1,4 +1,4 @@
-package com.example.mashin_flutter.media
+package com.example.mashin_flutter.media.artwork
 
 import android.content.ContentProvider
 import android.content.ContentValues

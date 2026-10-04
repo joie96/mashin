@@ -1,17 +1,47 @@
 # mashin_flutter
 
-A new Flutter project.
+Flutter client for Music Assistant, backed by the Rust Mashin playback core.
 
-## Getting Started
+## Android Playback Ownership
 
-This project is a starting point for a Flutter application.
+Android playback commands follow one path:
 
-A few resources to get you started if this is your first Flutter project:
+```text
+MashinCoreBridge -> AndroidBridge -> FlutterPlaybackChannel
+	-> UI MediaController -> PlaybackService MediaSession
+	-> RustCoreBridge JNI -> Rust core
+```
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+- `PlaybackService` owns Android session restoration, command ordering, audio focus,
+	foreground notification and the playback CPU wake lock. Rust owns the queue and
+	playback state; Media3 only projects that state.
+- Flutter engine detach releases only the UI controller. It does not shut down
+	Android playback. Returning to the UI reconnects without restoring over a live session.
+- Before engine detach, Android synchronously revokes the Flutter FFI listener.
+	Registration and native callback invocation share a lock, so no old listener
+	can be called after revocation returns. Service-owned JNI events remain active.
+- A local playback start establishes foreground eligibility before requesting
+	audio focus or executing Rust. Failed startup does not fall back to FFI.
+- Notification permission is not a prerequisite for media-session playback.
+	A CPU wake lock does not guarantee network availability under every Android
+	battery restriction or Doze policy.
+- Library queries and non-playback operations may use FFI on Android. Desktop
+	playback continues to use FFI. Persisted session identifiers are unchanged.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Build And Verify
+
+Rebuild the native library after JNI changes, then rebuild Flutter:
+
+```powershell
+& ./scripts/build_mashin_engine.ps1 -Profile Debug -PlatformSelection AndroidArm64
+flutter build apk --debug
+./android/gradlew.bat -p android :app:testDebugUnitTest --console=plain
+cargo test --manifest-path rust/mashin_engine/Cargo.toml jni::commands::tests --lib
+flutter test test/android_bridge_test.dart
+```
+
+Kotlin/Rust changes require a full app restart, not just Flutter hot reload.
+On a device, verify local playback with a media notification, screen-off playback,
+task removal while playing, and UI reconnection. After pause or stop, verify that
+audio focus and the CPU wake lock are released. Host tests do not certify standby
+behavior or manufacturer-specific battery policies.

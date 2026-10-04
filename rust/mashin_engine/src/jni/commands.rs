@@ -1,196 +1,262 @@
-//! Synchronous Android JNI command adapter for the Rust-owned playback core.
+//! Typed Android commands into the Rust-owned playback core.
+//! JNI callers refresh their snapshot synchronously; events also notify Flutter.
 
 use crate::core;
-use crate::core::models::{CoreError, MediaSessionEvent, QueuePlayMediaRequest};
-use crate::music_assistant::models::identifiers::QueueItemId;
+use crate::core::models::{
+    CoreError, LogLevelPreference, LoginConfig, MediaSessionEvent, OfflineOutputConfig,
+    QueuePlayMediaRequest, RemoteOutputConfig, SelectedOutput, ThemePreference,
+};
+use crate::music_assistant::models::identifiers::{PlayerId, QueueItemId};
 use crate::music_assistant::models::media::MediaItem;
 use crate::music_assistant::models::queue::{QueueOption, RepeatMode};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct QueueInsertRequest {
-    index: usize,
-    media_items: Vec<MediaItem>,
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+enum PlaybackCommand {
+    Login {
+        music_assistant_url: String,
+        username: String,
+        password: String,
+    },
+    ActivateEngine,
+    DeactivateEngine,
+    Shutdown,
+    SelectDefaultSendspinOutput,
+    SelectOfflineLibrary {
+        library_root: String,
+    },
+    SelectRemotePlayer {
+        player_id: PlayerId,
+    },
+    TransportPlay,
+    TransportPause,
+    TransportStop,
+    TransportNext,
+    TransportPrevious,
+    TransportSeek {
+        seconds: f64,
+    },
+    TransportRepeatMode {
+        mode: u8,
+    },
+    TransportShuffle {
+        enabled: bool,
+    },
+    SetAutoplay {
+        enabled: bool,
+    },
+    SetVolume {
+        volume: u8,
+    },
+    SetMuted {
+        muted: bool,
+    },
+    SetTheme {
+        theme: ThemePreference,
+    },
+    SetLogLevel {
+        log_level: LogLevelPreference,
+    },
+    QueuePlayMedia {
+        request: QueuePlayMediaRequest,
+    },
+    StartSendspinRadio {
+        media_items: Vec<MediaItem>,
+    },
+    InsertQueueItems {
+        index: usize,
+        media_items: Vec<MediaItem>,
+    },
+    AppendQueueItems {
+        media_items: Vec<MediaItem>,
+    },
+    MoveQueueItems {
+        item_ids: Vec<QueueItemId>,
+        target_index: usize,
+    },
+    DeleteQueueItems {
+        item_ids: Vec<QueueItemId>,
+    },
+    SelectQueueItem {
+        item_id: QueueItemId,
+    },
+    PlayQueueIndex {
+        index: usize,
+    },
+    RequestCodec {
+        codec: String,
+    },
+    SetLocalCacheSizeBytes {
+        cache_size_bytes: usize,
+    },
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct QueueMoveRequest {
-    item_ids: Vec<QueueItemId>,
-    target_index: usize,
-}
-
-// Session lifecycle commands.
+// Session restoration precedes snapshot synchronization in the service.
 pub(crate) fn restore_persisted_session() -> Result<(bool, Vec<MediaSessionEvent>), CoreError> {
     core::restore_persisted_session_and_collect_events()
 }
 
-pub(crate) fn activate_engine() -> Result<Vec<MediaSessionEvent>, CoreError> {
-    execute_core_command(|coordinator| coordinator.activate_selected_engine())
-}
-
-// Queue commands.
-pub(crate) fn queue_play_media(argument: &str) -> Result<Vec<MediaSessionEvent>, CoreError> {
-    let request: QueuePlayMediaRequest = serde_json::from_str(argument).map_err(|error| {
-        CoreError::command_failed(format!("invalid Android play media request: {error}"))
-    })?;
-    if request.option == QueueOption::Unknown {
-        return Err(CoreError::command_failed("unknown queue option"));
-    }
-    if request.media_items.is_empty() && request.option == QueueOption::Replace {
-        return execute_core_command(|coordinator| {
-            coordinator.queue_play_media(Vec::new(), request.option, None, false, false)
-        });
-    }
-    core::resolve_media_and_execute_command(request.media_items, false, |coordinator, tracks| {
-        coordinator.queue_play_media(tracks, request.option, request.start_item, request.shuffle, request.start_download)
-    })
-}
-
-pub(crate) fn insert_queue_items(argument: &str) -> Result<Vec<MediaSessionEvent>, CoreError> {
-    let request: QueueInsertRequest = serde_json::from_str(argument)
-        .map_err(|error| CoreError::command_failed(format!("invalid queue insertion: {error}")))?;
-    execute_core_command(|coordinator| coordinator.insert_queue_items(request.index, request.media_items))
-}
-
-pub(crate) fn append_queue_items(argument: &str) -> Result<Vec<MediaSessionEvent>, CoreError> {
-    let items = parse_media_items(argument)?;
-    execute_core_command(|coordinator| coordinator.append_queue_items(items))
-}
-
-pub(crate) fn move_queue_items(argument: &str) -> Result<Vec<MediaSessionEvent>, CoreError> {
-    let request: QueueMoveRequest = serde_json::from_str(argument)
-        .map_err(|error| CoreError::command_failed(format!("invalid queue move: {error}")))?;
-    execute_core_command(|coordinator| coordinator.move_queue_items(request.item_ids, request.target_index))
-}
-
-pub(crate) fn delete_queue_items(argument: &str) -> Result<Vec<MediaSessionEvent>, CoreError> {
-    let item_ids: Vec<QueueItemId> = serde_json::from_str(argument)
-        .map_err(|error| CoreError::command_failed(format!("invalid queue deletion: {error}")))?;
-    execute_core_command(|coordinator| coordinator.delete_queue_items(item_ids))
-}
-
-pub(crate) fn play_queue_item(item_id: &str) -> Result<Vec<MediaSessionEvent>, CoreError> {
-    execute_core_command(|coordinator| {
-        coordinator.play_queue_item(QueueItemId(item_id.to_string()))
-    })
-}
-
-pub(crate) fn select_queue_item(item_id: &str) -> Result<Vec<MediaSessionEvent>, CoreError> {
-    execute_core_command(|coordinator| {
-        coordinator.select_queue_item(QueueItemId(item_id.to_string()))
-    })
-}
-
-// Playback transport commands.
-pub(crate) fn play() -> Result<Vec<MediaSessionEvent>, CoreError> {
-    execute_core_command(|coordinator| coordinator.transport_play())
-}
-
-pub(crate) fn pause() -> Result<Vec<MediaSessionEvent>, CoreError> {
-    execute_core_command(|coordinator| {
-        coordinator.transport_pause();
-        Ok(())
-    })
-}
-
-pub(crate) fn stop() -> Result<Vec<MediaSessionEvent>, CoreError> {
-    execute_core_command(|coordinator| {
-        coordinator.transport_stop();
-        Ok(())
-    })
-}
-
-pub(crate) fn next() -> Result<Vec<MediaSessionEvent>, CoreError> {
-    execute_core_command(|coordinator| coordinator.transport_next())
-}
-
-pub(crate) fn previous() -> Result<Vec<MediaSessionEvent>, CoreError> {
-    execute_core_command(|coordinator| coordinator.transport_previous())
-}
-
-pub(crate) fn seek(seconds: f64) -> Result<Vec<MediaSessionEvent>, CoreError> {
-    execute_core_command(|coordinator| coordinator.transport_seek(seconds))
-}
-
-// Playback preference commands.
-pub(crate) fn set_volume(volume: u8) -> Result<Vec<MediaSessionEvent>, CoreError> {
-    execute_core_command(|coordinator| {
-        coordinator.set_volume(volume)?;
-        if volume > 0 {
-            coordinator.set_muted(false);
-        }
-        Ok(())
-    })
-}
-
-pub(crate) fn set_shuffle(is_enabled: bool) -> Result<Vec<MediaSessionEvent>, CoreError> {
-    execute_core_command(|coordinator| {
-        coordinator.set_shuffle(is_enabled);
-        Ok(())
-    })
-}
-
-pub(crate) fn set_repeat_mode(mode: RepeatMode) -> Result<Vec<MediaSessionEvent>, CoreError> {
-    execute_core_command(|coordinator| {
-        coordinator.set_repeat_mode(mode);
-        Ok(())
-    })
-}
-
-// JNI command routing.
+// JNI command validation and execution.
 pub(crate) fn execute_command(kind: &str, argument: Option<&str>) -> Result<(), String> {
-    let events = match kind {
-        "activate" => activate_engine(),
-        "queuePlayMedia" => queue_play_media(required_text_argument(argument)?),
-        "insertQueueItems" => insert_queue_items(required_text_argument(argument)?),
-        "appendQueueItems" => append_queue_items(required_text_argument(argument)?),
-        "moveQueueItems" => move_queue_items(required_text_argument(argument)?),
-        "deleteQueueItems" => delete_queue_items(required_text_argument(argument)?),
-        "playQueueItem" => play_queue_item(required_text_argument(argument)?),
-        "selectQueueItem" => select_queue_item(required_text_argument(argument)?),
-        "startSendspinRadio" => {
-            let media_items = parse_media_items(required_text_argument(argument)?)
-                .map_err(|error| error.message)?;
-            let events = core::start_sendspin_radio_and_execute_command(
+    let command = decode_command(kind, argument)?;
+    let events = match command {
+        PlaybackCommand::Login {
+            music_assistant_url,
+            username,
+            password,
+        } => execute_core_command(|coordinator| {
+            coordinator.authenticate_and_configure_session(LoginConfig {
+                music_assistant_url:
+                    crate::music_assistant::models::session::MusicAssistantServerUrl(
+                        music_assistant_url,
+                    ),
+                username,
+                password,
+            })
+        }),
+        PlaybackCommand::ActivateEngine => {
+            execute_core_command(|coordinator| coordinator.activate_selected_engine())
+        }
+        PlaybackCommand::DeactivateEngine => execute_core_command(|coordinator| {
+            coordinator.deactivate_active_engine();
+            Ok(())
+        }),
+        PlaybackCommand::Shutdown => return core::shutdown().map_err(|error| error.message),
+        PlaybackCommand::SelectDefaultSendspinOutput => {
+            execute_core_command(|coordinator| coordinator.select_default_sendspin_output())
+        }
+        PlaybackCommand::SelectOfflineLibrary { library_root } => {
+            execute_core_command(|coordinator| {
+                coordinator.select_output(SelectedOutput::Offline(OfflineOutputConfig {
+                    library_root,
+                }))
+            })
+        }
+        PlaybackCommand::SelectRemotePlayer { player_id } => execute_core_command(|coordinator| {
+            coordinator.select_output(SelectedOutput::Remote(RemoteOutputConfig { player_id }))
+        }),
+        PlaybackCommand::TransportPlay => {
+            execute_core_command(|coordinator| coordinator.transport_play())
+        }
+        PlaybackCommand::TransportPause => execute_core_command(|coordinator| {
+            coordinator.transport_pause();
+            Ok(())
+        }),
+        PlaybackCommand::TransportStop => execute_core_command(|coordinator| {
+            coordinator.transport_stop();
+            Ok(())
+        }),
+        PlaybackCommand::TransportNext => {
+            execute_core_command(|coordinator| coordinator.transport_next())
+        }
+        PlaybackCommand::TransportPrevious => {
+            execute_core_command(|coordinator| coordinator.transport_previous())
+        }
+        PlaybackCommand::TransportSeek { seconds } => {
+            execute_core_command(|coordinator| coordinator.transport_seek(seconds))
+        }
+        PlaybackCommand::TransportRepeatMode { mode } => execute_core_command(|coordinator| {
+            coordinator.set_repeat_mode(match mode {
+                0 => RepeatMode::Off,
+                1 => RepeatMode::One,
+                2 => RepeatMode::All,
+                _ => return Err("invalid repeat mode".into()),
+            });
+            Ok(())
+        }),
+        PlaybackCommand::TransportShuffle { enabled } => execute_core_command(|coordinator| {
+            coordinator.set_shuffle(enabled);
+            Ok(())
+        }),
+        PlaybackCommand::SetAutoplay { enabled } => execute_core_command(|coordinator| {
+            coordinator.set_autoplay(enabled);
+            Ok(())
+        }),
+        PlaybackCommand::SetVolume { volume } => {
+            execute_core_command(|coordinator| coordinator.set_volume(volume.min(100)))
+        }
+        PlaybackCommand::SetMuted { muted } => execute_core_command(|coordinator| {
+            coordinator.set_muted(muted);
+            Ok(())
+        }),
+        PlaybackCommand::SetTheme { theme } => {
+            execute_core_command(|coordinator| coordinator.set_theme(theme))
+        }
+        PlaybackCommand::SetLogLevel { log_level } => {
+            execute_core_command(|coordinator| coordinator.set_log_level(log_level))
+        }
+        PlaybackCommand::QueuePlayMedia { request } => {
+            if request.option == QueueOption::Unknown {
+                return Err("unknown queue option".into());
+            }
+            if request.media_items.is_empty() && request.option == QueueOption::Replace {
+                execute_core_command(|coordinator| {
+                    coordinator.queue_play_media(Vec::new(), request.option, None, false, false)
+                })
+            } else {
+                core::resolve_media_and_execute_command(
+                    request.media_items,
+                    false,
+                    |coordinator, tracks| {
+                        coordinator.queue_play_media(
+                            tracks,
+                            request.option,
+                            request.start_item,
+                            request.shuffle,
+                            request.start_download,
+                        )
+                    },
+                )
+            }
+        }
+        PlaybackCommand::StartSendspinRadio { media_items } => {
+            core::start_sendspin_radio_and_execute_command(
                 media_items,
                 publish_media_session_events,
             )
-            .map_err(|error| error.message)?;
-            publish_media_session_events(events);
-            return Ok(());
         }
-        "play" => play(),
-        "pause" => pause(),
-        "stop" => stop(),
-        "next" => next(),
-        "previous" => previous(),
-        "seekSeconds" => seek(
-            required_text_argument(argument)?
-                .parse()
-                .map_err(|_| "invalid seek seconds")?,
-        ),
-        "setVolume" => set_volume(
-            required_text_argument(argument)?
-                .parse::<u8>()
-                .map_err(|_| "invalid Android volume")?
-                .min(100),
-        ),
-        "setShuffle" => set_shuffle(required_text_argument(argument)? == "true"),
-        "setRepeatMode" => set_repeat_mode(match required_text_argument(argument)? {
-            "one" => RepeatMode::One,
-            "all" => RepeatMode::All,
-            _ => RepeatMode::Off,
-        }),
-        "shutdown" => return core::shutdown().map_err(|error| error.message),
-        _ => return Err(format!("unsupported Android core command '{kind}'")),
+        PlaybackCommand::InsertQueueItems { index, media_items } => {
+            execute_core_command(|coordinator| coordinator.insert_queue_items(index, media_items))
+        }
+        PlaybackCommand::AppendQueueItems { media_items } => {
+            execute_core_command(|coordinator| coordinator.append_queue_items(media_items))
+        }
+        PlaybackCommand::MoveQueueItems {
+            item_ids,
+            target_index,
+        } => {
+            execute_core_command(|coordinator| coordinator.move_queue_items(item_ids, target_index))
+        }
+        PlaybackCommand::DeleteQueueItems { item_ids } => {
+            execute_core_command(|coordinator| coordinator.delete_queue_items(item_ids))
+        }
+        PlaybackCommand::SelectQueueItem { item_id } => {
+            execute_core_command(|coordinator| coordinator.select_queue_item(item_id))
+        }
+        PlaybackCommand::PlayQueueIndex { index } => {
+            execute_core_command(|coordinator| coordinator.play_queue_index(index))
+        }
+        PlaybackCommand::RequestCodec { codec } => {
+            execute_core_command(|coordinator| coordinator.set_preferred_codec(&codec))
+        }
+        PlaybackCommand::SetLocalCacheSizeBytes { cache_size_bytes } => {
+            execute_core_command(|coordinator| {
+                coordinator.set_local_cache_size_bytes(cache_size_bytes)
+            })
+        }
     };
     events
         .map(publish_media_session_events)
         .map_err(|error| error.message)
 }
 
+// Event delivery and core coordination.
 pub(crate) fn publish_media_session_events(events: Vec<MediaSessionEvent>) {
     core::event_channel::publish_jni_command_events(events);
 }
@@ -202,109 +268,98 @@ where
     core::execute_command_and_collect_events(operation)
 }
 
-fn required_text_argument(argument: Option<&str>) -> Result<&str, String> {
-    argument.ok_or_else(|| "missing Android core command argument".to_string())
-}
-
-fn parse_media_items(serialized_items: &str) -> Result<Vec<MediaItem>, CoreError> {
-    serde_json::from_str(serialized_items)
-        .map_err(|error| CoreError::command_failed(format!("invalid Android media items: {error}")))
+// Serialization is confined to the JNI boundary.
+fn decode_command(kind: &str, argument: Option<&str>) -> Result<PlaybackCommand, String> {
+    let mut arguments: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(argument.unwrap_or("{}"))
+            .map_err(|error| format!("invalid Android command arguments: {error}"))?;
+    if arguments.contains_key("kind") {
+        return Err("command arguments must not override kind".into());
+    }
+    arguments.insert("kind".into(), serde_json::Value::String(kind.into()));
+    serde_json::from_value(serde_json::Value::Object(arguments))
+        .map_err(|error| format!("invalid Android command: {error}"))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{execute_command, QueuePlayMediaRequest};
+    use super::{decode_command, execute_command};
 
     #[test]
-    fn android_artist_radio_requires_valid_media_items() {
-        assert_eq!(
-            execute_command("startSendspinRadio", None).unwrap_err(),
-            "missing Android core command argument"
-        );
-        assert!(execute_command("startSendspinRadio", Some("not JSON"))
-            .unwrap_err()
-            .starts_with("invalid Android media items:"));
+    fn transport_uses_the_same_names_as_flutter() {
+        for kind in [
+            "transportPlay",
+            "transportPause",
+            "transportStop",
+            "transportNext",
+            "transportPrevious",
+            "activateEngine",
+            "deactivateEngine",
+        ] {
+            assert!(decode_command(kind, Some("{}")).is_ok(), "{kind}");
+        }
+        for kind in [
+            "play",
+            "pause",
+            "stop",
+            "next",
+            "previous",
+            "activate",
+            "seekSeconds",
+        ] {
+            assert!(decode_command(kind, None).is_err(), "{kind}");
+        }
     }
 
     #[test]
-    fn android_queue_play_media_requires_a_valid_queue_option() {
-        assert_eq!(
-            execute_command("queuePlayMedia", None).unwrap_err(),
-            "missing Android core command argument"
-        );
-        assert!(execute_command("queuePlayMedia", Some("not JSON"))
-            .unwrap_err()
-            .starts_with("invalid Android play media request:"));
-        assert!(execute_command("queuePlayMedia", Some(r#"{"mediaItems":[],"option":"invalid","startDownload":true}"#))
-            .unwrap_err()
-            .contains("unknown queue option"));
+    fn queue_commands_reject_invalid_contracts() {
+        for (kind, arguments) in [
+            (
+                "queuePlayMedia",
+                r#"{"request":{"mediaItems":[],"option":"replace","startPositionMillis":2500,"startDownload":false}}"#,
+            ),
+            ("insertQueueItems", r#"{"index":-1,"mediaItems":[]}"#),
+            ("appendQueueItems", r#"{"mediaItems":{}}"#),
+            ("moveQueueItems", r#"{"targetIndex":0,"itemIds":"invalid"}"#),
+            ("deleteQueueItems", r#"{"itemIds":{}}"#),
+            ("playQueueIndex", r#"{"index":-1}"#),
+        ] {
+            assert!(decode_command(kind, Some(arguments)).is_err(), "{kind}");
+        }
     }
 
     #[test]
-    fn android_queue_selection_requires_an_item_id() {
-        assert_eq!(
-            execute_command("playQueueItem", None).unwrap_err(),
-            "missing Android core command argument"
-        );
-        assert_eq!(
-            execute_command("playQueueItem", Some("missing-item")).unwrap_err(),
-            "queue item is no longer available"
-        );
-        assert_eq!(
-            execute_command("selectQueueItem", None).unwrap_err(),
-            "missing Android core command argument"
-        );
-        assert_eq!(
-            execute_command("selectQueueItem", Some("missing-item")).unwrap_err(),
-            "queue item is no longer available"
-        );
-    }
-
-    #[test]
-    fn queue_play_media_rejects_removed_media3_fields() {
-        assert!(
-            execute_command("queuePlayMedia", Some(r#"{"queueEntries":[],"option":"replace","startDownload":false}"#))
-                .unwrap_err()
-                .starts_with("invalid Android play media request:")
-        );
-        assert!(
-            execute_command("queuePlayMedia", Some(r#"{"mediaItems":[],"option":"replace","startPositionMillis":2500,"startDownload":false}"#))
-                .unwrap_err()
-                .starts_with("invalid Android play media request:")
-        );
-    }
-
-    #[test]
-    fn queue_play_media_accepts_regular_media_items() {
-        let request: QueuePlayMediaRequest = serde_json::from_str(
-            r#"{"mediaItems":[{"media_type":"track","item_id":"track-1","provider":"test","name":"First"}],"option":"replace","startItem":0,"startDownload":false}"#,
+    fn queue_commands_accept_flutter_payloads() {
+        assert!(decode_command("queuePlayMedia", Some(r#"{"request":{"mediaItems":[{"media_type":"track","item_id":"track-1","provider":"test","name":"First"}],"option":"play","startItem":0,"shuffle":false,"startDownload":true}}"#)).is_ok());
+        assert!(decode_command(
+            "moveQueueItems",
+            Some(r#"{"itemIds":["item-1"],"targetIndex":0}"#)
         )
-        .expect("deserialize queue request");
-        assert_eq!(request.start_item, Some(0));
-        assert_eq!(request.media_items.len(), 1);
+        .is_ok());
+        assert!(decode_command("transportRepeatMode", Some(r#"{"mode":2}"#)).is_ok());
     }
 
     #[test]
-    fn queue_edit_commands_validate_payloads() {
-        assert!(execute_command("insertQueueItems", Some(r#"{"index":-1,"mediaItems":[]}"#))
-            .unwrap_err().starts_with("invalid queue insertion:"));
-        assert!(execute_command("appendQueueItems", Some("{}"))
-            .unwrap_err().starts_with("invalid Android media items:"));
-        assert!(execute_command("moveQueueItems", Some(r#"{"targetIndex":0,"itemIds":"invalid"}"#))
-            .unwrap_err().starts_with("invalid queue move:"));
-        assert!(execute_command("deleteQueueItems", Some("{}"))
-            .unwrap_err().starts_with("invalid queue deletion:"));
+    fn arguments_cannot_change_the_command_or_coerce_types() {
+        assert!(decode_command("transportPause", Some(r#"{"kind":"transportPlay"}"#)).is_err());
+        assert!(decode_command("setVolume", Some(r#"{"volume":"50"}"#)).is_err());
+        assert!(decode_command("transportShuffle", Some(r#"{"enabled":"true"}"#)).is_err());
+        assert!(decode_command("setMuted", Some(r#"{"muted":true}"#)).is_ok());
     }
 
     #[test]
-    fn android_volume_requires_a_number() {
+    fn unknown_queue_option_and_missing_selection_fail() {
         assert_eq!(
-            execute_command("setVolume", None).unwrap_err(),
-            "missing Android core command argument"
+            execute_command(
+                "queuePlayMedia",
+                Some(r#"{"request":{"mediaItems":[],"option":"invalid","startDownload":true}}"#)
+            )
+            .unwrap_err(),
+            "unknown queue option"
         );
         assert_eq!(
-            execute_command("setVolume", Some("NaN")).unwrap_err(),
-            "invalid Android volume"
+            execute_command("selectQueueItem", Some(r#"{"itemId":"missing-item"}"#)).unwrap_err(),
+            "queue item is no longer available"
         );
     }
 }

@@ -8,6 +8,7 @@ import '../../features/core/core_userdata.dart';
 
 class AppSessionController extends ChangeNotifier {
   static const Duration _startupTimeout = Duration(seconds: 5);
+  static const Duration _sessionStartupTimeout = Duration(seconds: 20);
   static const Duration _userDataMigrationTimeout = Duration(minutes: 2);
 
   AppSessionController() {
@@ -143,7 +144,7 @@ class AppSessionController extends ChangeNotifier {
 
   Future<void> _restoreSession() async {
     _isAuthenticated = await coreBridge.restorePersistedSession().timeout(
-      _startupTimeout,
+      _sessionStartupTimeout,
     );
   }
 
@@ -209,11 +210,28 @@ class AppSessionController extends ChangeNotifier {
   void dispose() {
     _isDisposed = true;
     _disposeUserDataController();
-    unawaited(coreBridge.shutdown());
     coreEvents.dispose();
+    unawaited(_disposeCoreBridge());
     if (identical(_instance, this)) {
       _instance = null;
     }
     super.dispose();
+  }
+
+  // Android's service owns playback; closing its UI releases only the client.
+  Future<void> _disposeCoreBridge() async {
+    try {
+      if (!coreBridge.isServiceOwnedPlayback) {
+        await coreBridge.shutdown();
+      }
+    } catch (error) {
+      coreBridge.log(
+        LogLevelPreference.error,
+        'AppSessionController',
+        'Core shutdown failed: $error',
+      );
+    } finally {
+      await coreBridge.dispose();
+    }
   }
 }

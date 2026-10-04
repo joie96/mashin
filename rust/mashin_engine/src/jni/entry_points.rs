@@ -63,6 +63,16 @@ pub(crate) extern "system" fn restore_persisted_session(
     }
 }
 
+// This barrier revokes only Flutter delivery; the service's JNI events and playback remain live.
+pub(crate) extern "system" fn unregister_flutter_event_callback(
+    mut env: JNIEnv,
+    _rust_core_bridge: JObject,
+) {
+    if let Err(error) = crate::ffi::event_channel::unregister_flutter_event_callback() {
+        let _ = env.throw_new("java/lang/IllegalStateException", error);
+    }
+}
+
 pub(crate) extern "system" fn query(
     mut env: JNIEnv,
     _native_core_bridge: JObject,
