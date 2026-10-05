@@ -100,7 +100,7 @@ class AppRouter {
           if (session.isLoading) {
             return location == '/loading' ? null : '/loading';
           }
-          if (!session.isAuthenticated) {
+          if (!session.isAuthenticated || session.userDataController == null) {
             return location == '/login' ? null : '/login';
           }
           if (location == '/loading' || location == '/login') {

@@ -76,7 +76,9 @@ class PlaybackService : MediaLibraryService() {
         val player = RustSessionPlayer(::dispatchPlayerCommand, initializedBrowser::startPlayback, initializedBrowser::queueEntry)
         sessionPlayer = player
         val callback = PlaybackSessionCallback(packageName, initializedBrowser, ::dispatchCoreCommand)
-        val session = MediaLibrarySession.Builder(this, player, callback).build()
+        val session = MediaLibrarySession.Builder(this, player, callback)
+            .setSessionActivity(notificationProvider.sessionActivity)
+            .build()
         mediaLibrarySession = session
         addSession(session)
         setListener(object : androidx.media3.session.MediaSessionService.Listener {

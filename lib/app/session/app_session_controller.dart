@@ -50,8 +50,8 @@ class AppSessionController extends ChangeNotifier {
       await _restoreSession();
       await _refreshSessionSettings();
       _initialSettingsReady.complete();
-      await _loadProviderIcons().timeout(_startupTimeout);
       await _initializeUserData().timeout(_userDataMigrationTimeout);
+      await _loadProviderIcons().timeout(_startupTimeout);
       await coreEvents.start().timeout(_startupTimeout);
     } catch (error, stackTrace) {
       if (!_initialSettingsReady.isCompleted) {
@@ -93,8 +93,8 @@ class AppSessionController extends ChangeNotifier {
 
       await _refreshSessionSettings();
       _isAuthenticated = true;
-      await _loadProviderIcons();
       await _initializeUserData();
+      await _loadProviderIcons();
       notifyListeners();
       return null;
     } catch (_) {

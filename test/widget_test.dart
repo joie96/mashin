@@ -29,6 +29,14 @@ class _LightThemeSession extends AppSessionController {
   bool get isDarkTheme => false;
 }
 
+class _AuthenticatedSessionWithoutUserData extends AppSessionController {
+  @override
+  bool get isLoading => false;
+
+  @override
+  bool get isAuthenticated => true;
+}
+
 class _PlaylistShellSession extends AppSessionController {
   _PlaylistShellSession(MashinCoreBridgeApi bridge)
     : userData = UserData(coreBridge: bridge);
@@ -108,6 +116,36 @@ class _PlaylistShellBridge implements MashinCoreBridgeApi {
 }
 
 void main() {
+  testWidgets('protected routes require initialized user data', (
+    WidgetTester tester,
+  ) async {
+    final session = _AuthenticatedSessionWithoutUserData();
+    final appRouter = AppRouter(session);
+    addTearDown(appRouter.router.dispose);
+    addTearDown(session.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp.router(
+        routerConfig: appRouter.router,
+        theme: AppTheme.dark(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    for (final location in <String>[
+      AppRoutes.home,
+      AppRoutes.favorites,
+      AppRoutes.playlists,
+    ]) {
+      appRouter.router.go(location);
+      await tester.pumpAndSettle();
+
+      expect(appRouter.router.routeInformationProvider.value.uri.path, '/login');
+      expect(find.text('Bei Music Assistant anmelden'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    }
+  });
+
   testWidgets('uses restored light theme on the first frame', (
     WidgetTester tester,
   ) async {
