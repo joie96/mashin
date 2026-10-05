@@ -7,6 +7,7 @@ import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
+import com.example.mashin_flutter.media.PlaybackSessionLifecycle
 import com.example.mashin_flutter.media.library.MediaLibraryBrowser
 import com.google.common.util.concurrent.Futures
 import org.junit.Assert.assertEquals
@@ -26,7 +27,10 @@ class PlaybackSessionCallbackTest {
         val context = RuntimeEnvironment.getApplication()
         val browser = MediaLibraryBrowser(context) { Futures.immediateVoidFuture() }
         val player = RustSessionPlayer({ Futures.immediateVoidFuture() }, browser::startPlayback, browser::queueEntry)
-        val callback = PlaybackSessionCallback(context.packageName, browser) {
+        val lifecycle = PlaybackSessionLifecycle()
+        var shutdownRequests = 0
+        lifecycle.attachSession { shutdownRequests++ }
+        val callback = PlaybackSessionCallback(context.packageName, browser, lifecycle) {
             Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
         val session = MediaLibrarySession.Builder(context, player, callback).build()
@@ -36,6 +40,7 @@ class PlaybackSessionCallbackTest {
                     packageName, 1, 1000, 0, 0, true, Bundle.EMPTY, true)
                 val result = callback.onConnect(session, controller)
                 assertTrue(result.isAccepted)
+                callback.onPostConnect(session, controller)
                 assertTrue("$packageName cannot browse the library root", result.availableSessionCommands.contains(
                     SessionCommand.COMMAND_CODE_LIBRARY_GET_LIBRARY_ROOT))
                 val libraryRoot = callback.onGetLibraryRoot(session, controller, null).get()
@@ -56,6 +61,8 @@ class PlaybackSessionCallbackTest {
                 assertEquals(packageName == context.packageName,
                     result.availableSessionCommands.contains(PlaybackSessionCommands.execute))
                 assertFalse(result.availablePlayerCommands == Player.Commands.EMPTY)
+                callback.onDisconnected(session, controller)
+                assertEquals(if (packageName == "com.google.android.projection.gearhead") 1 else 0, shutdownRequests)
             }
         } finally {
             session.release()

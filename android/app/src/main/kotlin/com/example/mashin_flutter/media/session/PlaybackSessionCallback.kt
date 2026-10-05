@@ -8,6 +8,7 @@ import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
+import com.example.mashin_flutter.media.PlaybackSessionLifecycle
 import com.example.mashin_flutter.media.library.MediaLibraryBrowser
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
@@ -17,6 +18,7 @@ import com.google.common.util.concurrent.ListenableFuture
 internal class PlaybackSessionCallback(
     private val packageName: String,
     private val browser: MediaLibraryBrowser,
+    private val lifecycle: PlaybackSessionLifecycle = PlaybackSessionLifecycle.shared,
     private val dispatchCommand: (PlaybackRequest) -> ListenableFuture<SessionResult>,
 ) : MediaLibraryService.MediaLibrarySession.Callback {
     // Session access: app-only lifecycle commands, standard media access for other controllers.
@@ -95,4 +97,13 @@ internal class PlaybackSessionCallback(
         params: MediaLibraryService.LibraryParams?,
     ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> =
         browser.onGetSearchResult(session, controller, query, page, pageSize, params)
+
+    // Only Android Auto connections participate in automotive session ownership.
+    override fun onPostConnect(session: MediaSession, controller: MediaSession.ControllerInfo) {
+        if (session.isAutoCompanionController(controller)) lifecycle.attachAndroidAutoController(controller)
+    }
+
+    override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) {
+        lifecycle.detachAndroidAutoController(controller)
+    }
 }

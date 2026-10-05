@@ -15,8 +15,13 @@ MashinCoreBridge -> AndroidBridge -> FlutterPlaybackChannel
 - `PlaybackService` owns Android session restoration, command ordering, audio focus,
 	foreground notification and the playback CPU wake lock. Rust owns the queue and
 	playback state; Media3 only projects that state.
-- Flutter engine detach releases only the UI controller. It does not shut down
-	Android playback. Returning to the UI reconnects without restoring over a live session.
+- Minimizing the Flutter activity keeps the session alive. Closing the activity or
+	removing its task releases the Media3 session, removes its notification and shuts
+	down native playback, even when Android Auto is connected. Configuration changes
+	that recreate the activity do not shut down playback.
+- Disconnecting the last Android Auto controller ends the session only when no
+	Flutter activity exists, including a minimized activity. This follows Media3
+	controller disconnect callbacks; legacy controller disconnects may be delayed.
 - Before engine detach, Android synchronously revokes the Flutter FFI listener.
 	Registration and native callback invocation share a lock, so no old listener
 	can be called after revocation returns. Service-owned JNI events remain active.
@@ -46,7 +51,10 @@ flutter test test/android_bridge_test.dart
 
 Kotlin/Rust changes require a full app restart, not just Flutter hot reload.
 On a device, verify local playback with a media notification, screen-off playback,
-task removal while playing, and UI reconnection. After pause or stop, verify that
+activity closure and task removal while playing, and UI reconnection. Closing the
+activity must remove the notification and end playback. Disconnect Android Auto
+both without a Flutter activity and with a minimized Flutter activity: only the
+former must end the session. After pause or stop, verify that
 audio focus and the CPU wake lock are released. Host tests do not certify standby
 behavior or manufacturer-specific battery policies.
 For Bluetooth headsets, repeat pause/play and verify that the native AAudio player

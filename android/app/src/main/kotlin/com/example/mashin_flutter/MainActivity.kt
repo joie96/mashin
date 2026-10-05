@@ -1,9 +1,11 @@
 package com.example.mashin_flutter
 
+import android.os.Bundle
 import androidx.media3.common.util.UnstableApi
 import com.example.mashin_flutter.core.RustCoreBridge
 import com.example.mashin_flutter.flutter.DeviceInfoChannel
 import com.example.mashin_flutter.flutter.FlutterPlaybackChannel
+import com.example.mashin_flutter.media.PlaybackSessionLifecycle
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 
@@ -11,6 +13,17 @@ import io.flutter.embedding.engine.FlutterEngine
 class MainActivity : FlutterActivity() {
     private var playbackChannel: FlutterPlaybackChannel? = null
     private var deviceInfoChannel: DeviceInfoChannel? = null
+
+    // Activity existence owns playback even while the UI is minimized.
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        PlaybackSessionLifecycle.shared.attachActivity(this)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        PlaybackSessionLifecycle.shared.detachActivity(this, isChangingConfigurations)
+    }
 
     // Activity hosts UI channels; the playback service owns the native session.
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {

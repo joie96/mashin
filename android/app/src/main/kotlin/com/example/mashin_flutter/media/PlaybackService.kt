@@ -1,5 +1,6 @@
 package com.example.mashin_flutter.media
 
+import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Bundle
@@ -75,12 +76,13 @@ class PlaybackService : MediaLibraryService() {
         browser = initializedBrowser
         val player = RustSessionPlayer(::dispatchPlayerCommand, initializedBrowser::startPlayback, initializedBrowser::queueEntry)
         sessionPlayer = player
-        val callback = PlaybackSessionCallback(packageName, initializedBrowser, ::dispatchCoreCommand)
+        val callback = PlaybackSessionCallback(packageName, initializedBrowser, dispatchCommand = ::dispatchCoreCommand)
         val session = MediaLibrarySession.Builder(this, player, callback)
             .setSessionActivity(notificationProvider.sessionActivity)
             .build()
         mediaLibrarySession = session
         addSession(session)
+        PlaybackSessionLifecycle.shared.attachSession(::shutdownSession)
         setListener(object : androidx.media3.session.MediaSessionService.Listener {
             override fun onForegroundServiceStartNotAllowedException() {
                 Log.e(TAG, "Foreground playback was rejected by Android")
@@ -102,9 +104,11 @@ class PlaybackService : MediaLibraryService() {
             } catch (error: Exception) {
                 Log.e(TAG, "Native session restore failed", error)
                 mainHandler.post {
-                    initializationError = error.message ?: "Native session restore failed"
-                    isCoreReady = true
-                    executeNextCommand()
+                    if (!isDestroyed) {
+                        initializationError = error.message ?: "Native session restore failed"
+                        isCoreReady = true
+                        executeNextCommand()
+                    }
                 }
             }
         }
@@ -114,12 +118,20 @@ class PlaybackService : MediaLibraryService() {
         mediaLibrarySession?.takeUnless { isDestroyed }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        if (pendingPlaybackStarts == 0 && !snapshot.hasPlaybackIntent) pauseAllPlayersAndStopSelf()
+        PlaybackSessionLifecycle.shared.removeActivityTask()
     }
 
     override fun onDestroy() {
+        shutdownSession()
+        super.onDestroy()
+    }
+
+    // Release the session immediately: bound controllers can delay service destruction.
+    private fun shutdownSession() {
+        if (isDestroyed) return
         isDestroyed = true
-        Log.d(TAG, "Destroying playback service")
+        PlaybackSessionLifecycle.shared.detachSession()
+        Log.d(TAG, "Shutting down playback session")
         pendingCommands.forEach { it.completion.set(failedResult("Playback service disconnected")) }
         pendingCommands.clear()
         RustCoreBridge.stopObservingEvents()
@@ -127,10 +139,15 @@ class PlaybackService : MediaLibraryService() {
         if (wakeLock.isHeld) wakeLock.release()
         browser?.close()
         browser = null
-        mediaLibrarySession?.release()
+        mediaLibrarySession?.let { session ->
+            removeSession(session)
+            session.release()
+        }
         mediaLibrarySession = null
         sessionPlayer?.release()
         sessionPlayer = null
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        getSystemService(NotificationManager::class.java).cancel(DefaultMediaNotificationProvider.DEFAULT_NOTIFICATION_ID)
         coreExecutor.execute {
             try {
                 RustCoreBridge.command(PlaybackCommandKind.Shutdown.action, "{}")
@@ -138,7 +155,7 @@ class PlaybackService : MediaLibraryService() {
                 Log.e(TAG, "Native shutdown failed", error)
             }
         }
-        super.onDestroy()
+        stopSelf()
     }
 
     // Playback commands are acknowledged only after Rust execution and Media3 synchronization.
@@ -226,7 +243,7 @@ class PlaybackService : MediaLibraryService() {
 
     // Media3 takes over notification management after the pending startup completes.
     override fun onUpdateNotificationAsync(session: MediaSession, startInForegroundRequired: Boolean): ListenableFuture<Void?> =
-        if (pendingPlaybackStarts > 0) Futures.immediateFuture(null)
+        if (isDestroyed || pendingPlaybackStarts > 0) Futures.immediateFuture(null)
         else super.onUpdateNotificationAsync(session, startInForegroundRequired)
 
     private fun startPlaybackForeground() {
