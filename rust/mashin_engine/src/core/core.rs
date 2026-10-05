@@ -321,8 +321,8 @@ impl CoreCoordinator {
         self.playback.transport_play()
     }
 
-    pub(crate) fn transport_pause(&mut self) {
-        self.playback.transport_pause();
+    pub(crate) fn transport_pause(&mut self) -> Result<(), String> {
+        self.playback.transport_pause()
     }
 
     pub(crate) fn transport_stop(&mut self) {

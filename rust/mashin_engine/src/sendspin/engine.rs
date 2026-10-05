@@ -1123,14 +1123,15 @@ impl SendspinEngine {
                 .ok_or_else(|| "cannot play without an active track".to_string())?;
             return self.play_cached_content(&content_key);
         }
-        self.audio_player.resume();
+        self.audio_player.transport_play()?;
         self.player_state.playback_state = PlayState::Playing;
         Ok(())
     }
 
-    pub(crate) fn transport_pause(&mut self) {
-        self.audio_player.pause();
+    pub(crate) fn transport_pause(&mut self) -> Result<(), String> {
+        self.audio_player.transport_pause()?;
         self.player_state.playback_state = PlayState::Paused;
+        Ok(())
     }
 
     pub(crate) fn transport_stop(&mut self) {
@@ -1470,8 +1471,8 @@ impl PlaybackEngine for SendspinEngine {
         SendspinEngine::transport_play(self)
     }
 
-    fn transport_pause(&mut self) {
-        SendspinEngine::transport_pause(self);
+    fn transport_pause(&mut self) -> Result<(), String> {
+        SendspinEngine::transport_pause(self)
     }
 
     fn transport_stop(&mut self) {
@@ -1956,7 +1957,7 @@ mod tests {
             snapshot.save(&path).expect("reset stored queue");
             let mut engine = SendspinEngine::new();
             engine.configure(config.clone()).expect("restore queue");
-            engine.transport_pause();
+            engine.transport_pause().expect("pause restored queue");
             engine.transport_stop();
             assert!(engine.downloader.download_plan().is_none());
             assert!(engine.current_cache_content_key.is_none());

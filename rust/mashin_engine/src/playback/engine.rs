@@ -32,7 +32,7 @@ pub(crate) trait PlaybackEngine: Send {
     fn select_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String>;
     fn queue_play(&mut self, index: usize) -> Result<(), String>;
     fn transport_play(&mut self) -> Result<(), String>;
-    fn transport_pause(&mut self);
+    fn transport_pause(&mut self) -> Result<(), String>;
     fn transport_stop(&mut self);
     fn transport_next(&mut self) -> Result<(), String>;
     fn transport_previous(&mut self) -> Result<(), String>;

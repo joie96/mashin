@@ -144,10 +144,9 @@ pub(crate) fn execute_command(kind: &str, argument: Option<&str>) -> Result<(), 
         PlaybackCommand::TransportPlay => {
             execute_core_command(|coordinator| coordinator.transport_play())
         }
-        PlaybackCommand::TransportPause => execute_core_command(|coordinator| {
-            coordinator.transport_pause();
-            Ok(())
-        }),
+        PlaybackCommand::TransportPause => {
+            execute_core_command(|coordinator| coordinator.transport_pause())
+        }
         PlaybackCommand::TransportStop => execute_core_command(|coordinator| {
             coordinator.transport_stop();
             Ok(())

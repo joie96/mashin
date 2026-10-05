@@ -149,11 +149,8 @@ impl PlaybackCoordinator {
         self.with_active_engine_mut(|engine| engine.transport_play())
     }
 
-    pub(crate) fn transport_pause(&mut self) {
-        let _ = self.with_active_engine_mut(|engine| {
-            engine.transport_pause();
-            Ok(())
-        });
+    pub(crate) fn transport_pause(&mut self) -> Result<(), String> {
+        self.with_active_engine_mut(|engine| engine.transport_pause())
     }
 
     pub(crate) fn transport_stop(&mut self) {

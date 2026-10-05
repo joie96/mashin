@@ -868,10 +868,7 @@ pub extern "C" fn mashin_core_transport_play() -> i32 {
 
 #[no_mangle]
 pub extern "C" fn mashin_core_transport_pause() -> i32 {
-    execute_core_command(|coordinator| {
-        coordinator.transport_pause();
-        Ok(())
-    })
+    execute_core_command(|coordinator| coordinator.transport_pause())
 }
 
 #[no_mangle]

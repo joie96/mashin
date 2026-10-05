@@ -22,6 +22,10 @@ MashinCoreBridge -> AndroidBridge -> FlutterPlaybackChannel
 	can be called after revocation returns. Service-owned JNI events remain active.
 - A local playback start establishes foreground eligibility before requesting
 	audio focus or executing Rust. Failed startup does not fall back to FFI.
+- Local pause suspends the native audio stream without discarding buffered audio.
+	Writing silence to a running stream still counts as active music on Android
+	and can cause the Bluetooth service to discard headset play commands.
+	Native pause/play failures propagate through JNI and FFI before state changes.
 - Notification permission is not a prerequisite for media-session playback.
 	A CPU wake lock does not guarantee network availability under every Android
 	battery restriction or Doze policy.
@@ -45,3 +49,5 @@ On a device, verify local playback with a media notification, screen-off playbac
 task removal while playing, and UI reconnection. After pause or stop, verify that
 audio focus and the CPU wake lock are released. Host tests do not certify standby
 behavior or manufacturer-specific battery policies.
+For Bluetooth headsets, repeat pause/play and verify that the native AAudio player
+is paused (not `started`) during pause and that headset play reaches the MediaSession.

@@ -139,32 +139,34 @@ impl AudioPlayer {
         }
     }
 
-    // Playback state transitions.
-    pub(crate) fn pause(&mut self) {
-        if !matches!(
-            self.state,
-            AudioPlayerState::Buffering | AudioPlayerState::Playing
-        ) {
-            return;
-        }
-        if let Some(output) = self.output.as_ref() {
-            output.set_paused(true);
-        }
-        self.state = AudioPlayerState::Paused;
-    }
-
-    pub(crate) fn resume(&mut self) {
+    // Playback transport commands.
+    pub(crate) fn transport_play(&mut self) -> Result<(), String> {
         if self.state != AudioPlayerState::Paused {
-            return;
+            return Ok(());
         }
         if let Some(output) = self.output.as_ref() {
-            output.set_paused(false);
+            output.transport_play()?;
         }
         self.state = if self.buffered_duration_millis() > 0 {
             AudioPlayerState::Playing
         } else {
             AudioPlayerState::Buffering
         };
+        Ok(())
+    }
+
+    pub(crate) fn transport_pause(&mut self) -> Result<(), String> {
+        if !matches!(
+            self.state,
+            AudioPlayerState::Buffering | AudioPlayerState::Playing
+        ) {
+            return Ok(());
+        }
+        if let Some(output) = self.output.as_ref() {
+            output.transport_pause()?;
+        }
+        self.state = AudioPlayerState::Paused;
+        Ok(())
     }
 
     // Decoded sample enqueueing.
@@ -293,6 +295,41 @@ impl AudioPlayer {
 mod tests {
     use super::{AudioPlayer, AudioPlayerState};
     use crate::audio::source::AudioSource;
+
+    #[test]
+    fn transport_preserves_prepared_source_and_decode_position() {
+        let mut player = AudioPlayer::new();
+        player.prepare_with_seek(AudioSource::cached_content("track"), 4, 250);
+
+        for _ in 0..3 {
+            player.transport_pause().expect("pause prepared source");
+            assert_eq!(player.state(), AudioPlayerState::Paused);
+            assert!(player.has_prepared_source());
+            assert_eq!(player.next_chunk_index, 4);
+            assert_eq!(player.skip_remaining_millis, 250);
+
+            player.transport_play().expect("play prepared source");
+            assert_eq!(player.state(), AudioPlayerState::Buffering);
+            assert!(player.has_prepared_source());
+            assert_eq!(player.next_chunk_index, 4);
+            assert_eq!(player.skip_remaining_millis, 250);
+        }
+    }
+
+    #[test]
+    fn transport_is_idempotent_for_paused_and_idle_players() {
+        let mut player = AudioPlayer::new();
+        player.transport_pause().expect("pause idle player");
+        player.transport_play().expect("play idle player");
+        assert_eq!(player.state(), AudioPlayerState::Idle);
+
+        player.prepare_with_seek(AudioSource::cached_content("track"), 0, 0);
+        player.transport_pause().expect("pause prepared source");
+        player
+            .transport_pause()
+            .expect("pause already paused source");
+        assert_eq!(player.state(), AudioPlayerState::Paused);
+    }
 
     #[test]
     fn stopped_player_has_no_prepared_source() {

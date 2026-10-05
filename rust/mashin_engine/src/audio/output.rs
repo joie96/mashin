@@ -128,11 +128,10 @@ impl RubatoResampler {
 }
 
 pub(crate) struct AudioOutput {
-    _stream: Stream,
+    stream: Stream,
     queue: Arc<Mutex<LocalPlaybackQueue>>,
     volume: Arc<AtomicU8>,
     muted: Arc<AtomicBool>,
-    paused: Arc<AtomicBool>,
     underrun: Arc<AtomicBool>,
     underrun_active: Arc<AtomicBool>,
     played_samples: Arc<AtomicU64>,
@@ -166,7 +165,6 @@ impl AudioOutput {
         }));
         let volume = Arc::new(AtomicU8::new(volume));
         let muted = Arc::new(AtomicBool::new(muted));
-        let paused = Arc::new(AtomicBool::new(false));
         let underrun = Arc::new(AtomicBool::new(false));
         let underrun_active = Arc::new(AtomicBool::new(false));
         let played_samples = Arc::new(AtomicU64::new(0));
@@ -188,7 +186,6 @@ impl AudioOutput {
             Arc::clone(&queue),
             Arc::clone(&volume),
             Arc::clone(&muted),
-            Arc::clone(&paused),
             Arc::clone(&underrun),
             Arc::clone(&underrun_active),
             Arc::clone(&played_samples),
@@ -203,11 +200,10 @@ impl AudioOutput {
             format.sample_rate, stream_config.sample_rate, format.channels
         ));
         Ok(Self {
-            _stream: stream,
+            stream,
             queue,
             volume,
             muted,
-            paused,
             underrun,
             underrun_active,
             played_samples,
@@ -216,6 +212,20 @@ impl AudioOutput {
             output_channels: stream_config.channels.min(u16::from(u8::MAX)) as u8,
             resampler: Mutex::new(resampler),
         })
+    }
+
+    // Playback transport commands.
+    pub(crate) fn transport_play(&self) -> Result<(), String> {
+        self.stream
+            .play()
+            .map_err(|error| format!("starting local audio stream failed: {error}"))
+    }
+
+    // Pause the native stream, not just its samples, so Android stops reporting active music.
+    pub(crate) fn transport_pause(&self) -> Result<(), String> {
+        self.stream
+            .pause()
+            .map_err(|error| format!("pausing local audio stream failed: {error}"))
     }
 
     // Sample enqueueing.
@@ -275,14 +285,6 @@ impl AudioOutput {
         self.muted.store(muted, Ordering::Relaxed);
     }
 
-    pub(crate) fn set_paused(&self, paused: bool) {
-        self.paused.store(paused, Ordering::Relaxed);
-        LOGGER.debug(format!(
-            "audio output {}",
-            if paused { "paused" } else { "resumed" }
-        ));
-    }
-
     pub(crate) fn take_underrun(&self) -> bool {
         let detected = self.underrun.swap(false, Ordering::Relaxed);
         if detected {
@@ -311,7 +313,6 @@ fn build_local_fifo_stream(
     queue: Arc<Mutex<LocalPlaybackQueue>>,
     volume: Arc<AtomicU8>,
     muted: Arc<AtomicBool>,
-    paused: Arc<AtomicBool>,
     underrun: Arc<AtomicBool>,
     underrun_active: Arc<AtomicBool>,
     played_samples: Arc<AtomicU64>,
@@ -321,17 +322,12 @@ fn build_local_fifo_stream(
             let queue = Arc::clone(&queue);
             let volume = Arc::clone(&volume);
             let muted = Arc::clone(&muted);
-            let paused = Arc::clone(&paused);
             let underrun = Arc::clone(&underrun);
             let underrun_active = Arc::clone(&underrun_active);
             let played_samples = Arc::clone(&played_samples);
             device.build_output_stream(
                 config.clone(),
                 move |output: &mut [$sample], _| {
-                    if paused.load(Ordering::Relaxed) {
-                        output.fill(<$sample>::EQUILIBRIUM);
-                        return;
-                    }
                     let gain = if muted.load(Ordering::Relaxed) {
                         0.0
                     } else {
