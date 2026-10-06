@@ -63,6 +63,10 @@ enum PlaybackCommand {
     SetLogLevel {
         log_level: LogLevelPreference,
     },
+    SetUserDataFavorites {
+        media_items: Vec<MediaItem>,
+        favorite: bool,
+    },
     QueuePlayMedia {
         request: QueuePlayMediaRequest,
     },
@@ -190,6 +194,17 @@ pub(crate) fn execute_command(kind: &str, argument: Option<&str>) -> Result<(), 
         PlaybackCommand::SetLogLevel { log_level } => {
             execute_core_command(|coordinator| coordinator.set_log_level(log_level))
         }
+        PlaybackCommand::SetUserDataFavorites {
+            media_items,
+            favorite,
+        } => {
+            core::mutate_user_data(|user_data| {
+                user_data.set_favorites(media_items, favorite);
+                Ok(())
+            })
+            .map_err(|error| error.message)?;
+            return Ok(());
+        }
         PlaybackCommand::QueuePlayMedia { request } => {
             if request.option == QueueOption::Unknown {
                 return Err("unknown queue option".into());
@@ -283,6 +298,25 @@ fn decode_command(kind: &str, argument: Option<&str>) -> Result<PlaybackCommand,
 #[cfg(test)]
 mod tests {
     use super::{decode_command, execute_command};
+
+    // Platform command contracts.
+    #[test]
+    fn favorite_commands_accept_flutter_payloads_and_reject_invalid_types() {
+        for favorite in [true, false] {
+            let arguments = serde_json::json!({
+                "mediaItems": [{"media_type":"track", "item_id":"track-1", "provider":"library", "name":"Track", "uri":"library://track/track-1"}],
+                "favorite": favorite,
+            });
+            assert!(decode_command("setUserDataFavorites", Some(&arguments.to_string())).is_ok());
+        }
+        for arguments in [
+            r#"{"mediaItems":[],"favorite":"true"}"#,
+            r#"{"mediaItems":{ },"favorite":true}"#,
+            r#"{"mediaItems":[]}"#,
+        ] {
+            assert!(decode_command("setUserDataFavorites", Some(arguments)).is_err());
+        }
+    }
 
     #[test]
     fn transport_uses_the_same_names_as_flutter() {

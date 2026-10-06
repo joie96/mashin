@@ -12,6 +12,24 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class PlaybackSnapshotMapperTest {
+    // Canonical state and metadata projection.
+    @Test
+    fun favoriteStateUsesUserDataUriInsteadOfStaleQueueFlags() {
+        val state = JSONObject("""{"currentQueueItemId":"queue:1"}""")
+        val queue = JSONObject("""{"items":[{"queue_item_id":"queue:1","media_item":{"media_type":"track","item_id":"track-1","uri":" library://track/track-1 ","favorite":false}}]}""")
+        val userData = JSONObject("""{"favorites":{"tracks":[{"uri":"LIBRARY://TRACK/TRACK-1"}]}}""")
+        val favorite = PlaybackSnapshotMapper.fromPlayerState(state, queue, userData = userData)
+        assertTrue(favorite.isCurrentItemFavorite)
+        assertEquals("track-1", JSONObject(favorite.serializedCurrentMediaItem!!).getString("item_id"))
+        val removed = PlaybackSnapshotMapper.fromPlayerState(state, queue, userData = JSONObject("{}"))
+        assertFalse(removed.isCurrentItemFavorite)
+        assertNotNull(removed.serializedCurrentMediaItem)
+        assertNull(PlaybackSnapshotMapper.fromPlayerState(state, queue).serializedCurrentMediaItem)
+        assertNull(PlaybackSnapshotMapper.fromPlayerState(JSONObject("{}"), queue, userData = userData).serializedCurrentMediaItem)
+        queue.getJSONArray("items").getJSONObject(0).getJSONObject("media_item").remove("uri")
+        assertNull(PlaybackSnapshotMapper.fromPlayerState(state, queue, userData = userData).serializedCurrentMediaItem)
+    }
+
     @Test
     fun failedSessionResultIsNotAPlayerAcknowledgement() {
         val result = androidx.media3.session.SessionResult(-1,

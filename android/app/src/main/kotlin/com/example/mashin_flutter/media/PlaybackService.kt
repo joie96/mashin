@@ -21,6 +21,7 @@ import com.example.mashin_flutter.media.notification.PlaybackNotificationProvide
 import com.example.mashin_flutter.media.session.PlaybackCommandKind
 import com.example.mashin_flutter.media.session.PlaybackRequest
 import com.example.mashin_flutter.media.session.PlaybackSessionCallback
+import com.example.mashin_flutter.media.session.PlaybackSessionActions
 import com.example.mashin_flutter.media.session.PlaybackSessionCommands
 import com.example.mashin_flutter.media.session.PlaybackSnapshot
 import com.example.mashin_flutter.media.session.PlaybackSnapshotMapper
@@ -72,13 +73,14 @@ class PlaybackService : MediaLibraryService() {
             dispatchCoreCommand(PlaybackRequest(PlaybackCommandKind.TransportPause))
         }
         RustCoreBridge.initializeCore(applicationContext)
-        val initializedBrowser = MediaLibraryBrowser(applicationContext, ::dispatchPlayerCommand)
+        val initializedBrowser = MediaLibraryBrowser(applicationContext, dispatchCommand = ::dispatchPlayerCommand)
         browser = initializedBrowser
         val player = RustSessionPlayer(::dispatchPlayerCommand, initializedBrowser::startPlayback, initializedBrowser::queueEntry)
         sessionPlayer = player
-        val callback = PlaybackSessionCallback(packageName, initializedBrowser, dispatchCommand = ::dispatchCoreCommand)
+        val callback = PlaybackSessionCallback(packageName, initializedBrowser, readSnapshot = { snapshot }, dispatchCommand = ::dispatchCoreCommand)
         val session = MediaLibrarySession.Builder(this, player, callback)
             .setSessionActivity(notificationProvider.sessionActivity)
+            .setMediaButtonPreferences(PlaybackSessionActions.buttons(snapshot))
             .build()
         mediaLibrarySession = session
         addSession(session)
@@ -258,13 +260,22 @@ class PlaybackService : MediaLibraryService() {
     private fun readSnapshot(): PlaybackSnapshot {
         val state = JSONObject(checkNotNull(RustCoreBridge.query("mediaSessionState", null)))
         val settings = JSONObject(checkNotNull(RustCoreBridge.query("sessionSettings", null)))
+        val userData = if (state.getJSONObject("queue").optJSONArray("items")?.length()?.let { it > 0 } == true) {
+            try {
+                RustCoreBridge.query("userData", null)?.let(::JSONObject)
+            } catch (error: Exception) {
+                Log.w(TAG, "Favorite state is unavailable", error)
+                null
+            }
+        } else null
         return PlaybackSnapshotMapper.fromPlayerState(state.getJSONObject("playerState"), state.getJSONObject("queue"),
-            settings.optString("musicAssistantUrl"))
+            settings.optString("musicAssistantUrl"), userData)
     }
 
     private fun applySnapshot(nextSnapshot: PlaybackSnapshot) {
         snapshot = nextSnapshot
         sessionPlayer?.updateState(nextSnapshot)
+        mediaLibrarySession?.setMediaButtonPreferences(PlaybackSessionActions.buttons(nextSnapshot))
         if (nextSnapshot.hasPlaybackIntent && nextSnapshot.isLocalPlayback) {
             if (!wakeLock.isHeld) wakeLock.acquire()
         } else if (pendingPlaybackStarts == 0) {
@@ -276,7 +287,7 @@ class PlaybackService : MediaLibraryService() {
     // Core events only schedule reads; a long Rust operation never blocks Android's main thread.
     private fun applyCoreEvent(payload: String) {
         val eventType = JSONObject(payload).optString("type")
-        if (isDestroyed || isSnapshotRefreshQueued || eventType !in listOf("player_state_changed", "queue_changed")) return
+        if (isDestroyed || isSnapshotRefreshQueued || eventType !in listOf("player_state_changed", "queue_changed", "user_data_changed")) return
         isSnapshotRefreshQueued = true
         coreExecutor.execute {
             try {

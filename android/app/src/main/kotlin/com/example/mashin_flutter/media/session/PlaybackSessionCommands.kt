@@ -27,6 +27,7 @@ internal enum class PlaybackCommandKind(val action: String, val canStartPlayback
     SetMuted("setMuted"),
     SetTheme("setTheme"),
     SetLogLevel("setLogLevel"),
+    SetUserDataFavorites("setUserDataFavorites"),
     QueuePlayMedia("queuePlayMedia", true),
     StartSendspinRadio("startSendspinRadio", true),
     InsertQueueItems("insertQueueItems"),

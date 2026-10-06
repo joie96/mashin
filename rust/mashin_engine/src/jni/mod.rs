@@ -8,7 +8,7 @@ pub(crate) mod commands;
 pub(crate) mod entry_points;
 #[cfg(target_os = "android")]
 pub(crate) mod event_channel;
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", test))]
 pub(crate) mod queries;
 
 #[cfg(target_os = "android")]

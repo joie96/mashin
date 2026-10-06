@@ -265,6 +265,7 @@ pub(crate) struct LoginConfig {
 pub(crate) enum MediaSessionEvent {
     QueueChanged { queue: Queue },
     PlayerStateChanged { player_state: PlayerState },
+    UserDataChanged,
     OperationCompleted { request_id: u64, result: Value },
     OperationFailed { request_id: u64, error: CoreError },
 }

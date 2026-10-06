@@ -3,6 +3,8 @@ package com.example.mashin_flutter.media.library
 import android.content.ContentResolver
 import android.content.Context
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
@@ -29,9 +31,12 @@ import org.json.JSONObject
 @UnstableApi
 internal class MediaLibraryBrowser(
     private val context: Context,
+    private val search: MediaLibrarySearch = MediaLibrarySearch { kind, argument -> RustCoreBridge.query(kind, argument) },
     private val dispatchCommand: (PlaybackRequest) -> ListenableFuture<*>,
 ) : MediaLibraryService.MediaLibrarySession.Callback {
     private val browseExecutor = MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor())
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var isClosed = false
     private val libraryItemsById = ConcurrentHashMap<String, MediaItem>()
     private val serializedMediaItems = ConcurrentHashMap<String, String>()
     private val serializedTrackLists = ConcurrentHashMap<String, String>()
@@ -39,6 +44,8 @@ internal class MediaLibraryBrowser(
 
     // Browser worker lifecycle.
     fun close() {
+        isClosed = true
+        search.close()
         browseExecutor.shutdown()
     }
 
@@ -110,6 +117,9 @@ internal class MediaLibraryBrowser(
         if (parentId == "root") {
             return Futures.immediateFuture(LibraryResult.ofItemList(libraryItems(parentId), params))
         }
+        if (parentId.startsWith("search:")) {
+            return searchCategoryItems(parentId, page, pageSize, params)
+        }
         return browseExecutor.submit<LibraryResult<com.google.common.collect.ImmutableList<MediaItem>>> {
             LibraryResult.ofItemList(libraryItems(parentId), params)
         }
@@ -130,10 +140,20 @@ internal class MediaLibraryBrowser(
         query: String,
         params: MediaLibraryService.LibraryParams?,
     ): ListenableFuture<LibraryResult<Void>> {
-        return browseExecutor.submit<LibraryResult<Void>> {
-            session.notifySearchResultChanged(browser, query, searchItems(query).size, params)
-            LibraryResult.ofVoid(params)
+        val results = search.start(query)
+        session.notifySearchResultChanged(browser, query, results.size, params)
+        results.forEach { (category, result) ->
+            result.addListener({
+                mainHandler.post {
+                    if (!isClosed && !result.isCancelled && search.isCurrent(query, category, result)) {
+                        val itemCount = JSONArray(Futures.getDone(result)).length()
+                        session.notifyChildrenChanged(browser, "search:${category.resultKey}?$query",
+                            itemCount + if (category == SearchMediaCategory.Tracks && itemCount > 0) 2 else 0, params)
+                    }
+                }
+            }, MoreExecutors.directExecutor())
         }
+        return Futures.immediateFuture(LibraryResult.ofVoid(params))
     }
 
     override fun onGetSearchResult(
@@ -144,9 +164,9 @@ internal class MediaLibraryBrowser(
         pageSize: Int,
         params: MediaLibraryService.LibraryParams?,
     ): ListenableFuture<LibraryResult<com.google.common.collect.ImmutableList<MediaItem>>> {
-        return browseExecutor.submit<LibraryResult<com.google.common.collect.ImmutableList<MediaItem>>> {
-            LibraryResult.ofItemList(searchItems(query), params)
-        }
+        if (page < 0 || pageSize <= 0) return Futures.immediateFuture(LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE))
+        return Futures.immediateFuture(LibraryResult.ofItemList(searchItems(query).drop(
+            (page.toLong() * pageSize).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()).take(pageSize), params))
     }
 
     fun queueEntry(mediaId: String): JSONObject? = serializedMediaItems[mediaId]
@@ -259,7 +279,6 @@ internal class MediaLibraryBrowser(
     }
 
     private fun dynamicChildren(parentId: String): List<MediaItem> = when {
-        parentId.startsWith("search:") -> searchCategoryItems(parentId)
         parentId.startsWith("browse:album:") -> referencedItems(parentId, "albumTracks")
         parentId.startsWith("browse:playlist:") -> referencedItems(parentId, "playlistTracks")
         parentId.startsWith("browse:artist:") -> artistChildren(parentId)
@@ -271,39 +290,36 @@ internal class MediaLibraryBrowser(
 
     private fun searchItems(query: String): List<MediaItem> {
         if (query.isBlank()) return emptyList()
-        val results = JSONObject(RustCoreBridge.query("search", query) ?: "{}")
-        return listOf("tracks" to "Tracks", "albums" to "Alben", "playlists" to "Playlists", "artists" to "Artists")
-            .filter { (category, _) -> (results.optJSONArray(category)?.length() ?: 0) > 0 }
-            .map { (category, title) ->
-                val iconResource = when (category) {
-                    "tracks" -> R.drawable.music_note
-                    "albums" -> R.drawable.album
-                    "playlists" -> R.drawable.playlist_play
-                    else -> R.drawable.artist
-                }
-                libraryItem("search:$category?$query", title, false, iconResource = iconResource)
+        search.start(query)
+        return SearchMediaCategory.entries.map { category ->
+            val iconResource = when (category) {
+                SearchMediaCategory.Tracks -> R.drawable.music_note
+                SearchMediaCategory.Albums -> R.drawable.album
+                SearchMediaCategory.Playlists -> R.drawable.playlist_play
+                SearchMediaCategory.Artists -> R.drawable.artist
             }
+            libraryItem("search:${category.resultKey}?$query", category.title, false,
+                iconResource = iconResource)
+        }
     }
 
-    private fun searchCategoryItems(parentId: String): List<MediaItem> {
-        val category = parentId.substringAfter(':').substringBefore('?')
+    private fun searchCategoryItems(
+        parentId: String,
+        page: Int,
+        pageSize: Int,
+        params: MediaLibraryService.LibraryParams?,
+    ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+        val categoryKey = parentId.substringAfter(':').substringBefore('?')
+        val category = SearchMediaCategory.entries.firstOrNull { it.resultKey == categoryKey }
+            ?: return Futures.immediateFuture(LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE))
+        if (page < 0 || pageSize <= 0) return Futures.immediateFuture(LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE))
         val query = parentId.substringAfter('?', "")
-        return mediaItemsFromJson(
-            searchResults(query, category),
-            includeTrackListActions = category == "tracks",
-            mediaType = when (category) {
-                "tracks" -> "track"
-                "albums" -> "album"
-                "playlists" -> "playlist"
-                "artists" -> "artist"
-                else -> null
-            },
-        )
-    }
-
-    private fun searchResults(query: String, key: String): String {
-        val results = JSONObject(RustCoreBridge.query("search", query) ?: "{}")
-        return results.optJSONArray(key)?.toString() ?: "[]"
+        return Futures.transform(search.results(query, category), { serializedItems ->
+            val items = mediaItemsFromJson(serializedItems,
+                includeTrackListActions = category == SearchMediaCategory.Tracks, mediaType = category.mediaType)
+            LibraryResult.ofItemList(items.drop(
+                (page.toLong() * pageSize).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()).take(pageSize), params)
+        }, MoreExecutors.directExecutor())
     }
 
     private fun userDataItems(category: String, mediaType: String, includeTrackListActions: Boolean = false): List<MediaItem> {

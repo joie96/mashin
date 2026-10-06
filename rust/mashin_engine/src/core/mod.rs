@@ -17,6 +17,6 @@ pub(crate) use core::{
     read_music_assistant_track_versions, read_or_load_user_data, read_player_state, read_queue,
     read_session_settings, read_user_data, remove_playlist_tracks,
     resolve_media_and_execute_command, restore_persisted_session_and_collect_events,
-    search_music_assistant, shutdown, spawn_blocking_operation, start_music_assistant_query,
+    search_music_assistant_media, shutdown, spawn_blocking_operation, start_music_assistant_query,
     start_sendspin_radio_and_execute_command, CoreCoordinator,
 };

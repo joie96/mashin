@@ -10,12 +10,25 @@ import org.json.JSONObject
 @UnstableApi
 internal object PlaybackSnapshotMapper {
     // Canonical Rust state is projected without native calls or a second queue owner.
-    fun fromPlayerState(values: JSONObject, queue: JSONObject, musicAssistantUrl: String = ""): PlaybackSnapshot {
+    fun fromPlayerState(values: JSONObject, queue: JSONObject, musicAssistantUrl: String = "", userData: JSONObject? = null): PlaybackSnapshot {
         val queueItemId = values.optString("currentQueueItemId")
         val queueItems = queue.optJSONArray("items")
             ?.let { items -> (0 until items.length()).mapNotNull(items::optJSONObject) }
             ?: emptyList()
         val currentQueueItem = queueItems.firstOrNull { it.optString("queue_item_id") == queueItemId }
+        val currentMediaItem = currentQueueItem?.optJSONObject("media_item")
+        val currentUri = currentMediaItem?.optString("uri")?.trim()?.takeIf { it.isNotEmpty() && it != "null" }
+        val favoriteCategory = when (currentMediaItem?.optString("media_type")) {
+            "track" -> "tracks"
+            "album" -> "albums"
+            "playlist" -> "playlists"
+            "artist" -> "artists"
+            else -> null
+        }
+        val favorites = favoriteCategory?.let { userData?.optJSONObject("favorites")?.optJSONArray(it) }
+        val isCurrentItemFavorite = currentUri != null && favorites != null && (0 until favorites.length()).any { index ->
+            favorites.optJSONObject(index)?.optString("uri")?.trim()?.equals(currentUri, ignoreCase = true) == true
+        }
         val durationMillis = values.optLong("durationMillis", -1L).takeIf { it > 0 }
             ?: currentQueueItem?.optLong("duration")?.takeIf { it > 0 }?.times(1_000L)
         val positionMillis = values.optLong("positionMillis", 0L)
@@ -61,6 +74,8 @@ internal object PlaybackSnapshotMapper {
             mediaItems = items,
             currentIndex = queueItems.indexOfFirst { it.optString("queue_item_id") == queueItemId }.coerceAtLeast(0),
             isLocalPlayback = values.optString("activeEngineKind") != "remote",
+            serializedCurrentMediaItem = currentMediaItem?.takeIf { userData != null && currentUri != null && favoriteCategory != null }?.toString(),
+            isCurrentItemFavorite = isCurrentItemFavorite,
         )
     }
 

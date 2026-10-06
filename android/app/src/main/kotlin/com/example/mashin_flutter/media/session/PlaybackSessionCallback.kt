@@ -19,12 +19,16 @@ internal class PlaybackSessionCallback(
     private val packageName: String,
     private val browser: MediaLibraryBrowser,
     private val lifecycle: PlaybackSessionLifecycle = PlaybackSessionLifecycle.shared,
+    private val readSnapshot: () -> PlaybackSnapshot = { PlaybackSnapshot.empty() },
     private val dispatchCommand: (PlaybackRequest) -> ListenableFuture<SessionResult>,
 ) : MediaLibraryService.MediaLibrarySession.Callback {
     // Session access: app-only lifecycle commands, standard media access for other controllers.
     override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
         val commands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
         if (controller.packageName == packageName) commands.add(PlaybackSessionCommands.execute)
+        if (controller.packageName == packageName || controller.isTrusted || session.isMediaNotificationController(controller)) {
+            PlaybackSessionActions.commands.forEach(commands::add)
+        }
         return MediaSession.ConnectionResult.AcceptedResultBuilder()
             .setAvailableSessionCommands(commands.build())
             .setAvailablePlayerCommands(MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS)
@@ -38,11 +42,20 @@ internal class PlaybackSessionCallback(
         customCommand: SessionCommand,
         args: Bundle,
     ): ListenableFuture<SessionResult> {
-        if (controller.packageName != packageName || customCommand.customAction != PlaybackSessionCommands.execute.customAction) {
-            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_PERMISSION_DENIED))
-        }
         return try {
-            dispatchCommand(PlaybackSessionCommands.decode(args))
+            if (customCommand.customAction == PlaybackSessionCommands.execute.customAction) {
+                if (controller.packageName != packageName) {
+                    Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_PERMISSION_DENIED))
+                } else {
+                    dispatchCommand(PlaybackSessionCommands.decode(args))
+                }
+            } else if (controller.packageName == packageName || controller.isTrusted || session.isMediaNotificationController(controller)) {
+                val request = PlaybackSessionActions.request(customCommand, readSnapshot())
+                if (request == null) Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED))
+                else dispatchCommand(request)
+            } else {
+                Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_PERMISSION_DENIED))
+            }
         } catch (error: IllegalArgumentException) {
             Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_BAD_VALUE,
                 Bundle().apply { putString(PlaybackSessionCommands.ERROR_KEY, error.message) }))

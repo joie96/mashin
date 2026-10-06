@@ -66,6 +66,21 @@ mod tests {
             .push(text.to_string_lossy().into_owned());
     }
 
+    // Platform event routing contracts.
+    #[test]
+    fn user_data_changes_reach_both_platform_listeners() {
+        let android_messages = RefCell::new(Vec::new());
+        let flutter_messages = RefCell::new(Vec::new());
+        publish_event(
+            &MediaSessionEvent::UserDataChanged,
+            true,
+            |text| android_messages.borrow_mut().push(text.to_string()),
+            |text| flutter_messages.borrow_mut().push(text.to_string()),
+        );
+        assert_eq!(*android_messages.borrow(), vec![r#"{"type":"user_data_changed"}"#]);
+        assert_eq!(*android_messages.borrow(), *flutter_messages.borrow());
+    }
+
     #[test]
     fn jni_command_updates_only_flutter_while_background_updates_both() {
         let event = MediaSessionEvent::PlayerStateChanged {

@@ -21,6 +21,8 @@ internal data class PlaybackSnapshot(
     val mediaItems: List<MediaItem>,
     val currentIndex: Int,
     val isLocalPlayback: Boolean = true,
+    val serializedCurrentMediaItem: String? = null,
+    val isCurrentItemFavorite: Boolean = false,
 ) {
     val hasPlaybackIntent: Boolean
         get() = status == PlaybackStatus.Playing || status == PlaybackStatus.Buffering || status == PlaybackStatus.Seeking

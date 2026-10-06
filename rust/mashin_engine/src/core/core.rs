@@ -680,6 +680,7 @@ where
     if should_schedule {
         start_user_data_write_worker(session_generation);
     }
+    crate::core::event_channel::publish_background_event(MediaSessionEvent::UserDataChanged);
     Ok(snapshot)
 }
 
@@ -942,20 +943,16 @@ pub(crate) fn read_music_assistant_recently_played_tracks(
         .map_err(CoreError::command_failed)
 }
 
-pub(crate) fn search_music_assistant(
+pub(crate) fn search_music_assistant_media(
     query: &str,
+    media_type: MediaType,
     limit: u32,
 ) -> Result<MusicAssistantSearchResults, CoreError> {
     let client = music_assistant_client_for_query("search Music Assistant")?;
     CORE_NETWORK_RUNTIME
         .block_on(client.search_media(
             query,
-            &[
-                MediaType::Track,
-                MediaType::Album,
-                MediaType::Playlist,
-                MediaType::Artist,
-            ],
+            &[media_type],
             limit.clamp(1, 100),
         ))
         .map_err(CoreError::command_failed)

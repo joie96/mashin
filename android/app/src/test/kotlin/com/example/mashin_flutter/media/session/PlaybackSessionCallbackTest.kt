@@ -9,7 +9,14 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import com.example.mashin_flutter.media.PlaybackSessionLifecycle
 import com.example.mashin_flutter.media.library.MediaLibraryBrowser
+import com.example.mashin_flutter.media.library.MediaLibrarySearch
+import com.example.mashin_flutter.media.library.SearchMediaCategory
 import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.SettableFuture
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -22,6 +29,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class PlaybackSessionCallbackTest {
+    // Controller browsing and search contracts.
     @Test
     fun controllersCanBrowseAndControlPlayback() {
         val context = RuntimeEnvironment.getApplication()
@@ -60,6 +68,9 @@ class PlaybackSessionCallbackTest {
                 }
                 assertEquals(packageName == context.packageName,
                     result.availableSessionCommands.contains(PlaybackSessionCommands.execute))
+                PlaybackSessionActions.commands.forEach { command ->
+                    assertTrue("$packageName missing ${command.customAction}", result.availableSessionCommands.contains(command))
+                }
                 assertFalse(result.availablePlayerCommands == Player.Commands.EMPTY)
                 callback.onDisconnected(session, controller)
                 assertEquals(if (packageName == "com.google.android.projection.gearhead") 1 else 0, shutdownRequests)
@@ -68,6 +79,140 @@ class PlaybackSessionCallbackTest {
             session.release()
             player.release()
             browser.close()
+        }
+    }
+
+    @Test
+    fun trustedControllersCanToggleActionsButCannotExecuteAppOnlyCommands() {
+        val context = RuntimeEnvironment.getApplication()
+        val browser = MediaLibraryBrowser(context) { Futures.immediateVoidFuture() }
+        val player = RustSessionPlayer({ Futures.immediateVoidFuture() }, browser::startPlayback, browser::queueEntry)
+        val snapshot = PlaybackSnapshot.empty().copy(serializedCurrentMediaItem =
+            """{"media_type":"track","item_id":"track-1","provider":"library","uri":"library://track/track-1","name":"Track"}""")
+        val requests = mutableListOf<PlaybackRequest>()
+        val completion = SettableFuture.create<SessionResult>()
+        val callback = PlaybackSessionCallback(context.packageName, browser, readSnapshot = { snapshot }) { request ->
+            requests.add(request)
+            completion
+        }
+        val session = MediaLibrarySession.Builder(context, player, callback)
+            .setMediaButtonPreferences(PlaybackSessionActions.buttons(snapshot)).build()
+        try {
+            for (packageName in listOf("com.android.systemui", "com.google.android.projection.gearhead")) {
+                val controller = MediaSession.ControllerInfo.createTestOnlyControllerInfo(
+                    packageName, 1, 1000, 0, 0, true, Bundle.EMPTY, true)
+                for (command in PlaybackSessionActions.commands) {
+                    val result = callback.onCustomCommand(session, controller, command, Bundle.EMPTY)
+                    assertFalse(result.isDone)
+                }
+                assertEquals(SessionResult.RESULT_ERROR_PERMISSION_DENIED,
+                    callback.onCustomCommand(session, controller, PlaybackSessionCommands.execute,
+                        PlaybackSessionCommands.encode(PlaybackRequest(PlaybackCommandKind.Shutdown))).get().resultCode)
+            }
+            assertEquals(listOf(PlaybackCommandKind.SetUserDataFavorites, PlaybackCommandKind.TransportShuffle,
+                PlaybackCommandKind.TransportRepeatMode).let { it + it }, requests.map { it.kind })
+            val untrusted = MediaSession.ControllerInfo.createTestOnlyControllerInfo(
+                "untrusted", 1, 2000, 0, 0, false, Bundle.EMPTY, true)
+            assertFalse(callback.onConnect(session, untrusted).availableSessionCommands.contains(PlaybackSessionActions.toggleShuffle))
+            assertEquals(SessionResult.RESULT_ERROR_PERMISSION_DENIED,
+                callback.onCustomCommand(session, untrusted, PlaybackSessionActions.toggleShuffle, Bundle.EMPTY).get().resultCode)
+            assertEquals(3, session.mediaButtonPreferences.size)
+            completion.set(SessionResult(SessionResult.RESULT_ERROR_UNKNOWN))
+            assertEquals(SessionResult.RESULT_ERROR_UNKNOWN,
+                callback.onCustomCommand(session, MediaSession.ControllerInfo.createTestOnlyControllerInfo(
+                    "com.android.systemui", 1, 1000, 0, 0, true, Bundle.EMPTY, true),
+                    PlaybackSessionActions.toggleShuffle, Bundle.EMPTY).get().resultCode)
+        } finally {
+            session.release()
+            player.release()
+            browser.close()
+        }
+    }
+
+    @Test
+    fun searchCallbacksShowAllCategoriesAndCompleteOpenedListsWhenDataArrives() {
+        val started = CountDownLatch(4)
+        val releaseResults = CountDownLatch(1)
+        val releaseAlbums = CountDownLatch(1)
+        val requestCount = AtomicInteger()
+        val search = MediaLibrarySearch { _, argument ->
+            requestCount.incrementAndGet()
+            val request = JSONObject(argument!!)
+            val mediaType = request.getString("mediaType")
+            started.countDown()
+            check(started.await(5, TimeUnit.SECONDS))
+            check(releaseResults.await(5, TimeUnit.SECONDS))
+            if (mediaType == "album") check(releaseAlbums.await(5, TimeUnit.SECONDS))
+            if (mediaType == "artist") error("Provider unavailable")
+            val category = SearchMediaCategory.entries.first { it.mediaType == mediaType }
+            "{\"${category.resultKey}\":[{\"item_id\":\"$mediaType-1\",\"provider\":\"library\",\"name\":\"Result\"}]}"
+        }
+        val context = RuntimeEnvironment.getApplication()
+        val browser = MediaLibraryBrowser(context, search) { Futures.immediateVoidFuture() }
+        val player = RustSessionPlayer({ Futures.immediateVoidFuture() }, browser::startPlayback, browser::queueEntry)
+        val callback = PlaybackSessionCallback(context.packageName, browser) {
+            Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
+        val session = MediaLibrarySession.Builder(context, player, callback).build()
+        val controller = MediaSession.ControllerInfo.createTestOnlyControllerInfo(
+            "com.google.android.projection.gearhead", 1, 1000, 0, 0, true, Bundle.EMPTY, true)
+        try {
+            assertEquals(LibraryResult.RESULT_SUCCESS, callback.onSearch(session, controller, "jazz", null)
+                .get(1, TimeUnit.SECONDS).resultCode)
+            assertTrue(started.await(5, TimeUnit.SECONDS))
+            val expectedCategories = listOf("search:tracks?jazz", "search:albums?jazz",
+                "search:playlists?jazz", "search:artists?jazz")
+            assertEquals(expectedCategories, callback.onGetSearchResult(session, controller, "jazz", 0, 10, null)
+                .get(1, TimeUnit.SECONDS).value?.map { it.mediaId })
+            val loadingCategories = callback.onGetSearchResult(session, controller, "jazz", 0, 10, null).get().value!!
+            assertTrue(loadingCategories.all { it.mediaMetadata.subtitle == null })
+            val openedCategories = expectedCategories.associateWith { category ->
+                callback.onGetChildren(session, controller, category, 0, 10, null).also { children ->
+                    assertFalse(children.isDone)
+                }
+            }
+            releaseResults.countDown()
+            search.results("jazz", SearchMediaCategory.Tracks).get(5, TimeUnit.SECONDS)
+            search.results("jazz", SearchMediaCategory.Playlists).get(5, TimeUnit.SECONDS)
+            search.results("jazz", SearchMediaCategory.Artists).get(5, TimeUnit.SECONDS)
+            assertFalse(search.results("jazz", SearchMediaCategory.Albums).isDone)
+            val categories = callback.onGetSearchResult(session, controller, "jazz", 0, 10, null).get()
+            assertEquals(expectedCategories, categories.value?.map { it.mediaId })
+            assertTrue(categories.value!!.all { it.mediaMetadata.subtitle == null })
+            assertFalse(openedCategories.getValue("search:albums?jazz").isDone)
+            assertEquals("browse:track:library:track-1", openedCategories.getValue("search:tracks?jazz")
+                .get(1, TimeUnit.SECONDS).value?.last()?.mediaId)
+            assertEquals("browse:playlist:library:playlist-1", openedCategories.getValue("search:playlists?jazz")
+                .get(1, TimeUnit.SECONDS).value?.single()?.mediaId)
+            assertTrue(openedCategories.getValue("search:artists?jazz").get(1, TimeUnit.SECONDS).value!!.isEmpty())
+            val page = callback.onGetSearchResult(session, controller, "jazz", 1, 1, null).get()
+            assertEquals("search:albums?jazz", page.value?.single()?.mediaId)
+            repeat(2) {
+                val tracks = callback.onGetChildren(session, controller, "search:tracks?jazz", 0, 10, null)
+                    .get(1, TimeUnit.SECONDS).value!!
+                assertEquals(3, tracks.size)
+                assertEquals("browse:track:library:track-1", tracks.last().mediaId)
+                assertTrue(tracks.last().mediaMetadata.isPlayable == true)
+                assertEquals("track", browser.queueEntry(tracks.last().mediaId)?.getJSONObject("mediaItem")?.getString("media_type"))
+            }
+            assertEquals(LibraryResult.RESULT_ERROR_BAD_VALUE,
+                callback.onGetSearchResult(session, controller, "jazz", -1, 10, null).get().resultCode)
+            assertEquals(4, requestCount.get())
+            releaseAlbums.countDown()
+            search.results("jazz", SearchMediaCategory.Albums).get(5, TimeUnit.SECONDS)
+            assertEquals("browse:album:library:album-1",
+                openedCategories.getValue("search:albums?jazz").get(1, TimeUnit.SECONDS).value?.single()?.mediaId)
+            val completedCategories = callback.onGetSearchResult(session, controller, "jazz", 0, 10, null).get().value!!
+            assertEquals(expectedCategories, completedCategories.map { it.mediaId })
+            assertTrue(completedCategories.all { it.mediaMetadata.subtitle == null })
+            assertEquals(4, requestCount.get())
+            assertTrue(callback.onGetSearchResult(session, controller, "  ", 0, 10, null).get().value!!.isEmpty())
+        } finally {
+            releaseResults.countDown()
+            releaseAlbums.countDown()
+            browser.close()
+            session.release()
+            player.release()
         }
     }
 }
