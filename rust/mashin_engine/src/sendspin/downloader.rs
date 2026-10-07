@@ -8,6 +8,10 @@ use super::models::{
     CacheItemState, SendspinAudioCodec, SendspinDownloadPlan, SendspinDownloadPlanItem,
     SendspinDownloadPlanRequest, SendspinDownloadQueueItem,
 };
+use super::reconnect::{
+    DecodedDownloadChunk, DownloadStream, StreamAppend, MAXIMUM_ALIGNMENT_DURATION,
+    MINIMUM_CACHE_DURATION_FOR_RECONNECT_ALIGNMENT, RECONNECT_SEEK_OVERLAP,
+};
 use crate::logging::Logger;
 use crate::music_assistant::client::MusicAssistantClient;
 use crate::music_assistant::models::identifiers::CacheContentKey;
@@ -18,7 +22,7 @@ use ::sendspin::audio::AudioFormat;
 use ::sendspin::protocol::client::{ConnectionGuard, Controller, WsSender};
 use ::sendspin::protocol::messages::{GoodbyeReason, Message, PlayerState};
 use ::sendspin::ProtocolClientBuilder;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
@@ -31,10 +35,10 @@ const CACHE_CAPACITY_PRESSURE_PERCENT: usize = 95;
 const CACHE_CAPACITY_RECOVERY_PERCENT: usize = 90;
 const CONNECTION_LIVENESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
 const CONNECTION_LIVENESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-const SEEK_REPLACEMENT_STREAM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-const SEEK_CONFIRMATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+const STREAM_REPLACEMENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const DOWNLOAD_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 const DOWNLOAD_PROGRESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
-const MAXIMUM_PENDING_SEEK_AUDIO_BYTES: usize = 8 * 1024 * 1024;
+const DOWNLOAD_RESUME_COMMAND_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
 const DOWNLOAD_QUEUE_REGISTRATION_ATTEMPTS: usize = 4;
 const DOWNLOAD_QUEUE_REGISTRATION_RETRY_DELAY: std::time::Duration =
     std::time::Duration::from_secs(2);
@@ -317,18 +321,13 @@ impl SendspinDownloaderWorker {
             let task = tokio::spawn(async move {
                 let mut format: Option<AudioFormat> = None;
                 let mut reservation: Option<crate::cache::store::DownloadSlotReservation> = None;
-                let mut pending_audio_chunk: Option<(i64, Arc<[u8]>)> = None;
-                let mut buffered_audio_chunks: VecDeque<(u64, Arc<[u8]>)> = VecDeque::new();
-                let mut buffered_audio_bytes = 0_usize;
-                let mut stream_ended_before_seek_confirmation = false;
+                let mut stream: Option<DownloadStream> = None;
                 let mut cached_bytes = 0_usize;
                 let mut cached_duration_millis = 0_u64;
-                let mut last_chunk_duration_millis = 0_u64;
                 let mut next_progress_millis = 5_000_u64;
-                let mut seek_gate_reported = false;
                 let mut first_chunk_reported = false;
-                let mut seek_replacement_deadline = None;
-                let mut seek_confirmation_deadline: Option<(String, tokio::time::Instant)> = None;
+                let mut stream_replacement_deadline = None;
+                let mut alignment_deadline = None;
                 let mut stalled_content_key: Option<String> = None;
                 let mut download_progress_deadline = None;
                 let mut observed_cached_bytes = 0;
@@ -340,70 +339,9 @@ impl SendspinDownloaderWorker {
                             tokio::time::Instant::now() + DOWNLOAD_PROGRESS_TIMEOUT,
                         );
                     }
-                    if seek_confirmation_deadline.as_ref().is_some_and(|(lease_id, _)| {
-                        reservation.as_ref().is_none_or(|value| {
-                            value.lease_id != *lease_id
-                                || value.append_after_seek.load(Ordering::Acquire)
-                        })
-                    }) {
-                        seek_confirmation_deadline = None;
-                    }
                     if !downloads_allowed.load(Ordering::Acquire) {
-                        buffered_audio_chunks.clear();
-                        buffered_audio_bytes = 0;
-                        pending_audio_chunk = None;
-                        stream_ended_before_seek_confirmation = false;
-                    }
-                    if !buffered_audio_chunks.is_empty() || stream_ended_before_seek_confirmation {
-                        if let (Some(value), Some(stream_format)) = (reservation.as_ref(), format.as_ref()) {
-                            if !crate::cache::store::slot_reservation_is_current(&slots, slot_index, value) {
-                                reservation = None;
-                                format = None;
-                                pending_audio_chunk = None;
-                                buffered_audio_chunks.clear();
-                                buffered_audio_bytes = 0;
-                                stream_ended_before_seek_confirmation = false;
-                                continue;
-                            }
-                            if value.append_after_seek.load(Ordering::Acquire) {
-                                while let Some((duration, data)) = buffered_audio_chunks.pop_front() {
-                                    append_download_chunk(
-                                        &slots, &downloads_allowed, &caches, &cache_change_signal, &cache_touch_sequence,
-                                        &states, &event_sender, &download_status_refresh,
-                                        slot_index, value, stream_format, duration, &data,
-                                        &mut cached_bytes, &mut cached_duration_millis,
-                                        &mut first_chunk_reported, &mut next_progress_millis,
-                                    );
-                                }
-                                buffered_audio_bytes = 0;
-                                if stream_ended_before_seek_confirmation {
-                                    if let Some((_, data)) = pending_audio_chunk.take() {
-                                        let duration = terminal_chunk_duration_millis(
-                                            last_chunk_duration_millis,
-                                            value.expected_duration_millis,
-                                            cached_duration_millis,
-                                        );
-                                        append_download_chunk(
-                                            &slots, &downloads_allowed, &caches, &cache_change_signal, &cache_touch_sequence,
-                                            &states, &event_sender, &download_status_refresh,
-                                            slot_index, value, stream_format, duration, &data,
-                                            &mut cached_bytes, &mut cached_duration_millis,
-                                            &mut first_chunk_reported, &mut next_progress_millis,
-                                        );
-                                    }
-                                    if crate::cache::store::slot_reservation_is_current(&slots, slot_index, value) {
-                                        retain_interrupted_reservation(
-                                            &slots, &caches, &cache_change_signal, &states,
-                                            &event_sender, slot_index, value,
-                                        );
-                                    }
-                                    reservation = None;
-                                    format = None;
-                                    stream_ended_before_seek_confirmation = false;
-                                    seek_replacement_deadline = None;
-                                }
-                            }
-                        }
+                        stream = None;
+                        alignment_deadline = None;
                     }
                     tokio::select! {
                         _ = async {
@@ -433,47 +371,34 @@ impl SendspinDownloaderWorker {
                             download_progress_deadline = None;
                         }
                         _ = async {
-                            match seek_confirmation_deadline.as_ref() {
-                                Some((_, deadline)) => tokio::time::sleep_until(*deadline).await,
-                                None => std::future::pending::<()>().await,
-                            }
-                        } => {
-                            if let Some(value) = reservation.as_ref() {
-                                if connection_generation.load(Ordering::Acquire) == task_connection_generation
-                                    && crate::cache::store::slot_reservation_is_current(&slots, slot_index, value)
-                                    && !value.append_after_seek.load(Ordering::Acquire)
-                                {
-                                    LOGGER.warn(format!(
-                                        "seek confirmation timed out on slot {} for cache key {} ({})",
-                                        slot_index + 1,
-                                        value.cache_content_key,
-                                        value.title
-                                    ));
-                                    downloads_allowed.store(false, Ordering::Release);
-                                    report_connection_lost_if_current(
-                                        &connection_generation, &connection_event,
-                                        task_connection_generation, slot_index, "seek confirmation timeout",
-                                    );
-                                }
-                            }
-                            seek_confirmation_deadline = None;
-                        }
-                        _ = async {
-                            match seek_replacement_deadline {
+                            match alignment_deadline {
                                 Some(deadline) => tokio::time::sleep_until(deadline).await,
                                 None => std::future::pending::<()>().await,
                             }
                         } => {
                             if let Some(value) = reservation.as_ref() {
-                                if crate::cache::store::slot_reservation_is_current(
-                                    &slots,
-                                    slot_index,
-                                    value,
-                                ) && !value.append_after_seek.load(Ordering::Acquire) {
-                                    LOGGER.warn(format!(
-                                        "seek replacement stream timed out on slot {}; resuming the interrupted download",
-                                        slot_index + 1
-                                    ));
+                                if connection_generation.load(Ordering::Acquire) == task_connection_generation {
+                                    restart_unmatched_download(&slots, &caches, &cache_change_signal,
+                                        &states, &event_sender, slot_index, value);
+                                }
+                            }
+                            stream = None;
+                            reservation = None;
+                            alignment_deadline = None;
+                            stream_replacement_deadline = None;
+                        }
+                        _ = async {
+                            match stream_replacement_deadline {
+                                Some(deadline) => tokio::time::sleep_until(deadline).await,
+                                None => std::future::pending::<()>().await,
+                            }
+                        } => {
+                            if let Some(value) = reservation.as_ref() {
+                                if connection_generation.load(Ordering::Acquire) == task_connection_generation {
+                                    if value.resume_reference.is_some() && stream.as_ref().is_none_or(DownloadStream::requires_alignment) {
+                                        restart_unmatched_download(&slots, &caches, &cache_change_signal,
+                                            &states, &event_sender, slot_index, value);
+                                    } else {
                                     retain_interrupted_reservation(
                                         &slots,
                                         &caches,
@@ -483,17 +408,15 @@ impl SendspinDownloaderWorker {
                                         slot_index,
                                         value,
                                     );
+                                    }
                                 }
                             }
                             reservation = None;
                             format = None;
-                            pending_audio_chunk = None;
-                            buffered_audio_chunks.clear();
-                            buffered_audio_bytes = 0;
-                            stream_ended_before_seek_confirmation = false;
-                            seek_replacement_deadline = None;
+                            stream = None;
+                            stream_replacement_deadline = None;
+                            alignment_deadline = None;
                         }
-                        _ = tokio::time::sleep(std::time::Duration::from_millis(20)), if !buffered_audio_chunks.is_empty() || stream_ended_before_seek_confirmation => {}
                         message = messages.recv() => {
                             let Some(message) = message else { break; };
                             match message {
@@ -513,21 +436,32 @@ impl SendspinDownloaderWorker {
                                         ).ok()
                                     });
                                     reservation = slots.lock().ok().and_then(|values| values[slot_index].clone());
-                                    pending_audio_chunk = None;
-                                    buffered_audio_chunks.clear();
-                                    buffered_audio_bytes = 0;
-                                    stream_ended_before_seek_confirmation = false;
+                                    stream = match (format.as_ref(), reservation.as_ref()) {
+                                        (Some(format), Some(value)) => match DownloadStream::new(
+                                            format.clone(), value.resume_after_millis, value.resume_reference.clone(),
+                                        ) {
+                                            Ok(stream) => Some(stream),
+                                            Err(error) => {
+                                                LOGGER.error(format!("download decoder initialization failed: {error}"));
+                                                None
+                                            }
+                                        },
+                                        _ => None,
+                                    };
                                     cached_bytes = 0;
                                     observed_cached_bytes = 0;
-                                    last_chunk_duration_millis = 0;
                                     cached_duration_millis = reservation
                                         .as_ref()
                                         .map(|value| value.resume_after_millis)
                                         .unwrap_or(0);
                                     next_progress_millis = 5_000;
-                                    seek_gate_reported = false;
                                     first_chunk_reported = false;
-                                    seek_replacement_deadline = None;
+                                    stream_replacement_deadline = None;
+                                    if reservation.as_ref().is_some_and(|value| value.resume_reference.is_some()) {
+                                        alignment_deadline.get_or_insert(tokio::time::Instant::now() + MAXIMUM_ALIGNMENT_DURATION);
+                                    } else {
+                                        alignment_deadline = None;
+                                    }
                                     if let Some(value) = reservation.as_ref() {
                                         download_progress_deadline = Some(watchdog_deadline(
                                             stalled_content_key.as_deref().zip(download_progress_deadline),
@@ -572,92 +506,7 @@ impl SendspinDownloaderWorker {
                                         task_connection_generation,
                                         false,
                                     );
-                                    let awaiting_confirmation = reservation.as_ref().is_some_and(|value| {
-                                        crate::cache::store::slot_reservation_is_current(&slots, slot_index, value)
-                                            && (!value.append_after_seek.load(Ordering::Acquire)
-                                                || !buffered_audio_chunks.is_empty())
-                                            && pending_audio_chunk.is_some()
-                                    });
-                                    if awaiting_confirmation {
-                                        stream_ended_before_seek_confirmation = true;
-                                        seek_replacement_deadline = Some(
-                                            tokio::time::Instant::now() + SEEK_REPLACEMENT_STREAM_TIMEOUT,
-                                        );
-                                        continue;
-                                    }
-                                    if let (Some(value), Some(format), Some((_, data))) = (
-                                        reservation.as_ref(),
-                                        format.as_ref(),
-                                        pending_audio_chunk.take(),
-                                    ) {
-                                        if crate::cache::store::slot_reservation_is_current(
-                                            &slots,
-                                            slot_index,
-                                            value,
-                                        ) && value.append_after_seek.load(Ordering::Acquire) {
-                                            let duration = terminal_chunk_duration_millis(
-                                                last_chunk_duration_millis,
-                                                value.expected_duration_millis,
-                                                cached_duration_millis,
-                                            );
-                                            append_download_chunk(
-                                                &slots, &downloads_allowed, &caches, &cache_change_signal,
-                                                &cache_touch_sequence, &states, &event_sender,
-                                                &download_status_refresh, slot_index, value, format,
-                                                duration, &data, &mut cached_bytes,
-                                                &mut cached_duration_millis, &mut first_chunk_reported,
-                                                &mut next_progress_millis,
-                                            );
-                                        }
-                                    }
-                                    let mut released_reservation = false;
-                                    if let Some(value) = reservation.as_ref() {
-                                        if crate::cache::store::slot_reservation_is_current(
-                                            &slots,
-                                            slot_index,
-                                            value,
-                                        ) {
-                                            match stream_end_outcome(value.append_after_seek.load(Ordering::Acquire)) {
-                                                StreamEndOutcome::Interrupted => {
-                                                    retain_interrupted_reservation(
-                                                        &slots,
-                                                        &caches,
-                                                        &cache_change_signal,
-                                                        &states,
-                                                        &event_sender,
-                                                        slot_index,
-                                                        value,
-                                                    );
-                                                    released_reservation = true;
-                                                }
-                                                StreamEndOutcome::AwaitingSeekStream => {
-                                                    LOGGER.trace(format!(
-                                                        "stream ended during pending seek on slot {}; waiting for the replacement stream",
-                                                        slot_index + 1
-                                                    ));
-                                                    seek_replacement_deadline = Some(
-                                                        tokio::time::Instant::now()
-                                                            + SEEK_REPLACEMENT_STREAM_TIMEOUT,
-                                                    );
-                                                }
-                                            }
-                                        }
-                                    }
-                                    if released_reservation
-                                        || reservation.as_ref().is_some_and(|value| {
-                                            !crate::cache::store::slot_reservation_is_current(
-                                                &slots,
-                                                slot_index,
-                                                value,
-                                            )
-                                        })
-                                    {
-                                        reservation = None;
-                                    }
-                                    format = None;
-                                    pending_audio_chunk = None;
-                                    buffered_audio_chunks.clear();
-                                    buffered_audio_bytes = 0;
+                                    stream_replacement_deadline = Some(tokio::time::Instant::now() + STREAM_REPLACEMENT_TIMEOUT);
                                 }
                                 Message::StreamClear(_) => {
                                     publish_slot_stream_state(
@@ -666,40 +515,19 @@ impl SendspinDownloaderWorker {
                                         false,
                                     );
                                     LOGGER.warn(format!("stream cleared on slot {}", slot_index + 1));
-                                    if let Some(value) = reservation.as_ref() {
-                                        if crate::cache::store::slot_reservation_is_current(
-                                            &slots,
-                                            slot_index,
-                                            value,
-                                        ) {
-                                            retain_interrupted_reservation(
-                                            &slots,
-                                            &caches,
-                                            &cache_change_signal,
-                                            &states,
-                                            &event_sender,
-                                            slot_index,
-                                            value,
-                                            );
-                                        }
-                                    }
-                                    reservation = None;
                                     format = None;
-                                    pending_audio_chunk = None;
-                                    buffered_audio_chunks.clear();
-                                    buffered_audio_bytes = 0;
-                                    stream_ended_before_seek_confirmation = false;
-                                    seek_replacement_deadline = None;
+                                    stream = None;
+                                    stream_replacement_deadline = Some(tokio::time::Instant::now() + STREAM_REPLACEMENT_TIMEOUT);
                                 }
                                 _ => {}
                             }
                         }
-                        chunk = audio.recv(), if !stream_ended_before_seek_confirmation && (buffered_audio_chunks.is_empty() || reservation.as_ref().is_some_and(|value| !value.append_after_seek.load(Ordering::Acquire))) => {
+                        chunk = audio.recv() => {
                             let Some(chunk) = chunk else { break; };
                             if !downloads_allowed.load(Ordering::Acquire) {
                                 continue;
                             }
-                            let (Some(value), Some(stream_format)) = (reservation.as_ref(), format.as_ref()) else { continue; };
+                            let (Some(value), Some(stream_format), Some(processor)) = (reservation.as_ref(), format.as_ref(), stream.take()) else { continue; };
                             if !crate::cache::store::slot_reservation_is_current(
                                     &slots,
                                     slot_index,
@@ -708,73 +536,55 @@ impl SendspinDownloaderWorker {
                             {
                                 continue;
                             }
-                            let Some((previous_timestamp, previous_data)) = pending_audio_chunk
-                                .replace((chunk.timestamp, chunk.data)) else {
-                                continue;
+                            let decoded = tokio::task::spawn_blocking(move || {
+                                let mut processor = processor;
+                                let result = processor.receive(chunk.data);
+                                (processor, result)
+                            }).await;
+                            let (processor, result) = match decoded {
+                                Ok(result) => result,
+                                Err(error) => {
+                                    LOGGER.error(format!("download decoder task failed: {error}"));
+                                    restart_unmatched_download(&slots, &caches, &cache_change_signal,
+                                        &states, &event_sender, slot_index, value);
+                                    continue;
+                                }
                             };
-                            let duration = chunk
-                                .timestamp
-                                .saturating_sub(previous_timestamp)
-                                .max(0) as u64
-                                / 1_000;
-                            last_chunk_duration_millis = duration;
-                            if !value.append_after_seek.load(Ordering::Acquire) {
-                                let deadline = watchdog_deadline(
-                                    seek_confirmation_deadline.as_ref().map(|(lease_id, deadline)| (lease_id.as_str(), *deadline)),
-                                    &value.lease_id,
-                                    tokio::time::Instant::now(),
-                                    SEEK_CONFIRMATION_TIMEOUT,
-                                );
-                                seek_confirmation_deadline = Some((value.lease_id.clone(), deadline));
-                                if !seek_gate_reported {
-                                    LOGGER.debug(format!(
-                                        "download chunks are buffered until seek confirmation: slot {}, cache key {} ({})",
-                                        slot_index + 1,
-                                        value.cache_content_key,
-                                        value.title
-                                    ));
-                                    seek_gate_reported = true;
+                            stream = Some(processor);
+                            match result {
+                                Ok(StreamAppend::Waiting) => {}
+                                Ok(StreamAppend::Chunks(chunks)) => {
+                                    alignment_deadline = None;
+                                    for chunk in chunks {
+                                        let result = append_decoded_download_chunk(
+                                            &slots, &downloads_allowed, &caches, &cache_change_signal,
+                                            &cache_touch_sequence, &states, &event_sender, &download_status_refresh,
+                                            slot_index, value, stream_format, chunk,
+                                            &connection_generation, task_connection_generation,
+                                            &mut cached_bytes, &mut cached_duration_millis,
+                                            &mut first_chunk_reported, &mut next_progress_millis,
+                                        );
+                                        if result != crate::cache::store::CacheAppendResult::Appended {
+                                            if matches!(result, crate::cache::store::CacheAppendResult::IgnoredOverlap
+                                                | crate::cache::store::CacheAppendResult::WriteUnavailable)
+                                            {
+                                                restart_unmatched_download(&slots, &caches, &cache_change_signal,
+                                                    &states, &event_sender, slot_index, value);
+                                                stream = None;
+                                            }
+                                            break;
+                                        }
+                                    }
                                 }
-                                buffered_audio_bytes = buffered_audio_bytes.saturating_add(previous_data.len());
-                                buffered_audio_chunks.push_back((duration, previous_data));
-                                if buffered_audio_bytes > MAXIMUM_PENDING_SEEK_AUDIO_BYTES {
-                                    downloads_allowed.store(false, Ordering::Release);
-                                    retain_interrupted_reservation(
-                                        &slots, &caches, &cache_change_signal, &states,
-                                        &event_sender, slot_index, value,
-                                    );
-                                    report_connection_lost_if_current(
-                                        &connection_generation, &connection_event,
-                                        task_connection_generation, slot_index, "pending seek audio limit",
-                                    );
-                                    reservation = None;
-                                    format = None;
-                                    pending_audio_chunk = None;
-                                    buffered_audio_chunks.clear();
-                                    buffered_audio_bytes = 0;
+                                Ok(StreamAppend::RestartRequired) | Err(_) => {
+                                    if connection_generation.load(Ordering::Acquire) == task_connection_generation {
+                                        restart_unmatched_download(&slots, &caches, &cache_change_signal,
+                                            &states, &event_sender, slot_index, value);
+                                    }
+                                    stream = None;
+                                    alignment_deadline = None;
                                 }
-                                continue;
                             }
-                            let result = append_download_chunk(
-                                &slots,
-                                &downloads_allowed,
-                                &caches,
-                                &cache_change_signal,
-                                &cache_touch_sequence,
-                                &states,
-                                &event_sender,
-                                &download_status_refresh,
-                                slot_index,
-                                value,
-                                stream_format,
-                                duration,
-                                &previous_data,
-                                &mut cached_bytes,
-                                &mut cached_duration_millis,
-                                &mut first_chunk_reported,
-                                &mut next_progress_millis,
-                            );
-                            let _ = result;
                         }
                     }
                 }
@@ -1575,13 +1385,6 @@ impl SendspinDownloaderWorker {
             ));
             return Ok(());
         }
-        let interrupted_resume_after_millis =
-            crate::cache::store::cache_interrupted_duration_millis(
-                &self.caches,
-                item.cache_content_key.as_str(),
-            );
-        let interrupted_resume_position_seconds =
-            interrupted_resume_after_millis.map(|duration| duration.saturating_div(1_000) as i64);
         let requested_seek_seconds = if self
             .plan
             .as_ref()
@@ -1592,14 +1395,30 @@ impl SendspinDownloaderWorker {
         } else {
             None
         };
-        let resume_position_seconds =
-            requested_seek_seconds.or(interrupted_resume_position_seconds);
-        let resume_after_millis = if let Some(seconds) = resume_position_seconds {
-            (seconds as u64).saturating_mul(1_000)
+        let resume_reference = if requested_seek_seconds.is_none() {
+            prepare_reconnect_reference(&self.caches, item.cache_content_key.as_str())
         } else {
-            0
+            None
         };
-        if interrupted_resume_after_millis.is_none() && requested_seek_seconds.is_none() {
+        let resume_position_seconds = requested_seek_seconds.or_else(|| {
+            resume_reference.as_ref().map(|reference| {
+                let end_millis =
+                    reference.end_frame * 1_000 / u64::from(reference.format.sample_rate.max(1));
+                let reference_millis = reference.samples.len() as u64 * 1_000
+                    / u64::from(reference.format.channels.max(1))
+                    / u64::from(reference.format.sample_rate.max(1));
+                let overlap_millis =
+                    (RECONNECT_SEEK_OVERLAP.as_millis() as u64).max(reference_millis + 2_000);
+                (end_millis.saturating_sub(overlap_millis) / 1_000) as i64
+            })
+        });
+        let resume_after_millis = resume_reference
+            .as_ref()
+            .map(|reference| {
+                reference.end_frame * 1_000 / u64::from(reference.format.sample_rate.max(1))
+            })
+            .unwrap_or_else(|| requested_seek_seconds.unwrap_or(0).max(0) as u64 * 1_000);
+        if resume_reference.is_none() {
             crate::cache::store::cache_discard_incomplete(
                 &self.caches,
                 item.cache_content_key.as_str(),
@@ -1617,7 +1436,7 @@ impl SendspinDownloaderWorker {
                 title: item.media_item.fields().name.clone(),
                 expected_duration_millis: item.expected_duration_millis,
                 resume_after_millis,
-                append_after_seek: Arc::new(AtomicBool::new(false)),
+                resume_reference,
                 lease_id: format!("slot-{}-{}", slot_index + 1, reservation_id),
             };
             slots[slot_index] = Some(reservation.clone());
@@ -1710,6 +1529,7 @@ impl SendspinDownloaderWorker {
                 }
                 return;
             }
+            tokio::time::sleep(DOWNLOAD_RESUME_COMMAND_DELAY).await;
             if !download_request_is_current(
                 &slots,
                 slot_index,
@@ -1800,6 +1620,7 @@ impl SendspinDownloaderWorker {
                 return;
             }
             if let Some(position) = resume_position_seconds {
+                tokio::time::sleep(DOWNLOAD_RESUME_COMMAND_DELAY).await;
                 if !download_request_is_current(
                     &slots,
                     slot_index,
@@ -1841,16 +1662,6 @@ impl SendspinDownloaderWorker {
                     );
                     return;
                 }
-                if download_request_is_current(
-                    &slots,
-                    slot_index,
-                    &reservation,
-                    &connection_generation,
-                    request_connection_generation,
-                ) && downloads_allowed.load(Ordering::Acquire)
-                {
-                    reservation.append_after_seek.store(true, Ordering::Release);
-                }
             } else if let Err(error) = client.queue_play_index(queue_id, 0).await {
                 if download_request_is_current(
                     &slots,
@@ -1878,15 +1689,6 @@ impl SendspinDownloaderWorker {
                         "download seek failure",
                     );
                 }
-            } else if download_request_is_current(
-                &slots,
-                slot_index,
-                &reservation,
-                &connection_generation,
-                request_connection_generation,
-            ) && downloads_allowed.load(Ordering::Acquire)
-            {
-                reservation.append_after_seek.store(true, Ordering::Release);
             }
         }));
         Ok(())
@@ -1923,7 +1725,7 @@ impl SendspinDownloaderWorker {
                 title: current.title.clone(),
                 expected_duration_millis: current.expected_duration_millis,
                 resume_after_millis: (seconds.max(0) as u64).saturating_mul(1_000),
-                append_after_seek: Arc::new(AtomicBool::new(false)),
+                resume_reference: None,
                 lease_id: format!("slot-{}-{}", slot_index + 1, reservation_id),
             };
             slots[slot_index] = Some(replacement.clone());
@@ -1963,17 +1765,14 @@ impl SendspinDownloaderWorker {
 
         let seek_result = self.runtime.block_on(async {
             tokio::time::timeout(
-                SEEK_CONFIRMATION_TIMEOUT,
+                DOWNLOAD_COMMAND_TIMEOUT,
                 seek_download_player(&client, &controller, player_id, position),
             )
             .await
             .map_err(|_| "Sendspin seek command timed out".to_string())?
         });
         match seek_result {
-            Ok(()) => {
-                reservation.append_after_seek.store(true, Ordering::Release);
-                Ok(())
-            }
+            Ok(()) => Ok(()),
             Err(error) => {
                 release_incomplete_reservation(
                     &self.slots,
@@ -2209,12 +2008,22 @@ impl SendspinDownloader {
         crate::cache::store::cache_read_format(&self.caches, content_key)
     }
 
-    pub(crate) fn cache_chunk_with_duration(
+    pub(crate) fn cache_chunk(
         &self,
         content_key: &str,
         chunk_index: usize,
-    ) -> Result<(Option<(Arc<[u8]>, u64)>, bool), String> {
-        crate::cache::store::cache_read_chunk_with_duration(&self.caches, content_key, chunk_index)
+        expected_identity: Option<u64>,
+    ) -> Result<(Option<crate::cache::store::EncodedCacheChunk>, bool), String> {
+        crate::cache::store::cache_read_chunk(
+            &self.caches,
+            content_key,
+            chunk_index,
+            expected_identity,
+        )
+    }
+
+    pub(crate) fn cache_identity(&self, content_key: &str) -> Option<u64> {
+        crate::cache::store::cache_identity(&self.caches, content_key)
     }
 
     pub(crate) fn local_cache_seek_target(
@@ -2438,7 +2247,8 @@ async fn stop_existing_download_players(
 }
 
 // Appends a validated stream chunk, publishes cache state, and schedules capacity reconciliation.
-fn append_download_chunk(
+// Publishes decoded audio only while the connection generation and lease still own the cache.
+fn append_decoded_download_chunk(
     slots: &crate::cache::store::DownloadSlots,
     downloads_allowed: &Arc<AtomicBool>,
     caches: &crate::cache::store::EncodedCaches,
@@ -2450,42 +2260,38 @@ fn append_download_chunk(
     slot_index: usize,
     reservation: &crate::cache::store::DownloadSlotReservation,
     format: &AudioFormat,
-    duration_millis: u64,
-    data: &[u8],
+    chunk: DecodedDownloadChunk,
+    connection_generation: &Arc<AtomicU64>,
+    request_generation: u64,
     cached_bytes: &mut usize,
     cached_duration_millis: &mut u64,
     first_chunk_reported: &mut bool,
     next_progress_millis: &mut u64,
 ) -> crate::cache::store::CacheAppendResult {
     let Ok(mut slots) = slots.lock() else {
-        return crate::cache::store::CacheAppendResult::IgnoredStaleLease;
+        return crate::cache::store::CacheAppendResult::WriteUnavailable;
     };
-    if !downloads_allowed.load(Ordering::Acquire) {
+    if !downloads_allowed.load(Ordering::Acquire)
+        || connection_generation.load(Ordering::Acquire) != request_generation
+    {
         return crate::cache::store::CacheAppendResult::IgnoredConnectionLost;
     }
     if !slots[slot_index]
         .as_ref()
-        .map(|current| current.lease_id == reservation.lease_id)
-        .unwrap_or(false)
+        .is_some_and(|current| current.lease_id == reservation.lease_id)
     {
         return crate::cache::store::CacheAppendResult::IgnoredStaleLease;
     }
-    if !reservation.append_after_seek.load(Ordering::Acquire) {
-        return crate::cache::store::CacheAppendResult::IgnoredPendingSeek;
-    }
+    let bytes = chunk.encoded.data.len();
+    let end_frame = chunk.encoded.start_frame + chunk.encoded.audible_frames();
     let result = crate::cache::store::cache_append_encoded_chunk(
         caches,
         cache_touch_sequence,
         reservation,
         format,
-        *cached_duration_millis,
-        duration_millis,
-        data,
+        chunk.encoded,
+        &chunk.samples,
     );
-    if result == crate::cache::store::CacheAppendResult::IgnoredOverlap {
-        *cached_duration_millis = cached_duration_millis.saturating_add(duration_millis);
-        return result;
-    }
     if !matches!(
         result,
         crate::cache::store::CacheAppendResult::Appended
@@ -2493,7 +2299,8 @@ fn append_download_chunk(
     ) {
         return result;
     }
-
+    *cached_bytes += bytes;
+    *cached_duration_millis = end_frame * 1_000 / u64::from(format.sample_rate.max(1));
     if !*first_chunk_reported {
         LOGGER.trace(format!(
             "download cache write started: slot {}, cache key {} ({})",
@@ -2501,52 +2308,90 @@ fn append_download_chunk(
             reservation.cache_content_key,
             reservation.title
         ));
-        *first_chunk_reported = true;
     }
-    *cached_bytes = cached_bytes.saturating_add(data.len());
-    *cached_duration_millis = cached_duration_millis.saturating_add(duration_millis);
-    crate::cache::store::notify_cache_changed(cache_change_signal);
-    if let Ok(mut states) = states.lock() {
-        if let Some(state) = states.get_mut(&reservation.cache_content_key) {
-            state.state = CacheStatus::Downloading;
-            state.cached_duration_millis =
-                state.cached_duration_millis.saturating_add(duration_millis);
-        }
-    }
+    *first_chunk_reported = true;
     if result == crate::cache::store::CacheAppendResult::Completed {
         slots[slot_index] = None;
-        crate::cache::store::notify_cache_changed(cache_change_signal);
-        if let Ok(mut states) = states.lock() {
-            if let Some(state) = states.get_mut(&reservation.cache_content_key) {
-                state.state = CacheStatus::Complete;
-            }
-        }
-        LOGGER.trace(format!(
-            "download complete from stream timestamps: slot {}, cache key {} ({}), {} ms, {} bytes",
-            slot_index + 1,
-            reservation.cache_content_key,
-            reservation.title,
-            *cached_duration_millis,
-            *cached_bytes
-        ));
     }
-    if *cached_duration_millis >= *next_progress_millis {
+    if let Ok(mut states) = states.lock() {
+        if let Some(state) = states.get_mut(&reservation.cache_content_key) {
+            state.state = if result == crate::cache::store::CacheAppendResult::Completed {
+                CacheStatus::Complete
+            } else {
+                CacheStatus::Downloading
+            };
+            state.cached_duration_millis = *cached_duration_millis;
+        }
+    }
+    if *cached_duration_millis >= *next_progress_millis
+        || result == crate::cache::store::CacheAppendResult::Completed
+    {
         download_status_refresh.store(true, Ordering::Release);
         LOGGER.trace(format!(
-            "download progress: slot {}, cache key {} ({}), {} ms, {} bytes",
+            "download progress: slot {}, cache key {}, {} ms, {} bytes",
             slot_index + 1,
             reservation.cache_content_key,
-            reservation.title,
             *cached_duration_millis,
             *cached_bytes
         ));
-        *next_progress_millis = cached_duration_millis
-            .saturating_div(5_000)
-            .saturating_add(1)
-            .saturating_mul(5_000);
+        *next_progress_millis = (*cached_duration_millis / 5_000 + 1) * 5_000;
     }
+    crate::cache::store::notify_cache_changed(cache_change_signal);
     let _ = event_sender.send(DownloaderCommand::ReconcileCacheAndDownloads);
     result
+}
+
+// Invalidates the lease before discarding audio so reconciliation starts from zero without a seek.
+fn restart_unmatched_download(
+    slots: &crate::cache::store::DownloadSlots,
+    caches: &crate::cache::store::EncodedCaches,
+    signal: &crate::cache::store::CacheChangeSignal,
+    states: &Arc<Mutex<HashMap<String, CacheItemState>>>,
+    sender: &Sender<DownloaderCommand>,
+    slot_index: usize,
+    reservation: &crate::cache::store::DownloadSlotReservation,
+) {
+    let Ok(mut slots) = slots.lock() else {
+        return;
+    };
+    if !slots[slot_index].as_ref().is_some_and(|current| current.lease_id == reservation.lease_id) {
+        return;
+    }
+    slots[slot_index] = None;
+    LOGGER.warn(format!(
+        "PCM reconnect alignment failed on slot {}; restarting download from zero",
+        slot_index + 1
+    ));
+    crate::cache::store::cache_discard(caches, &reservation.cache_content_key);
+    if let Ok(mut states) = states.lock() {
+        if let Some(state) = states.get_mut(&reservation.cache_content_key) {
+            state.state = CacheStatus::Buffering;
+            state.cached_duration_millis = 0;
+        }
+    }
+    drop(slots);
+    crate::cache::store::notify_cache_changed(signal);
+    let _ = sender.send(DownloaderCommand::ReconcileCacheAndDownloads);
+}
+
+// Short or unmatchable caches are discarded before commands are issued, never resumed by a seek.
+fn prepare_reconnect_reference(
+    caches: &crate::cache::store::EncodedCaches,
+    content_key: &str,
+) -> Option<Arc<super::reconnect::PcmResumeReference>> {
+    crate::cache::store::cache_interrupted_duration_millis(caches, content_key)?;
+    let duration =
+        crate::cache::store::cache_audio_duration_millis(caches, content_key).unwrap_or(0);
+    let reference = if duration >= MINIMUM_CACHE_DURATION_FOR_RECONNECT_ALIGNMENT.as_millis() as u64
+    {
+        crate::cache::store::cache_resume_reference(caches, content_key)
+    } else {
+        None
+    };
+    if reference.is_none() {
+        crate::cache::store::cache_discard(caches, content_key);
+    }
+    reference
 }
 
 async fn resolve_download_player_ids(
@@ -2918,20 +2763,6 @@ fn publish_connection_event(
     *event = Some(DownloaderConnectionEvent { generation, status });
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StreamEndOutcome {
-    AwaitingSeekStream,
-    Interrupted,
-}
-
-fn stream_end_outcome(seek_completed: bool) -> StreamEndOutcome {
-    if !seek_completed {
-        StreamEndOutcome::AwaitingSeekStream
-    } else {
-        StreamEndOutcome::Interrupted
-    }
-}
-
 fn watchdog_deadline(
     previous: Option<(&str, tokio::time::Instant)>,
     identity: &str,
@@ -2942,20 +2773,6 @@ fn watchdog_deadline(
         .filter(|(previous_identity, _)| *previous_identity == identity)
         .map(|(_, deadline)| deadline)
         .unwrap_or(now + timeout)
-}
-
-fn terminal_chunk_duration_millis(
-    last_chunk_duration_millis: u64,
-    expected_duration_millis: Option<u64>,
-    current_position_millis: u64,
-) -> u64 {
-    expected_duration_millis
-        .map(|expected| {
-            expected
-                .saturating_sub(current_position_millis)
-                .min(last_chunk_duration_millis)
-        })
-        .unwrap_or(last_chunk_duration_millis)
 }
 
 fn cache_reaches_capacity_pressure_threshold(cache_used_bytes: usize, cache_bytes: usize) -> bool {
@@ -3029,19 +2846,118 @@ fn download_client_name(base_name: &str, slot_number: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        append_download_chunk, cache_reaches_capacity_pressure_threshold, download_client_id,
-        download_client_name, download_request_is_current, estimate_cache_size,
-        next_downloader_command, normalize_client_id, publish_connection_event, remaining_download_duration_millis,
-        report_connection_lost_if_current, retain_interrupted_reservation,
-        should_admit_non_current_downloads, stream_end_outcome, terminal_chunk_duration_millis,
-        watchdog_deadline, DownloaderCommand, DownloaderConnectionEvent, DownloaderConnectionStatus, StreamEndOutcome,
-        DOWNLOAD_PROGRESS_TIMEOUT, SEEK_CONFIRMATION_TIMEOUT,
+        append_decoded_download_chunk, cache_reaches_capacity_pressure_threshold,
+        download_client_id, download_client_name, download_request_is_current, estimate_cache_size,
+        next_downloader_command, normalize_client_id, prepare_reconnect_reference,
+        publish_connection_event, remaining_download_duration_millis,
+        report_connection_lost_if_current, restart_unmatched_download,
+        retain_interrupted_reservation, should_admit_non_current_downloads, watchdog_deadline,
+        DownloaderCommand, DownloaderConnectionEvent, DownloaderConnectionStatus,
+        DOWNLOAD_PROGRESS_TIMEOUT,
     };
     use crate::cache::store::{self, CacheAppendResult, DownloadSlotReservation};
     use crate::sendspin::models::{SendspinAudioCodec, SendspinDownloadPlanRequest};
     use ::sendspin::audio::{AudioFormat, Codec};
     use std::sync::atomic::Ordering;
     use std::sync::{mpsc, Arc, Mutex};
+
+    fn interrupted_cache(duration_millis: u64) -> (store::EncodedCaches, DownloadSlotReservation) {
+        let caches = Arc::new(Mutex::new(std::collections::HashMap::new()));
+        let format = AudioFormat {
+            codec: Codec::Pcm,
+            sample_rate: 1_000,
+            channels: 1,
+            bit_depth: 16,
+            codec_header: None,
+        };
+        let reservation = DownloadSlotReservation {
+            cache_content_key: "track".to_string(),
+            title: "Track".to_string(),
+            expected_duration_millis: None,
+            resume_after_millis: 0,
+            resume_reference: None,
+            lease_id: "slot-1-original".to_string(),
+        };
+        store::cache_add_key(&caches, "track".to_string(), 0);
+        let samples: Vec<_> = (0..duration_millis)
+            .map(|index| (index % 997) as i32)
+            .collect();
+        assert_eq!(
+            store::cache_append_encoded_chunk(
+                &caches,
+                &Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                &reservation,
+                &format,
+                store::EncodedCacheChunk {
+                    data: Arc::from(b"encoded".as_slice()),
+                    start_frame: 0,
+                    frame_count: duration_millis,
+                    leading_frames_to_skip: 0,
+                    sample_rate: 1_000
+                },
+                &samples
+            ),
+            CacheAppendResult::Appended
+        );
+        store::cache_mark_interrupted(&caches, "track");
+        (caches, reservation)
+    }
+
+    #[test]
+    fn reconnect_discards_caches_below_thirty_seconds() {
+        let (caches, _) = interrupted_cache(29_999);
+        let old_identity = store::cache_identity(&caches, "track").unwrap();
+        assert!(prepare_reconnect_reference(&caches, "track").is_none());
+        assert!(store::cache_identity(&caches, "track").is_none());
+        store::cache_add_key(&caches, "track".to_string(), 0);
+        assert_ne!(store::cache_identity(&caches, "track"), Some(old_identity));
+        assert_eq!(
+            store::cache_cached_duration_millis(&caches, "track"),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn reconnect_retains_caches_at_the_thirty_second_boundary() {
+        let (caches, _) = interrupted_cache(30_000);
+        let identity = store::cache_identity(&caches, "track").unwrap();
+        let reference = prepare_reconnect_reference(&caches, "track").unwrap();
+        assert_eq!(reference.cache_identity, identity);
+        assert_eq!(reference.end_frame, 30_000);
+        assert_eq!(reference.samples.len(), 3_000);
+        assert_eq!(
+            store::cache_cached_duration_millis(&caches, "track"),
+            Some(30_000)
+        );
+    }
+
+    #[test]
+    fn failed_alignment_discards_cache_and_schedules_a_fresh_download() {
+        let (caches, reservation) = interrupted_cache(35_000);
+        let old_identity = store::cache_identity(&caches, "track").unwrap();
+        let slots = Arc::new(Mutex::new([Some(reservation.clone()), None]));
+        let states = Arc::new(Mutex::new(std::collections::HashMap::new()));
+        let (sender, receiver) = mpsc::channel();
+        let signal = store::new_cache_change_signal();
+        restart_unmatched_download(&slots, &caches, &signal, &states, &sender, 0, &reservation);
+        assert!(slots.lock().unwrap()[0].is_none());
+        assert!(store::cache_identity(&caches, "track").is_none());
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(DownloaderCommand::ReconcileCacheAndDownloads)
+        ));
+        store::cache_add_key(&caches, "track".to_string(), 0);
+        let new_identity = store::cache_identity(&caches, "track").unwrap();
+        assert_ne!(old_identity, new_identity);
+        let replacement = DownloadSlotReservation {
+            lease_id: "slot-1-new".to_string(),
+            ..reservation.clone()
+        };
+        slots.lock().unwrap()[0] = Some(replacement);
+        restart_unmatched_download(&slots, &caches, &signal, &states, &sender, 0, &reservation);
+        assert_eq!(store::cache_identity(&caches, "track"), Some(new_identity));
+        assert!(receiver.try_recv().is_err());
+    }
 
     #[test]
     fn pending_download_plan_overtakes_redundant_reconciliation() {
@@ -3138,15 +3054,6 @@ mod tests {
     }
 
     #[test]
-    fn stream_end_waits_for_a_pending_seek_or_marks_the_download_interrupted() {
-        assert_eq!(
-            stream_end_outcome(false),
-            StreamEndOutcome::AwaitingSeekStream
-        );
-        assert_eq!(stream_end_outcome(true), StreamEndOutcome::Interrupted);
-    }
-
-    #[test]
     fn repeated_stream_starts_do_not_extend_the_download_stall_deadline() {
         let now = tokio::time::Instant::now();
         let original = watchdog_deadline(None, "track", now, DOWNLOAD_PROGRESS_TIMEOUT);
@@ -3172,35 +3079,24 @@ mod tests {
     }
 
     #[test]
-    fn repeated_seek_chunks_do_not_extend_the_lease_deadline() {
+    fn repeated_alignment_streams_do_not_extend_the_lease_deadline() {
         let now = tokio::time::Instant::now();
-        let original = watchdog_deadline(None, "lease-1", now, SEEK_CONFIRMATION_TIMEOUT);
+        let timeout = super::MAXIMUM_ALIGNMENT_DURATION;
+        let original = watchdog_deadline(None, "lease-1", now, timeout);
 
         assert_eq!(
             watchdog_deadline(
                 Some(("lease-1", original)),
                 "lease-1",
-                now + SEEK_CONFIRMATION_TIMEOUT,
-                SEEK_CONFIRMATION_TIMEOUT
+                now + timeout,
+                timeout
             ),
             original,
         );
         assert_eq!(
-            watchdog_deadline(
-                Some(("lease-1", original)),
-                "lease-2",
-                now,
-                SEEK_CONFIRMATION_TIMEOUT
-            ),
-            now + SEEK_CONFIRMATION_TIMEOUT,
+            watchdog_deadline(Some(("lease-1", original)), "lease-2", now, timeout),
+            now + timeout,
         );
-    }
-
-    #[test]
-    fn terminal_chunk_does_not_claim_the_entire_missing_track_duration() {
-        assert_eq!(terminal_chunk_duration_millis(20, Some(60_000), 5_000), 20);
-        assert_eq!(terminal_chunk_duration_millis(20, Some(5_010), 5_000), 10);
-        assert_eq!(terminal_chunk_duration_millis(0, Some(60_000), 5_000), 0);
     }
 
     #[test]
@@ -3230,13 +3126,13 @@ mod tests {
     }
 
     #[test]
-    fn superseded_download_request_cannot_modify_direct_seek_gate() {
+    fn superseded_download_request_cannot_modify_the_cache() {
         let reservation = DownloadSlotReservation {
             cache_content_key: "track".to_string(),
             title: "Track".to_string(),
             expected_duration_millis: None,
             resume_after_millis: 2_000,
-            append_after_seek: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            resume_reference: None,
             lease_id: "slot-1-old".to_string(),
         };
         let slots = Arc::new(Mutex::new([Some(reservation.clone()), None]));
@@ -3265,17 +3161,16 @@ mod tests {
             &generation,
             1
         ));
-        assert!(!reservation.append_after_seek.load(Ordering::Acquire));
     }
 
     #[test]
-    fn resumed_chunks_commit_only_after_seek_and_stop_after_lost() {
+    fn decoded_chunks_commit_immediately_but_not_after_connection_loss() {
         let reservation = DownloadSlotReservation {
             cache_content_key: "track".to_string(),
             title: "Track".to_string(),
             expected_duration_millis: None,
-            resume_after_millis: 3_000,
-            append_after_seek: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            resume_after_millis: 0,
+            resume_reference: None,
             lease_id: "slot-1-1".to_string(),
         };
         let format = AudioFormat {
@@ -3293,28 +3188,25 @@ mod tests {
         let states = Arc::new(Mutex::new(std::collections::HashMap::new()));
         let (commands, _) = std::sync::mpsc::channel();
         let refresh = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let generation = Arc::new(std::sync::atomic::AtomicU64::new(1));
         let mut cached_bytes = 0;
         let mut stream_position_millis = reservation.resume_after_millis;
         let mut first_chunk_reported = false;
         let mut next_progress_millis = 5_000;
 
-        assert!(!reservation.append_after_seek.load(Ordering::Acquire));
         store::cache_add_key(&caches, "track".to_string(), 0);
-        assert_eq!(
-            store::cache_append_encoded_chunk(
-                &caches,
-                &sequence,
-                &reservation,
-                &format,
-                0,
-                3_500,
-                b"old"
-            ),
-            CacheAppendResult::Appended
-        );
-        store::cache_mark_interrupted(&caches, "track");
-        let mut append = |duration_millis, data: &[u8]| {
-            append_download_chunk(
+        let make_chunk = |start_frame, data: &[u8]| super::DecodedDownloadChunk {
+            encoded: store::EncodedCacheChunk {
+                data: Arc::from(data),
+                start_frame,
+                frame_count: 12_000,
+                leading_frames_to_skip: 0,
+                sample_rate: 48_000,
+            },
+            samples: Arc::from(vec![0; 24_000]),
+        };
+        let mut append = |start_frame, data: &[u8]| {
+            append_decoded_download_chunk(
                 &slots,
                 &downloads_allowed,
                 &caches,
@@ -3326,8 +3218,9 @@ mod tests {
                 0,
                 &reservation,
                 &format,
-                duration_millis,
-                data,
+                make_chunk(start_frame, data),
+                &generation,
+                1,
                 &mut cached_bytes,
                 &mut stream_position_millis,
                 &mut first_chunk_reported,
@@ -3335,35 +3228,30 @@ mod tests {
             )
         };
 
-        assert_eq!(
-            append(250, b"unconfirmed"),
-            CacheAppendResult::IgnoredPendingSeek
-        );
+        assert_eq!(append(0, b"immediate"), CacheAppendResult::Appended);
         assert_eq!(
             store::cache_cached_duration_millis(&caches, "track"),
-            Some(3_500)
+            Some(250)
         );
-        reservation.append_after_seek.store(true, Ordering::Release);
-        assert_eq!(append(250, b"inside"), CacheAppendResult::IgnoredOverlap);
-        assert_eq!(append(750, b"crossing"), CacheAppendResult::Appended);
+        assert_eq!(append(12_000, b"next"), CacheAppendResult::Appended);
         drop(append);
-        assert_eq!(stream_position_millis, 4_000);
+        assert_eq!(stream_position_millis, 500);
         assert_eq!(
             store::cache_cached_duration_millis(&caches, "track"),
-            Some(4_000)
+            Some(500)
         );
         assert_eq!(
-            store::cache_read_chunk_with_duration(&caches, "track", 1)
+            store::cache_read_chunk(&caches, "track", 1, None)
                 .unwrap()
                 .0
                 .unwrap()
-                .0
+                .data
                 .as_ref(),
-            b"crossing"
+            b"next"
         );
         downloads_allowed.store(false, Ordering::Release);
         assert_eq!(
-            append_download_chunk(
+            append_decoded_download_chunk(
                 &slots,
                 &downloads_allowed,
                 &caches,
@@ -3375,8 +3263,9 @@ mod tests {
                 0,
                 &reservation,
                 &format,
-                250,
-                b"lost",
+                make_chunk(24_000, b"lost"),
+                &generation,
+                1,
                 &mut cached_bytes,
                 &mut stream_position_millis,
                 &mut first_chunk_reported,
@@ -3395,7 +3284,7 @@ mod tests {
         );
         downloads_allowed.store(true, Ordering::Release);
         assert_eq!(
-            append_download_chunk(
+            append_decoded_download_chunk(
                 &slots,
                 &downloads_allowed,
                 &caches,
@@ -3407,8 +3296,9 @@ mod tests {
                 0,
                 &reservation,
                 &format,
-                250,
-                b"late",
+                make_chunk(24_000, b"late"),
+                &generation,
+                1,
                 &mut cached_bytes,
                 &mut stream_position_millis,
                 &mut first_chunk_reported,
@@ -3418,7 +3308,7 @@ mod tests {
         );
         assert_eq!(
             store::cache_cached_duration_millis(&caches, "track"),
-            Some(4_000)
+            Some(500)
         );
     }
 }

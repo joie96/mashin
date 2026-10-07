@@ -1379,6 +1379,7 @@ dependencies = [
  "rand 0.8.8",
  "reqwest",
  "rubato",
+ "rustfft",
  "sendspin",
  "serde",
  "serde_json",

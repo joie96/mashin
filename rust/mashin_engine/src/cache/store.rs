@@ -1,9 +1,11 @@
+use crate::sendspin::reconnect::{PcmResumeReference, PcmTail};
 use ::sendspin::audio::AudioFormat;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
 const CACHE_COMPLETION_TOLERANCE_MILLIS: u64 = 500;
+static NEXT_CACHE_IDENTITY: AtomicU64 = AtomicU64::new(1);
 
 pub(crate) type CacheChangeSignal = Arc<(Mutex<u64>, Condvar)>;
 
@@ -25,7 +27,7 @@ pub(crate) struct DownloadSlotReservation {
     pub(crate) title: String,
     pub(crate) expected_duration_millis: Option<u64>,
     pub(crate) resume_after_millis: u64,
-    pub(crate) append_after_seek: Arc<AtomicBool>,
+    pub(crate) resume_reference: Option<Arc<PcmResumeReference>>,
     pub(crate) lease_id: String,
 }
 
@@ -36,10 +38,28 @@ enum CacheIntegrity {
     Complete,
 }
 
-struct EncodedCacheChunk {
-    data: Arc<[u8]>,
-    start_position_millis: u64,
-    duration_millis: u64,
+#[derive(Clone)]
+pub(crate) struct EncodedCacheChunk {
+    pub(crate) data: Arc<[u8]>,
+    pub(crate) start_frame: u64,
+    pub(crate) frame_count: u64,
+    pub(crate) leading_frames_to_skip: u64,
+    pub(crate) sample_rate: u32,
+}
+
+impl EncodedCacheChunk {
+    // Audible timeline queries.
+    pub(crate) fn audible_frames(&self) -> u64 {
+        self.frame_count.saturating_sub(self.leading_frames_to_skip)
+    }
+
+    pub(crate) fn duration_millis(&self) -> u64 {
+        self.audible_frames().saturating_mul(1_000) / u64::from(self.sample_rate.max(1))
+    }
+
+    fn start_position_millis(&self) -> u64 {
+        self.start_frame.saturating_mul(1_000) / u64::from(self.sample_rate.max(1))
+    }
 }
 
 pub(crate) struct EncodedTrackCache {
@@ -50,19 +70,18 @@ pub(crate) struct EncodedTrackCache {
     last_touched: u64,
     format: Option<AudioFormat>,
     integrity: CacheIntegrity,
+    identity: u64,
+    end_frame: u64,
+    pcm_tail: Option<PcmTail>,
 }
 
 impl EncodedTrackCache {
-    fn append(&mut self, chunk: Arc<[u8]>, start_position_millis: u64, duration_millis: u64) {
-        self.byte_len = self.byte_len.saturating_add(chunk.len());
-        self.cached_duration_millis = self
-            .cached_duration_millis
-            .max(start_position_millis.saturating_add(duration_millis));
-        self.chunks.push_back(EncodedCacheChunk {
-            data: chunk,
-            start_position_millis,
-            duration_millis,
-        });
+    fn append(&mut self, chunk: EncodedCacheChunk) {
+        self.byte_len = self.byte_len.saturating_add(chunk.data.len());
+        self.end_frame = chunk.start_frame.saturating_add(chunk.audible_frames());
+        self.cached_duration_millis =
+            self.end_frame.saturating_mul(1_000) / u64::from(chunk.sample_rate.max(1));
+        self.chunks.push_back(chunk);
     }
 }
 
@@ -80,7 +99,7 @@ pub(crate) type EncodedCaches = Arc<Mutex<HashMap<String, EncodedTrackCache>>>;
 pub(crate) struct LocalCacheSeekTarget {
     pub(crate) chunk_index: usize,
     pub(crate) chunk_start_position_millis: u64,
-    pub(crate) skip_within_chunk_millis: u64,
+    pub(crate) skip_within_chunk_frames: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,7 +109,6 @@ pub(crate) enum CacheAppendResult {
     IgnoredComplete,
     IgnoredConnectionLost,
     IgnoredOverlap,
-    IgnoredPendingSeek,
     IgnoredStaleLease,
     WriteUnavailable,
 }
@@ -148,6 +166,9 @@ pub(crate) fn cache_add_key(
                     last_touched: 0,
                     format: None,
                     integrity: CacheIntegrity::Partial,
+                    identity: NEXT_CACHE_IDENTITY.fetch_add(1, Ordering::Relaxed),
+                    end_frame: 0,
+                    pcm_tail: None,
                 });
             true
         })
@@ -193,11 +214,10 @@ pub(crate) fn cache_append_encoded_chunk(
     cache_sequence: &Arc<AtomicU64>,
     reservation: &DownloadSlotReservation,
     format: &AudioFormat,
-    start_position_millis: u64,
-    duration_millis: u64,
-    data: &[u8],
+    chunk: EncodedCacheChunk,
+    decoded_samples: &[i32],
 ) -> CacheAppendResult {
-    if data.is_empty() {
+    if chunk.data.is_empty() || chunk.audible_frames() == 0 {
         return CacheAppendResult::Appended;
     }
 
@@ -213,25 +233,39 @@ pub(crate) fn cache_append_encoded_chunk(
                 .map(|existing_format| !audio_format_matches(existing_format, format))
                 .unwrap_or(false)
             {
-                caches.remove(&reservation.cache_content_key);
+                return CacheAppendResult::WriteUnavailable;
             }
         }
         let Some(cache) = caches.get_mut(&reservation.cache_content_key) else {
             return CacheAppendResult::IgnoredStaleLease;
         };
-        if !cache.chunks.is_empty()
-            && start_position_millis.saturating_add(duration_millis) <= cache.cached_duration_millis
+        if reservation
+            .resume_reference
+            .as_ref()
+            .is_some_and(|reference| reference.cache_identity != cache.identity)
         {
+            return CacheAppendResult::IgnoredStaleLease;
+        }
+        if !cache.chunks.is_empty() && chunk.start_frame != cache.end_frame {
             return CacheAppendResult::IgnoredOverlap;
         }
         cache.last_touched = touch;
         cache.format = Some(format.clone());
-        cache.append(Arc::from(data), start_position_millis, duration_millis);
+        let tail = cache
+            .pcm_tail
+            .get_or_insert_with(|| PcmTail::new(format.sample_rate, format.channels));
+        let skip_samples =
+            chunk.leading_frames_to_skip as usize * usize::from(format.channels.max(1));
+        if let Some(samples) = decoded_samples.get(skip_samples..) {
+            tail.append(samples);
+        }
+        cache.integrity = CacheIntegrity::Partial;
+        cache.append(chunk);
         if reservation
             .expected_duration_millis
             .map(|expected| {
-                start_position_millis
-                    .saturating_add(duration_millis)
+                cache
+                    .cached_duration_millis
                     .saturating_add(CACHE_COMPLETION_TOLERANCE_MILLIS)
                     >= expected
             })
@@ -290,9 +324,78 @@ pub(crate) fn cache_interrupted_duration_millis(
     (cache.integrity == CacheIntegrity::Interrupted).then_some(cache.cached_duration_millis)
 }
 
+// Immutable restart snapshots; packet decoding and matching never hold the cache lock.
+pub(crate) fn cache_resume_reference(
+    caches: &EncodedCaches,
+    content_key: &str,
+) -> Option<Arc<PcmResumeReference>> {
+    let caches = caches.lock().ok()?;
+    let cache = caches.get(content_key)?;
+    let format = cache.format.as_ref()?;
+    let samples = cache.pcm_tail.as_ref()?.reference(format.sample_rate);
+    if samples.is_empty() {
+        return None;
+    }
+    Some(Arc::new(PcmResumeReference {
+        cache_identity: cache.identity,
+        end_frame: cache.end_frame,
+        format: format.clone(),
+        samples,
+    }))
+}
+
+pub(crate) fn cache_identity(caches: &EncodedCaches, content_key: &str) -> Option<u64> {
+    caches
+        .lock()
+        .ok()?
+        .get(content_key)
+        .map(|cache| cache.identity)
+}
+
+pub(crate) fn cache_audio_duration_millis(
+    caches: &EncodedCaches,
+    content_key: &str,
+) -> Option<u64> {
+    let caches = caches.lock().ok()?;
+    let cache = caches.get(content_key)?;
+    let sample_rate = u64::from(cache.format.as_ref()?.sample_rate.max(1));
+    Some(
+        cache
+            .chunks
+            .iter()
+            .map(EncodedCacheChunk::audible_frames)
+            .sum::<u64>()
+            * 1_000
+            / sample_rate,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn chunk(start_millis: u64, duration_millis: u64, data: &[u8]) -> EncodedCacheChunk {
+        EncodedCacheChunk {
+            data: Arc::from(data),
+            start_frame: start_millis * 48,
+            frame_count: duration_millis * 48,
+            leading_frames_to_skip: 0,
+            sample_rate: 48_000,
+        }
+    }
+
+    #[test]
+    fn old_identity_cannot_read_a_rebuilt_cache() {
+        let caches = Arc::new(Mutex::new(HashMap::new()));
+        cache_add_key(&caches, "track".to_string(), 0);
+        let identity = cache_identity(&caches, "track").unwrap();
+        cache_discard(&caches, "track");
+        cache_add_key(&caches, "track".to_string(), 0);
+        assert_ne!(cache_identity(&caches, "track"), Some(identity));
+        let (chunk, is_complete) = cache_read_chunk(&caches, "track", 0, Some(identity)).unwrap();
+        assert!(chunk.is_none());
+        assert!(!is_complete);
+    }
 
     #[test]
     fn counts_only_distinct_cached_items_with_audio() {
@@ -312,7 +415,7 @@ mod tests {
                 title: "Track".to_string(),
                 expected_duration_millis: Some(expected_duration_millis),
                 resume_after_millis: 0,
-                append_after_seek: Arc::new(AtomicBool::new(true)),
+                resume_reference: None,
                 lease_id: key.to_string(),
             };
             cache_append_encoded_chunk(
@@ -320,9 +423,8 @@ mod tests {
                 &sequence,
                 &reservation,
                 &format,
-                0,
-                1_000,
-                b"audio",
+                chunk(0, 1_000, b"audio"),
+                &[],
             );
         }
         cache_add_key(&caches, "empty".to_string(), 1_000);
@@ -334,7 +436,7 @@ mod tests {
     }
 
     #[test]
-    fn resume_keeps_old_indexes_and_appends_chunk_crossing_the_cached_end() {
+    fn resume_keeps_indexes_and_trims_the_transition_sample_exactly() {
         let caches: EncodedCaches = Arc::new(Mutex::new(HashMap::new()));
         let sequence = Arc::new(AtomicU64::new(0));
         let reservation = DownloadSlotReservation {
@@ -342,7 +444,7 @@ mod tests {
             title: "Track".to_string(),
             expected_duration_millis: Some(6_000),
             resume_after_millis: 2_000,
-            append_after_seek: Arc::new(AtomicBool::new(true)),
+            resume_reference: None,
             lease_id: "slot-1-1".to_string(),
         };
         let format = AudioFormat {
@@ -364,9 +466,8 @@ mod tests {
                     &sequence,
                     &reservation,
                     &format,
-                    start,
-                    duration,
-                    data
+                    chunk(start, duration, data),
+                    &[],
                 ),
                 CacheAppendResult::Appended
             );
@@ -378,9 +479,8 @@ mod tests {
                 &sequence,
                 &reservation,
                 &format,
-                2_000,
-                1_000,
-                b"duplicate"
+                chunk(2_000, 1_000, b"duplicate"),
+                &[],
             ),
             CacheAppendResult::IgnoredOverlap
         );
@@ -391,13 +491,29 @@ mod tests {
                 &sequence,
                 &reservation,
                 &format,
-                3_000,
-                1_000,
-                b"new"
+                EncodedCacheChunk {
+                    start_frame: 168_000,
+                    leading_frames_to_skip: 24_000,
+                    ..chunk(3_000, 1_000, b"new")
+                },
+                &[],
             ),
             CacheAppendResult::Appended
         );
         assert_eq!(cache_cached_duration_millis(&caches, "track"), Some(4_000));
+        let transition = cache_read_chunk(&caches, "track", 3, None)
+            .unwrap()
+            .0
+            .unwrap();
+        assert_eq!(transition.leading_frames_to_skip, 24_000);
+        assert_eq!(transition.audible_frames(), 24_000);
+        assert_eq!(
+            cache_local_seek_target(&caches, "track", 3_750)
+                .unwrap()
+                .skip_within_chunk_frames,
+            12_000
+        );
+        assert_eq!(cache_audio_duration_millis(&caches, "track"), Some(4_000));
         assert_eq!(
             cache_local_seek_target(&caches, "track", 3_750)
                 .unwrap()
@@ -405,11 +521,11 @@ mod tests {
             3
         );
         assert_eq!(
-            cache_read_chunk_with_duration(&caches, "track", 3)
+            cache_read_chunk(&caches, "track", 3, None)
                 .unwrap()
                 .0
                 .unwrap()
-                .0
+                .data
                 .as_ref(),
             b"new"
         );
@@ -419,9 +535,8 @@ mod tests {
                 &sequence,
                 &reservation,
                 &format,
-                4_000,
-                2_000,
-                b"end"
+                chunk(4_000, 2_000, b"end"),
+                &[],
             ),
             CacheAppendResult::Completed
         );
@@ -451,26 +566,25 @@ pub(crate) fn cache_read_format(
     Ok(format)
 }
 
-pub(crate) fn cache_read_chunk_with_duration(
+pub(crate) fn cache_read_chunk(
     caches: &EncodedCaches,
     content_key: &str,
     chunk_index: usize,
-) -> Result<(Option<(Arc<[u8]>, u64)>, bool), String> {
+    expected_identity: Option<u64>,
+) -> Result<(Option<EncodedCacheChunk>, bool), String> {
     let mut caches = caches
         .lock()
         .map_err(|_| "encoded cache lock poisoned".to_string())?;
     let cache = caches
         .get_mut(content_key)
         .ok_or_else(|| "encoded track cache is unavailable".to_string())?;
+    if expected_identity.is_some_and(|identity| identity != cache.identity) {
+        return Ok((None, false));
+    }
     cache.last_touched = cache.last_touched.saturating_add(1);
     let deque_index = chunk_index.checked_sub(cache.first_chunk_index);
     Ok((
-        deque_index.and_then(|index| {
-            cache
-                .chunks
-                .get(index)
-                .map(|chunk| (Arc::clone(&chunk.data), chunk.duration_millis))
-        }),
+        deque_index.and_then(|index| cache.chunks.get(index).cloned()),
         cache.integrity == CacheIntegrity::Complete,
     ))
 }
@@ -497,8 +611,8 @@ pub(crate) fn cache_trim_played_current_to_capacity(
             .front()
             .map(|chunk| {
                 chunk
-                    .start_position_millis
-                    .saturating_add(chunk.duration_millis)
+                    .start_position_millis()
+                    .saturating_add(chunk.duration_millis())
                     <= played_position_millis
             })
             .unwrap_or(false)
@@ -522,18 +636,18 @@ pub(crate) fn cache_local_seek_target(
     let mut caches = caches.lock().ok()?;
     let cache = caches.get_mut(content_key)?;
     let (chunk_index, chunk) = cache.chunks.iter().enumerate().find(|(_, chunk)| {
-        target_position_millis >= chunk.start_position_millis
-            && target_position_millis
-                <= chunk
-                    .start_position_millis
-                    .saturating_add(chunk.duration_millis)
+        let target_frame = target_position_millis * u64::from(chunk.sample_rate) / 1_000;
+        target_frame >= chunk.start_frame
+            && target_frame < chunk.start_frame + chunk.audible_frames()
     })?;
     cache.last_touched = cache.last_touched.saturating_add(1);
     Some(LocalCacheSeekTarget {
         chunk_index: cache.first_chunk_index.saturating_add(chunk_index),
-        chunk_start_position_millis: chunk.start_position_millis,
-        skip_within_chunk_millis: target_position_millis
-            .saturating_sub(chunk.start_position_millis),
+        chunk_start_position_millis: chunk.start_position_millis(),
+        skip_within_chunk_frames: target_position_millis
+            .saturating_mul(u64::from(chunk.sample_rate))
+            .saturating_div(1_000)
+            .saturating_sub(chunk.start_frame),
     })
 }
 

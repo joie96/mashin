@@ -4,7 +4,8 @@ use std::sync::Arc;
 pub(crate) enum SourceReadResult {
     Data {
         data: Arc<[u8]>,
-        duration_millis: u64,
+        frame_count: u64,
+        leading_frames_to_skip: u64,
     },
     Waiting,
     EndOfStream,

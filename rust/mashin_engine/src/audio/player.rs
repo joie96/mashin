@@ -50,7 +50,7 @@ pub(crate) struct AudioPlayer {
     state: AudioPlayerState,
     next_chunk_index: usize,
     source_ended: bool,
-    skip_remaining_millis: u64,
+    skip_remaining_frames: u64,
     input_channels: usize,
 }
 
@@ -74,7 +74,7 @@ impl AudioPlayer {
             state: AudioPlayerState::Idle,
             next_chunk_index: 0,
             source_ended: false,
-            skip_remaining_millis: 0,
+            skip_remaining_frames: 0,
             input_channels: 0,
         }
     }
@@ -84,14 +84,14 @@ impl AudioPlayer {
         &mut self,
         source: AudioSource,
         chunk_index: usize,
-        skip_millis: u64,
+        skip_frames: u64,
     ) {
         self.stop();
         self.source = Some(source);
         self.state = AudioPlayerState::Buffering;
         self.next_chunk_index = chunk_index;
         self.source_ended = false;
-        self.skip_remaining_millis = skip_millis;
+        self.skip_remaining_frames = skip_frames;
         LOGGER.debug("audio source prepared");
     }
 
@@ -122,7 +122,7 @@ impl AudioPlayer {
         self.state = AudioPlayerState::Idle;
         self.next_chunk_index = 0;
         self.source_ended = false;
-        self.skip_remaining_millis = 0;
+        self.skip_remaining_frames = 0;
         self.input_channels = 0;
     }
 
@@ -170,12 +170,7 @@ impl AudioPlayer {
     }
 
     // Decoded sample enqueueing.
-    pub(crate) fn enqueue_encoded(
-        &self,
-        data: &[u8],
-        skip_millis: u64,
-        chunk_duration_millis: u64,
-    ) -> Result<(), String> {
+    pub(crate) fn enqueue_encoded(&self, data: &[u8], skip_frames: u64) -> Result<(), String> {
         let decoder = self
             .decoder
             .as_ref()
@@ -185,20 +180,12 @@ impl AudioPlayer {
             .as_ref()
             .ok_or_else(|| "audio output is not started".to_string())?;
         let samples = decoder.decode(data)?;
-        if samples.is_empty() || skip_millis == 0 || chunk_duration_millis == 0 {
-            return output.enqueue(samples);
+        let audible_samples = trim_leading_frames(samples, self.input_channels, skip_frames);
+        if audible_samples.is_empty() {
+            Ok(())
+        } else {
+            output.enqueue(audible_samples)
         }
-        let skipped_samples = samples
-            .len()
-            .saturating_mul(skip_millis.min(chunk_duration_millis) as usize)
-            .saturating_div(chunk_duration_millis as usize);
-        let skipped_samples = skipped_samples
-            .saturating_div(self.input_channels.max(1))
-            .saturating_mul(self.input_channels.max(1));
-        if skipped_samples >= samples.len() {
-            return Ok(());
-        }
-        output.enqueue(Arc::from(samples[skipped_samples..].to_vec()))
     }
 
     // Player state queries.
@@ -238,8 +225,9 @@ impl AudioPlayer {
             let chunk = match read(self.next_chunk_index) {
                 SourceReadResult::Data {
                     data,
-                    duration_millis,
-                } => Some((data, duration_millis)),
+                    frame_count,
+                    leading_frames_to_skip,
+                } => Some((data, frame_count, leading_frames_to_skip)),
                 SourceReadResult::Waiting => None,
                 SourceReadResult::EndOfStream => {
                     self.source_ended = true;
@@ -251,16 +239,18 @@ impl AudioPlayer {
                     return;
                 }
             };
-            let Some((chunk, duration_millis)) = chunk else {
+            let Some((chunk, frame_count, leading_frames_to_skip)) = chunk else {
                 break;
             };
-            let skip_millis = self.skip_remaining_millis.min(duration_millis);
-            if let Err(error) = self.enqueue_encoded(&chunk, skip_millis, duration_millis) {
+            let audible_frames = frame_count.saturating_sub(leading_frames_to_skip);
+            let skip_frames =
+                leading_frames_to_skip + self.skip_remaining_frames.min(audible_frames);
+            if let Err(error) = self.enqueue_encoded(&chunk, skip_frames) {
                 LOGGER.error(format!("audio chunk decode failed: {error}"));
                 self.state = AudioPlayerState::Error;
                 return;
             }
-            self.skip_remaining_millis = self.skip_remaining_millis.saturating_sub(duration_millis);
+            self.skip_remaining_frames = self.skip_remaining_frames.saturating_sub(audible_frames);
             self.next_chunk_index = self.next_chunk_index.saturating_add(1);
         }
 
@@ -291,10 +281,38 @@ impl AudioPlayer {
     }
 }
 
+// Cuts only whole input-channel frames, including local seek offsets and reconnect overlap.
+fn trim_leading_frames(samples: Arc<[i32]>, channels: usize, skip_frames: u64) -> Arc<[i32]> {
+    if skip_frames == 0 {
+        return samples;
+    }
+    let skipped_samples = (skip_frames as usize)
+        .saturating_mul(channels.max(1))
+        .min(samples.len());
+    Arc::from(samples[skipped_samples..].to_vec())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{AudioPlayer, AudioPlayerState};
+    use super::{trim_leading_frames, AudioPlayer, AudioPlayerState};
     use crate::audio::source::AudioSource;
+
+    #[test]
+    fn transition_marker_skips_complete_stereo_frames() {
+        let samples = std::sync::Arc::from(vec![10, 11, 20, 21, 30, 31]);
+        assert_eq!(trim_leading_frames(samples, 2, 2).as_ref(), &[30, 31]);
+        assert!(trim_leading_frames(std::sync::Arc::from(vec![10, 11]), 2, 2).is_empty());
+    }
+
+    #[test]
+    fn replacing_source_discards_old_chunk_and_seek_positions() {
+        let mut player = AudioPlayer::new();
+        player.prepare_with_seek(AudioSource::cached_content("track"), 19, 250);
+        player.prepare_with_seek(AudioSource::cached_content("track"), 0, 0);
+        assert_eq!(player.next_chunk_index, 0);
+        assert_eq!(player.skip_remaining_frames, 0);
+        assert_eq!(player.state(), AudioPlayerState::Buffering);
+    }
 
     #[test]
     fn transport_preserves_prepared_source_and_decode_position() {
@@ -306,13 +324,13 @@ mod tests {
             assert_eq!(player.state(), AudioPlayerState::Paused);
             assert!(player.has_prepared_source());
             assert_eq!(player.next_chunk_index, 4);
-            assert_eq!(player.skip_remaining_millis, 250);
+            assert_eq!(player.skip_remaining_frames, 250);
 
             player.transport_play().expect("play prepared source");
             assert_eq!(player.state(), AudioPlayerState::Buffering);
             assert!(player.has_prepared_source());
             assert_eq!(player.next_chunk_index, 4);
-            assert_eq!(player.skip_remaining_millis, 250);
+            assert_eq!(player.skip_remaining_frames, 250);
         }
     }
 

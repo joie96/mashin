@@ -48,6 +48,7 @@ pub(crate) struct SendspinEngine {
     queue_store: Option<QueueStore>,
     is_queue_restored: bool,
     current_cache_content_key: Option<String>,
+    current_cache_identity: Option<u64>,
     queue_content_keys: Vec<String>,
     last_download_status_log: Option<Instant>,
     next_reconnect_attempt: Option<Instant>,
@@ -88,6 +89,7 @@ impl SendspinEngine {
             queue_store: None,
             is_queue_restored: false,
             current_cache_content_key: None,
+            current_cache_identity: None,
             queue_content_keys: Vec::new(),
             last_download_status_log: None,
             next_reconnect_attempt: None,
@@ -813,7 +815,7 @@ impl SendspinEngine {
         &mut self,
         content_key: &str,
         chunk_index: usize,
-        skip_millis: u64,
+        skip_frames: u64,
     ) -> Result<(), String> {
         let key = content_key.trim();
         if key.is_empty() {
@@ -824,9 +826,10 @@ impl SendspinEngine {
         self.audio_player.prepare_with_seek(
             AudioSource::cached_content(key.to_string()),
             chunk_index,
-            skip_millis,
+            skip_frames,
         );
         self.current_cache_content_key = Some(key.to_string());
+        self.current_cache_identity = self.downloader.cache_identity(key);
         self.playback_position_offset_millis = 0;
         self.player_state.playback_state = PlayState::Buffering;
         self.player_state.position_millis = Some(0);
@@ -947,6 +950,27 @@ impl SendspinEngine {
 
     // Advances local cached playback, updates player state, and selects the next queue item on end.
     fn process_cached_playback(&mut self, content_key: &str) {
+        let identity = self.downloader.cache_identity(content_key);
+        if self.current_cache_identity.is_some() && identity != self.current_cache_identity {
+            let is_paused = self.audio_player.state() == AudioPlayerState::Paused;
+            self.audio_player
+                .prepare_with_seek(AudioSource::cached_content(content_key), 0, 0);
+            self.playback_position_offset_millis = 0;
+            self.player_state.position_millis = Some(0);
+            self.player_state.playback_state = if is_paused {
+                PlayState::Paused
+            } else {
+                PlayState::Buffering
+            };
+            if is_paused {
+                let _ = self.audio_player.transport_pause();
+            }
+        }
+        self.current_cache_identity = identity;
+        if identity.is_none() {
+            self.refresh_queue_cache_states();
+            return;
+        }
         self.start_prepared_audio_if_available(&content_key);
         if !self.audio_player.is_started() {
             self.refresh_queue_cache_states();
@@ -1063,17 +1087,22 @@ impl SendspinEngine {
     }
 
     fn pump_audio_player(&mut self, content_key: &str) {
+        let expected_identity = self.current_cache_identity;
         self.audio_player.pump_until(750, |chunk_index| {
             match self
                 .downloader
-                .cache_chunk_with_duration(content_key, chunk_index)
+                .cache_chunk(content_key, chunk_index, expected_identity)
             {
-                Ok((Some((data, duration_millis)), _)) => SourceReadResult::Data {
-                    data,
-                    duration_millis,
+                Ok((Some(chunk), _)) => SourceReadResult::Data {
+                    data: chunk.data,
+                    frame_count: chunk.frame_count,
+                    leading_frames_to_skip: chunk.leading_frames_to_skip,
                 },
                 Ok((None, true)) => SourceReadResult::EndOfStream,
                 Ok((None, false)) => SourceReadResult::Waiting,
+                Err(_) if self.downloader.cache_identity(content_key) != expected_identity => {
+                    SourceReadResult::Waiting
+                }
                 Err(error) => SourceReadResult::Error(error),
             }
         });
@@ -1098,12 +1127,16 @@ impl SendspinEngine {
         let Ok(format) = self.downloader.cache_format(content_key) else {
             return;
         };
+        let is_paused = self.audio_player.state() == AudioPlayerState::Paused;
         if let Err(error) =
             self.audio_player
                 .start(&format, self.player_state.volume, self.player_state.muted)
         {
             LOGGER.error(format!("failed to start audio playback: {error}"));
             self.player_state.playback_state = PlayState::Error;
+        }
+        if is_paused {
+            let _ = self.audio_player.transport_pause();
         }
     }
 
@@ -1181,7 +1214,7 @@ impl SendspinEngine {
             self.play_cached_content_with_seek(
                 &content_key,
                 target.chunk_index,
-                target.skip_within_chunk_millis,
+                target.skip_within_chunk_frames,
             )?;
             self.playback_position_offset_millis = position;
             self.player_state.position_millis = Some(position);
@@ -2079,12 +2112,14 @@ mod tests {
         let mut items = ["first", "third", "second"]
             .into_iter()
             .enumerate()
-            .map(|(index, name)| QueueItem::local(
-                Queue::default().queue_id,
-                QueueItemId(format!("local-{}", index + 1)),
-                [61, 63, 62][index],
-                track("test", name),
-            ))
+            .map(|(index, name)| {
+                QueueItem::local(
+                    Queue::default().queue_id,
+                    QueueItemId(format!("local-{}", index + 1)),
+                    [61, 63, 62][index],
+                    track("test", name),
+                )
+            })
             .collect::<Vec<_>>();
         for (index, item) in items.iter_mut().enumerate() {
             item.index = (61 + index) as u32;
@@ -2595,10 +2630,7 @@ mod tests {
 
         assert!(engine.queue.shuffle_enabled);
         assert_ne!(
-            engine
-                .queue
-                .items
-                .iter()
+            engine.queue.items.iter()
                 .map(|item| item.media_item.as_ref().unwrap().fields().item_id.as_str())
                 .collect::<Vec<_>>(),
             vec!["first", "second", "third", "fourth"],
@@ -2660,7 +2692,10 @@ mod tests {
         assert_eq!(engine.queue.items[0].sort_index, 0);
         assert!(!engine.queue.shuffle_enabled);
         assert_ne!(
-            engine.queue.items.iter()
+            engine
+                .queue
+                .items
+                .iter()
                 .map(|item| item.media_item.as_ref().unwrap().fields().item_id.as_str())
                 .collect::<Vec<_>>(),
             vec!["first", "second", "selected", "fourth"],

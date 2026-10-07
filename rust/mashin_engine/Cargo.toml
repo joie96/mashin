@@ -18,6 +18,7 @@ futures-util = "0.3"
 sendspin = { git = "https://github.com/joie96/sendspin-rs", branch = "mashin/liveness-ping-pong", package = "sendspin" }
 cpal = "0.18.1"
 rubato = "0.16"
+rustfft = "6"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 rand = "0.8"

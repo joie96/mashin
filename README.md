@@ -37,6 +37,31 @@ MashinCoreBridge -> AndroidBridge -> FlutterPlaybackChannel
 - Library queries and non-playback operations may use FFI on Android. Desktop
 	playback continues to use FFI. Persisted session identifiers are unchanged.
 
+## Sendspin Download Recovery
+
+Incomplete caches below 30 seconds of retained audio are discarded after a
+connection loss and downloaded again from zero without a seek. The threshold is
+`MINIMUM_CACHE_DURATION_FOR_RECONNECT_ALIGNMENT` in the Rust reconnect module.
+Completed caches are retained.
+
+Larger caches retain a three-second decoded PCM reference. A replacement stream
+seeks at least five seconds before the confirmed cache end and is decoded as soon
+as packets arrive, without a seek-confirmation gate. Quiet reference windows may
+extend to ten seconds, with a correspondingly earlier seek. Correlation locates
+the old audio in the replacement stream; original encoded packets are preserved,
+duplicates are dropped, and the transition packet receives a sample-frame skip
+marker. Playback and local seeks honor that marker without re-encoding audio.
+
+Matching is bounded to 20 seconds of audio or 8 MiB of encoded packets, with a
+20-second elapsed-time deadline. No unique match, a format mismatch, or a decode
+failure discards the cache and schedules a fresh download from zero. Active
+playback is reset when its cache identity changes. Stop and Play Media, and Play
+Media and a resume Seek, are separated by one-second asynchronous delays.
+
+This recovery does not change the existing playback decoder behavior at Opus
+stream boundaries. Validate real-server PCM, FLAC and Opus reconnects on the
+target device in addition to host tests.
+
 ## Build And Verify
 
 Rebuild the native library after JNI changes, then rebuild Flutter:
