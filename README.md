@@ -39,8 +39,10 @@ MashinCoreBridge -> AndroidBridge -> FlutterPlaybackChannel
 
 ## Sendspin Download Recovery
 
-Incomplete caches below 30 seconds of retained audio are discarded after a
-connection loss and downloaded again from zero without a seek. The threshold is
+Incomplete prefetch caches below 30 seconds of retained audio are discarded after
+connection loss and downloaded again from zero without a seek. Current playback
+always retains its PCM reference for seek restoration, even below this threshold.
+The threshold is
 `MINIMUM_CACHE_DURATION_FOR_RECONNECT_ALIGNMENT` in the Rust reconnect module.
 Completed caches are retained.
 
@@ -54,9 +56,16 @@ marker. Playback and local seeks honor that marker without re-encoding audio.
 
 Matching is bounded to 20 seconds of audio or 8 MiB of encoded packets, with a
 20-second elapsed-time deadline. No unique match, a format mismatch, or a decode
-failure discards the cache and schedules a fresh download from zero. Active
-playback is reset when its cache identity changes. Stop and Play Media, and Play
+failure discards prefetch caches and schedules a fresh download from zero. For the
+current title, the cache and its identity are retained and seek restoration is
+retried instead. Stop and Play Media, and Play
 Media and a resume Seek, are separated by one-second asynchronous delays.
+
+After stream replacement or progress timeout, a verified download within two
+seconds of its expected metadata duration is completed at its actual decoded end.
+This tolerance is not used to truncate a flowing stream or bypass PCM alignment.
+Short interrupted prefetch caches are discarded before capacity admission is
+estimated, and capacity-pressure eviction never removes the current title.
 
 This recovery does not change the existing playback decoder behavior at Opus
 stream boundaries. Validate real-server PCM, FLAC and Opus reconnects on the

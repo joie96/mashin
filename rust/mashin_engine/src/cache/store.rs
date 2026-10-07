@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
 const CACHE_COMPLETION_TOLERANCE_MILLIS: u64 = 500;
+const STOPPED_DOWNLOAD_COMPLETION_TOLERANCE_MILLIS: u64 = 2_000;
 static NEXT_CACHE_IDENTITY: AtomicU64 = AtomicU64::new(1);
 
 pub(crate) type CacheChangeSignal = Arc<(Mutex<u64>, Condvar)>;
@@ -302,7 +303,25 @@ pub(crate) fn cache_clear_all(caches: &EncodedCaches) {
     }
 }
 
-// Interrupted-cache handling.
+// Stopped and interrupted cache lifecycle.
+// Metadata durations are approximate; only a stopped download may use this wider end tolerance.
+pub(crate) fn cache_complete_near_end(
+    caches: &EncodedCaches,
+    content_key: &str,
+    expected_duration_millis: Option<u64>,
+) -> Option<u64> {
+    let expected = expected_duration_millis?;
+    let mut caches = caches.lock().ok()?;
+    let cache = caches.get_mut(content_key)?;
+    if cache.chunks.is_empty()
+        || cache.cached_duration_millis.saturating_add(STOPPED_DOWNLOAD_COMPLETION_TOLERANCE_MILLIS) < expected
+    {
+        return None;
+    }
+    cache.integrity = CacheIntegrity::Complete;
+    Some(cache.cached_duration_millis)
+}
+
 pub(crate) fn cache_mark_interrupted(caches: &EncodedCaches, content_key: &str) -> Option<u64> {
     let Ok(mut caches) = caches.lock() else {
         return None;

@@ -277,6 +277,7 @@ impl SendspinDownloaderWorker {
         let support = player_support(config.preferred_codec, config.downloader_buffer_bytes);
         let slots = Arc::clone(&self.slots);
         let caches = Arc::clone(&self.caches);
+        let download_plan = Arc::clone(&self.download_plan);
         let states = Arc::clone(&self.cache_states);
         let cache_change_signal = Arc::clone(&self.cache_change_signal);
         let cache_touch_sequence = Arc::clone(&self.cache_touch_sequence);
@@ -355,6 +356,15 @@ impl SendspinDownloaderWorker {
                             if let Some(value) = reservation.as_ref() {
                                 if connection_generation.load(Ordering::Acquire) == task_connection_generation
                                     && crate::cache::store::slot_reservation_is_current(&slots, slot_index, value) {
+                                    if cached_bytes > 0 && stream.as_ref().is_some_and(|stream| !stream.requires_alignment())
+                                        && complete_stopped_download(&slots, &caches, &cache_change_signal,
+                                            &states, &event_sender, slot_index, value)
+                                    {
+                                        reservation = None;
+                                        stream = None;
+                                        download_progress_deadline = None;
+                                        continue;
+                                    }
                                     LOGGER.warn(format!(
                                         "download stalled on slot {} for cache key {} ({})",
                                         slot_index + 1,
@@ -378,7 +388,7 @@ impl SendspinDownloaderWorker {
                         } => {
                             if let Some(value) = reservation.as_ref() {
                                 if connection_generation.load(Ordering::Acquire) == task_connection_generation {
-                                    restart_unmatched_download(&slots, &caches, &cache_change_signal,
+                                    recover_unmatched_download(&download_plan, &slots, &caches, &cache_change_signal,
                                         &states, &event_sender, slot_index, value);
                                 }
                             }
@@ -396,10 +406,13 @@ impl SendspinDownloaderWorker {
                             if let Some(value) = reservation.as_ref() {
                                 if connection_generation.load(Ordering::Acquire) == task_connection_generation {
                                     if value.resume_reference.is_some() && stream.as_ref().is_none_or(DownloadStream::requires_alignment) {
-                                        restart_unmatched_download(&slots, &caches, &cache_change_signal,
+                                        recover_unmatched_download(&download_plan, &slots, &caches, &cache_change_signal,
                                             &states, &event_sender, slot_index, value);
                                     } else {
-                                    retain_interrupted_reservation(
+                                    if !(cached_bytes > 0 && stream.as_ref().is_some_and(|stream| !stream.requires_alignment())
+                                        && complete_stopped_download(&slots, &caches, &cache_change_signal,
+                                            &states, &event_sender, slot_index, value)) {
+                                        retain_interrupted_reservation(
                                         &slots,
                                         &caches,
                                         &cache_change_signal,
@@ -408,6 +421,7 @@ impl SendspinDownloaderWorker {
                                         slot_index,
                                         value,
                                     );
+                                    }
                                     }
                                 }
                             }
@@ -545,7 +559,7 @@ impl SendspinDownloaderWorker {
                                 Ok(result) => result,
                                 Err(error) => {
                                     LOGGER.error(format!("download decoder task failed: {error}"));
-                                    restart_unmatched_download(&slots, &caches, &cache_change_signal,
+                                    recover_unmatched_download(&download_plan, &slots, &caches, &cache_change_signal,
                                         &states, &event_sender, slot_index, value);
                                     continue;
                                 }
@@ -568,7 +582,7 @@ impl SendspinDownloaderWorker {
                                             if matches!(result, crate::cache::store::CacheAppendResult::IgnoredOverlap
                                                 | crate::cache::store::CacheAppendResult::WriteUnavailable)
                                             {
-                                                restart_unmatched_download(&slots, &caches, &cache_change_signal,
+                                                recover_unmatched_download(&download_plan, &slots, &caches, &cache_change_signal,
                                                     &states, &event_sender, slot_index, value);
                                                 stream = None;
                                             }
@@ -578,7 +592,7 @@ impl SendspinDownloaderWorker {
                                 }
                                 Ok(StreamAppend::RestartRequired) | Err(_) => {
                                     if connection_generation.load(Ordering::Acquire) == task_connection_generation {
-                                        restart_unmatched_download(&slots, &caches, &cache_change_signal,
+                                        recover_unmatched_download(&download_plan, &slots, &caches, &cache_change_signal,
                                             &states, &event_sender, slot_index, value);
                                     }
                                     stream = None;
@@ -922,6 +936,26 @@ impl SendspinDownloaderWorker {
         // Remove cache entries that are no longer part of the current download plan.
         self.discard_orphaned_cache_entries(&content_keys);
 
+        // Apply restart policy before estimating admission; discarded prefetch audio cannot reduce its footprint.
+        for item in &plan.items {
+            if plan.current_content_key.as_ref() == Some(&item.cache_content_key) {
+                continue;
+            }
+            if crate::cache::store::cache_interrupted_duration_millis(
+                &self.caches, item.cache_content_key.as_str(),
+            ).is_some() && prepare_reconnect_reference(
+                &self.caches, item.cache_content_key.as_str(), false,
+            ).is_none() {
+                crate::cache::store::notify_cache_changed(&self.cache_change_signal);
+                if let Ok(mut states) = self.cache_states.lock() {
+                    if let Some(state) = states.get_mut(item.cache_content_key.as_str()) {
+                        state.state = CacheStatus::Buffering;
+                        state.cached_duration_millis = 0;
+                    }
+                }
+            }
+        }
+
         // Remove lowest-priority entries until cache capacity is within the recovery target.
         self.enforce_soft_cache_capacity();
 
@@ -1257,6 +1291,9 @@ impl SendspinDownloaderWorker {
         let mut lowest_priority_items = plan.items.clone();
         lowest_priority_items.sort_by(|left, right| left.priority.cmp(&right.priority));
         for item in lowest_priority_items {
+            if plan.current_content_key.as_ref() == Some(&item.cache_content_key) {
+                continue;
+            }
             if crate::cache::store::cache_total_bytes(&self.caches) <= target_capacity_bytes {
                 break;
             }
@@ -1385,18 +1422,18 @@ impl SendspinDownloaderWorker {
             ));
             return Ok(());
         }
-        let requested_seek_seconds = if self
+        let is_current_item = self
             .plan
             .as_ref()
             .and_then(|plan| plan.current_content_key.as_ref())
-            == Some(&item.cache_content_key)
-        {
+            == Some(&item.cache_content_key);
+        let requested_seek_seconds = if is_current_item {
             self.pending_current_seek_seconds.take()
         } else {
             None
         };
         let resume_reference = if requested_seek_seconds.is_none() {
-            prepare_reconnect_reference(&self.caches, item.cache_content_key.as_str())
+            prepare_reconnect_reference(&self.caches, item.cache_content_key.as_str(), is_current_item)
         } else {
             None
         };
@@ -2341,8 +2378,41 @@ fn append_decoded_download_chunk(
     result
 }
 
-// Invalidates the lease before discarding audio so reconciliation starts from zero without a seek.
-fn restart_unmatched_download(
+// A stopped, verified stream may finish short of its approximate metadata duration.
+fn complete_stopped_download(
+    slots: &crate::cache::store::DownloadSlots,
+    caches: &crate::cache::store::EncodedCaches,
+    signal: &crate::cache::store::CacheChangeSignal,
+    states: &Arc<Mutex<HashMap<String, CacheItemState>>>,
+    sender: &Sender<DownloaderCommand>,
+    slot_index: usize,
+    reservation: &crate::cache::store::DownloadSlotReservation,
+) -> bool {
+    let Ok(mut slots) = slots.lock() else { return false; };
+    if !slots[slot_index].as_ref().is_some_and(|current| current.lease_id == reservation.lease_id) {
+        return false;
+    }
+    let Some(duration) = crate::cache::store::cache_complete_near_end(
+        caches, &reservation.cache_content_key, reservation.expected_duration_millis,
+    ) else { return false; };
+    slots[slot_index] = None;
+    if let Ok(mut states) = states.lock() {
+        if let Some(state) = states.get_mut(&reservation.cache_content_key) {
+            state.state = CacheStatus::Complete;
+            state.cached_duration_millis = duration;
+        }
+    }
+    LOGGER.info(format!("download completed at stream tail: slot {}, {} ({duration} ms)",
+        slot_index + 1, reservation.title));
+    drop(slots);
+    crate::cache::store::notify_cache_changed(signal);
+    let _ = sender.send(DownloaderCommand::ReconcileCacheAndDownloads);
+    true
+}
+
+// Current playback keeps its identity and retries seek restoration; only prefetch may restart at zero.
+fn recover_unmatched_download(
+    download_plan: &Arc<Mutex<Option<SendspinDownloadPlan>>>,
     slots: &crate::cache::store::DownloadSlots,
     caches: &crate::cache::store::EncodedCaches,
     signal: &crate::cache::store::CacheChangeSignal,
@@ -2351,6 +2421,9 @@ fn restart_unmatched_download(
     slot_index: usize,
     reservation: &crate::cache::store::DownloadSlotReservation,
 ) {
+    let Ok(plan) = download_plan.lock() else { return; };
+    let is_current_item = plan.as_ref().and_then(|plan| plan.current_content_key.as_ref())
+        .is_some_and(|key| key.as_str() == reservation.cache_content_key);
     let Ok(mut slots) = slots.lock() else {
         return;
     };
@@ -2358,31 +2431,38 @@ fn restart_unmatched_download(
         return;
     }
     slots[slot_index] = None;
-    LOGGER.warn(format!(
-        "PCM reconnect alignment failed on slot {}; restarting download from zero",
-        slot_index + 1
-    ));
-    crate::cache::store::cache_discard(caches, &reservation.cache_content_key);
+    let duration = if is_current_item {
+        LOGGER.warn(format!("PCM reconnect alignment failed on slot {}; retaining current playback for seek restoration",
+            slot_index + 1));
+        crate::cache::store::cache_mark_interrupted(caches, &reservation.cache_content_key).unwrap_or(0)
+    } else {
+        LOGGER.warn(format!("PCM reconnect alignment failed on slot {}; restarting prefetch from zero",
+            slot_index + 1));
+        crate::cache::store::cache_discard(caches, &reservation.cache_content_key);
+        0
+    };
     if let Ok(mut states) = states.lock() {
         if let Some(state) = states.get_mut(&reservation.cache_content_key) {
-            state.state = CacheStatus::Buffering;
-            state.cached_duration_millis = 0;
+            state.state = if is_current_item { CacheStatus::Interrupted } else { CacheStatus::Buffering };
+            state.cached_duration_millis = duration;
         }
     }
     drop(slots);
+    drop(plan);
     crate::cache::store::notify_cache_changed(signal);
     let _ = sender.send(DownloaderCommand::ReconcileCacheAndDownloads);
 }
 
-// Short or unmatchable caches are discarded before commands are issued, never resumed by a seek.
+// Current playback always retains its reference; the restart threshold applies only to prefetch.
 fn prepare_reconnect_reference(
     caches: &crate::cache::store::EncodedCaches,
     content_key: &str,
+    is_current_item: bool,
 ) -> Option<Arc<super::reconnect::PcmResumeReference>> {
     crate::cache::store::cache_interrupted_duration_millis(caches, content_key)?;
     let duration =
         crate::cache::store::cache_audio_duration_millis(caches, content_key).unwrap_or(0);
-    let reference = if duration >= MINIMUM_CACHE_DURATION_FOR_RECONNECT_ALIGNMENT.as_millis() as u64
+    let reference = if is_current_item || duration >= MINIMUM_CACHE_DURATION_FOR_RECONNECT_ALIGNMENT.as_millis() as u64
     {
         crate::cache::store::cache_resume_reference(caches, content_key)
     } else {
@@ -2850,7 +2930,7 @@ mod tests {
         download_client_id, download_client_name, download_request_is_current, estimate_cache_size,
         next_downloader_command, normalize_client_id, prepare_reconnect_reference,
         publish_connection_event, remaining_download_duration_millis,
-        report_connection_lost_if_current, restart_unmatched_download,
+        report_connection_lost_if_current, recover_unmatched_download,
         retain_interrupted_reservation, should_admit_non_current_downloads, watchdog_deadline,
         DownloaderCommand, DownloaderConnectionEvent, DownloaderConnectionStatus,
         DOWNLOAD_PROGRESS_TIMEOUT,
@@ -2907,7 +2987,7 @@ mod tests {
     fn reconnect_discards_caches_below_thirty_seconds() {
         let (caches, _) = interrupted_cache(29_999);
         let old_identity = store::cache_identity(&caches, "track").unwrap();
-        assert!(prepare_reconnect_reference(&caches, "track").is_none());
+        assert!(prepare_reconnect_reference(&caches, "track", false).is_none());
         assert!(store::cache_identity(&caches, "track").is_none());
         store::cache_add_key(&caches, "track".to_string(), 0);
         assert_ne!(store::cache_identity(&caches, "track"), Some(old_identity));
@@ -2921,7 +3001,7 @@ mod tests {
     fn reconnect_retains_caches_at_the_thirty_second_boundary() {
         let (caches, _) = interrupted_cache(30_000);
         let identity = store::cache_identity(&caches, "track").unwrap();
-        let reference = prepare_reconnect_reference(&caches, "track").unwrap();
+        let reference = prepare_reconnect_reference(&caches, "track", false).unwrap();
         assert_eq!(reference.cache_identity, identity);
         assert_eq!(reference.end_frame, 30_000);
         assert_eq!(reference.samples.len(), 3_000);
@@ -2932,6 +3012,69 @@ mod tests {
     }
 
     #[test]
+    fn reconnect_retains_short_current_playback_cache() {
+        let (caches, _) = interrupted_cache(3_000);
+        let identity = store::cache_identity(&caches, "track").unwrap();
+        let reference = prepare_reconnect_reference(&caches, "track", true).unwrap();
+        assert_eq!(reference.cache_identity, identity);
+        assert_eq!(reference.end_frame, 3_000);
+        assert_eq!(store::cache_identity(&caches, "track"), Some(identity));
+    }
+
+    #[test]
+    fn stopped_download_completes_short_metadata_tail_without_discarding_audio() {
+        let (caches, mut reservation) = interrupted_cache(171_025);
+        reservation.expected_duration_millis = Some(172_000);
+        let identity = store::cache_identity(&caches, "track");
+        let slots = Arc::new(Mutex::new([Some(reservation.clone()), None]));
+        let states = Arc::new(Mutex::new(std::collections::HashMap::new()));
+        let (sender, receiver) = mpsc::channel();
+        assert!(super::complete_stopped_download(&slots, &caches, &store::new_cache_change_signal(),
+            &states, &sender, 0, &reservation));
+        assert_eq!(store::cache_complete_duration_millis(&caches, "track"), Some(171_025));
+        assert_eq!(store::cache_identity(&caches, "track"), identity);
+        assert!(slots.lock().unwrap()[0].is_none());
+        assert!(matches!(receiver.try_recv(), Ok(DownloaderCommand::ReconcileCacheAndDownloads)));
+    }
+
+    #[test]
+    fn stopped_download_does_not_complete_missing_audio_or_stale_reservations() {
+        let (caches, mut reservation) = interrupted_cache(169_999);
+        reservation.expected_duration_millis = Some(172_000);
+        let slots = Arc::new(Mutex::new([Some(reservation.clone()), None]));
+        let states = Arc::new(Mutex::new(std::collections::HashMap::new()));
+        let (sender, receiver) = mpsc::channel();
+        assert!(!super::complete_stopped_download(&slots, &caches, &store::new_cache_change_signal(),
+            &states, &sender, 0, &reservation));
+        reservation.expected_duration_millis = Some(171_000);
+        reservation.lease_id = "stale".to_string();
+        assert!(!super::complete_stopped_download(&slots, &caches, &store::new_cache_change_signal(),
+            &states, &sender, 0, &reservation));
+        assert!(store::cache_complete_duration_millis(&caches, "track").is_none());
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn failed_alignment_retains_current_cache_and_retries_seek_restoration() {
+        let (caches, reservation) = interrupted_cache(3_000);
+        let identity = store::cache_identity(&caches, "track");
+        let slots = Arc::new(Mutex::new([Some(reservation.clone()), None]));
+        let plan = Arc::new(Mutex::new(Some(crate::sendspin::models::SendspinDownloadPlan {
+            version: 1,
+            current_content_key: Some(crate::music_assistant::models::identifiers::CacheContentKey("track".to_string())),
+            items: Vec::new(),
+        })));
+        let states = Arc::new(Mutex::new(std::collections::HashMap::new()));
+        let (sender, receiver) = mpsc::channel();
+        recover_unmatched_download(&plan, &slots, &caches, &store::new_cache_change_signal(),
+            &states, &sender, 0, &reservation);
+        assert_eq!(store::cache_identity(&caches, "track"), identity);
+        assert!(slots.lock().unwrap()[0].is_none());
+        assert!(matches!(receiver.try_recv(), Ok(DownloaderCommand::ReconcileCacheAndDownloads)));
+        assert_eq!(prepare_reconnect_reference(&caches, "track", true).unwrap().end_frame, 3_000);
+    }
+
+    #[test]
     fn failed_alignment_discards_cache_and_schedules_a_fresh_download() {
         let (caches, reservation) = interrupted_cache(35_000);
         let old_identity = store::cache_identity(&caches, "track").unwrap();
@@ -2939,7 +3082,8 @@ mod tests {
         let states = Arc::new(Mutex::new(std::collections::HashMap::new()));
         let (sender, receiver) = mpsc::channel();
         let signal = store::new_cache_change_signal();
-        restart_unmatched_download(&slots, &caches, &signal, &states, &sender, 0, &reservation);
+        let plan = Arc::new(Mutex::new(None));
+        recover_unmatched_download(&plan, &slots, &caches, &signal, &states, &sender, 0, &reservation);
         assert!(slots.lock().unwrap()[0].is_none());
         assert!(store::cache_identity(&caches, "track").is_none());
         assert!(matches!(
@@ -2954,9 +3098,77 @@ mod tests {
             ..reservation.clone()
         };
         slots.lock().unwrap()[0] = Some(replacement);
-        restart_unmatched_download(&slots, &caches, &signal, &states, &sender, 0, &reservation);
+        recover_unmatched_download(&plan, &slots, &caches, &signal, &states, &sender, 0, &reservation);
         assert_eq!(store::cache_identity(&caches, "track"), Some(new_identity));
         assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn window_discards_short_prefetch_before_capacity_admission() {
+        let (caches, _) = interrupted_cache(3_000);
+        let (prefetch_caches, _) = interrupted_cache(1_000);
+        let prefetch = prefetch_caches.lock().unwrap().remove("track").unwrap();
+        caches.lock().unwrap().insert("prefetch".to_string(), prefetch);
+        let identity = store::cache_identity(&caches, "track");
+        let mut worker = worker_with_cached_plan(caches.clone(), 10_000);
+        worker.downloads_allowed.store(true, Ordering::Release);
+        worker.reconcile_cache_and_downloads().unwrap();
+        assert_eq!(store::cache_identity(&caches, "track"), identity);
+        assert!(store::cache_identity(&caches, "prefetch").is_none());
+        assert_eq!(super::remaining_download_duration_millis(Some(60_000),
+            store::cache_cached_duration_millis(&caches, "prefetch").unwrap_or(0)), Some(60_000));
+    }
+
+    #[test]
+    fn capacity_pressure_evicts_prefetch_but_preserves_current_playback() {
+        let (caches, _) = interrupted_cache(3_000);
+        let (prefetch_caches, _) = interrupted_cache(35_000);
+        let prefetch = prefetch_caches.lock().unwrap().remove("track").unwrap();
+        caches.lock().unwrap().insert("prefetch".to_string(), prefetch);
+        let identity = store::cache_identity(&caches, "track");
+        let capacity = store::cache_total_bytes(&caches);
+        let mut worker = worker_with_cached_plan(caches.clone(), capacity);
+        worker.enforce_soft_cache_capacity();
+        assert_eq!(store::cache_identity(&caches, "track"), identity);
+        assert!(store::cache_identity(&caches, "prefetch").is_none());
+        assert_eq!(worker.capacity_mode, super::DownloadCapacityMode::Dual);
+    }
+
+    fn worker_with_cached_plan(caches: store::EncodedCaches, cache_bytes: usize) -> super::SendspinDownloaderWorker {
+        let (sender, _) = mpsc::channel();
+        let mut worker = super::SendspinDownloaderWorker::new(sender,
+            Arc::new(Mutex::new(None)), Arc::new(Mutex::new(super::DownloadCapacityMode::Dual)));
+        worker.caches = caches;
+        worker.config = Some(super::SendspinDownloaderConfig {
+            sendspin_url: String::new(),
+            music_assistant_url: String::new(),
+            music_assistant_auth_token: None,
+            client_id: "test".to_string(),
+            client_name: "Test".to_string(),
+            downloader_buffer_bytes: 0,
+            cache_bytes,
+            preferred_codec: SendspinAudioCodec::Pcm,
+        });
+        worker.plan = Some(crate::sendspin::models::SendspinDownloadPlan {
+            version: 1,
+            current_content_key: Some(crate::music_assistant::models::identifiers::CacheContentKey("track".to_string())),
+            items: ["track", "prefetch"].into_iter().enumerate().map(|(index, key)| {
+                crate::sendspin::models::SendspinDownloadPlanItem {
+                    queue_item_id: crate::music_assistant::models::identifiers::QueueItemId(key.to_string()),
+                    original_index: index,
+                    queue_index: index,
+                    priority: 100 - index as u32,
+                    cache_content_key: crate::music_assistant::models::identifiers::CacheContentKey(key.to_string()),
+                    expected_duration_millis: Some(60_000),
+                    estimated_bytes: estimate_cache_size(Some(60_000), SendspinAudioCodec::Pcm),
+                    media_item: serde_json::from_value(serde_json::json!({
+                        "media_type": "track", "item_id": key, "provider": "test", "name": key,
+                        "duration": 60
+                    })).unwrap(),
+                }
+            }).collect(),
+        });
+        worker
     }
 
     #[test]
