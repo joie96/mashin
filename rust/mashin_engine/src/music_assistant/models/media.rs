@@ -9,6 +9,29 @@ where
     Option::<Vec<Item>>::deserialize(deserializer).map(Option::unwrap_or_default)
 }
 
+// Providers may return decimal strings; domain and persisted album years remain integers.
+fn deserialize_album_year<'de, D>(deserializer: D) -> Result<Option<i32>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum AlbumYearInput {
+        Number(i32),
+        Text(String),
+    }
+
+    match Option::<AlbumYearInput>::deserialize(deserializer)? {
+        None => Ok(None),
+        Some(AlbumYearInput::Number(year)) => Ok(Some(year)),
+        Some(AlbumYearInput::Text(year)) => year
+            .trim()
+            .parse::<i32>()
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum MediaType {
@@ -331,7 +354,7 @@ struct ArtistInput {
 struct AlbumInput {
     #[serde(flatten)]
     media: MediaItemFields,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_album_year")]
     year: Option<i32>,
     #[serde(default, deserialize_with = "deserialize_nullable_vec")]
     artists: Vec<Artist>,
@@ -467,8 +490,62 @@ impl MediaItem {
 
 #[cfg(test)]
 mod tests {
-    use super::{MediaItem, MediaItemMetadata};
+    use super::{Album, MediaItem, MediaItemMetadata, MusicAssistantSearchResults};
     use serde_json::json;
+
+    #[test]
+    fn album_years_accept_numbers_strings_null_and_missing_values() {
+        for (input, expected) in [
+            (json!(2020), Some(2020)),
+            (json!("2026"), Some(2026)),
+            (json!(" 2023 "), Some(2023)),
+            (json!(null), None),
+        ] {
+            let album: Album = serde_json::from_value(json!({
+                "item_id": "album", "provider": "ytmusic--test", "name": "Album",
+                "year": input
+            }))
+            .unwrap();
+            assert_eq!(album.year, expected);
+            assert_eq!(serde_json::to_value(album).unwrap()["year"], json!(expected));
+        }
+        let album: Album = serde_json::from_value(json!({
+            "item_id": "album", "provider": "ytmusic--test", "name": "Album"
+        }))
+        .unwrap();
+        assert_eq!(album.year, None);
+        for invalid in [json!("invalid"), json!(2020.5), json!(true), json!("2147483648")] {
+            assert!(serde_json::from_value::<Album>(json!({
+                "item_id": "album", "provider": "ytmusic--test", "name": "Album",
+                "year": invalid
+            })).is_err());
+        }
+    }
+
+    #[test]
+    fn youtube_search_normalizes_album_years_for_favorite_commands() {
+        let results: MusicAssistantSearchResults = serde_json::from_value(json!({
+            "albums": [{
+                "media_type": "album", "item_id": "MPREb_epgTIaIJXwO",
+                "provider": "ytmusic--test", "name": "TAKE ON ME [THE LAST OF US]",
+                "uri": "ytmusic--test://album/MPREb_epgTIaIJXwO", "year": "2026",
+                "album_type": "single", "metadata": { "images": [], "genres": null }
+            }],
+            "tracks": [{
+                "item_id": "track", "provider": "ytmusic--test", "name": "Track",
+                "album": {
+                    "item_id": "nested", "provider": "ytmusic--test", "name": "Album",
+                    "year": "2023"
+                }
+            }]
+        }))
+        .unwrap();
+        assert_eq!(results.albums[0].year, Some(2026));
+        assert_eq!(results.tracks[0].album.as_ref().unwrap().year, Some(2023));
+        let command = serde_json::to_value(MediaItem::Album(results.albums[0].clone())).unwrap();
+        assert_eq!(command["year"], json!(2026));
+        assert!(matches!(serde_json::from_value::<MediaItem>(command).unwrap(), MediaItem::Album(_)));
+    }
 
     #[test]
     fn deserializes_null_metadata_collections_as_empty() {

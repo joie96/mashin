@@ -246,6 +246,43 @@ void main() {
     );
   });
 
+  test('YouTube metadata covers survive favorite payload and snapshot parsing', () {
+    MediaItemImage.configureProxyBaseUrl('http://music-assistant.local:8095');
+    final image = <String, dynamic>{
+      'type': 'thumb',
+      'path': 'https://yt3.googleusercontent.com/cover',
+      'provider': 'ytmusic--test',
+      'remotely_accessible': true,
+      'proxy_id': 'youtube-cover',
+    };
+    final track = Track.fromJson(<String, dynamic>{
+      'media_type': 'track',
+      'item_id': 'video',
+      'provider': 'ytmusic--test',
+      'name': 'Track',
+      'uri': 'ytmusic--test://track/video',
+      'image': null,
+      'metadata': <String, dynamic>{
+        'images': <Map<String, dynamic>>[image],
+        'genres': null,
+      },
+    });
+    final payload = createMusicAssistantMediaItemPayload(track);
+    expect(payload['image'], isNull);
+    expect(payload['metadata']['images'].single, image);
+    final restored = Track.fromJson(<String, dynamic>{
+      ...payload,
+      'image': image,
+      'favorite': true,
+    });
+    expect(restored.favorite, isTrue);
+    expect(
+      restored.imageUriForSize(256),
+      'http://music-assistant.local:8095/imageproxy/youtube-cover?size=256',
+    );
+    expect(track.imageUriForSize(256), restored.imageUriForSize(256));
+  });
+
   test(
     'encodes direct track and nested model images for typed Rust commands',
     () {

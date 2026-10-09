@@ -553,6 +553,50 @@ mod tests {
     }
 
     #[test]
+    fn youtube_favorites_preserve_album_years_and_covers_in_version_four() {
+        let mut controller = UserDataController::from_preferences(Map::new()).unwrap();
+        let items: Vec<MediaItem> = serde_json::from_value(serde_json::json!([
+            {
+                "media_type": "album", "item_id": "album", "provider": "ytmusic--test",
+                "name": "Album", "uri": "ytmusic--test://album/album", "year": "2026",
+                "metadata": { "images": [{
+                    "type": "thumb", "path": "https://yt3.googleusercontent.com/album",
+                    "provider": "ytmusic--test", "remotely_accessible": true,
+                    "proxy_id": "album-cover"
+                }] }
+            },
+            {
+                "media_type": "track", "item_id": "track", "provider": "ytmusic--test",
+                "name": "Track", "uri": "ytmusic--test://track/track", "image": null,
+                "metadata": { "images": [{
+                    "type": "thumb", "path": "https://yt3.googleusercontent.com/track",
+                    "provider": "ytmusic--test", "remotely_accessible": true,
+                    "proxy_id": "track-cover"
+                }], "genres": null }
+            }
+        ]))
+        .unwrap();
+        controller.set_favorites(items.clone(), true);
+        let preferences = controller.preferences().unwrap();
+        assert_eq!(preferences[VERSION_PREFERENCE_KEY], 4);
+        let mut restored = UserDataController::from_preferences(preferences).unwrap();
+        let snapshot = restored.snapshot();
+        assert_eq!(snapshot.favorites.albums[0].year, Some(2026));
+        assert_eq!(
+            snapshot.favorites.albums[0].media.metadata.as_ref().unwrap().images[0]
+                .proxy_id.as_deref(),
+            Some("album-cover")
+        );
+        assert_eq!(
+            snapshot.favorites.tracks[0].image.as_ref().unwrap().proxy_id.as_deref(),
+            Some("track-cover")
+        );
+        restored.set_favorites(items, false);
+        assert!(restored.snapshot().favorites.albums.is_empty());
+        assert!(restored.snapshot().favorites.tracks.is_empty());
+    }
+
+    #[test]
     fn preferences_store_compact_tracks_with_nested_display_media() {
         let mut controller =
             UserDataController::from_preferences(Map::new()).expect("preferences must load");

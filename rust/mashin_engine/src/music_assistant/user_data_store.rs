@@ -38,7 +38,6 @@ struct StoredTrack {
     track_number: u16,
     artists: Vec<String>,
     album: Option<String>,
-    image: Option<MediaItemImage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -251,19 +250,23 @@ impl StoredUserData {
             .collect();
         let album = track.album.as_ref().map(|album| self.add_album(album));
         if !self.tracks.contains_key(&id) {
+            let mut media = StoredMedia::from_media(&track.media);
+            media.image = track.image.clone().or(media.image);
             self.tracks.insert(
                 id.clone(),
                 StoredTrack {
-                    media: StoredMedia::from_media(&track.media),
+                    media,
                     duration: track.duration,
                     disc_number: track.disc_number,
                     track_number: track.track_number,
                     artists,
                     album,
-                    image: track.image.clone(),
                 },
             );
         } else if let Some(entry) = self.tracks.get_mut(&id) {
+            if entry.media.image.is_none() {
+                entry.media.image.clone_from(&track.image);
+            }
             entry.media.merge(&track.media);
             if entry.duration == 0 {
                 entry.duration = track.duration;
@@ -273,9 +276,6 @@ impl StoredUserData {
             }
             if entry.album.is_none() {
                 entry.album = album;
-            }
-            if entry.image.is_none() {
-                entry.image.clone_from(&track.image);
             }
         }
         id
@@ -345,7 +345,7 @@ impl StoredUserData {
                 .as_deref()
                 .map(|id| self.album(id, false))
                 .transpose()?,
-            image: track.image.clone(),
+            image: track.media.image.clone(),
         })
     }
 
@@ -417,6 +417,78 @@ mod tests {
     use super::StoredUserData;
     use crate::music_assistant::models::media::{Album, Artist, Playlist, Track};
     use crate::music_assistant::user_data::{Favorites, LocalPlaylist, UserDataSnapshot};
+
+    #[test]
+    fn track_artwork_uses_one_version_four_field_and_survives_round_trip() {
+        let metadata_image = serde_json::json!({
+            "type": "thumb", "path": "https://yt3.googleusercontent.com/cover",
+            "provider": "ytmusic--test", "remotely_accessible": true,
+            "proxy_id": "youtube-cover"
+        });
+        let direct_image = serde_json::json!({
+            "type": "thumb", "path": "https://i.ytimg.com/track.jpg",
+            "provider": "url", "remotely_accessible": true,
+            "proxy_id": "direct-cover"
+        });
+        for (metadata, direct, expected) in [
+            (Some(metadata_image.clone()), None, Some(metadata_image.clone())),
+            (None, Some(direct_image.clone()), Some(direct_image.clone())),
+            (Some(metadata_image), Some(direct_image.clone()), Some(direct_image)),
+            (None, None, None),
+        ] {
+            let track: Track = serde_json::from_value(serde_json::json!({
+                "item_id": "video", "provider": "ytmusic--test", "name": "Track",
+                "uri": "ytmusic--test://track/video",
+                "metadata": { "images": metadata.into_iter().collect::<Vec<_>>() },
+                "image": direct
+            }))
+            .unwrap();
+            let snapshot = UserDataSnapshot {
+                favorites: Favorites { tracks: vec![track], ..Favorites::default() },
+                playlists: Vec::new(),
+            };
+            let stored = StoredUserData::from_snapshot(&snapshot);
+            let encoded = serde_json::to_string(&stored).unwrap();
+            assert_eq!(encoded.matches("\"image\":").count(), 1);
+            let json = serde_json::to_value(&stored).unwrap();
+            assert_eq!(json["tracks"]["ytmusic--test:video"]["image"], serde_json::json!(expected));
+            let restored = serde_json::from_str::<StoredUserData>(&encoded)
+                .unwrap()
+                .to_snapshot()
+                .unwrap();
+            let restored_track = &restored.favorites.tracks[0];
+            assert_eq!(serde_json::to_value(&restored_track.image).unwrap(), serde_json::json!(expected));
+            assert_eq!(
+                restored_track.media.metadata.as_ref().and_then(|metadata| metadata.images.first()),
+                restored_track.image.as_ref()
+            );
+        }
+    }
+
+    #[test]
+    fn existing_version_four_track_image_is_read_without_a_schema_change() {
+        for image in [serde_json::json!({
+            "type": "thumb", "path": "cover.jpg", "provider": "library",
+            "remotely_accessible": false, "proxy_id": "existing-cover"
+        }), serde_json::Value::Null] {
+            let stored: StoredUserData = serde_json::from_value(serde_json::json!({
+                "tracks": { "library:track": {
+                    "item_id": "track", "provider": "library", "name": "Track",
+                    "uri": "library://track/track", "sort_name": null,
+                    "image": image, "cache_checksum": null,
+                    "duration": 210, "disc_number": 1, "track_number": 2,
+                    "artists": [], "album": null
+                } },
+                "albums": {}, "artists": {}, "playlists": {},
+                "favorites": { "tracks": ["library:track"], "albums": [], "artists": [], "playlists": [] },
+                "local_playlists": []
+            }))
+            .unwrap();
+            let restored = stored.to_snapshot().unwrap();
+            assert_eq!(serde_json::to_value(&restored.favorites.tracks[0].image).unwrap(), image);
+            assert!(restored.favorites.tracks[0].media.favorite);
+        }
+    }
 
     #[test]
     fn repeated_tracks_keep_order_and_display_details_without_duplicating_metadata() {
