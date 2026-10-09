@@ -250,16 +250,30 @@ class _MediaSlideSectionMobileState<T>
                 _selectionController.select(index, widget.items.length),
             onToggleSelection: () =>
                 _selectionController.toggle(index, widget.items.length),
-            onTap: widget.onItemTap == null
+            onTap:
+                widget.onItemTap == null ||
+                    (widget.items[index] is Track &&
+                        !(widget.items[index] as Track).canPlay)
                 ? null
                 : () => widget.onItemTap!(widget.items[index]),
-            child: _MobileSlideCard<T>(
-              item: widget.items[index],
-              itemWidth: double.infinity,
-              coverSize: widget.coverSize,
-              coreEvents: widget.coreEvents,
-              onPlayTap: () => _playItem(index),
-              onTap: null,
+            child: Opacity(
+              opacity:
+                  resolvePlayableMediaItem(widget.items[index])?.canPlay ==
+                      false
+                  ? 0.35
+                  : 1,
+              child: _MobileSlideCard<T>(
+                item: widget.items[index],
+                itemWidth: double.infinity,
+                coverSize: widget.coverSize,
+                coreEvents: widget.coreEvents,
+                onPlayTap:
+                    resolvePlayableMediaItem(widget.items[index])?.canPlay ==
+                        true
+                    ? () => _playItem(index)
+                    : null,
+                onTap: null,
+              ),
             ),
           ),
         );
@@ -608,7 +622,9 @@ MediaItem? resolvePlayableMediaItem(Object? item) {
 }
 
 bool isValidPlayable(MediaItem item) {
-  return item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty;
+  return item.canPlay &&
+      item.itemId.trim().isNotEmpty &&
+      item.provider.trim().isNotEmpty;
 }
 
 String _albumSubtitle(Album album) {

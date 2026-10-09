@@ -38,6 +38,7 @@ const CONNECTION_LIVENESS_TIMEOUT: std::time::Duration = std::time::Duration::fr
 const STREAM_REPLACEMENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const DOWNLOAD_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 const DOWNLOAD_PROGRESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+const TRACK_STAGING_ATTEMPTS: usize = 3;
 const DOWNLOAD_RESUME_COMMAND_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
 const DOWNLOAD_QUEUE_REGISTRATION_ATTEMPTS: usize = 4;
 const DOWNLOAD_QUEUE_REGISTRATION_RETRY_DELAY: std::time::Duration =
@@ -84,6 +85,13 @@ pub(crate) struct DownloaderConnectionEvent {
     pub(crate) status: DownloaderConnectionStatus,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct TrackDownloadEvent {
+    pub(crate) generation: u64,
+    pub(crate) queue_item_id: crate::music_assistant::models::identifiers::QueueItemId,
+    pub(crate) has_failed: bool,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct DownloaderSlotConnectionState {
     generation: u64,
@@ -118,6 +126,7 @@ struct SendspinDownloaderWorker {
     event_sender: Sender<DownloaderCommand>,
     connection_event: Arc<Mutex<Option<DownloaderConnectionEvent>>>,
     connection_generation: Arc<AtomicU64>,
+    track_events: Arc<Mutex<Vec<TrackDownloadEvent>>>,
     downloads_allowed: Arc<AtomicBool>,
     // Updated by I/O tasks and used to validate a generated Ready event.
     slot_connection_states: [Arc<Mutex<DownloaderSlotConnectionState>>; 2],
@@ -159,6 +168,7 @@ impl SendspinDownloaderWorker {
             event_sender,
             connection_event: Arc::new(Mutex::new(None)),
             connection_generation: Arc::new(AtomicU64::new(0)),
+            track_events: Arc::new(Mutex::new(Vec::new())),
             downloads_allowed: Arc::new(AtomicBool::new(false)),
             slot_connection_states: [
                 Arc::new(Mutex::new(DownloaderSlotConnectionState::disconnected(0))),
@@ -290,6 +300,7 @@ impl SendspinDownloaderWorker {
         let task_connection_generation = connection_generation.load(Ordering::Acquire);
         let slot_connection_state = Arc::clone(&self.slot_connection_states[slot_index]);
         publish_slot_transport_connected(&slot_connection_state, task_connection_generation);
+        let track_events = Arc::clone(&self.track_events);
         let (controller, sender, guard, task) = self.runtime.block_on(async move {
             let client = ProtocolClientBuilder::builder()
                 .client_id(client_id)
@@ -334,6 +345,15 @@ impl SendspinDownloaderWorker {
                 let mut observed_cached_bytes = 0;
                 loop {
                     if cached_bytes > observed_cached_bytes {
+                        if observed_cached_bytes == 0 {
+                            if let Some(value) = reservation.as_ref() {
+                                if let Some(state) = states.lock().ok().and_then(|states| states.get(&value.cache_content_key).cloned()) {
+                                    if let Ok(mut events) = track_events.lock() {
+                                        events.push(TrackDownloadEvent { generation: task_connection_generation, queue_item_id: state.queue_item_id, has_failed: false });
+                                    }
+                                }
+                            }
+                        }
                         observed_cached_bytes = cached_bytes;
                         confirmed_download_progress.fetch_add(1, Ordering::Release);
                         download_progress_deadline = Some(
@@ -847,6 +867,7 @@ impl SendspinDownloaderWorker {
             .queue_items
             .into_iter()
             .enumerate()
+            .filter(|(_, item)| !request.excluded_queue_item_ids.contains(&item.queue_item_id))
             .map(|(queue_index, item)| {
                 let cache_content_key = cache_content_key_for_item(&item, config.preferred_codec)?;
                 let expected_duration_millis = item
@@ -988,6 +1009,10 @@ impl SendspinDownloaderWorker {
 
         // Admit only items whose remaining download size fits the projected cache footprint.
         for item in candidates {
+            if self.cache_states.lock().ok().and_then(|states| states.get(item.cache_content_key.as_str()).cloned())
+                .is_some_and(|state| state.state == CacheStatus::Failed) {
+                continue;
+            }
             if prioritized_items.len() == allowed_slot_count
                 || crate::cache::store::cache_complete_duration_millis(
                     &self.caches,
@@ -1433,7 +1458,11 @@ impl SendspinDownloaderWorker {
             None
         };
         let resume_reference = if requested_seek_seconds.is_none() {
-            prepare_reconnect_reference(&self.caches, item.cache_content_key.as_str(), is_current_item)
+            prepare_reconnect_reference(
+                &self.caches,
+                item.cache_content_key.as_str(),
+                is_current_item,
+            )
         } else {
             None
         };
@@ -1523,6 +1552,8 @@ impl SendspinDownloaderWorker {
         let connection_generation = Arc::clone(&self.connection_generation);
         let downloads_allowed = Arc::clone(&self.downloads_allowed);
         let request_connection_generation = connection_generation.load(Ordering::Acquire);
+        let track_events = Arc::clone(&self.track_events);
+        let queue_item_id = item.queue_item_id.clone();
         // The generation and reservation checks make this request harmless after preemption or reconnection.
         self.download_request_tasks[slot_index] = Some(self.runtime.spawn(async move {
             if !download_request_is_current(
@@ -1535,6 +1566,11 @@ impl SendspinDownloaderWorker {
                 return;
             }
             let client = MusicAssistantClient::new(&music_assistant_url, access_token);
+            let mut staging_attempt = 0;
+            loop {
+            if !downloads_allowed.load(Ordering::Acquire) {
+                return;
+            }
             if let Err(error) = client.player_stop(&player_id).await {
                 if download_request_is_current(
                     &slots,
@@ -1615,9 +1651,9 @@ impl SendspinDownloaderWorker {
                 return;
             }
             let result = client
-                .queue_play_media(queue_id.clone(), vec![media_item], "replace_next", false)
+                .queue_play_media(queue_id.clone(), vec![media_item.clone()], "replace_next", false)
                 .await;
-            if !download_request_is_current(
+            if !downloads_allowed.load(Ordering::Acquire) || !download_request_is_current(
                 &slots,
                 slot_index,
                 &reservation,
@@ -1636,6 +1672,23 @@ impl SendspinDownloaderWorker {
                 ));
             }
             if let Err(error) = result {
+                if error.is_track_staging_failure() {
+                    staging_attempt += 1;
+                    LOGGER.warn(format!("track staging attempt {staging_attempt}/{TRACK_STAGING_ATTEMPTS} failed: {}: {error}", reservation.title));
+                    if staging_attempt < TRACK_STAGING_ATTEMPTS {
+                        tokio::time::sleep(std::time::Duration::from_secs(if staging_attempt == 1 { 1 } else { 3 })).await;
+                        if !download_request_is_current(&slots, slot_index, &reservation, &connection_generation, request_connection_generation)
+                            || !downloads_allowed.load(Ordering::Acquire) {
+                            return;
+                        }
+                        continue;
+                    }
+                    release_incomplete_reservation(&slots, &caches, &cache_change_signal, &states, &event_sender, slot_index, &reservation);
+                    if let Ok(mut events) = track_events.lock() {
+                        events.push(TrackDownloadEvent { generation: request_connection_generation, queue_item_id: queue_item_id.clone(), has_failed: true });
+                    }
+                    return;
+                }
                 LOGGER.error(format!("failed to stage download slot media: {error}"));
                 downloads_allowed.store(false, Ordering::Release);
                 retain_interrupted_reservation(
@@ -1667,7 +1720,7 @@ impl SendspinDownloaderWorker {
                 ) {
                     return;
                 }
-                if let Err(error) = client.player_seek(player_id, position).await {
+                if let Err(error) = client.player_seek(player_id.clone(), position).await {
                     if !download_request_is_current(
                         &slots,
                         slot_index,
@@ -1699,7 +1752,7 @@ impl SendspinDownloaderWorker {
                     );
                     return;
                 }
-            } else if let Err(error) = client.queue_play_index(queue_id, 0).await {
+            } else if let Err(error) = client.queue_play_index(queue_id.clone(), 0).await {
                 if download_request_is_current(
                     &slots,
                     slot_index,
@@ -1726,6 +1779,8 @@ impl SendspinDownloaderWorker {
                         "download seek failure",
                     );
                 }
+            }
+            break;
             }
         }));
         Ok(())
@@ -1855,6 +1910,9 @@ pub(crate) struct SendspinDownloader {
     download_status_refresh: Arc<AtomicBool>,
     confirmed_download_progress: Arc<AtomicU64>,
     connection_event: Arc<Mutex<Option<DownloaderConnectionEvent>>>,
+    connection_generation: Arc<AtomicU64>,
+    downloads_allowed: Arc<AtomicBool>,
+    track_events: Arc<Mutex<Vec<TrackDownloadEvent>>>,
     slots: crate::cache::store::DownloadSlots,
     cache_bytes: Arc<AtomicUsize>,
     download_capacity_mode: Arc<Mutex<DownloadCapacityMode>>,
@@ -1877,6 +1935,9 @@ impl SendspinDownloader {
         let download_status_refresh = Arc::clone(&worker.download_status_refresh);
         let confirmed_download_progress = Arc::clone(&worker.confirmed_download_progress);
         let connection_event = Arc::clone(&worker.connection_event);
+        let connection_generation = Arc::clone(&worker.connection_generation);
+        let downloads_allowed = Arc::clone(&worker.downloads_allowed);
+        let track_events = Arc::clone(&worker.track_events);
         let cache_bytes = Arc::new(AtomicUsize::new(0));
         std::thread::spawn(move || run_downloader_worker(worker, receiver));
         Self {
@@ -1886,6 +1947,9 @@ impl SendspinDownloader {
             caches,
             download_status_refresh,
             connection_event,
+            connection_generation,
+            downloads_allowed,
+            track_events,
             slots,
             cache_bytes,
             download_capacity_mode,
@@ -1909,6 +1973,10 @@ impl SendspinDownloader {
 
     pub(crate) fn reconnect(&self) -> Result<(), String> {
         self.send(DownloaderCommand::Reconnect)
+    }
+
+    pub(crate) fn suspend_downloads(&self) {
+        self.downloads_allowed.store(false, Ordering::Release);
     }
 
     pub(crate) fn restart_for_codec_change(
@@ -1948,6 +2016,19 @@ impl SendspinDownloader {
     }
 
     // Worker event and status queries.
+    pub(crate) fn take_track_events(&self) -> Vec<TrackDownloadEvent> {
+        let generation = self.connection_generation.load(Ordering::Acquire);
+        self.track_events
+            .lock()
+            .map(|mut events| {
+                std::mem::take(&mut *events)
+                    .into_iter()
+                    .filter(|event| event.generation == generation)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub(crate) fn take_download_status_refresh(&self) -> bool {
         self.download_status_refresh.swap(false, Ordering::AcqRel)
     }
@@ -2061,6 +2142,10 @@ impl SendspinDownloader {
 
     pub(crate) fn cache_identity(&self, content_key: &str) -> Option<u64> {
         crate::cache::store::cache_identity(&self.caches, content_key)
+    }
+
+    pub(crate) fn has_complete_cache(&self, content_key: &str) -> bool {
+        crate::cache::store::cache_complete_duration_millis(&self.caches, content_key).is_some()
     }
 
     pub(crate) fn local_cache_seek_target(
@@ -2587,13 +2672,13 @@ fn release_incomplete_reservation(
     }
     crate::cache::store::cache_discard_incomplete(caches, &reservation.cache_content_key);
     crate::cache::store::notify_cache_changed(cache_change_signal);
-    let _ = event_sender.send(DownloaderCommand::ReconcileCacheAndDownloads);
     if let Ok(mut states) = states.lock() {
         if let Some(state) = states.get_mut(&reservation.cache_content_key) {
             state.state = CacheStatus::Failed;
             state.cached_duration_millis = 0;
         }
     }
+    let _ = event_sender.send(DownloaderCommand::ReconcileCacheAndDownloads);
 }
 
 fn download_request_is_current(
@@ -3172,12 +3257,197 @@ mod tests {
     }
 
     #[test]
+    fn stale_track_events_are_discarded_after_generation_changes() {
+        let downloader = super::SendspinDownloader::new();
+        downloader.connection_generation.store(2, Ordering::Release);
+        downloader.track_events.lock().unwrap().extend([
+            super::TrackDownloadEvent {
+                generation: 1,
+                queue_item_id: crate::music_assistant::models::identifiers::QueueItemId(
+                    "old".to_string(),
+                ),
+                has_failed: true,
+            },
+            super::TrackDownloadEvent {
+                generation: 2,
+                queue_item_id: crate::music_assistant::models::identifiers::QueueItemId(
+                    "new".to_string(),
+                ),
+                has_failed: false,
+            },
+        ]);
+        let events = downloader.take_track_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].queue_item_id.as_str(), "new");
+        assert!(downloader.take_track_events().is_empty());
+    }
+
+    #[test]
+    fn http_500_staging_retries_three_times_then_fails_only_the_track() {
+        let (worker, commands) = stage_http_responses(&[500, 500, 500]);
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|command| command.as_str() == "player_queues/play_media")
+                .count(),
+            3
+        );
+        assert!(worker.downloads_allowed.load(Ordering::Acquire));
+        assert!(worker.connection_event.lock().unwrap().is_none());
+        let events = worker.track_events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(events[0].has_failed);
+        assert_eq!(events[0].queue_item_id.as_str(), "track");
+        assert_eq!(
+            worker.cache_states.lock().unwrap()["track"].state,
+            super::CacheStatus::Failed
+        );
+        assert!(worker.slots.lock().unwrap()[0].is_none());
+    }
+
+    #[test]
+    fn successful_staging_retry_does_not_skip_or_reconnect() {
+        let (worker, commands) = stage_http_responses(&[500, 200]);
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|command| command.as_str() == "player_queues/play_media")
+                .count(),
+            2
+        );
+        assert!(commands.last().unwrap().contains("play_index"));
+        assert!(worker.track_events.lock().unwrap().is_empty());
+        assert!(worker.connection_event.lock().unwrap().is_none());
+        assert!(worker.downloads_allowed.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn infrastructure_failure_preserves_the_connection_loss_path() {
+        let (worker, commands) = stage_http_responses(&[503]);
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|command| command.as_str() == "player_queues/play_media")
+                .count(),
+            1
+        );
+        assert!(worker.track_events.lock().unwrap().is_empty());
+        assert!(!worker.downloads_allowed.load(Ordering::Acquire));
+        assert_eq!(
+            worker
+                .connection_event
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .status,
+            super::DownloaderConnectionStatus::Lost
+        );
+    }
+
+    fn stage_http_responses(statuses: &[u16]) -> (super::SendspinDownloaderWorker, Vec<String>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let statuses = statuses.to_vec();
+        let response_count = statuses.len() * 3 + usize::from(statuses.last() == Some(&200));
+        let server = std::thread::spawn(move || {
+            let mut commands = Vec::new();
+            let mut staging_attempt = 0;
+            for _ in 0..response_count {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(15)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0_u8; 1024];
+                let body_offset = loop {
+                    let bytes_read = stream.read(&mut buffer).unwrap();
+                    assert!(bytes_read > 0);
+                    request.extend_from_slice(&buffer[..bytes_read]);
+                    if let Some(offset) = request.windows(4).position(|part| part == b"\r\n\r\n") {
+                        break offset + 4;
+                    }
+                };
+                let headers = std::str::from_utf8(&request[..body_offset]).unwrap();
+                let body_length: usize = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse().unwrap())
+                    })
+                    .unwrap();
+                while request.len() < body_offset + body_length {
+                    let bytes_read = stream.read(&mut buffer).unwrap();
+                    assert!(bytes_read > 0);
+                    request.extend_from_slice(&buffer[..bytes_read]);
+                }
+                let payload: serde_json::Value =
+                    serde_json::from_slice(&request[body_offset..body_offset + body_length]).unwrap();
+                let command = payload["command"].as_str().unwrap().to_string();
+                let status = if command == "player_queues/play_media" {
+                    let status = statuses[staging_attempt];
+                    staging_attempt += 1;
+                    status
+                } else {
+                    200
+                };
+                commands.push(command);
+                let body = if status == 200 {
+                    "null"
+                } else {
+                    "Internal server error"
+                };
+                write!(
+                    stream,
+                    "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .unwrap();
+            }
+            commands
+        });
+        let caches = Arc::new(Mutex::new(std::collections::HashMap::new()));
+        let mut worker = worker_with_cached_plan(caches, usize::MAX);
+        worker.config.as_mut().unwrap().music_assistant_url = endpoint;
+        worker.queue_ids[0] = Some(crate::music_assistant::models::identifiers::QueueId(
+            "test-queue".to_string(),
+        ));
+        worker.player_ids[0] = Some(crate::music_assistant::models::identifiers::PlayerId(
+            "test-player".to_string(),
+        ));
+        worker.downloads_allowed.store(true, Ordering::Release);
+        let item = worker.plan.as_ref().unwrap().items[0].clone();
+        worker.cache_states.lock().unwrap().insert(
+            "track".to_string(),
+            super::CacheItemState {
+                queue_item_id: item.queue_item_id.clone(),
+                state: super::CacheStatus::Queued,
+                cached_duration_millis: 0,
+            },
+        );
+        worker
+            .start_slot_download(0, &item, &worker.config.clone().unwrap())
+            .unwrap();
+        let task = worker.download_request_tasks[0].take().unwrap();
+        worker.runtime.block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(20), task)
+                .await
+                .unwrap()
+                .unwrap();
+        });
+        (worker, server.join().unwrap())
+    }
+
+    #[test]
     fn pending_download_plan_overtakes_redundant_reconciliation() {
         let (sender, receiver) = mpsc::channel();
         for _ in 0..50 {
             sender.send(DownloaderCommand::ReconcileCacheAndDownloads).unwrap();
         }
         sender.send(DownloaderCommand::ApplyDownloadPlan(SendspinDownloadPlanRequest {
+            excluded_queue_item_ids: Vec::new(),
             queue_revision: 2,
             queue_items: Vec::new(),
             current_index: None,

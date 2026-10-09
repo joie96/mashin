@@ -179,6 +179,8 @@ pub(crate) struct MediaItemFields {
     pub(crate) external_ids: Vec<Vec<String>>,
     #[serde(default = "default_true")]
     pub(crate) is_playable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) available: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_nullable_vec")]
     pub(crate) provider_mappings: Vec<ProviderMapping>,
     #[serde(default)]
@@ -197,6 +199,14 @@ pub(crate) struct Artist {
     pub(crate) media: MediaItemFields,
     #[serde(default)]
     pub(crate) artist_type: Option<String>,
+}
+
+impl MediaItemFields {
+    // Availability remains optimistic when neither mappings nor a server flag are known.
+    pub(crate) fn is_available(&self) -> bool {
+        self.available != Some(false)
+            && (self.provider_mappings.is_empty() || self.provider_mappings.iter().any(|mapping| mapping.available))
+    }
 }
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct Album {

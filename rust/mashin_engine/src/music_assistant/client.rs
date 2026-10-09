@@ -1,16 +1,56 @@
 use super::models::identifiers::{AccessToken, MediaId, PlayerId, QueueId};
 use super::models::media::{
-    Album, Artist, MediaItem, MediaType, MusicAssistantSearchResults, Playlist, Track,
+    Album, Artist, MediaItem, MediaItemFields, MediaType, MusicAssistantSearchResults, Playlist, Track,
 };
 use super::models::player::MusicAssistantPlayer;
 use super::models::queue::{MusicAssistantQueue, QueueItem, RepeatMode};
 use super::models::recommendation::MusicAssistantRecommendationFolder;
-use super::models::session::{MusicAssistantUser, ProviderManifest, ServerInfo};
+use super::models::session::{MusicAssistantUser, ProviderInstance, ProviderManifest, ServerInfo};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use std::collections::HashSet;
+use std::time::{Duration, Instant};
+
+struct ProviderAvailabilitySnapshot {
+    endpoint: String,
+    access_token: Option<AccessToken>,
+    expires_at: Instant,
+    providers: Option<Vec<ProviderInstance>>,
+}
+
+static PROVIDER_AVAILABILITY: once_cell::sync::Lazy<tokio::sync::Mutex<Vec<ProviderAvailabilitySnapshot>>> =
+    once_cell::sync::Lazy::new(|| tokio::sync::Mutex::new(Vec::new()));
 
 const RADIO_MAXIMUM_TRACK_DURATION_SECONDS: u32 = 20 * 60;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum HttpCommandError {
+    Http { command: String, status: u16, details: String },
+    Transport { command: String, is_timeout: bool, is_connect: bool, details: String },
+    InvalidResponse { command: String, details: String },
+}
+
+impl HttpCommandError {
+    pub(crate) fn is_track_staging_failure(&self) -> bool {
+        matches!(self, Self::Http { command, status: 500, .. } if command == "player_queues/play_media")
+    }
+}
+
+impl std::fmt::Display for HttpCommandError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Http { command, status, details } => write!(formatter, "Music Assistant command '{command}' returned HTTP {status}: {details}"),
+            Self::Transport { command, details, .. } => write!(formatter, "Music Assistant command '{command}' transport failed: {details}"),
+            Self::InvalidResponse { command, details } => write!(formatter, "Music Assistant command '{command}' returned invalid JSON: {details}"),
+        }
+    }
+}
+
+impl From<HttpCommandError> for String {
+    fn from(error: HttpCommandError) -> Self {
+        error.to_string()
+    }
+}
 
 pub(crate) struct MusicAssistantClient {
     endpoint: String,
@@ -24,7 +64,11 @@ impl MusicAssistantClient {
         Self {
             endpoint: format!("{}/api", base_url.trim_end_matches('/')),
             access_token,
-            http_client: reqwest::Client::new(),
+            http_client: reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(5))
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .expect("create Music Assistant HTTP client"),
         }
     }
 
@@ -391,12 +435,12 @@ impl MusicAssistantClient {
         media: Vec<MediaItem>,
         option: &str,
         radio_mode: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), HttpCommandError> {
         let media = media
             .into_iter()
             .map(queue_media_payload)
             .collect::<Vec<_>>();
-        self.execute_command::<Value>(
+        self.execute_http_command::<Value>(
             "player_queues/play_media",
             json!({
                 "queue_id": queue_id,
@@ -469,11 +513,56 @@ impl MusicAssistantClient {
     }
 
     // HTTP command transport.
+    async fn provider_availability(&self) -> Option<Vec<ProviderInstance>> {
+        let mut snapshots = PROVIDER_AVAILABILITY.lock().await;
+        snapshots.retain(|snapshot| snapshot.expires_at > Instant::now());
+        if let Some(snapshot) = snapshots.iter().find(|snapshot| {
+            snapshot.endpoint == self.endpoint && snapshot.access_token == self.access_token
+        }) {
+            return snapshot.providers.clone();
+        }
+        let providers = tokio::time::timeout(
+            Duration::from_secs(5),
+            self.execute_http_command::<Vec<ProviderInstance>>("providers", json!({})),
+        )
+        .await
+        .ok()
+        .and_then(Result::ok);
+        snapshots.push(ProviderAvailabilitySnapshot {
+            endpoint: self.endpoint.clone(),
+            access_token: self.access_token.clone(),
+            expires_at: Instant::now() + Duration::from_secs(if providers.is_some() { 30 } else { 5 }),
+            providers: providers.clone(),
+        });
+        providers
+    }
+
     async fn execute_command<Response>(
         &self,
         command: &str,
         arguments: Value,
     ) -> Result<Response, String>
+    where
+        Response: DeserializeOwned,
+    {
+        let mut response: Value = self
+            .execute_http_command(command, arguments)
+            .await
+            .map_err(String::from)?;
+        if command.starts_with("music/") {
+            let providers = self.provider_availability().await;
+            annotate_media_availability(&mut response, providers.as_deref());
+        }
+        serde_json::from_value(response).map_err(|error| {
+            format!("Music Assistant command '{command}' returned invalid data: {error}")
+        })
+    }
+
+    async fn execute_http_command<Response>(
+        &self,
+        command: &str,
+        arguments: Value,
+    ) -> Result<Response, HttpCommandError>
     where
         Response: DeserializeOwned,
     {
@@ -491,22 +580,36 @@ impl MusicAssistantClient {
         let response = request
             .send()
             .await
-            .map_err(|error| format!("Music Assistant command failed: {error}"))?;
+            .map_err(|error| HttpCommandError::Transport {
+                command: command.to_string(),
+                is_timeout: error.is_timeout(),
+                is_connect: error.is_connect(),
+                details: error.to_string(),
+            })?;
         let status = response.status();
-        let response_body = response.text().await.map_err(|error| {
-            format!("Music Assistant command '{command}' response failed: {error}")
-        })?;
+        let response_body = response
+            .text()
+            .await
+            .map_err(|error| HttpCommandError::Transport {
+                command: command.to_string(),
+                is_timeout: error.is_timeout(),
+                is_connect: error.is_connect(),
+                details: error.to_string(),
+            })?;
         if !status.is_success() {
             let response_excerpt = response_body.chars().take(512).collect::<String>();
-            return Err(format!(
-                "Music Assistant command '{command}' returned HTTP {status}: {response_excerpt}",
-            ));
+            return Err(HttpCommandError::Http {
+                command: command.to_string(),
+                status: status.as_u16(),
+                details: response_excerpt,
+            });
         }
         serde_json::from_str(&response_body).map_err(|error| {
             let response_excerpt = response_body.chars().take(512).collect::<String>();
-            format!(
-                "Music Assistant command '{command}' returned invalid JSON: {error}; response: {response_excerpt}"
-            )
+            HttpCommandError::InvalidResponse {
+                command: command.to_string(),
+                details: format!("{error}; response: {response_excerpt}"),
+            }
         })
     }
 }
@@ -526,6 +629,43 @@ fn queue_media_payload(media_item: MediaItem) -> Value {
         _ => {}
     }
     payload
+}
+
+// Serialization boundary: preserve provider metadata while adding the effective availability flag.
+fn annotate_media_availability(value: &mut Value, providers: Option<&[ProviderInstance]>) {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                annotate_media_availability(item, providers);
+            }
+        }
+        Value::Object(fields) => {
+            if fields.contains_key("item_id") && fields.contains_key("provider") {
+                if let Ok(media) =
+                    serde_json::from_value::<MediaItemFields>(Value::Object(fields.clone()))
+                {
+                    let available = media.is_available()
+                        && (media.provider_mappings.is_empty()
+                            || media.provider_mappings.iter().any(|mapping| {
+                                mapping.available
+                                    && providers
+                                        .map(|providers| {
+                                            providers.iter().any(|provider| {
+                                                provider.instance_id == mapping.provider_instance
+                                                    && provider.available
+                                            })
+                                        })
+                                        .unwrap_or(true)
+                            }));
+                    fields.insert("available".to_string(), json!(available));
+                }
+            }
+            for field in fields.values_mut() {
+                annotate_media_availability(field, providers);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn tag_artists(artists: &mut Value) {
@@ -561,6 +701,7 @@ fn filter_radio_tracks(radio_tracks: Vec<Track>, started_tracks: &[Track]) -> Ve
     let mut track_keys = HashSet::new();
     radio_tracks
         .into_iter()
+        .filter(|track| track.media.is_playable && track.media.is_available())
         .filter(|track| !started_track_keys.contains(&track_key(track)))
         .filter(|track| track.duration <= RADIO_MAXIMUM_TRACK_DURATION_SECONDS)
         .filter(|track| track_keys.insert(track_key(track)))
@@ -633,6 +774,63 @@ mod tests {
     use crate::music_assistant::models::identifiers::MediaId;
     use crate::music_assistant::models::media::{MediaItem, Track};
     use serde_json::json;
+
+    #[test]
+    fn availability_combines_mappings_with_live_provider_status() {
+        let mut track = json!({ "item_id": "track", "provider": "library", "name": "Track", "provider_mappings": [
+            { "item_id": "one", "provider_domain": "deezer", "provider_instance": "deezer-one", "available": false },
+            { "item_id": "two", "provider_domain": "deezer", "provider_instance": "deezer-two", "available": true }
+        ] });
+        let mut providers: Vec<super::ProviderInstance> = serde_json::from_value(json!([
+            { "instance_id": "deezer-one", "available": true }, { "instance_id": "deezer-two", "available": false }
+        ])).unwrap();
+        super::annotate_media_availability(&mut track, Some(&providers));
+        assert_eq!(track["available"], false);
+        track.as_object_mut().unwrap().remove("available");
+        providers[1].available = true;
+        super::annotate_media_availability(&mut track, Some(&providers));
+        assert_eq!(track["available"], true);
+        assert_eq!(track["provider_mappings"][0]["available"], false);
+    }
+
+    #[test]
+    fn unknown_provider_status_does_not_block_metadata_available_tracks() {
+        let mut tracks = json!([
+            { "item_id": "unknown", "provider": "library", "name": "Unknown" },
+            { "item_id": "slim", "provider": "deezer", "name": "Unavailable", "available": false },
+            { "item_id": "mapped", "provider": "deezer", "name": "Unavailable", "provider_mappings": [
+                { "item_id": "mapped", "provider_domain": "deezer", "provider_instance": "deezer-one", "available": false }
+            ] }
+        ]);
+        super::annotate_media_availability(&mut tracks, None);
+        assert_eq!(tracks[0]["available"], true);
+        assert_eq!(tracks[1]["available"], false);
+        assert_eq!(tracks[2]["available"], false);
+    }
+
+    #[test]
+    fn only_play_media_http_500_is_a_track_staging_failure() {
+        for (command, status, expected) in [
+            ("player_queues/play_media", 500, true),
+            ("player_queues/play_media", 401, false),
+            ("player_queues/play_media", 503, false),
+            ("player_queues/clear", 500, false),
+        ] {
+            let error = super::HttpCommandError::Http {
+                command: command.to_string(),
+                status,
+                details: "Internal server error".to_string(),
+            };
+            assert_eq!(error.is_track_staging_failure(), expected);
+        }
+        assert!(!super::HttpCommandError::Transport {
+            command: "player_queues/play_media".to_string(),
+            is_timeout: true,
+            is_connect: false,
+            details: "timeout".to_string(),
+        }
+        .is_track_staging_failure());
+    }
 
     #[test]
     fn radio_uses_the_original_media_uri_as_playlist_item_id() {

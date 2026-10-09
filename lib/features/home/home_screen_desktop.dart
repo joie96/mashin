@@ -83,30 +83,35 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
     return <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
+        isEnabled: item.canPlay,
         icon: Icons.play_arrow,
         onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[item]),
       ),
       if (item is Album || item is Playlist)
         ContextMenuAction(
           label: 'Zufällig abspielen',
+          isEnabled: item.canPlay,
           icon: Icons.shuffle_outlined,
           onSelected: () =>
               widget.coreBridge.queuePlayMedia(<MediaItem>[item], shuffle: true),
         ),
       ContextMenuAction(
         label: 'Radio starten',
+        isEnabled: item.canPlay,
         icon: Icons.radio_outlined,
         onSelected: () =>
             widget.coreBridge.startSendspinRadio(<MediaItem>[item]),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
+        isEnabled: item.canPlay,
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
         onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[item], option: QueueOption.next),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
+        isEnabled: item.canPlay,
         icon: Icons.last_page,
         onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[item], option: QueueOption.add),
       ),

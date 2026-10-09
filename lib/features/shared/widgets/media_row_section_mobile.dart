@@ -123,7 +123,9 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
   }
 
   bool _isValidPlayable(MediaItem item) {
-    return item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty;
+    return item.canPlay &&
+        item.itemId.trim().isNotEmpty &&
+        item.provider.trim().isNotEmpty;
   }
 
   bool get _isTrackSection => T == Track;
@@ -395,13 +397,16 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
       );
     }
     if (item is Track) {
-      return _buildMobileMediaRowTrack(
-        item: item,
-        itemWidth: itemWidth,
-        coverSize: coverSize,
-        onPlayTap: () => _onPlayTap(index),
-        onItemTap: onItemTap,
-        coreEvents: coreEvents,
+      return Opacity(
+        opacity: item.canPlay ? 1 : 0.35,
+        child: _buildMobileMediaRowTrack(
+          item: item,
+          itemWidth: itemWidth,
+          coverSize: coverSize,
+          onPlayTap: item.canPlay ? () => _onPlayTap(index) : null,
+          onItemTap: onItemTap,
+          coreEvents: coreEvents,
+        ),
       );
     }
     return _buildMobileMediaRowUnknown(
@@ -446,6 +451,9 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
   }
 
   VoidCallback? _itemTapCallback(T item) {
+    if (item is Track && !item.canPlay) {
+      return null;
+    }
     final ValueChanged<T>? onTap = onItemTap;
     return onTap == null ? null : () => onTap(item);
   }

@@ -28,7 +28,7 @@ pub(crate) async fn resolve_radio_tracks(
         let started_tracks = media_items
             .into_iter()
             .filter_map(|item| match item {
-                MediaItem::Track(track) => Some(track),
+                MediaItem::Track(track) if track.media.is_playable && track.media.is_available() => Some(track),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -62,6 +62,7 @@ pub(crate) async fn resolve_radio_tracks(
         }
         _ => resolve_music_assistant_media_items(client, vec![radio_seed.clone()]).await?,
     };
+    source_tracks.retain(|track| track.media.is_playable && track.media.is_available());
     if matches!(radio_seed, MediaItem::Artist(_)) {
         source_tracks.truncate(RADIO_ARTIST_SEED_LIMIT);
     }
@@ -81,8 +82,11 @@ pub(crate) async fn resolve_radio_tracks(
 
 fn select_radio_seed(media_items: &[MediaItem]) -> Result<MediaItem, String> {
     let radio_seed = media_items
+        .iter()
+        .filter(|item| item.fields().is_playable && item.fields().is_available())
+        .collect::<Vec<_>>()
         .choose(&mut rand::thread_rng())
-        .cloned()
+        .map(|item| (*item).clone())
         .ok_or_else(|| "radio requires at least one media item".to_string())?;
     if !matches!(
         radio_seed,
@@ -284,6 +288,17 @@ mod tests {
     }
 
     #[test]
+    fn radio_does_not_choose_a_known_unavailable_seed() {
+        let mut unavailable = track(1);
+        unavailable.media.available = Some(false);
+        let available = track(2);
+        for _ in 0..20 {
+            assert_eq!(select_radio_seed(&[MediaItem::Track(unavailable.clone()), MediaItem::Track(available.clone())]).unwrap(), MediaItem::Track(available.clone()));
+        }
+        assert!(select_radio_seed(&[MediaItem::Track(unavailable)]).is_err());
+    }
+
+    #[test]
     fn radio_rejects_mixed_media_types() {
         let album = serde_json::from_value(serde_json::json!({
             "media_type": "album", "item_id": "album-1", "provider": "library", "name": "Album",
@@ -302,6 +317,7 @@ mod tests {
             uri: None,
             external_ids: Vec::new(),
             is_playable: true,
+            available: None,
             provider_mappings: mappings,
             metadata: None,
             favorite: false,

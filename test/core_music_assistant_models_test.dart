@@ -42,6 +42,77 @@ Map<String, dynamic> _mediaJson(String mediaType) => <String, dynamic>{
 };
 
 void main() {
+  test(
+    'complete queue cache bypasses provider unavailability but partial cache does not',
+    () {
+      final media = Track.fromJson(_mediaJson('track')..['available'] = false);
+      final partial = QueueItem(
+        queueItemId: 'partial',
+        mediaItem: media,
+        available: false,
+        cache: const CacheState(
+          status: CacheStatus.interrupted,
+          cachedDurationMillis: 30000,
+        ),
+      );
+      final complete = QueueItem(
+        queueItemId: 'complete',
+        mediaItem: media,
+        available: false,
+        cache: const CacheState(
+          status: CacheStatus.complete,
+          cachedDurationMillis: 120000,
+        ),
+      );
+      expect(partial.canPlay, isFalse);
+      expect(partial.isAvailable, isFalse);
+      expect(complete.canPlay, isTrue);
+      expect(complete.isAvailable, isTrue);
+      final buffering = QueueItem(
+        queueItemId: 'buffering',
+        mediaItem: media,
+        available: true,
+        cache: const CacheState(
+          status: CacheStatus.buffering,
+          cachedDurationMillis: 120000,
+        ),
+      );
+      expect(buffering.canPlay, isTrue);
+      expect(buffering.isAvailable, isTrue);
+    },
+  );
+
+  test('availability survives parsing and playback payload serialization', () {
+    for (final mediaType in <String>[
+      'track',
+      'album',
+      'artist',
+      'playlist',
+      'radio',
+      'audiobook',
+      'podcast',
+      'folder',
+    ]) {
+      final json = _mediaJson(mediaType)..['available'] = false;
+      final item = mediaItemFromJson(json);
+      expect(item.isAvailable, isFalse);
+      expect(item.canPlay, isFalse);
+      expect(createMusicAssistantMediaItemPayload(item)['available'], isFalse);
+    }
+  });
+
+  test(
+    'unknown availability is optimistic but unavailable mappings are not',
+    () {
+      final json = _mediaJson('track')..['is_playable'] = true;
+      expect(Track.fromJson(json).canPlay, isTrue);
+      (json['provider_mappings'] as List).first['available'] = false;
+      expect(Track.fromJson(json).canPlay, isFalse);
+      json['provider_mappings'] = null;
+      expect(Track.fromJson(json).canPlay, isTrue);
+    },
+  );
+
   tearDown(() => MediaItemImage.configureProxyBaseUrl(null));
 
   test('decodes all concrete Music Assistant media variants', () {
@@ -300,7 +371,10 @@ void main() {
     expect(payload['podcast']['media_type'], 'podcast');
     expect(payload['podcast']['publisher'], isNull);
     expect(payload['podcast']['total_episodes'], isNull);
-    expect(payload['podcast']['metadata']['images'][0]['proxy_id'], 'podcast-proxy-id');
+    expect(
+      payload['podcast']['metadata']['images'][0]['proxy_id'],
+      'podcast-proxy-id',
+    );
   });
 
   test('decodes canonical Music Assistant player and session contracts', () {

@@ -205,91 +205,96 @@ class _MediaListTileState<T extends MediaItem>
     final colors = context.mashinColors;
     final String title = _displayName(widget.item);
 
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() {
-        _isHovered = false;
-        _isPlayHovered = false;
-      }),
-      child: Listener(
-        onPointerDown: (PointerDownEvent event) {
-          if (event.kind == PointerDeviceKind.mouse &&
-              (event.buttons & kSecondaryMouseButton) != 0) {
-            widget.onContextMenu?.call(event.position);
-          }
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          decoration: BoxDecoration(
-            color: colors.bgSecondary,
-            borderRadius: BorderRadius.circular(5),
-            boxShadow: _isHovered
-                ? <BoxShadow>[
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.20),
-                      blurRadius: 8,
-                      offset: const Offset(0, 4),
-                    ),
-                  ]
-                : null,
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Stack(
-            children: <Widget>[
-              Positioned(
-                top: 0,
-                bottom: 0,
-                left: 0,
-                width: 8,
-                child: ColoredBox(color: accentColorFromText(title)),
-              ),
-              Padding(
-                padding: const EdgeInsets.only(left: 24, right: 56),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: MediaLinkText(
-                    items: <MediaItem>[widget.item],
-                    fallbackText: title,
-                    onItemTap: widget.onItemTap == null
-                        ? null
-                        : (MediaItem item) => widget.onItemTap!(item as T),
-                    style: TextStyle(
-                      color: colors.textSecondary,
-                      fontWeight: FontWeight.w500,
+    return Opacity(
+      opacity: widget.item.canPlay ? 1 : 0.35,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() {
+          _isHovered = false;
+          _isPlayHovered = false;
+        }),
+        child: Listener(
+          onPointerDown: (PointerDownEvent event) {
+            if (event.kind == PointerDeviceKind.mouse &&
+                (event.buttons & kSecondaryMouseButton) != 0) {
+              widget.onContextMenu?.call(event.position);
+            }
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            decoration: BoxDecoration(
+              color: colors.bgSecondary,
+              borderRadius: BorderRadius.circular(5),
+              boxShadow: _isHovered
+                  ? <BoxShadow>[
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.20),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                    ]
+                  : null,
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Stack(
+              children: <Widget>[
+                Positioned(
+                  top: 0,
+                  bottom: 0,
+                  left: 0,
+                  width: 8,
+                  child: ColoredBox(color: accentColorFromText(title)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(left: 24, right: 56),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: MediaLinkText(
+                      items: <MediaItem>[widget.item],
+                      fallbackText: title,
+                      onItemTap: widget.onItemTap == null
+                          ? null
+                          : (MediaItem item) => widget.onItemTap!(item as T),
+                      style: TextStyle(
+                        color: colors.textSecondary,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                 ),
-              ),
-              Positioned(
-                top: 8,
-                right: 12,
-                child: IgnorePointer(
-                  ignoring: !_isHovered,
-                  child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 150),
-                    opacity: _isHovered ? 1 : 0,
-                    child: AnimatedSlide(
+                Positioned(
+                  top: 8,
+                  right: 12,
+                  child: IgnorePointer(
+                    ignoring: !_isHovered,
+                    child: AnimatedOpacity(
                       duration: const Duration(milliseconds: 150),
-                      offset: _isHovered ? Offset.zero : const Offset(0.25, 0),
-                      child: MouseRegion(
-                        onEnter: (_) => setState(() => _isPlayHovered = true),
-                        onExit: (_) => setState(() => _isPlayHovered = false),
-                        child: AnimatedScale(
-                          duration: const Duration(milliseconds: 100),
-                          scale: _isPlayHovered ? 1.1 : 1,
-                          child: GestureDetector(
-                            onTap: _play,
-                            child: Container(
-                              width: 32,
-                              height: 32,
-                              decoration: BoxDecoration(
-                                color: colors.overlayPlayButtonBackground,
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: Icon(
-                                Icons.play_arrow_sharp,
-                                size: 21,
-                                color: colors.overlayPlayButtonForeground,
+                      opacity: _isHovered ? 1 : 0,
+                      child: AnimatedSlide(
+                        duration: const Duration(milliseconds: 150),
+                        offset: _isHovered
+                            ? Offset.zero
+                            : const Offset(0.25, 0),
+                        child: MouseRegion(
+                          onEnter: (_) => setState(() => _isPlayHovered = true),
+                          onExit: (_) => setState(() => _isPlayHovered = false),
+                          child: AnimatedScale(
+                            duration: const Duration(milliseconds: 100),
+                            scale: _isPlayHovered ? 1.1 : 1,
+                            child: GestureDetector(
+                              onTap: _play,
+                              child: Container(
+                                width: 32,
+                                height: 32,
+                                decoration: BoxDecoration(
+                                  color: colors.overlayPlayButtonBackground,
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: Icon(
+                                  Icons.play_arrow_sharp,
+                                  size: 21,
+                                  color: colors.overlayPlayButtonForeground,
+                                ),
                               ),
                             ),
                           ),
@@ -298,8 +303,8 @@ class _MediaListTileState<T extends MediaItem>
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -357,7 +362,9 @@ String _displayName(MediaItem item) {
 }
 
 bool _isValidPlayable(MediaItem item) {
-  return item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty;
+  return item.canPlay &&
+      item.itemId.trim().isNotEmpty &&
+      item.provider.trim().isNotEmpty;
 }
 
 Color accentColorFromText(String text) {

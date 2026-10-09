@@ -339,6 +339,8 @@ class HomeController extends ChangeNotifier {
       provider: playlist.provider,
       name: normalizedName,
       isEditable: playlist.isEditable,
+      isPlayable: playlist.isPlayable,
+      available: playlist.available,
       sortName: playlist.sortName,
       uri: playlist.uri,
       owner: null,

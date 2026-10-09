@@ -99,6 +99,7 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
     final List<ContextMenuAction> actions = <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
+        isEnabled: tracks.isEmpty ? item.canPlay : tracks.any((track) => track.canPlay),
         icon: Icons.play_arrow,
         onSelected: () => widget.coreBridge.queuePlayMedia(
           tracks.isEmpty ? <MediaItem>[item] : tracks,
@@ -108,12 +109,14 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
       if (item is Album || item is Playlist)
         ContextMenuAction(
           label: 'Zufällig abspielen',
+          isEnabled: item.canPlay,
           icon: Icons.shuffle_outlined,
           onSelected: () =>
               widget.coreBridge.queuePlayMedia(<MediaItem>[item], shuffle: true),
         ),
       ContextMenuAction(
         label: 'Radio starten',
+        isEnabled: tracks.isEmpty ? item.canPlay : tracks.any((track) => track.canPlay),
         icon: Icons.radio_outlined,
         onSelected: () => item is Track
             ? widget.coreBridge.startSendspinRadio(
@@ -123,6 +126,7 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
+        isEnabled: tracks.isEmpty ? item.canPlay : tracks.any((track) => track.canPlay),
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
         onSelected: () => widget.coreBridge.queuePlayMedia(
@@ -132,6 +136,7 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
+        isEnabled: tracks.isEmpty ? item.canPlay : tracks.any((track) => track.canPlay),
         icon: Icons.last_page,
         onSelected: () => widget.coreBridge.queuePlayMedia(
           tracks.isEmpty ? <MediaItem>[item] : tracks,

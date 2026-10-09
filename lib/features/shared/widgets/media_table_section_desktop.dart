@@ -225,7 +225,9 @@ class _MediaTableSectionDesktopState<T>
   }
 
   bool _isValidPlayable(MediaItem item) {
-    return item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty;
+    return item.canPlay &&
+        item.itemId.trim().isNotEmpty &&
+        item.provider.trim().isNotEmpty;
   }
 
   bool get _isTrackSection => T == Track;
@@ -278,6 +280,12 @@ class _MediaTableSectionDesktopState<T>
   }
 
   void _onRowActivated({required T item, required int index}) {
+    if (item is QueueItem && !item.canPlay) {
+      return;
+    }
+    if (item is MediaItem && !item.canPlay) {
+      return;
+    }
     unawaited(() async {
       final bool handled = await _handleRowActivate(item: item, index: index);
       if (!handled) {
@@ -1439,94 +1447,97 @@ Widget _buildDesktopTableRowTrack({
   ValueChanged<int>? onArtistPointerDown,
   ValueChanged<Album>? onAlbumTap,
 }) {
-  return _buildDesktopTableRowBase(
-    cells: <Widget>[
-      _buildDesktopTableSizedCell(
-        width: 40,
-        child: Center(
-          child: DesktopPlaybackIndicator(
-            coreEvents: coreEvents,
-            item: item,
-            fallback: '${index + 1}',
+  return Opacity(
+    opacity: item.canPlay ? 1 : 0.35,
+    child: _buildDesktopTableRowBase(
+      cells: <Widget>[
+        _buildDesktopTableSizedCell(
+          width: 40,
+          child: Center(
+            child: DesktopPlaybackIndicator(
+              coreEvents: coreEvents,
+              item: item,
+              fallback: '${index + 1}',
+            ),
           ),
         ),
-      ),
-      _buildDesktopTableSizedCell(
-        width: 48,
-        child: MediaTableCover(
-          coverUrl: item.imageUriForSize(80),
-          fallbackIcon: Icons.music_note_outlined,
-          size: 48,
-          radius: 8,
-          onPlayTap: onDoubleTap,
+        _buildDesktopTableSizedCell(
+          width: 48,
+          child: MediaTableCover(
+            coverUrl: item.imageUriForSize(80),
+            fallbackIcon: Icons.music_note_outlined,
+            size: 48,
+            radius: 8,
+            onPlayTap: item.canPlay ? onDoubleTap : null,
+          ),
         ),
-      ),
-      _buildDesktopTableSizedCell(
-        flex: 5,
-        child: _buildDesktopTrackTitleCell(
-          coreEvents: coreEvents,
-          playbackItem: item,
-          title: _prefer(item.name, 'Unknown Track'),
+        _buildDesktopTableSizedCell(
+          flex: 5,
+          child: _buildDesktopTrackTitleCell(
+            coreEvents: coreEvents,
+            playbackItem: item,
+            title: _prefer(item.name, 'Unknown Track'),
+          ),
         ),
-      ),
-      _buildDesktopTableSizedCell(
-        width: 80,
-        child: _buildDesktopBodyText(
-          formatDuration(item.duration),
-          TextAlign.right,
-          DesktopTextTone.tertiary,
+        _buildDesktopTableSizedCell(
+          width: 80,
+          child: _buildDesktopBodyText(
+            formatDuration(item.duration),
+            TextAlign.right,
+            DesktopTextTone.tertiary,
+          ),
         ),
-      ),
-      _buildDesktopTableSizedCell(
-        flex: 3,
-        child: _buildDesktopAlbumLinkCell(
-          album: item.album,
-          onAlbumTap: onAlbumTap,
+        _buildDesktopTableSizedCell(
+          flex: 3,
+          child: _buildDesktopAlbumLinkCell(
+            album: item.album,
+            onAlbumTap: onAlbumTap,
+          ),
         ),
-      ),
-      _buildDesktopTableSizedCell(
-        flex: 3,
-        child: _buildDesktopArtistLinkCell(
-          artists: item.artists,
-          fallbackText: _trackSubtitle(item),
-          onArtistTap: onArtistTap,
-          onArtistPointerDown: onArtistPointerDown,
+        _buildDesktopTableSizedCell(
+          flex: 3,
+          child: _buildDesktopArtistLinkCell(
+            artists: item.artists,
+            fallbackText: _trackSubtitle(item),
+            onArtistTap: onArtistTap,
+            onArtistPointerDown: onArtistPointerDown,
+          ),
         ),
-      ),
-      _buildDesktopTableSizedCell(
-        flex: 1,
-        child: _buildDesktopBodyText(
-          item.album?.year?.toString() ?? '-',
-          TextAlign.left,
-          DesktopTextTone.tertiary,
+        _buildDesktopTableSizedCell(
+          flex: 1,
+          child: _buildDesktopBodyText(
+            item.album?.year?.toString() ?? '-',
+            TextAlign.left,
+            DesktopTextTone.tertiary,
+          ),
         ),
-      ),
-      _buildDesktopTableSizedCell(
-        width: 80,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            MediaProviderIcon(
-              providerLabel: _providerLabelFromId(item.provider),
-              iconSvg: ProviderManifestRegistry.iconSvgForProvider(
-                item.provider,
+        _buildDesktopTableSizedCell(
+          width: 80,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              MediaProviderIcon(
+                providerLabel: _providerLabelFromId(item.provider),
+                iconSvg: ProviderManifestRegistry.iconSvgForProvider(
+                  item.provider,
+                ),
+                size: 16,
               ),
-              size: 16,
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
-    ],
-    isFirst: isFirst,
-    isSelected: isSelected,
-    isFavorite: isFavorite,
-    selectionEnabled: selectionEnabled,
-    onToggleSelected: onToggleSelected,
-    onFavoriteTap: onFavoriteTap,
-    onMoreTap: onMoreTap,
-    onMoreAnchorTap: onMoreAnchorTap,
-    onDoubleTap: onDoubleTap,
-    onPointerDown: onPointerDown,
+      ],
+      isFirst: isFirst,
+      isSelected: isSelected,
+      isFavorite: isFavorite,
+      selectionEnabled: selectionEnabled,
+      onToggleSelected: onToggleSelected,
+      onFavoriteTap: onFavoriteTap,
+      onMoreTap: onMoreTap,
+      onMoreAnchorTap: onMoreAnchorTap,
+      onDoubleTap: item.canPlay ? onDoubleTap : null,
+      onPointerDown: onPointerDown,
+    ),
   );
 }
 
@@ -1823,84 +1834,89 @@ Widget _buildDesktopTableRowQueue({
       .where((name) => name.isNotEmpty)
       .join(', ');
 
-  return _buildDesktopTableRowBase(
-    cells: <Widget>[
-      _buildDesktopTableSizedCell(
-        width: 40,
-        child: Center(
-          child: DesktopPlaybackIndicator(
-            coreEvents: coreEvents,
-            item: item.mediaItem,
-            fallback: '${(item.sortIndex ?? index) + 1}',
+  return Opacity(
+    opacity: item.isAvailable ? 1 : 0.35,
+    child: _buildDesktopTableRowBase(
+      cells: <Widget>[
+        _buildDesktopTableSizedCell(
+          width: 40,
+          child: Center(
+            child: DesktopPlaybackIndicator(
+              coreEvents: coreEvents,
+              item: item.mediaItem,
+              fallback: '${(item.sortIndex ?? index) + 1}',
+            ),
           ),
         ),
-      ),
-      _buildDesktopTableSizedCell(
-        width: 48,
-        child: MediaTableCover(
-          coverUrl: mediaItem.imageUriForSize(80),
-          fallbackIcon: Icons.music_note_outlined,
-          size: 48,
-          radius: 8,
-          onPlayTap: onDoubleTap,
+        _buildDesktopTableSizedCell(
+          width: 48,
+          child: MediaTableCover(
+            coverUrl: mediaItem.imageUriForSize(80),
+            fallbackIcon: Icons.music_note_outlined,
+            size: 48,
+            radius: 8,
+            onPlayTap: item.canPlay ? onDoubleTap : null,
+          ),
         ),
-      ),
-      _buildDesktopTableSizedCell(
-        flex: 5,
-        child: _buildDesktopTrackTitleCell(
-          coreEvents: coreEvents,
-          playbackItem: item.mediaItem,
-          title: title,
+        _buildDesktopTableSizedCell(
+          flex: 5,
+          child: _buildDesktopTrackTitleCell(
+            coreEvents: coreEvents,
+            playbackItem: item.mediaItem,
+            title: title,
+          ),
         ),
-      ),
-      _buildDesktopTableSizedCell(
-        width: 80,
-        child: _buildDesktopBodyText(
-          formatDuration(item.duration ?? 0),
-          TextAlign.right,
-          DesktopTextTone.tertiary,
+        _buildDesktopTableSizedCell(
+          width: 80,
+          child: _buildDesktopBodyText(
+            formatDuration(item.duration ?? 0),
+            TextAlign.right,
+            DesktopTextTone.tertiary,
+          ),
         ),
-      ),
-      _buildDesktopTableSizedCell(
-        flex: 3,
-        child: _buildDesktopAlbumLinkCell(
-          album: track?.album,
-          onAlbumTap: onAlbumTap,
+        _buildDesktopTableSizedCell(
+          flex: 3,
+          child: _buildDesktopAlbumLinkCell(
+            album: track?.album,
+            onAlbumTap: onAlbumTap,
+          ),
         ),
-      ),
-      _buildDesktopTableSizedCell(
-        flex: 3,
-        child: _buildDesktopArtistLinkCell(
-          artists: artists,
-          fallbackText: artistsFallbackText.isEmpty ? '-' : artistsFallbackText,
-          onArtistTap: onArtistTap,
-          onArtistPointerDown: onArtistPointerDown,
+        _buildDesktopTableSizedCell(
+          flex: 3,
+          child: _buildDesktopArtistLinkCell(
+            artists: artists,
+            fallbackText: artistsFallbackText.isEmpty
+                ? '-'
+                : artistsFallbackText,
+            onArtistTap: onArtistTap,
+            onArtistPointerDown: onArtistPointerDown,
+          ),
         ),
-      ),
-      _buildDesktopTableSizedCell(
-        width: 80,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            MediaProviderIcon(
-              providerLabel: _providerLabelFromId(provider),
-              iconSvg: ProviderManifestRegistry.iconSvgForProvider(provider),
-              size: 16,
-            ),
-          ],
+        _buildDesktopTableSizedCell(
+          width: 80,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              MediaProviderIcon(
+                providerLabel: _providerLabelFromId(provider),
+                iconSvg: ProviderManifestRegistry.iconSvgForProvider(provider),
+                size: 16,
+              ),
+            ],
+          ),
         ),
-      ),
-    ],
-    isFirst: isFirst,
-    isSelected: isSelected,
-    isFavorite: isFavorite,
-    selectionEnabled: selectionEnabled,
-    onToggleSelected: onToggleSelected,
-    onFavoriteTap: onFavoriteTap,
-    onMoreTap: onMoreTap,
-    onMoreAnchorTap: onMoreAnchorTap,
-    onDoubleTap: onDoubleTap,
-    onPointerDown: onPointerDown,
+      ],
+      isFirst: isFirst,
+      isSelected: isSelected,
+      isFavorite: isFavorite,
+      selectionEnabled: selectionEnabled,
+      onToggleSelected: onToggleSelected,
+      onFavoriteTap: onFavoriteTap,
+      onMoreTap: onMoreTap,
+      onMoreAnchorTap: onMoreAnchorTap,
+      onDoubleTap: item.canPlay ? onDoubleTap : null,
+      onPointerDown: onPointerDown,
+    ),
   );
 }
 

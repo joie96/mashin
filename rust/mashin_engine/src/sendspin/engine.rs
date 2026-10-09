@@ -1,4 +1,4 @@
-use super::downloader::{DownloaderConnectionStatus, SendspinDownloader, SendspinDownloaderConfig};
+use super::downloader::{DownloaderConnectionStatus, SendspinDownloader, SendspinDownloaderConfig, TrackDownloadEvent};
 use super::models::{
     SendspinAudioCodec, SendspinDownloadPlanRequest, SendspinDownloadQueueItem,
     SendspinEngineConfiguration,
@@ -34,6 +34,7 @@ static AUTOPLAY_NETWORK_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
 });
 const INITIAL_RECONNECT_DELAY: Duration = Duration::from_secs(2);
 const MAXIMUM_RECONNECT_DELAY: Duration = Duration::from_secs(8);
+const TRACK_FAILURES_BEFORE_RECONNECT: usize = 3;
 
 pub(crate) struct SendspinEngine {
     config: Option<SendspinEngineConfiguration>,
@@ -57,6 +58,7 @@ pub(crate) struct SendspinEngine {
     is_reconnect_in_flight: bool,
     last_connection_event_generation: Option<u64>,
     lost_connection_generation: Option<u64>,
+    consecutive_track_failures: usize,
     playback_position_offset_millis: i64,
     autoplay: AutoplayController,
     autoplay_result_sender: Sender<Vec<Track>>,
@@ -98,6 +100,7 @@ impl SendspinEngine {
             is_reconnect_in_flight: false,
             last_connection_event_generation: None,
             lost_connection_generation: None,
+            consecutive_track_failures: 0,
             playback_position_offset_millis: 0,
             autoplay: AutoplayController::new(),
             autoplay_result_sender,
@@ -128,6 +131,7 @@ impl SendspinEngine {
         self.is_reconnect_in_flight = false;
         self.last_connection_event_generation = None;
         self.lost_connection_generation = None;
+        self.consecutive_track_failures = 0;
         self.playback_position_offset_millis = 0;
         self.autoplay = AutoplayController::new();
         self.last_player_state_event_at = None;
@@ -271,6 +275,21 @@ impl SendspinEngine {
                     item.media_item.clone(),
                 );
                 queue_item.index = index as u32;
+                if request
+                    .excluded_queue_item_ids
+                    .contains(&item.queue_item_id)
+                {
+                    queue_item.available = false;
+                    queue_item.cache = self
+                        .queue
+                        .items
+                        .iter()
+                        .find(|previous| previous.queue_item_id == item.queue_item_id)
+                        .and_then(|previous| previous.cache.clone())
+                        .filter(|cache| cache.status == CacheStatus::Failed);
+                } else {
+                    queue_item.available = true;
+                }
                 queue_item
             })
             .collect();
@@ -338,6 +357,9 @@ impl SendspinEngine {
             Self::shuffle_items(&mut media_items);
         }
         let seed_tracks = tracks_from_media_items(&media_items);
+        if matches!(option, QueueOption::Play | QueueOption::Replace) {
+            self.consecutive_track_failures = 0;
+        }
         match option {
             QueueOption::Play => {
                 let index = start_item.unwrap_or(0);
@@ -451,6 +473,7 @@ impl SendspinEngine {
         self.stop_queue_downloads()?;
         self.audio_player.stop();
         self.queue.items.clear();
+        self.consecutive_track_failures = 0;
         self.queue.current_index = None;
         self.current_cache_content_key = None;
         self.queue_content_keys.clear();
@@ -570,6 +593,22 @@ impl SendspinEngine {
     }
 
     pub(crate) fn play_queue_index(&mut self, index: usize) -> Result<(), String> {
+        if let Some(media_item) = self
+            .queue
+            .items
+            .get(index)
+            .and_then(|item| item.media_item.as_ref())
+        {
+            if !self.media_item_can_play(media_item) {
+                return Err(
+                    "track is unavailable from its providers and has no complete local cache"
+                        .to_string(),
+                );
+            }
+        }
+        if let Some(item) = self.queue.items.get_mut(index) {
+            item.available = true;
+        }
         if self.is_queue_restored {
             if index >= self.queue.items.len() {
                 return Err("queue index is out of range".to_string());
@@ -592,10 +631,10 @@ impl SendspinEngine {
         };
         let content_key = content_key.clone();
         self.queue.current_index = Some(index);
-        self.play_cached_content(&content_key)?;
         self.apply_queue_download_plan(
             self.build_download_plan_request(self.queue_media_items(), index)?,
-        )
+        )?;
+        self.play_cached_content(&content_key)
     }
 
     // Queue planning helpers.
@@ -606,6 +645,7 @@ impl SendspinEngine {
         }
         let version = self.download_plan_version.saturating_add(1);
         self.downloader.apply_download_plan(SendspinDownloadPlanRequest {
+            excluded_queue_item_ids: Vec::new(),
             queue_revision: version,
             queue_items: Vec::new(),
             current_index: None,
@@ -689,6 +729,11 @@ impl SendspinEngine {
                     );
                     queue_item.index = index as u32;
                     queue_item.cache = None;
+                    if self.queue.items.iter().any(|previous| previous.queue_item_id == queue_item.queue_item_id && !previous.available) {
+                        queue_item.available = false;
+                        queue_item.cache = self.queue.items.iter().find(|previous| previous.queue_item_id == queue_item.queue_item_id)
+                            .and_then(|previous| previous.cache.clone()).filter(|cache| cache.status == CacheStatus::Failed);
+                    }
                     queue_item
                 })
                 .collect();
@@ -725,7 +770,21 @@ impl SendspinEngine {
         media_items: Vec<QueueMediaItem>,
         current_index: usize,
     ) -> Result<SendspinDownloadPlanRequest, String> {
+        let excluded_queue_item_ids: Vec<_> = media_items
+            .iter()
+            .filter(|item| {
+                !self.media_item_can_play(&item.media_item)
+                    || self.queue.items.iter().any(|previous| {
+                        previous.queue_item_id == item.queue_item_id && !previous.available
+                    })
+            })
+            .map(|item| item.queue_item_id.clone())
+            .collect();
+        let current_index = (current_index..media_items.len())
+            .find(|index| !excluded_queue_item_ids.contains(&media_items[*index].queue_item_id))
+            .ok_or_else(|| "queue has no available item after the selected position".to_string())?;
         Ok(SendspinDownloadPlanRequest {
+            excluded_queue_item_ids,
             queue_revision: self.download_plan_version.saturating_add(1),
             queue_items: media_items
                 .into_iter()
@@ -739,9 +798,22 @@ impl SendspinEngine {
         })
     }
 
+    fn media_item_can_play(&self, media_item: &MediaItem) -> bool {
+        let fields = media_item.fields();
+        (fields.is_playable && fields.is_available())
+            || self.config.as_ref().is_some_and(|config| {
+                queue_cache_content_key(media_item, config.preferred_codec)
+                    .ok()
+                    .is_some_and(|key| self.downloader.has_complete_cache(&key))
+            })
+    }
+
     fn refresh_queue_cache_states(&mut self) {
         let states = self.downloader.cache_states();
         for item in &mut self.queue.items {
+            if !item.available {
+                continue;
+            }
             if let Some(state) = states
                 .iter()
                 .find(|state| state.queue_item_id == item.queue_item_id)
@@ -839,6 +911,81 @@ impl SendspinEngine {
     }
 
     // Background playback processing.
+    fn next_available_queue_index(&self, current_index: usize) -> Option<usize> {
+        let count = self.queue.items.len();
+        (1..=count)
+            .filter_map(|offset| {
+                let index = current_index.saturating_add(offset);
+                if index < count {
+                    Some(index)
+                } else if self.queue.repeat_mode == RepeatMode::All && count > 0 {
+                    Some(index % count)
+                } else {
+                    None
+                }
+            })
+            .find(|index| self.queue.items[*index].available)
+    }
+
+    fn process_track_download_event(&mut self, event: TrackDownloadEvent) {
+        let Some(index) = self
+            .queue
+            .items
+            .iter()
+            .position(|item| item.queue_item_id == event.queue_item_id)
+        else {
+            return;
+        };
+        if !self.queue.items[index].available {
+            return;
+        }
+        if !event.has_failed {
+            self.consecutive_track_failures = 0;
+            return;
+        }
+        self.queue.items[index].available = false;
+        self.queue.items[index].cache = Some(CacheState {
+            status: CacheStatus::Failed,
+            cached_duration_millis: 0,
+        });
+        self.consecutive_track_failures += 1;
+        LOGGER.warn(format!(
+            "track skipped after exhausted HTTP retries: {}",
+            self.queue.items[index].name
+        ));
+        let should_reconnect = self.consecutive_track_failures >= TRACK_FAILURES_BEFORE_RECONNECT
+            && self.queue.items.iter().any(|item| item.available);
+        if should_reconnect {
+            self.consecutive_track_failures = 0;
+            if self.player_state.connection_state != PlaybackConnectionState::Reconnecting {
+                LOGGER.warn("three tracks failed consecutively; requesting full downloader reconnect");
+                self.downloader.suspend_downloads();
+                self.lost_connection_generation = Some(event.generation);
+                self.player_state.connection_state = PlaybackConnectionState::Reconnecting;
+                self.schedule_reconnect_attempt();
+            }
+        }
+        if self.queue.current_index == Some(index) {
+            if let Some(next_index) = self.next_available_queue_index(index) {
+                if let Err(error) = self.play_queue_index(next_index) {
+                    LOGGER.error(format!("failed to advance past unplayable track: {error}"));
+                }
+            } else {
+                self.transport_stop();
+                let _ = self.stop_queue_downloads();
+                self.current_cache_content_key = None;
+            }
+        } else if let Some(current_index) = self.queue.current_index {
+            if let Ok(request) =
+                self.build_download_plan_request(self.queue_media_items(), current_index)
+            {
+                let _ = self.apply_queue_download_plan(request);
+            }
+        }
+        self.queue_revision = self.queue_revision.saturating_add(1);
+        self.persist_queue();
+    }
+
     fn schedule_reconnect_attempt(&mut self) {
         let delay = self.reconnect_delay;
         self.next_reconnect_attempt = Some(Instant::now() + delay);
@@ -982,21 +1129,19 @@ impl SendspinEngine {
                 self.player_state.playback_state = PlayState::Idle;
                 return;
             };
-            let next_index = match self.queue.repeat_mode {
-                RepeatMode::One => Some(current_index),
-                RepeatMode::All if !self.queue.items.is_empty() => {
-                    Some((current_index + 1) % self.queue.items.len())
-                }
-                _ => current_index
-                    .checked_add(1)
-                    .filter(|index| *index < self.queue.items.len()),
+            let next_index = if self.queue.repeat_mode == RepeatMode::One && self.queue.items[current_index].available {
+                Some(current_index)
+            } else {
+                self.next_available_queue_index(current_index)
             };
             if let Some(next_index) = next_index {
                 if self.play_queue_index(next_index).is_ok() {
                     return;
                 }
             }
-            self.player_state.playback_state = PlayState::Idle;
+            self.transport_stop();
+            let _ = self.stop_queue_downloads();
+            self.current_cache_content_key = None;
             return;
         }
         self.refresh_queue_cache_states();
@@ -1234,25 +1379,42 @@ impl SendspinEngine {
         let Some(current_index) = self.queue.current_index else {
             return Ok(());
         };
-        let next_index = current_index.saturating_add(1);
-        if next_index >= self.queue.items.len() {
-            if self.queue.repeat_mode == RepeatMode::All {
-                return self.play_queue_index(0);
-            }
-            self.transport_stop();
-            return Ok(());
+        if let Some(next_index) = self.next_available_queue_index(current_index) {
+            return self.play_queue_index(next_index);
         }
-        self.play_queue_index(next_index)
+        self.transport_stop();
+        Ok(())
     }
 
     pub(crate) fn transport_previous(&mut self) -> Result<(), String> {
         let Some(current_index) = self.queue.current_index else {
             return Ok(());
         };
-        if current_index == 0 && self.queue.repeat_mode == RepeatMode::All {
-            return self.play_queue_index(self.queue.items.len() - 1);
+        let previous_index = (0..current_index)
+            .rev()
+            .find(|index| self.queue.items[*index].available)
+            .or_else(|| {
+                if self.queue.repeat_mode == RepeatMode::All {
+                    (current_index..self.queue.items.len())
+                        .rev()
+                        .find(|index| self.queue.items[*index].available)
+                } else if self
+                    .queue
+                    .items
+                    .get(current_index)
+                    .is_some_and(|item| item.available)
+                {
+                    Some(current_index)
+                } else {
+                    None
+                }
+            });
+        if let Some(index) = previous_index {
+            self.play_queue_index(index)
+        } else {
+            self.transport_stop();
+            Ok(())
         }
-        self.play_queue_index(current_index.saturating_sub(1))
     }
 
     // Playback preference commands.
@@ -1581,6 +1743,9 @@ impl PlaybackEngine for SendspinEngine {
         let player_state_before = self.player_state();
         self.process_autoplay_results();
         self.process_connection_state();
+        for event in self.downloader.take_track_events() {
+            self.process_track_download_event(event);
+        }
         if let Some(content_key) = self.current_cache_content_key.clone() {
             self.process_download_status();
             self.process_cached_playback(&content_key);
@@ -1638,6 +1803,7 @@ mod tests {
                 uri: None,
                 external_ids: Vec::new(),
                 is_playable: true,
+                available: None,
                 provider_mappings: Vec::new(),
                 metadata: None,
                 favorite: false,
@@ -1651,6 +1817,200 @@ mod tests {
             disc_number: 0,
             track_number: 0,
         })
+    }
+
+    #[test]
+    fn current_track_failure_advances_but_prefetch_failure_does_not() {
+        let mut engine = SendspinEngine::new();
+        engine.configure(configuration()).unwrap();
+        engine
+            .queue_play_media(
+                vec![
+                    track("test", "one"),
+                    track("test", "two"),
+                    track("test", "three"),
+                ],
+                QueueOption::Replace,
+                None,
+                false,
+                false,
+            )
+            .unwrap();
+        engine.process_track_download_event(TrackDownloadEvent {
+            generation: 0,
+            queue_item_id: engine.queue.items[2].queue_item_id.clone(),
+            has_failed: true,
+        });
+        assert_eq!(engine.queue.current_index, Some(0));
+        engine.process_track_download_event(TrackDownloadEvent {
+            generation: 0,
+            queue_item_id: engine.queue.items[0].queue_item_id.clone(),
+            has_failed: true,
+        });
+        assert_eq!(engine.queue.current_index, Some(1));
+        assert!(!engine.queue.items[0].available);
+        assert!(!engine.queue.items[2].available);
+    }
+
+    #[test]
+    fn failed_track_exclusions_survive_plan_rebuild_and_manual_retry_clears_them() {
+        let mut engine = SendspinEngine::new();
+        engine.configure(configuration()).expect("configure engine");
+        engine
+            .queue_play_media(
+                vec![track("test", "one"), track("test", "two")],
+                QueueOption::Replace,
+                None,
+                false,
+                false,
+            )
+            .unwrap();
+        engine.queue.current_index = Some(1);
+        engine.process_track_download_event(TrackDownloadEvent {
+            generation: 0,
+            queue_item_id: engine.queue.items[0].queue_item_id.clone(),
+            has_failed: true,
+        });
+        let request = engine
+            .build_download_plan_request(engine.queue_media_items(), 1)
+            .unwrap();
+        engine.apply_queue_download_plan(request).unwrap();
+        assert!(!engine.queue.items[0].available);
+        assert_eq!(
+            engine.queue.items[0].cache.as_ref().unwrap().status,
+            CacheStatus::Failed
+        );
+        engine.play_queue_index(0).unwrap();
+        assert!(engine.queue.items[0].available);
+        assert!(engine
+            .build_download_plan_request(engine.queue_media_items(), 0)
+            .unwrap()
+            .excluded_queue_item_ids
+            .is_empty());
+    }
+
+    #[test]
+    fn known_metadata_unavailability_does_not_count_as_an_http_failure() {
+        let mut engine = SendspinEngine::new();
+        let mut blocked = track("test", "blocked");
+        if let MediaItem::Track(item) = &mut blocked {
+            item.media.available = Some(false);
+        }
+        engine
+            .queue_play_media(
+                vec![blocked, track("test", "available")],
+                QueueOption::Replace,
+                None,
+                false,
+                false,
+            )
+            .unwrap();
+        assert!(!engine.queue.items[0].available);
+        assert_eq!(engine.consecutive_track_failures, 0);
+        let plan = engine
+            .build_download_plan_request(engine.queue_media_items(), 0)
+            .unwrap();
+        assert_eq!(plan.current_index, Some(1));
+        assert_eq!(plan.excluded_queue_item_ids.len(), 1);
+        assert!(engine.play_queue_index(0).is_err());
+    }
+
+    #[test]
+    fn track_failures_skip_and_reconnect_without_reviving_failed_entries() {
+        let mut engine = SendspinEngine::new();
+        engine
+            .queue_play_media(
+                vec![
+                    track("test", "one"),
+                    track("test", "two"),
+                    track("test", "three"),
+                    track("test", "four"),
+                ],
+                QueueOption::Replace,
+                None,
+                false,
+                false,
+            )
+            .unwrap();
+        engine.queue.current_index = Some(3);
+        for index in 0..3 {
+            engine.process_track_download_event(TrackDownloadEvent {
+                generation: 0,
+                queue_item_id: engine.queue.items[index].queue_item_id.clone(),
+                has_failed: true,
+            });
+        }
+        assert_eq!(
+            engine.player_state.connection_state,
+            PlaybackConnectionState::Reconnecting
+        );
+        assert!(engine.next_reconnect_attempt.is_some());
+        assert!(engine.queue.items[..3].iter().all(|item| !item.available));
+        assert_eq!(
+            engine
+                .build_download_plan_request(engine.queue_media_items(), 3)
+                .unwrap()
+                .excluded_queue_item_ids
+                .len(),
+            3
+        );
+        let scheduled = engine.next_reconnect_attempt;
+        engine.process_track_download_event(TrackDownloadEvent {
+            generation: 0,
+            queue_item_id: engine.queue.items[0].queue_item_id.clone(),
+            has_failed: true,
+        });
+        assert_eq!(engine.next_reconnect_attempt, scheduled);
+    }
+
+    #[test]
+    fn failed_queue_pass_ends_even_with_repeat_all() {
+        let mut engine = SendspinEngine::new();
+        engine
+            .queue_play_media(
+                vec![track("test", "one")],
+                QueueOption::Replace,
+                None,
+                false,
+                false,
+            )
+            .unwrap();
+        engine.queue.repeat_mode = RepeatMode::All;
+        engine.process_track_download_event(TrackDownloadEvent {
+            generation: 0,
+            queue_item_id: engine.queue.items[0].queue_item_id.clone(),
+            has_failed: true,
+        });
+        assert_eq!(engine.player_state.playback_state, PlayState::Idle);
+        assert!(engine.next_available_queue_index(0).is_none());
+        assert!(engine.next_reconnect_attempt.is_none());
+    }
+
+    #[test]
+    fn confirmed_new_track_data_resets_failure_streak() {
+        let mut engine = SendspinEngine::new();
+        engine
+            .queue_play_media(
+                vec![track("test", "one"), track("test", "two")],
+                QueueOption::Replace,
+                None,
+                false,
+                false,
+            )
+            .unwrap();
+        engine.queue.current_index = Some(1);
+        engine.process_track_download_event(TrackDownloadEvent {
+            generation: 0,
+            queue_item_id: engine.queue.items[0].queue_item_id.clone(),
+            has_failed: true,
+        });
+        assert_eq!(engine.consecutive_track_failures, 1);
+        engine.process_track_download_event(TrackDownloadEvent {
+            generation: 0,
+            queue_item_id: engine.queue.items[1].queue_item_id.clone(),
+            has_failed: false,
+        });
+        assert_eq!(engine.consecutive_track_failures, 0);
     }
 
     #[test]

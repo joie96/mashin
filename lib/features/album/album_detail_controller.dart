@@ -144,6 +144,7 @@ class AlbumDetailController extends ChangeNotifier {
                       uri: track.uri,
                       externalIds: track.externalIds,
                       isPlayable: track.isPlayable,
+                      available: track.available,
                       album: loadedAlbum,
                       image: track.image,
                       providerMappings: track.providerMappings,

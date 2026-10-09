@@ -263,6 +263,7 @@ class PlaylistDetailController extends ChangeNotifier {
             uri: track.uri,
             externalIds: track.externalIds,
             isPlayable: track.isPlayable,
+            available: track.available,
             album: album,
             image: track.image,
             providerMappings: track.providerMappings,

@@ -314,25 +314,40 @@ class _MediaSlideSectionDesktopState<T>
                   child: Listener(
                     key: ValueKey<int>(_currentIndex),
                     onPointerDown: _openContextMenu,
-                    child: _DesktopSlideCard<T>(
-                      item: widget.items[_currentIndex],
-                      index: _currentIndex,
-                      coverSize: widget.coverSize,
-                      coreEvents: widget.coreEvents,
-                      isFavorite: _isItemFavorite(
-                        widget.items[_currentIndex],
-                        _currentIndex,
+                    child: Opacity(
+                      opacity:
+                          resolvePlayableMediaItem(
+                                widget.items[_currentIndex],
+                              )?.canPlay ==
+                              false
+                          ? 0.35
+                          : 1,
+                      child: _DesktopSlideCard<T>(
+                        item: widget.items[_currentIndex],
+                        index: _currentIndex,
+                        coverSize: widget.coverSize,
+                        coreEvents: widget.coreEvents,
+                        isFavorite: _isItemFavorite(
+                          widget.items[_currentIndex],
+                          _currentIndex,
+                        ),
+                        onPlayTap:
+                            resolvePlayableMediaItem(
+                                  widget.items[_currentIndex],
+                                )?.canPlay ==
+                                true
+                            ? _playCurrent
+                            : null,
+                        onFavoriteTap: widget.onRowFavoriteTap == null
+                            ? null
+                            : () => widget.onRowFavoriteTap!(
+                                widget.items[_currentIndex],
+                                _currentIndex,
+                              ),
+                        onMoreTap: _openMore,
+                        onArtistTap: widget.onArtistTap,
+                        onAlbumTap: widget.onAlbumTap,
                       ),
-                      onPlayTap: _playCurrent,
-                      onFavoriteTap: widget.onRowFavoriteTap == null
-                          ? null
-                          : () => widget.onRowFavoriteTap!(
-                              widget.items[_currentIndex],
-                              _currentIndex,
-                            ),
-                      onMoreTap: _openMore,
-                      onArtistTap: widget.onArtistTap,
-                      onAlbumTap: widget.onAlbumTap,
                     ),
                   ),
                 ),
@@ -757,7 +772,9 @@ MediaItem? resolvePlayableMediaItem(Object? item) {
 }
 
 bool isValidPlayable(MediaItem item) {
-  return item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty;
+  return item.canPlay &&
+      item.itemId.trim().isNotEmpty &&
+      item.provider.trim().isNotEmpty;
 }
 
 String _albumSubtitle(Album album) {

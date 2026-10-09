@@ -97,7 +97,9 @@ class _MediaListSectionMobileState<T extends MediaItem>
   }
 
   bool _isValidPlayable(MediaItem item) {
-    return item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty;
+    return item.canPlay &&
+        item.itemId.trim().isNotEmpty &&
+        item.provider.trim().isNotEmpty;
   }
 
   void _onPlayAllTap() {
@@ -234,6 +236,7 @@ class _MobileListTile<T extends MediaItem> extends StatelessWidget {
   void _play() {
     final MashinCoreBridgeApi? bridge = coreBridge;
     if (bridge == null ||
+        !item.canPlay ||
         item.itemId.trim().isEmpty ||
         item.provider.trim().isEmpty) {
       return;
@@ -255,54 +258,59 @@ class _MobileListTile<T extends MediaItem> extends StatelessWidget {
         ? 'Unbekannt'
         : item.name.trim();
 
-    return GestureDetector(
-      onTap: onItemTap == null ? null : () => onItemTap!(item),
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        height: 50,
-        decoration: BoxDecoration(
-          color: colors.bgSecondary,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Row(
-          children: <Widget>[
-            Container(width: 10, color: accentColorFromText(title)),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: colors.textSecondary,
-                    fontWeight: FontWeight.w500,
-                    fontSize: 14,
+    return Opacity(
+      opacity: item.canPlay ? 1 : 0.35,
+      child: GestureDetector(
+        onTap: onItemTap == null || (item is Track && !item.canPlay)
+            ? null
+            : () => onItemTap!(item),
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          height: 50,
+          decoration: BoxDecoration(
+            color: colors.bgSecondary,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Row(
+            children: <Widget>[
+              Container(width: 10, color: accentColorFromText(title)),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: colors.textSecondary,
+                      fontWeight: FontWeight.w500,
+                      fontSize: 14,
+                    ),
                   ),
                 ),
               ),
-            ),
-            GestureDetector(
-              onTap: _play,
-              child: Container(
-                width: 28,
-                height: 28,
-                margin: const EdgeInsets.only(right: 4),
-                decoration: BoxDecoration(
-                  color: colors.overlayPlayButtonBackground.withValues(
-                    alpha: 0.88,
+              GestureDetector(
+                onTap: item.canPlay ? _play : null,
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  margin: const EdgeInsets.only(right: 4),
+                  decoration: BoxDecoration(
+                    color: colors.overlayPlayButtonBackground.withValues(
+                      alpha: 0.88,
+                    ),
+                    borderRadius: BorderRadius.circular(24),
                   ),
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: Icon(
-                  Icons.play_arrow_sharp,
-                  size: 18,
-                  color: colors.overlayPlayButtonForeground,
+                  child: Icon(
+                    Icons.play_arrow_sharp,
+                    size: 18,
+                    color: colors.overlayPlayButtonForeground,
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

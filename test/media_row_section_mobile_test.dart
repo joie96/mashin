@@ -66,6 +66,38 @@ void main() {
     expect(title.style?.fontWeight, FontWeight.normal);
   });
 
+  testWidgets('unavailable mobile tracks are dimmed and have no play action', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      section<Track>(
+        items: const <Track>[
+          Track(
+            itemId: 'blocked',
+            provider: 'test',
+            name: 'Blocked track',
+            duration: 120,
+            artists: <Artist>[],
+            available: false,
+          ),
+        ],
+      ),
+    );
+    final opacity = tester.widget<Opacity>(
+      find
+          .ancestor(
+            of: find.text('Blocked track'),
+            matching: find.byType(Opacity),
+          )
+          .first,
+    );
+    expect(opacity.opacity, 0.35);
+    await tester.tap(find.text('Blocked track'));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(find.byIcon(Icons.play_arrow), findsNothing);
+  });
+
   testWidgets('row ends at the last line for each media type', (
     WidgetTester tester,
   ) async {

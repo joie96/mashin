@@ -87,7 +87,9 @@ class _MediaTableSectionMobileState<T>
   }
 
   bool _isValidPlayable(MediaItem item) {
-    return item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty;
+    return item.canPlay &&
+        item.itemId.trim().isNotEmpty &&
+        item.provider.trim().isNotEmpty;
   }
 
   List<MediaItem> _playableItemsFromIndex(int startIndex) {
@@ -177,6 +179,12 @@ class _MediaTableSectionMobileState<T>
   }
 
   void _onRowActivated({required T item, required int index}) {
+    if (item is QueueItem && !item.canPlay) {
+      return;
+    }
+    if (item is MediaItem && !item.canPlay) {
+      return;
+    }
     if (!_isTrackSection && item is! QueueItem) {
       widget.onRowTap?.call(item, index);
       return;
@@ -574,30 +582,36 @@ class _MediaTableSectionMobileState<T>
     final Object? typedItem = item;
 
     if (typedItem is Track) {
-      return _buildMobileTableRowTrack(
-        item: typedItem,
-        isFirst: isFirst,
-        isSelected: isSelected,
-        selectionModeActive: selectionModeActive,
-        selectionEnabled: selectionEnabled,
-        onToggleSelected: onToggleSelected,
-        onLongPressSelect: onLongPressSelect,
-        onTap: onTap,
-        onMoreTap: onMoreTap,
+      return Opacity(
+        opacity: typedItem.canPlay ? 1 : 0.35,
+        child: _buildMobileTableRowTrack(
+          item: typedItem,
+          isFirst: isFirst,
+          isSelected: isSelected,
+          selectionModeActive: selectionModeActive,
+          selectionEnabled: selectionEnabled,
+          onToggleSelected: onToggleSelected,
+          onLongPressSelect: onLongPressSelect,
+          onTap: typedItem.canPlay ? onTap : null,
+          onMoreTap: onMoreTap,
+        ),
       );
     }
 
     if (typedItem is QueueItem) {
-      return _buildMobileTableRowQueue(
-        item: typedItem,
-        isFirst: isFirst,
-        isSelected: isSelected,
-        selectionModeActive: selectionModeActive,
-        selectionEnabled: selectionEnabled,
-        onToggleSelected: onToggleSelected,
-        onLongPressSelect: onLongPressSelect,
-        onTap: onTap,
-        onMoreTap: onMoreTap,
+      return Opacity(
+        opacity: typedItem.isAvailable ? 1 : 0.35,
+        child: _buildMobileTableRowQueue(
+          item: typedItem,
+          isFirst: isFirst,
+          isSelected: isSelected,
+          selectionModeActive: selectionModeActive,
+          selectionEnabled: selectionEnabled,
+          onToggleSelected: onToggleSelected,
+          onLongPressSelect: onLongPressSelect,
+          onTap: typedItem.canPlay ? onTap : null,
+          onMoreTap: onMoreTap,
+        ),
       );
     }
 

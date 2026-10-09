@@ -141,6 +141,7 @@ impl StoredMedia {
             uri: self.uri.clone().map(MediaUri),
             external_ids: Vec::new(),
             is_playable: true,
+            available: None,
             provider_mappings: Vec::new(),
             metadata: self.image.clone().map(|image| MediaItemMetadata {
                 images: vec![image],

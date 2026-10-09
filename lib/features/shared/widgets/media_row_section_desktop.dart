@@ -214,7 +214,9 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
   }
 
   bool _isValidPlayable(MediaItem item) {
-    return item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty;
+    return item.canPlay &&
+        item.itemId.trim().isNotEmpty &&
+        item.provider.trim().isNotEmpty;
   }
 
   bool get _isTrackSection => T == Track;
@@ -1556,31 +1558,36 @@ Widget _buildDesktopMediaRowTrack({
   ValueChanged<int>? onArtistPointerDown,
   ValueChanged<Album>? onAlbumTap,
 }) {
-  return _buildDesktopMediaRowItemBase(
-    itemWidth: itemWidth,
-    coverSize: coverSize,
-    icon: Icons.music_note_outlined,
-    title: _prefer(item.name, 'Unknown Track'),
-    secondaryText: _trackSubtitle(item),
-    secondaryArtists: item.artists,
-    onArtistTap: onArtistTap,
-    onArtistPointerDown: onArtistPointerDown,
-    tertiaryText: _trackTertiary(item),
-    tertiaryAlbum: item.album,
-    onAlbumTap: onAlbumTap,
-    coverUrl: item.imageUriForSize(256) ?? '',
-    providerLabel: _providerLabelFromId(item.provider),
-    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
-    onPlayTap: onPlayTap,
-    isFavorite: isFavorite,
-    onFavoriteTap: onFavoriteTap,
-    onMoreTap: onMoreTap,
-    onMoreAnchorTap: onMoreAnchorTap,
-    isSelected: isSelected,
-    onSelectTap: onSelectTap,
-    onSelectPointerDown: onSelectPointerDown,
-    coreEvents: coreEvents,
-    playbackItem: item,
+  return Opacity(
+    opacity: item.canPlay ? 1 : 0.35,
+    child: _buildDesktopMediaRowItemBase(
+      itemWidth: itemWidth,
+      coverSize: coverSize,
+      icon: Icons.music_note_outlined,
+      title: _prefer(item.name, 'Unknown Track'),
+      secondaryText: _trackSubtitle(item),
+      secondaryArtists: item.artists,
+      onArtistTap: onArtistTap,
+      onArtistPointerDown: onArtistPointerDown,
+      tertiaryText: _trackTertiary(item),
+      tertiaryAlbum: item.album,
+      onAlbumTap: onAlbumTap,
+      coverUrl: item.imageUriForSize(256) ?? '',
+      providerLabel: _providerLabelFromId(item.provider),
+      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(
+        item.provider,
+      ),
+      onPlayTap: item.canPlay ? onPlayTap : null,
+      isFavorite: isFavorite,
+      onFavoriteTap: onFavoriteTap,
+      onMoreTap: onMoreTap,
+      onMoreAnchorTap: onMoreAnchorTap,
+      isSelected: isSelected,
+      onSelectTap: onSelectTap,
+      onSelectPointerDown: onSelectPointerDown,
+      coreEvents: coreEvents,
+      playbackItem: item,
+    ),
   );
 }
 
@@ -1940,7 +1947,11 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
                                 size: 34,
                               ),
                             )
-                          : Icon(widget.icon, color: colors.textSecondary, size: 34),
+                          : Icon(
+                              widget.icon,
+                              color: colors.textSecondary,
+                              size: 34,
+                            ),
                     ),
                   )
                 : Container(
@@ -1955,7 +1966,11 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
                               size: 34,
                             ),
                           )
-                        : Icon(widget.icon, color: colors.textSecondary, size: 34),
+                        : Icon(
+                            widget.icon,
+                            color: colors.textSecondary,
+                            size: 34,
+                          ),
                   ),
           ),
           Positioned(

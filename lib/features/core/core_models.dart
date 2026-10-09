@@ -195,6 +195,7 @@ Map<String, dynamic> createMusicAssistantMediaItemPayload(MediaItem mediaItem) {
     'uri': mediaItem.uri,
     'external_ids': mediaItem.externalIds,
     'is_playable': mediaItem.isPlayable,
+    'available': mediaItem.available,
     'media_type': mediaTypeToJson(mediaItem.mediaType),
     'provider_mappings': mediaItem.providerMappings
         .map(
@@ -241,7 +242,9 @@ Map<String, dynamic> createMusicAssistantMediaItemPayload(MediaItem mediaItem) {
   } else if (mediaItem is Artist) {
     payload['artist_type'] = mediaItem.artistType;
   } else if (mediaItem is PodcastEpisode) {
-    payload['podcast'] = createMusicAssistantMediaItemPayload(mediaItem.podcast);
+    payload['podcast'] = createMusicAssistantMediaItemPayload(
+      mediaItem.podcast,
+    );
     payload['duration'] = mediaItem.duration;
     payload['resume_position_ms'] = mediaItem.resumePositionMs;
   } else if (mediaItem is Podcast) {
@@ -320,6 +323,7 @@ class MediaItem {
   final String? uri;
   final List<List<String>> externalIds;
   final bool isPlayable;
+  final bool? available;
   final MediaType mediaType;
   final List<ProviderMapping> providerMappings;
   final MediaItemMetadata? metadata;
@@ -338,6 +342,7 @@ class MediaItem {
     this.uri,
     this.externalIds = const <List<String>>[],
     this.isPlayable = true,
+    this.available,
     this.metadata,
     this.favorite = false,
     this.position,
@@ -354,6 +359,7 @@ class MediaItem {
       uri: (json['uri'] as String?)?.trim(),
       externalIds: _stringPairsFromJson(json['external_ids']),
       isPlayable: json['is_playable'] != false,
+      available: json['available'] as bool?,
       mediaType: mediaTypeFromJson(json['media_type'] as String?),
       providerMappings:
           (json['provider_mappings'] as List?)
@@ -407,6 +413,15 @@ class ProviderMapping {
       details: (json['details'] as String?)?.trim(),
     );
   }
+}
+
+extension MediaItemAvailability on MediaItem {
+  bool get isAvailable =>
+      available != false &&
+      (providerMappings.isEmpty ||
+          providerMappings.any((mapping) => mapping.available));
+
+  bool get canPlay => isPlayable && isAvailable;
 }
 
 class AudioFormat {
@@ -596,6 +611,8 @@ class Artist implements MediaItem {
   @override
   final bool isPlayable;
   @override
+  final bool? available;
+  @override
   final List<ProviderMapping> providerMappings;
   @override
   final MediaItemMetadata? metadata;
@@ -616,6 +633,7 @@ class Artist implements MediaItem {
     this.uri,
     this.externalIds = const <List<String>>[],
     this.isPlayable = true,
+    this.available,
     this.providerMappings = const <ProviderMapping>[],
     this.metadata,
     this.favorite = false,
@@ -652,6 +670,7 @@ class Artist implements MediaItem {
       uri: (json['uri'] as String?)?.trim(),
       externalIds: _stringPairsFromJson(json['external_ids']),
       isPlayable: json['is_playable'] != false,
+      available: json['available'] as bool?,
       providerMappings:
           (json['provider_mappings'] as List?)
               ?.whereType<Map<String, dynamic>>()
@@ -684,6 +703,8 @@ class Album implements MediaItem {
   final List<List<String>> externalIds;
   @override
   final bool isPlayable;
+  @override
+  final bool? available;
   final int? year;
   final AlbumType albumType;
   final List<Artist> artists;
@@ -708,6 +729,7 @@ class Album implements MediaItem {
     this.uri,
     this.externalIds = const <List<String>>[],
     this.isPlayable = true,
+    this.available,
     this.year,
     this.albumType = AlbumType.unknown,
     this.providerMappings = const <ProviderMapping>[],
@@ -745,6 +767,7 @@ class Album implements MediaItem {
       uri: (json['uri'] as String?)?.trim(),
       externalIds: _stringPairsFromJson(json['external_ids']),
       isPlayable: json['is_playable'] != false,
+      available: json['available'] as bool?,
       year: (json['year'] as num?)?.toInt(),
       albumType: _albumTypeFromJson(json['album_type'] as String?),
       artists:
@@ -784,6 +807,8 @@ class Track implements MediaItem {
   final List<List<String>> externalIds;
   @override
   final bool isPlayable;
+  @override
+  final bool? available;
   final int duration;
   final List<Artist> artists;
   final Album? album;
@@ -812,6 +837,7 @@ class Track implements MediaItem {
     this.uri,
     this.externalIds = const <List<String>>[],
     this.isPlayable = true,
+    this.available,
     this.album,
     this.image,
     this.providerMappings = const <ProviderMapping>[],
@@ -874,6 +900,7 @@ class Track implements MediaItem {
       uri: (json['uri'] as String?)?.trim(),
       externalIds: _stringPairsFromJson(json['external_ids']),
       isPlayable: json['is_playable'] != false,
+      available: json['available'] as bool?,
       duration: (json['duration'] as num?)?.toInt() ?? 0,
       artists:
           (json['artists'] as List?)
@@ -919,6 +946,7 @@ class Radio extends MediaItem {
         uri: media.uri,
         externalIds: media.externalIds,
         isPlayable: media.isPlayable,
+        available: media.available,
         metadata: media.metadata,
         favorite: media.favorite,
         position: media.position,
@@ -948,6 +976,7 @@ class Audiobook extends MediaItem {
         uri: media.uri,
         externalIds: media.externalIds,
         isPlayable: media.isPlayable,
+        available: media.available,
         metadata: media.metadata,
         favorite: media.favorite,
         position: media.position,
@@ -977,6 +1006,7 @@ class Podcast extends MediaItem {
         uri: media.uri,
         externalIds: media.externalIds,
         isPlayable: media.isPlayable,
+        available: media.available,
         metadata: media.metadata,
         favorite: media.favorite,
         position: media.position,
@@ -1011,6 +1041,7 @@ class PodcastEpisode extends MediaItem {
          uri: media.uri,
          externalIds: media.externalIds,
          isPlayable: media.isPlayable,
+         available: media.available,
          metadata: media.metadata,
          favorite: media.favorite,
          position: media.position,
@@ -1048,6 +1079,7 @@ class GenericMediaItem extends MediaItem {
         uri: media.uri,
         externalIds: media.externalIds,
         isPlayable: media.isPlayable,
+        available: media.available,
         metadata: media.metadata,
         favorite: media.favorite,
         position: media.position,
@@ -1104,6 +1136,8 @@ class Playlist implements MediaItem {
   final List<List<String>> externalIds;
   @override
   final bool isPlayable;
+  @override
+  final bool? available;
   final String? owner;
   final bool isEditable;
   final bool isDynamic;
@@ -1128,6 +1162,7 @@ class Playlist implements MediaItem {
     this.uri,
     this.externalIds = const <List<String>>[],
     this.isPlayable = true,
+    this.available,
     this.owner,
     this.isDynamic = false,
     this.providerMappings = const <ProviderMapping>[],
@@ -1170,6 +1205,7 @@ class Playlist implements MediaItem {
       uri: (json['uri'] as String?)?.trim(),
       externalIds: _stringPairsFromJson(json['external_ids']),
       isPlayable: json['is_playable'] != false,
+      available: json['available'] as bool?,
       owner: (json['owner'] as String?)?.trim(),
       isEditable: json['is_editable'] == true,
       isDynamic: json['is_dynamic'] == true,
@@ -1317,6 +1353,18 @@ class QueueItem {
           : null,
     );
   }
+}
+
+extension QueueItemAvailability on QueueItem {
+  bool get isAvailable =>
+      cache?.status == CacheStatus.complete ||
+      (available ?? mediaItem.isAvailable);
+
+  // A failed HTTP entry can be retried explicitly; provider-blocked entries need a complete cache.
+  bool get canPlay =>
+      cache?.status == CacheStatus.complete ||
+      available == true ||
+      mediaItem.canPlay;
 }
 
 PlayState? _playbackStateFromJson(String? value) {

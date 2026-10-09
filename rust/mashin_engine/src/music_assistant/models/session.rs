@@ -69,3 +69,9 @@ pub(crate) struct ProviderManifest {
     #[serde(default)]
     pub(crate) builtin: Option<bool>,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct ProviderInstance {
+    pub(crate) instance_id: ProviderInstanceId,
+    pub(crate) available: bool,
+}

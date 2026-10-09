@@ -97,22 +97,26 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
     return <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
+        isEnabled: track.canPlay,
         icon: Icons.play_arrow,
         onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[track]),
       ),
       ContextMenuAction(
         label: 'Radio starten',
+        isEnabled: track.canPlay,
         icon: Icons.radio_outlined,
         onSelected: () => _controller.startTrackRadio(track),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
+        isEnabled: track.canPlay,
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
         onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[track], option: QueueOption.next),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
+        isEnabled: track.canPlay,
         icon: Icons.last_page,
         onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[track], option: QueueOption.add),
       ),
@@ -172,17 +176,20 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
     final List<ContextMenuAction> actions = <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
+        isEnabled: targets.any((target) => target.canPlay),
         icon: Icons.play_arrow,
         onSelected: () => widget.coreBridge.queuePlayMedia(targets),
       ),
       if (item is Album || item is Playlist || item is Artist)
         ContextMenuAction(
           label: 'Zufällig abspielen',
+          isEnabled: targets.any((target) => target.canPlay),
           icon: Icons.shuffle_outlined,
           onSelected: () => widget.coreBridge.queuePlayMedia(targets, shuffle: true),
         ),
       ContextMenuAction(
         label: 'Radio starten',
+        isEnabled: targets.any((target) => target.canPlay),
         icon: Icons.radio_outlined,
         onSelected: () => item is Artist && isSingleTarget
             ? _controller.startArtistRadio(item)
@@ -190,12 +197,14 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
+        isEnabled: targets.any((target) => target.canPlay),
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
           onSelected: () => widget.coreBridge.queuePlayMedia(targets, option: QueueOption.next),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
+        isEnabled: targets.any((target) => target.canPlay),
         icon: Icons.last_page,
           onSelected: () => widget.coreBridge.queuePlayMedia(targets, option: QueueOption.add),
       ),

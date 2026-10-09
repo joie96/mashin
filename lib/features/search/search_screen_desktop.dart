@@ -149,22 +149,26 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
     return <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
+        isEnabled: tracks.any((track) => track.canPlay),
         icon: Icons.play_arrow,
         onSelected: () => widget.coreBridge.queuePlayMedia(tracks),
       ),
       ContextMenuAction(
         label: 'Radio starten',
+        isEnabled: tracks.any((track) => track.canPlay),
         icon: Icons.radio_outlined,
         onSelected: () => widget.coreBridge.startSendspinRadio(tracks),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
+        isEnabled: tracks.any((track) => track.canPlay),
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
         onSelected: () => widget.coreBridge.queuePlayMedia(tracks, option: QueueOption.next),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
+        isEnabled: tracks.any((track) => track.canPlay),
         icon: Icons.last_page,
         onSelected: () => widget.coreBridge.queuePlayMedia(tracks, option: QueueOption.add),
       ),
@@ -217,23 +221,27 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
     return <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
+        isEnabled: album.canPlay,
         icon: Icons.play_arrow,
         onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[album]),
       ),
       ContextMenuAction(
         label: 'Zufällig abspielen',
+        isEnabled: album.canPlay,
         icon: Icons.shuffle_outlined,
         onSelected: () =>
             widget.coreBridge.queuePlayMedia(<MediaItem>[album], shuffle: true),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
+        isEnabled: album.canPlay,
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
         onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[album], option: QueueOption.next),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
+        isEnabled: album.canPlay,
         icon: Icons.last_page,
         onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[album], option: QueueOption.add),
       ),
@@ -272,23 +280,27 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
     return <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
+        isEnabled: playlist.canPlay,
         icon: Icons.play_arrow,
         onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[playlist]),
       ),
       ContextMenuAction(
         label: 'Zufällig abspielen',
+        isEnabled: playlist.canPlay,
         icon: Icons.shuffle_outlined,
         onSelected: () =>
             widget.coreBridge.queuePlayMedia(<MediaItem>[playlist], shuffle: true),
       ),
       ContextMenuAction(
         label: 'Radio starten',
+        isEnabled: playlist.canPlay,
         icon: Icons.radio_outlined,
         onSelected: () =>
             widget.coreBridge.startSendspinRadio(<MediaItem>[playlist]),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
+        isEnabled: playlist.canPlay,
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
         onSelected: () =>
@@ -296,6 +308,7 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
+        isEnabled: playlist.canPlay,
         icon: Icons.last_page,
         onSelected: () =>
             widget.coreBridge.queuePlayMedia(<MediaItem>[playlist], option: QueueOption.add),
@@ -327,23 +340,27 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
     return <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
+        isEnabled: artist.canPlay,
         icon: Icons.play_arrow,
         onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[artist]),
       ),
       ContextMenuAction(
         label: 'Radio starten',
+        isEnabled: artist.canPlay,
         icon: Icons.radio_outlined,
         onSelected: () =>
             widget.coreBridge.startSendspinRadio(<MediaItem>[artist]),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
+        isEnabled: artist.canPlay,
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
         onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[artist], option: QueueOption.next),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
+        isEnabled: artist.canPlay,
         icon: Icons.last_page,
         onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[artist], option: QueueOption.add),
       ),

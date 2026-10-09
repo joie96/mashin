@@ -238,6 +238,7 @@ impl UserDataController {
                 sort_name: Some(name.to_string()),
                 uri: Some(MediaUri(format!("mashin://playlist/{}", name))),
                 is_playable: true,
+                available: None,
                 ..default_media_fields()
             },
             owner: String::new(),
@@ -425,6 +426,7 @@ fn default_media_fields() -> MediaItemFields {
         uri: None,
         external_ids: Vec::new(),
         is_playable: true,
+        available: None,
         provider_mappings: Vec::new(),
         metadata: None,
         favorite: false,

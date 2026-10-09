@@ -100,6 +100,7 @@ impl QueueItem {
     ) -> Self {
         let name = media_item.fields().name.clone();
         let duration = media_item.duration_seconds();
+        let available = media_item.fields().is_playable && media_item.fields().is_available();
         Self {
             queue_id,
             queue_item_id,
@@ -110,7 +111,7 @@ impl QueueItem {
             media_item: Some(media_item),
             image: None,
             index: sort_index as u32,
-            available: true,
+            available,
             cache: Some(CacheState {
                 status: CacheStatus::Queued,
                 cached_duration_millis: 0,
@@ -272,6 +273,7 @@ mod tests {
                     uri: None,
                     external_ids: Vec::new(),
                     is_playable: true,
+                    available: None,
                     provider_mappings: Vec::new(),
                     metadata: None,
                     favorite: false,

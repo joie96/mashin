@@ -46,6 +46,7 @@ pub(crate) struct SendspinDownloadPlanRequest {
     pub(crate) queue_revision: u64,
     pub(crate) queue_items: Vec<SendspinDownloadQueueItem>,
     pub(crate) current_index: Option<usize>,
+    pub(crate) excluded_queue_item_ids: Vec<QueueItemId>,
 }
 
 #[derive(Debug, Clone)]

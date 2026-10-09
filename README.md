@@ -42,6 +42,22 @@ MashinCoreBridge -> AndroidBridge -> FlutterPlaybackChannel
 
 ## Sendspin Download Recovery
 
+Commands remain on HTTP. A single-track `player_queues/play_media` HTTP 500 is
+retried three times in total, with one- and three-second retry delays. Exhaustion
+marks that queue entry failed for the current pass and advances past it. HTTP 500
+is a skip heuristic, not proof of provider unavailability; other HTTP statuses
+and transport failures retain the connection-recovery path. HTTP commands have
+a five-second connect timeout and a thirty-second total timeout.
+
+Three consecutive exhausted entries request the existing full downloader
+reconnect. Failed entries remain visible and excluded across reconnect and queue
+edits; explicit playback of an entry retries it. Newly received track data resets
+the streak, not playback of older cached audio. Repeat cannot loop over an entirely
+unplayable queue. Known metadata/provider-unavailable entries do not count toward
+the streak. Provider-instance snapshots are scoped to the server and session and
+cached for thirty seconds; a failed snapshot query leaves provider status unknown.
+Completely cached tracks may still play locally when their provider is unavailable.
+
 Incomplete prefetch caches below 30 seconds of retained audio are discarded after
 connection loss and downloaded again from zero without a seek. Current playback
 always retains its PCM reference for seek restoration, even below this threshold.
