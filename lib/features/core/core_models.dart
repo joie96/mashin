@@ -2083,6 +2083,21 @@ class MediaSessionState {
   });
 }
 
+class ListenBrainzCredentials {
+  const ListenBrainzCredentials({this.username = '', this.token = ''});
+
+  final String username;
+  final String token;
+
+  bool get isConfigured => username.isNotEmpty && token.isNotEmpty;
+
+  factory ListenBrainzCredentials.fromJson(Map<String, dynamic> json) =>
+      ListenBrainzCredentials(
+        username: json['username'] as String? ?? '',
+        token: json['token'] as String? ?? '',
+      );
+}
+
 class SessionSettings {
   const SessionSettings({
     required this.musicAssistantUrl,
@@ -2091,6 +2106,7 @@ class SessionSettings {
     required this.localCacheSizeBytes,
     required this.isDarkTheme,
     required this.logLevel,
+    this.listenBrainzCredentials = const ListenBrainzCredentials(),
   });
 
   final String musicAssistantUrl;
@@ -2099,6 +2115,7 @@ class SessionSettings {
   final int localCacheSizeBytes;
   final bool isDarkTheme;
   final LogLevelPreference logLevel;
+  final ListenBrainzCredentials listenBrainzCredentials;
 
   factory SessionSettings.fromJson(Map<String, dynamic> json) {
     return SessionSettings(
@@ -2109,6 +2126,9 @@ class SessionSettings {
           (json['localCacheSizeBytes'] as num?)?.toInt() ?? 250 * 1024 * 1024,
       isDarkTheme: json['theme'] != 'light',
       logLevel: LogLevelPreference.parse(json['logLevel'] as String? ?? 'info'),
+      listenBrainzCredentials: ListenBrainzCredentials.fromJson(
+        json['listenbrainz'] as Map<String, dynamic>? ?? <String, dynamic>{},
+      ),
     );
   }
 }

@@ -90,6 +90,22 @@ This recovery does not change the existing playback decoder behavior at Opus
 stream boundaries. Validate real-server PCM, FLAC and Opus reconnects on the
 target device in addition to host tests.
 
+## ListenBrainz Scrobbling
+
+Enter the ListenBrainz username and user token in Settings under ListenBrainz,
+then save. Mashin verifies that the token belongs to that username before storing
+it with the secure native session. Clear both fields and save to disable it.
+
+The Rust core scrobbles local playback after half the track or four minutes of
+actual listening, whichever is shorter. Pauses, buffering, downloads and seek
+jumps do not count as listening. Repeats have distinct playback identities.
+Pending listens are persisted without tokens, scoped to their ListenBrainz account,
+and retried when the API is reachable. Remote-player playback is not scrobbled.
+
+Disable Music Assistant's ListenBrainz scrobbler for the same local playback path
+to avoid duplicate submissions. Recommendations and recommendation playlists
+continue to come from Music Assistant; its recommendation plugin stays enabled.
+
 ## Build And Verify
 
 Rebuild the native library after JNI changes, then rebuild Flutter:

@@ -7,6 +7,7 @@ mod cache;
 mod core;
 mod ffi;
 mod jni;
+mod listenbrainz;
 mod logging;
 mod music_assistant;
 mod offline;

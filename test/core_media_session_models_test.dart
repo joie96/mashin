@@ -2,6 +2,27 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mashin_flutter/features/core/core_models.dart';
 
 void main() {
+  test(
+    'projects ListenBrainz credentials and defaults for existing sessions',
+    () {
+      final configured = SessionSettings.fromJson(<String, dynamic>{
+        'listenbrainz': <String, dynamic>{
+          'username': 'user',
+          'token': 'secret',
+        },
+      });
+      expect(configured.listenBrainzCredentials.username, 'user');
+      expect(configured.listenBrainzCredentials.token, 'secret');
+      expect(configured.listenBrainzCredentials.isConfigured, isTrue);
+      expect(
+        SessionSettings.fromJson(
+          <String, dynamic>{},
+        ).listenBrainzCredentials.isConfigured,
+        isFalse,
+      );
+    },
+  );
+
   test('projects the Rust player-state payload', () {
     final playerState = PlayerState.fromJson(<String, dynamic>{
       'activeEngineKind': 'remote',

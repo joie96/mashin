@@ -216,13 +216,17 @@ mod tests {
             volume: 100,
             theme: ThemePreference::Dark,
             log_level: LogLevelPreference::Info,
+            listenbrainz: Default::default(),
         }
     }
 
     #[test]
     fn auth_store_round_trips_and_clears_session_configurations() {
         let store = InMemoryAuthStore::new();
-        let session = session_config();
+        let mut session = session_config();
+        session.listenbrainz = crate::listenbrainz::ListenBrainzCredentials {
+            username: "listener".into(), token: "listenbrainz-secret".into(),
+        };
 
         assert_eq!(store.load_session().expect("load empty session"), None);
         store
@@ -235,5 +239,13 @@ mod tests {
 
         store.clear_session().expect("clear session configuration");
         assert_eq!(store.load_session().expect("load cleared session"), None);
+    }
+
+    #[test]
+    fn existing_sessions_restore_without_listenbrainz_credentials() {
+        let mut serialized = serde_json::to_value(session_config()).unwrap();
+        serialized.as_object_mut().unwrap().remove("listenbrainz");
+        let restored: SessionConfig = serde_json::from_value(serialized).unwrap();
+        assert_eq!(restored.listenbrainz, crate::listenbrainz::ListenBrainzCredentials::default());
     }
 }

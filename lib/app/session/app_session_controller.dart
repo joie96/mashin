@@ -32,6 +32,8 @@ class AppSessionController extends ChangeNotifier {
   late int _localCacheSizeBytes;
   bool _isDarkTheme = true;
   LogLevelPreference _logLevel = LogLevelPreference.info;
+  ListenBrainzCredentials _listenBrainzCredentials =
+      const ListenBrainzCredentials();
   final Completer<void> _initialSettingsReady = Completer<void>();
 
   UserData? get userDataController => _userDataController;
@@ -43,6 +45,8 @@ class AppSessionController extends ChangeNotifier {
   int get localCacheSizeBytes => _localCacheSizeBytes;
   bool get isDarkTheme => _isDarkTheme;
   LogLevelPreference get logLevel => _logLevel;
+  ListenBrainzCredentials get listenBrainzCredentials =>
+      _listenBrainzCredentials;
   Future<void> get initialSettingsReady => _initialSettingsReady.future;
 
   Future<void> initialize() async {
@@ -142,6 +146,14 @@ class AppSessionController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setListenBrainzCredentials(
+    ListenBrainzCredentials credentials,
+  ) async {
+    await coreBridge.setListenBrainzCredentials(credentials);
+    _listenBrainzCredentials = credentials;
+    notifyListeners();
+  }
+
   Future<void> _restoreSession() async {
     _isAuthenticated = await coreBridge.restorePersistedSession().timeout(
       _sessionStartupTimeout,
@@ -159,6 +171,7 @@ class AppSessionController extends ChangeNotifier {
     _localCacheSizeBytes = settings.localCacheSizeBytes;
     _isDarkTheme = settings.isDarkTheme;
     _logLevel = settings.logLevel;
+    _listenBrainzCredentials = settings.listenBrainzCredentials;
   }
 
   Future<void> _initializeUserData() async {

@@ -46,6 +46,25 @@ void main() {
     );
   });
 
+  test(
+    'ListenBrainz credentials are acknowledged by the Android service',
+    () async {
+      MethodCall? receivedCall;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        receivedCall = call;
+        return null;
+      });
+      await AndroidBridge().execute(
+        AndroidCoreCommand.setListenBrainzCredentials,
+        const <String, Object?>{'username': 'user', 'token': 'secret'},
+      );
+      expect(receivedCall?.arguments, <String, Object?>{
+        'command': 'setListenBrainzCredentials',
+        'arguments': <String, Object?>{'username': 'user', 'token': 'secret'},
+      });
+    },
+  );
+
   test('service failure is propagated without fallback', () async {
     messenger.setMockMethodCallHandler(channel, (_) async {
       throw PlatformException(code: 'service_unavailable');

@@ -135,6 +135,16 @@ fn execute_async_operation(request: CoreOperationRequest) -> Result<Value, CoreE
         "setLogLevel" => {
             execute_text_command(mashin_core_set_session_log_level, &arguments, "logLevel")
         }
+        "setListenBrainzCredentials" => {
+            let credentials = serde_json::from_value::<crate::listenbrainz::ListenBrainzCredentials>(Value::Object(arguments))
+                .map_err(|_| CoreError::command_failed("invalid ListenBrainz credentials"))?;
+            let credentials = crate::listenbrainz::validate_credentials(credentials)
+                .map_err(CoreError::command_failed)?;
+            let status = execute_core_command(|coordinator| coordinator.set_listenbrainz_credentials(credentials));
+            if status == 0 { Ok(Value::Null) } else {
+                Err(CoreError::command_failed("ListenBrainz settings could not be saved"))
+            }
+        }
         "saveLogSnapshot" => serialize_operation_result(
             crate::logging::save_log_snapshot().map_err(CoreError::internal),
         ),

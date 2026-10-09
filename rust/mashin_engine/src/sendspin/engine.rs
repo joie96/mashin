@@ -880,7 +880,9 @@ impl SendspinEngine {
 
     // Cached playback and background processing.
     pub(crate) fn play_cached_content(&mut self, content_key: &str) -> Result<(), String> {
-        self.play_cached_content_with_seek(content_key, 0, 0)
+        self.play_cached_content_with_seek(content_key, 0, 0)?;
+        crate::listenbrainz::record_playback_start();
+        Ok(())
     }
 
     fn play_cached_content_with_seek(

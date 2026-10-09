@@ -22,6 +22,7 @@ pub(crate) struct SessionSettings {
     pub(crate) local_cache_size_bytes: usize,
     pub(crate) theme: ThemePreference,
     pub(crate) log_level: LogLevelPreference,
+    pub(crate) listenbrainz: crate::listenbrainz::ListenBrainzCredentials,
 }
 
 pub(crate) fn session_settings(session: Option<&SessionConfig>) -> SessionSettings {
@@ -63,6 +64,7 @@ pub(crate) fn session_settings(session: Option<&SessionConfig>) -> SessionSettin
         local_cache_size_bytes,
         theme,
         log_level,
+        listenbrainz: session.map(|session| session.listenbrainz.clone()).unwrap_or_default(),
     }
 }
 
@@ -140,6 +142,7 @@ mod tests {
                 local_cache_size_bytes: DEFAULT_LOCAL_CACHE_SIZE_BYTES,
                 theme: ThemePreference::Dark,
                 log_level: LogLevelPreference::Info,
+                listenbrainz: Default::default(),
             }
         );
     }
@@ -162,6 +165,7 @@ mod tests {
             volume: 100,
             theme: ThemePreference::Light,
             log_level: LogLevelPreference::Error,
+            listenbrainz: crate::listenbrainz::ListenBrainzCredentials { username: "listener".into(), token: "secret".into() },
         };
 
         let configuration = session_settings(Some(&session));
@@ -172,5 +176,6 @@ mod tests {
         assert_eq!(configuration.local_cache_size_bytes, 1_024);
         assert_eq!(configuration.theme, ThemePreference::Light);
         assert_eq!(configuration.log_level, LogLevelPreference::Error);
+        assert_eq!(configuration.listenbrainz, session.listenbrainz);
     }
 }

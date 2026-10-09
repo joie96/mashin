@@ -249,6 +249,8 @@ pub(crate) struct SessionConfig {
     pub(crate) theme: ThemePreference,
     #[serde(default)]
     pub(crate) log_level: LogLevelPreference,
+    #[serde(default)]
+    pub(crate) listenbrainz: crate::listenbrainz::ListenBrainzCredentials,
 }
 
 #[derive(Deserialize)]

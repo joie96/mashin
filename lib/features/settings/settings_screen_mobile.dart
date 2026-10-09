@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/theme/app_theme.dart';
 import '../core/core_models.dart';
 import 'settings_log_view.dart';
+import 'settings_listenbrainz_form.dart';
 
 class SettingsScreenMobile extends StatelessWidget {
   const SettingsScreenMobile({
@@ -15,6 +16,8 @@ class SettingsScreenMobile extends StatelessWidget {
     required this.onThemeChanged,
     required this.onLogLevelChanged,
     required this.onSaveLogSnapshot,
+    required this.listenBrainzCredentials,
+    required this.onListenBrainzSave,
   });
 
   final String musicAssistantUrl;
@@ -25,6 +28,8 @@ class SettingsScreenMobile extends StatelessWidget {
   final ValueChanged<bool> onThemeChanged;
   final ValueChanged<LogLevelPreference> onLogLevelChanged;
   final Future<String> Function() onSaveLogSnapshot;
+  final ListenBrainzCredentials listenBrainzCredentials;
+  final Future<void> Function(ListenBrainzCredentials) onListenBrainzSave;
 
   @override
   Widget build(BuildContext context) {
@@ -63,6 +68,16 @@ class SettingsScreenMobile extends StatelessWidget {
                 Text(
                   'Die URL wird mit der Anmeldung gespeichert.',
                   style: TextStyle(color: colors.textSecondary),
+                ),
+                const SizedBox(height: 32),
+                Text(
+                  'ListenBrainz',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 12),
+                SettingsListenBrainzForm(
+                  credentials: listenBrainzCredentials,
+                  onSave: onListenBrainzSave,
                 ),
                 const SizedBox(height: 32),
                 Text(

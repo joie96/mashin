@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/theme/app_theme.dart';
 import '../core/core_models.dart';
 import 'settings_log_view.dart';
+import 'settings_listenbrainz_form.dart';
 
 const double _desktopSettingsControlWidth = 280;
 const BoxConstraints _desktopSettingsFieldConstraints = BoxConstraints.tightFor(
@@ -43,6 +44,8 @@ class SettingsScreenDesktop extends StatelessWidget {
     required this.onThemeChanged,
     required this.onLogLevelChanged,
     required this.onSaveLogSnapshot,
+    required this.listenBrainzCredentials,
+    required this.onListenBrainzSave,
   });
 
   final String musicAssistantUrl;
@@ -53,6 +56,8 @@ class SettingsScreenDesktop extends StatelessWidget {
   final ValueChanged<bool> onThemeChanged;
   final ValueChanged<LogLevelPreference> onLogLevelChanged;
   final Future<String> Function() onSaveLogSnapshot;
+  final ListenBrainzCredentials listenBrainzCredentials;
+  final Future<void> Function(ListenBrainzCredentials) onListenBrainzSave;
 
   @override
   Widget build(BuildContext context) {
@@ -101,6 +106,8 @@ class SettingsScreenDesktop extends StatelessWidget {
                       isDarkTheme: isDarkTheme,
                       onCacheSizeChanged: onCacheSizeChanged,
                       onThemeChanged: onThemeChanged,
+                      listenBrainzCredentials: listenBrainzCredentials,
+                      onListenBrainzSave: onListenBrainzSave,
                     ),
                     _DesktopLogTab(
                       logLevel: logLevel,
@@ -171,6 +178,8 @@ class _DesktopSettingsForm extends StatelessWidget {
     required this.isDarkTheme,
     required this.onCacheSizeChanged,
     required this.onThemeChanged,
+    required this.listenBrainzCredentials,
+    required this.onListenBrainzSave,
   });
 
   final String musicAssistantUrl;
@@ -178,6 +187,8 @@ class _DesktopSettingsForm extends StatelessWidget {
   final bool isDarkTheme;
   final ValueChanged<String> onCacheSizeChanged;
   final ValueChanged<bool> onThemeChanged;
+  final ListenBrainzCredentials listenBrainzCredentials;
+  final Future<void> Function(ListenBrainzCredentials) onListenBrainzSave;
 
   @override
   Widget build(BuildContext context) {
@@ -199,6 +210,20 @@ class _DesktopSettingsForm extends StatelessWidget {
                   colors: colors,
                   icon: Icons.dns_outlined,
                 ),
+              ),
+            ),
+          ),
+        ),
+        const _DesktopSettingsDivider(),
+        _DesktopSettingsSection(
+          title: 'ListenBrainz',
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 560),
+              child: SettingsListenBrainzForm(
+                credentials: listenBrainzCredentials,
+                onSave: onListenBrainzSave,
               ),
             ),
           ),

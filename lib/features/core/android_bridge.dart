@@ -22,6 +22,7 @@ enum AndroidCoreCommand {
   setMuted,
   setTheme,
   setLogLevel,
+  setListenBrainzCredentials,
   queuePlayMedia,
   startSendspinRadio,
   insertQueueItems,
@@ -45,7 +46,9 @@ class AndroidBridge {
   Future<void> dispose() async {
     try {
       await _channel.invokeMethod<void>('disconnect');
-    } on MissingPluginException {}
+    } on MissingPluginException {
+      return;
+    }
   }
 
   // Service command transport and boundary serialization.

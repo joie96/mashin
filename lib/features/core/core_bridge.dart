@@ -135,6 +135,7 @@ abstract class MashinCoreBridgeApi {
   Future<void> setLocalCacheSizeBytes(int cacheSizeBytes);
   Future<void> setTheme(bool isDarkTheme);
   Future<void> setLogLevel(LogLevelPreference logLevel);
+  Future<void> setListenBrainzCredentials(ListenBrainzCredentials credentials);
   Future<String> saveLogSnapshot();
   void log(LogLevelPreference level, String category, String message);
   Future<void> addPlaylistTracks(String playlistId, List<String> uris);
@@ -748,6 +749,14 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     });
     _reapplyRuntimeLogLevelOverride();
   }
+
+  @override
+  Future<void> setListenBrainzCredentials(
+    ListenBrainzCredentials credentials,
+  ) => _submitVoidOperation('setListenBrainzCredentials', <String, Object?>{
+    'username': credentials.username,
+    'token': credentials.token,
+  });
 
   @override
   Future<String> saveLogSnapshot() => _submitOperation<String>(

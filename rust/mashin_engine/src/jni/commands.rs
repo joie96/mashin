@@ -63,6 +63,10 @@ enum PlaybackCommand {
     SetLogLevel {
         log_level: LogLevelPreference,
     },
+    SetListenBrainzCredentials {
+        username: String,
+        token: String,
+    },
     SetUserDataFavorites {
         media_items: Vec<MediaItem>,
         favorite: bool,
@@ -193,6 +197,12 @@ pub(crate) fn execute_command(kind: &str, argument: Option<&str>) -> Result<(), 
         }
         PlaybackCommand::SetLogLevel { log_level } => {
             execute_core_command(|coordinator| coordinator.set_log_level(log_level))
+        }
+        PlaybackCommand::SetListenBrainzCredentials { username, token } => {
+            let credentials = crate::listenbrainz::validate_credentials(
+                crate::listenbrainz::ListenBrainzCredentials { username, token },
+            )?;
+            execute_core_command(|coordinator| coordinator.set_listenbrainz_credentials(credentials))
         }
         PlaybackCommand::SetUserDataFavorites {
             media_items,

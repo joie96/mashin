@@ -89,6 +89,7 @@ impl CoreCoordinator {
         self.auth_store.save_session(session.clone())?;
         self.invalidate_user_data();
         self.session_configuration = Some(session);
+        crate::listenbrainz::start(&CORE_NETWORK_RUNTIME);
         Ok(())
     }
 
@@ -104,6 +105,7 @@ impl CoreCoordinator {
         crate::logging::set_minimum_level(session.log_level.as_str())?;
         self.invalidate_user_data();
         self.session_configuration = Some(session);
+        crate::listenbrainz::start(&CORE_NETWORK_RUNTIME);
         Ok(true)
     }
 
@@ -139,6 +141,7 @@ impl CoreCoordinator {
             volume: DEFAULT_LOCAL_VOLUME,
             theme: ThemePreference::Dark,
             log_level: LogLevelPreference::Info,
+            listenbrainz: Default::default(),
         })
     }
 
@@ -205,6 +208,18 @@ impl CoreCoordinator {
         session.log_level = log_level;
         self.auth_store.save_session(session.clone())?;
         crate::logging::set_minimum_level(log_level.as_str())?;
+        self.session_configuration = Some(session);
+        Ok(())
+    }
+
+    pub(crate) fn set_listenbrainz_credentials(
+        &mut self,
+        credentials: crate::listenbrainz::ListenBrainzCredentials,
+    ) -> Result<(), String> {
+        let mut session = self.session_configuration.clone()
+            .ok_or_else(|| "a restored session is required before configuring ListenBrainz".to_string())?;
+        session.listenbrainz = credentials;
+        self.auth_store.save_session(session.clone())?;
         self.session_configuration = Some(session);
         Ok(())
     }
@@ -388,6 +403,10 @@ impl CoreCoordinator {
     }
 
     // Platform state reads project the active engine without storing duplicate core state.
+    pub(crate) fn listenbrainz_credentials(&self) -> crate::listenbrainz::ListenBrainzCredentials {
+        self.session_configuration.as_ref().map(|session| session.listenbrainz.clone()).unwrap_or_default()
+    }
+
     pub(crate) fn queue(&self) -> Queue {
         self.playback.queue()
     }
@@ -1392,6 +1411,7 @@ mod tests {
             volume: 100,
             theme: ThemePreference::Dark,
             log_level: LogLevelPreference::Info,
+            listenbrainz: Default::default(),
         }
     }
 
@@ -1408,6 +1428,20 @@ mod tests {
         assert!(coordinator.session_configuration.is_some());
         assert!(queue.items.is_empty());
         assert_eq!(player_state.playback_state, PlayState::Idle);
+    }
+
+    #[test]
+    fn listenbrainz_credentials_are_persisted_without_changing_playback() {
+        let mut coordinator = test_coordinator();
+        coordinator.configure_session(session_config()).unwrap();
+        let credentials = crate::listenbrainz::ListenBrainzCredentials {
+            username: "listener".into(), token: "secret".into(),
+        };
+        let player_before = coordinator.player_state();
+        coordinator.set_listenbrainz_credentials(credentials.clone()).unwrap();
+        assert_eq!(coordinator.listenbrainz_credentials(), credentials);
+        assert_eq!(coordinator.auth_store.load_session().unwrap().unwrap().listenbrainz, credentials);
+        assert_eq!(coordinator.player_state(), player_before);
     }
 
     #[test]
