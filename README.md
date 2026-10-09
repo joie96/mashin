@@ -15,13 +15,16 @@ MashinCoreBridge -> AndroidBridge -> FlutterPlaybackChannel
 - `PlaybackService` owns Android session restoration, command ordering, audio focus,
 	foreground notification and the playback CPU wake lock. Rust owns the queue and
 	playback state; Media3 only projects that state.
-- Minimizing the Flutter activity keeps the session alive. Closing the activity or
-	removing its task releases the Media3 session, removes its notification and shuts
-	down native playback, even when Android Auto is connected. Configuration changes
-	that recreate the activity do not shut down playback.
-- Disconnecting the last Android Auto controller ends the session only when no
-	Flutter activity exists, including a minimized activity. This follows Media3
-	controller disconnect callbacks; legacy controller disconnects may be delayed.
+- Flutter activities (including minimized activities) and Android Auto controllers
+	share session ownership. Closing the last activity or removing its task ends
+	playback only when no Android Auto controller or reconnect grace remains.
+	Configuration changes that recreate the activity do not shut down playback.
+- Disconnecting the last Android Auto controller starts a five-second reconnect
+	grace, preserving the session and ongoing playback. Reconnecting a controller or
+	attaching an activity cancels the pending shutdown. At expiry, the session ends
+	only if no activity or Android Auto controller exists and no activity recreation
+	is in progress. This follows Media3 controller disconnect callbacks; legacy
+	controller disconnects may be delayed.
 - Before engine detach, Android synchronously revokes the Flutter FFI listener.
 	Registration and native callback invocation share a lock, so no old listener
 	can be called after revocation returns. Service-owned JNI events remain active.
@@ -86,9 +89,12 @@ flutter test test/android_bridge_test.dart
 Kotlin/Rust changes require a full app restart, not just Flutter hot reload.
 On a device, verify local playback with a media notification, screen-off playback,
 activity closure and task removal while playing, and UI reconnection. Closing the
-activity must remove the notification and end playback. Disconnect Android Auto
-both without a Flutter activity and with a minimized Flutter activity: only the
-former must end the session. After pause or stop, verify that
+last activity or removing its task must preserve playback while Android Auto is
+connected; without another owner or reconnect grace, it must end playback and
+remove the notification. Disconnect Android Auto both without a Flutter activity
+and with a minimized Flutter activity: only the former must end the session after
+five seconds. Reconnect within five seconds and verify uninterrupted playback.
+After pause or stop, verify that
 audio focus and the CPU wake lock are released. Host tests do not certify standby
 behavior or manufacturer-specific battery policies.
 For Bluetooth headsets, repeat pause/play and verify that the native AAudio player

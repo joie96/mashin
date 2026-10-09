@@ -1,6 +1,7 @@
 package com.example.mashin_flutter.media.session
 
 import android.os.Bundle
+import android.os.Looper
 import androidx.media3.common.Player
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.LibraryResult
@@ -16,6 +17,7 @@ import com.google.common.util.concurrent.SettableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.time.Duration
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -24,10 +26,13 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.LooperMode
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
+@LooperMode(LooperMode.Mode.PAUSED)
 class PlaybackSessionCallbackTest {
     // Controller browsing and search contracts.
     @Test
@@ -73,9 +78,14 @@ class PlaybackSessionCallbackTest {
                 }
                 assertFalse(result.availablePlayerCommands == Player.Commands.EMPTY)
                 callback.onDisconnected(session, controller)
+                assertEquals(0, shutdownRequests)
+                shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(4_999))
+                assertEquals(0, shutdownRequests)
+                shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1))
                 assertEquals(if (packageName == "com.google.android.projection.gearhead") 1 else 0, shutdownRequests)
             }
         } finally {
+            lifecycle.detachSession()
             session.release()
             player.release()
             browser.close()
