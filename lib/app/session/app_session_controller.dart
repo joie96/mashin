@@ -116,41 +116,27 @@ class AppSessionController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> setLocalCacheSizeBytes(int cacheSizeBytes) async {
-    if (cacheSizeBytes == _localCacheSizeBytes) {
-      return;
-    }
-
-    await coreBridge.setLocalCacheSizeBytes(cacheSizeBytes);
-    _localCacheSizeBytes = cacheSizeBytes;
-    notifyListeners();
-  }
-
   Future<void> setDarkTheme(bool isDarkTheme) async {
     if (isDarkTheme == _isDarkTheme) {
       return;
     }
 
-    await coreBridge.setTheme(isDarkTheme);
-    _isDarkTheme = isDarkTheme;
-    notifyListeners();
+    await saveSessionSettings(
+      SessionSettingsUpdate(
+        localCacheSizeBytes: _localCacheSizeBytes,
+        isDarkTheme: isDarkTheme,
+        logLevel: _logLevel,
+        listenBrainzCredentials: _listenBrainzCredentials,
+      ),
+    );
   }
 
-  Future<void> setLogLevel(LogLevelPreference logLevel) async {
-    if (logLevel == _logLevel) {
-      return;
-    }
-
-    await coreBridge.setLogLevel(logLevel);
-    _logLevel = logLevel;
-    notifyListeners();
-  }
-
-  Future<void> setListenBrainzCredentials(
-    ListenBrainzCredentials credentials,
-  ) async {
-    await coreBridge.setListenBrainzCredentials(credentials);
-    _listenBrainzCredentials = credentials;
+  Future<void> saveSessionSettings(SessionSettingsUpdate settings) async {
+    await coreBridge.saveSessionSettings(settings);
+    _localCacheSizeBytes = settings.localCacheSizeBytes;
+    _isDarkTheme = settings.isDarkTheme;
+    _logLevel = settings.logLevel;
+    _listenBrainzCredentials = settings.listenBrainzCredentials;
     notifyListeners();
   }
 

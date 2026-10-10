@@ -169,57 +169,36 @@ impl CoreCoordinator {
         self.select_output(default_sendspin_output(&music_assistant_url)?)
     }
 
-    pub(crate) fn set_local_cache_size_bytes(
-        &mut self,
-        cache_size_bytes: usize,
-    ) -> Result<(), String> {
-        const MINIMUM_CACHE_SIZE_BYTES: usize = 25 * 1024 * 1024;
-        const MAXIMUM_CACHE_SIZE_BYTES: usize = 1_000 * 1024 * 1024;
-        if !(MINIMUM_CACHE_SIZE_BYTES..=MAXIMUM_CACHE_SIZE_BYTES).contains(&cache_size_bytes) {
+    // Commit all settings together; failed persistence restores the previous playback configuration.
+    pub(crate) fn save_session_settings(&mut self, update: super::models::SessionSettingsUpdate) -> Result<(), String> {
+        if !(25 * 1024 * 1024..=1_000 * 1024 * 1024).contains(&update.local_cache_size_bytes) {
             return Err("local cache size must be between 25 and 1000 MB".to_string());
         }
-        let mut session = self.session_configuration.clone().ok_or_else(|| {
-            "a restored session is required before changing the local cache size".to_string()
-        })?;
-        let SelectedOutput::Sendspin(configuration) = &mut session.selected_output else {
+        let previous = self.session_configuration.clone()
+            .ok_or_else(|| "a restored session is required before saving settings".to_string())?;
+        let mut session = previous.clone();
+        let mut has_changed_cache = false;
+        if let SelectedOutput::Sendspin(configuration) = &mut session.selected_output {
+            has_changed_cache = configuration.cache_bytes != update.local_cache_size_bytes;
+            configuration.cache_bytes = update.local_cache_size_bytes;
+        } else if super::config::session_settings(Some(&session)).local_cache_size_bytes != update.local_cache_size_bytes {
             return Err("the local cache is available only with the Sendspin output".to_string());
-        };
-        configuration.cache_bytes = cache_size_bytes;
-        self.configure_selected_output(&session)?;
-        self.auth_store.save_session(session.clone())?;
-        self.session_configuration = Some(session);
-        Ok(())
-    }
-
-    pub(crate) fn set_theme(&mut self, theme: ThemePreference) -> Result<(), String> {
-        let mut session = self.session_configuration.clone().ok_or_else(|| {
-            "a restored session is required before changing the theme".to_string()
-        })?;
-        session.theme = theme;
-        self.auth_store.save_session(session.clone())?;
-        self.session_configuration = Some(session);
-        Ok(())
-    }
-
-    pub(crate) fn set_log_level(&mut self, log_level: LogLevelPreference) -> Result<(), String> {
-        let mut session = self.session_configuration.clone().ok_or_else(|| {
-            "a restored session is required before changing the log level".to_string()
-        })?;
-        session.log_level = log_level;
-        self.auth_store.save_session(session.clone())?;
-        crate::logging::set_minimum_level(log_level.as_str())?;
-        self.session_configuration = Some(session);
-        Ok(())
-    }
-
-    pub(crate) fn set_listenbrainz_credentials(
-        &mut self,
-        credentials: crate::listenbrainz::ListenBrainzCredentials,
-    ) -> Result<(), String> {
-        let mut session = self.session_configuration.clone()
-            .ok_or_else(|| "a restored session is required before configuring ListenBrainz".to_string())?;
-        session.listenbrainz = credentials;
-        self.auth_store.save_session(session.clone())?;
+        }
+        session.theme = update.theme;
+        session.log_level = update.log_level;
+        session.listenbrainz = update.listenbrainz;
+        if has_changed_cache {
+            self.configure_selected_output(&session)?;
+            self.playback.set_volume(session.volume);
+        }
+        if let Err(error) = self.auth_store.save_session(session.clone()) {
+            if has_changed_cache {
+                self.configure_selected_output(&previous)?;
+                self.playback.set_volume(previous.volume);
+            }
+            return Err(error);
+        }
+        crate::logging::set_minimum_level(session.log_level.as_str())?;
         self.session_configuration = Some(session);
         Ok(())
     }
@@ -1394,6 +1373,15 @@ mod tests {
         );
     }
 
+    fn settings_update() -> crate::core::models::SessionSettingsUpdate {
+        crate::core::models::SessionSettingsUpdate {
+            local_cache_size_bytes: 512 * 1024 * 1024,
+            theme: ThemePreference::Light,
+            log_level: LogLevelPreference::Warn,
+            listenbrainz: Default::default(),
+        }
+    }
+
     fn session_config() -> SessionConfig {
         SessionConfig {
             music_assistant_url: MusicAssistantServerUrl("https://music-assistant.example".into()),
@@ -1431,14 +1419,51 @@ mod tests {
     }
 
     #[test]
-    fn listenbrainz_credentials_are_persisted_without_changing_playback() {
+    fn session_settings_commit_all_preferences_and_reject_invalid_cache_without_mutation() {
         let mut coordinator = test_coordinator();
         coordinator.configure_session(session_config()).unwrap();
+        let update = super::super::models::SessionSettingsUpdate {
+            local_cache_size_bytes: 500 * 1024 * 1024,
+            theme: ThemePreference::Light,
+            log_level: LogLevelPreference::Warn,
+            listenbrainz: crate::listenbrainz::ListenBrainzCredentials {
+                username: "listener".into(), token: "secret".into(),
+            },
+        };
+        coordinator.save_session_settings(update).unwrap();
+        let stored = coordinator.auth_store.load_session().unwrap().unwrap();
+        assert_eq!(coordinator.player_state().volume, stored.volume);
+        let settings = crate::core::config::session_settings(Some(&stored));
+        assert_eq!(settings.local_cache_size_bytes, 500 * 1024 * 1024);
+        assert_eq!(settings.theme, ThemePreference::Light);
+        assert_eq!(settings.log_level, LogLevelPreference::Warn);
+        assert_eq!(settings.listenbrainz.username, "listener");
+        assert!(coordinator.save_session_settings(super::super::models::SessionSettingsUpdate {
+            local_cache_size_bytes: 1,
+            theme: ThemePreference::Dark,
+            log_level: LogLevelPreference::Error,
+            listenbrainz: Default::default(),
+        }).is_err());
+        assert_eq!(crate::core::config::session_settings(coordinator.session_configuration.as_ref()), settings);
+        assert_eq!(crate::core::config::session_settings(coordinator.auth_store.load_session().unwrap().as_ref()), settings);
+    }
+
+    #[test]
+    fn listenbrainz_credentials_are_persisted_without_changing_playback() {
+        let mut coordinator = test_coordinator();
+        let mut session = session_config();
+        let SelectedOutput::Sendspin(configuration) = &mut session.selected_output else {
+            panic!("test session must select Sendspin");
+        };
+        configuration.cache_bytes = settings_update().local_cache_size_bytes;
+        coordinator.configure_session(session).unwrap();
         let credentials = crate::listenbrainz::ListenBrainzCredentials {
             username: "listener".into(), token: "secret".into(),
         };
         let player_before = coordinator.player_state();
-        coordinator.set_listenbrainz_credentials(credentials.clone()).unwrap();
+        let mut update = settings_update();
+        update.listenbrainz = credentials.clone();
+        coordinator.save_session_settings(update).unwrap();
         assert_eq!(coordinator.listenbrainz_credentials(), credentials);
         assert_eq!(coordinator.auth_store.load_session().unwrap().unwrap().listenbrainz, credentials);
         assert_eq!(coordinator.player_state(), player_before);
@@ -1483,7 +1508,7 @@ mod tests {
             .expect("configure session");
 
         coordinator
-            .set_local_cache_size_bytes(512 * 1024 * 1024)
+            .save_session_settings(settings_update())
             .expect("update local cache size");
 
         let configuration = coordinator
@@ -1508,7 +1533,7 @@ mod tests {
             .expect("configure session");
 
         coordinator
-            .set_theme(ThemePreference::Light)
+            .save_session_settings(settings_update())
             .expect("update theme");
 
         let configuration = coordinator
@@ -1530,7 +1555,7 @@ mod tests {
             .expect("configure session");
 
         coordinator
-            .set_log_level(LogLevelPreference::Warn)
+            .save_session_settings(settings_update())
             .expect("update log level");
 
         let configuration = coordinator

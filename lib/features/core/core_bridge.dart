@@ -132,10 +132,8 @@ abstract class MashinCoreBridgeApi {
   Future<void> selectQueueItem(String itemId);
   Future<void> playQueueIndex(int index);
   Future<void> requestCodec(String codec);
-  Future<void> setLocalCacheSizeBytes(int cacheSizeBytes);
-  Future<void> setTheme(bool isDarkTheme);
-  Future<void> setLogLevel(LogLevelPreference logLevel);
-  Future<void> setListenBrainzCredentials(ListenBrainzCredentials credentials);
+  Future<void> testListenBrainzCredentials(ListenBrainzCredentials credentials);
+  Future<void> saveSessionSettings(SessionSettingsUpdate settings);
   Future<String> saveLogSnapshot();
   void log(LogLevelPreference level, String category, String message);
   Future<void> addPlaylistTracks(String playlistId, List<String> uris);
@@ -730,33 +728,20 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   Future<void> requestCodec(String codec) =>
       _submitVoidOperation('requestCodec', <String, Object?>{'codec': codec});
 
+  // Session settings are committed once; connection tests never persist them.
   @override
-  Future<void> setLocalCacheSizeBytes(int cacheSizeBytes) =>
-      _submitVoidOperation('setLocalCacheSizeBytes', <String, Object?>{
-        'cacheSizeBytes': cacheSizeBytes,
-      });
-
-  @override
-  Future<void> setTheme(bool isDarkTheme) => _submitVoidOperation(
-    'setTheme',
-    <String, Object?>{'theme': isDarkTheme ? 'dark' : 'light'},
-  );
-
-  @override
-  Future<void> setLogLevel(LogLevelPreference logLevel) async {
-    await _submitVoidOperation('setLogLevel', <String, Object?>{
-      'logLevel': logLevel.name,
-    });
-    _reapplyRuntimeLogLevelOverride();
-  }
-
-  @override
-  Future<void> setListenBrainzCredentials(
+  Future<void> testListenBrainzCredentials(
     ListenBrainzCredentials credentials,
-  ) => _submitVoidOperation('setListenBrainzCredentials', <String, Object?>{
+  ) => _submitVoidOperation('testListenBrainzCredentials', <String, Object?>{
     'username': credentials.username,
     'token': credentials.token,
   });
+
+  @override
+  Future<void> saveSessionSettings(SessionSettingsUpdate settings) async {
+    await _submitVoidOperation('saveSessionSettings', settings.toJson());
+    _reapplyRuntimeLogLevelOverride();
+  }
 
   @override
   Future<String> saveLogSnapshot() => _submitOperation<String>(

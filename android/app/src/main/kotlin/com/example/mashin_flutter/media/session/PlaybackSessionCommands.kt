@@ -25,9 +25,7 @@ internal enum class PlaybackCommandKind(val action: String, val canStartPlayback
     SetAutoplay("setAutoplay"),
     SetVolume("setVolume"),
     SetMuted("setMuted"),
-    SetTheme("setTheme"),
-    SetLogLevel("setLogLevel"),
-    SetListenBrainzCredentials("setListenBrainzCredentials"),
+    SaveSessionSettings("saveSessionSettings"),
     SetUserDataFavorites("setUserDataFavorites"),
     QueuePlayMedia("queuePlayMedia", true),
     StartSendspinRadio("startSendspinRadio", true),
@@ -38,7 +36,6 @@ internal enum class PlaybackCommandKind(val action: String, val canStartPlayback
     SelectQueueItem("selectQueueItem"),
     PlayQueueIndex("playQueueIndex", true),
     RequestCodec("requestCodec"),
-    SetLocalCacheSizeBytes("setLocalCacheSizeBytes"),
 }
 
 // Serialized arguments cross the session/JNI boundary; Rust validates their typed contract.

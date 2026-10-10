@@ -254,6 +254,15 @@ pub(crate) struct SessionConfig {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SessionSettingsUpdate {
+    pub(crate) local_cache_size_bytes: usize,
+    pub(crate) theme: ThemePreference,
+    pub(crate) log_level: LogLevelPreference,
+    pub(crate) listenbrainz: crate::listenbrainz::ListenBrainzCredentials,
+}
+
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LoginConfig {
     pub(crate) music_assistant_url: MusicAssistantServerUrl,

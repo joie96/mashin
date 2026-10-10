@@ -93,8 +93,12 @@ target device in addition to host tests.
 ## ListenBrainz Scrobbling
 
 Enter the ListenBrainz username and user token in Settings under ListenBrainz,
-then save. Mashin verifies that the token belongs to that username before storing
-it with the secure native session. Clear both fields and save to disable it.
+then use the page-wide Save button. All settings, including cache size, theme,
+log level and ListenBrainz credentials, remain a local draft until Save; Cancel
+restores the last saved values. The ListenBrainz Test button validates the draft
+without saving or enabling scrobbling and shows a checkmark on success.
+Mashin verifies changed credentials before storing the complete settings update
+with the secure native session. Clear both fields and save to disable scrobbling.
 
 The Rust core scrobbles local playback after half the track or four minutes of
 actual listening, whichever is shorter. Pauses, buffering, downloads and seek

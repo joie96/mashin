@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mashin_flutter/features/core/android_bridge.dart';
+import 'package:mashin_flutter/features/core/core_models.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -46,24 +47,64 @@ void main() {
     );
   });
 
-  test(
-    'ListenBrainz credentials are acknowledged by the Android service',
-    () async {
-      MethodCall? receivedCall;
-      messenger.setMockMethodCallHandler(channel, (call) async {
-        receivedCall = call;
-        return null;
-      });
-      await AndroidBridge().execute(
-        AndroidCoreCommand.setListenBrainzCredentials,
-        const <String, Object?>{'username': 'user', 'token': 'secret'},
-      );
-      expect(receivedCall?.arguments, <String, Object?>{
-        'command': 'setListenBrainzCredentials',
-        'arguments': <String, Object?>{'username': 'user', 'token': 'secret'},
-      });
-    },
-  );
+  test('settings are submitted in one complete Android command', () async {
+    MethodCall? receivedCall;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      receivedCall = call;
+      return null;
+    });
+    const update = SessionSettingsUpdate(
+      localCacheSizeBytes: 524288000,
+      isDarkTheme: false,
+      logLevel: LogLevelPreference.warn,
+      listenBrainzCredentials: ListenBrainzCredentials(
+        username: 'listener',
+        token: 'secret',
+      ),
+    );
+    await AndroidBridge().execute(
+      AndroidCoreCommand.saveSessionSettings,
+      update.toJson(),
+    );
+    expect(receivedCall?.arguments, <String, Object?>{
+      'command': 'saveSessionSettings',
+      'arguments': <String, Object?>{
+        'localCacheSizeBytes': 524288000,
+        'theme': 'light',
+        'logLevel': 'warn',
+        'listenbrainz': <String, Object?>{
+          'username': 'listener',
+          'token': 'secret',
+        },
+      },
+    });
+  });
+
+  test('settings commit is acknowledged by the Android service', () async {
+    MethodCall? receivedCall;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      receivedCall = call;
+      return null;
+    });
+    await AndroidBridge().execute(
+      AndroidCoreCommand.saveSessionSettings,
+      const SessionSettingsUpdate(
+        localCacheSizeBytes: 262144000,
+        isDarkTheme: true,
+        logLevel: LogLevelPreference.info,
+        listenBrainzCredentials: ListenBrainzCredentials(),
+      ).toJson(),
+    );
+    expect(receivedCall?.arguments, <String, Object?>{
+      'command': 'saveSessionSettings',
+      'arguments': <String, Object?>{
+        'localCacheSizeBytes': 262144000,
+        'theme': 'dark',
+        'logLevel': 'info',
+        'listenbrainz': <String, Object?>{'username': '', 'token': ''},
+      },
+    });
+  });
 
   test('service failure is propagated without fallback', () async {
     messenger.setMockMethodCallHandler(channel, (_) async {

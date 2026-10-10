@@ -2098,6 +2098,30 @@ class ListenBrainzCredentials {
       );
 }
 
+class SessionSettingsUpdate {
+  const SessionSettingsUpdate({
+    required this.localCacheSizeBytes,
+    required this.isDarkTheme,
+    required this.logLevel,
+    required this.listenBrainzCredentials,
+  });
+
+  final int localCacheSizeBytes;
+  final bool isDarkTheme;
+  final LogLevelPreference logLevel;
+  final ListenBrainzCredentials listenBrainzCredentials;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'localCacheSizeBytes': localCacheSizeBytes,
+    'theme': isDarkTheme ? 'dark' : 'light',
+    'logLevel': logLevel.name,
+    'listenbrainz': <String, Object?>{
+      'username': listenBrainzCredentials.username,
+      'token': listenBrainzCredentials.token,
+    },
+  };
+}
+
 class SessionSettings {
   const SessionSettings({
     required this.musicAssistantUrl,

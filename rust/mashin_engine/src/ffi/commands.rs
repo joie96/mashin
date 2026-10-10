@@ -131,19 +131,21 @@ fn execute_async_operation(request: CoreOperationRequest) -> Result<Value, CoreE
         "setAutoplay" => execute_boolean_command(mashin_core_set_autoplay, &arguments, "enabled"),
         "setVolume" => execute_integer_command(mashin_core_set_volume, &arguments, "volume"),
         "setMuted" => execute_boolean_command(mashin_core_set_muted, &arguments, "muted"),
-        "setTheme" => execute_text_command(mashin_core_set_theme, &arguments, "theme"),
-        "setLogLevel" => {
-            execute_text_command(mashin_core_set_session_log_level, &arguments, "logLevel")
+        "saveSessionSettings" => {
+            let update = serde_json::from_value::<crate::core::models::SessionSettingsUpdate>(Value::Object(arguments))
+                .map_err(|_| CoreError::command_failed("invalid settings"))?;
+            let update = crate::listenbrainz::validate_settings_update(update).map_err(CoreError::command_failed)?;
+            let status = execute_core_command(|coordinator| coordinator.save_session_settings(update));
+            if status == 0 { Ok(Value::Null) } else { Err(CoreError::command_failed("settings could not be saved")) }
         }
-        "setListenBrainzCredentials" => {
+        "testListenBrainzCredentials" => {
             let credentials = serde_json::from_value::<crate::listenbrainz::ListenBrainzCredentials>(Value::Object(arguments))
                 .map_err(|_| CoreError::command_failed("invalid ListenBrainz credentials"))?;
-            let credentials = crate::listenbrainz::validate_credentials(credentials)
-                .map_err(CoreError::command_failed)?;
-            let status = execute_core_command(|coordinator| coordinator.set_listenbrainz_credentials(credentials));
-            if status == 0 { Ok(Value::Null) } else {
-                Err(CoreError::command_failed("ListenBrainz settings could not be saved"))
+            if credentials.username.trim().is_empty() || credentials.token.trim().is_empty() {
+                return Err(CoreError::command_failed("ListenBrainz username and token are both required"));
             }
+            crate::listenbrainz::validate_credentials(credentials).map_err(CoreError::command_failed)?;
+            Ok(Value::Null)
         }
         "saveLogSnapshot" => serialize_operation_result(
             crate::logging::save_log_snapshot().map_err(CoreError::internal),
@@ -159,11 +161,6 @@ fn execute_async_operation(request: CoreOperationRequest) -> Result<Value, CoreE
         "selectQueueItem" => execute_text_command(mashin_core_select_queue_item, &arguments, "itemId"),
         "playQueueIndex" => execute_integer_command(mashin_core_queue_play, &arguments, "index"),
         "requestCodec" => execute_text_command(mashin_core_set_codec, &arguments, "codec"),
-        "setLocalCacheSizeBytes" => execute_integer_command(
-            mashin_core_set_local_cache_size_bytes,
-            &arguments,
-            "cacheSizeBytes",
-        ),
         "addPlaylistTracks" => execute_two_json_text_command(
             mashin_core_add_playlist_tracks,
             &arguments,
@@ -726,67 +723,6 @@ pub extern "C" fn mashin_core_start_sendspin_radio(media_items_json: *const c_ch
 pub extern "C" fn mashin_core_set_codec(codec: *const c_char) -> i32 {
     match read_required_c_string(codec, "codec") {
         Ok(codec) => execute_core_command(|coordinator| coordinator.set_preferred_codec(&codec)),
-        Err(error) => {
-            record_and_publish_error(error);
-            -1
-        }
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn mashin_core_set_local_cache_size_bytes(cache_size_bytes: i32) -> i32 {
-    match usize::try_from(cache_size_bytes) {
-        Ok(cache_size_bytes) => execute_core_command(|coordinator| {
-            coordinator.set_local_cache_size_bytes(cache_size_bytes)
-        }),
-        Err(_) => {
-            record_and_publish_error("local cache size must not be negative".to_string());
-            -1
-        }
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn mashin_core_set_theme(theme: *const c_char) -> i32 {
-    match read_required_c_string(theme, "theme") {
-        Ok(theme) => match theme.as_str() {
-            "dark" => execute_core_command(|coordinator| {
-                coordinator.set_theme(crate::core::models::ThemePreference::Dark)
-            }),
-            "light" => execute_core_command(|coordinator| {
-                coordinator.set_theme(crate::core::models::ThemePreference::Light)
-            }),
-            _ => {
-                record_and_publish_error("theme must be 'dark' or 'light'".to_string());
-                -1
-            }
-        },
-        Err(error) => {
-            record_and_publish_error(error);
-            -1
-        }
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn mashin_core_set_session_log_level(log_level: *const c_char) -> i32 {
-    match read_required_c_string(log_level, "log_level") {
-        Ok(log_level) => {
-            let log_level = match log_level.as_str() {
-                "trace" => crate::core::models::LogLevelPreference::Trace,
-                "debug" => crate::core::models::LogLevelPreference::Debug,
-                "info" => crate::core::models::LogLevelPreference::Info,
-                "warn" => crate::core::models::LogLevelPreference::Warn,
-                "error" => crate::core::models::LogLevelPreference::Error,
-                _ => {
-                    record_and_publish_error(
-                        "log level must be trace, debug, info, warn, or error".to_string(),
-                    );
-                    return -1;
-                }
-            };
-            execute_core_command(|coordinator| coordinator.set_log_level(log_level))
-        }
         Err(error) => {
             record_and_publish_error(error);
             -1

@@ -3,8 +3,8 @@
 
 use crate::core;
 use crate::core::models::{
-    CoreError, LogLevelPreference, LoginConfig, MediaSessionEvent, OfflineOutputConfig,
-    QueuePlayMediaRequest, RemoteOutputConfig, SelectedOutput, ThemePreference,
+    CoreError, LoginConfig, MediaSessionEvent, OfflineOutputConfig,
+    QueuePlayMediaRequest, RemoteOutputConfig, SelectedOutput,
 };
 use crate::music_assistant::models::identifiers::{PlayerId, QueueItemId};
 use crate::music_assistant::models::media::MediaItem;
@@ -57,15 +57,9 @@ enum PlaybackCommand {
     SetMuted {
         muted: bool,
     },
-    SetTheme {
-        theme: ThemePreference,
-    },
-    SetLogLevel {
-        log_level: LogLevelPreference,
-    },
-    SetListenBrainzCredentials {
-        username: String,
-        token: String,
+    SaveSessionSettings {
+        #[serde(flatten)]
+        settings: crate::core::models::SessionSettingsUpdate,
     },
     SetUserDataFavorites {
         media_items: Vec<MediaItem>,
@@ -99,9 +93,6 @@ enum PlaybackCommand {
     },
     RequestCodec {
         codec: String,
-    },
-    SetLocalCacheSizeBytes {
-        cache_size_bytes: usize,
     },
 }
 
@@ -192,17 +183,9 @@ pub(crate) fn execute_command(kind: &str, argument: Option<&str>) -> Result<(), 
             coordinator.set_muted(muted);
             Ok(())
         }),
-        PlaybackCommand::SetTheme { theme } => {
-            execute_core_command(|coordinator| coordinator.set_theme(theme))
-        }
-        PlaybackCommand::SetLogLevel { log_level } => {
-            execute_core_command(|coordinator| coordinator.set_log_level(log_level))
-        }
-        PlaybackCommand::SetListenBrainzCredentials { username, token } => {
-            let credentials = crate::listenbrainz::validate_credentials(
-                crate::listenbrainz::ListenBrainzCredentials { username, token },
-            )?;
-            execute_core_command(|coordinator| coordinator.set_listenbrainz_credentials(credentials))
+        PlaybackCommand::SaveSessionSettings { settings } => {
+            let settings = crate::listenbrainz::validate_settings_update(settings)?;
+            execute_core_command(|coordinator| coordinator.save_session_settings(settings))
         }
         PlaybackCommand::SetUserDataFavorites {
             media_items,
@@ -269,11 +252,6 @@ pub(crate) fn execute_command(kind: &str, argument: Option<&str>) -> Result<(), 
         PlaybackCommand::RequestCodec { codec } => {
             execute_core_command(|coordinator| coordinator.set_preferred_codec(&codec))
         }
-        PlaybackCommand::SetLocalCacheSizeBytes { cache_size_bytes } => {
-            execute_core_command(|coordinator| {
-                coordinator.set_local_cache_size_bytes(cache_size_bytes)
-            })
-        }
     };
     events
         .map(publish_media_session_events)
@@ -310,6 +288,22 @@ mod tests {
     use super::{decode_command, execute_command};
 
     // Platform command contracts.
+    #[test]
+    fn session_settings_accept_the_flutter_commit_payload() {
+        let arguments = r#"{"localCacheSizeBytes":524288000,"theme":"light","logLevel":"warn","listenbrainz":{"username":"listener","token":"secret"}}"#;
+        let command = decode_command("saveSessionSettings", Some(arguments)).expect("settings command");
+        let super::PlaybackCommand::SaveSessionSettings { settings } = command else {
+            panic!("expected settings commit");
+        };
+        assert_eq!(settings.local_cache_size_bytes, 524_288_000);
+        assert_eq!(settings.theme, crate::core::models::ThemePreference::Light);
+        assert_eq!(settings.listenbrainz.username, "listener");
+        assert!(decode_command("saveSessionSettings", Some(r#"{"theme":"light"}"#)).is_err());
+        let mut invalid: serde_json::Value = serde_json::from_str(arguments).unwrap();
+        invalid["unexpected"] = serde_json::json!(true);
+        assert!(decode_command("saveSessionSettings", Some(&invalid.to_string())).is_err());
+    }
+
     #[test]
     fn favorite_commands_accept_flutter_payloads_and_reject_invalid_types() {
         for favorite in [true, false] {

@@ -4,6 +4,7 @@ import '../../app/theme/app_theme.dart';
 import '../core/core_models.dart';
 import 'settings_log_view.dart';
 import 'settings_listenbrainz_form.dart';
+import 'settings_actions.dart';
 
 const double _desktopSettingsControlWidth = 280;
 const BoxConstraints _desktopSettingsFieldConstraints = BoxConstraints.tightFor(
@@ -40,24 +41,30 @@ class SettingsScreenDesktop extends StatelessWidget {
     required this.cacheSizeController,
     required this.isDarkTheme,
     required this.logLevel,
-    required this.onCacheSizeChanged,
     required this.onThemeChanged,
     required this.onLogLevelChanged,
     required this.onSaveLogSnapshot,
     required this.listenBrainzCredentials,
-    required this.onListenBrainzSave,
+    required this.onListenBrainzChanged,
+    required this.onListenBrainzTest,
+    required this.onSave,
+    required this.onCancel,
+    required this.isSaving,
   });
 
   final String musicAssistantUrl;
   final TextEditingController cacheSizeController;
   final bool isDarkTheme;
   final LogLevelPreference logLevel;
-  final ValueChanged<String> onCacheSizeChanged;
   final ValueChanged<bool> onThemeChanged;
   final ValueChanged<LogLevelPreference> onLogLevelChanged;
   final Future<String> Function() onSaveLogSnapshot;
   final ListenBrainzCredentials listenBrainzCredentials;
-  final Future<void> Function(ListenBrainzCredentials) onListenBrainzSave;
+  final ValueChanged<ListenBrainzCredentials> onListenBrainzChanged;
+  final Future<void> Function(ListenBrainzCredentials) onListenBrainzTest;
+  final VoidCallback onSave;
+  final VoidCallback onCancel;
+  final bool isSaving;
 
   @override
   Widget build(BuildContext context) {
@@ -98,24 +105,32 @@ class SettingsScreenDesktop extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Expanded(
-                child: TabBarView(
-                  children: <Widget>[
-                    _DesktopSettingsForm(
-                      musicAssistantUrl: musicAssistantUrl,
-                      cacheSizeController: cacheSizeController,
-                      isDarkTheme: isDarkTheme,
-                      onCacheSizeChanged: onCacheSizeChanged,
-                      onThemeChanged: onThemeChanged,
-                      listenBrainzCredentials: listenBrainzCredentials,
-                      onListenBrainzSave: onListenBrainzSave,
-                    ),
-                    _DesktopLogTab(
-                      logLevel: logLevel,
-                      onLogLevelChanged: onLogLevelChanged,
-                      onSaveLogSnapshot: onSaveLogSnapshot,
-                    ),
-                  ],
+                child: AbsorbPointer(
+                  absorbing: isSaving,
+                  child: TabBarView(
+                    children: <Widget>[
+                      _DesktopSettingsForm(
+                        musicAssistantUrl: musicAssistantUrl,
+                        cacheSizeController: cacheSizeController,
+                        isDarkTheme: isDarkTheme,
+                        onThemeChanged: onThemeChanged,
+                        listenBrainzCredentials: listenBrainzCredentials,
+                        onListenBrainzChanged: onListenBrainzChanged,
+                        onListenBrainzTest: onListenBrainzTest,
+                      ),
+                      _DesktopLogTab(
+                        logLevel: logLevel,
+                        onLogLevelChanged: onLogLevelChanged,
+                        onSaveLogSnapshot: onSaveLogSnapshot,
+                      ),
+                    ],
+                  ),
                 ),
+              ),
+              SettingsActions(
+                onSave: onSave,
+                onCancel: onCancel,
+                isSaving: isSaving,
               ),
             ],
           ),
@@ -176,19 +191,19 @@ class _DesktopSettingsForm extends StatelessWidget {
     required this.musicAssistantUrl,
     required this.cacheSizeController,
     required this.isDarkTheme,
-    required this.onCacheSizeChanged,
     required this.onThemeChanged,
     required this.listenBrainzCredentials,
-    required this.onListenBrainzSave,
+    required this.onListenBrainzChanged,
+    required this.onListenBrainzTest,
   });
 
   final String musicAssistantUrl;
   final TextEditingController cacheSizeController;
   final bool isDarkTheme;
-  final ValueChanged<String> onCacheSizeChanged;
   final ValueChanged<bool> onThemeChanged;
   final ListenBrainzCredentials listenBrainzCredentials;
-  final Future<void> Function(ListenBrainzCredentials) onListenBrainzSave;
+  final ValueChanged<ListenBrainzCredentials> onListenBrainzChanged;
+  final Future<void> Function(ListenBrainzCredentials) onListenBrainzTest;
 
   @override
   Widget build(BuildContext context) {
@@ -217,13 +232,17 @@ class _DesktopSettingsForm extends StatelessWidget {
         const _DesktopSettingsDivider(),
         _DesktopSettingsSection(
           title: 'ListenBrainz',
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 560),
-              child: SettingsListenBrainzForm(
-                credentials: listenBrainzCredentials,
-                onSave: onListenBrainzSave,
+          child: SettingsListenBrainzForm(
+            credentials: listenBrainzCredentials,
+            onChanged: onListenBrainzChanged,
+            onTest: onListenBrainzTest,
+            fieldDecoration: (icon) =>
+                _desktopSettingsFieldDecoration(colors: colors, icon: icon),
+            rowBuilder: (label, control) => _DesktopSettingRow(
+              title: label,
+              control: SizedBox(
+                width: _desktopSettingsControlWidth,
+                child: control,
               ),
             ),
           ),
@@ -238,9 +257,9 @@ class _DesktopSettingsForm extends StatelessWidget {
             control: SizedBox(
               width: _desktopSettingsControlWidth,
               child: TextField(
+                key: const Key('settings-cache-size'),
                 controller: cacheSizeController,
                 keyboardType: TextInputType.number,
-                onChanged: onCacheSizeChanged,
                 decoration: _desktopSettingsFieldDecoration(
                   colors: colors,
                   icon: Icons.storage_outlined,
@@ -329,7 +348,7 @@ class _DesktopSettingsDivider extends StatelessWidget {
 class _DesktopSettingRow extends StatelessWidget {
   const _DesktopSettingRow({
     required this.title,
-    required this.description,
+    this.description = '',
     required this.control,
   });
 
@@ -351,11 +370,12 @@ class _DesktopSettingRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Text(title, style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 6),
-                  Text(
-                    description,
-                    style: TextStyle(color: colors.textSecondary),
-                  ),
+                  if (description.isNotEmpty) const SizedBox(height: 6),
+                  if (description.isNotEmpty)
+                    Text(
+                      description,
+                      style: TextStyle(color: colors.textSecondary),
+                    ),
                 ],
               ),
             ),

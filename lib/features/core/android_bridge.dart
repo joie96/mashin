@@ -20,9 +20,7 @@ enum AndroidCoreCommand {
   setAutoplay,
   setVolume,
   setMuted,
-  setTheme,
-  setLogLevel,
-  setListenBrainzCredentials,
+  saveSessionSettings,
   queuePlayMedia,
   startSendspinRadio,
   insertQueueItems,
@@ -32,7 +30,6 @@ enum AndroidCoreCommand {
   selectQueueItem,
   playQueueIndex,
   requestCodec,
-  setLocalCacheSizeBytes,
 }
 
 /// Android playback commands are acknowledged by the service, never by FFI.

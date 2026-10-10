@@ -2,27 +2,65 @@ import 'package:flutter/material.dart';
 
 import '../../app/layout/layout_utils.dart';
 import '../../app/session/app_session_controller.dart';
+import '../core/core_models.dart';
 import 'settings_screen_desktop.dart';
 import 'settings_screen_mobile.dart';
 
-class SettingsScreen extends StatefulWidget {
+class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key, required this.session});
 
   final AppSessionController session;
 
   @override
-  State<SettingsScreen> createState() => _SettingsScreenState();
+  Widget build(BuildContext context) => SettingsEditor(
+    musicAssistantUrl: session.baseUrl,
+    settings: SessionSettingsUpdate(
+      localCacheSizeBytes: session.localCacheSizeBytes,
+      isDarkTheme: session.isDarkTheme,
+      logLevel: session.logLevel,
+      listenBrainzCredentials: session.listenBrainzCredentials,
+    ),
+    onSave: session.saveSessionSettings,
+    onTestListenBrainz: session.coreBridge.testListenBrainzCredentials,
+    onSaveLogSnapshot: session.coreBridge.saveLogSnapshot,
+  );
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
-  late final TextEditingController _cacheSizeController;
+class SettingsEditor extends StatefulWidget {
+  const SettingsEditor({
+    super.key,
+    required this.musicAssistantUrl,
+    required this.settings,
+    required this.onSave,
+    required this.onTestListenBrainz,
+    required this.onSaveLogSnapshot,
+  });
 
+  final String musicAssistantUrl;
+  final SessionSettingsUpdate settings;
+  final Future<void> Function(SessionSettingsUpdate) onSave;
+  final Future<void> Function(ListenBrainzCredentials) onTestListenBrainz;
+  final Future<String> Function() onSaveLogSnapshot;
+
+  @override
+  State<SettingsEditor> createState() => _SettingsEditorState();
+}
+
+class _SettingsEditorState extends State<SettingsEditor> {
+  late final TextEditingController _cacheSizeController;
+  late SessionSettingsUpdate _savedSettings;
+  late bool _isDarkTheme;
+  late LogLevelPreference _logLevel;
+  late ListenBrainzCredentials _credentials;
+  bool _isSaving = false;
+
+  // Draft construction and lifecycle.
   @override
   void initState() {
     super.initState();
-    _cacheSizeController = TextEditingController(
-      text: '${widget.session.localCacheSizeBytes ~/ _bytesPerMegabyte}',
-    );
+    _cacheSizeController = TextEditingController();
+    _savedSettings = widget.settings;
+    _restoreDraft();
   }
 
   @override
@@ -31,53 +69,97 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.dispose();
   }
 
-  Future<void> _setCacheSize(String value) async {
-    final int? cacheSizeMb = int.tryParse(value.trim());
+  // Draft commands; no setting is applied before the single save operation.
+  void _restoreDraft() {
+    _cacheSizeController.text =
+        '${_savedSettings.localCacheSizeBytes ~/ _bytesPerMegabyte}';
+    _isDarkTheme = _savedSettings.isDarkTheme;
+    _logLevel = _savedSettings.logLevel;
+    _credentials = _savedSettings.listenBrainzCredentials;
+  }
+
+  void _cancel() {
+    FocusScope.of(context).unfocus();
+    setState(_restoreDraft);
+  }
+
+  Future<void> _save() async {
+    final int? cacheSizeMb = int.tryParse(_cacheSizeController.text.trim());
     if (cacheSizeMb == null || cacheSizeMb < 25 || cacheSizeMb > 1000) {
+      _showMessage('Cache-Groesse muss zwischen 25 und 1000 MB liegen.');
       return;
     }
-
+    if (_credentials.username.isEmpty != _credentials.token.isEmpty) {
+      _showMessage('ListenBrainz benoetigt Benutzername und Token.');
+      return;
+    }
+    final update = SessionSettingsUpdate(
+      localCacheSizeBytes: cacheSizeMb * _bytesPerMegabyte,
+      isDarkTheme: _isDarkTheme,
+      logLevel: _logLevel,
+      listenBrainzCredentials: _credentials,
+    );
+    FocusScope.of(context).unfocus();
+    setState(() => _isSaving = true);
     try {
-      await widget.session.setLocalCacheSizeBytes(
-        cacheSizeMb * _bytesPerMegabyte,
-      );
+      await widget.onSave(update);
+      if (!mounted) {
+        return;
+      }
+      _savedSettings = update;
+      _showMessage('Einstellungen gespeichert.');
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Einstellung konnte nicht gespeichert werden.'),
-          ),
+        _showMessage(
+          'Einstellungen konnten nicht gespeichert werden. Verbindung und Eingaben pruefen.',
         );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
       }
     }
   }
 
+  void _showMessage(String message) => ScaffoldMessenger.of(
+    context,
+  ).showSnackBar(SnackBar(content: Text(message)));
+
+  // Responsive presentation with one shared draft across tabs and layouts.
   @override
   Widget build(BuildContext context) {
     final screen = isCompactLayout(context)
         ? SettingsScreenMobile(
-            musicAssistantUrl: widget.session.baseUrl,
+            musicAssistantUrl: widget.musicAssistantUrl,
             cacheSizeController: _cacheSizeController,
-            isDarkTheme: widget.session.isDarkTheme,
-            logLevel: widget.session.logLevel,
-            listenBrainzCredentials: widget.session.listenBrainzCredentials,
-            onListenBrainzSave: widget.session.setListenBrainzCredentials,
-            onCacheSizeChanged: _setCacheSize,
-            onThemeChanged: widget.session.setDarkTheme,
-            onLogLevelChanged: widget.session.setLogLevel,
-            onSaveLogSnapshot: widget.session.coreBridge.saveLogSnapshot,
+            isDarkTheme: _isDarkTheme,
+            logLevel: _logLevel,
+            listenBrainzCredentials: _credentials,
+            onListenBrainzChanged: (value) =>
+                setState(() => _credentials = value),
+            onListenBrainzTest: widget.onTestListenBrainz,
+            onThemeChanged: (value) => setState(() => _isDarkTheme = value),
+            onLogLevelChanged: (value) => setState(() => _logLevel = value),
+            onSaveLogSnapshot: widget.onSaveLogSnapshot,
+            onSave: _save,
+            onCancel: _cancel,
+            isSaving: _isSaving,
           )
         : SettingsScreenDesktop(
-            musicAssistantUrl: widget.session.baseUrl,
+            musicAssistantUrl: widget.musicAssistantUrl,
             cacheSizeController: _cacheSizeController,
-            isDarkTheme: widget.session.isDarkTheme,
-            logLevel: widget.session.logLevel,
-            listenBrainzCredentials: widget.session.listenBrainzCredentials,
-            onListenBrainzSave: widget.session.setListenBrainzCredentials,
-            onCacheSizeChanged: _setCacheSize,
-            onThemeChanged: widget.session.setDarkTheme,
-            onLogLevelChanged: widget.session.setLogLevel,
-            onSaveLogSnapshot: widget.session.coreBridge.saveLogSnapshot,
+            isDarkTheme: _isDarkTheme,
+            logLevel: _logLevel,
+            listenBrainzCredentials: _credentials,
+            onListenBrainzChanged: (value) =>
+                setState(() => _credentials = value),
+            onListenBrainzTest: widget.onTestListenBrainz,
+            onThemeChanged: (value) => setState(() => _isDarkTheme = value),
+            onLogLevelChanged: (value) => setState(() => _logLevel = value),
+            onSaveLogSnapshot: widget.onSaveLogSnapshot,
+            onSave: _save,
+            onCancel: _cancel,
+            isSaving: _isSaving,
           );
     return screen;
   }

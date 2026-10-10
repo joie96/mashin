@@ -41,6 +41,16 @@ pub(crate) fn record_playback_start() {
     PLAYBACK_GENERATION.fetch_add(1, Ordering::Relaxed);
 }
 
+// Unchanged credentials allow settings changes offline without another token-validation request.
+pub(crate) fn validate_settings_update(mut update: crate::core::models::SessionSettingsUpdate)
+    -> Result<crate::core::models::SessionSettingsUpdate, String> {
+    let stored = CORE_COORDINATOR.lock().map_err(|_| "core lock poisoned".to_string())?.listenbrainz_credentials();
+    if stored != update.listenbrainz {
+        update.listenbrainz = validate_credentials(update.listenbrainz)?;
+    }
+    Ok(update)
+}
+
 struct CompletedSubmission {
     username: String,
     count: usize,
