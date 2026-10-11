@@ -191,10 +191,7 @@ pub(crate) fn execute_command(kind: &str, argument: Option<&str>) -> Result<(), 
             media_items,
             favorite,
         } => {
-            core::mutate_user_data(|user_data| {
-                user_data.set_favorites(media_items, favorite);
-                Ok(())
-            })
+            core::set_user_data_favorites(media_items, favorite)
             .map_err(|error| error.message)?;
             return Ok(());
         }

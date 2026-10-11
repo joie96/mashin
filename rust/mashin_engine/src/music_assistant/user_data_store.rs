@@ -1,8 +1,7 @@
-//! Compact, display-ready user preferences; domain media remain full Rust models.
+//! Deduplicated user preferences preserve complete modeled media and ordered relationships.
 
-use super::models::identifiers::{MediaId, MediaUri, ProviderInstanceId};
 use super::models::media::{
-    Album, AlbumType, Artist, MediaItemFields, MediaItemImage, MediaItemMetadata, Playlist, Track,
+    Album, AlbumType, Artist, MediaItemFields, MediaItemImage, Playlist, Track,
 };
 use super::user_data::{Favorites, LocalPlaylist, UserDataSnapshot};
 use serde::{Deserialize, Serialize};
@@ -20,13 +19,10 @@ pub(crate) struct StoredUserData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredMedia {
-    item_id: String,
-    provider: String,
-    name: String,
-    uri: Option<String>,
-    sort_name: Option<String>,
+    #[serde(flatten)]
+    fields: MediaItemFields,
+    #[serde(default)]
     image: Option<MediaItemImage>,
-    cache_checksum: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,8 +32,8 @@ struct StoredTrack {
     duration: u32,
     disc_number: u16,
     track_number: u16,
-    artists: Vec<String>,
-    album: Option<String>,
+    artist_refs: Vec<String>,
+    album_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,7 +42,7 @@ struct StoredAlbum {
     media: StoredMedia,
     year: Option<i32>,
     album_type: AlbumType,
-    artists: Vec<String>,
+    artist_refs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,35 +80,37 @@ fn key(media: &MediaItemFields) -> String {
 }
 
 impl StoredMedia {
-    // Capture only fields needed to render cached library media.
+    // Media projection and reconstruction.
     fn from_media(media: &MediaItemFields) -> Self {
+        let mut fields = media.clone();
+        fields.favorite = false;
         Self {
-            item_id: media.item_id.as_str().to_string(),
-            provider: media.provider.as_str().to_string(),
-            name: media.name.clone(),
-            uri: media.uri.as_ref().map(|uri| uri.as_str().to_string()),
-            sort_name: media.sort_name.clone(),
+            fields,
             image: media
                 .metadata
                 .as_ref()
                 .and_then(|metadata| metadata.images.first())
                 .cloned(),
-            cache_checksum: media
-                .metadata
-                .as_ref()
-                .and_then(|metadata| metadata.cache_checksum.clone()),
         }
     }
 
     fn merge(&mut self, media: &MediaItemFields) {
-        if self.name.is_empty() && !media.name.is_empty() {
-            self.name.clone_from(&media.name);
-        }
-        if self.uri.is_none() {
-            self.uri = media.uri.as_ref().map(|uri| uri.as_str().to_string());
-        }
-        if self.sort_name.is_none() {
-            self.sort_name.clone_from(&media.sort_name);
+        if !media.provider_mappings.is_empty() {
+            self.fields = media.clone();
+            self.fields.favorite = false;
+        } else {
+            if self.fields.name.is_empty() {
+                self.fields.name.clone_from(&media.name);
+            }
+            if self.fields.uri.is_none() {
+                self.fields.uri.clone_from(&media.uri);
+            }
+            if self.fields.sort_name.is_none() {
+                self.fields.sort_name.clone_from(&media.sort_name);
+            }
+            if self.fields.metadata.is_none() {
+                self.fields.metadata.clone_from(&media.metadata);
+            }
         }
         if self.image.is_none() {
             self.image = media
@@ -121,40 +119,49 @@ impl StoredMedia {
                 .and_then(|metadata| metadata.images.first())
                 .cloned();
         }
-        if self.cache_checksum.is_none() {
-            self.cache_checksum = media
-                .metadata
-                .as_ref()
-                .and_then(|metadata| metadata.cache_checksum.clone());
-        }
     }
 
-    // Rebuild the stable, typed domain shape expected by Dart snapshots.
     fn to_media(&self, favorite: bool) -> MediaItemFields {
-        MediaItemFields {
-            item_id: MediaId(self.item_id.clone()),
-            provider: ProviderInstanceId(self.provider.clone()),
-            name: self.name.clone(),
-            version: String::new(),
-            sort_name: self.sort_name.clone(),
-            uri: self.uri.clone().map(MediaUri),
-            external_ids: Vec::new(),
-            is_playable: true,
-            available: None,
-            provider_mappings: Vec::new(),
-            metadata: self.image.clone().map(|image| MediaItemMetadata {
-                images: vec![image],
-                cache_checksum: self.cache_checksum.clone(),
-                ..MediaItemMetadata::default()
-            }),
-            favorite,
-            position: None,
-            date_added: None,
-        }
+        let mut media = self.fields.clone();
+        media.favorite = favorite;
+        media
     }
 }
 
 impl StoredUserData {
+    // Version-five integrity checks never fetch or repair persisted media.
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        for (media_type, entries) in [
+            ("track", self.tracks.iter().map(|(id, item)| (id, &item.media.fields)).collect::<Vec<_>>()),
+            ("album", self.albums.iter().map(|(id, item)| (id, &item.media.fields)).collect()),
+            ("artist", self.artists.iter().map(|(id, item)| (id, &item.media.fields)).collect()),
+            ("playlist", self.playlists.iter().map(|(id, item)| (id, &item.media.fields)).collect()),
+        ] {
+            for (id, fields) in entries {
+                if *id != key(fields) || fields.item_id.as_str().trim().is_empty()
+                    || fields.provider.as_str().trim().is_empty() || fields.name.trim().is_empty()
+                {
+                    return Err(format!("invalid user data {media_type} identity: {id}"));
+                }
+                if media_type == "playlist" && fields.provider.as_str() == super::user_data::LOCAL_PLAYLIST_PROVIDER {
+                    continue;
+                }
+                if fields.provider_mappings.is_empty() {
+                    return Err(format!("missing provider mappings for user data {media_type} {id}"));
+                }
+                for mapping in &fields.provider_mappings {
+                    if mapping.item_id.as_str().trim().is_empty() || mapping.provider_domain.as_str().trim().is_empty()
+                        || mapping.provider_instance.as_str().trim().is_empty()
+                        || mapping.audio_format.as_ref().is_some_and(|format| format.channels == 0 || format.sample_rate == 0)
+                    {
+                        return Err(format!("invalid provider mapping for user data {media_type} {id}"));
+                    }
+                }
+            }
+        }
+        self.to_snapshot().map(|_| ())
+    }
+
     // Projection and deduplication.
     pub(crate) fn from_snapshot(snapshot: &UserDataSnapshot) -> Self {
         let mut stored = Self {
@@ -226,16 +233,20 @@ impl StoredUserData {
                     media: StoredMedia::from_media(&album.media),
                     year: album.year,
                     album_type: album.album_type,
-                    artists,
+                    artist_refs: artists,
                 },
             );
         } else if let Some(entry) = self.albums.get_mut(&id) {
             entry.media.merge(&album.media);
-            if entry.year.is_none() {
+            let has_complete_media = !album.media.provider_mappings.is_empty();
+            if has_complete_media || entry.year.is_none() {
                 entry.year = album.year;
             }
-            if entry.artists.is_empty() {
-                entry.artists = artists;
+            if has_complete_media {
+                entry.album_type = album.album_type;
+            }
+            if has_complete_media || entry.artist_refs.is_empty() {
+                entry.artist_refs = artists;
             }
         }
         id
@@ -259,23 +270,28 @@ impl StoredUserData {
                     duration: track.duration,
                     disc_number: track.disc_number,
                     track_number: track.track_number,
-                    artists,
-                    album,
+                    artist_refs: artists,
+                    album_ref: album,
                 },
             );
         } else if let Some(entry) = self.tracks.get_mut(&id) {
-            if entry.media.image.is_none() {
+            let has_complete_media = !track.media.provider_mappings.is_empty();
+            if has_complete_media || entry.media.image.is_none() {
                 entry.media.image.clone_from(&track.image);
             }
             entry.media.merge(&track.media);
-            if entry.duration == 0 {
+            if has_complete_media || entry.duration == 0 {
                 entry.duration = track.duration;
             }
-            if entry.artists.is_empty() {
-                entry.artists = artists;
+            if has_complete_media {
+                entry.disc_number = track.disc_number;
+                entry.track_number = track.track_number;
             }
-            if entry.album.is_none() {
-                entry.album = album;
+            if has_complete_media || entry.artist_refs.is_empty() {
+                entry.artist_refs = artists;
+            }
+            if has_complete_media || entry.album_ref.is_none() {
+                entry.album_ref = album;
             }
         }
         id
@@ -293,6 +309,11 @@ impl StoredUserData {
                 is_dynamic: playlist.is_dynamic,
             });
         entry.media.merge(&playlist.media);
+        if !playlist.media.provider_mappings.is_empty() {
+            entry.owner.clone_from(&playlist.owner);
+            entry.is_editable = playlist.is_editable;
+            entry.is_dynamic = playlist.is_dynamic;
+        }
         id
     }
 
@@ -318,7 +339,7 @@ impl StoredUserData {
             year: album.year,
             album_type: album.album_type,
             artists: album
-                .artists
+                .artist_refs
                 .iter()
                 .map(|id| self.artist(id))
                 .collect::<Result<_, _>>()?,
@@ -336,12 +357,12 @@ impl StoredUserData {
             disc_number: track.disc_number,
             track_number: track.track_number,
             artists: track
-                .artists
+                .artist_refs
                 .iter()
                 .map(|id| self.artist(id))
                 .collect::<Result<_, _>>()?,
             album: track
-                .album
+                .album_ref
                 .as_deref()
                 .map(|id| self.album(id, false))
                 .transpose()?,
@@ -419,7 +440,7 @@ mod tests {
     use crate::music_assistant::user_data::{Favorites, LocalPlaylist, UserDataSnapshot};
 
     #[test]
-    fn track_artwork_uses_one_version_four_field_and_survives_round_trip() {
+    fn track_artwork_and_original_metadata_survive_round_trip() {
         let metadata_image = serde_json::json!({
             "type": "thumb", "path": "https://yt3.googleusercontent.com/cover",
             "provider": "ytmusic--test", "remotely_accessible": true,
@@ -443,6 +464,7 @@ mod tests {
                 "image": direct
             }))
             .unwrap();
+            let original_metadata = track.media.metadata.clone();
             let snapshot = UserDataSnapshot {
                 favorites: Favorites { tracks: vec![track], ..Favorites::default() },
                 playlists: Vec::new(),
@@ -458,35 +480,27 @@ mod tests {
                 .unwrap();
             let restored_track = &restored.favorites.tracks[0];
             assert_eq!(serde_json::to_value(&restored_track.image).unwrap(), serde_json::json!(expected));
-            assert_eq!(
-                restored_track.media.metadata.as_ref().and_then(|metadata| metadata.images.first()),
-                restored_track.image.as_ref()
-            );
+            assert_eq!(restored_track.media.metadata, original_metadata);
         }
     }
 
     #[test]
-    fn existing_version_four_track_image_is_read_without_a_schema_change() {
-        for image in [serde_json::json!({
-            "type": "thumb", "path": "cover.jpg", "provider": "library",
-            "remotely_accessible": false, "proxy_id": "existing-cover"
-        }), serde_json::Value::Null] {
-            let stored: StoredUserData = serde_json::from_value(serde_json::json!({
+    fn store_requires_version_five_relationship_fields() {
+        for relationship_fields in [serde_json::json!({ "artists": [], "album": null }),
+            serde_json::json!({ "album_ref": null })] {
+            let mut value = serde_json::json!({
                 "tracks": { "library:track": {
                     "item_id": "track", "provider": "library", "name": "Track",
                     "uri": "library://track/track", "sort_name": null,
-                    "image": image, "cache_checksum": null,
                     "duration": 210, "disc_number": 1, "track_number": 2,
-                    "artists": [], "album": null
                 } },
                 "albums": {}, "artists": {}, "playlists": {},
                 "favorites": { "tracks": ["library:track"], "albums": [], "artists": [], "playlists": [] },
                 "local_playlists": []
-            }))
-            .unwrap();
-            let restored = stored.to_snapshot().unwrap();
-            assert_eq!(serde_json::to_value(&restored.favorites.tracks[0].image).unwrap(), image);
-            assert!(restored.favorites.tracks[0].media.favorite);
+            });
+            value["tracks"]["library:track"].as_object_mut().unwrap()
+                .extend(relationship_fields.as_object().unwrap().clone());
+            assert!(serde_json::from_value::<StoredUserData>(value).is_err());
         }
     }
 
@@ -529,8 +543,8 @@ mod tests {
         assert_eq!(json["tracks"].as_object().unwrap().len(), 1);
         assert_eq!(json["albums"].as_object().unwrap().len(), 1);
         assert_eq!(json["artists"].as_object().unwrap().len(), 1);
-        assert!(!json.to_string().contains("long lyrics"));
-        assert!(!json.to_string().contains("large biography"));
+        assert_eq!(json.to_string().matches("long lyrics").count(), 1);
+        assert_eq!(json.to_string().matches("large biography").count(), 1);
         let restored = stored.to_snapshot().unwrap();
         assert_eq!(restored.playlists[0].items.len(), 2);
         assert_eq!(
@@ -541,6 +555,34 @@ mod tests {
             restored.playlists[0].items[0].artists[0].media.name,
             "Artist"
         );
+    }
+
+    #[test]
+    fn complete_media_fields_and_provider_mappings_survive_round_trip() {
+        let track: Track = serde_json::from_value(serde_json::json!({
+            "item_id": "track", "provider": "ytmusic--test", "name": "Track",
+            "version": "Live", "sort_name": "sorted", "uri": "ytmusic--test://track/track",
+            "external_ids": [["isrc", "test"]], "is_playable": false, "available": false,
+            "position": 3, "date_added": "2026-10-11",
+            "duration": 233, "disc_number": 2, "track_number": 4,
+            "metadata": { "lyrics": "Lyrics", "genres": ["Pop"], "cache_checksum": "checksum" },
+            "provider_mappings": [{
+                "item_id": "video", "provider_domain": "ytmusic", "provider_instance": "ytmusic--test",
+                "available": false, "in_library": true, "is_unique": false,
+                "url": "https://example.com/video", "details": "provider data",
+                "audio_format": { "content_type": "opus", "codec_type": "opus", "sample_rate": 48000,
+                    "bit_depth": 16, "channels": 2, "output_format_str": "opus", "bit_rate": 128 }
+            }]
+        })).unwrap();
+        let snapshot = UserDataSnapshot {
+            favorites: Favorites { tracks: vec![track.clone()], ..Favorites::default() },
+            playlists: Vec::new(),
+        };
+        let stored = serde_json::to_value(StoredUserData::from_snapshot(&snapshot)).unwrap();
+        let restored = serde_json::from_value::<StoredUserData>(stored).unwrap().to_snapshot().unwrap();
+        let mut expected = track;
+        expected.media.favorite = true;
+        assert_eq!(restored.favorites.tracks[0], expected);
     }
 
     #[test]

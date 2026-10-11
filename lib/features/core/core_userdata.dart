@@ -161,10 +161,84 @@ class UserData extends ChangeNotifier {
     return sortComparison != 0 ? sortComparison : left.name.toLowerCase().compareTo(right.name.toLowerCase());
   }
 
-  Track _copyTrack(Track item, bool favorite) => Track(itemId: item.itemId, provider: item.provider, name: item.name, duration: item.duration, artists: item.artists, sortName: item.sortName, uri: item.uri, isPlayable: item.isPlayable, available: item.available, album: item.album, image: item.image, providerMappings: item.providerMappings, metadata: item.metadata, favorite: favorite);
-  Album _copyAlbum(Album item, bool favorite) => Album(itemId: item.itemId, provider: item.provider, name: item.name, artists: item.artists, sortName: item.sortName, uri: item.uri, isPlayable: item.isPlayable, available: item.available, year: item.year, albumType: item.albumType, providerMappings: item.providerMappings, metadata: item.metadata, favorite: favorite);
-  Artist _copyArtist(Artist item, bool favorite) => Artist(itemId: item.itemId, provider: item.provider, name: item.name, sortName: item.sortName, uri: item.uri, isPlayable: item.isPlayable, available: item.available, providerMappings: item.providerMappings, metadata: item.metadata, favorite: favorite);
-  Playlist _copyPlaylist(Playlist item, bool favorite) => Playlist(itemId: item.itemId, provider: item.provider, name: item.name, isEditable: item.isEditable, sortName: item.sortName, uri: item.uri, isPlayable: item.isPlayable, available: item.available, owner: item.owner, providerMappings: item.providerMappings, metadata: item.metadata, favorite: favorite);
+  // Favorite projection changes membership only, never playback or provider data.
+  Track _copyTrack(Track item, bool favorite) => Track(
+    itemId: item.itemId,
+    provider: item.provider,
+    name: item.name,
+    version: item.version,
+    externalIds: item.externalIds,
+    position: item.position,
+    dateAdded: item.dateAdded,
+    duration: item.duration,
+    discNumber: item.discNumber,
+    trackNumber: item.trackNumber,
+    artists: item.artists,
+    sortName: item.sortName,
+    uri: item.uri,
+    isPlayable: item.isPlayable,
+    available: item.available,
+    album: item.album,
+    image: item.image,
+    providerMappings: item.providerMappings,
+    metadata: item.metadata,
+    favorite: favorite,
+  );
+  Album _copyAlbum(Album item, bool favorite) => Album(
+    itemId: item.itemId,
+    provider: item.provider,
+    name: item.name,
+    version: item.version,
+    externalIds: item.externalIds,
+    position: item.position,
+    dateAdded: item.dateAdded,
+    artists: item.artists,
+    sortName: item.sortName,
+    uri: item.uri,
+    isPlayable: item.isPlayable,
+    available: item.available,
+    year: item.year,
+    albumType: item.albumType,
+    providerMappings: item.providerMappings,
+    metadata: item.metadata,
+    favorite: favorite,
+  );
+  Artist _copyArtist(Artist item, bool favorite) => Artist(
+    itemId: item.itemId,
+    provider: item.provider,
+    name: item.name,
+    version: item.version,
+    externalIds: item.externalIds,
+    position: item.position,
+    dateAdded: item.dateAdded,
+    artistType: item.artistType,
+    sortName: item.sortName,
+    uri: item.uri,
+    isPlayable: item.isPlayable,
+    available: item.available,
+    providerMappings: item.providerMappings,
+    metadata: item.metadata,
+    favorite: favorite,
+  );
+  Playlist _copyPlaylist(Playlist item, bool favorite) => Playlist(
+    itemId: item.itemId,
+    provider: item.provider,
+    name: item.name,
+    version: item.version,
+    externalIds: item.externalIds,
+    position: item.position,
+    dateAdded: item.dateAdded,
+    isEditable: item.isEditable,
+    isDynamic: item.isDynamic,
+    sortName: item.sortName,
+    uri: item.uri,
+    isPlayable: item.isPlayable,
+    available: item.available,
+    owner: item.owner,
+    providerMappings: item.providerMappings,
+    metadata: item.metadata,
+    favorite: favorite,
+  );
 
   @override
   void dispose() {

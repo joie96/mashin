@@ -90,6 +90,22 @@ This recovery does not change the existing playback decoder behavior at Opus
 stream boundaries. Validate real-server PCM, FLAC and Opus reconnects on the
 target device in addition to host tests.
 
+## User Data Version 5
+
+Mashin favorites and local playlists use a deduplicated version-five store in
+Music Assistant user preferences. The store preserves all modeled media fields,
+provider mappings, metadata and ordered playlist references. Queue playback sends
+full media objects, never URI strings. Sparse new entries are completed through
+the typed `music/*/get` APIs before they are added.
+This completion is limited to ingestion: queue playback and version-five store
+reads never repair missing data. Version-five writes and reads validate provider
+mappings, media identities and references. Invalid mutation batches leave active
+user data unchanged and report an error instead of silently healing the store.
+
+Only version five is supported; user-data loading does not upgrade or rewrite
+preferences. Mapping identity strings containing `None` are preserved as returned
+by Music Assistant. Null or unknown audio formats remain allowed.
+
 ## ListenBrainz Scrobbling
 
 Enter the ListenBrainz username and user token in Settings under ListenBrainz,

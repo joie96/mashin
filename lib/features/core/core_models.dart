@@ -253,6 +253,7 @@ Map<String, dynamic> createMusicAssistantMediaItemPayload(MediaItem mediaItem) {
   } else if (mediaItem is Playlist) {
     payload['owner'] = mediaItem.owner;
     payload['is_editable'] = mediaItem.isEditable;
+    payload['is_dynamic'] = mediaItem.isDynamic;
   }
 
   return payload;

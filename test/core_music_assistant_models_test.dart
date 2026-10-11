@@ -1,6 +1,10 @@
 // ignore_for_file: prefer_const_constructors
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mashin_flutter/features/core/core_bridge.dart';
 import 'package:mashin_flutter/features/core/core_models.dart';
+import 'package:mashin_flutter/features/core/core_userdata.dart';
+
+class _UnusedCoreBridge extends Fake implements MashinCoreBridgeApi {}
 
 Map<String, dynamic> _mediaJson(String mediaType) => <String, dynamic>{
   'media_type': mediaType,
@@ -42,6 +46,30 @@ Map<String, dynamic> _mediaJson(String mediaType) => <String, dynamic>{
 };
 
 void main() {
+  test('favorite projection preserves complete modeled media payloads', () {
+    final userData = UserData(coreBridge: _UnusedCoreBridge());
+    for (final mediaType in <String>['track', 'album', 'artist', 'playlist']) {
+      final json = _mediaJson(mediaType)
+        ..['uri'] = 'library://$mediaType/item'
+        ..['duration'] = 233
+        ..['disc_number'] = 2
+        ..['track_number'] = 4
+        ..['year'] = 2026
+        ..['artist_type'] = 'artist'
+        ..['is_dynamic'] = true;
+      final original = mediaItemFromJson(json);
+      final projected = userData.withFavoriteStatus(original);
+      expect(
+        createMusicAssistantMediaItemPayload(projected),
+        createMusicAssistantMediaItemPayload(original),
+      );
+      if (projected is Playlist) {
+        expect(createMusicAssistantMediaItemPayload(projected)['is_dynamic'], isTrue);
+      }
+    }
+    userData.dispose();
+  });
+
   test(
     'complete queue cache bypasses provider unavailability but partial cache does not',
     () {

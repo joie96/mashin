@@ -442,6 +442,7 @@ impl CoreCoordinator {
             .ok_or_else(|| "user data is not loaded".to_string())
     }
 
+    // Commit only validated candidates; failed batches leave active user data untouched.
     fn mutate_user_data<F>(
         &mut self,
         operation: F,
@@ -449,12 +450,15 @@ impl CoreCoordinator {
     where
         F: FnOnce(&mut UserDataController) -> Result<(), String>,
     {
-        let user_data = self
+        let mut candidate = self
             .user_data
-            .as_mut()
-            .ok_or_else(|| "user data is not loaded".to_string())?;
-        operation(user_data)?;
-        user_data.preferences()
+            .as_ref()
+            .ok_or_else(|| "user data is not loaded".to_string())?
+            .clone();
+        operation(&mut candidate)?;
+        let preferences = candidate.preferences()?;
+        self.user_data = Some(candidate);
+        Ok(preferences)
     }
 }
 
@@ -646,7 +650,44 @@ pub(crate) fn read_or_load_user_data() -> Result<UserDataSnapshot, CoreError> {
     }
 }
 
-pub(crate) fn mutate_user_data<F>(operation: F) -> Result<UserDataSnapshot, CoreError>
+// Complete sparse media only before insertion into the originating user-data session.
+pub(crate) fn set_user_data_favorites(items: Vec<MediaItem>, is_favorite: bool) -> Result<UserDataSnapshot, CoreError> {
+    let (items, session_generation) = if is_favorite {
+        let (items, generation) = complete_user_data_media(items)?;
+        (items, Some(generation))
+    } else {
+        (items, None)
+    };
+    mutate_user_data(session_generation, |user_data| {
+        user_data.set_favorites(items, is_favorite);
+        Ok(())
+    })
+}
+
+pub(crate) fn add_local_playlist_tracks(playlist_id: &str, tracks: Vec<Track>) -> Result<UserDataSnapshot, CoreError> {
+    let (items, session_generation) = complete_user_data_media(tracks.into_iter().map(MediaItem::Track).collect())?;
+    let tracks = items.into_iter().map(|item| match item {
+        MediaItem::Track(track) => Ok(track),
+        _ => Err(CoreError::internal("expected completed playlist track")),
+    }).collect::<Result<Vec<_>, _>>()?;
+    mutate_local_playlist_tracks(Some(session_generation), playlist_id, false, |user_data| {
+        user_data.add_local_playlist_tracks(playlist_id, tracks)
+    })
+}
+
+fn complete_user_data_media(items: Vec<MediaItem>) -> Result<(Vec<MediaItem>, u64), CoreError> {
+    let (client, session_generation) = {
+        let coordinator = CORE_COORDINATOR.lock().map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
+        let session = coordinator.session_configuration.as_ref()
+            .ok_or_else(|| CoreError::command_failed("a restored session is required to complete user data"))?;
+        (MusicAssistantClient::new(&session.music_assistant_url.0, session.access_token.clone()), coordinator.user_data_session_generation)
+    };
+    let items = CORE_NETWORK_RUNTIME.block_on(client.complete_user_data_media(items)).map_err(CoreError::command_failed)?;
+    Ok((items, session_generation))
+}
+
+// User-data mutations serialize commands and reject stale network completions.
+pub(crate) fn mutate_user_data<F>(expected_session_generation: Option<u64>, operation: F) -> Result<UserDataSnapshot, CoreError>
 where
     F: FnOnce(&mut UserDataController) -> Result<(), String>,
 {
@@ -660,6 +701,9 @@ where
         coordinator.session_configuration.as_ref().ok_or_else(|| {
             CoreError::command_failed("a restored session is required to modify user data")
         })?;
+        if expected_session_generation.is_some_and(|generation| generation != coordinator.user_data_session_generation) {
+            return Err(CoreError::command_failed("user data session changed during media completion"));
+        }
         coordinator
             .mutate_user_data(operation)
             .map_err(CoreError::command_failed)?;
@@ -684,6 +728,7 @@ where
 
 /// Applies a local playlist mutation, renders its cover outside the coordinator lock, then persists both.
 pub(crate) fn mutate_local_playlist_tracks<F>(
+    expected_session_generation: Option<u64>,
     playlist_id: &str,
     clear_cover_when_empty: bool,
     operation: F,
@@ -698,6 +743,9 @@ where
         let mut coordinator = CORE_COORDINATOR
             .lock()
             .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
+        if expected_session_generation.is_some_and(|generation| generation != coordinator.user_data_session_generation) {
+            return Err(CoreError::command_failed("user data session changed during media completion"));
+        }
         let base_url = coordinator
             .session_configuration
             .as_ref()
@@ -1649,6 +1697,22 @@ mod tests {
             .expect("restore session");
 
         assert_eq!(coordinator.player_state().volume, 37);
+    }
+
+    #[test]
+    fn incomplete_user_data_mutations_fail_without_changing_active_state() {
+        let mut coordinator = test_coordinator();
+        coordinator.user_data = Some(super::UserDataController::from_preferences(serde_json::Map::new()).unwrap());
+        let original = coordinator.user_data_snapshot().unwrap();
+        let incomplete: crate::music_assistant::models::media::Track = serde_json::from_value(serde_json::json!({
+            "item_id": "track", "provider": "library", "name": "Track", "uri": "library://track/track"
+        })).unwrap();
+        let failure = coordinator.mutate_user_data(|user_data| {
+            let playlist = user_data.create_local_playlist("New playlist".to_string())?;
+            user_data.add_local_playlist_tracks(playlist.media.item_id.as_str(), vec![incomplete])
+        }).unwrap_err();
+        assert!(failure.contains("missing provider mappings"));
+        assert_eq!(coordinator.user_data_snapshot().unwrap(), original);
     }
 
     #[test]

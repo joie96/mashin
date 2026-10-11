@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::time::{Duration, Instant};
 
-const VERSION_PREFERENCE_KEY: &str = "mashin.user_data_version";
-const USER_DATA_PREFERENCE_KEY: &str = "mashin.user_data";
-const USER_DATA_VERSION: u64 = 4;
+pub(crate) const VERSION_PREFERENCE_KEY: &str = "mashin.user_data_version";
+pub(crate) const USER_DATA_PREFERENCE_KEY: &str = "mashin.user_data";
+pub(crate) const USER_DATA_VERSION: u64 = 5;
 pub(crate) const LOCAL_PLAYLIST_PROVIDER: &str = "mashin";
 pub(crate) const WRITE_DEBOUNCE: Duration = Duration::from_secs(2);
 
@@ -124,10 +124,11 @@ impl UserDataController {
                 if version != USER_DATA_VERSION {
                     return Err(format!("unsupported user data version {version}"));
                 }
-                let stored_data = stored_data.ok_or("missing version four user data")?;
-                serde_json::from_value::<StoredUserData>(stored_data)
-                    .map_err(|error| format!("decode version four user data failed: {error}"))?
-                    .to_snapshot()?
+                let stored_data = stored_data.ok_or("missing version five user data")?;
+                let stored = serde_json::from_value::<StoredUserData>(stored_data)
+                    .map_err(|error| format!("decode version five user data failed: {error}"))?;
+                stored.validate()?;
+                stored.to_snapshot()?
             }
             (None, Some(_)) => return Err("missing user data version".to_string()),
         };
@@ -145,6 +146,8 @@ impl UserDataController {
     }
 
     pub(crate) fn preferences(&self) -> Result<Map<String, Value>, String> {
+        let stored = StoredUserData::from_snapshot(&self.snapshot);
+        stored.validate()?;
         let mut preferences = self.additional_preferences.clone();
         preferences.insert(
             VERSION_PREFERENCE_KEY.to_string(),
@@ -152,7 +155,7 @@ impl UserDataController {
         );
         preferences.insert(
             USER_DATA_PREFERENCE_KEY.to_string(),
-            serde_json::to_value(StoredUserData::from_snapshot(&self.snapshot))
+            serde_json::to_value(stored)
                 .map_err(|error| format!("serialize user data failed: {error}"))?,
         );
         Ok(preferences)
@@ -471,6 +474,7 @@ mod tests {
             "provider": "library",
             "name": "Track",
             "uri": uri,
+            "provider_mappings": [{ "item_id": "track-id", "provider_domain": "test", "provider_instance": "test--one" }],
         }))
         .expect("test track must deserialize")
     }
@@ -492,6 +496,59 @@ mod tests {
             controller.write_delay(mutation_time + Duration::from_secs(3)),
             Some(Duration::ZERO)
         );
+    }
+
+    #[test]
+    fn incomplete_version_five_media_fail_reads_and_writes_without_repair() {
+        let mut controller = UserDataController::from_preferences(Map::new()).unwrap();
+        let mut item = track("library://track/track-id");
+        item.media.provider_mappings.clear();
+        controller.set_favorites(vec![MediaItem::Track(item.clone())], true);
+        assert!(controller.preferences().unwrap_err().contains("missing provider mappings"));
+        let snapshot = UserDataSnapshot {
+            favorites: Favorites { tracks: vec![item], ..Favorites::default() },
+            playlists: Vec::new(),
+        };
+        let preferences = serde_json::from_value(serde_json::json!({
+            "mashin.user_data_version": 5,
+            "mashin.user_data": StoredUserData::from_snapshot(&snapshot)
+        })).unwrap();
+        assert!(UserDataController::from_preferences(preferences).unwrap_err().contains("missing provider mappings"));
+    }
+
+    #[test]
+    fn invalid_nested_media_and_store_references_fail_integrity_checks() {
+        let mut controller = UserDataController::from_preferences(Map::new()).unwrap();
+        let mut item = track("library://track/track-id");
+        item.album = Some(serde_json::from_value(serde_json::json!({
+            "item_id": "album", "provider": "library", "name": "Album"
+        })).unwrap());
+        controller.set_favorites(vec![MediaItem::Track(item)], true);
+        assert!(controller.preferences().unwrap_err().contains("user data album"));
+        let mut controller = UserDataController::from_preferences(Map::new()).unwrap();
+        controller.set_favorites(vec![MediaItem::Track(track("library://track/track-id"))], true);
+        let mut preferences = controller.preferences().unwrap();
+        preferences[USER_DATA_PREFERENCE_KEY]["tracks"]["library:track-id"]["album_ref"] = serde_json::json!("library:missing");
+        assert!(UserDataController::from_preferences(preferences).unwrap_err().contains("missing album"));
+    }
+
+    #[test]
+    fn successful_preference_write_keeps_complete_active_media() {
+        let mut controller = UserDataController::from_preferences(Map::new()).unwrap();
+        let item: MediaItem = serde_json::from_value(serde_json::json!({
+            "media_type": "track", "item_id": "track", "provider": "jellyfin--test", "name": "Track",
+            "uri": "jellyfin--test://track/track",
+            "version": "Live", "duration": 233, "disc_number": 2, "track_number": 4,
+            "provider_mappings": [{ "item_id": "source", "provider_domain": "jellyfin", "provider_instance": "jellyfin--test", "details": "source details" }],
+            "metadata": { "lyrics": "Lyrics", "genres": ["Pop"] }
+        })).unwrap();
+        controller.set_favorites(vec![item], true);
+        let before_write = controller.snapshot();
+        controller.schedule_write();
+        let (revision, preferences) = controller.pending_write().unwrap();
+        assert!(controller.finish_write(revision, Some(preferences)));
+        assert_eq!(controller.snapshot(), before_write);
+        assert_eq!(controller.snapshot().favorites.tracks[0].media.provider_mappings.len(), 1);
     }
 
     #[test]
@@ -553,12 +610,13 @@ mod tests {
     }
 
     #[test]
-    fn youtube_favorites_preserve_album_years_and_covers_in_version_four() {
+    fn youtube_favorites_preserve_album_years_and_covers_in_version_five() {
         let mut controller = UserDataController::from_preferences(Map::new()).unwrap();
         let items: Vec<MediaItem> = serde_json::from_value(serde_json::json!([
             {
                 "media_type": "album", "item_id": "album", "provider": "ytmusic--test",
                 "name": "Album", "uri": "ytmusic--test://album/album", "year": "2026",
+                "provider_mappings": [{ "item_id": "album", "provider_domain": "ytmusic", "provider_instance": "ytmusic--test" }],
                 "metadata": { "images": [{
                     "type": "thumb", "path": "https://yt3.googleusercontent.com/album",
                     "provider": "ytmusic--test", "remotely_accessible": true,
@@ -568,6 +626,7 @@ mod tests {
             {
                 "media_type": "track", "item_id": "track", "provider": "ytmusic--test",
                 "name": "Track", "uri": "ytmusic--test://track/track", "image": null,
+                "provider_mappings": [{ "item_id": "track", "provider_domain": "ytmusic", "provider_instance": "ytmusic--test" }],
                 "metadata": { "images": [{
                     "type": "thumb", "path": "https://yt3.googleusercontent.com/track",
                     "provider": "ytmusic--test", "remotely_accessible": true,
@@ -578,7 +637,7 @@ mod tests {
         .unwrap();
         controller.set_favorites(items.clone(), true);
         let preferences = controller.preferences().unwrap();
-        assert_eq!(preferences[VERSION_PREFERENCE_KEY], 4);
+        assert_eq!(preferences[VERSION_PREFERENCE_KEY], 5);
         let mut restored = UserDataController::from_preferences(preferences).unwrap();
         let snapshot = restored.snapshot();
         assert_eq!(snapshot.favorites.albums[0].year, Some(2026));
@@ -606,6 +665,7 @@ mod tests {
             "provider": "library",
             "name": "Track",
             "uri": "library://track/1",
+            "provider_mappings": [{ "item_id": "track-id", "provider_domain": "test", "provider_instance": "test--one" }],
             "favorite": true,
             "image": { "type": "thumb", "path": "track.jpg", "provider": "library", "proxy_id": "track-image" },
             "artists": [{
@@ -613,6 +673,7 @@ mod tests {
                 "item_id": "artist-id",
                 "provider": "library",
                 "name": "Artist",
+                "provider_mappings": [{ "item_id": "artist-id", "provider_domain": "test", "provider_instance": "test--one" }],
                 "image": { "type": "thumb", "path": "artist.jpg", "provider": "library", "proxy_id": "artist-image" }
             }],
             "album": {
@@ -620,6 +681,7 @@ mod tests {
                 "item_id": "album-id",
                 "provider": "library",
                 "name": "Album",
+                "provider_mappings": [{ "item_id": "album-id", "provider_domain": "test", "provider_instance": "test--one" }],
                 "image": { "type": "thumb", "path": "album.jpg", "provider": "library", "proxy_id": "album-image" }
             }
         }))
@@ -696,7 +758,7 @@ mod tests {
     }
 
     #[test]
-    fn version_four_playlist_jpeg_survives_roundtrip() {
+    fn version_five_playlist_jpeg_survives_roundtrip() {
         let mut controller = UserDataController::from_preferences(Map::new()).unwrap();
         let playlist = controller
             .create_local_playlist("Local".to_string())
@@ -726,6 +788,28 @@ mod tests {
     }
 
     #[test]
+    fn version_five_preserves_none_mapping_identities_and_null_audio_format() {
+        let mut controller = UserDataController::from_preferences(Map::new()).unwrap();
+        let playlist = controller.create_local_playlist("Local".to_string()).unwrap();
+        let mut value = serde_json::to_value(track("library://track/1")).unwrap();
+        value["provider_mappings"][0]["provider_domain"] = serde_json::json!("None");
+        value["provider_mappings"][0]["provider_instance"] = serde_json::json!("None");
+        value["provider_mappings"][0]["audio_format"] = Value::Null;
+        value["artists"] = serde_json::json!([{
+            "item_id": "2", "provider": "library", "name": "Electric Callboy",
+            "provider_mappings": [{
+                "item_id": "2", "provider_domain": "None", "provider_instance": "None"
+            }]
+        }]);
+        controller.add_local_playlist_tracks(playlist.media.item_id.as_str(),
+            vec![serde_json::from_value(value).unwrap()]).unwrap();
+        let preferences = controller.preferences().unwrap();
+        let restored = UserDataController::from_preferences(preferences.clone()).unwrap();
+        assert_eq!(restored.snapshot(), controller.snapshot());
+        assert_eq!(restored.preferences().unwrap(), preferences);
+    }
+
+    #[test]
     fn unsupported_or_incomplete_user_data_is_not_overwritten() {
         let mut preferences = Map::new();
         preferences.insert(VERSION_PREFERENCE_KEY.into(), Value::from(3));
@@ -746,7 +830,7 @@ mod tests {
         );
         assert!(UserDataController::from_preferences(preferences)
             .unwrap_err()
-            .contains("missing version four user data"));
+            .contains("missing version five user data"));
 
         let mut preferences = Map::new();
         preferences.insert(USER_DATA_PREFERENCE_KEY.into(), serde_json::json!({}));
@@ -756,7 +840,7 @@ mod tests {
     }
 
     #[test]
-    fn removing_last_cover_source_clears_playlist_image_in_version_four() {
+    fn removing_last_cover_source_clears_playlist_image_in_version_five() {
         let mut controller = UserDataController::from_preferences(Map::new()).unwrap();
         let playlist = controller
             .create_local_playlist("Local".to_string())

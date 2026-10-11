@@ -177,6 +177,15 @@ impl MusicAssistantClient {
         .await
     }
 
+    // Complete incoming user-data media before insertion, never during playback or store reads.
+    pub(crate) async fn complete_user_data_media(&self, items: Vec<MediaItem>) -> Result<Vec<MediaItem>, String> {
+        let mut completed = Vec::with_capacity(items.len());
+        for item in items {
+            completed.push(self.complete_user_data_item(item).await?);
+        }
+        Ok(completed)
+    }
+
     pub(crate) async fn get_library_artists(
         &self,
         arguments: Value,
@@ -513,6 +522,53 @@ impl MusicAssistantClient {
     }
 
     // HTTP command transport.
+    fn complete_user_data_item(&self, mut item: MediaItem) -> futures_util::future::BoxFuture<'_, Result<MediaItem, String>> {
+        Box::pin(async move {
+            if matches!(&item, MediaItem::Playlist(playlist) if playlist.media.provider.as_str() == super::user_data::LOCAL_PLAYLIST_PROVIDER) {
+                return Ok(item);
+            }
+            if item.fields().provider_mappings.is_empty() {
+                let fields = item.fields();
+                item = match &item {
+                    MediaItem::Track(_) => MediaItem::Track(self.get_track(&fields.item_id, fields.provider.as_str()).await?),
+                    MediaItem::Album(_) => MediaItem::Album(self.get_album(&fields.item_id, fields.provider.as_str()).await?),
+                    MediaItem::Artist(_) => MediaItem::Artist(self.get_artist(&fields.item_id, fields.provider.as_str()).await?),
+                    MediaItem::Playlist(_) => MediaItem::Playlist(self.get_playlist(&fields.item_id, fields.provider.as_str()).await?),
+                    _ => return Err("unsupported user data media type".to_string()),
+                };
+                if item.fields().provider_mappings.is_empty() {
+                    return Err(format!("complete provider mappings are required for {}:{}", item.fields().provider.as_str(), item.fields().item_id.as_str()));
+                }
+            }
+            match &mut item {
+                MediaItem::Track(track) => {
+                    for artist in &mut track.artists {
+                        let MediaItem::Artist(completed) = self.complete_user_data_item(MediaItem::Artist(artist.clone())).await? else {
+                            return Err("expected a completed artist".to_string());
+                        };
+                        *artist = completed;
+                    }
+                    if let Some(album) = track.album.take() {
+                        let MediaItem::Album(completed) = self.complete_user_data_item(MediaItem::Album(album)).await? else {
+                            return Err("expected a completed album".to_string());
+                        };
+                        track.album = Some(completed);
+                    }
+                }
+                MediaItem::Album(album) => {
+                    for artist in &mut album.artists {
+                        let MediaItem::Artist(completed) = self.complete_user_data_item(MediaItem::Artist(artist.clone())).await? else {
+                            return Err("expected a completed artist".to_string());
+                        };
+                        *artist = completed;
+                    }
+                }
+                _ => {}
+            }
+            Ok(item)
+        })
+    }
+
     async fn provider_availability(&self) -> Option<Vec<ProviderInstance>> {
         let mut snapshots = PROVIDER_AVAILABILITY.lock().await;
         snapshots.retain(|snapshot| snapshot.expires_at > Instant::now());
@@ -614,6 +670,7 @@ impl MusicAssistantClient {
     }
 }
 
+// Transport always sends modeled media objects, including nested media type tags.
 fn queue_media_payload(media_item: MediaItem) -> Value {
     let mut payload = json!(&media_item);
     match media_item {
@@ -773,7 +830,30 @@ mod tests {
     };
     use crate::music_assistant::models::identifiers::MediaId;
     use crate::music_assistant::models::media::{MediaItem, Track};
-    use serde_json::json;
+    use crate::music_assistant::user_data::{UserDataController, UserDataSnapshot};
+    use crate::music_assistant::user_data_store::StoredUserData;
+    use serde_json::{json, Value};
+
+    #[tokio::test]
+    async fn complete_ingestion_keeps_mapped_media_without_network_requests() {
+        let client = super::MusicAssistantClient::new("http://127.0.0.1:0", None);
+        let item: MediaItem = serde_json::from_value(json!({
+            "media_type": "track", "item_id": "track", "provider": "ytmusic--test", "name": "Track",
+            "provider_mappings": [{ "item_id": "video", "provider_domain": "ytmusic", "provider_instance": "ytmusic--test" }],
+            "metadata": { "lyrics": "Full lyrics" }
+        })).unwrap();
+        let completed = client.complete_user_data_media(vec![item.clone()]).await.unwrap();
+        assert_eq!(completed, vec![item]);
+    }
+
+    #[tokio::test]
+    async fn incomplete_ingestion_fails_without_returning_partial_media() {
+        let client = super::MusicAssistantClient::new("http://127.0.0.1:0", None);
+        let item: MediaItem = serde_json::from_value(json!({
+            "media_type": "track", "item_id": "track", "provider": "ytmusic--test", "name": "Track"
+        })).unwrap();
+        assert!(client.complete_user_data_media(vec![item]).await.is_err());
+    }
 
     #[test]
     fn availability_combines_mappings_with_live_provider_status() {
@@ -878,11 +958,93 @@ mod tests {
     }
 
     #[test]
+    fn queue_media_remain_objects_even_without_mappings() {
+        for provider in ["ytmusic--test", "deezer--test", "jellyfin--test", "library"] {
+            for media_type in ["track", "album", "artist", "playlist", "podcast_episode"] {
+                for uri in [None, Some(""), Some("custom://track/original")] {
+                    let item: MediaItem = serde_json::from_value(json!({
+                        "media_type": media_type,
+                        "item_id": "item/with:identifier",
+                        "provider": provider,
+                        "name": "Cached media",
+                        "uri": uri,
+                        "podcast": {
+                            "item_id": "podcast", "provider": provider, "name": "Podcast"
+                        },
+                    })).unwrap();
+                    let payload = queue_media_payload(item);
+                    assert!(payload.is_object());
+                    assert_eq!(payload["provider"], provider);
+                    assert_eq!(payload["media_type"], media_type);
+                    assert_eq!(payload["uri"], json!(uri));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn persisted_favorites_and_playlist_items_keep_complete_payloads() {
+        for (domain, provider) in [
+            ("ytmusic", "ytmusic--test"),
+            ("deezer", "deezer--test"),
+            ("jellyfin", "jellyfin--test"),
+            ("deezer", "library"),
+        ] {
+            for has_uri in [true, false] {
+                let track_uri = format!("{provider}://track/track-1");
+                let album_uri = format!("{provider}://album/album-1");
+                let track = json!({
+                    "item_id": "track-1", "provider": provider, "name": "Track",
+                    "uri": has_uri.then_some(&track_uri),
+                    "provider_mappings": [{
+                        "item_id": "track-1", "provider_domain": domain, "provider_instance": "source--test"
+                    }],
+                });
+                let album = json!({
+                    "item_id": "album-1", "provider": provider, "name": "Album",
+                    "uri": has_uri.then_some(&album_uri),
+                    "provider_mappings": [{
+                        "item_id": "album-1", "provider_domain": domain, "provider_instance": "source--test"
+                    }],
+                });
+                let snapshot: UserDataSnapshot = serde_json::from_value(json!({
+                    "favorites": { "tracks": [track], "albums": [album] },
+                    "playlists": [{
+                        "item_id": "local", "provider": "mashin", "name": "Playlist",
+                        "items": [track, track],
+                    }],
+                })).unwrap();
+                let preferences = serde_json::from_value(json!({
+                    "mashin.user_data_version": 5,
+                    "mashin.user_data": StoredUserData::from_snapshot(&snapshot),
+                })).unwrap();
+                let restored = UserDataController::from_preferences(preferences).unwrap().snapshot();
+                let favorite_track = restored.favorites.tracks[0].clone();
+                assert_eq!(favorite_track.media.provider_mappings.len(), 1);
+                let expected_track: Track = serde_json::from_value(track).unwrap();
+                let track_payload = queue_media_payload(MediaItem::Track(favorite_track));
+                assert_eq!(track_payload["provider_mappings"], json!(expected_track.media.provider_mappings));
+                let expected_album: super::Album = serde_json::from_value(album).unwrap();
+                let album_payload = queue_media_payload(MediaItem::Album(restored.favorites.albums[0].clone()));
+                assert_eq!(album_payload["provider_mappings"], json!(expected_album.media.provider_mappings));
+                let playlist_media: Vec<_> = restored.playlists[0].items.iter()
+                    .cloned().map(MediaItem::Track).map(queue_media_payload).collect();
+                assert_eq!(playlist_media.len(), 2);
+                assert_eq!(playlist_media[0], playlist_media[1]);
+                assert!(playlist_media.iter().all(Value::is_object));
+            }
+        }
+    }
+
+    #[test]
     fn serializes_complete_queue_media_with_nested_types() {
         let track: MediaItem = serde_json::from_value(json!({
             "media_type": "track",
             "item_id": "track-1",
             "provider": "ytmusic",
+            "provider_mappings": [{
+                "item_id": "track-1", "provider_domain": "ytmusic", "provider_instance": "ytmusic--test"
+            }],
             "name": "Take on Me",
             "duration": 232,
             "artists": [{
@@ -907,11 +1069,15 @@ mod tests {
         assert_eq!(payload["album"]["item_id"], "album-1");
         assert_eq!(payload["artists"][0]["media_type"], "artist");
         assert_eq!(payload["artists"][0]["name"], "a-ha");
+        assert_eq!(payload["provider_mappings"][0]["provider_instance"], "ytmusic--test");
 
         let album: MediaItem = serde_json::from_value(json!({
             "media_type": "album",
             "item_id": "album-1",
             "provider": "ytmusic",
+            "provider_mappings": [{
+                "item_id": "album-1", "provider_domain": "ytmusic", "provider_instance": "ytmusic--test"
+            }],
             "name": "Hunting High and Low",
             "artists": [{
                 "media_type": "artist",
@@ -929,6 +1095,9 @@ mod tests {
             "media_type": "podcast_episode",
             "item_id": "episode-1",
             "provider": "library",
+            "provider_mappings": [{
+                "item_id": "episode-1", "provider_domain": "test", "provider_instance": "test--instance"
+            }],
             "name": "Episode one",
             "podcast": {
                 "media_type": "podcast",

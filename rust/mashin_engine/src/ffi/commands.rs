@@ -579,12 +579,7 @@ pub extern "C" fn mashin_core_set_user_data_favorites(
     let result = read_required_c_string(media_items_json, "media_items_json")
         .and_then(|items| parse_media_items(&items))
         .map_err(CoreError::command_failed)
-        .and_then(|items| {
-            core::mutate_user_data(|user_data| {
-                user_data.set_favorites(items, is_favorite != 0);
-                Ok(())
-            })
-        });
+        .and_then(|items| core::set_user_data_favorites(items, is_favorite != 0));
     execute_user_data_mutation(result)
 }
 
@@ -593,7 +588,7 @@ pub extern "C" fn mashin_core_create_local_playlist(name: *const c_char) -> i32 
     let result = read_required_c_string(name, "name")
         .map_err(CoreError::command_failed)
         .and_then(|name| {
-            core::mutate_user_data(|user_data| user_data.create_local_playlist(name).map(|_| ()))
+            core::mutate_user_data(None, |user_data| user_data.create_local_playlist(name).map(|_| ()))
         });
     execute_user_data_mutation(result)
 }
@@ -609,7 +604,7 @@ pub extern "C" fn mashin_core_rename_local_playlist(
         })
         .map_err(CoreError::command_failed)
         .and_then(|(playlist_id, name)| {
-            core::mutate_user_data(|user_data| user_data.rename_local_playlist(&playlist_id, name))
+            core::mutate_user_data(None, |user_data| user_data.rename_local_playlist(&playlist_id, name))
         });
     execute_user_data_mutation(result)
 }
@@ -619,7 +614,7 @@ pub extern "C" fn mashin_core_remove_local_playlist(playlist_id: *const c_char) 
     let result = read_required_c_string(playlist_id, "playlist_id")
         .map_err(CoreError::command_failed)
         .and_then(|playlist_id| {
-            core::mutate_user_data(|user_data| user_data.remove_local_playlist(&playlist_id))
+            core::mutate_user_data(None, |user_data| user_data.remove_local_playlist(&playlist_id))
         });
     execute_user_data_mutation(result)
 }
@@ -632,11 +627,7 @@ pub extern "C" fn mashin_core_add_local_playlist_tracks(
     let result = read_required_c_string(playlist_id, "playlist_id")
         .and_then(|playlist_id| parse_tracks(tracks_json).map(|tracks| (playlist_id, tracks)))
         .map_err(CoreError::command_failed)
-        .and_then(|(playlist_id, tracks)| {
-            core::mutate_local_playlist_tracks(&playlist_id, false, |user_data| {
-                user_data.add_local_playlist_tracks(&playlist_id, tracks)
-            })
-        });
+        .and_then(|(playlist_id, tracks)| core::add_local_playlist_tracks(&playlist_id, tracks));
     execute_user_data_mutation(result)
 }
 
@@ -651,7 +642,7 @@ pub extern "C" fn mashin_core_remove_local_playlist_tracks(
         })
         .map_err(CoreError::command_failed)
         .and_then(|(playlist_id, uris)| {
-            core::mutate_local_playlist_tracks(&playlist_id, true, |user_data| {
+            core::mutate_local_playlist_tracks(None, &playlist_id, true, |user_data| {
                 user_data.remove_local_playlist_tracks(&playlist_id, uris)
             })
         });
