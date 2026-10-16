@@ -5,7 +5,7 @@ use super::strings::{read_required_c_string, read_required_json_array, read_requ
 use crate::core;
 use crate::core::event_channel::publish_background_event;
 use crate::core::models::{
-    CoreError, CoreOperationRequest, LoginConfig, MediaSessionEvent, OfflineOutputConfig, QueuePlayMediaRequest,
+    CoreError, CoreOperationRequest, LoginConfig, MediaSessionEvent, QueuePlayMediaRequest,
     RemoteOutputConfig, SelectedOutput,
 };
 use crate::core::CoreCoordinator;
@@ -100,14 +100,7 @@ fn execute_async_operation(request: CoreOperationRequest) -> Result<Value, CoreE
     match request.kind.as_str() {
         "login" => execute_json_command(mashin_core_login, &arguments),
         "restorePersistedSession" => execute_restore_persisted_session(),
-        "selectDefaultSendspinOutput" => {
-            execute_void_command(mashin_core_select_default_sendspin_output)
-        }
-        "selectOfflineLibrary" => execute_text_command(
-            mashin_core_select_offline_library,
-            &arguments,
-            "libraryRoot",
-        ),
+        "selectLocalOutput" => execute_void_command(mashin_core_select_local_output),
         "selectRemotePlayer" => {
             execute_text_command(mashin_core_select_remote_player, &arguments, "playerId")
         }
@@ -132,35 +125,52 @@ fn execute_async_operation(request: CoreOperationRequest) -> Result<Value, CoreE
         "setVolume" => execute_integer_command(mashin_core_set_volume, &arguments, "volume"),
         "setMuted" => execute_boolean_command(mashin_core_set_muted, &arguments, "muted"),
         "saveSessionSettings" => {
-            let update = serde_json::from_value::<crate::core::models::SessionSettingsUpdate>(Value::Object(arguments))
-                .map_err(|_| CoreError::command_failed("invalid settings"))?;
-            let update = crate::listenbrainz::validate_settings_update(update).map_err(CoreError::command_failed)?;
-            let status = execute_core_command(|coordinator| coordinator.save_session_settings(update));
-            if status == 0 { Ok(Value::Null) } else { Err(CoreError::command_failed("settings could not be saved")) }
-        }
-        "testListenBrainzCredentials" => {
-            let credentials = serde_json::from_value::<crate::listenbrainz::ListenBrainzCredentials>(Value::Object(arguments))
-                .map_err(|_| CoreError::command_failed("invalid ListenBrainz credentials"))?;
-            if credentials.username.trim().is_empty() || credentials.token.trim().is_empty() {
-                return Err(CoreError::command_failed("ListenBrainz username and token are both required"));
+            let update = serde_json::from_value::<crate::core::models::SessionSettingsUpdate>(
+                Value::Object(arguments),
+            )
+            .map_err(|_| CoreError::command_failed("invalid settings"))?;
+            let status =
+                execute_core_command(|coordinator| coordinator.save_session_settings(update));
+            if status == 0 {
+                Ok(Value::Null)
+            } else {
+                Err(CoreError::command_failed("settings could not be saved"))
             }
-            crate::listenbrainz::validate_credentials(credentials).map_err(CoreError::command_failed)?;
-            Ok(Value::Null)
         }
         "saveLogSnapshot" => serialize_operation_result(
             crate::logging::save_log_snapshot().map_err(CoreError::internal),
         ),
-        "queuePlayMedia" => execute_json_text_command(mashin_core_queue_play_media, &arguments, "request"),
-        "startSendspinRadio" => {
-            execute_json_text_command(mashin_core_start_sendspin_radio, &arguments, "mediaItems")
+        "queuePlayMedia" => {
+            execute_json_text_command(mashin_core_queue_play_media, &arguments, "request")
         }
-        "insertQueueItems" => execute_json_integer_command(mashin_core_insert_queue_items, &arguments, "mediaItems", "index"),
-        "appendQueueItems" => execute_json_text_command(mashin_core_append_queue_items, &arguments, "mediaItems"),
-        "moveQueueItems" => execute_json_integer_command(mashin_core_move_queue_items, &arguments, "itemIds", "targetIndex"),
-        "deleteQueueItems" => execute_json_text_command(mashin_core_delete_queue_items, &arguments, "itemIds"),
-        "selectQueueItem" => execute_text_command(mashin_core_select_queue_item, &arguments, "itemId"),
+        "startRadio" => {
+            execute_json_text_command(mashin_core_start_radio, &arguments, "mediaItems")
+        }
+        "insertQueueItems" => execute_json_integer_command(
+            mashin_core_insert_queue_items,
+            &arguments,
+            "mediaItems",
+            "index",
+        ),
+        "appendQueueItems" => {
+            execute_json_text_command(mashin_core_append_queue_items, &arguments, "mediaItems")
+        }
+        "moveQueueItems" => execute_json_integer_command(
+            mashin_core_move_queue_items,
+            &arguments,
+            "itemIds",
+            "targetIndex",
+        ),
+        "deleteQueueItems" => {
+            execute_json_text_command(mashin_core_delete_queue_items, &arguments, "itemIds")
+        }
+        "selectQueueItem" => {
+            execute_text_command(mashin_core_select_queue_item, &arguments, "itemId")
+        }
         "playQueueIndex" => execute_integer_command(mashin_core_queue_play, &arguments, "index"),
-        "requestCodec" => execute_text_command(mashin_core_set_codec, &arguments, "codec"),
+        "setAudioProfile" => {
+            execute_text_command(mashin_core_set_audio_profile, &arguments, "audioProfile")
+        }
         "addPlaylistTracks" => execute_two_json_text_command(
             mashin_core_add_playlist_tracks,
             &arguments,
@@ -290,7 +300,10 @@ fn execute_json_integer_command(
     integer_key: &str,
 ) -> Result<Value, CoreError> {
     with_json_value(arguments, json_key, |value| {
-        command_result(command(value.as_ptr(), required_i32(arguments, integer_key)?))
+        command_result(command(
+            value.as_ptr(),
+            required_i32(arguments, integer_key)?,
+        ))
     })
 }
 fn execute_json_boolean_command(
@@ -478,24 +491,8 @@ pub extern "C" fn mashin_core_restore_persisted_session() -> i32 {
 }
 
 #[no_mangle]
-pub extern "C" fn mashin_core_select_default_sendspin_output() -> i32 {
-    execute_core_command(|coordinator| coordinator.select_default_sendspin_output())
-}
-
-#[no_mangle]
-pub extern "C" fn mashin_core_select_offline_library(library_root: *const c_char) -> i32 {
-    let library_root = match read_required_c_string(library_root, "library_root") {
-        Ok(value) => value,
-        Err(error) => {
-            record_and_publish_error(error);
-            return -1;
-        }
-    };
-    execute_core_command(|coordinator| {
-        coordinator.select_output(SelectedOutput::Offline(OfflineOutputConfig {
-            library_root,
-        }))
-    })
+pub extern "C" fn mashin_core_select_local_output() -> i32 {
+    execute_core_command(|coordinator| coordinator.select_local_output())
 }
 
 #[no_mangle]
@@ -516,13 +513,13 @@ pub extern "C" fn mashin_core_select_remote_player(player_id: *const c_char) -> 
 
 #[no_mangle]
 pub extern "C" fn mashin_core_activate_engine() -> i32 {
-    execute_core_command(|coordinator| coordinator.activate_selected_engine())
+    execute_playback_command(|playback| playback.activate())
 }
 
 #[no_mangle]
 pub extern "C" fn mashin_core_deactivate_engine() -> i32 {
-    execute_core_command(|coordinator| {
-        coordinator.deactivate_active_engine();
+    execute_playback_command(|playback| {
+        playback.deactivate();
         Ok(())
     })
 }
@@ -588,7 +585,9 @@ pub extern "C" fn mashin_core_create_local_playlist(name: *const c_char) -> i32 
     let result = read_required_c_string(name, "name")
         .map_err(CoreError::command_failed)
         .and_then(|name| {
-            core::mutate_user_data(None, |user_data| user_data.create_local_playlist(name).map(|_| ()))
+            core::mutate_user_data(None, |user_data| {
+                user_data.create_local_playlist(name).map(|_| ())
+            })
         });
     execute_user_data_mutation(result)
 }
@@ -604,7 +603,9 @@ pub extern "C" fn mashin_core_rename_local_playlist(
         })
         .map_err(CoreError::command_failed)
         .and_then(|(playlist_id, name)| {
-            core::mutate_user_data(None, |user_data| user_data.rename_local_playlist(&playlist_id, name))
+            core::mutate_user_data(None, |user_data| {
+                user_data.rename_local_playlist(&playlist_id, name)
+            })
         });
     execute_user_data_mutation(result)
 }
@@ -614,7 +615,9 @@ pub extern "C" fn mashin_core_remove_local_playlist(playlist_id: *const c_char) 
     let result = read_required_c_string(playlist_id, "playlist_id")
         .map_err(CoreError::command_failed)
         .and_then(|playlist_id| {
-            core::mutate_user_data(None, |user_data| user_data.remove_local_playlist(&playlist_id))
+            core::mutate_user_data(None, |user_data| {
+                user_data.remove_local_playlist(&playlist_id)
+            })
         });
     execute_user_data_mutation(result)
 }
@@ -673,15 +676,20 @@ pub extern "C" fn mashin_core_queue_play_media(request_json: *const c_char) -> i
         });
     match request {
         Ok(request) if request.option == QueueOption::Replace && request.media_items.is_empty() => {
-            execute_core_command(|coordinator| coordinator.queue_play_media(Vec::new(), request.option, None, false, false))
+            execute_playback_command(|playback| {
+                playback.queue_play_media(Vec::new(), request.option, None, false)
+            })
         }
-        Ok(request) if request.option != QueueOption::Unknown => resolve_media_and_execute_core_command(
-            request.media_items,
-            false,
-            |coordinator, tracks| {
-                coordinator.queue_play_media(tracks, request.option, request.start_item, request.shuffle, request.start_download)
-            },
-        ),
+        Ok(request) if request.option != QueueOption::Unknown => {
+            resolve_media_and_execute_playback_command(request.media_items, |playback, tracks| {
+                playback.queue_play_media(
+                    tracks,
+                    request.option,
+                    request.start_item,
+                    request.shuffle,
+                )
+            })
+        }
         Ok(_) => {
             record_and_publish_error(CoreError::command_failed("unknown queue option"));
             -1
@@ -694,10 +702,10 @@ pub extern "C" fn mashin_core_queue_play_media(request_json: *const c_char) -> i
 }
 
 #[no_mangle]
-pub extern "C" fn mashin_core_start_sendspin_radio(media_items_json: *const c_char) -> i32 {
+pub extern "C" fn mashin_core_start_radio(media_items_json: *const c_char) -> i32 {
     match read_required_c_string(media_items_json, "media_items_json") {
         Ok(media_items) => match parse_media_items(&media_items) {
-            Ok(media_items) => start_sendspin_radio_and_execute_core_command(media_items),
+            Ok(media_items) => start_radio_and_execute_core_command(media_items),
             Err(error) => {
                 record_and_publish_error(error);
                 -1
@@ -711,9 +719,9 @@ pub extern "C" fn mashin_core_start_sendspin_radio(media_items_json: *const c_ch
 }
 
 #[no_mangle]
-pub extern "C" fn mashin_core_set_codec(codec: *const c_char) -> i32 {
-    match read_required_c_string(codec, "codec") {
-        Ok(codec) => execute_core_command(|coordinator| coordinator.set_preferred_codec(&codec)),
+pub extern "C" fn mashin_core_set_audio_profile(audio_profile: *const c_char) -> i32 {
+    match read_required_c_string(audio_profile, "audioProfile") {
+        Ok(profile) => execute_core_command(|coordinator| coordinator.set_audio_profile(&profile)),
         Err(error) => {
             record_and_publish_error(error);
             -1
@@ -722,13 +730,20 @@ pub extern "C" fn mashin_core_set_codec(codec: *const c_char) -> i32 {
 }
 
 #[no_mangle]
-pub extern "C" fn mashin_core_insert_queue_items(media_items_json: *const c_char, index: i32) -> i32 {
+pub extern "C" fn mashin_core_insert_queue_items(
+    media_items_json: *const c_char,
+    index: i32,
+) -> i32 {
     if index < 0 {
         record_and_publish_error("queue insertion index must not be negative".to_string());
         return -1;
     }
-    match read_required_c_string(media_items_json, "media_items_json").and_then(|value| parse_media_items(&value)) {
-        Ok(items) => execute_core_command(|coordinator| coordinator.insert_queue_items(index as usize, items)),
+    match read_required_c_string(media_items_json, "media_items_json")
+        .and_then(|value| parse_media_items(&value))
+    {
+        Ok(items) => {
+            execute_playback_command(|playback| playback.insert_queue_items(index as usize, items))
+        }
         Err(error) => {
             record_and_publish_error(error);
             -1
@@ -738,8 +753,10 @@ pub extern "C" fn mashin_core_insert_queue_items(media_items_json: *const c_char
 
 #[no_mangle]
 pub extern "C" fn mashin_core_append_queue_items(media_items_json: *const c_char) -> i32 {
-    match read_required_c_string(media_items_json, "media_items_json").and_then(|value| parse_media_items(&value)) {
-        Ok(items) => execute_core_command(|coordinator| coordinator.append_queue_items(items)),
+    match read_required_c_string(media_items_json, "media_items_json")
+        .and_then(|value| parse_media_items(&value))
+    {
+        Ok(items) => execute_playback_command(|playback| playback.append_queue_items(items)),
         Err(error) => {
             record_and_publish_error(error);
             -1
@@ -748,14 +765,20 @@ pub extern "C" fn mashin_core_append_queue_items(media_items_json: *const c_char
 }
 
 #[no_mangle]
-pub extern "C" fn mashin_core_move_queue_items(item_ids_json: *const c_char, target_index: i32) -> i32 {
+pub extern "C" fn mashin_core_move_queue_items(
+    item_ids_json: *const c_char,
+    target_index: i32,
+) -> i32 {
     if target_index < 0 {
         record_and_publish_error("queue move target must not be negative".to_string());
         return -1;
     }
-    match read_required_c_string(item_ids_json, "item_ids_json")
-        .and_then(|value| serde_json::from_str::<Vec<QueueItemId>>(&value).map_err(|error| error.to_string())) {
-        Ok(ids) => execute_core_command(|coordinator| coordinator.move_queue_items(ids, target_index as usize)),
+    match read_required_c_string(item_ids_json, "item_ids_json").and_then(|value| {
+        serde_json::from_str::<Vec<QueueItemId>>(&value).map_err(|error| error.to_string())
+    }) {
+        Ok(ids) => execute_playback_command(|playback| {
+            playback.move_queue_items(ids, target_index as usize)
+        }),
         Err(error) => {
             record_and_publish_error(error);
             -1
@@ -765,9 +788,10 @@ pub extern "C" fn mashin_core_move_queue_items(item_ids_json: *const c_char, tar
 
 #[no_mangle]
 pub extern "C" fn mashin_core_delete_queue_items(item_ids_json: *const c_char) -> i32 {
-    match read_required_c_string(item_ids_json, "item_ids_json")
-        .and_then(|value| serde_json::from_str::<Vec<QueueItemId>>(&value).map_err(|error| error.to_string())) {
-        Ok(ids) => execute_core_command(|coordinator| coordinator.delete_queue_items(ids)),
+    match read_required_c_string(item_ids_json, "item_ids_json").and_then(|value| {
+        serde_json::from_str::<Vec<QueueItemId>>(&value).map_err(|error| error.to_string())
+    }) {
+        Ok(ids) => execute_playback_command(|playback| playback.delete_queue_items(ids)),
         Err(error) => {
             record_and_publish_error(error);
             -1
@@ -779,7 +803,7 @@ pub extern "C" fn mashin_core_delete_queue_items(item_ids_json: *const c_char) -
 pub extern "C" fn mashin_core_select_queue_item(item_id: *const c_char) -> i32 {
     match read_required_c_string(item_id, "queue_item_id") {
         Ok(item_id) => {
-            execute_core_command(|coordinator| coordinator.select_queue_item(QueueItemId(item_id)))
+            execute_playback_command(|playback| playback.select_queue_item(QueueItemId(item_id)))
         }
         Err(error) => {
             record_and_publish_error(error);
@@ -794,55 +818,55 @@ pub extern "C" fn mashin_core_queue_play(index: i32) -> i32 {
         record_and_publish_error("queue index must not be negative".to_string());
         return -1;
     }
-    execute_core_command(|coordinator| coordinator.play_queue_index(index as usize))
+    execute_playback_command(|playback| playback.play_queue_index(index as usize))
 }
 
 // Playback transport and preference commands.
 #[no_mangle]
 pub extern "C" fn mashin_core_transport_play() -> i32 {
-    execute_core_command(|coordinator| coordinator.transport_play())
+    execute_playback_command(|playback| playback.transport_play())
 }
 
 #[no_mangle]
 pub extern "C" fn mashin_core_transport_pause() -> i32 {
-    execute_core_command(|coordinator| coordinator.transport_pause())
+    execute_playback_command(|playback| playback.transport_pause())
 }
 
 #[no_mangle]
 pub extern "C" fn mashin_core_transport_stop() -> i32 {
-    execute_core_command(|coordinator| {
-        coordinator.transport_stop();
+    execute_playback_command(|playback| {
+        playback.transport_stop();
         Ok(())
     })
 }
 
 #[no_mangle]
 pub extern "C" fn mashin_core_transport_next() -> i32 {
-    execute_core_command(|coordinator| coordinator.transport_next())
+    execute_playback_command(|playback| playback.transport_next())
 }
 
 #[no_mangle]
 pub extern "C" fn mashin_core_transport_previous() -> i32 {
-    execute_core_command(|coordinator| coordinator.transport_previous())
+    execute_playback_command(|playback| playback.transport_previous())
 }
 
 #[no_mangle]
 pub extern "C" fn mashin_core_transport_seek(seconds: f64) -> i32 {
-    execute_core_command(|coordinator| coordinator.transport_seek(seconds))
+    execute_playback_command(|playback| playback.transport_seek(seconds))
 }
 
 #[no_mangle]
 pub extern "C" fn mashin_core_set_shuffle(is_enabled: i32) -> i32 {
-    execute_core_command(|coordinator| {
-        coordinator.set_shuffle(is_enabled != 0);
+    execute_playback_command(|playback| {
+        playback.set_shuffle(is_enabled != 0);
         Ok(())
     })
 }
 
 #[no_mangle]
 pub extern "C" fn mashin_core_set_autoplay(is_enabled: i32) -> i32 {
-    execute_core_command(|coordinator| {
-        coordinator.set_autoplay(is_enabled != 0);
+    execute_playback_command(|playback| {
+        playback.set_autoplay(is_enabled != 0);
         Ok(())
     })
 }
@@ -854,8 +878,8 @@ pub extern "C" fn mashin_core_set_repeat_mode(mode: i32) -> i32 {
         2 => RepeatMode::All,
         _ => RepeatMode::Off,
     };
-    execute_core_command(|coordinator| {
-        coordinator.set_repeat_mode(mode);
+    execute_playback_command(|playback| {
+        playback.set_repeat_mode(mode);
         Ok(())
     })
 }
@@ -867,8 +891,8 @@ pub extern "C" fn mashin_core_set_volume(volume: i32) -> i32 {
 
 #[no_mangle]
 pub extern "C" fn mashin_core_set_muted(is_muted: i32) -> i32 {
-    execute_core_command(|coordinator| {
-        coordinator.set_muted(is_muted != 0);
+    execute_playback_command(|playback| {
+        playback.set_muted(is_muted != 0);
         Ok(())
     })
 }
@@ -881,30 +905,25 @@ where
     publish_command_result(core::execute_command_and_collect_events(operation))
 }
 
-fn resolve_media_and_execute_core_command<F>(
-    media_items: Vec<MediaItem>,
-    should_shuffle: bool,
-    operation: F,
-) -> i32
+fn execute_playback_command<F>(operation: F) -> i32
 where
-    F: FnOnce(&mut CoreCoordinator, Vec<MediaItem>) -> Result<(), String>,
+    F: FnOnce(&mut crate::playback::engine::PlaybackEngine) -> Result<(), String>,
+{
+    publish_command_result(core::execute_playback_command_and_collect_events(operation))
+}
+
+fn resolve_media_and_execute_playback_command<F>(media_items: Vec<MediaItem>, operation: F) -> i32
+where
+    F: FnOnce(&mut crate::playback::engine::PlaybackEngine, Vec<MediaItem>) -> Result<(), String>,
 {
     publish_command_result(core::resolve_media_and_execute_command(
         media_items,
-        should_shuffle,
         operation,
     ))
 }
 
-fn start_sendspin_radio_and_execute_core_command(media_items: Vec<MediaItem>) -> i32 {
-    publish_command_result(core::start_sendspin_radio_and_execute_command(
-        media_items,
-        |events| {
-            for event in events {
-                publish_background_event(event);
-            }
-        },
-    ))
+fn start_radio_and_execute_core_command(media_items: Vec<MediaItem>) -> i32 {
+    publish_command_result(core::start_radio_and_execute_command(media_items))
 }
 
 fn publish_command_result(result: Result<Vec<MediaSessionEvent>, CoreError>) -> i32 {

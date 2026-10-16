@@ -18,7 +18,7 @@ class PlaybackSessionCommandsTest {
     fun everyPlaybackStartIsClassifiedBeforeCoreDispatch() {
         for (kind in listOf(PlaybackCommandKind.TransportPlay, PlaybackCommandKind.TransportNext,
             PlaybackCommandKind.TransportPrevious, PlaybackCommandKind.QueuePlayMedia,
-            PlaybackCommandKind.StartSendspinRadio, PlaybackCommandKind.PlayQueueIndex)) {
+            PlaybackCommandKind.StartRadio, PlaybackCommandKind.PlayQueueIndex)) {
             assertTrue(kind.action, kind.canStartPlayback)
         }
         assertFalse(PlaybackCommandKind.TransportPause.canStartPlayback)

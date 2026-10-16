@@ -54,7 +54,7 @@ class FavoritesController extends ChangeNotifier {
     }
 
     try {
-      await coreBridge.startSendspinRadio(<MediaItem>[track]);
+      await coreBridge.startRadio(<MediaItem>[track]);
     } catch (_) {
       // Ignore playback failures to keep the UI responsive.
     }
@@ -66,7 +66,7 @@ class FavoritesController extends ChangeNotifier {
     }
 
     try {
-      await coreBridge.startSendspinRadio(<MediaItem>[item]);
+      await coreBridge.startRadio(<MediaItem>[item]);
     } catch (_) {
       // Ignore playback failures to keep the UI responsive.
     }
@@ -78,7 +78,7 @@ class FavoritesController extends ChangeNotifier {
     }
 
     try {
-      await coreBridge.startSendspinRadio(<MediaItem>[artist]);
+      await coreBridge.startRadio(<MediaItem>[artist]);
     } catch (_) {
       // Ignore playback failures to keep the UI responsive.
     }

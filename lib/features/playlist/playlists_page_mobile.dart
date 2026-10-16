@@ -79,7 +79,7 @@ class _PlaylistsPageMobileState extends State<PlaylistsPageMobile> {
         label: 'Radio starten',
         icon: Icons.radio_outlined,
         isEnabled: tracks.isNotEmpty,
-        onSelected: () => widget.coreBridge.startSendspinRadio(playlists),
+        onSelected: () => widget.coreBridge.startRadio(playlists),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',

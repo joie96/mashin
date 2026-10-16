@@ -239,8 +239,8 @@ class PlaylistDetailController extends ChangeNotifier {
     bool hasChanges = false;
     final List<Track> enriched = _tracks
         .map((Track track) {
-            final Album? reference = track.album;
-            if (reference == null || reference.year != null) {
+          final Album? reference = track.album;
+          if (reference == null || reference.year != null) {
             return track;
           }
           final Album? album =
@@ -298,11 +298,11 @@ class PlaylistDetailController extends ChangeNotifier {
   }
 
   Future<void> startTrackRadio(Track track) async {
-    await coreBridge.startSendspinRadio(<MediaItem>[track]);
+    await coreBridge.startRadio(<MediaItem>[track]);
   }
 
   Future<void> startItemRadio(MediaItem item) async {
-    await coreBridge.startSendspinRadio(<MediaItem>[item]);
+    await coreBridge.startRadio(<MediaItem>[item]);
   }
 
   // Favorites

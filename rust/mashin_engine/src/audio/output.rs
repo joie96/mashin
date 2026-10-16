@@ -1,4 +1,3 @@
-use ::sendspin::audio::AudioFormat;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat, Stream, StreamConfig};
 use rubato::{FftFixedInOut, Resampler};
@@ -60,12 +59,24 @@ impl AudioResampler {
             Self::Rubato(resampler) => resampler.process(samples),
         }
     }
+
+    fn finish(&mut self) -> Result<Arc<[i32]>, String> {
+        match self {
+            Self::Passthrough => Ok(Arc::from([])),
+            Self::Rubato(resampler) => resampler.finish(),
+        }
+    }
 }
 
 struct RubatoResampler {
     resampler: FftFixedInOut<f32>,
     channels: usize,
     pending_input: Vec<Vec<f32>>,
+    source_sample_rate: u32,
+    output_sample_rate: u32,
+    input_frames: u64,
+    emitted_frames: u64,
+    delay_frames: usize,
 }
 
 impl RubatoResampler {
@@ -81,10 +92,16 @@ impl RubatoResampler {
             channels,
         )
         .map_err(|error| format!("create audio resampler failed: {error}"))?;
+        let delay_frames = resampler.output_delay();
         Ok(Self {
             resampler,
             channels,
             pending_input: vec![Vec::new(); channels],
+            source_sample_rate,
+            output_sample_rate,
+            input_frames: 0,
+            emitted_frames: 0,
+            delay_frames,
         })
     }
 
@@ -93,6 +110,7 @@ impl RubatoResampler {
             return Err("audio samples are not frame-aligned for the output channels".to_string());
         }
 
+        self.input_frames += (samples.len() / self.channels) as u64;
         for frame in samples.chunks_exact(self.channels) {
             for (channel, sample) in self.pending_input.iter_mut().zip(frame) {
                 channel.push(*sample as f32 / i32::MAX as f32);
@@ -115,7 +133,9 @@ impl RubatoResampler {
                 .resampler
                 .process_into_buffer(&input, &mut resampled, None)
                 .map_err(|error| format!("resample audio failed: {error}"))?;
-            for frame_index in 0..output_frames {
+            let skip = self.delay_frames.min(output_frames);
+            self.delay_frames -= skip;
+            for frame_index in skip..output_frames {
                 for channel in &resampled {
                     output.push(
                         (channel[frame_index].clamp(-1.0, 1.0) * i32::MAX as f32).round() as i32,
@@ -123,7 +143,24 @@ impl RubatoResampler {
                 }
             }
         }
+        self.emitted_frames += (output.len() / self.channels) as u64;
         Ok(Arc::from(output))
+    }
+
+    fn finish(&mut self) -> Result<Arc<[i32]>, String> {
+        let input_frames = self.input_frames;
+        let target_frames =
+            input_frames * u64::from(self.output_sample_rate) / u64::from(self.source_sample_rate);
+        let mut output = Vec::new();
+        while self.emitted_frames < target_frames {
+            let padding = vec![0; self.resampler.input_frames_next() * self.channels];
+            output.extend_from_slice(&self.process(padding.into())?);
+        }
+        let excess = (self.emitted_frames - target_frames) as usize * self.channels;
+        output.truncate(output.len().saturating_sub(excess));
+        self.input_frames = input_frames;
+        self.emitted_frames = target_frames;
+        Ok(output.into())
     }
 }
 
@@ -135,15 +172,24 @@ pub(crate) struct AudioOutput {
     underrun: Arc<AtomicBool>,
     underrun_active: Arc<AtomicBool>,
     played_samples: Arc<AtomicU64>,
+    audible_samples: Arc<AtomicU64>,
+    enqueued_output_samples: AtomicU64,
     enqueued_chunks: AtomicU64,
     output_sample_rate: u32,
     output_channels: u8,
+    source_channels: u8,
+    source_sample_rate: u32,
     resampler: Mutex<AudioResampler>,
 }
 
 impl AudioOutput {
     // Construction.
-    pub(crate) fn new(format: &AudioFormat, volume: u8, muted: bool) -> Result<Self, String> {
+    pub(crate) fn new(
+        sample_rate: u32,
+        channels: u8,
+        volume: u8,
+        muted: bool,
+    ) -> Result<Self, String> {
         let host = cpal::default_host();
         let device = host
             .default_output_device()
@@ -152,10 +198,14 @@ impl AudioOutput {
             .default_output_config()
             .map_err(|error| format!("read default output device configuration failed: {error}"))?;
         let stream_config = device_config.config();
-        if stream_config.channels != u16::from(format.channels) {
+        if channels == 0
+            || channels > 2
+            || stream_config.channels == 0
+            || stream_config.channels > 2
+        {
             return Err(format!(
                 "audio stream has {} channels but the default output device has {} channels",
-                format.channels, stream_config.channels
+                channels, stream_config.channels
             ));
         }
         let queue = Arc::new(Mutex::new(LocalPlaybackQueue {
@@ -168,10 +218,11 @@ impl AudioOutput {
         let underrun = Arc::new(AtomicBool::new(false));
         let underrun_active = Arc::new(AtomicBool::new(false));
         let played_samples = Arc::new(AtomicU64::new(0));
+        let audible_samples = Arc::new(AtomicU64::new(0));
         let resampler = AudioResampler::new(
-            format.sample_rate,
+            sample_rate,
             stream_config.sample_rate,
-            usize::from(format.channels),
+            usize::from(stream_config.channels),
         )?;
         LOGGER.debug(format!(
             "building local audio stream: {:?}, {} Hz, {} channels",
@@ -189,6 +240,7 @@ impl AudioOutput {
             Arc::clone(&underrun),
             Arc::clone(&underrun_active),
             Arc::clone(&played_samples),
+            Arc::clone(&audible_samples),
         )?;
         LOGGER.debug("starting local audio stream");
         stream.play().map_err(|error| {
@@ -197,7 +249,7 @@ impl AudioOutput {
         })?;
         LOGGER.info(format!(
             "audio output started: {} Hz input, {} Hz output, {} channels",
-            format.sample_rate, stream_config.sample_rate, format.channels
+            sample_rate, stream_config.sample_rate, channels
         ));
         Ok(Self {
             stream,
@@ -207,9 +259,13 @@ impl AudioOutput {
             underrun,
             underrun_active,
             played_samples,
+            audible_samples,
+            enqueued_output_samples: AtomicU64::new(0),
             enqueued_chunks: AtomicU64::new(0),
             output_sample_rate: stream_config.sample_rate,
             output_channels: stream_config.channels.min(u16::from(u8::MAX)) as u8,
+            source_channels: channels,
+            source_sample_rate: sample_rate,
             resampler: Mutex::new(resampler),
         })
     }
@@ -230,12 +286,19 @@ impl AudioOutput {
 
     // Sample enqueueing.
     pub(crate) fn enqueue(&self, samples: Arc<[i32]>) -> Result<(), String> {
+        let samples = convert_channels(samples, self.source_channels, self.output_channels)?;
         let samples = self
             .resampler
             .lock()
             .map_err(|_| "audio resampler lock is poisoned".to_string())?
             .process(samples)?;
-        if let Ok(mut queue) = self.queue.lock() {
+        {
+            let mut queue = self
+                .queue
+                .lock()
+                .map_err(|_| "audio queue lock is poisoned")?;
+            self.enqueued_output_samples
+                .fetch_add(samples.len() as u64, Ordering::Release);
             queue.enqueue(samples);
             if self.enqueued_chunks.fetch_add(1, Ordering::Relaxed) % 20 == 0 {
                 LOGGER.trace(format!(
@@ -246,6 +309,22 @@ impl AudioOutput {
             }
         }
         self.underrun_active.store(false, Ordering::Relaxed);
+        Ok(())
+    }
+
+    pub(crate) fn finish(&self) -> Result<(), String> {
+        let tail = self
+            .resampler
+            .lock()
+            .map_err(|_| "audio resampler lock is poisoned")?
+            .finish()?;
+        let mut queue = self
+            .queue
+            .lock()
+            .map_err(|_| "audio queue lock is poisoned")?;
+        self.enqueued_output_samples
+            .fetch_add(tail.len() as u64, Ordering::Release);
+        queue.enqueue(tail);
         Ok(())
     }
 
@@ -274,6 +353,19 @@ impl AudioOutput {
             .load(Ordering::Relaxed)
             .saturating_mul(1_000)
             .saturating_div(samples_per_second) as i64
+    }
+
+    pub(crate) fn audible_source_frames(&self) -> u64 {
+        self.audible_samples
+            .load(Ordering::Acquire)
+            .saturating_mul(u64::from(self.source_sample_rate))
+            / u64::from(self.output_channels)
+            / u64::from(self.output_sample_rate)
+    }
+
+    pub(crate) fn is_audibly_drained(&self) -> bool {
+        self.audible_samples.load(Ordering::Acquire)
+            >= self.enqueued_output_samples.load(Ordering::Acquire)
     }
 
     // Output controls and underrun state.
@@ -306,6 +398,30 @@ impl AudioOutput {
     }
 }
 
+fn convert_channels(
+    samples: Arc<[i32]>,
+    source_channels: u8,
+    output_channels: u8,
+) -> Result<Arc<[i32]>, String> {
+    if source_channels == 0 || samples.len() % usize::from(source_channels) != 0 {
+        return Err("audio samples are not frame-aligned".into());
+    }
+    match (source_channels, output_channels) {
+        (1, 1) | (2, 2) => Ok(samples),
+        (1, 2) => Ok(samples
+            .iter()
+            .flat_map(|sample| [*sample, *sample])
+            .collect::<Vec<_>>()
+            .into()),
+        (2, 1) => Ok(samples
+            .chunks_exact(2)
+            .map(|frame| ((i64::from(frame[0]) + i64::from(frame[1])) / 2) as i32)
+            .collect::<Vec<_>>()
+            .into()),
+        _ => Err("unsupported audio channel conversion".into()),
+    }
+}
+
 fn build_local_fifo_stream(
     device: &cpal::Device,
     config: &StreamConfig,
@@ -316,6 +432,7 @@ fn build_local_fifo_stream(
     underrun: Arc<AtomicBool>,
     underrun_active: Arc<AtomicBool>,
     played_samples: Arc<AtomicU64>,
+    audible_samples: Arc<AtomicU64>,
 ) -> Result<Stream, String> {
     macro_rules! build_stream {
         ($sample:ty) => {{
@@ -325,9 +442,21 @@ fn build_local_fifo_stream(
             let underrun = Arc::clone(&underrun);
             let underrun_active = Arc::clone(&underrun_active);
             let played_samples = Arc::clone(&played_samples);
+            let audible_samples = Arc::clone(&audible_samples);
+            let mut pending_playback = VecDeque::<(cpal::StreamInstant, u64)>::new();
+            let sample_rate = config.sample_rate;
+            let channels = config.channels;
             device.build_output_stream(
                 config.clone(),
-                move |output: &mut [$sample], _| {
+                move |output: &mut [$sample], info| {
+                    let timestamp = info.timestamp();
+                    while pending_playback
+                        .front()
+                        .is_some_and(|(end, _)| timestamp.callback >= *end)
+                    {
+                        let (_, position) = pending_playback.pop_front().unwrap();
+                        audible_samples.store(position, Ordering::Release);
+                    }
                     let gain = if muted.load(Ordering::Relaxed) {
                         0.0
                     } else {
@@ -338,10 +467,12 @@ fn build_local_fifo_stream(
                         return;
                     };
                     let mut underrun_detected = false;
-                    for destination in output {
+                    let mut last_content_sample = 0;
+                    for (sample_index, destination) in output.iter_mut().enumerate() {
                         let sample = match queue.next_sample() {
                             Some(value) => {
                                 played_samples.fetch_add(1, Ordering::Relaxed);
+                                last_content_sample = sample_index + 1;
                                 value
                             }
                             None => {
@@ -352,6 +483,15 @@ fn build_local_fifo_stream(
                             / i32::MAX as f32
                             * gain;
                         *destination = <$sample>::from_sample(sample);
+                    }
+                    if last_content_sample != 0 {
+                        let duration = std::time::Duration::from_secs_f64(
+                            last_content_sample as f64
+                                / f64::from(channels)
+                                / f64::from(sample_rate),
+                        );
+                        let end = timestamp.playback + duration;
+                        pending_playback.push_back((end, played_samples.load(Ordering::Relaxed)));
                     }
                     if underrun_detected {
                         if underrun_active
@@ -388,4 +528,36 @@ fn build_local_fifo_stream(
         }
     };
     stream.map_err(|err| err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn channel_mapping_preserves_frames_and_avoids_integer_overflow() {
+        assert_eq!(
+            &*convert_channels(Arc::from([12, -4]), 1, 2).unwrap(),
+            &[12, 12, -4, -4]
+        );
+        assert_eq!(
+            &*convert_channels(Arc::from([i32::MAX, i32::MAX]), 2, 1).unwrap(),
+            &[i32::MAX]
+        );
+        assert!(convert_channels(Arc::from([1]), 2, 1).is_err());
+    }
+
+    #[test]
+    fn resampler_flushes_short_final_chunk_without_padding_or_lost_frames() {
+        for (source, target) in [(44100, 48000), (48000, 44100)] {
+            let mut resampler = AudioResampler::new(source, target, 2).unwrap();
+            let samples = resampler.process(vec![1000; 351 * 2].into()).unwrap();
+            let tail = resampler.finish().unwrap();
+            assert_eq!(
+                samples.len() + tail.len(),
+                (351 * target as usize / source as usize) * 2
+            );
+            assert!(resampler.finish().unwrap().is_empty());
+        }
+    }
 }

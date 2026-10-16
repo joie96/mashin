@@ -3,8 +3,8 @@
 
 use crate::core;
 use crate::core::models::{
-    CoreError, LoginConfig, MediaSessionEvent, OfflineOutputConfig,
-    QueuePlayMediaRequest, RemoteOutputConfig, SelectedOutput,
+    CoreError, LoginConfig, MediaSessionEvent, QueuePlayMediaRequest, RemoteOutputConfig,
+    SelectedOutput,
 };
 use crate::music_assistant::models::identifiers::{PlayerId, QueueItemId};
 use crate::music_assistant::models::media::MediaItem;
@@ -27,10 +27,7 @@ enum PlaybackCommand {
     ActivateEngine,
     DeactivateEngine,
     Shutdown,
-    SelectDefaultSendspinOutput,
-    SelectOfflineLibrary {
-        library_root: String,
-    },
+    SelectLocalOutput,
     SelectRemotePlayer {
         player_id: PlayerId,
     },
@@ -68,7 +65,7 @@ enum PlaybackCommand {
     QueuePlayMedia {
         request: QueuePlayMediaRequest,
     },
-    StartSendspinRadio {
+    StartRadio {
         media_items: Vec<MediaItem>,
     },
     InsertQueueItems {
@@ -91,8 +88,8 @@ enum PlaybackCommand {
     PlayQueueIndex {
         index: usize,
     },
-    RequestCodec {
-        codec: String,
+    SetAudioProfile {
+        audio_profile: String,
     },
 }
 
@@ -120,79 +117,86 @@ pub(crate) fn execute_command(kind: &str, argument: Option<&str>) -> Result<(), 
             })
         }),
         PlaybackCommand::ActivateEngine => {
-            execute_core_command(|coordinator| coordinator.activate_selected_engine())
+            core::execute_playback_command_and_collect_events(|playback| playback.activate())
         }
-        PlaybackCommand::DeactivateEngine => execute_core_command(|coordinator| {
-            coordinator.deactivate_active_engine();
-            Ok(())
-        }),
-        PlaybackCommand::Shutdown => return core::shutdown().map_err(|error| error.message),
-        PlaybackCommand::SelectDefaultSendspinOutput => {
-            execute_core_command(|coordinator| coordinator.select_default_sendspin_output())
-        }
-        PlaybackCommand::SelectOfflineLibrary { library_root } => {
-            execute_core_command(|coordinator| {
-                coordinator.select_output(SelectedOutput::Offline(OfflineOutputConfig {
-                    library_root,
-                }))
+        PlaybackCommand::DeactivateEngine => {
+            core::execute_playback_command_and_collect_events(|playback| {
+                playback.deactivate();
+                Ok(())
             })
+        }
+        PlaybackCommand::Shutdown => return core::shutdown().map_err(|error| error.message),
+        PlaybackCommand::SelectLocalOutput => {
+            execute_core_command(|coordinator| coordinator.select_local_output())
         }
         PlaybackCommand::SelectRemotePlayer { player_id } => execute_core_command(|coordinator| {
             coordinator.select_output(SelectedOutput::Remote(RemoteOutputConfig { player_id }))
         }),
         PlaybackCommand::TransportPlay => {
-            execute_core_command(|coordinator| coordinator.transport_play())
+            core::execute_playback_command_and_collect_events(|playback| playback.transport_play())
         }
         PlaybackCommand::TransportPause => {
-            execute_core_command(|coordinator| coordinator.transport_pause())
+            core::execute_playback_command_and_collect_events(|playback| playback.transport_pause())
         }
-        PlaybackCommand::TransportStop => execute_core_command(|coordinator| {
-            coordinator.transport_stop();
-            Ok(())
-        }),
+        PlaybackCommand::TransportStop => {
+            core::execute_playback_command_and_collect_events(|playback| {
+                playback.transport_stop();
+                Ok(())
+            })
+        }
         PlaybackCommand::TransportNext => {
-            execute_core_command(|coordinator| coordinator.transport_next())
+            core::execute_playback_command_and_collect_events(|playback| playback.transport_next())
         }
         PlaybackCommand::TransportPrevious => {
-            execute_core_command(|coordinator| coordinator.transport_previous())
+            core::execute_playback_command_and_collect_events(|playback| {
+                playback.transport_previous()
+            })
         }
         PlaybackCommand::TransportSeek { seconds } => {
-            execute_core_command(|coordinator| coordinator.transport_seek(seconds))
+            core::execute_playback_command_and_collect_events(|playback| {
+                playback.transport_seek(seconds)
+            })
         }
-        PlaybackCommand::TransportRepeatMode { mode } => execute_core_command(|coordinator| {
-            coordinator.set_repeat_mode(match mode {
-                0 => RepeatMode::Off,
-                1 => RepeatMode::One,
-                2 => RepeatMode::All,
-                _ => return Err("invalid repeat mode".into()),
-            });
-            Ok(())
-        }),
-        PlaybackCommand::TransportShuffle { enabled } => execute_core_command(|coordinator| {
-            coordinator.set_shuffle(enabled);
-            Ok(())
-        }),
-        PlaybackCommand::SetAutoplay { enabled } => execute_core_command(|coordinator| {
-            coordinator.set_autoplay(enabled);
-            Ok(())
-        }),
+        PlaybackCommand::TransportRepeatMode { mode } => {
+            core::execute_playback_command_and_collect_events(|playback| {
+                playback.set_repeat_mode(match mode {
+                    0 => RepeatMode::Off,
+                    1 => RepeatMode::One,
+                    2 => RepeatMode::All,
+                    _ => return Err("invalid repeat mode".into()),
+                });
+                Ok(())
+            })
+        }
+        PlaybackCommand::TransportShuffle { enabled } => {
+            core::execute_playback_command_and_collect_events(|playback| {
+                playback.set_shuffle(enabled);
+                Ok(())
+            })
+        }
+        PlaybackCommand::SetAutoplay { enabled } => {
+            core::execute_playback_command_and_collect_events(|playback| {
+                playback.set_autoplay(enabled);
+                Ok(())
+            })
+        }
         PlaybackCommand::SetVolume { volume } => {
             execute_core_command(|coordinator| coordinator.set_volume(volume.min(100)))
         }
-        PlaybackCommand::SetMuted { muted } => execute_core_command(|coordinator| {
-            coordinator.set_muted(muted);
-            Ok(())
-        }),
+        PlaybackCommand::SetMuted { muted } => {
+            core::execute_playback_command_and_collect_events(|playback| {
+                playback.set_muted(muted);
+                Ok(())
+            })
+        }
         PlaybackCommand::SaveSessionSettings { settings } => {
-            let settings = crate::listenbrainz::validate_settings_update(settings)?;
             execute_core_command(|coordinator| coordinator.save_session_settings(settings))
         }
         PlaybackCommand::SetUserDataFavorites {
             media_items,
             favorite,
         } => {
-            core::set_user_data_favorites(media_items, favorite)
-            .map_err(|error| error.message)?;
+            core::set_user_data_favorites(media_items, favorite).map_err(|error| error.message)?;
             return Ok(());
         }
         PlaybackCommand::QueuePlayMedia { request } => {
@@ -200,54 +204,56 @@ pub(crate) fn execute_command(kind: &str, argument: Option<&str>) -> Result<(), 
                 return Err("unknown queue option".into());
             }
             if request.media_items.is_empty() && request.option == QueueOption::Replace {
-                execute_core_command(|coordinator| {
-                    coordinator.queue_play_media(Vec::new(), request.option, None, false, false)
+                core::execute_playback_command_and_collect_events(|playback| {
+                    playback.queue_play_media(Vec::new(), request.option, None, false)
                 })
             } else {
-                core::resolve_media_and_execute_command(
-                    request.media_items,
-                    false,
-                    |coordinator, tracks| {
-                        coordinator.queue_play_media(
-                            tracks,
-                            request.option,
-                            request.start_item,
-                            request.shuffle,
-                            request.start_download,
-                        )
-                    },
-                )
+                core::resolve_media_and_execute_command(request.media_items, |playback, tracks| {
+                    playback.queue_play_media(
+                        tracks,
+                        request.option,
+                        request.start_item,
+                        request.shuffle,
+                    )
+                })
             }
         }
-        PlaybackCommand::StartSendspinRadio { media_items } => {
-            core::start_sendspin_radio_and_execute_command(
-                media_items,
-                publish_media_session_events,
-            )
+        PlaybackCommand::StartRadio { media_items } => {
+            core::start_radio_and_execute_command(media_items)
         }
         PlaybackCommand::InsertQueueItems { index, media_items } => {
-            execute_core_command(|coordinator| coordinator.insert_queue_items(index, media_items))
+            core::execute_playback_command_and_collect_events(|playback| {
+                playback.insert_queue_items(index, media_items)
+            })
         }
         PlaybackCommand::AppendQueueItems { media_items } => {
-            execute_core_command(|coordinator| coordinator.append_queue_items(media_items))
+            core::execute_playback_command_and_collect_events(|playback| {
+                playback.append_queue_items(media_items)
+            })
         }
         PlaybackCommand::MoveQueueItems {
             item_ids,
             target_index,
-        } => {
-            execute_core_command(|coordinator| coordinator.move_queue_items(item_ids, target_index))
-        }
+        } => core::execute_playback_command_and_collect_events(|playback| {
+            playback.move_queue_items(item_ids, target_index)
+        }),
         PlaybackCommand::DeleteQueueItems { item_ids } => {
-            execute_core_command(|coordinator| coordinator.delete_queue_items(item_ids))
+            core::execute_playback_command_and_collect_events(|playback| {
+                playback.delete_queue_items(item_ids)
+            })
         }
         PlaybackCommand::SelectQueueItem { item_id } => {
-            execute_core_command(|coordinator| coordinator.select_queue_item(item_id))
+            core::execute_playback_command_and_collect_events(|playback| {
+                playback.select_queue_item(item_id)
+            })
         }
         PlaybackCommand::PlayQueueIndex { index } => {
-            execute_core_command(|coordinator| coordinator.play_queue_index(index))
+            core::execute_playback_command_and_collect_events(|playback| {
+                playback.play_queue_index(index)
+            })
         }
-        PlaybackCommand::RequestCodec { codec } => {
-            execute_core_command(|coordinator| coordinator.set_preferred_codec(&codec))
+        PlaybackCommand::SetAudioProfile { audio_profile } => {
+            execute_core_command(|coordinator| coordinator.set_audio_profile(&audio_profile))
         }
     };
     events
@@ -286,15 +292,33 @@ mod tests {
 
     // Platform command contracts.
     #[test]
+    fn mashin_profile_contract_rejects_removed_command_names_and_fields() {
+        let command =
+            decode_command("setAudioProfile", Some(r#"{"audioProfile":"opus_192k"}"#)).unwrap();
+        assert!(
+            matches!(command, super::PlaybackCommand::SetAudioProfile { audio_profile } if audio_profile == "opus_192k")
+        );
+        assert!(decode_command("setAudioProfile", Some(r#"{"codec":"opus"}"#)).is_err());
+        for kind in [
+            "selectOfflineLibrary",
+            "selectDefaultSendspinOutput",
+            "requestCodec",
+            "startSendspinRadio",
+        ] {
+            assert!(decode_command(kind, Some("{}")).is_err());
+        }
+    }
+
+    #[test]
     fn session_settings_accept_the_flutter_commit_payload() {
-        let arguments = r#"{"localCacheSizeBytes":524288000,"theme":"light","logLevel":"warn","listenbrainz":{"username":"listener","token":"secret"}}"#;
-        let command = decode_command("saveSessionSettings", Some(arguments)).expect("settings command");
+        let arguments = r#"{"localCacheSizeBytes":524288000,"theme":"light","logLevel":"warn"}"#;
+        let command =
+            decode_command("saveSessionSettings", Some(arguments)).expect("settings command");
         let super::PlaybackCommand::SaveSessionSettings { settings } = command else {
             panic!("expected settings commit");
         };
         assert_eq!(settings.local_cache_size_bytes, 524_288_000);
         assert_eq!(settings.theme, crate::core::models::ThemePreference::Light);
-        assert_eq!(settings.listenbrainz.username, "listener");
         assert!(decode_command("saveSessionSettings", Some(r#"{"theme":"light"}"#)).is_err());
         let mut invalid: serde_json::Value = serde_json::from_str(arguments).unwrap();
         invalid["unexpected"] = serde_json::json!(true);
@@ -364,7 +388,7 @@ mod tests {
 
     #[test]
     fn queue_commands_accept_flutter_payloads() {
-        assert!(decode_command("queuePlayMedia", Some(r#"{"request":{"mediaItems":[{"media_type":"track","item_id":"track-1","provider":"test","name":"First"}],"option":"play","startItem":0,"shuffle":false,"startDownload":true}}"#)).is_ok());
+        assert!(decode_command("queuePlayMedia", Some(r#"{"request":{"mediaItems":[{"media_type":"track","item_id":"track-1","provider":"test","name":"First"}],"option":"play","startItem":0,"shuffle":false}}"#)).is_ok());
         assert!(decode_command(
             "moveQueueItems",
             Some(r#"{"itemIds":["item-1"],"targetIndex":0}"#)
@@ -386,14 +410,11 @@ mod tests {
         assert_eq!(
             execute_command(
                 "queuePlayMedia",
-                Some(r#"{"request":{"mediaItems":[],"option":"invalid","startDownload":true}}"#)
+                Some(r#"{"request":{"mediaItems":[],"option":"invalid"}}"#)
             )
             .unwrap_err(),
             "unknown queue option"
         );
-        assert_eq!(
-            execute_command("selectQueueItem", Some(r#"{"itemId":"missing-item"}"#)).unwrap_err(),
-            "queue item is no longer available"
-        );
+        assert!(execute_command("selectQueueItem", Some(r#"{"itemId":"missing-item"}"#)).is_err());
     }
 }

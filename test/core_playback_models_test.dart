@@ -4,7 +4,7 @@ import 'package:mashin_flutter/features/core/core_models.dart';
 void main() {
   test('projects the Rust player-state payload', () {
     final playerState = PlayerState.fromJson(<String, dynamic>{
-      'activeEngineKind': 'remote',
+      'activeMode': 'remote',
       'connectionState': 'online',
       'playbackState': 'playing',
       'currentQueueItemId': 'queue-item-7',
@@ -16,7 +16,7 @@ void main() {
       'muted': false,
     });
 
-    expect(playerState.activeOutputMode, CoreOutputMode.remote);
+    expect(playerState.activeMode, PlaybackMode.remote);
     expect(playerState.connectionState, CoreConnectionState.online);
     expect(playerState.playbackState, PlayState.playing);
     expect(playerState.currentQueueItemId, 'queue-item-7');

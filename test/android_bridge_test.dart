@@ -57,10 +57,6 @@ void main() {
       localCacheSizeBytes: 524288000,
       isDarkTheme: false,
       logLevel: LogLevelPreference.warn,
-      listenBrainzCredentials: ListenBrainzCredentials(
-        username: 'listener',
-        token: 'secret',
-      ),
     );
     await AndroidBridge().execute(
       AndroidCoreCommand.saveSessionSettings,
@@ -72,10 +68,6 @@ void main() {
         'localCacheSizeBytes': 524288000,
         'theme': 'light',
         'logLevel': 'warn',
-        'listenbrainz': <String, Object?>{
-          'username': 'listener',
-          'token': 'secret',
-        },
       },
     });
   });
@@ -92,7 +84,6 @@ void main() {
         localCacheSizeBytes: 262144000,
         isDarkTheme: true,
         logLevel: LogLevelPreference.info,
-        listenBrainzCredentials: ListenBrainzCredentials(),
       ).toJson(),
     );
     expect(receivedCall?.arguments, <String, Object?>{
@@ -101,7 +92,6 @@ void main() {
         'localCacheSizeBytes': 262144000,
         'theme': 'dark',
         'logLevel': 'info',
-        'listenbrainz': <String, Object?>{'username': '', 'token': ''},
       },
     });
   });

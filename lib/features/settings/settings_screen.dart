@@ -18,10 +18,8 @@ class SettingsScreen extends StatelessWidget {
       localCacheSizeBytes: session.localCacheSizeBytes,
       isDarkTheme: session.isDarkTheme,
       logLevel: session.logLevel,
-      listenBrainzCredentials: session.listenBrainzCredentials,
     ),
     onSave: session.saveSessionSettings,
-    onTestListenBrainz: session.coreBridge.testListenBrainzCredentials,
     onSaveLogSnapshot: session.coreBridge.saveLogSnapshot,
   );
 }
@@ -32,14 +30,12 @@ class SettingsEditor extends StatefulWidget {
     required this.musicAssistantUrl,
     required this.settings,
     required this.onSave,
-    required this.onTestListenBrainz,
     required this.onSaveLogSnapshot,
   });
 
   final String musicAssistantUrl;
   final SessionSettingsUpdate settings;
   final Future<void> Function(SessionSettingsUpdate) onSave;
-  final Future<void> Function(ListenBrainzCredentials) onTestListenBrainz;
   final Future<String> Function() onSaveLogSnapshot;
 
   @override
@@ -51,7 +47,6 @@ class _SettingsEditorState extends State<SettingsEditor> {
   late SessionSettingsUpdate _savedSettings;
   late bool _isDarkTheme;
   late LogLevelPreference _logLevel;
-  late ListenBrainzCredentials _credentials;
   bool _isSaving = false;
 
   // Draft construction and lifecycle.
@@ -75,7 +70,6 @@ class _SettingsEditorState extends State<SettingsEditor> {
         '${_savedSettings.localCacheSizeBytes ~/ _bytesPerMegabyte}';
     _isDarkTheme = _savedSettings.isDarkTheme;
     _logLevel = _savedSettings.logLevel;
-    _credentials = _savedSettings.listenBrainzCredentials;
   }
 
   void _cancel() {
@@ -89,15 +83,10 @@ class _SettingsEditorState extends State<SettingsEditor> {
       _showMessage('Cache-Groesse muss zwischen 25 und 1000 MB liegen.');
       return;
     }
-    if (_credentials.username.isEmpty != _credentials.token.isEmpty) {
-      _showMessage('ListenBrainz benoetigt Benutzername und Token.');
-      return;
-    }
     final update = SessionSettingsUpdate(
       localCacheSizeBytes: cacheSizeMb * _bytesPerMegabyte,
       isDarkTheme: _isDarkTheme,
       logLevel: _logLevel,
-      listenBrainzCredentials: _credentials,
     );
     FocusScope.of(context).unfocus();
     setState(() => _isSaving = true);
@@ -134,10 +123,6 @@ class _SettingsEditorState extends State<SettingsEditor> {
             cacheSizeController: _cacheSizeController,
             isDarkTheme: _isDarkTheme,
             logLevel: _logLevel,
-            listenBrainzCredentials: _credentials,
-            onListenBrainzChanged: (value) =>
-                setState(() => _credentials = value),
-            onListenBrainzTest: widget.onTestListenBrainz,
             onThemeChanged: (value) => setState(() => _isDarkTheme = value),
             onLogLevelChanged: (value) => setState(() => _logLevel = value),
             onSaveLogSnapshot: widget.onSaveLogSnapshot,
@@ -150,10 +135,6 @@ class _SettingsEditorState extends State<SettingsEditor> {
             cacheSizeController: _cacheSizeController,
             isDarkTheme: _isDarkTheme,
             logLevel: _logLevel,
-            listenBrainzCredentials: _credentials,
-            onListenBrainzChanged: (value) =>
-                setState(() => _credentials = value),
-            onListenBrainzTest: widget.onTestListenBrainz,
             onThemeChanged: (value) => setState(() => _isDarkTheme = value),
             onLogLevelChanged: (value) => setState(() => _logLevel = value),
             onSaveLogSnapshot: widget.onSaveLogSnapshot,

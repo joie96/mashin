@@ -2,30 +2,45 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mashin_flutter/features/core/core_models.dart';
 
 void main() {
+  test('only canonical local and remote mode names are accepted', () {
+    expect(
+      PlayerState.fromJson({'activeMode': 'local'}).activeMode,
+      PlaybackMode.local,
+    );
+    expect(
+      PlayerState.fromJson({'activeMode': 'remote'}).activeMode,
+      PlaybackMode.remote,
+    );
+    for (final removed in ['mashin', 'sendspin', 'offline']) {
+      expect(PlayerState.fromJson({'activeMode': removed}).activeMode, isNull);
+    }
+  });
+
   test(
-    'projects ListenBrainz credentials and defaults for existing sessions',
+    'projects the Mashin session profile and serializes only client settings',
     () {
       final configured = SessionSettings.fromJson(<String, dynamic>{
-        'listenbrainz': <String, dynamic>{
-          'username': 'user',
-          'token': 'secret',
-        },
+        'audioProfile': 'opus_192k',
       });
-      expect(configured.listenBrainzCredentials.username, 'user');
-      expect(configured.listenBrainzCredentials.token, 'secret');
-      expect(configured.listenBrainzCredentials.isConfigured, isTrue);
+      expect(configured.audioProfile, 'opus_192k');
       expect(
-        SessionSettings.fromJson(
-          <String, dynamic>{},
-        ).listenBrainzCredentials.isConfigured,
-        isFalse,
+        const SessionSettingsUpdate(
+          localCacheSizeBytes: 262144000,
+          isDarkTheme: true,
+          logLevel: LogLevelPreference.info,
+        ).toJson(),
+        {'localCacheSizeBytes': 262144000, 'theme': 'dark', 'logLevel': 'info'},
+      );
+      expect(
+        PlayerState.fromJson({'activeMode': 'local'}).activeMode,
+        PlaybackMode.local,
       );
     },
   );
 
   test('projects the Rust player-state payload', () {
     final playerState = PlayerState.fromJson(<String, dynamic>{
-      'activeEngineKind': 'remote',
+      'activeMode': 'remote',
       'connectionState': 'online',
       'playbackState': 'playing',
       'currentQueueItemId': 'queue-item-7',
@@ -37,7 +52,7 @@ void main() {
       'muted': false,
     });
 
-    expect(playerState.activeOutputMode, CoreOutputMode.remote);
+    expect(playerState.activeMode, PlaybackMode.remote);
     expect(playerState.connectionState, CoreConnectionState.online);
     expect(playerState.playbackState, PlayState.playing);
     expect(playerState.currentQueueItemId, 'queue-item-7');

@@ -7,6 +7,7 @@ import '../core/core_models.dart';
 import '../shared/context_menu/context_menu_controller.dart';
 import '../core/core_userdata.dart';
 import '../shared/widgets/media_image.dart';
+import 'playback_seek_slider.dart';
 
 class PlayerBarOverlayMobile extends StatefulWidget {
   const PlayerBarOverlayMobile({
@@ -372,11 +373,24 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
                                             thumbColor: colors.textSecondary,
                                             activeTrackColor:
                                                 colors.textSecondary,
+                                            secondaryActiveTrackColor:
+                                                colors.textTertiary,
                                             inactiveTrackColor:
                                                 colors.bgTertiary,
                                           ),
-                                          child: _PlayerbarOverlaySeekSlider(
+                                          child: PlaybackSeekSlider(
                                             value: clampedCurrentSeconds,
+                                            bufferedValue:
+                                                clampedMaxSeconds > 0 &&
+                                                    widget
+                                                            .playbackState
+                                                            .bufferedPositionMillis !=
+                                                        null
+                                                ? widget
+                                                          .playbackState
+                                                          .bufferedPositionMillis! /
+                                                      1000
+                                                : null,
                                             min: 0,
                                             max: clampedMaxSeconds > 0
                                                 ? clampedMaxSeconds
@@ -792,72 +806,6 @@ class _PlayerOverlayArtwork extends StatelessWidget {
                 size: 52,
               ),
       ),
-    );
-  }
-}
-
-class _PlayerbarOverlaySeekSlider extends StatefulWidget {
-  const _PlayerbarOverlaySeekSlider({
-    required this.value,
-    required this.min,
-    required this.max,
-    required this.enabled,
-    required this.onSeek,
-  });
-
-  final double value;
-  final double min;
-  final double max;
-  final bool enabled;
-  final Future<void> Function(double) onSeek;
-
-  @override
-  State<_PlayerbarOverlaySeekSlider> createState() =>
-      _PlayerbarOverlaySeekSliderState();
-}
-
-class _PlayerbarOverlaySeekSliderState
-    extends State<_PlayerbarOverlaySeekSlider> {
-  bool _isDragging = false;
-  double? _dragValue;
-
-  @override
-  void didUpdateWidget(covariant _PlayerbarOverlaySeekSlider oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!_isDragging) {
-      _dragValue = null;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final double effectiveValue =
-        (_isDragging ? (_dragValue ?? widget.value) : widget.value)
-            .clamp(widget.min, widget.max)
-            .toDouble();
-
-    return Slider(
-      value: effectiveValue,
-      min: widget.min,
-      max: widget.max,
-      padding: EdgeInsets.zero,
-      onChanged: widget.enabled
-          ? (double next) {
-              setState(() {
-                _isDragging = true;
-                _dragValue = next;
-              });
-            }
-          : null,
-      onChangeEnd: widget.enabled
-          ? (double next) {
-              setState(() {
-                _isDragging = false;
-                _dragValue = null;
-              });
-              unawaited(widget.onSeek(next));
-            }
-          : null,
     );
   }
 }

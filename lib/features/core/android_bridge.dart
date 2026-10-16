@@ -3,8 +3,7 @@ import 'package:flutter/services.dart';
 enum AndroidCoreCommand {
   login,
   restorePersistedSession,
-  selectDefaultSendspinOutput,
-  selectOfflineLibrary,
+  selectLocalOutput,
   selectRemotePlayer,
   activateEngine,
   deactivateEngine,
@@ -22,14 +21,14 @@ enum AndroidCoreCommand {
   setMuted,
   saveSessionSettings,
   queuePlayMedia,
-  startSendspinRadio,
+  startRadio,
   insertQueueItems,
   appendQueueItems,
   moveQueueItems,
   deleteQueueItems,
   selectQueueItem,
   playQueueIndex,
-  requestCodec,
+  setAudioProfile,
 }
 
 /// Android playback commands are acknowledged by the service, never by FFI.

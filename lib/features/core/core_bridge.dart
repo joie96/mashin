@@ -65,8 +65,7 @@ abstract class MashinCoreBridgeApi {
   });
   Future<bool> restorePersistedSession();
   Future<SessionSettings> getSessionSettings();
-  Future<void> selectDefaultSendspinOutput();
-  Future<void> selectOfflineLibrary(String libraryRoot);
+  Future<void> selectLocalOutput();
   Future<void> selectRemotePlayer(String playerId);
   Future<void> refreshQueue();
   Future<void> refreshPlayerState();
@@ -122,17 +121,15 @@ abstract class MashinCoreBridgeApi {
     QueueOption option = QueueOption.play,
     int? startItem,
     bool shuffle = false,
-    bool startDownload = true,
   });
-  Future<void> startSendspinRadio(List<MediaItem> mediaItems);
+  Future<void> startRadio(List<MediaItem> mediaItems);
   Future<void> insertQueueItems(int index, List<MediaItem> mediaItems);
   Future<void> appendQueueItems(List<MediaItem> mediaItems);
   Future<void> moveQueueItems(List<String> itemIds, int targetIndex);
   Future<void> deleteQueueItems(List<String> itemIds);
   Future<void> selectQueueItem(String itemId);
   Future<void> playQueueIndex(int index);
-  Future<void> requestCodec(String codec);
-  Future<void> testListenBrainzCredentials(ListenBrainzCredentials credentials);
+  Future<void> setAudioProfile(String audioProfile);
   Future<void> saveSessionSettings(SessionSettingsUpdate settings);
   Future<String> saveLogSnapshot();
   void log(LogLevelPreference level, String category, String message);
@@ -256,17 +253,11 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
       );
 
   @override
-  Future<void> selectDefaultSendspinOutput() => _submitOperation<void>(
-    'selectDefaultSendspinOutput',
+  Future<void> selectLocalOutput() => _submitOperation<void>(
+    'selectLocalOutput',
     const <String, Object?>{},
     (_) {},
   );
-
-  @override
-  Future<void> selectOfflineLibrary(String libraryRoot) =>
-      _submitOperation<void>('selectOfflineLibrary', <String, Object?>{
-        'libraryRoot': libraryRoot,
-      }, (_) {});
 
   @override
   Future<void> selectRemotePlayer(String playerId) => _submitOperation<void>(
@@ -659,7 +650,6 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     QueueOption option = QueueOption.play,
     int? startItem,
     bool shuffle = false,
-    bool startDownload = true,
   }) => _submitVoidOperation('queuePlayMedia', <String, Object?>{
     'request': <String, Object?>{
       'mediaItems': mediaItems
@@ -671,13 +661,12 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
       ),
       'startItem': startItem,
       'shuffle': shuffle,
-      'startDownload': startDownload,
     },
   });
 
   @override
-  Future<void> startSendspinRadio(List<MediaItem> mediaItems) =>
-      _submitMediaOperation('startSendspinRadio', mediaItems);
+  Future<void> startRadio(List<MediaItem> mediaItems) =>
+      _submitMediaOperation('startRadio', mediaItems);
 
   Future<void> _submitMediaOperation(String kind, List<MediaItem> mediaItems) =>
       _submitVoidOperation(kind, <String, Object?>{
@@ -723,19 +712,12 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   Future<void> playQueueIndex(int index) =>
       _submitVoidOperation('playQueueIndex', <String, Object?>{'index': index});
 
-  // Output codec selection.
+  // Mashin profile selection.
   @override
-  Future<void> requestCodec(String codec) =>
-      _submitVoidOperation('requestCodec', <String, Object?>{'codec': codec});
-
-  // Session settings are committed once; connection tests never persist them.
-  @override
-  Future<void> testListenBrainzCredentials(
-    ListenBrainzCredentials credentials,
-  ) => _submitVoidOperation('testListenBrainzCredentials', <String, Object?>{
-    'username': credentials.username,
-    'token': credentials.token,
-  });
+  Future<void> setAudioProfile(String audioProfile) => _submitVoidOperation(
+    'setAudioProfile',
+    <String, Object?>{'audioProfile': audioProfile},
+  );
 
   @override
   Future<void> saveSessionSettings(SessionSettingsUpdate settings) async {
@@ -1081,14 +1063,9 @@ class _RustBindings {
           .lookupFunction<_NativeVoidFn, _DartVoidFn>(
             'mashin_core_restore_persisted_session',
           ),
-      selectDefaultSendspinOutput = library
-          .lookupFunction<_NativeVoidFn, _DartVoidFn>(
-            'mashin_core_select_default_sendspin_output',
-          ),
-      selectOfflineLibrary = library
-          .lookupFunction<_NativeCodecFn, _DartCodecFn>(
-            'mashin_core_select_offline_library',
-          ),
+      selectLocalOutput = library.lookupFunction<_NativeVoidFn, _DartVoidFn>(
+        'mashin_core_select_local_output',
+      ),
       selectRemotePlayer = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
         'mashin_core_select_remote_player',
       ),
@@ -1141,8 +1118,8 @@ class _RustBindings {
       queuePlayMedia = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
         'mashin_core_queue_play_media',
       ),
-      startSendspinRadio = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
-        'mashin_core_start_sendspin_radio',
+      startRadio = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
+        'mashin_core_start_radio',
       ),
       queueInsert = library
           .lookupFunction<_NativeQueueIndexedFn, _DartQueueIndexedFn>(
@@ -1164,8 +1141,8 @@ class _RustBindings {
       queuePlay = library.lookupFunction<_NativeVolumeFn, _DartVolumeFn>(
         'mashin_core_queue_play',
       ),
-      setCodec = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
-        'mashin_core_set_codec',
+      setAudioProfile = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
+        'mashin_core_set_audio_profile',
       ),
       setEventCallback = library
           .lookupFunction<
@@ -1239,8 +1216,7 @@ class _RustBindings {
 
   final _DartJsonCommandFn login;
   final _DartVoidFn restorePersistedSession;
-  final _DartVoidFn selectDefaultSendspinOutput;
-  final _DartCodecFn selectOfflineLibrary;
+  final _DartVoidFn selectLocalOutput;
   final _DartCodecFn selectRemotePlayer;
   final _DartCodecFn setLogLevel;
   final _DartLogFn log;
@@ -1259,14 +1235,14 @@ class _RustBindings {
   final _DartVolumeFn setVolume;
   final _DartMutedFn setMuted;
   final _DartCodecFn queuePlayMedia;
-  final _DartCodecFn startSendspinRadio;
+  final _DartCodecFn startRadio;
   final _DartQueueIndexedFn queueInsert;
   final _DartCodecFn queueAppend;
   final _DartQueueIndexedFn queueMove;
   final _DartCodecFn queueRemove;
   final _DartCodecFn queueSelect;
   final _DartVolumeFn queuePlay;
-  final _DartCodecFn setCodec;
+  final _DartCodecFn setAudioProfile;
   final _DartRegisterEventCallbackFn setEventCallback;
   final _DartGetStringFn getQueue;
   final _DartGetStringFn getPlayerState;

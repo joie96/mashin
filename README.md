@@ -13,8 +13,8 @@ MashinCoreBridge -> AndroidBridge -> FlutterPlaybackChannel
 ```
 
 - `PlaybackService` owns Android session restoration, command ordering, audio focus,
-	foreground notification and the playback CPU wake lock. Rust owns the queue and
-	playback state; Media3 only projects that state.
+	foreground notification and the playback CPU wake lock. Rust projects the
+	server-owned queue and playback state; Media3 only presents that projection.
 - Flutter activities (including minimized activities) and Android Auto controllers
 	share session ownership. Closing the last activity or removing its task ends
 	playback only when no Android Auto controller or reconnect grace remains.
@@ -38,57 +38,82 @@ MashinCoreBridge -> AndroidBridge -> FlutterPlaybackChannel
 	A CPU wake lock does not guarantee network availability under every Android
 	battery restriction or Doze policy.
 - Library queries and non-playback operations may use FFI on Android. Desktop
-	playback continues to use FFI. Persisted session identifiers are unchanged.
+	playback continues to use FFI.
 
-## Sendspin Download Recovery
+## Playback And Session Ownership
 
-Commands remain on HTTP. A single-track `player_queues/play_media` HTTP 500 is
-retried three times in total, with one- and three-second retry delays. Exhaustion
-marks that queue entry failed for the current pass and advances past it. HTTP 500
-is a skip heuristic, not proof of provider unavailability; other HTTP statuses
-and transport failures retain the connection-recovery path. HTTP commands have
-a five-second connect timeout and a thirty-second total timeout.
+Only two modes exist: `local` plays through the native DAC; `remote` controls an
+existing Music Assistant player without owning audio. Both use MA's queue and
+stable queue-item IDs. Radio, shuffle, repeat and autoplay are server decisions.
+Favorites, client-local playlists, the MA library and recommendations remain
+available. Client-local playlists are expanded before sending their media to MA.
 
-Three consecutive exhausted entries request the existing full downloader
-reconnect. Failed entries remain visible and excluded across reconnect and queue
-edits; explicit playback of an entry retries it. Newly received track data resets
-the streak, not playback of older cached audio. Repeat cannot loop over an entirely
-unplayable queue. Known metadata/provider-unavailable entries do not count toward
-the streak. Provider-instance snapshots are scoped to the server and session and
-cached for thirty seconds; a failed snapshot query leaves provider status unknown.
-Completely cached tracks may still play locally when their provider is unavailable.
+One concrete `PlaybackEngine` owns mode selection and delegates to `LocalPlayback`
+or `RemotePlayback`. Both use a shared `MusicAssistantPlaybackTarget` for MA
+commands and queue projections; neither mode owns or embeds the other.
 
-Incomplete prefetch caches below 30 seconds of retained audio are discarded after
-connection loss and downloaded again from zero without a seek. Current playback
-always retains its PCM reference for seek restoration, even below this threshold.
-The threshold is
-`MINIMUM_CACHE_DURATION_FOR_RECONNECT_ALIGNMENT` in the Rust reconnect module.
-Completed caches are retained.
+`CoreCoordinator` owns application transactions, not a second playback API.
+Session login and output selection live in `core/session.rs`; persisted settings
+live in `core/settings.rs`. Pure playback commands go directly to the engine
+through one serialized core entry that collects events and awaits network work
+outside the core lock. Local volume persistence remains an application setting;
+remote volume never overwrites it.
 
-Larger caches retain a three-second decoded PCM reference. A replacement stream
-seeks at least five seconds before the confirmed cache end and is decoded as soon
-as packets arrive, without a seek-confirmation gate. Quiet reference windows may
-extend to ten seconds, with a correspondingly earlier seek. Correlation locates
-the old audio in the replacement stream; original encoded packets are preserved,
-duplicates are dropped, and the transition packet receives a sample-frame skip
-marker. Playback and local seeks honor that marker without re-encoding audio.
+One `MusicAssistantConnection` shares the authenticated API client and EventHub
+between targets. Local configuration contains only device and audio preferences.
+`LocalPlayback` prepares and reuses its own receiver session; the engine installs
+sessions and retains checkpoints for persistence rollback. Profile changes retain
+their original receiver and own native compensation. The engine rejects stale
+commits; the application only persists the confirmed preference. Negotiated server
+profiles do not replace the user's preference or force receiver recreation.
 
-Matching is bounded to 20 seconds of audio or 8 MiB of encoded packets, with a
-20-second elapsed-time deadline. No unique match, a format mismatch, or a decode
-failure discards prefetch caches and schedules a fresh download from zero. For the
-current title, the cache and its identity are retained and seek restoration is
-retried instead. Stop and Play Media, and Play
-Media and a resume Seek, are separated by one-second asynchronous delays.
+One native authenticated MA EventHub supplies queue and player changes. Mode
+selection does not replace the engine-owned local session or its RAM audio.
+The receiver connects to `/mashin/v1/control` and `/mashin/v1/audio`; neither
+socket receives the MA API token. Supported profiles are FLAC (default) and
+Opus 96, 128, 192 and 256 kb/s.
 
-After stream replacement or progress timeout, a verified download within two
-seconds of its expected metadata duration is completed at its actual decoded end.
-This tolerance is not used to truncate a flowing stream or bypass PCM alignment.
-Short interrupted prefetch caches are discarded before capacity admission is
-estimated, and capacity-pressure eviction never removes the current title.
+The bounded RAM cache retains only authorized encoded chunks for the current and
+prepared next stream. Connection loss preserves accepted chunks and the receive
+cursor; it does not start a downloader, create audio files or reconstruct a queue.
+Chunks are acknowledged only after native retention. Position and track changes
+follow audible output, not receipt or decoder completion.
 
-This recovery does not change the existing playback decoder behavior at Opus
-stream boundaries. Validate real-server PCM, FLAC and Opus reconnects on the
-target device in addition to host tests.
+At Debug log level, the native buffer reports occupied/capacity KiB, cached chunks
+and remaining audio every five seconds while a stream is configured. Prepared-next
+audio is reported separately. Desktop and the opened mobile player overlay show
+buffered audio ahead of the audible position, limited to the current track.
+The compact mobile player keeps its existing playback-progress indicator.
+
+Session storage format 3 requires a fresh login for older or invalid sessions.
+Each fresh login creates a persistent Mashin device identity. Selecting Remote
+and returning to Local preserves it. This reset does not rewrite favorites or
+local playlists stored in MA user preferences. Settings remain drafts until Save;
+Cancel discards changes. Failed persistence restores the preceding native session.
+
+### Native Structure
+
+```text
+core/                          App settings, secure persistence and user data
+core/session.rs                Login, output selection and session transactions
+core/settings.rs               Persisted application and playback preferences
+playback/engine.rs              Concrete engine, lifecycle and mode dispatch
+playback/backend.rs             Shared Local/Remote command contract
+playback/mode.rs                Canonical local/remote mode names
+playback/local/                 Local presentation and receiver session
+playback/local/mashin/          V1 sockets, framing, authorization and audio adapter
+playback/remote/                Remote MA presentation, no audio resources
+audio/                         Pipeline worker, bounded buffer, codecs and CPAL
+music_assistant/                API, EventHub, playback target and projections
+music_assistant/connection.rs    Shared API client and EventHub resources
+```
+
+The audio layer has no dependency on Mashin wire messages or MA models. The
+local adapter validates the protocol and supplies typed audio commands, formats
+and chunks. Only the pipeline worker owns native audio resources. The application
+core uses typed profile operations and playback checkpoints instead of accessing sockets
+or audio internals. Platform snapshots use `activeMode`; local selection uses
+`selectLocalOutput`, with no legacy command aliases.
 
 ## User Data Version 5
 
@@ -106,25 +131,11 @@ Only version five is supported; user-data loading does not upgrade or rewrite
 preferences. Mapping identity strings containing `None` are preserved as returned
 by Music Assistant. Null or unknown audio formats remain allowed.
 
-## ListenBrainz Scrobbling
+## Scrobbling
 
-Enter the ListenBrainz username and user token in Settings under ListenBrainz,
-then use the page-wide Save button. All settings, including cache size, theme,
-log level and ListenBrainz credentials, remain a local draft until Save; Cancel
-restores the last saved values. The ListenBrainz Test button validates the draft
-without saving or enabling scrobbling and shows a checkmark on success.
-Mashin verifies changed credentials before storing the complete settings update
-with the secure native session. Clear both fields and save to disable scrobbling.
-
-The Rust core scrobbles local playback after half the track or four minutes of
-actual listening, whichever is shorter. Pauses, buffering, downloads and seek
-jumps do not count as listening. Repeats have distinct playback identities.
-Pending listens are persisted without tokens, scoped to their ListenBrainz account,
-and retried when the API is reachable. Remote-player playback is not scrobbled.
-
-Disable Music Assistant's ListenBrainz scrobbler for the same local playback path
-to avoid duplicate submissions. Recommendations and recommendation playlists
-continue to come from Music Assistant; its recommendation plugin stays enabled.
+Scrobbling is owned by Music Assistant. The client has no scrobbling credentials,
+outbox, worker or connection-test command. Recommendations come from MA without
+restricting them to one provider.
 
 ## Build And Verify
 
@@ -134,8 +145,9 @@ Rebuild the native library after JNI changes, then rebuild Flutter:
 & ./scripts/build_mashin_engine.ps1 -Profile Debug -PlatformSelection AndroidArm64
 flutter build apk --debug
 ./android/gradlew.bat -p android :app:testDebugUnitTest --console=plain
-cargo test --manifest-path rust/mashin_engine/Cargo.toml jni::commands::tests --lib
-flutter test test/android_bridge_test.dart
+cargo test --manifest-path rust/mashin_engine/Cargo.toml --lib
+flutter analyze
+flutter test
 ```
 
 Kotlin/Rust changes require a full app restart, not just Flutter hot reload.

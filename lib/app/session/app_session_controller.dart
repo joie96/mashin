@@ -25,28 +25,24 @@ class AppSessionController extends ChangeNotifier {
   UserData? _userDataController;
   String _baseUrl = '';
   String? _username;
-  late String _preferredCodec;
+  late String _audioProfile;
   bool _isAuthenticated = false;
   bool _isLoading = true;
   bool _isDisposed = false;
   late int _localCacheSizeBytes;
   bool _isDarkTheme = true;
   LogLevelPreference _logLevel = LogLevelPreference.info;
-  ListenBrainzCredentials _listenBrainzCredentials =
-      const ListenBrainzCredentials();
   final Completer<void> _initialSettingsReady = Completer<void>();
 
   UserData? get userDataController => _userDataController;
   String get baseUrl => _baseUrl;
   String? get username => _username;
-  String get preferredCodec => _preferredCodec;
+  String get audioProfile => _audioProfile;
   bool get isLoading => _isLoading;
   bool get isAuthenticated => _isAuthenticated;
   int get localCacheSizeBytes => _localCacheSizeBytes;
   bool get isDarkTheme => _isDarkTheme;
   LogLevelPreference get logLevel => _logLevel;
-  ListenBrainzCredentials get listenBrainzCredentials =>
-      _listenBrainzCredentials;
   Future<void> get initialSettingsReady => _initialSettingsReady.future;
 
   Future<void> initialize() async {
@@ -106,13 +102,13 @@ class AppSessionController extends ChangeNotifier {
     }
   }
 
-  Future<void> setPreferredCodec(String codec) async {
-    if (codec == _preferredCodec) {
+  Future<void> setAudioProfile(String audioProfile) async {
+    if (audioProfile == _audioProfile) {
       return;
     }
 
-    await coreBridge.requestCodec(codec);
-    _preferredCodec = codec;
+    await coreBridge.setAudioProfile(audioProfile);
+    _audioProfile = audioProfile;
     notifyListeners();
   }
 
@@ -126,7 +122,6 @@ class AppSessionController extends ChangeNotifier {
         localCacheSizeBytes: _localCacheSizeBytes,
         isDarkTheme: isDarkTheme,
         logLevel: _logLevel,
-        listenBrainzCredentials: _listenBrainzCredentials,
       ),
     );
   }
@@ -136,7 +131,6 @@ class AppSessionController extends ChangeNotifier {
     _localCacheSizeBytes = settings.localCacheSizeBytes;
     _isDarkTheme = settings.isDarkTheme;
     _logLevel = settings.logLevel;
-    _listenBrainzCredentials = settings.listenBrainzCredentials;
     notifyListeners();
   }
 
@@ -153,11 +147,10 @@ class AppSessionController extends ChangeNotifier {
     _baseUrl = settings.musicAssistantUrl;
     MediaItemImage.configureProxyBaseUrl(_baseUrl);
     _username = settings.username;
-    _preferredCodec = settings.preferredCodec;
+    _audioProfile = settings.audioProfile;
     _localCacheSizeBytes = settings.localCacheSizeBytes;
     _isDarkTheme = settings.isDarkTheme;
     _logLevel = settings.logLevel;
-    _listenBrainzCredentials = settings.listenBrainzCredentials;
   }
 
   Future<void> _initializeUserData() async {

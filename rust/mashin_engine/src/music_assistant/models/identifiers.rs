@@ -37,4 +37,3 @@ string_identifier!(QueueItemId);
 string_identifier!(PlayerId);
 string_identifier!(UserId);
 string_identifier!(AccessToken);
-string_identifier!(CacheContentKey);

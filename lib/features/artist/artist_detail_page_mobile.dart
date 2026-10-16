@@ -116,26 +116,29 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
           label: 'Zufällig abspielen',
           isEnabled: targets.any((target) => target.canPlay),
           icon: Icons.shuffle_outlined,
-          onSelected: () => widget.coreBridge.queuePlayMedia(targets, shuffle: true),
+          onSelected: () =>
+              widget.coreBridge.queuePlayMedia(targets, shuffle: true),
         ),
       ContextMenuAction(
         label: 'Radio starten',
         isEnabled: targets.any((target) => target.canPlay),
         icon: Icons.radio_outlined,
-        onSelected: () => widget.coreBridge.startSendspinRadio(targets),
+        onSelected: () => widget.coreBridge.startRadio(targets),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         isEnabled: targets.any((target) => target.canPlay),
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-          onSelected: () => widget.coreBridge.queuePlayMedia(targets, option: QueueOption.next),
+        onSelected: () =>
+            widget.coreBridge.queuePlayMedia(targets, option: QueueOption.next),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         isEnabled: targets.any((target) => target.canPlay),
         icon: Icons.last_page,
-          onSelected: () => widget.coreBridge.queuePlayMedia(targets, option: QueueOption.add),
+        onSelected: () =>
+            widget.coreBridge.queuePlayMedia(targets, option: QueueOption.add),
       ),
     ];
 
@@ -213,12 +216,16 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
         label: 'Als Nächstes spielen',
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[artist], option: QueueOption.next),
+        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[
+          artist,
+        ], option: QueueOption.next),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         icon: Icons.last_page,
-        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[artist], option: QueueOption.add),
+        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[
+          artist,
+        ], option: QueueOption.add),
       ),
       const ContextMenuAction.separator(),
       ContextMenuAction(

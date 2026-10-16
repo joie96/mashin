@@ -69,7 +69,7 @@ internal class MediaLibraryBrowser(
         if (mediaId.startsWith("artistRadio:")) {
             val artist = serializedMediaItems[mediaId.removePrefix("artistRadio:")]
                 ?: return Futures.immediateFailedFuture<Any>(IllegalArgumentException("unknown Android media ID: $mediaId"))
-            return dispatchCommand(PlaybackRequest(PlaybackCommandKind.StartSendspinRadio,
+            return dispatchCommand(PlaybackRequest(PlaybackCommandKind.StartRadio,
                 JSONObject().put("mediaItems", JSONArray().put(JSONObject(artist))).toString()))
         }
         serializedTrackLists[mediaId]?.let { serializedItems ->
@@ -78,20 +78,19 @@ internal class MediaLibraryBrowser(
                 JSONObject().put("request", JSONObject()
                     .put("mediaItems", JSONArray(serializedItems))
                     .put("option", "play")
-                    .put("shuffle", mediaId.startsWith("action:shuffle:"))
-                    .put("startDownload", true))
+                    .put("shuffle", mediaId.startsWith("action:shuffle:")))
                     .toString(),
             ))
         }
         serializedMediaItems[mediaId]?.let { serializedItem ->
             if (JSONObject(serializedItem).optString("media_type") == "track") {
-                return dispatchCommand(PlaybackRequest(PlaybackCommandKind.StartSendspinRadio,
+                return dispatchCommand(PlaybackRequest(PlaybackCommandKind.StartRadio,
                     JSONObject().put("mediaItems", JSONArray().put(JSONObject(serializedItem))).toString()))
             }
             return dispatchCommand(PlaybackRequest(
                 PlaybackCommandKind.QueuePlayMedia,
                 JSONObject().put("request", JSONObject().put("mediaItems", JSONArray().put(JSONObject(serializedItem)))
-                    .put("option", "play").put("startDownload", true)).toString(),
+                    .put("option", "play")).toString(),
             ))
         }
         return Futures.immediateFailedFuture<Any>(IllegalArgumentException("unknown Android media ID: $mediaId"))
@@ -255,8 +254,7 @@ internal class MediaLibraryBrowser(
     ): List<MediaItem> {
         val folders = JSONArray(RustCoreBridge.query("recommendations", null) ?: "[]")
         val folder = (0 until folders.length()).mapNotNull(folders::optJSONObject).firstOrNull {
-            it.optString("item_id").equals(folderId, ignoreCase = true) &&
-                it.optString("provider").startsWith("listenbrainz_recommendations--", ignoreCase = true)
+            it.optString("item_id").equals(folderId, ignoreCase = true)
         } ?: return emptyList()
         val items = folder.optJSONArray("items") ?: return emptyList()
         val selected = JSONArray()

@@ -1,9 +1,16 @@
-//! Authenticated Music Assistant WebSocket lifecycle for opt-in live features.
+//! One authenticated Music Assistant WebSocket owned by native session consumers.
 
-use crate::core::models::SessionConfig;
+use super::models::identifiers::{AccessToken, PlayerId, QueueId};
+use super::models::player::MusicAssistantPlayer;
+use super::models::queue::MusicAssistantQueue;
+use super::models::session::MusicAssistantServerUrl;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
@@ -16,16 +23,24 @@ const EVENT_HUB_LOGGER: crate::logging::Logger = crate::logging::Logger::new("ev
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum EventHubLeaseReason {
-    RemotePlayback,
+    Playback,
     AndroidAutoLiveState,
     ExplicitUserRefresh,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct MusicAssistantQueueEvent {
-    pub(crate) name: String,
-    pub(crate) queue_id: Option<String>,
-    pub(crate) data: Value,
+pub(crate) enum MusicAssistantEvent {
+    Connected,
+    Disconnected,
+    QueueUpdated(MusicAssistantQueue),
+    QueueItemsUpdated(QueueId),
+    QueueRemoved(QueueId),
+    QueueTimeUpdated {
+        queue_id: QueueId,
+        elapsed_seconds: f64,
+    },
+    PlayerUpdated(MusicAssistantPlayer),
+    PlayerRemoved(PlayerId),
 }
 
 /// Owns one authenticated WebSocket while at least one live-state feature has a lease.
@@ -33,16 +48,18 @@ pub(crate) struct MusicAssistantEventHub {
     websocket_url: String,
     access_token: String,
     leases: HashMap<EventHubLeaseReason, usize>,
-    event_sender: broadcast::Sender<MusicAssistantQueueEvent>,
+    event_sender: broadcast::Sender<MusicAssistantEvent>,
     worker: Option<JoinHandle<()>>,
+    is_connected: Arc<AtomicBool>,
 }
 
 impl MusicAssistantEventHub {
     // Construction and subscriptions.
-    pub(crate) fn new(session: &SessionConfig) -> Result<Self, String> {
-        let access_token = session
-            .access_token
-            .as_ref()
+    pub(crate) fn new(
+        server_url: &MusicAssistantServerUrl,
+        access_token: Option<&AccessToken>,
+    ) -> Result<Self, String> {
+        let access_token = access_token
             .map(|token| token.as_str().trim())
             .filter(|token| !token.is_empty())
             .ok_or_else(|| {
@@ -50,16 +67,21 @@ impl MusicAssistantEventHub {
             })?;
         let (event_sender, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         Ok(Self {
-            websocket_url: websocket_url_for_music_assistant(&session.music_assistant_url.0)?,
+            websocket_url: websocket_url_for_music_assistant(&server_url.0)?,
             access_token: access_token.to_string(),
             leases: HashMap::new(),
             event_sender,
             worker: None,
+            is_connected: Arc::new(AtomicBool::new(false)),
         })
     }
 
-    pub(crate) fn subscribe(&self) -> broadcast::Receiver<MusicAssistantQueueEvent> {
+    pub(crate) fn subscribe(&self) -> broadcast::Receiver<MusicAssistantEvent> {
         self.event_sender.subscribe()
+    }
+
+    pub(crate) fn is_connected(&self) -> bool {
+        self.is_connected.load(Ordering::Acquire)
     }
 
     // Feature lease lifecycle.
@@ -92,12 +114,14 @@ impl MusicAssistantEventHub {
         let websocket_url = self.websocket_url.clone();
         let access_token = self.access_token.clone();
         let event_sender = self.event_sender.clone();
+        let is_connected = self.is_connected.clone();
         self.worker = Some(tokio::spawn(async move {
-            run_event_worker(websocket_url, access_token, event_sender).await;
+            run_event_worker(websocket_url, access_token, event_sender, is_connected).await;
         }));
     }
 
     fn stop_worker(&mut self) {
+        self.is_connected.store(false, Ordering::Release);
         if let Some(worker) = self.worker.take() {
             worker.abort();
         }
@@ -113,13 +137,18 @@ impl Drop for MusicAssistantEventHub {
 async fn run_event_worker(
     websocket_url: String,
     access_token: String,
-    event_sender: broadcast::Sender<MusicAssistantQueueEvent>,
+    event_sender: broadcast::Sender<MusicAssistantEvent>,
+    is_connected: Arc<AtomicBool>,
 ) {
     loop {
-        let result = connect_and_forward_events(&websocket_url, &access_token, &event_sender).await;
+        let result =
+            connect_and_forward_events(&websocket_url, &access_token, &event_sender, &is_connected)
+                .await;
+        is_connected.store(false, Ordering::Release);
         if let Err(error) = result {
             EVENT_HUB_LOGGER.warn(format!("Music Assistant event hub disconnected: {error}"));
         }
+        let _ = event_sender.send(MusicAssistantEvent::Disconnected);
         sleep(RECONNECT_DELAY).await;
     }
 }
@@ -127,7 +156,8 @@ async fn run_event_worker(
 async fn connect_and_forward_events(
     websocket_url: &str,
     access_token: &str,
-    event_sender: &broadcast::Sender<MusicAssistantQueueEvent>,
+    event_sender: &broadcast::Sender<MusicAssistantEvent>,
+    is_connected: &AtomicBool,
 ) -> Result<(), String> {
     let (mut websocket, _) = tokio_tungstenite::connect_async(websocket_url)
         .await
@@ -145,36 +175,57 @@ async fn connect_and_forward_events(
         .await
         .map_err(|error| format!("authenticate Music Assistant event hub failed: {error}"))?;
 
-    let authentication_response = tokio::time::timeout(AUTHENTICATION_TIMEOUT, websocket.next())
-        .await
-        .map_err(|_| "Music Assistant event hub authentication timed out".to_string())?
-        .ok_or_else(|| "Music Assistant event hub closed during authentication".to_string())?
-        .map_err(|error| {
-            format!("read Music Assistant event hub authentication failed: {error}")
-        })?;
-    let Message::Text(authentication_payload) = authentication_response else {
-        return Err(
-            "Music Assistant event hub returned a non-text authentication response".to_string(),
-        );
-    };
-    let authentication_payload: Value =
-        serde_json::from_str(&authentication_payload).map_err(|error| {
-            format!("decode Music Assistant event hub authentication failed: {error}")
-        })?;
-    if !is_authenticated_response(&authentication_payload) {
-        return Err("Music Assistant event hub authentication was rejected".to_string());
-    }
+    tokio::time::timeout(AUTHENTICATION_TIMEOUT, async {
+        while let Some(message) = websocket.next().await {
+            match message.map_err(|error| format!("read MA authentication failed: {error}"))? {
+                Message::Text(payload) => {
+                    let payload: Value = serde_json::from_str(&payload)
+                        .map_err(|error| format!("decode MA authentication failed: {error}"))?;
+                    if payload.get("message_id").and_then(Value::as_str)
+                        != Some("mashin-event-hub-auth")
+                    {
+                        continue;
+                    }
+                    return if is_authenticated_response(&payload) {
+                        Ok(())
+                    } else {
+                        Err("Music Assistant authentication was rejected".to_string())
+                    };
+                }
+                Message::Ping(payload) => websocket
+                    .send(Message::Pong(payload))
+                    .await
+                    .map_err(|error| format!("MA authentication pong failed: {error}"))?,
+                Message::Close(_) => break,
+                _ => {}
+            }
+        }
+        Err("Music Assistant closed during authentication".to_string())
+    })
+    .await
+    .map_err(|_| "Music Assistant authentication timed out".to_string())??;
+    is_connected.store(true, Ordering::Release);
+    let _ = event_sender.send(MusicAssistantEvent::Connected);
 
     while let Some(message) = websocket.next().await {
         let message =
             message.map_err(|error| format!("read Music Assistant event failed: {error}"))?;
-        let Message::Text(payload) = message else {
-            continue;
+        let payload = match message {
+            Message::Text(payload) => payload,
+            Message::Ping(payload) => {
+                websocket
+                    .send(Message::Pong(payload))
+                    .await
+                    .map_err(|error| format!("MA event pong failed: {error}"))?;
+                continue;
+            }
+            Message::Close(_) => break,
+            _ => continue,
         };
         let Ok(payload) = serde_json::from_str::<Value>(&payload) else {
             continue;
         };
-        let Some(event) = parse_queue_event(payload) else {
+        let Some(event) = parse_event(payload) else {
             continue;
         };
         let _ = event_sender.send(event);
@@ -213,34 +264,41 @@ fn websocket_url_for_music_assistant(base_url: &str) -> Result<String, String> {
     Ok(url.into())
 }
 
-fn parse_queue_event(payload: Value) -> Option<MusicAssistantQueueEvent> {
+fn parse_event(payload: Value) -> Option<MusicAssistantEvent> {
     let event_name = payload.get("event")?.as_str()?.trim().to_ascii_lowercase();
-    if !matches!(
-        event_name.as_str(),
-        "queue_added"
-            | "queue_removed"
-            | "queue_updated"
-            | "queue_items_updated"
-            | "queue_time_updated"
-            | "queue_settings_updated"
-    ) {
+    let object_id = payload.get("object_id")?.as_str()?.trim();
+    if object_id.is_empty() {
         return None;
     }
-    Some(MusicAssistantQueueEvent {
-        name: event_name,
-        queue_id: payload
-            .get("object_id")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string),
-        data: payload.get("data").cloned().unwrap_or(Value::Null),
-    })
+    let data = payload.get("data").cloned().unwrap_or(Value::Null);
+    match event_name.as_str() {
+        "queue_added" | "queue_updated" | "queue_settings_updated" => serde_json::from_value(data)
+            .ok()
+            .map(MusicAssistantEvent::QueueUpdated),
+        "queue_items_updated" => Some(MusicAssistantEvent::QueueItemsUpdated(QueueId(
+            object_id.into(),
+        ))),
+        "queue_removed" => Some(MusicAssistantEvent::QueueRemoved(QueueId(object_id.into()))),
+        "queue_time_updated" => Some(MusicAssistantEvent::QueueTimeUpdated {
+            queue_id: QueueId(object_id.into()),
+            elapsed_seconds: data.as_f64()?,
+        }),
+        "player_added" | "player_updated" => serde_json::from_value(data)
+            .ok()
+            .map(MusicAssistantEvent::PlayerUpdated),
+        "player_removed" => Some(MusicAssistantEvent::PlayerRemoved(PlayerId(
+            object_id.into(),
+        ))),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_authenticated_response, parse_queue_event, websocket_url_for_music_assistant};
+    use super::{
+        is_authenticated_response, parse_event, websocket_url_for_music_assistant,
+        MusicAssistantEvent,
+    };
     use serde_json::json;
 
     #[test]
@@ -254,17 +312,78 @@ mod tests {
 
     #[test]
     fn filters_and_normalizes_queue_events() {
-        let event = parse_queue_event(json!({
+        let event = parse_event(json!({
             "event": "QUEUE_TIME_UPDATED",
             "object_id": " queue-1 ",
             "data": 42.5,
         }))
         .expect("queue event");
 
-        assert_eq!(event.name, "queue_time_updated");
-        assert_eq!(event.queue_id.as_deref(), Some("queue-1"));
-        assert_eq!(event.data, json!(42.5));
-        assert!(parse_queue_event(json!({ "event": "player_added" })).is_none());
+        assert!(
+            matches!(event, MusicAssistantEvent::QueueTimeUpdated { queue_id, elapsed_seconds }
+            if queue_id.0 == "queue-1" && elapsed_seconds == 42.5)
+        );
+        assert!(parse_event(json!({ "event": "player_added" })).is_none());
+        assert!(
+            matches!(parse_event(json!({ "event": "player_removed", "object_id": "remote" })),
+            Some(MusicAssistantEvent::PlayerRemoved(player_id)) if player_id.0 == "remote")
+        );
+    }
+
+    #[tokio::test]
+    async fn authenticates_after_server_info_and_forwards_queue_events() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            socket
+                .send(Message::Text(
+                    json!({"server_id": "test", "schema_version": 1})
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .unwrap();
+            let request = socket.next().await.unwrap().unwrap();
+            assert!(matches!(request, Message::Text(_)));
+            socket
+                .send(Message::Text(
+                    json!({"message_id":"mashin-event-hub-auth", "result":{"authenticated":true}})
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .unwrap();
+            socket
+                .send(Message::Text(
+                    json!({"event":"queue_items_updated", "object_id":"player"})
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .unwrap();
+            socket.close(None).await.unwrap();
+        });
+        let (sender, mut receiver) = tokio::sync::broadcast::channel(8);
+        let connected = std::sync::atomic::AtomicBool::new(false);
+        let _ = super::connect_and_forward_events(
+            &format!("ws://{address}"),
+            "test-token",
+            &sender,
+            &connected,
+        )
+        .await;
+        assert_eq!(
+            receiver.recv().await.unwrap(),
+            MusicAssistantEvent::Connected
+        );
+        assert!(
+            matches!(receiver.recv().await.unwrap(), MusicAssistantEvent::QueueItemsUpdated(queue_id) if queue_id.0 == "player")
+        );
+        server.await.unwrap();
     }
 
     #[test]

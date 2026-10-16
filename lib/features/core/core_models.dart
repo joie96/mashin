@@ -1319,7 +1319,6 @@ class QueueItem {
   final bool? available;
   final MediaItem mediaItem;
   final int? originalIndex;
-  final CacheState? cache;
 
   const QueueItem({
     required this.queueItemId,
@@ -1330,7 +1329,6 @@ class QueueItem {
     this.sortIndex,
     this.available,
     this.originalIndex,
-    this.cache,
   });
 
   factory QueueItem.fromJson(Map<String, dynamic> json) {
@@ -1349,23 +1347,14 @@ class QueueItem {
       available: json['available'] as bool?,
       mediaItem: mediaItemFromJson(mediaItemJson),
       originalIndex: (json['index'] as num?)?.toInt(),
-      cache: json['cache'] is Map<String, dynamic>
-          ? CacheState.fromJson(json['cache'] as Map<String, dynamic>)
-          : null,
     );
   }
 }
 
 extension QueueItemAvailability on QueueItem {
-  bool get isAvailable =>
-      cache?.status == CacheStatus.complete ||
-      (available ?? mediaItem.isAvailable);
+  bool get isAvailable => available ?? mediaItem.isAvailable;
 
-  // A failed HTTP entry can be retried explicitly; provider-blocked entries need a complete cache.
-  bool get canPlay =>
-      cache?.status == CacheStatus.complete ||
-      available == true ||
-      mediaItem.canPlay;
+  bool get canPlay => available ?? mediaItem.canPlay;
 }
 
 PlayState? _playbackStateFromJson(String? value) {
@@ -1849,39 +1838,9 @@ class BootstrapData {
 // Immutable Flutter contracts for versioned Rust media-session events and queries.
 enum CoreConnectionState { offline, connecting, online, reconnecting }
 
-enum CoreOutputMode { offline, sendspin, remote }
+enum PlaybackMode { local, remote }
 
 // Media-session state contracts.
-
-enum CacheStatus {
-  queued,
-  prepared,
-  buffering,
-  downloading,
-  paused,
-  complete,
-  interrupted,
-  evicted,
-  discarded,
-  failed,
-}
-
-class CacheState {
-  final CacheStatus status;
-  final int cachedDurationMillis;
-
-  const CacheState({required this.status, required this.cachedDurationMillis});
-
-  factory CacheState.fromJson(Map<String, dynamic> json) => CacheState(
-    status: CacheStatus.values.byName(json['status'] as String),
-    cachedDurationMillis: (json['cached_duration_millis'] as num).toInt(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'status': status.name,
-    'cached_duration_millis': cachedDurationMillis,
-  };
-}
 
 class MusicAssistantQueue {
   final String queueId;
@@ -2028,7 +1987,7 @@ class Queue {
 }
 
 class PlayerState {
-  final CoreOutputMode? activeOutputMode;
+  final PlaybackMode? activeMode;
   final CoreConnectionState connectionState;
   final PlayState playbackState;
   final String? currentQueueItemId;
@@ -2040,7 +1999,7 @@ class PlayerState {
   final bool muted;
 
   const PlayerState({
-    this.activeOutputMode,
+    this.activeMode,
     this.connectionState = CoreConnectionState.offline,
     this.playbackState = PlayState.uninitialized,
     this.currentQueueItemId,
@@ -2054,7 +2013,7 @@ class PlayerState {
 
   factory PlayerState.fromJson(Map<String, dynamic> json) {
     return PlayerState(
-      activeOutputMode: _parseOutputMode(json['activeEngineKind']),
+      activeMode: _parseOutputMode(json['activeMode']),
       connectionState: _parseConnectionState(json['connectionState']),
       playbackState: _parsePlaybackState(json['playbackState']),
       currentQueueItemId: (json['currentQueueItemId'] as String?)?.trim(),
@@ -2084,42 +2043,21 @@ class MediaSessionState {
   });
 }
 
-class ListenBrainzCredentials {
-  const ListenBrainzCredentials({this.username = '', this.token = ''});
-
-  final String username;
-  final String token;
-
-  bool get isConfigured => username.isNotEmpty && token.isNotEmpty;
-
-  factory ListenBrainzCredentials.fromJson(Map<String, dynamic> json) =>
-      ListenBrainzCredentials(
-        username: json['username'] as String? ?? '',
-        token: json['token'] as String? ?? '',
-      );
-}
-
 class SessionSettingsUpdate {
   const SessionSettingsUpdate({
     required this.localCacheSizeBytes,
     required this.isDarkTheme,
     required this.logLevel,
-    required this.listenBrainzCredentials,
   });
 
   final int localCacheSizeBytes;
   final bool isDarkTheme;
   final LogLevelPreference logLevel;
-  final ListenBrainzCredentials listenBrainzCredentials;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'localCacheSizeBytes': localCacheSizeBytes,
     'theme': isDarkTheme ? 'dark' : 'light',
     'logLevel': logLevel.name,
-    'listenbrainz': <String, Object?>{
-      'username': listenBrainzCredentials.username,
-      'token': listenBrainzCredentials.token,
-    },
   };
 }
 
@@ -2127,33 +2065,28 @@ class SessionSettings {
   const SessionSettings({
     required this.musicAssistantUrl,
     required this.username,
-    required this.preferredCodec,
+    required this.audioProfile,
     required this.localCacheSizeBytes,
     required this.isDarkTheme,
     required this.logLevel,
-    this.listenBrainzCredentials = const ListenBrainzCredentials(),
   });
 
   final String musicAssistantUrl;
   final String? username;
-  final String preferredCodec;
+  final String audioProfile;
   final int localCacheSizeBytes;
   final bool isDarkTheme;
   final LogLevelPreference logLevel;
-  final ListenBrainzCredentials listenBrainzCredentials;
 
   factory SessionSettings.fromJson(Map<String, dynamic> json) {
     return SessionSettings(
       musicAssistantUrl: json['musicAssistantUrl'] as String? ?? '',
       username: json['username'] as String?,
-      preferredCodec: json['preferredCodec'] as String? ?? '',
+      audioProfile: json['audioProfile'] as String? ?? '',
       localCacheSizeBytes:
           (json['localCacheSizeBytes'] as num?)?.toInt() ?? 250 * 1024 * 1024,
       isDarkTheme: json['theme'] != 'light',
       logLevel: LogLevelPreference.parse(json['logLevel'] as String? ?? 'info'),
-      listenBrainzCredentials: ListenBrainzCredentials.fromJson(
-        json['listenbrainz'] as Map<String, dynamic>? ?? <String, dynamic>{},
-      ),
     );
   }
 }
@@ -2166,11 +2099,10 @@ int? _toClampedMillis(double? value) {
   return millis < 0 ? 0 : millis;
 }
 
-CoreOutputMode? _parseOutputMode(Object? value) =>
+PlaybackMode? _parseOutputMode(Object? value) =>
     switch ((value as String?)?.trim()) {
-      'offline' => CoreOutputMode.offline,
-      'sendspin' => CoreOutputMode.sendspin,
-      'remote' => CoreOutputMode.remote,
+      'local' => PlaybackMode.local,
+      'remote' => PlaybackMode.remote,
       _ => null,
     };
 CoreConnectionState _parseConnectionState(Object? value) =>

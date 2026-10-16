@@ -8,8 +8,7 @@ import androidx.media3.session.SessionResult
 internal enum class PlaybackCommandKind(val action: String, val canStartPlayback: Boolean = false) {
     Login("login"),
     RestorePersistedSession("restorePersistedSession"),
-    SelectDefaultSendspinOutput("selectDefaultSendspinOutput"),
-    SelectOfflineLibrary("selectOfflineLibrary"),
+    SelectLocalOutput("selectLocalOutput"),
     SelectRemotePlayer("selectRemotePlayer"),
     ActivateEngine("activateEngine"),
     DeactivateEngine("deactivateEngine"),
@@ -28,14 +27,14 @@ internal enum class PlaybackCommandKind(val action: String, val canStartPlayback
     SaveSessionSettings("saveSessionSettings"),
     SetUserDataFavorites("setUserDataFavorites"),
     QueuePlayMedia("queuePlayMedia", true),
-    StartSendspinRadio("startSendspinRadio", true),
+    StartRadio("startRadio", true),
     InsertQueueItems("insertQueueItems"),
     AppendQueueItems("appendQueueItems"),
     MoveQueueItems("moveQueueItems"),
     DeleteQueueItems("deleteQueueItems"),
     SelectQueueItem("selectQueueItem"),
     PlayQueueIndex("playQueueIndex", true),
-    RequestCodec("requestCodec"),
+    SetAudioProfile("setAudioProfile"),
 }
 
 // Serialized arguments cross the session/JNI boundary; Rust validates their typed contract.

@@ -73,7 +73,7 @@ internal object PlaybackSnapshotMapper {
             },
             mediaItems = items,
             currentIndex = queueItems.indexOfFirst { it.optString("queue_item_id") == queueItemId }.coerceAtLeast(0),
-            isLocalPlayback = values.optString("activeEngineKind") != "remote",
+            isLocalPlayback = values.optString("activeMode") == "local",
             serializedCurrentMediaItem = currentMediaItem?.takeIf { userData != null && currentUri != null && favoriteCategory != null }?.toString(),
             isCurrentItemFavorite = isCurrentItemFavorite,
         )

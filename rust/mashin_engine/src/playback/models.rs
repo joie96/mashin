@@ -1,58 +1,22 @@
 //! Engine-neutral queue and player-state contracts for platform adapters.
 
-use crate::music_assistant::models::identifiers::{AccessToken, PlayerId, QueueId, QueueItemId};
+use crate::music_assistant::models::identifiers::{PlayerId, QueueId, QueueItemId};
 use crate::music_assistant::models::queue::QueueItem;
 use crate::music_assistant::models::queue::{PlayState, RepeatMode};
-use crate::music_assistant::models::session::MusicAssistantServerUrl;
-use crate::sendspin::models::SendspinEngineConfiguration;
 use serde::Serialize;
-use std::path::PathBuf;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum PlaybackEngineKind {
-    Offline,
-    Sendspin,
-    Remote,
+use crate::playback::mode::PlaybackMode;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PlaybackTarget {
+    Local,
+    Remote(PlayerId),
 }
 
-impl PlaybackEngineKind {
-    pub(crate) fn display_name(self) -> &'static str {
-        match self {
-            Self::Offline => "offline",
-            Self::Sendspin => "Sendspin",
-            Self::Remote => "remote",
-        }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) enum PlaybackEngineConfiguration {
-    Offline(OfflinePlaybackConfiguration),
-    Sendspin(SendspinEngineConfiguration),
-    Remote(RemotePlaybackConfiguration),
-}
-
-#[derive(Clone)]
-pub(crate) struct OfflinePlaybackConfiguration {
-    pub(crate) library_root: PathBuf,
-}
-
-#[derive(Clone)]
-pub(crate) struct RemotePlaybackConfiguration {
-    pub(crate) music_assistant_url: MusicAssistantServerUrl,
-    pub(crate) access_token: Option<AccessToken>,
-    pub(crate) player_id: PlayerId,
-}
-
-impl PlaybackEngineConfiguration {
-    pub(crate) fn kind(&self) -> PlaybackEngineKind {
-        match self {
-            Self::Offline(_) => PlaybackEngineKind::Offline,
-            Self::Sendspin(_) => PlaybackEngineKind::Sendspin,
-            Self::Remote(_) => PlaybackEngineKind::Remote,
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlaybackSessionConfiguration {
+    pub(crate) local: crate::playback::local::session::LocalSessionConfiguration,
+    pub(crate) target: PlaybackTarget,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -79,7 +43,7 @@ pub(crate) struct Queue {
 impl Default for Queue {
     fn default() -> Self {
         Self {
-            queue_id: QueueId("local-sendspin".to_string()),
+            queue_id: QueueId(String::new()),
             items: Vec::new(),
             current_index: None,
             shuffle_enabled: false,
@@ -96,27 +60,14 @@ impl Queue {
             && self.shuffle_enabled == other.shuffle_enabled
             && self.repeat_mode == other.repeat_mode
             && self.autoplay_enabled == other.autoplay_enabled
-            && self.items.len() == other.items.len()
-            && self
-                .items
-                .iter()
-                .zip(&other.items)
-                .all(|(item, other_item)| queue_items_have_same_structure(item, other_item))
+            && self.items == other.items
     }
-}
-
-fn queue_items_have_same_structure(item: &QueueItem, other: &QueueItem) -> bool {
-    let mut item_without_cache = item.clone();
-    let mut other_without_cache = other.clone();
-    item_without_cache.cache = None;
-    other_without_cache.cache = None;
-    item_without_cache == other_without_cache
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PlayerState {
-    pub(crate) active_engine_kind: PlaybackEngineKind,
+    pub(crate) active_mode: PlaybackMode,
     pub(crate) connection_state: PlaybackConnectionState,
     pub(crate) playback_state: PlayState,
     pub(crate) current_queue_item_id: Option<QueueItemId>,
@@ -131,7 +82,7 @@ pub(crate) struct PlayerState {
 impl Default for PlayerState {
     fn default() -> Self {
         Self {
-            active_engine_kind: PlaybackEngineKind::Sendspin,
+            active_mode: PlaybackMode::Local,
             connection_state: PlaybackConnectionState::Offline,
             playback_state: PlayState::Uninitialized,
             current_queue_item_id: None,
@@ -147,7 +98,7 @@ impl Default for PlayerState {
 
 impl PlayerState {
     pub(crate) fn has_same_non_position_as(&self, other: &Self) -> bool {
-        self.active_engine_kind == other.active_engine_kind
+        self.active_mode == other.active_mode
             && self.connection_state == other.connection_state
             && self.playback_state == other.playback_state
             && self.current_queue_item_id == other.current_queue_item_id

@@ -176,36 +176,36 @@ class HomeController extends ChangeNotifier {
     try {
       final List<RecommendationFolder> folders = await coreBridge
           .getRecommendations();
-      final List<RecommendationFolder> listenBrainzFolders = folders
-          .where(_isListenBrainzFolder)
+      final List<RecommendationFolder> recommendationFolders = folders
+          .where((folder) => folder.itemId.trim().isNotEmpty)
           .toList(growable: false);
 
       final List<Track> recommendations = _tracksFromFolder(
-        listenBrainzFolders,
+        recommendationFolders,
         'recommendations',
       );
       _shuffle(recommendations);
       _recommendationItems = _withFavoriteStatuses(recommendations);
       _genrePlaylists = _withFavoriteStatuses(
         _playlistsFromFolder(
-          listenBrainzFolders,
+          recommendationFolders,
           'genre_playlists',
         ).map(_withNormalizedPlaylistName).take(9).toList(growable: false),
       );
       _artistPlaylists = _withFavoriteStatuses(
         _playlistsFromFolder(
-          listenBrainzFolders,
+          recommendationFolders,
           'artist_playlists',
         ).map(_withNormalizedPlaylistName).toList(growable: false),
       );
       _topTracks = _withFavoriteStatuses(
-        _tracksFromFolder(listenBrainzFolders, 'top_tracks'),
+        _tracksFromFolder(recommendationFolders, 'top_tracks'),
       );
       _topArtists = _withFavoriteStatuses(
-        _artistsFromFolder(listenBrainzFolders, 'top_artists'),
+        _artistsFromFolder(recommendationFolders, 'top_artists'),
       );
       _similarArtistSections = _similarArtistSectionsFromFolders(
-        listenBrainzFolders,
+        recommendationFolders,
       );
     } catch (_) {
       _recommendationItems = const <Track>[];
@@ -256,11 +256,6 @@ class HomeController extends ChangeNotifier {
 
   bool _isValidPlayable(MediaItem item) {
     return item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty;
-  }
-
-  bool _isListenBrainzFolder(RecommendationFolder folder) {
-    return folder.provider.startsWith('listenbrainz_recommendations--') &&
-        folder.itemId.trim().isNotEmpty;
   }
 
   RecommendationFolder? _findFolderById(

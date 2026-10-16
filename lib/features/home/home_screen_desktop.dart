@@ -92,28 +92,32 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
           label: 'Zufällig abspielen',
           isEnabled: item.canPlay,
           icon: Icons.shuffle_outlined,
-          onSelected: () =>
-              widget.coreBridge.queuePlayMedia(<MediaItem>[item], shuffle: true),
+          onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[
+            item,
+          ], shuffle: true),
         ),
       ContextMenuAction(
         label: 'Radio starten',
         isEnabled: item.canPlay,
         icon: Icons.radio_outlined,
-        onSelected: () =>
-            widget.coreBridge.startSendspinRadio(<MediaItem>[item]),
+        onSelected: () => widget.coreBridge.startRadio(<MediaItem>[item]),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         isEnabled: item.canPlay,
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[item], option: QueueOption.next),
+        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[
+          item,
+        ], option: QueueOption.next),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         isEnabled: item.canPlay,
         icon: Icons.last_page,
-        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[item], option: QueueOption.add),
+        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[
+          item,
+        ], option: QueueOption.add),
       ),
       if (primaryArtist != null || primaryAlbum != null) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
@@ -185,7 +189,7 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
                     title: 'Unsere Empfehlungen für dich',
                     isLoading: _controller.isLoadingRecommendations,
                     items: _controller.recommendationItems,
-                    emptyText: 'Keine ListenBrainz-Empfehlungen verfügbar.',
+                    emptyText: 'Keine Empfehlungen verfügbar.',
                     coverSize: 175,
                     height: 215,
                     coreBridge: widget.coreBridge,

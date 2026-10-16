@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../app/theme/app_theme.dart';
 import '../core/core_models.dart';
 import 'settings_log_view.dart';
-import 'settings_listenbrainz_form.dart';
 import 'settings_actions.dart';
 
 class SettingsScreenMobile extends StatelessWidget {
@@ -16,9 +15,6 @@ class SettingsScreenMobile extends StatelessWidget {
     required this.onThemeChanged,
     required this.onLogLevelChanged,
     required this.onSaveLogSnapshot,
-    required this.listenBrainzCredentials,
-    required this.onListenBrainzChanged,
-    required this.onListenBrainzTest,
     required this.onSave,
     required this.onCancel,
     required this.isSaving,
@@ -31,9 +27,6 @@ class SettingsScreenMobile extends StatelessWidget {
   final ValueChanged<bool> onThemeChanged;
   final ValueChanged<LogLevelPreference> onLogLevelChanged;
   final Future<String> Function() onSaveLogSnapshot;
-  final ListenBrainzCredentials listenBrainzCredentials;
-  final ValueChanged<ListenBrainzCredentials> onListenBrainzChanged;
-  final Future<void> Function(ListenBrainzCredentials) onListenBrainzTest;
   final VoidCallback onSave;
   final VoidCallback onCancel;
   final bool isSaving;
@@ -91,17 +84,6 @@ class SettingsScreenMobile extends StatelessWidget {
                   ),
                   const SizedBox(height: 32),
                   Text(
-                    'ListenBrainz',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 12),
-                  SettingsListenBrainzForm(
-                    credentials: listenBrainzCredentials,
-                    onChanged: onListenBrainzChanged,
-                    onTest: onListenBrainzTest,
-                  ),
-                  const SizedBox(height: 32),
-                  Text(
                     'Lokaler Cache',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
@@ -118,7 +100,7 @@ class SettingsScreenMobile extends StatelessWidget {
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    'Zwischen 25 und 1000 MB. Die Einstellung wird in der aktiven Sendspin-Konfiguration gespeichert.',
+                    '25 bis 1000 MB RAM fuer den Mashin-Player.',
                     style: TextStyle(color: colors.textSecondary),
                   ),
                   const SizedBox(height: 32),

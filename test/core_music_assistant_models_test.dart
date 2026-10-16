@@ -64,51 +64,39 @@ void main() {
         createMusicAssistantMediaItemPayload(original),
       );
       if (projected is Playlist) {
-        expect(createMusicAssistantMediaItemPayload(projected)['is_dynamic'], isTrue);
+        expect(
+          createMusicAssistantMediaItemPayload(projected)['is_dynamic'],
+          isTrue,
+        );
       }
     }
     userData.dispose();
   });
 
-  test(
-    'complete queue cache bypasses provider unavailability but partial cache does not',
-    () {
-      final media = Track.fromJson(_mediaJson('track')..['available'] = false);
-      final partial = QueueItem(
-        queueItemId: 'partial',
-        mediaItem: media,
-        available: false,
-        cache: const CacheState(
-          status: CacheStatus.interrupted,
-          cachedDurationMillis: 30000,
-        ),
-      );
-      final complete = QueueItem(
-        queueItemId: 'complete',
-        mediaItem: media,
-        available: false,
-        cache: const CacheState(
-          status: CacheStatus.complete,
-          cachedDurationMillis: 120000,
-        ),
-      );
-      expect(partial.canPlay, isFalse);
-      expect(partial.isAvailable, isFalse);
-      expect(complete.canPlay, isTrue);
-      expect(complete.isAvailable, isTrue);
-      final buffering = QueueItem(
-        queueItemId: 'buffering',
-        mediaItem: media,
-        available: true,
-        cache: const CacheState(
-          status: CacheStatus.buffering,
-          cachedDurationMillis: 120000,
-        ),
-      );
-      expect(buffering.canPlay, isTrue);
-      expect(buffering.isAvailable, isTrue);
-    },
-  );
+  test('queue availability follows MA without local cache overrides', () {
+    final media = Track.fromJson(_mediaJson('track')..['available'] = false);
+    final partial = QueueItem(
+      queueItemId: 'partial',
+      mediaItem: media,
+      available: false,
+    );
+    final complete = QueueItem(
+      queueItemId: 'complete',
+      mediaItem: media,
+      available: true,
+    );
+    expect(partial.canPlay, isFalse);
+    expect(partial.isAvailable, isFalse);
+    expect(complete.canPlay, isTrue);
+    expect(complete.isAvailable, isTrue);
+    final buffering = QueueItem(
+      queueItemId: 'buffering',
+      mediaItem: media,
+      available: true,
+    );
+    expect(buffering.canPlay, isTrue);
+    expect(buffering.isAvailable, isTrue);
+  });
 
   test('availability survives parsing and playback payload serialization', () {
     for (final mediaType in <String>[
@@ -274,42 +262,45 @@ void main() {
     );
   });
 
-  test('YouTube metadata covers survive favorite payload and snapshot parsing', () {
-    MediaItemImage.configureProxyBaseUrl('http://music-assistant.local:8095');
-    final image = <String, dynamic>{
-      'type': 'thumb',
-      'path': 'https://yt3.googleusercontent.com/cover',
-      'provider': 'ytmusic--test',
-      'remotely_accessible': true,
-      'proxy_id': 'youtube-cover',
-    };
-    final track = Track.fromJson(<String, dynamic>{
-      'media_type': 'track',
-      'item_id': 'video',
-      'provider': 'ytmusic--test',
-      'name': 'Track',
-      'uri': 'ytmusic--test://track/video',
-      'image': null,
-      'metadata': <String, dynamic>{
-        'images': <Map<String, dynamic>>[image],
-        'genres': null,
-      },
-    });
-    final payload = createMusicAssistantMediaItemPayload(track);
-    expect(payload['image'], isNull);
-    expect(payload['metadata']['images'].single, image);
-    final restored = Track.fromJson(<String, dynamic>{
-      ...payload,
-      'image': image,
-      'favorite': true,
-    });
-    expect(restored.favorite, isTrue);
-    expect(
-      restored.imageUriForSize(256),
-      'http://music-assistant.local:8095/imageproxy/youtube-cover?size=256',
-    );
-    expect(track.imageUriForSize(256), restored.imageUriForSize(256));
-  });
+  test(
+    'YouTube metadata covers survive favorite payload and snapshot parsing',
+    () {
+      MediaItemImage.configureProxyBaseUrl('http://music-assistant.local:8095');
+      final image = <String, dynamic>{
+        'type': 'thumb',
+        'path': 'https://yt3.googleusercontent.com/cover',
+        'provider': 'ytmusic--test',
+        'remotely_accessible': true,
+        'proxy_id': 'youtube-cover',
+      };
+      final track = Track.fromJson(<String, dynamic>{
+        'media_type': 'track',
+        'item_id': 'video',
+        'provider': 'ytmusic--test',
+        'name': 'Track',
+        'uri': 'ytmusic--test://track/video',
+        'image': null,
+        'metadata': <String, dynamic>{
+          'images': <Map<String, dynamic>>[image],
+          'genres': null,
+        },
+      });
+      final payload = createMusicAssistantMediaItemPayload(track);
+      expect(payload['image'], isNull);
+      expect(payload['metadata']['images'].single, image);
+      final restored = Track.fromJson(<String, dynamic>{
+        ...payload,
+        'image': image,
+        'favorite': true,
+      });
+      expect(restored.favorite, isTrue);
+      expect(
+        restored.imageUriForSize(256),
+        'http://music-assistant.local:8095/imageproxy/youtube-cover?size=256',
+      );
+      expect(track.imageUriForSize(256), restored.imageUriForSize(256));
+    },
+  );
 
   test(
     'encodes direct track and nested model images for typed Rust commands',

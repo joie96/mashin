@@ -4,8 +4,8 @@ use crate::music_assistant::models::identifiers::{AccessToken, PlayerId, UserId}
 use crate::music_assistant::models::media::{MediaItem, MediaType};
 use crate::music_assistant::models::queue::QueueOption;
 use crate::music_assistant::models::session::MusicAssistantServerUrl;
+use crate::playback::local::mashin::models::AudioProfileId;
 use crate::playback::models::{PlayerState, Queue};
-use crate::sendspin::models::SendspinAudioCodec;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -19,7 +19,6 @@ pub(crate) struct QueuePlayMediaRequest {
     pub(crate) start_item: Option<usize>,
     #[serde(default)]
     pub(crate) shuffle: bool,
-    pub(crate) start_download: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -167,26 +166,17 @@ pub(crate) enum MusicAssistantQuery {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum SelectedOutput {
-    Offline(OfflineOutputConfig),
-    Sendspin(SendspinOutputConfig),
+    Local,
     Remote(RemoteOutputConfig),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct OfflineOutputConfig {
-    pub(crate) library_root: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct SendspinOutputConfig {
-    pub(crate) sendspin_url: String,
-    pub(crate) client_id: String,
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LocalOutputConfig {
+    pub(crate) device_id: String,
     pub(crate) client_name: String,
-    pub(crate) downloader_buffer_bytes: u64,
     pub(crate) cache_bytes: usize,
-    pub(crate) preferred_codec: SendspinAudioCodec,
+    pub(crate) audio_profile: AudioProfileId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -237,20 +227,19 @@ impl Default for LogLevelPreference {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SessionConfig {
     pub(crate) music_assistant_url: MusicAssistantServerUrl,
     pub(crate) access_token: Option<AccessToken>,
     pub(crate) user_id: Option<UserId>,
     pub(crate) username: String,
     pub(crate) selected_output: SelectedOutput,
+    pub(crate) local: LocalOutputConfig,
     pub(crate) volume: u8,
     #[serde(default)]
     pub(crate) theme: ThemePreference,
     #[serde(default)]
     pub(crate) log_level: LogLevelPreference,
-    #[serde(default)]
-    pub(crate) listenbrainz: crate::listenbrainz::ListenBrainzCredentials,
 }
 
 #[derive(Deserialize)]
@@ -259,7 +248,6 @@ pub(crate) struct SessionSettingsUpdate {
     pub(crate) local_cache_size_bytes: usize,
     pub(crate) theme: ThemePreference,
     pub(crate) log_level: LogLevelPreference,
-    pub(crate) listenbrainz: crate::listenbrainz::ListenBrainzCredentials,
 }
 
 #[derive(Deserialize)]

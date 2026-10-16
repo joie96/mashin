@@ -11,6 +11,7 @@ import '../../features/core/core_bridge.dart';
 import '../../features/core/core_events.dart';
 import '../../features/core/core_models.dart';
 import '../../features/playerbar/playerbar_overlay.dart';
+import '../../features/playerbar/playback_seek_slider.dart';
 import '../../features/queue/queue_overlay.dart';
 import '../../features/playlist/playlist_name_dialog.dart';
 import '../../features/core/core_userdata.dart';
@@ -92,7 +93,7 @@ class _AppShellState extends State<AppShell> {
   MashinCoreBridgeEvents get _coreEvents => widget.session.coreEvents;
   MashinCoreBridgeApi get _coreBridge => widget.session.coreBridge;
   UserData? get _userDataController => widget.session.userDataController;
-  String get _preferredCodec => widget.session.preferredCodec;
+  String get _audioProfile => widget.session.audioProfile;
   bool get _canGoBack => widget.navigatorKey.currentState?.canPop() ?? false;
 
   List<Playlist> get _sidebarPlaylists =>
@@ -540,7 +541,7 @@ class _AppShellState extends State<AppShell> {
                     currentTrackInfo:
                         currentTrackInfo ?? const SizedBox.shrink(),
                     playbackState:
-                        _coreEvents.mediaSessionState.playerState.playbackState,
+                      _coreEvents.mediaSessionState.playerState.playbackState,
                     currentSeconds: _currentTrackPositionSeconds,
                     maxSeconds: _currentTrackMaxSeconds,
                     trackTransitionKey: _currentQueueItem?.queueItemId ?? '',
@@ -970,17 +971,23 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _shuffleSidebarPlaylist(Playlist playlist) async {
     final List<Track> tracks = _playlistTracks(playlist);
-    if (tracks.isNotEmpty) await _coreBridge.queuePlayMedia(tracks, shuffle: true);
+    if (tracks.isNotEmpty) {
+      await _coreBridge.queuePlayMedia(tracks, shuffle: true);
+    }
   }
 
   Future<void> _playSidebarPlaylistNext(Playlist playlist) async {
     final List<Track> tracks = _playlistTracks(playlist);
-    if (tracks.isNotEmpty) await _coreBridge.queuePlayMedia(tracks, option: QueueOption.next);
+    if (tracks.isNotEmpty) {
+      await _coreBridge.queuePlayMedia(tracks, option: QueueOption.next);
+    }
   }
 
   Future<void> _playSidebarPlaylistLast(Playlist playlist) async {
     final List<Track> tracks = _playlistTracks(playlist);
-    if (tracks.isNotEmpty) await _coreBridge.queuePlayMedia(tracks, option: QueueOption.add);
+    if (tracks.isNotEmpty) {
+      await _coreBridge.queuePlayMedia(tracks, option: QueueOption.add);
+    }
   }
 
   Future<void> _deleteSidebarPlaylist(Playlist playlist) async {
@@ -1097,11 +1104,11 @@ class _AppShellState extends State<AppShell> {
       await const AppContextMenuController().showCustomContextMenu(
         context: context,
         anchorContext: anchorContext,
-        width: 240,
-        height: 230,
+        width: 280,
+        height: 420,
         child: _AudioOptionsMenu(
-          selectedCodec: _preferredCodec,
-          onSelected: _setPreferredAudioCodec,
+          selectedAudioProfile: _audioProfile,
+          onSelected: _setAudioProfile,
         ),
       );
     } finally {
@@ -1111,18 +1118,18 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  Future<void> _setPreferredAudioCodec(String codec) async {
+  Future<void> _setAudioProfile(String audioProfile) async {
     Navigator.of(context, rootNavigator: true).pop();
-    if (codec == _preferredCodec) {
+    if (audioProfile == _audioProfile) {
       return;
     }
 
     try {
-      await widget.session.setPreferredCodec(codec);
+      await widget.session.setAudioProfile(audioProfile);
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Codecwechsel fehlgeschlagen: $error')),
+          SnackBar(content: Text('Profilwechsel fehlgeschlagen: $error')),
         );
       }
     }
@@ -1857,10 +1864,17 @@ class _DesktopPlayerBar extends StatelessWidget {
                               ),
                               thumbColor: colors.textSecondary,
                               activeTrackColor: colors.textSecondary,
+                              secondaryActiveTrackColor: colors.textTertiary,
                               inactiveTrackColor: colors.bgTertiary,
                             ),
-                            child: _SeekSlider(
+                            child: PlaybackSeekSlider(
                               value: clampedCurrentSeconds,
+                              bufferedValue:
+                                  clampedMaxSeconds > 0 &&
+                                      playbackState.bufferedPositionMillis !=
+                                          null
+                                  ? playbackState.bufferedPositionMillis! / 1000
+                                  : null,
                               min: 0,
                               max: clampedMaxSeconds > 0
                                   ? clampedMaxSeconds
@@ -1958,11 +1972,11 @@ class _DesktopPlayerBar extends StatelessWidget {
 
 class _AudioOptionsMenu extends StatelessWidget {
   const _AudioOptionsMenu({
-    required this.selectedCodec,
+    required this.selectedAudioProfile,
     required this.onSelected,
   });
 
-  final String selectedCodec;
+  final String selectedAudioProfile;
   final ValueChanged<String> onSelected;
 
   @override
@@ -1976,7 +1990,7 @@ class _AudioOptionsMenu extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: RadioGroup<String>(
-          groupValue: selectedCodec,
+          groupValue: selectedAudioProfile,
           onChanged: (String? value) {
             if (value != null) {
               onSelected(value);
@@ -1997,17 +2011,17 @@ class _AudioOptionsMenu extends StatelessWidget {
                   ),
                 ),
               ),
-              _AudioCodecOption(
-                value: 'opus',
-                title: 'Standard',
-                subtitle: 'Opus 256 kb/s',
-              ),
-              _AudioCodecOption(
+              _AudioProfileOption(
                 value: 'flac',
                 title: 'High Fidelity',
                 subtitle: 'FLAC',
               ),
-              _AudioCodecOption(value: 'pcm', title: 'Studio', subtitle: 'PCM'),
+              for (final bitrate in [96, 128, 192, 256])
+                _AudioProfileOption(
+                  value: 'opus_${bitrate}k',
+                  title: 'Opus $bitrate kb/s',
+                  subtitle: 'Opus',
+                ),
             ],
           ),
         ),
@@ -2016,8 +2030,8 @@ class _AudioOptionsMenu extends StatelessWidget {
   }
 }
 
-class _AudioCodecOption extends StatelessWidget {
-  const _AudioCodecOption({
+class _AudioProfileOption extends StatelessWidget {
+  const _AudioProfileOption({
     required this.value,
     required this.title,
     required this.subtitle,
@@ -2209,70 +2223,6 @@ class _TransportControlButton extends StatelessWidget {
           color: onTap == null ? color.withValues(alpha: 0.45) : color,
         ),
       ),
-    );
-  }
-}
-
-class _SeekSlider extends StatefulWidget {
-  final double value;
-  final double min;
-  final double max;
-  final bool enabled;
-  final Future<void> Function(double) onSeek;
-
-  const _SeekSlider({
-    required this.value,
-    required this.min,
-    required this.max,
-    required this.enabled,
-    required this.onSeek,
-  });
-
-  @override
-  State<_SeekSlider> createState() => _SeekSliderState();
-}
-
-class _SeekSliderState extends State<_SeekSlider> {
-  bool _isDragging = false;
-  double? _dragValue;
-
-  @override
-  void didUpdateWidget(covariant _SeekSlider oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!_isDragging) {
-      _dragValue = null;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final double effectiveValue =
-        (_isDragging ? (_dragValue ?? widget.value) : widget.value)
-            .clamp(widget.min, widget.max)
-            .toDouble();
-
-    return Slider(
-      value: effectiveValue,
-      min: widget.min,
-      max: widget.max,
-      padding: EdgeInsets.zero,
-      onChanged: widget.enabled
-          ? (double next) {
-              setState(() {
-                _isDragging = true;
-                _dragValue = next;
-              });
-            }
-          : null,
-      onChangeEnd: widget.enabled
-          ? (double next) {
-              setState(() {
-                _isDragging = false;
-                _dragValue = null;
-              });
-              unawaited(widget.onSeek(next));
-            }
-          : null,
     );
   }
 }

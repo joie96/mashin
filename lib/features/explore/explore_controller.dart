@@ -45,12 +45,7 @@ class ExploreController extends ChangeNotifier {
     try {
       final List<RecommendationFolder> folders = await coreBridge
           .getRecommendations();
-      final List<RecommendationFolder> listenBrainzFolders = folders
-          .where(_isListenBrainzFolder)
-          .toList(growable: false);
-      _similarArtistSections = _similarArtistSectionsFromFolders(
-        listenBrainzFolders,
-      );
+      _similarArtistSections = _similarArtistSectionsFromFolders(folders);
     } catch (_) {
       _similarArtistSections = const <ExploreSimilarArtistSection>[];
     } finally {
@@ -85,11 +80,6 @@ class ExploreController extends ChangeNotifier {
     return items
         .map((T item) => controller.withFavoriteStatus(item))
         .toList(growable: false);
-  }
-
-  bool _isListenBrainzFolder(RecommendationFolder folder) {
-    return folder.provider.startsWith('listenbrainz_recommendations--') &&
-        folder.itemId.trim().isNotEmpty;
   }
 
   bool _isValidPlayable(MediaItem item) {

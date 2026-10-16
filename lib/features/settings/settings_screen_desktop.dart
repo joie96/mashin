@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../app/theme/app_theme.dart';
 import '../core/core_models.dart';
 import 'settings_log_view.dart';
-import 'settings_listenbrainz_form.dart';
 import 'settings_actions.dart';
 
 const double _desktopSettingsControlWidth = 280;
@@ -44,9 +43,6 @@ class SettingsScreenDesktop extends StatelessWidget {
     required this.onThemeChanged,
     required this.onLogLevelChanged,
     required this.onSaveLogSnapshot,
-    required this.listenBrainzCredentials,
-    required this.onListenBrainzChanged,
-    required this.onListenBrainzTest,
     required this.onSave,
     required this.onCancel,
     required this.isSaving,
@@ -59,9 +55,6 @@ class SettingsScreenDesktop extends StatelessWidget {
   final ValueChanged<bool> onThemeChanged;
   final ValueChanged<LogLevelPreference> onLogLevelChanged;
   final Future<String> Function() onSaveLogSnapshot;
-  final ListenBrainzCredentials listenBrainzCredentials;
-  final ValueChanged<ListenBrainzCredentials> onListenBrainzChanged;
-  final Future<void> Function(ListenBrainzCredentials) onListenBrainzTest;
   final VoidCallback onSave;
   final VoidCallback onCancel;
   final bool isSaving;
@@ -114,9 +107,6 @@ class SettingsScreenDesktop extends StatelessWidget {
                         cacheSizeController: cacheSizeController,
                         isDarkTheme: isDarkTheme,
                         onThemeChanged: onThemeChanged,
-                        listenBrainzCredentials: listenBrainzCredentials,
-                        onListenBrainzChanged: onListenBrainzChanged,
-                        onListenBrainzTest: onListenBrainzTest,
                       ),
                       _DesktopLogTab(
                         logLevel: logLevel,
@@ -192,18 +182,12 @@ class _DesktopSettingsForm extends StatelessWidget {
     required this.cacheSizeController,
     required this.isDarkTheme,
     required this.onThemeChanged,
-    required this.listenBrainzCredentials,
-    required this.onListenBrainzChanged,
-    required this.onListenBrainzTest,
   });
 
   final String musicAssistantUrl;
   final TextEditingController cacheSizeController;
   final bool isDarkTheme;
   final ValueChanged<bool> onThemeChanged;
-  final ListenBrainzCredentials listenBrainzCredentials;
-  final ValueChanged<ListenBrainzCredentials> onListenBrainzChanged;
-  final Future<void> Function(ListenBrainzCredentials) onListenBrainzTest;
 
   @override
   Widget build(BuildContext context) {
@@ -231,29 +215,10 @@ class _DesktopSettingsForm extends StatelessWidget {
         ),
         const _DesktopSettingsDivider(),
         _DesktopSettingsSection(
-          title: 'ListenBrainz',
-          child: SettingsListenBrainzForm(
-            credentials: listenBrainzCredentials,
-            onChanged: onListenBrainzChanged,
-            onTest: onListenBrainzTest,
-            fieldDecoration: (icon) =>
-                _desktopSettingsFieldDecoration(colors: colors, icon: icon),
-            rowBuilder: (label, control) => _DesktopSettingRow(
-              title: label,
-              control: SizedBox(
-                width: _desktopSettingsControlWidth,
-                child: control,
-              ),
-            ),
-          ),
-        ),
-        const _DesktopSettingsDivider(),
-        _DesktopSettingsSection(
           title: 'Wiedergabe',
           child: _DesktopSettingRow(
             title: 'Lokaler Cache',
-            description:
-                'Zwischen 25 und 1000 MB. Die Einstellung wird in der aktiven Sendspin-Konfiguration gespeichert.',
+            description: '25 bis 1000 MB RAM fuer den Mashin-Player.',
             control: SizedBox(
               width: _desktopSettingsControlWidth,
               child: TextField(

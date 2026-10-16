@@ -52,7 +52,7 @@ class PlaybackSnapshotMapperTest {
     @Test
     fun activeLocalPlaybackProjectsItsCanonicalQueueAndBufferedPosition() {
         val snapshot = PlaybackSnapshotMapper.fromPlayerState(
-            JSONObject("""{"activeEngineKind":"sendspin","playbackState":"playing","currentQueueItemId":"second","positionMillis":2500,"bufferedPositionMillis":1000,"volume":150,"muted":true}"""),
+            JSONObject("""{"activeMode":"local","playbackState":"playing","currentQueueItemId":"second","positionMillis":2500,"bufferedPositionMillis":1000,"volume":150,"muted":true}"""),
             JSONObject("""{"items":[{"queue_item_id":"first","name":"First"},{"queue_item_id":"second","name":"Second","duration":60}],"repeatMode":"one","shuffleEnabled":true}"""),
         )
         assertEquals(PlaybackStatus.Playing, snapshot.status)
@@ -99,7 +99,7 @@ class PlaybackSnapshotMapperTest {
     @Test
     fun remoteAndEmptyBufferingStatesNeverInventALocalTimeline() {
         val snapshot = PlaybackSnapshotMapper.fromPlayerState(
-            JSONObject("""{"activeEngineKind":"remote","playbackState":"buffering"}"""), JSONObject("{}"),
+            JSONObject("""{"activeMode":"remote","playbackState":"buffering"}"""), JSONObject("{}"),
         )
         assertFalse(snapshot.isLocalPlayback)
         assertTrue(snapshot.hasPlaybackIntent)
@@ -113,6 +113,16 @@ class PlaybackSnapshotMapperTest {
         assertEquals(request, PlaybackSessionCommands.decode(PlaybackSessionCommands.encode(request)))
         assertThrows(IllegalArgumentException::class.java) {
             PlaybackSessionCommands.decode(Bundle().apply { putString(PlaybackSessionCommands.COMMAND_KEY, "seekSeconds") })
+        }
+    }
+
+    @Test
+    fun unknownModesNeverAcquireLocalPlaybackOwnership() {
+        for (mode in listOf("mashin", "sendspin", "offline", "")) {
+            val snapshot = PlaybackSnapshotMapper.fromPlayerState(
+                JSONObject().put("activeMode", mode), JSONObject("{}"),
+            )
+            assertFalse(snapshot.isLocalPlayback)
         }
     }
 }

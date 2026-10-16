@@ -112,13 +112,17 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
         isEnabled: track.canPlay,
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[track], option: QueueOption.next),
+        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[
+          track,
+        ], option: QueueOption.next),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         isEnabled: track.canPlay,
         icon: Icons.last_page,
-        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[track], option: QueueOption.add),
+        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[
+          track,
+        ], option: QueueOption.add),
       ),
       if (primaryArtist != null || primaryAlbum != null) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
@@ -185,7 +189,8 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
           label: 'Zufällig abspielen',
           isEnabled: targets.any((target) => target.canPlay),
           icon: Icons.shuffle_outlined,
-          onSelected: () => widget.coreBridge.queuePlayMedia(targets, shuffle: true),
+          onSelected: () =>
+              widget.coreBridge.queuePlayMedia(targets, shuffle: true),
         ),
       ContextMenuAction(
         label: 'Radio starten',
@@ -193,20 +198,22 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
         icon: Icons.radio_outlined,
         onSelected: () => item is Artist && isSingleTarget
             ? _controller.startArtistRadio(item)
-            : widget.coreBridge.startSendspinRadio(targets),
+            : widget.coreBridge.startRadio(targets),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
         isEnabled: targets.any((target) => target.canPlay),
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-          onSelected: () => widget.coreBridge.queuePlayMedia(targets, option: QueueOption.next),
+        onSelected: () =>
+            widget.coreBridge.queuePlayMedia(targets, option: QueueOption.next),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
         isEnabled: targets.any((target) => target.canPlay),
         icon: Icons.last_page,
-          onSelected: () => widget.coreBridge.queuePlayMedia(targets, option: QueueOption.add),
+        onSelected: () =>
+            widget.coreBridge.queuePlayMedia(targets, option: QueueOption.add),
       ),
     ];
 

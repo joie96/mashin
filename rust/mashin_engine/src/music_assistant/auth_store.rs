@@ -1,6 +1,29 @@
 //! Persistent session storage contract for platform secure-storage adapters.
 
 use crate::core::models::SessionConfig;
+use serde::{Deserialize, Serialize};
+
+const SESSION_STORAGE_VERSION: u8 = 3;
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StoredSession {
+    format_version: u8,
+    session: SessionConfig,
+}
+
+fn decode_session(serialized: &str) -> Option<SessionConfig> {
+    let stored = serde_json::from_str::<StoredSession>(serialized).ok()?;
+    (stored.format_version == SESSION_STORAGE_VERSION).then_some(stored.session)
+}
+
+fn encode_session(session: SessionConfig) -> Result<String, String> {
+    serde_json::to_string(&StoredSession {
+        format_version: SESSION_STORAGE_VERSION,
+        session,
+    })
+    .map_err(|_| "encode secure session failed".to_string())
+}
 
 pub(crate) trait AuthStore {
     // Session values include credentials and must only be provided by secure platform storage.
@@ -41,15 +64,18 @@ struct AndroidAuthStore;
 impl AuthStore for AndroidAuthStore {
     fn load_session(&self) -> Result<Option<SessionConfig>, String> {
         let serialized_session = crate::jni::android_context::read_secure_session()?;
-        serialized_session
-            .map(|value| serde_json::from_str(&value))
-            .transpose()
-            .map_err(|error| format!("decode Android secure session failed: {error}"))
+        let Some(serialized_session) = serialized_session else {
+            return Ok(None);
+        };
+        if let Some(session) = decode_session(&serialized_session) {
+            return Ok(Some(session));
+        }
+        self.clear_session()?;
+        Ok(None)
     }
 
     fn save_session(&self, session: SessionConfig) -> Result<(), String> {
-        let serialized_session = serde_json::to_string(&session)
-            .map_err(|error| format!("encode Android secure session failed: {error}"))?;
+        let serialized_session = encode_session(session)?;
         crate::jni::android_context::write_secure_session(&serialized_session)
     }
 
@@ -130,14 +156,15 @@ impl AuthStore for KeyringAuthStore {
             Err(keyring::Error::NoEntry) => return Ok(None),
             Err(error) => return Err(format!("read secure session credential failed: {error}")),
         };
-        serde_json::from_str(&serialized_session)
-            .map(Some)
-            .map_err(|error| format!("decode secure session credential failed: {error}"))
+        if let Some(session) = decode_session(&serialized_session) {
+            return Ok(Some(session));
+        }
+        self.clear_session()?;
+        Ok(None)
     }
 
     fn save_session(&self, session: SessionConfig) -> Result<(), String> {
-        let serialized_session = serde_json::to_string(&session)
-            .map_err(|error| format!("encode secure session credential failed: {error}"))?;
+        let serialized_session = encode_session(session)?;
         self.credential_entry()?
             .set_password(&serialized_session)
             .map_err(|error| format!("save secure session credential failed: {error}"))
@@ -153,13 +180,10 @@ impl AuthStore for KeyringAuthStore {
 
 #[cfg(test)]
 mod tests {
-    use super::AuthStore;
-    use crate::core::models::{
-        LogLevelPreference, SelectedOutput, SendspinOutputConfig, SessionConfig, ThemePreference,
-    };
+    use super::{decode_session, encode_session, AuthStore};
+    use crate::core::models::{LogLevelPreference, SelectedOutput, SessionConfig, ThemePreference};
     use crate::music_assistant::models::identifiers::AccessToken;
     use crate::music_assistant::models::session::MusicAssistantServerUrl;
-    use crate::sendspin::models::SendspinAudioCodec;
     use std::sync::Mutex;
 
     struct InMemoryAuthStore {
@@ -205,28 +229,33 @@ mod tests {
             access_token: Some(AccessToken("secret-token".into())),
             user_id: None,
             username: "mashin".into(),
-            selected_output: SelectedOutput::Sendspin(SendspinOutputConfig {
-                sendspin_url: "ws://sendspin.example".into(),
-                client_id: "mashin-test".into(),
-                client_name: "Mashin Test".into(),
-                downloader_buffer_bytes: 1_024,
-                cache_bytes: 2_048,
-                preferred_codec: SendspinAudioCodec::Pcm,
-            }),
+            selected_output: SelectedOutput::Local,
+            local: crate::core::config::default_local_output(),
             volume: 100,
             theme: ThemePreference::Dark,
             log_level: LogLevelPreference::Info,
-            listenbrainz: Default::default(),
         }
+    }
+
+    #[test]
+    fn unversioned_and_corrupt_sessions_require_fresh_login() {
+        let legacy = serde_json::to_string(&session_config()).unwrap();
+        assert!(decode_session(&legacy).is_none());
+        assert!(decode_session("not-json").is_none());
+        assert!(decode_session(r#"{"formatVersion":255,"session":{}}"#).is_none());
+    }
+
+    #[test]
+    fn versioned_sessions_round_trip_without_a_legacy_decoder() {
+        let session = session_config();
+        let serialized = encode_session(session.clone()).unwrap();
+        assert_eq!(decode_session(&serialized), Some(session));
     }
 
     #[test]
     fn auth_store_round_trips_and_clears_session_configurations() {
         let store = InMemoryAuthStore::new();
-        let mut session = session_config();
-        session.listenbrainz = crate::listenbrainz::ListenBrainzCredentials {
-            username: "listener".into(), token: "listenbrainz-secret".into(),
-        };
+        let session = session_config();
 
         assert_eq!(store.load_session().expect("load empty session"), None);
         store
@@ -242,10 +271,16 @@ mod tests {
     }
 
     #[test]
-    fn existing_sessions_restore_without_listenbrainz_credentials() {
-        let mut serialized = serde_json::to_value(session_config()).unwrap();
-        serialized.as_object_mut().unwrap().remove("listenbrainz");
-        let restored: SessionConfig = serde_json::from_value(serialized).unwrap();
-        assert_eq!(restored.listenbrainz, crate::listenbrainz::ListenBrainzCredentials::default());
+    fn previous_schema_and_legacy_outputs_require_a_fresh_login() {
+        let serialized = encode_session(session_config()).unwrap();
+        let mut previous: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+        previous["formatVersion"] = serde_json::json!(1);
+        assert!(decode_session(&previous.to_string()).is_none());
+        previous["formatVersion"] = serde_json::json!(2);
+        assert!(decode_session(&previous.to_string()).is_none());
+        previous["formatVersion"] = serde_json::json!(3);
+        previous["session"]["selectedOutput"] =
+            serde_json::json!({"offline":{"libraryRoot":"old"}});
+        assert!(decode_session(&previous.to_string()).is_none());
     }
 }

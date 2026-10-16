@@ -28,7 +28,7 @@ pub(crate) struct PlayerMedia {
     #[serde(default)]
     pub(crate) image_url: Option<String>,
     #[serde(default)]
-    pub(crate) duration: Option<u32>,
+    pub(crate) duration: Option<f64>,
     #[serde(default)]
     pub(crate) queue_item_id: Option<QueueItemId>,
 }

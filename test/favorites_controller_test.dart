@@ -83,13 +83,12 @@ class _FakeFavoritesCoreBridge extends Fake implements MashinCoreBridgeApi {
     QueueOption option = QueueOption.play,
     int? startItem,
     bool shuffle = false,
-    bool startDownload = true,
   }) async {
     playedItems = items;
   }
 
   @override
-  Future<void> startSendspinRadio(List<MediaItem> items) async {
+  Future<void> startRadio(List<MediaItem> items) async {
     radioSeeds = items;
   }
 }

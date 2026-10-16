@@ -140,7 +140,10 @@ void main() {
       appRouter.router.go(location);
       await tester.pumpAndSettle();
 
-      expect(appRouter.router.routeInformationProvider.value.uri.path, '/login');
+      expect(
+        appRouter.router.routeInformationProvider.value.uri.path,
+        '/login',
+      );
       expect(find.text('Bei Music Assistant anmelden'), findsOneWidget);
       expect(tester.takeException(), isNull);
     }
@@ -166,7 +169,7 @@ void main() {
 
     final session = AppSessionController();
     await tester.pumpWidget(MashinApp(session: session));
-    await session.initialize();
+    await tester.runAsync(session.initialize);
     await tester.pumpAndSettle();
 
     expect(find.text('Bei Music Assistant anmelden'), findsOneWidget);
