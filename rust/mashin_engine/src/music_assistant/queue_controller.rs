@@ -8,7 +8,7 @@ use super::models::player::MusicAssistantPlayer;
 use super::models::queue::{MusicAssistantQueue, PlayState};
 use super::queue_projection::{QueueProjection, QueueSnapshotRequest};
 use crate::playback::mode::PlaybackMode;
-use crate::playback::models::{PlaybackConnectionState, PlayerState, Queue};
+use crate::playback::models::{MediaSessionState, PlaybackConnectionState, PlayerState, Queue};
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
@@ -62,6 +62,14 @@ impl MusicAssistantQueueController {
     pub(crate) fn remote_player_state(&self) -> PlayerState {
         let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         project_remote_player(&state)
+    }
+
+    pub(crate) fn synchronized_snapshot(&self) -> Option<MediaSessionState> {
+        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        (state.is_connected && state.projection.is_synchronized()).then(|| MediaSessionState {
+            queue: state.projection.queue().clone(),
+            player_state: project_remote_player(&state),
+        })
     }
 
     pub(crate) fn is_synchronized(&self) -> bool {
@@ -164,6 +172,9 @@ async fn run_projection(
                 match result {
                     (request, player_revision, Ok(response)) => {
                         let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
+                        if !state.is_connected || request != state.projection.begin_snapshot() {
+                            continue;
+                        }
                         if response.queue.queue_id != state.projection.queue().queue_id {
                             state.projection.select_queue(response.queue.queue_id.clone());
                         } else if state.is_connected && state.projection.apply_snapshot(request, response.queue) {

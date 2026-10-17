@@ -1,4 +1,4 @@
-//! Mashin presents MA's queue but projects position and output controls from its DAC.
+//! Mashin imports the initial MA selection once; subsequent playback belongs to its DAC.
 //! Deactivating this presentation never drops the session-owned audio receiver.
 
 use crate::audio::models::AudioCommand;
@@ -133,28 +133,39 @@ impl PlaybackBackend for LocalPlayback {
         shuffle: bool,
     ) -> Result<(), String> {
         self.synchronize_projection()?;
+        self.take_local_authority();
         self.target
             .queue_play_media(media, option, start_item, shuffle)
     }
     fn move_queue_item(&mut self, item_id: QueueItemId, position_shift: i32) -> Result<(), String> {
+        self.take_local_authority();
         self.target.move_queue_item(item_id, position_shift)
     }
     fn move_queue_item_to_end(&mut self, item_id: QueueItemId) -> Result<(), String> {
+        self.take_local_authority();
         self.target.move_queue_item_to_end(item_id)
     }
     fn delete_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {
+        self.take_local_authority();
         self.target.delete_queue_item(item_id)
     }
     fn select_queue_item(&mut self, id: QueueItemId) -> Result<(), String> {
+        self.take_local_authority();
         self.target.select_queue_item(id)
     }
     fn play_queue_index(&mut self, index: usize) -> Result<(), String> {
+        self.take_local_authority();
         self.target.play_queue_index(index)
     }
 
     // Manual next consumes only MA's already registered successor grant, even offline.
     // Local transport and shared queue preferences.
     fn transport_play(&mut self) -> Result<(), String> {
+        self.synchronize_projection()?;
+        self.take_local_authority();
+        if self.session.as_ref().is_some_and(|session| session.output.snapshot().current.is_none()) {
+            return self.target.transport_play();
+        }
         self.local_command(AudioCommand::Play { stream_id: None })
     }
     fn transport_pause(&mut self) -> Result<(), String> {
@@ -165,6 +176,7 @@ impl PlaybackBackend for LocalPlayback {
         self.record_failure(result);
     }
     fn transport_next(&mut self) -> Result<(), String> {
+        self.take_local_authority();
         if let Some(session) = self.session.as_ref() {
             let snapshot = session.output.snapshot();
             if let (Some(current), Some(prepared)) = (snapshot.current, snapshot.prepared) {
@@ -181,10 +193,12 @@ impl PlaybackBackend for LocalPlayback {
         self.target.transport_next()
     }
     fn transport_previous(&mut self) -> Result<(), String> {
+        self.take_local_authority();
         self.target.transport_previous()
     }
     fn transport_seek(&mut self, seconds: f64) -> Result<(), String> {
         let position_millis = seek_position_millis(seconds)?;
+        self.take_local_authority();
         let session = self
             .session
             .as_ref()
@@ -240,12 +254,15 @@ impl PlaybackBackend for LocalPlayback {
         self.record_failure(result);
     }
     fn set_shuffle(&mut self, enabled: bool) {
+        self.take_local_authority();
         self.target.set_shuffle(enabled);
     }
     fn set_repeat_mode(&mut self, mode: RepeatMode) {
+        self.take_local_authority();
         self.target.set_repeat_mode(mode);
     }
     fn set_autoplay(&mut self, enabled: bool) {
+        self.take_local_authority();
         self.target.set_autoplay(enabled);
     }
     fn take_pending_commands(&mut self) -> Vec<PlaybackCommand> {
@@ -254,7 +271,7 @@ impl PlaybackBackend for LocalPlayback {
         commands
     }
 
-    // Only queue metadata comes from MA; audible position never uses server elapsed time.
+    // Only the initial selection uses MA timing; audible playback always uses local timing.
     // Queue and audible player projections.
     fn queue(&self) -> Queue {
         self.media_session_state().queue
@@ -304,8 +321,9 @@ impl LocalPlayback {
         };
         let output = session.output.snapshot();
         let stream_id = output.current.as_ref().map(|stream| stream.stream_id);
+        let synchronized = self.target.synchronized_snapshot();
         let mut state = project_media_session_state(
-                self.target.queue(),
+            synchronized.as_ref().map(|snapshot| snapshot.queue.clone()).unwrap_or_else(|| self.target.queue()),
                 &output,
                 &session.receiver.snapshot(),
                 self.last_queue.as_ref(),
@@ -316,6 +334,14 @@ impl LocalPlayback {
                 revision: output.resume.output_revision,
                 state: state.player_state.playback_state,
             }, Instant::now());
+        let has_local_activity = output.current.is_some()
+            || output.resume.output_revision != 0
+            || matches!(state.player_state.playback_state, PlayState::Buffering | PlayState::Error);
+        session.queue_bootstrap.lock().expect("queue bootstrap lock poisoned").project(
+            &mut state,
+            synchronized.as_ref(),
+            has_local_activity,
+        );
         (state, stream_id)
     }
 
@@ -340,6 +366,12 @@ impl LocalPlayback {
     }
 
     // Native command adaptation and MA projection synchronization.
+    fn take_local_authority(&self) {
+        if let Some(session) = &self.session {
+            session.queue_bootstrap.lock().expect("queue bootstrap lock poisoned").take_local_authority();
+        }
+    }
+
     fn local_command(&mut self, command: AudioCommand) -> Result<(), String> {
         let output = self
             .session
@@ -347,6 +379,9 @@ impl LocalPlayback {
             .ok_or("Mashin session is not configured")?
             .output
             .pipeline();
+        if !matches!(command, AudioCommand::SetVolume { .. } | AudioCommand::SetMute { .. }) {
+            self.take_local_authority();
+        }
         self.pending_commands.push(Box::pin(async move {
             output.execute(command).await.map(|_| ())
         }));
@@ -378,6 +413,7 @@ impl LocalPlayback {
                 connection: session.connection.clone(),
             })?;
         self.target.activate()?;
+        session.queue_bootstrap.lock().expect("queue bootstrap lock poisoned").start_loading();
         self.projected_player_id = Some(player_id);
         Ok(())
     }

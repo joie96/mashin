@@ -11,7 +11,7 @@ use crate::music_assistant::queue_controller::MusicAssistantQueueController;
 use crate::music_assistant::queue_projection::QueueSnapshotRequest;
 use crate::playback::backend::PlaybackCommand;
 use crate::playback::mode::PlaybackMode;
-use crate::playback::models::{PlayerState, Queue};
+use crate::playback::models::{MediaSessionState, PlayerState, Queue};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -211,6 +211,10 @@ impl MusicAssistantPlaybackTarget {
         self.projection
             .as_ref()
             .map(MusicAssistantQueueController::revision)
+    }
+
+    pub(crate) fn synchronized_snapshot(&self) -> Option<MediaSessionState> {
+        self.projection.as_ref()?.synchronized_snapshot()
     }
 
     // Command serialization and asynchronous error delivery.
