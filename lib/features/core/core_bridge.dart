@@ -117,7 +117,7 @@ abstract class MashinCoreBridgeApi {
   Future<void> setMuted(bool muted);
   Future<void> queuePlayMedia(
     List<MediaItem> mediaItems, {
-    QueueOption option = QueueOption.play,
+    QueueOption option = QueueOption.replace,
     int? startItem,
     bool shuffle = false,
   });
@@ -645,7 +645,7 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   @override
   Future<void> queuePlayMedia(
     List<MediaItem> mediaItems, {
-    QueueOption option = QueueOption.play,
+    QueueOption option = QueueOption.replace,
     int? startItem,
     bool shuffle = false,
   }) => _submitVoidOperation('queuePlayMedia', <String, Object?>{
