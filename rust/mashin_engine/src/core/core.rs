@@ -4,6 +4,7 @@ use super::config::{session_settings, SessionSettings};
 use super::models::{
     CoreError, MediaSessionEvent, MusicAssistantQuery, MusicAssistantQueryRequest, SessionConfig,
 };
+use crate::core::event_channel::publish_background_event;
 use crate::logging::Logger;
 use crate::music_assistant::auth_store::{platform_auth_store, AuthStore};
 use crate::music_assistant::client::MusicAssistantClient;
@@ -11,6 +12,7 @@ use crate::music_assistant::models::identifiers::MediaId;
 use crate::music_assistant::models::media::{
     Album, Artist, MediaItem, MediaType, MusicAssistantSearchResults, Playlist, Track,
 };
+use crate::music_assistant::models::queue::QueueOption;
 use crate::music_assistant::models::recommendation::MusicAssistantRecommendationFolder;
 use crate::music_assistant::models::session::ProviderManifest;
 use crate::music_assistant::playlist_collage::build_playlist_collage;
@@ -285,21 +287,33 @@ where
     };
     let resolved_media_items = expand_local_playlist_media(media_items, user_data.as_ref())
         .map_err(CoreError::command_failed)?;
+    CORE_NETWORK_RUNTIME.block_on(execute_resolved_media_command(
+        resolved_media_items,
+        operation,
+    ))
+}
+
+// Shared media execution releases core ownership while the queued backend commands await I/O.
+async fn execute_resolved_media_command<F>(
+    media_items: Vec<MediaItem>,
+    operation: F,
+) -> Result<Vec<MediaSessionEvent>, CoreError>
+where
+    F: FnOnce(&mut PlaybackEngine, Vec<MediaItem>) -> Result<(), String>,
+{
     let mut coordinator = CORE_COORDINATOR
         .lock()
         .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
     let queue_before = coordinator.playback.queue();
     let player_state_before = coordinator.playback.player_state();
-    let result = operation(&mut coordinator.playback, resolved_media_items);
+    let result = operation(&mut coordinator.playback, media_items);
     let commands = coordinator
         .take_pending_commands()
         .map_err(CoreError::command_failed)?;
     result.map_err(CoreError::command_failed)?;
     drop(coordinator);
     for command in commands {
-        CORE_NETWORK_RUNTIME
-            .block_on(command)
-            .map_err(CoreError::command_failed)?;
+        command.await.map_err(CoreError::command_failed)?;
     }
     let coordinator = CORE_COORDINATOR
         .lock()
@@ -941,11 +955,71 @@ pub(crate) fn remove_playlist_tracks(
         .map_err(CoreError::command_failed)
 }
 
-// Radio is a single MA queue command, not a second client-side recommendation engine.
+// Radio I/O leaves transport responsive; each queue write validates its original selection.
 pub(crate) fn start_radio_and_execute_command(
     media_items: Vec<MediaItem>,
 ) -> Result<Vec<MediaSessionEvent>, CoreError> {
-    resolve_media_and_execute_command(media_items, |playback, media| playback.start_radio(media))
+    let (client, selection_revision) = {
+        let _command_guard = CORE_COMMAND_SERIALIZER
+            .lock()
+            .map_err(|_| CoreError::internal("core command serializer lock poisoned"))?;
+        let mut coordinator = CORE_COORDINATOR
+            .lock()
+            .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
+        let client = coordinator
+            .connection
+            .as_ref()
+            .ok_or_else(|| {
+                CoreError::command_failed("a restored session is required to start radio")
+            })?
+            .client
+            .clone();
+        (client, coordinator.playback.reserve_media_selection())
+    };
+    let user_data = if media_items.iter().any(is_local_playlist) {
+        Some(read_or_load_user_data()?)
+    } else {
+        None
+    };
+    let playlists = user_data
+        .as_ref()
+        .map(|data| data.playlists.as_slice())
+        .unwrap_or(&[]);
+    CORE_NETWORK_RUNTIME
+        .block_on(crate::music_assistant::radio::start_radio(
+            &client,
+            media_items,
+            playlists,
+            |media, option| async move {
+                let _command_guard = CORE_COMMAND_SERIALIZER
+                    .lock()
+                    .map_err(|_| "core command serializer lock poisoned".to_string())?;
+                let expected_revision = if option == QueueOption::Play {
+                    selection_revision
+                } else {
+                    selection_revision.wrapping_add(1)
+                };
+                {
+                    let coordinator = CORE_COORDINATOR
+                        .lock()
+                        .map_err(|_| "core coordinator lock poisoned".to_string())?;
+                    if coordinator.playback.media_selection_revision() != expected_revision {
+                        return Err("radio selection changed while resolving media".into());
+                    }
+                }
+                let events = execute_resolved_media_command(media, |playback, media| {
+                    playback.queue_play_media(media, option, None, false)
+                })
+                .await
+                .map_err(|error| error.message)?;
+                for event in events {
+                    publish_background_event(event);
+                }
+                Ok(())
+            },
+        ))
+        .map_err(CoreError::command_failed)?;
+    Ok(Vec::new())
 }
 
 // Initial reads use the same complete contracts as their corresponding events.

@@ -64,9 +64,6 @@ impl PlaybackBackend for RemotePlayback {
         self.target
             .queue_play_media(media, option, start_item, shuffle)
     }
-    fn start_radio(&mut self, media: Vec<MediaItem>) -> Result<(), String> {
-        self.target.start_radio(media)
-    }
     fn insert_queue_items(&mut self, index: usize, media: Vec<MediaItem>) -> Result<(), String> {
         self.target.insert_queue_items(index, media)
     }

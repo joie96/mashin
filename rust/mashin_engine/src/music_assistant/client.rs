@@ -467,31 +467,6 @@ impl MusicAssistantClient {
         .map(|_| ())
     }
 
-    pub(crate) async fn queue_play_media(
-        &self,
-        queue_id: QueueId,
-        media: Vec<MediaItem>,
-        option: &str,
-        radio_mode: bool,
-    ) -> Result<(), HttpCommandError> {
-        let media = media
-            .into_iter()
-            .map(queue_media_payload)
-            .collect::<Vec<_>>();
-        self.execute_http_command::<Value>(
-            "player_queues/play_media",
-            json!({
-                "queue_id": queue_id,
-                "media": media,
-                "option": option,
-                "radio_mode": radio_mode,
-                "sort_by": "original",
-            }),
-        )
-        .await
-        .map(|_| ())
-    }
-
     pub(crate) async fn queue_play_index(
         &self,
         queue_id: QueueId,

@@ -110,9 +110,6 @@ impl PlaybackBackend for LocalPlayback {
         self.target
             .queue_play_media(media, option, start_item, shuffle)
     }
-    fn start_radio(&mut self, media: Vec<MediaItem>) -> Result<(), String> {
-        self.target.start_radio(media)
-    }
     fn insert_queue_items(&mut self, index: usize, media: Vec<MediaItem>) -> Result<(), String> {
         self.target.insert_queue_items(index, media)
     }
@@ -722,7 +719,11 @@ mod tests {
         assert_eq!(engine.player_state().active_mode, PlaybackMode::Local);
         assert!(engine.transport_play().is_err());
         assert!(engine.play_queue_index(0).is_err());
-        assert!(engine.start_radio(Vec::new()).is_err());
+        assert!(
+            engine
+                .queue_play_media(Vec::new(), QueueOption::Play, None, false)
+                .is_err()
+        );
         engine.shutdown();
     }
 

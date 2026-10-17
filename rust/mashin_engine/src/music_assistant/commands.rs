@@ -24,7 +24,6 @@ pub(crate) enum QueueCommand {
         option: QueueOption,
         start_item: Option<usize>,
         shuffle: bool,
-        radio_mode: bool,
     },
     PlayIndex(usize),
     PlayItem(QueueItemId),
@@ -150,7 +149,6 @@ fn queue_command_request(
             option,
             start_item,
             shuffle,
-            radio_mode,
         } => {
             let start = start_item
                 .map(|index| {
@@ -167,7 +165,7 @@ fn queue_command_request(
                 .collect::<Vec<_>>();
             (
                 "play_media",
-                json!({"queue_id":queue_id,"media":media,"option":option,"start_item":start,"shuffle":shuffle,"radio_mode":radio_mode,"sort_by":"original"}),
+                json!({"queue_id":queue_id,"media":media,"option":option,"start_item":start,"shuffle":shuffle,"sort_by":"original"}),
             )
         }
         QueueCommand::PlayIndex(index) => {
@@ -207,6 +205,16 @@ mod tests {
         for (command, expected_name, expected) in [
             (QueueCommand::Clear, "clear", json!({"queue_id":"room"})),
             (
+                QueueCommand::Autoplay(true),
+                "autoplay",
+                json!({"queue_id":"room", "autoplay_enabled":true}),
+            ),
+            (
+                QueueCommand::Autoplay(false),
+                "autoplay",
+                json!({"queue_id":"room", "autoplay_enabled":false}),
+            ),
+            (
                 QueueCommand::PlayItem(QueueItemId("stable-item".into())),
                 "play_index",
                 json!({"queue_id":"room", "index":"stable-item"}),
@@ -232,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn radio_and_shuffle_are_forwarded_without_local_expansion_or_reordering() {
+    fn media_and_shuffle_are_forwarded_without_radio_mode_or_reordering() {
         let media: Vec<MediaItem> = serde_json::from_value(json!([
             {"media_type":"album", "item_id":"album", "provider":"library", "name":"Album"},
             {"media_type":"track", "item_id":"track", "provider":"library", "name":"Track"}
@@ -245,7 +253,6 @@ mod tests {
                 option: QueueOption::Play,
                 start_item: Some(1),
                 shuffle: true,
-                radio_mode: true,
             },
         )
         .unwrap();
@@ -254,7 +261,7 @@ mod tests {
         assert_eq!(arguments["media"][1]["item_id"], "track");
         assert_eq!(arguments["start_item"], arguments["media"][1]);
         assert_eq!(arguments["shuffle"], true);
-        assert_eq!(arguments["radio_mode"], true);
+        assert!(arguments.get("radio_mode").is_none());
         assert!(arguments.get("startDownload").is_none());
     }
 
@@ -274,7 +281,6 @@ mod tests {
                     option: QueueOption::Play,
                     start_item: Some(1),
                     shuffle: false,
-                    radio_mode: false,
                 }
             )
             .await

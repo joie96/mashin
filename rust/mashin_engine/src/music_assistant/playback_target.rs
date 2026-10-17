@@ -104,17 +104,6 @@ impl MusicAssistantPlaybackTarget {
             option,
             start_item,
             shuffle,
-            radio_mode: false,
-        })
-    }
-
-    pub(crate) fn start_radio(&mut self, media: Vec<MediaItem>) -> Result<(), String> {
-        self.queue_command(QueueCommand::PlayMedia {
-            media,
-            option: QueueOption::Play,
-            start_item: None,
-            shuffle: false,
-            radio_mode: true,
         })
     }
 

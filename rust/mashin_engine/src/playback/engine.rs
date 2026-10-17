@@ -36,6 +36,7 @@ pub(crate) struct PlaybackEngine {
     remote: Arc<Mutex<RemotePlayback>>,
     worker: Option<PeriodicWorker>,
     target: Option<PlaybackTarget>,
+    media_selection_revision: u64,
 }
 
 impl PlaybackEngine {
@@ -46,6 +47,7 @@ impl PlaybackEngine {
             remote: Arc::new(Mutex::new(RemotePlayback::new())),
             worker: None,
             target: None,
+            media_selection_revision: 0,
         }
     }
 
@@ -99,6 +101,7 @@ impl PlaybackEngine {
     }
 
     pub(crate) fn deactivate(&mut self) {
+        self.media_selection_revision = self.media_selection_revision.wrapping_add(1);
         self.worker = None;
         self.with_active_backend(|backend| {
             backend.deactivate();
@@ -108,6 +111,7 @@ impl PlaybackEngine {
     }
 
     pub(crate) fn shutdown(&mut self) {
+        self.media_selection_revision = self.media_selection_revision.wrapping_add(1);
         self.worker = None;
         self.local
             .lock()
@@ -121,6 +125,11 @@ impl PlaybackEngine {
     }
 
     // Queue commands.
+    pub(crate) fn reserve_media_selection(&mut self) -> u64 {
+        self.media_selection_revision = self.media_selection_revision.wrapping_add(1);
+        self.media_selection_revision
+    }
+
     pub(crate) fn queue_play_media(
         &mut self,
         media_items: Vec<MediaItem>,
@@ -128,13 +137,12 @@ impl PlaybackEngine {
         start_item: Option<usize>,
         shuffle: bool,
     ) -> Result<(), String> {
+        if matches!(option, QueueOption::Play | QueueOption::Replace) {
+            self.reserve_media_selection();
+        }
         self.with_active_backend(|engine| {
             engine.queue_play_media(media_items, option, start_item, shuffle)
         })
-    }
-
-    pub(crate) fn start_radio(&mut self, started_tracks: Vec<MediaItem>) -> Result<(), String> {
-        self.with_active_backend(|engine| engine.start_radio(started_tracks))
     }
 
     pub(crate) fn insert_queue_items(
@@ -162,10 +170,12 @@ impl PlaybackEngine {
     }
 
     pub(crate) fn select_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {
+        self.media_selection_revision = self.media_selection_revision.wrapping_add(1);
         self.with_active_backend(|engine| engine.select_queue_item(item_id))
     }
 
     pub(crate) fn play_queue_index(&mut self, index: usize) -> Result<(), String> {
+        self.media_selection_revision = self.media_selection_revision.wrapping_add(1);
         self.with_active_backend(|engine| engine.play_queue_index(index))
     }
 
@@ -179,6 +189,7 @@ impl PlaybackEngine {
     }
 
     pub(crate) fn transport_stop(&mut self) {
+        self.media_selection_revision = self.media_selection_revision.wrapping_add(1);
         let _ = self.with_active_backend(|engine| {
             engine.transport_stop();
             Ok(())
@@ -272,6 +283,10 @@ impl PlaybackEngine {
     }
 
     // Snapshots, request identity and checkpoints retaining native ownership for persistence rollback.
+    pub(crate) fn media_selection_revision(&self) -> u64 {
+        self.media_selection_revision
+    }
+
     pub(crate) fn active_mode(&self) -> PlaybackMode {
         match self.target {
             Some(PlaybackTarget::Remote(_)) => PlaybackMode::Remote,
@@ -387,6 +402,34 @@ mod tests {
     use crate::music_assistant::models::identifiers::{AccessToken, PlayerId};
     use crate::music_assistant::models::session::MusicAssistantServerUrl;
     use crate::playback::local::session::LocalSessionConfiguration;
+
+    #[test]
+    fn selection_intent_invalidates_radio_but_transport_preferences_do_not() {
+        let mut engine = PlaybackEngine::new();
+        let initial = engine.media_selection_revision();
+        engine.set_volume(40);
+        engine.set_muted(true);
+        let _ = engine.transport_pause();
+        assert_eq!(engine.media_selection_revision(), initial);
+        assert!(engine
+            .queue_play_media(Vec::new(), QueueOption::Play, None, false)
+            .is_err());
+        assert_eq!(engine.media_selection_revision(), initial.wrapping_add(1));
+        let _ = engine.append_queue_items(Vec::new());
+        assert_eq!(engine.media_selection_revision(), initial.wrapping_add(1));
+        engine.transport_stop();
+        assert_eq!(engine.media_selection_revision(), initial.wrapping_add(2));
+        let _ = engine.select_queue_item(QueueItemId("item".into()));
+        assert_eq!(engine.media_selection_revision(), initial.wrapping_add(3));
+        let _ = engine.play_queue_index(0);
+        assert_eq!(engine.media_selection_revision(), initial.wrapping_add(4));
+        engine.deactivate();
+        assert_eq!(engine.media_selection_revision(), initial.wrapping_add(5));
+        let older_radio = engine.reserve_media_selection();
+        let newer_radio = engine.reserve_media_selection();
+        assert_ne!(older_radio, newer_radio);
+        assert_eq!(engine.media_selection_revision(), newer_radio);
+    }
 
     fn configuration() -> (PlaybackSessionConfiguration, Arc<MusicAssistantConnection>) {
         let persisted = SessionConfig {

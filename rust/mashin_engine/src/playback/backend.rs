@@ -18,7 +18,6 @@ pub(crate) trait PlaybackBackend: Send {
         start_item: Option<usize>,
         shuffle: bool,
     ) -> Result<(), String>;
-    fn start_radio(&mut self, started_tracks: Vec<MediaItem>) -> Result<(), String>;
     fn insert_queue_items(
         &mut self,
         index: usize,

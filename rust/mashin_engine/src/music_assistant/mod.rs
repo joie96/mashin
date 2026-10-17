@@ -10,5 +10,6 @@ pub(crate) mod playback_target;
 pub(crate) mod playlist_collage;
 pub(crate) mod queue_controller;
 pub(crate) mod queue_projection;
+pub(crate) mod radio;
 pub(crate) mod user_data;
 pub(crate) mod user_data_store;

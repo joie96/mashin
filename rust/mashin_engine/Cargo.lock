@@ -1296,6 +1296,7 @@ dependencies = [
  "ogg",
  "once_cell",
  "opus-rs",
+ "rand 0.9.5",
  "reqwest",
  "rubato",
  "serde",
