@@ -1,7 +1,7 @@
 //! Mashin commands and metadata are translated here, outside the native audio owner.
 
 use super::models::{
-    HEADER_BYTES, MAX_INTEGER, MAX_PAYLOAD_BYTES, OutputState, StreamCursor, StreamDescriptor,
+    OutputState, StreamCursor, StreamDescriptor, HEADER_BYTES, MAX_INTEGER, MAX_PAYLOAD_BYTES,
 };
 use super::protocol::{ControlCommand, ProtocolError, ResumeState, Welcome};
 use crate::audio::buffer::EncodedChunk;
@@ -10,7 +10,7 @@ use crate::audio::models::{AudioEvent, AudioSnapshot};
 use crate::audio::pipeline::AudioPipeline;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -316,6 +316,7 @@ fn audio_stream(stream: &StreamDescriptor) -> AudioStream {
     }
 }
 
+// Device mutations retain internal revisions, but the wire revision belongs to a stream.
 fn project(snapshot: AudioSnapshot, streams: &HashMap<Uuid, StreamDescriptor>) -> OutputSnapshot {
     let state = snapshot.status;
     OutputSnapshot {
@@ -329,7 +330,11 @@ fn project(snapshot: AudioSnapshot, streams: &HashMap<Uuid, StreamDescriptor>) -
                     previous_position_frame: activation.previous_position_frame,
                 }),
             current_stream_id: state.current_stream_id,
-            output_revision: state.output_revision,
+            output_revision: if state.current_stream_id.is_some() {
+                state.output_revision
+            } else {
+                0
+            },
             output_state: match state.output_state {
                 AudioState::Idle => OutputState::Idle,
                 AudioState::Buffering => OutputState::Buffering,
@@ -374,9 +379,78 @@ fn project(snapshot: AudioSnapshot, streams: &HashMap<Uuid, StreamDescriptor>) -
 
 #[cfg(test)]
 mod tests {
-    use super::super::models::{AudioProfileId, test_stream};
+    use super::super::models::{test_stream, AudioProfileId};
     use super::super::protocol::ProtocolLimits;
     use super::*;
+
+    #[tokio::test]
+    async fn idle_wire_snapshot_after_stop_clears_stream_revision_and_receipts() {
+        for is_player_wide in [false, true] {
+            let output = MashinAudioAdapter::new(1_048_576, 30, false).unwrap();
+            let current = test_stream();
+            output
+                .execute(ControlCommand::SetMedia {
+                    command_id: 1,
+                    current: Some(current.clone()),
+                    prepared: Some(test_stream()),
+                    media_revision: 1,
+                    initial_output_state: OutputState::Paused,
+                })
+                .await
+                .unwrap();
+            let snapshot = output
+                .execute(ControlCommand::Stop {
+                    command_id: 2,
+                    stream_id: (!is_player_wide).then_some(current.stream_id),
+                })
+                .await
+                .unwrap();
+            assert_eq!(snapshot.resume.current_stream_id, None);
+            assert_eq!(snapshot.resume.output_state, OutputState::Idle);
+            assert_eq!(snapshot.resume.output_revision, 0);
+            assert_eq!(snapshot.resume.position_frame, 0);
+            assert!(snapshot.resume.received_streams.is_empty());
+            assert!(snapshot.resume.activation.is_none());
+            assert!(snapshot.current.is_none());
+            assert!(snapshot.prepared.is_none());
+            assert_eq!(output.snapshot(), snapshot);
+            assert!(output.pipeline.snapshot().status.output_revision > 0);
+            assert_eq!(
+                output
+                    .reconcile(idle_welcome(2))
+                    .await
+                    .unwrap()
+                    .resume
+                    .output_revision,
+                0
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn idle_wire_snapshot_after_volume_and_mute_keeps_zero_revision() {
+        let output = MashinAudioAdapter::new(1_048_576, 30, false).unwrap();
+        for command in [
+            ControlCommand::SetVolume {
+                command_id: 1,
+                volume_percent: 42,
+            },
+            ControlCommand::SetMute {
+                command_id: 2,
+                is_muted: true,
+            },
+        ] {
+            let snapshot = output.execute(command).await.unwrap();
+            assert_eq!(snapshot.resume.current_stream_id, None);
+            assert_eq!(snapshot.resume.output_state, OutputState::Idle);
+            assert_eq!(snapshot.resume.output_revision, 0);
+            assert_eq!(snapshot.resume.position_frame, 0);
+            assert!(snapshot.resume.received_streams.is_empty());
+            assert_eq!(snapshot.resume.volume_percent, 42);
+            assert_eq!(output.snapshot(), snapshot);
+        }
+        assert!(output.snapshot().resume.is_muted);
+    }
 
     #[tokio::test]
     async fn idle_handshake_adopts_revision_without_changing_output() {
@@ -434,12 +508,10 @@ mod tests {
             assert!(output.reconcile(welcome).await.is_err());
             assert_eq!(output.snapshot(), before);
         }
-        assert!(
-            output
-                .reconcile(idle_welcome(MAX_INTEGER + 1))
-                .await
-                .is_err()
-        );
+        assert!(output
+            .reconcile(idle_welcome(MAX_INTEGER + 1))
+            .await
+            .is_err());
         assert_eq!(output.snapshot(), before);
     }
 
@@ -498,13 +570,11 @@ mod tests {
                     "current stream descriptor"
                 }
             };
-            assert!(
-                output
-                    .reconcile(changed)
-                    .await
-                    .unwrap_err()
-                    .contains(expected_reason)
-            );
+            assert!(output
+                .reconcile(changed)
+                .await
+                .unwrap_err()
+                .contains(expected_reason));
             assert_eq!(output.snapshot(), before);
         }
         assert!(output.pipeline.reconcile_idle_revision(2).await.is_err());
@@ -570,18 +640,16 @@ mod tests {
         assert_eq!(accepted.current, Some(stream.clone()));
         let mut changed = stream.clone();
         changed.playback.queue_item_id.0 = "different".into();
-        assert!(
-            output
-                .execute(ControlCommand::SetMedia {
-                    command_id: 2,
-                    current: Some(changed),
-                    prepared: None,
-                    media_revision: 2,
-                    initial_output_state: OutputState::Paused,
-                })
-                .await
-                .is_err()
-        );
+        assert!(output
+            .execute(ControlCommand::SetMedia {
+                command_id: 2,
+                current: Some(changed),
+                prepared: None,
+                media_revision: 2,
+                initial_output_state: OutputState::Paused,
+            })
+            .await
+            .is_err());
         assert_eq!(output.snapshot(), accepted);
         assert_eq!(output.snapshot().current, Some(stream));
     }
@@ -637,18 +705,16 @@ mod tests {
             .await
             .unwrap();
         let before = output.snapshot();
-        assert!(
-            output
-                .execute(ControlCommand::SetMedia {
-                    command_id: 2,
-                    current: Some(current),
-                    prepared: Some(test_stream()),
-                    media_revision: MAX_INTEGER + 1,
-                    initial_output_state: OutputState::Paused,
-                })
-                .await
-                .is_err()
-        );
+        assert!(output
+            .execute(ControlCommand::SetMedia {
+                command_id: 2,
+                current: Some(current),
+                prepared: Some(test_stream()),
+                media_revision: MAX_INTEGER + 1,
+                initial_output_state: OutputState::Paused,
+            })
+            .await
+            .is_err());
         assert_eq!(output.snapshot(), before);
         assert_eq!(output.streams.lock().unwrap().len(), 1);
     }

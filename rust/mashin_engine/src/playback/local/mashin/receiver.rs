@@ -18,7 +18,7 @@ use tokio::net::TcpStream;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
+use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use uuid::Uuid;
 
@@ -706,7 +706,11 @@ mod tests {
                         let hello = next_json(&mut control, "hello").await;
                         assert!(hello["connection_epoch"].is_null());
                         assert_eq!(hello["payload"]["resume_state"]["volume_percent"], if generation == 0 { 30 } else { 42 });
-                        assert_eq!(hello["payload"]["resume_state"]["output_revision"], generation);
+                        assert_eq!(hello["payload"]["resume_state"]["output_revision"], 0);
+                        assert!(hello["payload"]["resume_state"]["current_stream_id"].is_null());
+                        assert_eq!(hello["payload"]["resume_state"]["output_state"], "idle");
+                        assert_eq!(hello["payload"]["resume_state"]["position_frame"], 0);
+                        assert_eq!(hello["payload"]["resume_state"]["received_streams"], serde_json::json!([]));
                         let epoch = format!("epoch-{generation}");
                         control.send(server_message("welcome", &epoch, serde_json::json!({
                             "player_id":"mashin-test", "provider_version":"1", "server_revision":"test",
@@ -729,8 +733,27 @@ mod tests {
                         control.send(command).await.unwrap();
                         assert_eq!(next_json(&mut control, "command_ack").await["payload"], ack["payload"]);
                         let state = next_json(&mut control, "player_state").await;
-                        assert_eq!(state["payload"]["output_revision"], generation + 1);
+                        assert_eq!(state["payload"]["output_revision"], 0);
                         assert_eq!(state["payload"]["volume_percent"], 42 + generation);
+                        let current = super::super::models::test_stream();
+                        let prepared = super::super::models::test_stream();
+                        control.send(server_message("set_media", &epoch, serde_json::json!({
+                            "command_id":2, "media_revision":1, "current":current,
+                            "prepared":prepared, "initial_output_state":"paused"
+                        }))).await.unwrap();
+                        assert_eq!(next_json(&mut control, "command_ack").await["payload"]["status"], "accepted");
+                        let state = next_json(&mut control, "player_state").await;
+                        assert_eq!(state["payload"]["stream_id"], current.stream_id.to_string());
+                        assert_eq!(state["payload"]["output_state"], "paused");
+                        control.send(server_message("stop", &epoch, serde_json::json!({
+                            "command_id":3, "stream_id":current.stream_id
+                        }))).await.unwrap();
+                        assert_eq!(next_json(&mut control, "command_ack").await["payload"]["status"], "accepted");
+                        let state = next_json(&mut control, "player_state").await;
+                        assert!(state["payload"]["stream_id"].is_null());
+                        assert_eq!(state["payload"]["output_state"], "idle");
+                        assert_eq!(state["payload"]["output_revision"], 0);
+                        assert_eq!(state["payload"]["position_frame"], 0);
                         if generation == 0 {
                             control.send(server_message("error", &epoch, serde_json::json!({
                                 "correlation_id":null, "stream_id":null, "audio_connection_id":1,
@@ -745,7 +768,7 @@ mod tests {
                 let receiver = MashinReceiver::new(&runtime, ReceiverConfiguration { music_assistant_url: format!("http://{address}"), device_id:"test-device".into(), client_name:"Test".into(), audio_profile:AudioProfileId::Flac }, output.clone()).unwrap();
                 server.await.unwrap();
                 assert_eq!(output.snapshot().resume.volume_percent, 43);
-                assert_eq!(output.snapshot().resume.output_revision, 2);
+                assert_eq!(output.snapshot().resume.output_revision, 0);
                 drop(receiver);
             }).await.unwrap();
         });
@@ -821,27 +844,24 @@ mod tests {
             );
         }
         assert_eq!(acks.history.len(), 32);
-        assert!(
-            acks.find(&ControlCommand::SetVolume {
+        assert!(acks
+            .find(&ControlCommand::SetVolume {
                 command_id: 33,
                 volume_percent: 30
             })
             .unwrap()
-            .is_some()
-        );
-        assert!(
-            acks.find(&ControlCommand::SetVolume {
+            .is_some());
+        assert!(acks
+            .find(&ControlCommand::SetVolume {
                 command_id: 33,
                 volume_percent: 31
             })
-            .is_err()
-        );
-        assert!(
-            acks.find(&ControlCommand::SetVolume {
+            .is_err());
+        assert!(acks
+            .find(&ControlCommand::SetVolume {
                 command_id: 1,
                 volume_percent: 30
             })
-            .is_err()
-        );
+            .is_err());
     }
 }
