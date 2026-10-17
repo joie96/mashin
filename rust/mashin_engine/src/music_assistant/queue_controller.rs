@@ -3,7 +3,7 @@
 
 use super::client::MusicAssistantClient;
 use super::event_hub::MusicAssistantEvent;
-use super::models::identifiers::{PlayerId, QueueId, QueueItemId};
+use super::models::identifiers::{PlayerId, QueueId};
 use super::models::player::MusicAssistantPlayer;
 use super::models::queue::{MusicAssistantQueue, PlayState};
 use super::queue_projection::{QueueProjection, QueueSnapshotRequest};
@@ -62,16 +62,6 @@ impl MusicAssistantQueueController {
     pub(crate) fn remote_player_state(&self) -> PlayerState {
         let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         project_remote_player(&state)
-    }
-
-    pub(crate) fn queue_item_index(&self, item_id: &QueueItemId) -> Option<usize> {
-        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        state
-            .projection
-            .queue()
-            .items
-            .iter()
-            .position(|item| &item.queue_item_id == item_id)
     }
 
     pub(crate) fn is_synchronized(&self) -> bool {

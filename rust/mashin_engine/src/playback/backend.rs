@@ -3,7 +3,7 @@
 use crate::music_assistant::models::identifiers::QueueItemId;
 use crate::music_assistant::models::media::MediaItem;
 use crate::music_assistant::models::queue::{QueueOption, RepeatMode};
-use crate::playback::models::{PlayerState, Queue};
+use crate::playback::models::{MediaSessionState, PlayerState, Queue};
 
 pub(crate) type PlaybackCommand = futures_util::future::BoxFuture<'static, Result<(), String>>;
 
@@ -45,6 +45,12 @@ pub(crate) trait PlaybackBackend: Send {
     fn set_repeat_mode(&mut self, mode: RepeatMode);
     fn queue(&self) -> Queue;
     fn player_state(&self) -> PlayerState;
+    fn media_session_state(&self) -> MediaSessionState {
+        MediaSessionState {
+            queue: self.queue(),
+            player_state: self.player_state(),
+        }
+    }
     fn process_playback_cycle(&mut self);
     fn set_autoplay(&mut self, is_enabled: bool);
     fn take_pending_commands(&mut self) -> Vec<PlaybackCommand>;

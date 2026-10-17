@@ -11,14 +11,16 @@ use crate::music_assistant::models::media::MediaItem;
 use crate::music_assistant::models::queue::{PlayState, QueueOption, RepeatMode};
 use crate::music_assistant::playback_target::MusicAssistantPlaybackTarget;
 use crate::music_assistant::playback_target::MusicAssistantPlaybackTargetConfiguration;
-use crate::music_assistant::queue_projection::QueueSnapshotRequest;
 use crate::playback::backend::{PlaybackBackend, PlaybackCommand};
+use crate::playback::local::mashin::audio_adapter::OutputSnapshot;
 use crate::playback::local::mashin::models::OutputState;
-use crate::playback::local::mashin::receiver::ConnectionState;
+use crate::playback::local::mashin::models::StreamDescriptor;
+use crate::playback::local::mashin::receiver::{ConnectionState, ReceiverSnapshot};
 use crate::playback::local::session::{LocalSession, LocalSessionConfiguration};
 use crate::playback::mode::PlaybackMode;
-use crate::playback::models::{PlaybackConnectionState, PlayerState, Queue};
+use crate::playback::models::{MediaSessionState, PlaybackConnectionState, PlayerState, Queue};
 use std::sync::Arc;
+use uuid::Uuid;
 
 pub(crate) struct LocalPlayback {
     session: Option<Arc<LocalSession>>,
@@ -26,8 +28,8 @@ pub(crate) struct LocalPlayback {
     projected_player_id: Option<String>,
     pending_commands: Vec<PlaybackCommand>,
     last_queue: Option<Queue>,
-    last_queue_revision: Option<(QueueSnapshotRequest, bool)>,
     last_player: Option<PlayerState>,
+    last_stream_id: Option<Uuid>,
 }
 
 impl LocalPlayback {
@@ -39,8 +41,8 @@ impl LocalPlayback {
             projected_player_id: None,
             pending_commands: Vec::new(),
             last_queue: None,
-            last_queue_revision: None,
             last_player: None,
+            last_stream_id: None,
         }
     }
 
@@ -85,8 +87,8 @@ impl PlaybackBackend for LocalPlayback {
         self.target.deactivate();
         self.projected_player_id = None;
         self.last_queue = None;
-        self.last_queue_revision = None;
         self.last_player = None;
+        self.last_stream_id = None;
     }
     fn shutdown(&mut self) {
         self.deactivate();
@@ -235,59 +237,13 @@ impl PlaybackBackend for LocalPlayback {
     // Only queue metadata comes from MA; audible position never uses server elapsed time.
     // Queue and audible player projections.
     fn queue(&self) -> Queue {
-        self.target.queue()
+        self.media_session_state().queue
     }
     fn player_state(&self) -> PlayerState {
-        let Some(session) = &self.session else {
-            return PlayerState {
-                active_mode: PlaybackMode::Local,
-                ..PlayerState::default()
-            };
-        };
-        let output = session.output.snapshot();
-        let connection = session.receiver.snapshot();
-        let item_id = output
-            .current
-            .as_ref()
-            .map(|stream| stream.playback.queue_item_id.clone());
-        let position_millis = output.current.as_ref().map(|stream| {
-            stream.media_start_position_millis.saturating_add(
-                output.resume.position_frame.saturating_mul(1000)
-                    / u64::from(stream.output_format.sample_rate_hz),
-            ) as i64
-        });
-        PlayerState {
-            active_mode: PlaybackMode::Local,
-            connection_state: if connection.control_connection == ConnectionState::Connected
-                && connection.audio_connection == ConnectionState::Connected
-            {
-                PlaybackConnectionState::Online
-            } else if connection.control_connection == ConnectionState::Connecting {
-                PlaybackConnectionState::Connecting
-            } else {
-                PlaybackConnectionState::Reconnecting
-            },
-            playback_state: match output.resume.output_state {
-                OutputState::Idle | OutputState::Ended => PlayState::Idle,
-                OutputState::Buffering => PlayState::Buffering,
-                OutputState::Playing => PlayState::Playing,
-                OutputState::Paused => PlayState::Paused,
-                OutputState::Error => PlayState::Error,
-            },
-            current_index: item_id
-                .as_ref()
-                .and_then(|id| self.target.queue_item_index(id)),
-            current_queue_item_id: item_id,
-            position_millis,
-            duration_millis: output
-                .current
-                .as_ref()
-                .and_then(|stream| stream.duration_millis.map(|duration| duration as i64)),
-            buffered_position_millis: position_millis
-                .map(|position| position.saturating_add(output.buffered_duration_millis as i64)),
-            volume: output.resume.volume_percent,
-            muted: output.resume.is_muted,
-        }
+        self.media_session_state().player_state
+    }
+    fn media_session_state(&self) -> MediaSessionState {
+        self.presentation_snapshot().0
     }
 
     // Presentation polling does not own the session's native audio worker.
@@ -296,21 +252,9 @@ impl PlaybackBackend for LocalPlayback {
         if self.synchronize_projection().is_err() {
             return;
         }
-        let revision = self.target.queue_revision();
-        if self.last_queue_revision != revision {
-            self.last_queue_revision = revision;
-            let queue = self.queue();
-            if self.last_queue.as_ref() != Some(&queue) {
-                self.last_queue = Some(queue.clone());
-                publish_background_event(MediaSessionEvent::QueueChanged { queue });
-            }
-        }
-        let player = self.player_state();
-        if self.last_player.as_ref() != Some(&player) {
-            self.last_player = Some(player.clone());
-            publish_background_event(MediaSessionEvent::PlayerStateChanged {
-                player_state: player,
-            });
+        let (state, stream_id) = self.presentation_snapshot();
+        for event in self.presentation_events(state, stream_id) {
+            publish_background_event(event);
         }
     }
 }
@@ -322,6 +266,55 @@ impl Drop for LocalPlayback {
 }
 
 impl LocalPlayback {
+    // One audio snapshot drives queue identity, timing and publication invalidation.
+    fn presentation_snapshot(&self) -> (MediaSessionState, Option<Uuid>) {
+        let Some(session) = self.session.as_ref() else {
+            let mut queue = self.target.queue();
+            queue.current_index = None;
+            return (
+                MediaSessionState {
+                    queue,
+                    player_state: PlayerState {
+                        active_mode: PlaybackMode::Local,
+                        ..PlayerState::default()
+                    },
+                },
+                None,
+            );
+        };
+        let output = session.output.snapshot();
+        let stream_id = output.current.as_ref().map(|stream| stream.stream_id);
+        (
+            project_media_session_state(
+                self.target.queue(),
+                &output,
+                &session.receiver.snapshot(),
+                self.last_queue.as_ref(),
+            ),
+            stream_id,
+        )
+    }
+
+    fn presentation_events(
+        &mut self,
+        state: MediaSessionState,
+        stream_id: Option<Uuid>,
+    ) -> Vec<MediaSessionEvent> {
+        let mut events = Vec::new();
+        if self.last_stream_id != stream_id || self.last_queue.as_ref() != Some(&state.queue) {
+            self.last_stream_id = stream_id;
+            self.last_queue = Some(state.queue.clone());
+            events.push(MediaSessionEvent::QueueChanged { queue: state.queue });
+        }
+        if self.last_player.as_ref() != Some(&state.player_state) {
+            self.last_player = Some(state.player_state.clone());
+            events.push(MediaSessionEvent::PlayerStateChanged {
+                player_state: state.player_state,
+            });
+        }
+        events
+    }
+
     // Native command adaptation and MA projection synchronization.
     fn local_command(&mut self, command: AudioCommand) -> Result<(), String> {
         let output = self
@@ -366,6 +359,88 @@ impl LocalPlayback {
     }
 }
 
+// The audible stream owns the local cursor, never the last server-reported index.
+fn project_queue(
+    mut queue: Queue,
+    current: Option<&StreamDescriptor>,
+    previous: Option<&Queue>,
+) -> Queue {
+    queue.current_index = None;
+    let Some(stream) = current.filter(|stream| stream.playback.queue_id == queue.queue_id) else {
+        return queue;
+    };
+    let item_index = |items: &[crate::music_assistant::models::queue::QueueItem]| {
+        items.iter().position(|item| {
+            item.queue_id == stream.playback.queue_id
+                && item.queue_item_id == stream.playback.queue_item_id
+        })
+    };
+    queue.current_index = item_index(&queue.items);
+    if queue.current_index.is_none() {
+        if let Some((previous, index)) = previous
+            .filter(|previous| previous.queue_id == queue.queue_id)
+            .and_then(|previous| item_index(&previous.items).map(|index| (previous, index)))
+        {
+            queue.items = previous.items.clone();
+            queue.current_index = Some(index);
+        }
+    }
+    queue
+}
+
+// Read-only local projection; server snapshots cannot override the audible cursor.
+fn project_media_session_state(
+    queue: Queue,
+    output: &OutputSnapshot,
+    connection: &ReceiverSnapshot,
+    previous: Option<&Queue>,
+) -> MediaSessionState {
+    let queue = project_queue(queue, output.current.as_ref(), previous);
+    let position_millis = output.current.as_ref().map(|stream| {
+        stream.media_start_position_millis.saturating_add(
+            output.resume.position_frame.saturating_mul(1000)
+                / u64::from(stream.output_format.sample_rate_hz),
+        ) as i64
+    });
+    let player_state = PlayerState {
+        active_mode: PlaybackMode::Local,
+        connection_state: if connection.control_connection == ConnectionState::Connected
+            && connection.audio_connection == ConnectionState::Connected
+        {
+            PlaybackConnectionState::Online
+        } else if connection.control_connection == ConnectionState::Connecting {
+            PlaybackConnectionState::Connecting
+        } else {
+            PlaybackConnectionState::Reconnecting
+        },
+        playback_state: match output.resume.output_state {
+            OutputState::Idle | OutputState::Ended => PlayState::Idle,
+            OutputState::Buffering => PlayState::Buffering,
+            OutputState::Playing => PlayState::Playing,
+            OutputState::Paused => PlayState::Paused,
+            OutputState::Error => PlayState::Error,
+        },
+        current_queue_item_id: output
+            .current
+            .as_ref()
+            .map(|stream| stream.playback.queue_item_id.clone()),
+        current_index: queue.current_index,
+        position_millis,
+        duration_millis: output
+            .current
+            .as_ref()
+            .and_then(|stream| stream.duration_millis.map(|duration| duration as i64)),
+        buffered_position_millis: position_millis
+            .map(|position| position.saturating_add(output.buffered_duration_millis as i64)),
+        volume: output.resume.volume_percent,
+        muted: output.resume.is_muted,
+    };
+    MediaSessionState {
+        queue,
+        player_state,
+    }
+}
+
 // Cached chunks start at whole seconds; invalid UI values never reach either seek path.
 fn seek_position_millis(seconds: f64) -> Result<u64, String> {
     if !seconds.is_finite()
@@ -382,6 +457,46 @@ fn seek_position_millis(seconds: f64) -> Result<u64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_queue_cursor_tracks_stream_identity_not_server_index() {
+        let mut stream = super::super::mashin::models::test_stream();
+        let queue: Queue = Queue {
+            queue_id: stream.playback.queue_id.clone(),
+            items: vec![
+                queue_item(&stream, "a"),
+                queue_item(&stream, "c"),
+                queue_item(&stream, "b"),
+            ],
+            current_index: Some(0),
+            shuffle_enabled: true,
+            repeat_mode: RepeatMode::All,
+            autoplay_enabled: true,
+        };
+        stream.playback.queue_item_id = QueueItemId("b".into());
+        let projected = project_queue(queue.clone(), Some(&stream), None);
+        assert_eq!(projected.current_index, Some(2));
+        assert_eq!(projected.items, queue.items);
+        assert!(projected.shuffle_enabled && projected.autoplay_enabled);
+        assert_eq!(projected.repeat_mode, RepeatMode::All);
+        assert_eq!(queue.current_index, Some(0));
+        assert_eq!(
+            project_queue(projected.clone(), Some(&stream), None),
+            projected
+        );
+        assert_eq!(project_queue(queue.clone(), None, None).current_index, None);
+        stream.playback.queue_item_id = QueueItemId("missing".into());
+        assert_eq!(
+            project_queue(queue.clone(), Some(&stream), None).current_index,
+            None
+        );
+        stream.playback.queue_item_id = QueueItemId("b".into());
+        stream.playback.queue_id.0 = "different-queue".into();
+        assert_eq!(
+            project_queue(queue, Some(&stream), None).current_index,
+            None
+        );
+    }
 
     #[test]
     fn cached_seek_rounds_down_and_rejects_invalid_ui_targets() {
@@ -448,6 +563,159 @@ mod tests {
         });
     }
 
+    #[tokio::test]
+    async fn offline_next_projects_and_publishes_b_without_a_server_queue_update() {
+        use super::super::mashin::audio_adapter::MashinAudioAdapter;
+        use super::super::mashin::models::{AudioProfileId, test_stream};
+        use super::super::mashin::protocol::ControlCommand;
+
+        let output = MashinAudioAdapter::new(1_048_576, 30, false).unwrap();
+        let mut current = test_stream();
+        current.playback.queue_item_id = QueueItemId("a".into());
+        let mut prepared = test_stream();
+        prepared.playback.queue_id = current.playback.queue_id.clone();
+        prepared.playback.queue_item_id = QueueItemId("b".into());
+        prepared.duration_millis = Some(240_000);
+        output
+            .execute(ControlCommand::SetMedia {
+                command_id: 1,
+                current: Some(current.clone()),
+                prepared: Some(prepared.clone()),
+                media_revision: 1,
+                initial_output_state: OutputState::Paused,
+            })
+            .await
+            .unwrap();
+        let queue = Queue {
+            queue_id: current.playback.queue_id.clone(),
+            items: vec![
+                queue_item(&current, "a"),
+                queue_item(&current, "c"),
+                queue_item(&current, "b"),
+            ],
+            current_index: Some(0),
+            ..Queue::default()
+        };
+        let mut connection = ReceiverSnapshot {
+            control_connection: ConnectionState::Disconnected,
+            audio_connection: ConnectionState::Disconnected,
+            player_id: Some(current.playback.player_id.0.clone()),
+            audio_profile: AudioProfileId::Flac,
+        };
+        let mut playback = LocalPlayback::new();
+        let initial =
+            project_media_session_state(queue.clone(), &output.snapshot(), &connection, None);
+        playback.presentation_events(initial, Some(current.stream_id));
+        output
+            .pipeline()
+            .execute(AudioCommand::ActivatePrepared {
+                current_stream_id: current.stream_id,
+                stream_id: prepared.stream_id,
+                media_revision: 1,
+            })
+            .await
+            .unwrap();
+        let snapshot = output.snapshot();
+        let promoted = project_media_session_state(
+            queue.clone(),
+            &snapshot,
+            &connection,
+            playback.last_queue.as_ref(),
+        );
+        assert_eq!(promoted.queue.current_index, Some(2));
+        assert_eq!(
+            promoted.player_state.current_index,
+            promoted.queue.current_index
+        );
+        assert_eq!(
+            promoted.player_state.current_queue_item_id,
+            Some(prepared.playback.queue_item_id.clone())
+        );
+        assert_eq!(promoted.player_state.position_millis, Some(0));
+        assert_eq!(promoted.player_state.duration_millis, Some(240_000));
+        assert_eq!(
+            promoted.player_state.connection_state,
+            PlaybackConnectionState::Reconnecting
+        );
+        let events = playback.presentation_events(promoted.clone(), Some(prepared.stream_id));
+        assert!(
+            matches!(&events[0], MediaSessionEvent::QueueChanged { queue } if queue.current_index == Some(2))
+        );
+        assert!(
+            matches!(&events[1], MediaSessionEvent::PlayerStateChanged { player_state } if player_state.current_index == Some(2))
+        );
+        assert!(
+            playback
+                .presentation_events(promoted.clone(), Some(prepared.stream_id))
+                .is_empty()
+        );
+        connection.control_connection = ConnectionState::Connected;
+        connection.audio_connection = ConnectionState::Connected;
+        let reconnected =
+            project_media_session_state(queue, &snapshot, &connection, Some(&promoted.queue));
+        assert_eq!(reconnected.queue.current_index, Some(2));
+        assert_eq!(
+            reconnected.player_state.current_queue_item_id,
+            promoted.player_state.current_queue_item_id
+        );
+        assert!(playback.take_pending_commands().is_empty());
+
+        let mut natural = snapshot;
+        natural.resume.activation = None;
+        natural.resume.position_frame = u64::from(prepared.output_format.sample_rate_hz) * 12;
+        let natural =
+            project_media_session_state(reconnected.queue.clone(), &natural, &connection, None);
+        assert_eq!(natural.queue.current_index, Some(2));
+        assert_eq!(natural.player_state.position_millis, Some(12_000));
+        assert_eq!(
+            natural.player_state.current_queue_item_id,
+            Some(prepared.playback.queue_item_id)
+        );
+    }
+
+    #[test]
+    fn retained_metadata_and_repeat_keep_the_audible_queue_cursor() {
+        let mut stream = super::super::mashin::models::test_stream();
+        stream.playback.queue_item_id = QueueItemId("b".into());
+        let previous = Queue {
+            queue_id: stream.playback.queue_id.clone(),
+            items: vec![queue_item(&stream, "a"), queue_item(&stream, "b")],
+            current_index: Some(0),
+            repeat_mode: RepeatMode::One,
+            ..Queue::default()
+        };
+        let mut stale = previous.clone();
+        stale.items.pop();
+        stale.shuffle_enabled = true;
+        let projected = project_queue(stale, Some(&stream), Some(&previous));
+        assert_eq!(projected.current_index, Some(1));
+        assert_eq!(projected.items[1].name, "b");
+        assert!(projected.shuffle_enabled);
+        assert_eq!(projected.repeat_mode, RepeatMode::One);
+        let mut playback = LocalPlayback::new();
+        let state = MediaSessionState {
+            queue: projected,
+            player_state: PlayerState {
+                current_index: Some(1),
+                current_queue_item_id: Some(stream.playback.queue_item_id.clone()),
+                ..PlayerState::default()
+            },
+        };
+        playback.presentation_events(state.clone(), Some(stream.stream_id));
+        let repeated = playback.presentation_events(state, Some(Uuid::new_v4()));
+        assert_eq!(repeated.len(), 1);
+        assert!(
+            matches!(&repeated[0], MediaSessionEvent::QueueChanged { queue } if queue.current_index == Some(1))
+        );
+        let mut unrelated = previous.clone();
+        unrelated.queue_id.0 = "other-queue".into();
+        unrelated.items.clear();
+        assert_eq!(
+            project_queue(unrelated, Some(&stream), Some(&previous)).current_index,
+            None
+        );
+    }
+
     #[test]
     fn unconfigured_engine_has_no_audio_and_cannot_start_local_planning() {
         let mut engine = LocalPlayback::new();
@@ -456,5 +724,23 @@ mod tests {
         assert!(engine.play_queue_index(0).is_err());
         assert!(engine.start_radio(Vec::new()).is_err());
         engine.shutdown();
+    }
+
+    fn queue_item(
+        stream: &StreamDescriptor,
+        identifier: &str,
+    ) -> crate::music_assistant::models::queue::QueueItem {
+        crate::music_assistant::models::queue::QueueItem {
+            queue_id: stream.playback.queue_id.clone(),
+            queue_item_id: QueueItemId(identifier.into()),
+            name: identifier.into(),
+            duration: Some(300),
+            sort_index: 0,
+            streamdetails: None,
+            media_item: None,
+            image: None,
+            index: 0,
+            available: true,
+        }
     }
 }

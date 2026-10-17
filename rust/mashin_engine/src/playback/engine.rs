@@ -12,7 +12,7 @@ use crate::music_assistant::models::queue::{QueueOption, RepeatMode};
 use crate::music_assistant::playback_target::MusicAssistantPlaybackTargetConfiguration;
 use crate::playback::backend::PlaybackBackend;
 use crate::playback::mode::PlaybackMode;
-use crate::playback::models::{PlayerState, Queue};
+use crate::playback::models::{MediaSessionState, PlayerState, Queue};
 use std::sync::{Arc, Mutex};
 
 pub(crate) struct PlaybackSessionCheckpoint {
@@ -290,6 +290,14 @@ impl PlaybackEngine {
             .expect("active playback backend must remain accessible for state reads");
         player_state.active_mode = self.active_mode();
         player_state
+    }
+
+    pub(crate) fn media_session_state(&self) -> MediaSessionState {
+        let mut state = self
+            .with_active_backend(|backend| Ok(backend.media_session_state()))
+            .expect("active playback backend must remain accessible for session reads");
+        state.player_state.active_mode = self.active_mode();
+        state
     }
 
     pub(crate) fn checkpoint(&self) -> PlaybackSessionCheckpoint {

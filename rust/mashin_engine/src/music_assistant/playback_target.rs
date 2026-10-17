@@ -259,12 +259,6 @@ impl MusicAssistantPlaybackTarget {
             .map(MusicAssistantQueueController::revision)
     }
 
-    pub(crate) fn queue_item_index(&self, item_id: &QueueItemId) -> Option<usize> {
-        self.projection
-            .as_ref()
-            .and_then(|projection| projection.queue_item_index(item_id))
-    }
-
     // Command serialization and asynchronous error delivery.
     fn player_command(&mut self, command: PlayerCommand) -> Result<(), String> {
         let configuration = self

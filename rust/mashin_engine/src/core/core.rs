@@ -92,10 +92,7 @@ impl CoreCoordinator {
 
     // Platform state reads project the active engine without storing duplicate core state.
     pub(crate) fn media_session_state(&self) -> MediaSessionState {
-        MediaSessionState {
-            queue: self.playback.queue(),
-            player_state: self.playback.player_state(),
-        }
+        self.playback.media_session_state()
     }
 
     // Pending work is extracted before releasing the application lock.
