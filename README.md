@@ -48,6 +48,16 @@ stable queue-item IDs. Radio, shuffle, repeat and autoplay are server decisions.
 Favorites, client-local playlists, the MA library and recommendations remain
 available. Client-local playlists are expanded before sending their media to MA.
 
+New media use only `queuePlayMedia` (`mediaItems`, `option`, `startItem`,
+`shuffle`), with MA options `play`, `replace`, `next`, `replace_next` and `add`.
+Existing items use `moveQueueItem(itemId, positionShift)`,
+`moveQueueItemToEnd(itemId)` and `deleteQueueItem(itemId)`. A zero shift means
+MA's next playable position, not an unchanged position. Multi-selection sends
+ordered individual requests and stops on failure; it is not atomic. Neither
+Flutter nor Android reconstructs the server queue to simulate these operations.
+Android Media3 set-media uses one replacement request; additions support next
+or end only. Arbitrary insertions and partial range replacements fail explicitly.
+
 One concrete `PlaybackEngine` owns mode selection and delegates to `LocalPlayback`
 or `RemotePlayback`. Both use a shared `MusicAssistantPlaybackTarget` for MA
 commands and queue projections; neither mode owns or embeds the other.

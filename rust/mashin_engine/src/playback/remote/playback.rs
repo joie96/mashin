@@ -64,17 +64,14 @@ impl PlaybackBackend for RemotePlayback {
         self.target
             .queue_play_media(media, option, start_item, shuffle)
     }
-    fn insert_queue_items(&mut self, index: usize, media: Vec<MediaItem>) -> Result<(), String> {
-        self.target.insert_queue_items(index, media)
+    fn move_queue_item(&mut self, item_id: QueueItemId, position_shift: i32) -> Result<(), String> {
+        self.target.move_queue_item(item_id, position_shift)
     }
-    fn append_queue_items(&mut self, media: Vec<MediaItem>) -> Result<(), String> {
-        self.target.append_queue_items(media)
+    fn move_queue_item_to_end(&mut self, item_id: QueueItemId) -> Result<(), String> {
+        self.target.move_queue_item_to_end(item_id)
     }
-    fn move_queue_items(&mut self, ids: Vec<QueueItemId>, target: usize) -> Result<(), String> {
-        self.target.move_queue_items(ids, target)
-    }
-    fn delete_queue_items(&mut self, ids: Vec<QueueItemId>) -> Result<(), String> {
-        self.target.delete_queue_items(ids)
+    fn delete_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {
+        self.target.delete_queue_item(item_id)
     }
     fn select_queue_item(&mut self, id: QueueItemId) -> Result<(), String> {
         self.target.select_queue_item(id)

@@ -32,6 +32,7 @@ pub(crate) enum QueueCommand {
         shift: i64,
     },
     DeleteItem(QueueItemId),
+    MoveItemToEnd(QueueItemId),
     Shuffle(bool),
     Repeat(RepeatMode),
     Autoplay(bool),
@@ -39,60 +40,6 @@ pub(crate) enum QueueCommand {
 
 impl MusicAssistantClient {
     // Playback and queue commands.
-    pub(crate) async fn move_queue_items_to(
-        &self,
-        queue_id: &QueueId,
-        item_ids: Vec<QueueItemId>,
-        target: usize,
-    ) -> Result<(), String> {
-        let mut items = Vec::new();
-        loop {
-            let page = self
-                .get_queue_items(&queue_id.0, 500, items.len() as u32)
-                .await?;
-            let has_more = page.len() == 500;
-            items.extend(page.into_iter().map(|item| item.queue_item_id));
-            if !has_more {
-                break;
-            }
-        }
-        let selected = items
-            .iter()
-            .filter(|item| item_ids.contains(item))
-            .cloned()
-            .collect::<Vec<_>>();
-        if selected.len() != item_ids.len() {
-            return Err("one or more queue items no longer exist".into());
-        }
-        let mut desired = items
-            .iter()
-            .filter(|item| !item_ids.contains(item))
-            .cloned()
-            .collect::<Vec<_>>();
-        let target = target.min(desired.len());
-        desired.splice(target..target, selected);
-        for (destination, item_id) in desired.iter().enumerate() {
-            let source = items
-                .iter()
-                .position(|item| item == item_id)
-                .ok_or("queue item disappeared")?;
-            if source == destination {
-                continue;
-            }
-            self.execute_queue_command(
-                queue_id,
-                QueueCommand::MoveItem {
-                    item_id: item_id.clone(),
-                    shift: destination as i64 - source as i64,
-                },
-            )
-            .await?;
-            let item = items.remove(source);
-            items.insert(destination, item);
-        }
-        Ok(())
-    }
-
     pub(crate) async fn execute_player_command(
         &self,
         player_id: &PlayerId,
@@ -182,6 +129,10 @@ fn queue_command_request(
             "delete_item",
             json!({"queue_id":queue_id,"item_id_or_index":item_id}),
         ),
+        QueueCommand::MoveItemToEnd(item_id) => (
+            "move_item_end",
+            json!({"queue_id":queue_id,"queue_item_id":item_id}),
+        ),
         QueueCommand::Shuffle(enabled) => (
             "shuffle",
             json!({"queue_id":queue_id,"shuffle_enabled":enabled}),
@@ -204,6 +155,19 @@ mod tests {
         let queue = QueueId("room".into());
         for (command, expected_name, expected) in [
             (QueueCommand::Clear, "clear", json!({"queue_id":"room"})),
+            (
+                QueueCommand::MoveItemToEnd(QueueItemId("stable-item".into())),
+                "move_item_end",
+                json!({"queue_id":"room", "queue_item_id":"stable-item"}),
+            ),
+            (
+                QueueCommand::MoveItem {
+                    item_id: QueueItemId("stable-item".into()),
+                    shift: 0,
+                },
+                "move_item",
+                json!({"queue_id":"room", "queue_item_id":"stable-item", "pos_shift":0}),
+            ),
             (
                 QueueCommand::Autoplay(true),
                 "autoplay",

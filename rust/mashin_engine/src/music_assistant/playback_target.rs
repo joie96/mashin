@@ -107,58 +107,23 @@ impl MusicAssistantPlaybackTarget {
         })
     }
 
-    pub(crate) fn insert_queue_items(
+    pub(crate) fn move_queue_item(
         &mut self,
-        index: usize,
-        media: Vec<MediaItem>,
+        item_id: QueueItemId,
+        position_shift: i32,
     ) -> Result<(), String> {
-        let queue = self.queue();
-        if index == queue.items.len() {
-            return self.append_queue_items(media);
-        }
-        if Some(index) == queue.current_index.map(|current| current + 1) {
-            return self.queue_play_media(media, QueueOption::Next, None, false);
-        }
-        Err("MA supports inserting next or appending; use move for existing items".into())
+        self.queue_command(QueueCommand::MoveItem {
+            item_id,
+            shift: position_shift.into(),
+        })
     }
 
-    pub(crate) fn append_queue_items(&mut self, media: Vec<MediaItem>) -> Result<(), String> {
-        self.queue_play_media(media, QueueOption::Add, None, false)
+    pub(crate) fn move_queue_item_to_end(&mut self, item_id: QueueItemId) -> Result<(), String> {
+        self.queue_command(QueueCommand::MoveItemToEnd(item_id))
     }
 
-    pub(crate) fn move_queue_items(
-        &mut self,
-        item_ids: Vec<QueueItemId>,
-        target_index: usize,
-    ) -> Result<(), String> {
-        let projection = self
-            .projection
-            .as_ref()
-            .ok_or("remote queue is not active")?;
-        if !projection.is_synchronized() {
-            return Err("remote queue is synchronizing".into());
-        }
-        let client = self
-            .configuration
-            .as_ref()
-            .ok_or("remote player is not configured")?
-            .connection
-            .client
-            .clone();
-        let queue_id = projection.queue().queue_id;
-        self.pending_commands.push(Box::pin(async move {
-            client
-                .move_queue_items_to(&queue_id, item_ids, target_index)
-                .await
-        }));
-        Ok(())
-    }
-
-    pub(crate) fn delete_queue_items(&mut self, item_ids: Vec<QueueItemId>) -> Result<(), String> {
-        for item_id in item_ids {
-            self.queue_command(QueueCommand::DeleteItem(item_id))?;
-        }
-        Ok(())
+    pub(crate) fn delete_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {
+        self.queue_command(QueueCommand::DeleteItem(item_id))
     }
 
     pub(crate) fn select_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {

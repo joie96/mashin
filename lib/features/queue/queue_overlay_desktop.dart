@@ -151,66 +151,30 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
       _selectedItems.isEmpty ? <QueueItem>[item] : _selectedItems;
 
   Future<void> _moveTargetItemsNext(List<QueueItem> targets) async {
-    final int? playingIndex = currentQueueIndex;
-    if (playingIndex == null) {
-      return;
-    }
-
-    final List<String> itemOrder = queueItems
-        .map((QueueItem item) => item.queueItemId)
-        .toList(growable: true);
     final Set<String> targetIds = targets
         .map((QueueItem item) => item.queueItemId)
         .where((String id) => id.isNotEmpty)
         .toSet();
-    final List<String> orderedTargetIds = itemOrder
+    final List<String> orderedTargetIds = queueItems
+        .map((QueueItem item) => item.queueItemId)
         .where(targetIds.contains)
         .toList(growable: false);
-    int insertPosition = (playingIndex + 1).clamp(0, itemOrder.length);
-
-    for (final String itemId in orderedTargetIds) {
-      final int currentPosition = itemOrder.indexOf(itemId);
-      if (currentPosition < 0) {
-        continue;
-      }
-      if (currentPosition < insertPosition) {
-        insertPosition--;
-      }
-      if (insertPosition != currentPosition) {
-        await widget.coreBridge.moveQueueItems(<String>[
-          itemId,
-        ], insertPosition);
-      }
-      itemOrder
-        ..removeAt(currentPosition)
-        ..insert(insertPosition, itemId);
-      insertPosition++;
+    for (final String itemId in orderedTargetIds.reversed) {
+      await widget.coreBridge.moveQueueItem(itemId, 0);
     }
   }
 
   Future<void> _moveTargetItemsLast(List<QueueItem> targets) async {
-    final List<String> itemOrder = queueItems
-        .map((QueueItem item) => item.queueItemId)
-        .toList(growable: true);
     final Set<String> targetIds = targets
         .map((QueueItem item) => item.queueItemId)
         .where((String id) => id.isNotEmpty)
         .toSet();
-
-    for (final String itemId in itemOrder.where(targetIds.contains).toList()) {
-      final int currentPosition = itemOrder.indexOf(itemId);
-      if (currentPosition < 0) {
-        continue;
-      }
-      final int targetPosition = itemOrder.length - 1;
-      if (targetPosition != currentPosition) {
-        await widget.coreBridge.moveQueueItems(<String>[
-          itemId,
-        ], targetPosition);
-      }
-      itemOrder
-        ..removeAt(currentPosition)
-        ..add(itemId);
+    final List<String> orderedTargetIds = queueItems
+        .map((QueueItem item) => item.queueItemId)
+        .where(targetIds.contains)
+        .toList(growable: false);
+    for (final String itemId in orderedTargetIds) {
+      await widget.coreBridge.moveQueueItemToEnd(itemId);
     }
   }
 
@@ -233,15 +197,8 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
       ContextMenuAction(
         label: 'Abspielen',
         icon: Icons.play_arrow,
-        onSelected: () {
-          final int index = queueItems.indexWhere(
-            (QueueItem queueItem) =>
-                queueItem.queueItemId == targets.first.queueItemId,
-          );
-          return index < 0
-              ? Future<void>.value()
-              : widget.coreBridge.playQueueIndex(index);
-        },
+        onSelected: () =>
+            widget.coreBridge.selectQueueItem(targets.first.queueItemId),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
@@ -257,12 +214,14 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
       ContextMenuAction(
         label: 'Aus Queue entfernen',
         icon: Icons.remove_circle_outline,
-        onSelected: () => widget.coreBridge.deleteQueueItems(
-          targets
-              .map((QueueItem target) => target.queueItemId)
-              .where((String id) => id.isNotEmpty)
-              .toList(),
-        ),
+        onSelected: () async {
+          for (final String itemId
+              in targets
+                  .map((QueueItem target) => target.queueItemId)
+                  .where((String id) => id.isNotEmpty)) {
+            await widget.coreBridge.deleteQueueItem(itemId);
+          }
+        },
       ),
       if (track != null &&
           (onOpenArtist != null || onOpenAlbum != null)) ...<ContextMenuAction>[

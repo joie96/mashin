@@ -39,7 +39,7 @@ class PlaybackSessionCallbackTest {
     fun controllersCanBrowseAndControlPlayback() {
         val context = RuntimeEnvironment.getApplication()
         val browser = MediaLibraryBrowser(context) { Futures.immediateVoidFuture() }
-        val player = RustSessionPlayer({ Futures.immediateVoidFuture() }, browser::startPlayback, browser::queueEntry)
+        val player = RustSessionPlayer({ Futures.immediateVoidFuture() }, browser::startPlayback, browser::resolveLibraryMediaItem)
         val lifecycle = PlaybackSessionLifecycle()
         var shutdownRequests = 0
         lifecycle.attachSession { shutdownRequests++ }
@@ -96,7 +96,7 @@ class PlaybackSessionCallbackTest {
     fun trustedControllersCanToggleActionsButCannotExecuteAppOnlyCommands() {
         val context = RuntimeEnvironment.getApplication()
         val browser = MediaLibraryBrowser(context) { Futures.immediateVoidFuture() }
-        val player = RustSessionPlayer({ Futures.immediateVoidFuture() }, browser::startPlayback, browser::queueEntry)
+        val player = RustSessionPlayer({ Futures.immediateVoidFuture() }, browser::startPlayback, browser::resolveLibraryMediaItem)
         val snapshot = PlaybackSnapshot.empty().copy(serializedCurrentMediaItem =
             """{"media_type":"track","item_id":"track-1","provider":"library","uri":"library://track/track-1","name":"Track"}""")
         val requests = mutableListOf<PlaybackRequest>()
@@ -159,7 +159,7 @@ class PlaybackSessionCallbackTest {
         }
         val context = RuntimeEnvironment.getApplication()
         val browser = MediaLibraryBrowser(context, search) { Futures.immediateVoidFuture() }
-        val player = RustSessionPlayer({ Futures.immediateVoidFuture() }, browser::startPlayback, browser::queueEntry)
+        val player = RustSessionPlayer({ Futures.immediateVoidFuture() }, browser::startPlayback, browser::resolveLibraryMediaItem)
         val callback = PlaybackSessionCallback(context.packageName, browser) {
             Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
@@ -203,7 +203,7 @@ class PlaybackSessionCallbackTest {
                 assertEquals(3, tracks.size)
                 assertEquals("browse:track:library:track-1", tracks.last().mediaId)
                 assertTrue(tracks.last().mediaMetadata.isPlayable == true)
-                assertEquals("track", browser.queueEntry(tracks.last().mediaId)?.getJSONObject("mediaItem")?.getString("media_type"))
+                assertEquals("track", browser.resolveLibraryMediaItem(tracks.last().mediaId)?.getString("media_type"))
             }
             assertEquals(LibraryResult.RESULT_ERROR_BAD_VALUE,
                 callback.onGetSearchResult(session, controller, "jazz", -1, 10, null).get().resultCode)

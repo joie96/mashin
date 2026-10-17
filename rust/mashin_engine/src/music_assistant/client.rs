@@ -1,10 +1,10 @@
-use super::models::identifiers::{AccessToken, MediaId, PlayerId, QueueId};
+use super::models::identifiers::{AccessToken, MediaId};
 use super::models::media::{
     Album, Artist, MediaItem, MediaItemFields, MediaType, MusicAssistantSearchResults, Playlist,
     Track,
 };
 use super::models::player::MusicAssistantPlayer;
-use super::models::queue::{MusicAssistantQueue, QueueItem, RepeatMode};
+use super::models::queue::{MusicAssistantQueue, QueueItem};
 use super::models::recommendation::MusicAssistantRecommendationFolder;
 use super::models::session::{MusicAssistantUser, ProviderInstance, ProviderManifest, ServerInfo};
 use serde::de::DeserializeOwned;
@@ -443,86 +443,6 @@ impl MusicAssistantClient {
             json!({ "queue_id": queue_id, "limit": limit, "offset": offset }),
         )
         .await
-    }
-
-    pub(crate) async fn set_queue_autoplay(
-        &self,
-        queue_id: &QueueId,
-        autoplay_enabled: bool,
-    ) -> Result<(), String> {
-        self.execute_command::<Value>(
-            "player_queues/autoplay",
-            json!({ "queue_id": queue_id, "autoplay_enabled": autoplay_enabled }),
-        )
-        .await
-        .map(|_| ())
-    }
-
-    pub(crate) async fn queue_clear(&self, queue_id: &QueueId) -> Result<(), String> {
-        self.execute_command::<Value>(
-            "player_queues/clear",
-            json!({ "queue_id": queue_id, "skip_stop": true }),
-        )
-        .await
-        .map(|_| ())
-    }
-
-    pub(crate) async fn queue_play_index(
-        &self,
-        queue_id: QueueId,
-        index: usize,
-    ) -> Result<(), String> {
-        self.execute_command::<Value>(
-            "player_queues/play_index",
-            json!({ "queue_id": queue_id, "index": index }),
-        )
-        .await
-        .map(|_| ())
-    }
-
-    pub(crate) async fn set_queue_shuffle(
-        &self,
-        queue_id: &str,
-        shuffle_enabled: bool,
-    ) -> Result<(), String> {
-        self.execute_command::<Value>(
-            "player_queues/shuffle",
-            json!({ "queue_id": queue_id, "shuffle_enabled": shuffle_enabled }),
-        )
-        .await
-        .map(|_| ())
-    }
-
-    pub(crate) async fn set_queue_repeat(
-        &self,
-        queue_id: &str,
-        repeat_mode: RepeatMode,
-    ) -> Result<(), String> {
-        self.execute_command::<Value>(
-            "player_queues/repeat",
-            json!({ "queue_id": queue_id, "repeat_mode": repeat_mode }),
-        )
-        .await
-        .map(|_| ())
-    }
-
-    pub(crate) async fn player_seek(
-        &self,
-        player_id: PlayerId,
-        position: i64,
-    ) -> Result<(), String> {
-        self.execute_command::<Value>(
-            "players/cmd/seek",
-            json!({ "player_id": player_id, "position": position.max(0) }),
-        )
-        .await
-        .map(|_| ())
-    }
-
-    pub(crate) async fn player_stop(&self, player_id: &PlayerId) -> Result<(), String> {
-        self.execute_command::<Value>("players/cmd/stop", json!({ "player_id": player_id }))
-            .await
-            .map(|_| ())
     }
 
     // HTTP command transport.

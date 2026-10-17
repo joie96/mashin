@@ -146,23 +146,17 @@ fn execute_async_operation(request: CoreOperationRequest) -> Result<Value, CoreE
         "startRadio" => {
             execute_json_text_command(mashin_core_start_radio, &arguments, "mediaItems")
         }
-        "insertQueueItems" => execute_json_integer_command(
-            mashin_core_insert_queue_items,
+        "moveQueueItem" => execute_text_integer_command(
+            mashin_core_move_queue_item,
             &arguments,
-            "mediaItems",
-            "index",
+            "itemId",
+            "positionShift",
         ),
-        "appendQueueItems" => {
-            execute_json_text_command(mashin_core_append_queue_items, &arguments, "mediaItems")
+        "moveQueueItemToEnd" => {
+            execute_text_command(mashin_core_move_queue_item_to_end, &arguments, "itemId")
         }
-        "moveQueueItems" => execute_json_integer_command(
-            mashin_core_move_queue_items,
-            &arguments,
-            "itemIds",
-            "targetIndex",
-        ),
-        "deleteQueueItems" => {
-            execute_json_text_command(mashin_core_delete_queue_items, &arguments, "itemIds")
+        "deleteQueueItem" => {
+            execute_text_command(mashin_core_delete_queue_item, &arguments, "itemId")
         }
         "selectQueueItem" => {
             execute_text_command(mashin_core_select_queue_item, &arguments, "itemId")
@@ -293,13 +287,13 @@ fn execute_boolean_command(
 ) -> Result<Value, CoreError> {
     command_result(command(if required_bool(arguments, key)? { 1 } else { 0 }))
 }
-fn execute_json_integer_command(
+fn execute_text_integer_command(
     command: extern "C" fn(*const c_char, i32) -> i32,
     arguments: &serde_json::Map<String, Value>,
-    json_key: &str,
+    text_key: &str,
     integer_key: &str,
 ) -> Result<Value, CoreError> {
-    with_json_value(arguments, json_key, |value| {
+    with_text(arguments, text_key, |value| {
         command_result(command(
             value.as_ptr(),
             required_i32(arguments, integer_key)?,
@@ -730,54 +724,10 @@ pub extern "C" fn mashin_core_set_audio_profile(audio_profile: *const c_char) ->
 }
 
 #[no_mangle]
-pub extern "C" fn mashin_core_insert_queue_items(
-    media_items_json: *const c_char,
-    index: i32,
-) -> i32 {
-    if index < 0 {
-        record_and_publish_error("queue insertion index must not be negative".to_string());
-        return -1;
-    }
-    match read_required_c_string(media_items_json, "media_items_json")
-        .and_then(|value| parse_media_items(&value))
-    {
-        Ok(items) => {
-            execute_playback_command(|playback| playback.insert_queue_items(index as usize, items))
-        }
-        Err(error) => {
-            record_and_publish_error(error);
-            -1
-        }
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn mashin_core_append_queue_items(media_items_json: *const c_char) -> i32 {
-    match read_required_c_string(media_items_json, "media_items_json")
-        .and_then(|value| parse_media_items(&value))
-    {
-        Ok(items) => execute_playback_command(|playback| playback.append_queue_items(items)),
-        Err(error) => {
-            record_and_publish_error(error);
-            -1
-        }
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn mashin_core_move_queue_items(
-    item_ids_json: *const c_char,
-    target_index: i32,
-) -> i32 {
-    if target_index < 0 {
-        record_and_publish_error("queue move target must not be negative".to_string());
-        return -1;
-    }
-    match read_required_c_string(item_ids_json, "item_ids_json").and_then(|value| {
-        serde_json::from_str::<Vec<QueueItemId>>(&value).map_err(|error| error.to_string())
-    }) {
-        Ok(ids) => execute_playback_command(|playback| {
-            playback.move_queue_items(ids, target_index as usize)
+pub extern "C" fn mashin_core_move_queue_item(item_id: *const c_char, position_shift: i32) -> i32 {
+    match read_required_c_string(item_id, "itemId") {
+        Ok(item_id) => execute_playback_command(|playback| {
+            playback.move_queue_item(QueueItemId(item_id), position_shift)
         }),
         Err(error) => {
             record_and_publish_error(error);
@@ -787,11 +737,24 @@ pub extern "C" fn mashin_core_move_queue_items(
 }
 
 #[no_mangle]
-pub extern "C" fn mashin_core_delete_queue_items(item_ids_json: *const c_char) -> i32 {
-    match read_required_c_string(item_ids_json, "item_ids_json").and_then(|value| {
-        serde_json::from_str::<Vec<QueueItemId>>(&value).map_err(|error| error.to_string())
-    }) {
-        Ok(ids) => execute_playback_command(|playback| playback.delete_queue_items(ids)),
+pub extern "C" fn mashin_core_move_queue_item_to_end(item_id: *const c_char) -> i32 {
+    match read_required_c_string(item_id, "itemId") {
+        Ok(item_id) => execute_playback_command(|playback| {
+            playback.move_queue_item_to_end(QueueItemId(item_id))
+        }),
+        Err(error) => {
+            record_and_publish_error(error);
+            -1
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn mashin_core_delete_queue_item(item_id: *const c_char) -> i32 {
+    match read_required_c_string(item_id, "itemId") {
+        Ok(item_id) => {
+            execute_playback_command(|playback| playback.delete_queue_item(QueueItemId(item_id)))
+        }
         Err(error) => {
             record_and_publish_error(error);
             -1

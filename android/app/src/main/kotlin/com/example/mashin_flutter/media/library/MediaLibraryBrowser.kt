@@ -168,8 +168,7 @@ internal class MediaLibraryBrowser(
             (page.toLong() * pageSize).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()).take(pageSize), params))
     }
 
-    fun queueEntry(mediaId: String): JSONObject? = serializedMediaItems[mediaId]
-        ?.let { JSONObject().put("mediaItem", JSONObject(it)) }
+    fun resolveLibraryMediaItem(mediaId: String): JSONObject? = serializedMediaItems[mediaId]?.let(::JSONObject)
 
     // Library boundary mapping and serialized media caching.
     private fun libraryItem(

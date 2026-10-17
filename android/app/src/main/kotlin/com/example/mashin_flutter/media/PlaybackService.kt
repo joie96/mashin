@@ -75,7 +75,7 @@ class PlaybackService : MediaLibraryService() {
         RustCoreBridge.initializeCore(applicationContext)
         val initializedBrowser = MediaLibraryBrowser(applicationContext, dispatchCommand = ::dispatchPlayerCommand)
         browser = initializedBrowser
-        val player = RustSessionPlayer(::dispatchPlayerCommand, initializedBrowser::startPlayback, initializedBrowser::queueEntry)
+        val player = RustSessionPlayer(::dispatchPlayerCommand, initializedBrowser::startPlayback, initializedBrowser::resolveLibraryMediaItem)
         sessionPlayer = player
         val callback = PlaybackSessionCallback(packageName, initializedBrowser, readSnapshot = { snapshot }, dispatchCommand = ::dispatchCoreCommand)
         val session = MediaLibrarySession.Builder(this, player, callback)
@@ -188,9 +188,7 @@ class PlaybackService : MediaLibraryService() {
         var requiresPlaybackStartup = false
         try {
             check(initializationError == null || request.kind == PlaybackCommandKind.Login) { initializationError.orEmpty() }
-            requiresPlaybackStartup = request.kind.canStartPlayback && snapshot.isLocalPlayback &&
-                (request.kind != PlaybackCommandKind.QueuePlayMedia ||
-                    JSONObject(request.arguments).getJSONObject("request").optString("option") == "play")
+            requiresPlaybackStartup = request.canStartPlayback && snapshot.isLocalPlayback
             if (requiresPlaybackStartup) {
                 startPlaybackForeground()
                 check(audioFocus.acquire()) { "Audio focus is required to start playback" }

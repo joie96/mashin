@@ -68,19 +68,15 @@ enum PlaybackCommand {
     StartRadio {
         media_items: Vec<MediaItem>,
     },
-    InsertQueueItems {
-        index: usize,
-        media_items: Vec<MediaItem>,
+    MoveQueueItem {
+        item_id: QueueItemId,
+        position_shift: i32,
     },
-    AppendQueueItems {
-        media_items: Vec<MediaItem>,
+    MoveQueueItemToEnd {
+        item_id: QueueItemId,
     },
-    MoveQueueItems {
-        item_ids: Vec<QueueItemId>,
-        target_index: usize,
-    },
-    DeleteQueueItems {
-        item_ids: Vec<QueueItemId>,
+    DeleteQueueItem {
+        item_id: QueueItemId,
     },
     SelectQueueItem {
         item_id: QueueItemId,
@@ -221,25 +217,20 @@ pub(crate) fn execute_command(kind: &str, argument: Option<&str>) -> Result<(), 
         PlaybackCommand::StartRadio { media_items } => {
             core::start_radio_and_execute_command(media_items)
         }
-        PlaybackCommand::InsertQueueItems { index, media_items } => {
-            core::execute_playback_command_and_collect_events(|playback| {
-                playback.insert_queue_items(index, media_items)
-            })
-        }
-        PlaybackCommand::AppendQueueItems { media_items } => {
-            core::execute_playback_command_and_collect_events(|playback| {
-                playback.append_queue_items(media_items)
-            })
-        }
-        PlaybackCommand::MoveQueueItems {
-            item_ids,
-            target_index,
+        PlaybackCommand::MoveQueueItem {
+            item_id,
+            position_shift,
         } => core::execute_playback_command_and_collect_events(|playback| {
-            playback.move_queue_items(item_ids, target_index)
+            playback.move_queue_item(item_id, position_shift)
         }),
-        PlaybackCommand::DeleteQueueItems { item_ids } => {
+        PlaybackCommand::MoveQueueItemToEnd { item_id } => {
             core::execute_playback_command_and_collect_events(|playback| {
-                playback.delete_queue_items(item_ids)
+                playback.move_queue_item_to_end(item_id)
+            })
+        }
+        PlaybackCommand::DeleteQueueItem { item_id } => {
+            core::execute_playback_command_and_collect_events(|playback| {
+                playback.delete_queue_item(item_id)
             })
         }
         PlaybackCommand::SelectQueueItem { item_id } => {
@@ -380,6 +371,16 @@ mod tests {
             ("appendQueueItems", r#"{"mediaItems":{}}"#),
             ("moveQueueItems", r#"{"targetIndex":0,"itemIds":"invalid"}"#),
             ("deleteQueueItems", r#"{"itemIds":{}}"#),
+            (
+                "moveQueueItem",
+                r#"{"itemId":"item-1","positionShift":"0"}"#,
+            ),
+            (
+                "moveQueueItem",
+                r#"{"itemId":"item-1","positionShift":2147483648}"#,
+            ),
+            ("moveQueueItemToEnd", r#"{"itemIds":["item-1"]}"#),
+            ("deleteQueueItem", r#"{"itemId":0}"#),
             ("playQueueIndex", r#"{"index":-1}"#),
         ] {
             assert!(decode_command(kind, Some(arguments)).is_err(), "{kind}");
@@ -390,10 +391,17 @@ mod tests {
     fn queue_commands_accept_flutter_payloads() {
         assert!(decode_command("queuePlayMedia", Some(r#"{"request":{"mediaItems":[{"media_type":"track","item_id":"track-1","provider":"test","name":"First"}],"option":"play","startItem":0,"shuffle":false}}"#)).is_ok());
         assert!(decode_command(
-            "moveQueueItems",
-            Some(r#"{"itemIds":["item-1"],"targetIndex":0}"#)
+            "moveQueueItem",
+            Some(r#"{"itemId":"item-1","positionShift":0}"#)
         )
         .is_ok());
+        assert!(decode_command(
+            "moveQueueItem",
+            Some(r#"{"itemId":"item-1","positionShift":-2}"#)
+        )
+        .is_ok());
+        assert!(decode_command("moveQueueItemToEnd", Some(r#"{"itemId":"item-1"}"#)).is_ok());
+        assert!(decode_command("deleteQueueItem", Some(r#"{"itemId":"item-1"}"#)).is_ok());
         assert!(decode_command("transportRepeatMode", Some(r#"{"mode":2}"#)).is_ok());
     }
 

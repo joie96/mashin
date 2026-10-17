@@ -36,7 +36,7 @@ class PlaybackNotificationProviderTest {
         val context = RuntimeEnvironment.getApplication()
         val provider = PlaybackNotificationProvider(context)
         val browser = MediaLibraryBrowser(context) { Futures.immediateVoidFuture() }
-        val player = RustSessionPlayer({ Futures.immediateVoidFuture() }, browser::startPlayback, browser::queueEntry)
+        val player = RustSessionPlayer({ Futures.immediateVoidFuture() }, browser::startPlayback, browser::resolveLibraryMediaItem)
         val callback = PlaybackSessionCallback(context.packageName, browser) {
             Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
@@ -68,7 +68,7 @@ class PlaybackNotificationProviderTest {
         val context = RuntimeEnvironment.getApplication()
         val provider = PlaybackNotificationProvider(context)
         val browser = MediaLibraryBrowser(context) { Futures.immediateVoidFuture() }
-        val player = RustSessionPlayer({ Futures.immediateVoidFuture() }, browser::startPlayback, browser::queueEntry)
+        val player = RustSessionPlayer({ Futures.immediateVoidFuture() }, browser::startPlayback, browser::resolveLibraryMediaItem)
         val callback = PlaybackSessionCallback(context.packageName, browser) {
             Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }

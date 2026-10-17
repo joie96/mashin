@@ -1,5 +1,6 @@
 package com.example.mashin_flutter.media.session
 
+import android.os.Bundle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -9,6 +10,8 @@ import org.json.JSONObject
 
 @UnstableApi
 internal object PlaybackSnapshotMapper {
+    const val SERIALIZED_MEDIA_ITEM_KEY = "mashin.serializedMediaItem"
+
     // Canonical Rust state is projected without native calls or a second queue owner.
     fun fromPlayerState(values: JSONObject, queue: JSONObject, musicAssistantUrl: String = "", userData: JSONObject? = null): PlaybackSnapshot {
         val queueItemId = values.optString("currentQueueItemId")
@@ -46,6 +49,7 @@ internal object PlaybackSnapshotMapper {
                         .setAlbumTitle(mediaItem?.optJSONObject("album")?.optString("name"))
                         .setArtworkUri(currentItem.artworkUri(musicAssistantUrl))
                         .setDurationMs(if (currentItem.optString("queue_item_id") == queueItemId) durationMillis else mediaItem?.optLong("duration")?.times(1_000L))
+                        .setExtras(mediaItem?.let { Bundle().apply { putString(SERIALIZED_MEDIA_ITEM_KEY, it.toString()) } })
                         .build(),
                 )
                 .build()

@@ -17,7 +17,7 @@ import org.json.JSONObject
 internal class RustSessionPlayer(
     private val dispatchCommand: (PlaybackRequest) -> ListenableFuture<*>,
     private val startPlayback: (String) -> ListenableFuture<*>,
-    private val queueEntry: (String) -> JSONObject?,
+    private val resolveLibraryMediaItem: (String) -> JSONObject?,
 ) : SimpleBasePlayer(Looper.getMainLooper()) {
     private var snapshot = PlaybackSnapshot.empty()
 
@@ -46,112 +46,83 @@ internal class RustSessionPlayer(
                 MoreExecutors.directExecutor(),
             )
         }
-        val selectedIndex = if (mediaItems.isEmpty()) null else if (startIndex == C.INDEX_UNSET) {
-            if (mediaItems.any { it.mediaId == snapshot.mediaItems.getOrNull(snapshot.currentIndex)?.mediaId }) null else 0
-        } else startIndex
+        val selectedIndex = if (mediaItems.isEmpty()) null else if (startIndex == C.INDEX_UNSET) 0 else startIndex
         if (selectedIndex != null && selectedIndex !in mediaItems.indices) {
             return Futures.immediateFailedFuture<Any>(IndexOutOfBoundsException("unknown queue item index: $selectedIndex"))
         }
-        val previousCurrentId = snapshot.mediaItems.getOrNull(snapshot.currentIndex)?.mediaId
-        val existingIds = snapshot.mediaItems.map { it.mediaId }
-        val retainedIds = mediaItems.mapNotNull { it.mediaId.takeIf(existingIds::contains) }
-        if (retainedIds.size != retainedIds.distinct().size) {
-            return Futures.immediateFailedFuture<Any>(IllegalArgumentException("queue item IDs must be distinct"))
+        val items = JSONArray()
+        for (item in mediaItems) {
+            val mediaItem = resolveMediaItem(item.mediaId)
+                ?: return Futures.immediateFailedFuture<Any>(IllegalArgumentException("unknown queue media ID: ${item.mediaId}"))
+            items.put(mediaItem)
         }
-        val newItems = mutableMapOf<Int, JSONObject>()
-        for ((index, item) in mediaItems.withIndex()) {
-            if (item.mediaId !in existingIds) {
-                newItems[index] = queueEntry(item.mediaId)?.getJSONObject("mediaItem")
-                    ?: return Futures.immediateFailedFuture<Any>(IllegalArgumentException("unknown queue media ID: ${item.mediaId}"))
-            }
-        }
-
-        val commands = mutableListOf<PlaybackRequest>()
-        val removedIds = existingIds.filterNot(retainedIds::contains)
-        if (removedIds.isNotEmpty()) {
-            commands += PlaybackRequest(PlaybackCommandKind.DeleteQueueItems,
-                JSONObject().put("itemIds", JSONArray(removedIds)).toString())
-        }
-        val workingIds = mutableListOf<String?>()
-        workingIds.addAll(existingIds.filter(retainedIds::contains))
-        for ((index, item) in mediaItems.withIndex()) {
-            val newItem = newItems[index]
-            if (newItem != null) {
-                commands += PlaybackRequest(PlaybackCommandKind.InsertQueueItems, JSONObject()
-                    .put("index", index).put("mediaItems", JSONArray().put(newItem)).toString()
-                )
-                workingIds.add(index, null)
-            } else {
-                val previousIndex = workingIds.indexOf(item.mediaId)
-                if (previousIndex != index) {
-                    commands += PlaybackRequest(PlaybackCommandKind.MoveQueueItems, JSONObject()
-                        .put("itemIds", JSONArray().put(item.mediaId)).put("targetIndex", index).toString()
-                    )
-                    workingIds.removeAt(previousIndex)
-                    workingIds.add(index, item.mediaId)
-                }
-            }
-        }
-        var completion: ListenableFuture<*> = Futures.immediateVoidFuture()
-        for (command in commands) {
-            completion = Futures.transformAsync(completion, { dispatchCommand(command) }, MoreExecutors.directExecutor())
-        }
-        if (selectedIndex != null) {
+        var completion: ListenableFuture<*> = dispatchCommand(PlaybackRequest(
+            PlaybackCommandKind.QueuePlayMedia,
+            JSONObject().put("request", JSONObject()
+                .put("mediaItems", items).put("option", "replace")
+                .put("startItem", selectedIndex ?: JSONObject.NULL).put("shuffle", false)).toString(),
+        ))
+        if (selectedIndex != null && startPositionMs > 0L && startPositionMs != C.TIME_UNSET) {
             completion = Futures.transformAsync(completion, {
-                val itemId = snapshot.mediaItems.getOrNull(selectedIndex)?.mediaId
-                    ?: throw IndexOutOfBoundsException("unknown queue item index: $selectedIndex")
-                if (itemId == previousCurrentId && itemId == snapshot.mediaItems.getOrNull(snapshot.currentIndex)?.mediaId) {
-                    Futures.immediateVoidFuture()
-                } else {
-                    dispatchCommand(PlaybackRequest(PlaybackCommandKind.SelectQueueItem,
-                        JSONObject().put("itemId", itemId).toString()))
-                }
+                dispatchCommand(PlaybackRequest(PlaybackCommandKind.TransportSeek,
+                    JSONObject().put("seconds", startPositionMs / 1_000.0).toString()))
             }, MoreExecutors.directExecutor())
-            if (startPositionMs > 0L && startPositionMs != C.TIME_UNSET) {
-                completion = Futures.transformAsync(completion, {
-                    dispatchCommand(PlaybackRequest(PlaybackCommandKind.TransportSeek,
-                        JSONObject().put("seconds", startPositionMs / 1_000.0).toString()))
-                }, MoreExecutors.directExecutor())
-            }
         }
         return completion
     }
 
     override fun handleAddMediaItems(index: Int, mediaItems: List<MediaItem>): ListenableFuture<*> {
+        if (mediaItems.isEmpty()) return Futures.immediateVoidFuture()
+        val option = when (index) {
+            snapshot.mediaItems.size -> "add"
+            snapshot.currentIndex + 1 -> "next"
+            else -> return Futures.immediateFailedFuture<Any>(UnsupportedOperationException("MA supports adding next or at the end only"))
+        }
         val items = JSONArray()
         for (item in mediaItems) {
-            val mediaItem = queueEntry(item.mediaId)?.getJSONObject("mediaItem")
+            val mediaItem = resolveMediaItem(item.mediaId)
                 ?: return Futures.immediateFailedFuture<Any>(IllegalArgumentException("unknown queue media ID: ${item.mediaId}"))
             items.put(mediaItem)
         }
-        return if (index == snapshot.mediaItems.size) {
-            dispatchCommand(PlaybackRequest(PlaybackCommandKind.AppendQueueItems,
-                JSONObject().put("mediaItems", items).toString()))
-        } else {
-            dispatchCommand(PlaybackRequest(PlaybackCommandKind.InsertQueueItems,
-                JSONObject().put("index", index).put("mediaItems", items).toString()))
-        }
+        return dispatchCommand(PlaybackRequest(PlaybackCommandKind.QueuePlayMedia,
+            JSONObject().put("request", JSONObject().put("mediaItems", items)
+                .put("option", option).put("startItem", JSONObject.NULL).put("shuffle", false)).toString()))
     }
 
     override fun handleRemoveMediaItems(fromIndex: Int, toIndex: Int): ListenableFuture<*> {
-        val itemIds = JSONArray()
-        snapshot.mediaItems.subList(fromIndex, toIndex).forEach { itemIds.put(it.mediaId) }
-        return dispatchCommand(PlaybackRequest(PlaybackCommandKind.DeleteQueueItems,
-            JSONObject().put("itemIds", itemIds).toString()))
+        val itemIds = snapshot.mediaItems.subList(fromIndex, toIndex).map { it.mediaId }
+        var completion: ListenableFuture<*> = Futures.immediateVoidFuture()
+        for (itemId in itemIds) {
+            completion = Futures.transformAsync(completion, {
+                dispatchCommand(PlaybackRequest(PlaybackCommandKind.DeleteQueueItem,
+                    JSONObject().put("itemId", itemId).toString()))
+            }, MoreExecutors.directExecutor())
+        }
+        return completion
     }
 
     override fun handleMoveMediaItems(fromIndex: Int, toIndex: Int, newIndex: Int): ListenableFuture<*> {
-        val itemIds = JSONArray()
-        snapshot.mediaItems.subList(fromIndex, toIndex).forEach { itemIds.put(it.mediaId) }
-        return dispatchCommand(PlaybackRequest(PlaybackCommandKind.MoveQueueItems,
-            JSONObject().put("itemIds", itemIds).put("targetIndex", newIndex).toString()))
+        val positionShift = newIndex - fromIndex
+        if (positionShift == 0 || fromIndex == toIndex) return Futures.immediateVoidFuture()
+        val itemIds = snapshot.mediaItems.subList(fromIndex, toIndex).map { it.mediaId }
+        val isMovingToEnd = newIndex == snapshot.mediaItems.size - itemIds.size
+        val orderedIds = if (positionShift > 0 && !isMovingToEnd) itemIds.reversed() else itemIds
+        var completion: ListenableFuture<*> = Futures.immediateVoidFuture()
+        for (itemId in orderedIds) {
+            completion = Futures.transformAsync(completion, {
+                val arguments = JSONObject().put("itemId", itemId)
+                val kind = if (isMovingToEnd) PlaybackCommandKind.MoveQueueItemToEnd else {
+                    arguments.put("positionShift", positionShift)
+                    PlaybackCommandKind.MoveQueueItem
+                }
+                dispatchCommand(PlaybackRequest(kind, arguments.toString()))
+            }, MoreExecutors.directExecutor())
+        }
+        return completion
     }
 
     override fun handleReplaceMediaItems(fromIndex: Int, toIndex: Int, mediaItems: List<MediaItem>): ListenableFuture<*> {
-        val items = snapshot.mediaItems.toMutableList()
-        items.subList(fromIndex, toIndex).clear()
-        items.addAll(fromIndex, mediaItems)
-        return handleSetMediaItems(items, C.INDEX_UNSET, 0)
+        return Futures.immediateFailedFuture<Any>(UnsupportedOperationException("MA does not support replacing a queue range; set media items instead"))
     }
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
@@ -183,8 +154,8 @@ internal class RustSessionPlayer(
             if (mediaItemIndex !in snapshot.mediaItems.indices) {
                 return Futures.immediateFailedFuture<Any>(IndexOutOfBoundsException("unknown queue item index: $mediaItemIndex"))
             }
-            val selection = dispatchCommand(PlaybackRequest(PlaybackCommandKind.PlayQueueIndex,
-                JSONObject().put("index", mediaItemIndex).toString()))
+            val selection = dispatchCommand(PlaybackRequest(PlaybackCommandKind.SelectQueueItem,
+                JSONObject().put("itemId", snapshot.mediaItems[mediaItemIndex].mediaId).toString()))
             if (positionMs <= 0L || positionMs == C.TIME_UNSET) return selection
             return Futures.transformAsync(
                 selection,
@@ -274,5 +245,10 @@ internal class RustSessionPlayer(
         return builder.build()
     }
 
+    // Resolve existing queue identities from the snapshot, not the browse cache.
+    private fun resolveMediaItem(mediaId: String): JSONObject? = snapshot.mediaItems
+        .firstOrNull { it.mediaId == mediaId }?.mediaMetadata?.extras
+        ?.getString(PlaybackSnapshotMapper.SERIALIZED_MEDIA_ITEM_KEY)?.let(::JSONObject)
+        ?: resolveLibraryMediaItem(mediaId)
 }
 

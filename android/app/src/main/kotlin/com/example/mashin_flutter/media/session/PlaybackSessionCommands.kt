@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
+import org.json.JSONObject
 
 internal enum class PlaybackCommandKind(val action: String, val canStartPlayback: Boolean = false) {
     Login("login"),
@@ -28,17 +29,24 @@ internal enum class PlaybackCommandKind(val action: String, val canStartPlayback
     SetUserDataFavorites("setUserDataFavorites"),
     QueuePlayMedia("queuePlayMedia", true),
     StartRadio("startRadio", true),
-    InsertQueueItems("insertQueueItems"),
-    AppendQueueItems("appendQueueItems"),
-    MoveQueueItems("moveQueueItems"),
-    DeleteQueueItems("deleteQueueItems"),
-    SelectQueueItem("selectQueueItem"),
+    MoveQueueItem("moveQueueItem"),
+    MoveQueueItemToEnd("moveQueueItemToEnd"),
+    DeleteQueueItem("deleteQueueItem"),
+    SelectQueueItem("selectQueueItem", true),
     PlayQueueIndex("playQueueIndex", true),
     SetAudioProfile("setAudioProfile"),
 }
 
 // Serialized arguments cross the session/JNI boundary; Rust validates their typed contract.
-internal data class PlaybackRequest(val kind: PlaybackCommandKind, val arguments: String = "{}")
+internal data class PlaybackRequest(val kind: PlaybackCommandKind, val arguments: String = "{}") {
+    // Empty replacements clear the queue; add/next do not start playback.
+    val canStartPlayback: Boolean
+        get() = if (kind == PlaybackCommandKind.QueuePlayMedia) {
+            val request = JSONObject(arguments).getJSONObject("request")
+            request.getJSONArray("mediaItems").length() > 0 &&
+                request.getString("option") in setOf("play", "replace")
+        } else kind.canStartPlayback
+}
 
 @UnstableApi
 internal object PlaybackSessionCommands {

@@ -26,9 +26,8 @@ typedef _NativeLogFn =
     ffi.Int32 Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
 typedef _DartLogFn =
     int Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
-typedef _NativeQueueIndexedFn =
-    ffi.Int32 Function(ffi.Pointer<Utf8>, ffi.Int32);
-typedef _DartQueueIndexedFn = int Function(ffi.Pointer<Utf8>, int);
+typedef _NativeQueueMoveFn = ffi.Int32 Function(ffi.Pointer<Utf8>, ffi.Int32);
+typedef _DartQueueMoveFn = int Function(ffi.Pointer<Utf8>, int);
 typedef _NativeGetStringFn = ffi.Pointer<Utf8> Function();
 typedef _DartGetStringFn = ffi.Pointer<Utf8> Function();
 typedef _NativeStartMusicAssistantQueryFn =
@@ -123,10 +122,9 @@ abstract class MashinCoreBridgeApi {
     bool shuffle = false,
   });
   Future<void> startRadio(List<MediaItem> mediaItems);
-  Future<void> insertQueueItems(int index, List<MediaItem> mediaItems);
-  Future<void> appendQueueItems(List<MediaItem> mediaItems);
-  Future<void> moveQueueItems(List<String> itemIds, int targetIndex);
-  Future<void> deleteQueueItems(List<String> itemIds);
+  Future<void> moveQueueItem(String itemId, int positionShift);
+  Future<void> moveQueueItemToEnd(String itemId);
+  Future<void> deleteQueueItem(String itemId);
   Future<void> selectQueueItem(String itemId);
   Future<void> playQueueIndex(int index);
   Future<void> setAudioProfile(String audioProfile);
@@ -677,29 +675,22 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   // Queue item mutations.
 
   @override
-  Future<void> insertQueueItems(int index, List<MediaItem> mediaItems) =>
-      _submitVoidOperation('insertQueueItems', <String, Object?>{
-        'index': index,
-        'mediaItems': mediaItems
-            .map(createMusicAssistantMediaItemPayload)
-            .toList(),
+  Future<void> moveQueueItem(String itemId, int positionShift) =>
+      _submitVoidOperation('moveQueueItem', <String, Object?>{
+        'itemId': itemId,
+        'positionShift': positionShift,
       });
 
   @override
-  Future<void> appendQueueItems(List<MediaItem> mediaItems) =>
-      _submitMediaOperation('appendQueueItems', mediaItems);
+  Future<void> moveQueueItemToEnd(String itemId) => _submitVoidOperation(
+    'moveQueueItemToEnd',
+    <String, Object?>{'itemId': itemId},
+  );
 
   @override
-  Future<void> moveQueueItems(List<String> itemIds, int targetIndex) =>
-      _submitVoidOperation('moveQueueItems', <String, Object?>{
-        'itemIds': itemIds,
-        'targetIndex': targetIndex,
-      });
-
-  @override
-  Future<void> deleteQueueItems(List<String> itemIds) => _submitVoidOperation(
-    'deleteQueueItems',
-    <String, Object?>{'itemIds': itemIds},
+  Future<void> deleteQueueItem(String itemId) => _submitVoidOperation(
+    'deleteQueueItem',
+    <String, Object?>{'itemId': itemId},
   );
 
   @override
@@ -1121,19 +1112,15 @@ class _RustBindings {
       startRadio = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
         'mashin_core_start_radio',
       ),
-      queueInsert = library
-          .lookupFunction<_NativeQueueIndexedFn, _DartQueueIndexedFn>(
-            'mashin_core_insert_queue_items',
+      moveQueueItem = library
+          .lookupFunction<_NativeQueueMoveFn, _DartQueueMoveFn>(
+            'mashin_core_move_queue_item',
           ),
-      queueAppend = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
-        'mashin_core_append_queue_items',
+      moveQueueItemToEnd = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
+        'mashin_core_move_queue_item_to_end',
       ),
-      queueMove = library
-          .lookupFunction<_NativeQueueIndexedFn, _DartQueueIndexedFn>(
-            'mashin_core_move_queue_items',
-          ),
-      queueRemove = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
-        'mashin_core_delete_queue_items',
+      deleteQueueItem = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
+        'mashin_core_delete_queue_item',
       ),
       queueSelect = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
         'mashin_core_select_queue_item',
@@ -1236,10 +1223,9 @@ class _RustBindings {
   final _DartMutedFn setMuted;
   final _DartCodecFn queuePlayMedia;
   final _DartCodecFn startRadio;
-  final _DartQueueIndexedFn queueInsert;
-  final _DartCodecFn queueAppend;
-  final _DartQueueIndexedFn queueMove;
-  final _DartCodecFn queueRemove;
+  final _DartQueueMoveFn moveQueueItem;
+  final _DartCodecFn moveQueueItemToEnd;
+  final _DartCodecFn deleteQueueItem;
   final _DartCodecFn queueSelect;
   final _DartVolumeFn queuePlay;
   final _DartCodecFn setAudioProfile;
