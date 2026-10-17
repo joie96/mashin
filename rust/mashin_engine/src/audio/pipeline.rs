@@ -266,6 +266,9 @@ impl<Sink: OutputSink> PipelineState<Sink> {
             }
             AudioCommand::Play { stream_id, .. } => {
                 self.require_stream(stream_id)?;
+                if let Some(error) = &self.error {
+                    return Err(error.clone());
+                }
                 if self.cache.current().is_none() {
                     return Err("no current native audio stream".into());
                 }
@@ -507,10 +510,11 @@ impl<Sink: OutputSink> PipelineState<Sink> {
         Ok(events)
     }
 
-    fn fail(&mut self) {
+    fn fail(&mut self, error: String) {
+        LOGGER.error(format!("Local audio output failed: {error}"));
         self.sink = None;
         self.state = AudioState::Error;
-        self.error = Some("Local audio output failed".into());
+        self.error = Some(error);
     }
 
     // Identity guards and state reset keep stale commands away from newer playback.
@@ -647,7 +651,7 @@ impl AudioPipeline {
                                 let _ = event_sender.send(event);
                             }
                         }
-                        Err(_) => output.fail(),
+                        Err(error) => output.fail(error),
                     }
                     if let Some(statistics) = output.take_buffer_statistics(Instant::now()) {
                         LOGGER.debug(format!(
@@ -789,6 +793,78 @@ mod tests {
             is_final: true,
             encoded_bytes: Arc::from([1u8]),
             payload_offset: 0,
+        }
+    }
+
+    #[test]
+    fn failed_decoder_preserves_its_reason_and_rejects_play_until_new_media() {
+        let mut output = PipelineState::<FakeSink>::new(1024, 30, false).unwrap();
+        let current = test_stream();
+        output
+            .execute(AudioCommand::SetMedia {
+                current: Some(current.clone()),
+                prepared: None,
+                media_revision: 1,
+                initial_output_state: AudioState::Playing,
+            })
+            .unwrap();
+        output.retain(chunk(current.stream_id)).unwrap();
+        let error = output
+            .pump_with(|_, _| Err("Opus decode failed: invalid packet".into()))
+            .unwrap_err();
+        output.fail(error.clone());
+        assert_eq!(output.snapshot().error.as_deref(), Some(error.as_str()));
+        assert!(output
+            .execute(AudioCommand::Play {
+                stream_id: Some(current.stream_id),
+            })
+            .is_err());
+        assert_eq!(output.state, AudioState::Error);
+        output
+            .execute(AudioCommand::SetMedia {
+                current: Some(test_stream()),
+                prepared: None,
+                media_revision: 2,
+                initial_output_state: AudioState::Playing,
+            })
+            .unwrap();
+        assert!(output.error.is_none());
+        assert_eq!(output.state, AudioState::Buffering);
+    }
+
+    #[test]
+    fn codec_switch_replaces_the_sink_and_decodes_with_the_new_descriptor() {
+        use crate::audio::models::AudioCodec;
+
+        let mut output = PipelineState::<FakeSink>::new(1024, 30, false).unwrap();
+        for (index, codec) in [AudioCodec::Flac, AudioCodec::Opus, AudioCodec::Flac]
+            .into_iter()
+            .enumerate()
+        {
+            let mut current = test_stream();
+            current.output_format.codec = codec;
+            current.output_format.bit_depth = (codec == AudioCodec::Flac).then_some(16);
+            output
+                .execute(AudioCommand::SetMedia {
+                    current: Some(current.clone()),
+                    prepared: None,
+                    media_revision: index as u64 + 1,
+                    initial_output_state: AudioState::Playing,
+                })
+                .unwrap();
+            assert!(output.sink.is_none());
+            assert_eq!(output.decoded_chunk_index, 1);
+            output.retain(chunk(current.stream_id)).unwrap();
+            output
+                .pump_with(|cached, format| {
+                    assert_eq!(cached.stream_id, current.stream_id);
+                    assert_eq!(format.codec, codec);
+                    Ok(Arc::from([0i32]))
+                })
+                .unwrap();
+            assert!(output.sink.is_some());
+            assert_eq!(output.state, AudioState::Playing);
+            assert!(output.error.is_none());
         }
     }
 

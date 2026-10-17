@@ -84,9 +84,9 @@ fn decode_opus(chunk: &EncodedChunk, format: &AudioFormat) -> Result<Vec<i32>, S
     }
     let channels = format.channels as usize;
     let expected_frames = chunk.frame_count as usize;
-    let maximum_frames = expected_frames + pre_skip + 5760;
+    let maximum_frames = expected_frames + pre_skip + 960;
     let mut samples = Vec::with_capacity(maximum_frames * channels);
-    let mut scratch = vec![0f32; 5760 * channels];
+    let mut scratch = vec![0f32; 960 * channels];
     let mut decoder = opus_rs::OpusDecoder::new(48000, channels).map_err(str::to_string)?;
     let mut final_granule = None;
     while let Some(packet) = reader
@@ -97,9 +97,9 @@ fn decode_opus(chunk: &EncodedChunk, format: &AudioFormat) -> Result<Vec<i32>, S
             return Err("unexpected chained Opus stream".into());
         }
         let frames = decoder
-            .decode(&packet.data, 5760, &mut scratch)
+            .decode(&packet.data, 960, &mut scratch)
             .map_err(|error| format!("Opus decode failed: {error}"))?;
-        if frames == 0 || frames > 5760 || samples.len() / channels + frames > maximum_frames {
+        if frames != 960 || samples.len() / channels + frames > maximum_frames {
             return Err("Opus exceeds chunk duration".into());
         }
         for sample in &scratch[..frames * channels] {
@@ -145,6 +145,48 @@ mod tests {
         invalid.payload_offset = 2;
         assert!(decode_chunk(&invalid, &test_format()).is_err());
         assert!(decode_chunk(&chunk(Vec::new(), 10), &test_format()).is_err());
+    }
+
+    #[test]
+    fn opus_256k_audio_packet_decodes_as_twenty_milliseconds() {
+        let mut encoder = opus_rs::OpusEncoder::new(48000, 2, opus_rs::Application::Audio).unwrap();
+        encoder.bitrate_bps = 256000;
+        let pcm: Vec<f32> = (0..960)
+            .flat_map(|frame| {
+                let sample = (frame as f32 * 440.0 * std::f32::consts::TAU / 48000.0).sin() * 0.25;
+                [sample, -sample]
+            })
+            .collect();
+        let mut packet = vec![0u8; 1276];
+        let size = encoder.encode(&pcm, 960, &mut packet).unwrap();
+        packet.truncate(size);
+        assert_eq!(packet[0] & 3, 0);
+        let mut writer = ogg::PacketWriter::new(Vec::new());
+        let mut header = b"OpusHead".to_vec();
+        header.extend_from_slice(&[1, 2]);
+        header.extend_from_slice(&0u16.to_le_bytes());
+        header.extend_from_slice(&48000u32.to_le_bytes());
+        header.extend_from_slice(&[0, 0, 0]);
+        writer
+            .write_packet(header, 1, ogg::PacketWriteEndInfo::EndPage, 0)
+            .unwrap();
+        let mut tags = b"OpusTags".to_vec();
+        tags.extend_from_slice(&[0; 8]);
+        writer
+            .write_packet(tags, 1, ogg::PacketWriteEndInfo::EndPage, 0)
+            .unwrap();
+        writer
+            .write_packet(packet, 1, ogg::PacketWriteEndInfo::EndStream, 960)
+            .unwrap();
+        let format = AudioFormat {
+            codec: AudioCodec::Opus,
+            sample_rate_hz: 48000,
+            bit_depth: None,
+            channels: 2,
+        };
+        let samples = decode_chunk(&chunk(writer.into_inner(), 960), &format).unwrap();
+        assert_eq!(samples.len(), 1920);
+        assert!(samples.iter().any(|sample| *sample != 0));
     }
 
     #[test]
