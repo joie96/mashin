@@ -218,15 +218,20 @@ impl StreamBuffer {
         self.next_revision = 0;
     }
 
+    // Preserve rewind history until the combined A/B cache reaches 90% of its byte budget.
     pub(crate) fn release_played_chunks(&mut self, position_frame: u64) {
+        let threshold = self.byte_capacity - self.byte_capacity / 10;
+        let mut retained_bytes = self.retained_bytes();
         if let Some(current) = self.current.as_mut() {
-            while current
-                .chunks
-                .front()
-                .is_some_and(|chunk| chunk.first_frame + chunk.frame_count <= position_frame)
+            while retained_bytes >= threshold
+                && current
+                    .chunks
+                    .front()
+                    .is_some_and(|chunk| chunk.first_frame + chunk.frame_count <= position_frame)
             {
                 let chunk = current.chunks.pop_front().unwrap();
                 current.retained_bytes -= chunk.encoded_bytes.len();
+                retained_bytes -= chunk.encoded_bytes.len();
             }
         }
     }
@@ -363,9 +368,9 @@ mod tests {
         assert_eq!(
             cache.statistics(96000),
             BufferStatistics {
-                retained_bytes: 44,
+                retained_bytes: 88,
                 byte_capacity: 1000,
-                cached_chunks: 1,
+                cached_chunks: 2,
                 current_remaining_millis: 0,
                 prepared_remaining_millis: 1000,
             }
@@ -530,5 +535,115 @@ mod tests {
             .retain(chunk(current.stream_id, 3, 96000, 48000, false))
             .unwrap();
         assert_eq!(cache.cursors()[0].next_chunk_index, 4);
+    }
+
+    #[test]
+    fn played_history_survives_below_ninety_percent_including_after_seek() {
+        let mut cache = StreamBuffer::new(1000);
+        let current = test_stream();
+        cache.set_current(current.clone()).unwrap();
+        for index in 1..=20 {
+            cache
+                .retain(chunk(
+                    current.stream_id,
+                    index,
+                    (index - 1) * 48000,
+                    48000,
+                    false,
+                ))
+                .unwrap();
+        }
+        let cursors = cache.cursors();
+        cache.release_played_chunks(20 * 48000);
+        assert_eq!(cache.retained_bytes(), 880);
+        assert_eq!(cache.cursors(), cursors);
+        assert!(cache.current().unwrap().chunk(1).is_some());
+        cache.release_played_chunks(5 * 48000);
+        assert_eq!(cache.retained_bytes(), 880);
+        assert!(cache.current().unwrap().chunk(6).is_some());
+    }
+
+    #[test]
+    fn ninety_percent_evicts_only_enough_oldest_history_and_preserves_b() {
+        let mut cache = StreamBuffer::new(1000);
+        let current = test_stream();
+        let next = test_stream();
+        cache.set_current(current.clone()).unwrap();
+        cache
+            .prepare_next(current.stream_id, next.clone(), 1)
+            .unwrap();
+        for index in 1..=20 {
+            cache
+                .retain(chunk(
+                    current.stream_id,
+                    index,
+                    (index - 1) * 48000,
+                    48000,
+                    false,
+                ))
+                .unwrap();
+        }
+        cache
+            .retain(chunk(next.stream_id, 1, 0, 48000, false))
+            .unwrap();
+        let cursors = cache.cursors();
+        let bytes = cache
+            .prepared()
+            .unwrap()
+            .chunk(1)
+            .unwrap()
+            .encoded_bytes
+            .clone();
+        cache.release_played_chunks(10 * 48000);
+        assert_eq!(cache.retained_bytes(), 880);
+        assert!(cache.current().unwrap().chunk(1).is_none());
+        assert!(cache.current().unwrap().chunk(2).is_some());
+        assert_eq!(cache.cursors(), cursors);
+        assert!(Arc::ptr_eq(
+            &bytes,
+            &cache.prepared().unwrap().chunk(1).unwrap().encoded_bytes
+        ));
+        cache.release_played_chunks(10 * 48000);
+        assert_eq!(cache.retained_bytes(), 880);
+    }
+
+    #[test]
+    fn variable_chunk_sizes_use_byte_pressure_and_never_evict_unplayed_audio() {
+        let mut cache = StreamBuffer::new(1000);
+        let current = test_stream();
+        cache.set_current(current.clone()).unwrap();
+        for index in 1..=3 {
+            let mut cached = chunk(current.stream_id, index, (index - 1) * 48000, 48000, false);
+            cached.encoded_bytes = vec![0; if index == 3 { 800 } else { 50 }].into();
+            cache.retain(cached).unwrap();
+        }
+        cache.release_played_chunks(47999);
+        assert_eq!(cache.retained_bytes(), 900);
+        cache.release_played_chunks(48000);
+        assert_eq!(cache.retained_bytes(), 850);
+        let mut incoming = chunk(current.stream_id, 4, 144000, 48000, false);
+        incoming.encoded_bytes = vec![0; 100].into();
+        cache.retain(incoming).unwrap();
+        cache.release_played_chunks(96000);
+        assert_eq!(cache.retained_bytes(), 900);
+        assert!(cache.current().unwrap().chunk(2).is_none());
+        assert!(cache.current().unwrap().chunk(3).is_some());
+        assert!(cache.current().unwrap().chunk(4).is_some());
+        assert!(
+            cache
+                .retain(chunk(current.stream_id, 5, 192000, 48000, false))
+                .is_ok()
+        );
+        assert!(
+            cache
+                .retain(chunk(current.stream_id, 6, 240000, 48000, false))
+                .is_ok()
+        );
+        assert!(
+            cache
+                .retain(chunk(current.stream_id, 7, 288000, 48000, false))
+                .is_err()
+        );
+        assert_eq!(cache.cursors()[0].next_chunk_index, 7);
     }
 }

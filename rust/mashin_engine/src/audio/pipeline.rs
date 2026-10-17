@@ -299,7 +299,9 @@ impl<Sink: OutputSink> PipelineState<Sink> {
     }
 
     fn retain(&mut self, chunk: EncodedChunk) -> Result<(), String> {
-        self.cache.retain(chunk)
+        self.cache.retain(chunk)?;
+        self.cache.release_played_chunks(self.position_frame);
+        Ok(())
     }
 
     // Snapshots retain receipt cursors independently of decoded or released chunks.
@@ -806,8 +808,97 @@ mod tests {
             output.sink.as_ref().unwrap().position.set(4800);
             output.pump_with(|_, _| Ok(Arc::from([0i32]))).unwrap();
             assert_eq!(output.position_frame, 52_800);
-            assert!(!output.seek_cached(current.stream_id, 0).unwrap());
+            assert!(output.seek_cached(current.stream_id, 0).unwrap());
+            assert_eq!(
+                output.snapshot().status.received_streams,
+                before.status.received_streams
+            );
         }
+    }
+
+    #[test]
+    fn history_eviction_precedes_ack_snapshot_and_preserves_unplayed_a_and_b() {
+        let mut output = PipelineState::<FakeSink>::new(1000, 30, false).unwrap();
+        let current = test_stream();
+        let next = test_stream();
+        output
+            .execute(AudioCommand::SetMedia {
+                stream: current.clone(),
+                autoplay: false,
+            })
+            .unwrap();
+        output
+            .execute(AudioCommand::PrepareNext {
+                current_stream_id: current.stream_id,
+                stream: next.clone(),
+                next_revision: 1,
+            })
+            .unwrap();
+        for index in 1..=3 {
+            let mut cached = chunk(current.stream_id);
+            cached.index = index;
+            cached.first_frame = (index - 1) * 48000;
+            cached.frame_count = 48000;
+            cached.is_final = false;
+            cached.encoded_bytes = vec![0; if index == 3 { 600 } else { 100 }].into();
+            output.retain(cached).unwrap();
+        }
+        output.position_frame = 96000;
+        for index in 1..=4 {
+            let mut cached = chunk(next.stream_id);
+            cached.index = index;
+            cached.first_frame = (index - 1) * 48000;
+            cached.frame_count = 48000;
+            cached.is_final = false;
+            cached.encoded_bytes = vec![0; 100].into();
+            output.retain(cached).unwrap();
+            let ack = output.snapshot();
+            assert_eq!(ack.status.received_streams[0].next_chunk_index, 4);
+            assert_eq!(ack.status.received_streams[1].next_chunk_index, index + 1);
+            assert_eq!(
+                ack.buffer_capacity,
+                if index <= 2 {
+                    200
+                } else {
+                    (4 - index) as usize * 100
+                }
+            );
+            assert!(output.cache.current().unwrap().chunk(3).is_some());
+            assert!(output.cache.prepared().unwrap().chunk(1).is_some());
+        }
+        assert!(!output.seek_cached(current.stream_id, 0).unwrap());
+    }
+
+    #[test]
+    fn playback_reclaims_history_under_pressure_without_waiting_for_another_chunk() {
+        let mut output = PipelineState::<FakeSink>::new(1000, 30, false).unwrap();
+        let stream = test_stream();
+        output
+            .execute(AudioCommand::SetMedia {
+                stream: stream.clone(),
+                autoplay: true,
+            })
+            .unwrap();
+        for index in 1..=3 {
+            let mut cached = chunk(stream.stream_id);
+            cached.index = index;
+            cached.first_frame = (index - 1) * 48000;
+            cached.frame_count = 48000;
+            cached.is_final = false;
+            cached.encoded_bytes = vec![0; 300].into();
+            output.retain(cached).unwrap();
+        }
+        output.pump_with(|_, _| Ok(Arc::from([0i32]))).unwrap();
+        assert_eq!(output.snapshot().buffer_capacity, 100);
+        output.sink.as_ref().unwrap().position.set(48000);
+        output.pump_with(|_, _| Ok(Arc::from([0i32]))).unwrap();
+        assert_eq!(output.snapshot().buffer_capacity, 400);
+        assert!(output.cache.current().unwrap().chunk(1).is_none());
+        assert!(output.cache.current().unwrap().chunk(2).is_some());
+        assert_eq!(
+            output.snapshot().status.received_streams[0].next_chunk_index,
+            4
+        );
     }
 
     #[test]
