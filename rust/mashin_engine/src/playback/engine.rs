@@ -5,6 +5,9 @@ use super::local::session::{AudioProfileChange, LocalSession};
 use super::models::{PlaybackSessionConfiguration, PlaybackTarget};
 use super::remote::playback::RemotePlayback;
 use super::runtime::PeriodicWorker;
+use super::start::{PlaybackStartRequest, StartKind};
+use crate::core::event_channel::publish_background_event;
+use crate::core::models::MediaSessionEvent;
 use crate::music_assistant::connection::MusicAssistantConnection;
 use crate::music_assistant::models::identifiers::QueueItemId;
 use crate::music_assistant::models::media::MediaItem;
@@ -37,6 +40,8 @@ pub(crate) struct PlaybackEngine {
     worker: Option<PeriodicWorker>,
     target: Option<PlaybackTarget>,
     media_selection_revision: u64,
+    pending_start: Option<PlaybackStartRequest>,
+    has_pending_start_command: bool,
 }
 
 impl PlaybackEngine {
@@ -48,6 +53,8 @@ impl PlaybackEngine {
             worker: None,
             target: None,
             media_selection_revision: 0,
+            pending_start: None,
+            has_pending_start_command: false,
         }
     }
 
@@ -101,6 +108,7 @@ impl PlaybackEngine {
     }
 
     pub(crate) fn deactivate(&mut self) {
+        self.cancel_start();
         self.media_selection_revision = self.media_selection_revision.wrapping_add(1);
         self.worker = None;
         self.with_active_backend(|backend| {
@@ -111,6 +119,7 @@ impl PlaybackEngine {
     }
 
     pub(crate) fn shutdown(&mut self) {
+        self.cancel_start();
         self.media_selection_revision = self.media_selection_revision.wrapping_add(1);
         self.worker = None;
         self.local
@@ -140,9 +149,26 @@ impl PlaybackEngine {
         if matches!(option, QueueOption::Play | QueueOption::Replace) {
             self.reserve_media_selection();
         }
-        self.with_active_backend(|engine| {
+        let is_starting = matches!(option, QueueOption::Play | QueueOption::Replace)
+            && !media_items.is_empty();
+        if is_starting && self.pending_start.as_ref().is_none_or(|request| !request.is_pending()) {
+            self.begin_start(StartKind::Media)?;
+        } else if matches!(option, QueueOption::Play | QueueOption::Replace)
+            && media_items.is_empty()
+        {
+            self.cancel_start();
+        }
+        let result = self.with_active_backend(|engine| {
             engine.queue_play_media(media_items, option, start_item, shuffle)
-        })
+        });
+        if is_starting {
+            if result.is_ok() {
+                self.has_pending_start_command = true;
+            } else {
+                self.cancel_start();
+            }
+        }
+        result
     }
 
     pub(crate) fn move_queue_item(
@@ -163,24 +189,47 @@ impl PlaybackEngine {
 
     pub(crate) fn select_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {
         self.media_selection_revision = self.media_selection_revision.wrapping_add(1);
-        self.with_active_backend(|engine| engine.select_queue_item(item_id))
+        self.begin_start(StartKind::Media)?;
+        let result = self.with_active_backend(|engine| engine.select_queue_item(item_id));
+        if result.is_ok() {
+            self.has_pending_start_command = true;
+        } else {
+            self.cancel_start();
+        }
+        result
     }
 
     pub(crate) fn play_queue_index(&mut self, index: usize) -> Result<(), String> {
         self.media_selection_revision = self.media_selection_revision.wrapping_add(1);
-        self.with_active_backend(|engine| engine.play_queue_index(index))
+        self.begin_start(StartKind::Media)?;
+        let result = self.with_active_backend(|engine| engine.play_queue_index(index));
+        if result.is_ok() {
+            self.has_pending_start_command = true;
+        } else {
+            self.cancel_start();
+        }
+        result
     }
 
     // Playback transport.
     pub(crate) fn transport_play(&mut self) -> Result<(), String> {
-        self.with_active_backend(|engine| engine.transport_play())
+        self.begin_start(StartKind::Resume)?;
+        let result = self.with_active_backend(|engine| engine.transport_play());
+        if result.is_ok() {
+            self.has_pending_start_command = true;
+        } else {
+            self.cancel_start();
+        }
+        result
     }
 
     pub(crate) fn transport_pause(&mut self) -> Result<(), String> {
+        self.cancel_start();
         self.with_active_backend(|engine| engine.transport_pause())
     }
 
     pub(crate) fn transport_stop(&mut self) {
+        self.cancel_start();
         self.media_selection_revision = self.media_selection_revision.wrapping_add(1);
         let _ = self.with_active_backend(|engine| {
             engine.transport_stop();
@@ -269,9 +318,58 @@ impl PlaybackEngine {
     }
 
     pub(crate) fn take_pending_commands(
-        &self,
+        &mut self,
     ) -> Result<Vec<crate::playback::backend::PlaybackCommand>, String> {
-        self.with_active_backend(|engine| Ok(engine.take_pending_commands()))
+        let commands = self.with_active_backend(|engine| Ok(engine.take_pending_commands()))?;
+        if !self.has_pending_start_command {
+            return Ok(commands);
+        }
+        self.has_pending_start_command = false;
+        let Some(request) = self.pending_start.take() else {
+            return Ok(commands);
+        };
+        Ok(vec![Box::pin(async move {
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                async move {
+                    for command in commands {
+                        command.await?;
+                    }
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap_or_else(|_| Err("Playback start timed out".into()));
+            request.complete(result.is_ok());
+            result
+        })])
+    }
+
+    // Publish intent before I/O while keeping the native/server state authoritative.
+    pub(crate) fn begin_start(&mut self, kind: StartKind) -> Result<PlaybackStartRequest, String> {
+        let (start, observation) = self.with_active_backend(|backend| {
+            Ok((backend.start_presentation(), backend.start_observation()))
+        })?;
+        let request = PlaybackStartRequest::begin(start, kind, observation);
+        self.pending_start = Some(request.clone());
+        self.has_pending_start_command = false;
+        publish_background_event(MediaSessionEvent::PlayerStateChanged {
+            player_state: self.player_state(),
+        });
+        Ok(request)
+    }
+
+    pub(crate) fn cancel_start(&mut self) {
+        self.pending_start = None;
+        self.has_pending_start_command = false;
+        let _ = self.with_active_backend(|backend| {
+            backend
+                .start_presentation()
+                .lock()
+                .expect("playback start lock poisoned")
+                .cancel();
+            Ok(())
+        });
     }
 
     // Snapshots, request identity and checkpoints retaining native ownership for persistence rollback.
@@ -483,6 +581,47 @@ mod tests {
         assert_eq!(engine.active_mode(), PlaybackMode::Local);
         assert!(engine.checkpoint().shares_local_session(&local));
         assert_eq!(engine.player_state().volume, 44);
+    }
+
+    #[test]
+    fn pause_stop_and_output_switch_cancel_pending_start_requests() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let (mut configuration, connection) = configuration();
+        let mut engine = PlaybackEngine::new();
+        engine.configure_session(configuration.clone(), connection.clone(), &runtime).unwrap();
+        let pause_request = engine.begin_start(StartKind::Media).unwrap();
+        assert_eq!(engine.media_session_state().player_state.playback_state, crate::music_assistant::models::queue::PlayState::Buffering);
+        engine.transport_pause().unwrap();
+        assert!(!pause_request.is_pending());
+        let stop_request = engine.begin_start(StartKind::Media).unwrap();
+        engine.transport_stop();
+        assert!(!stop_request.is_pending());
+        let switched_request = engine.begin_start(StartKind::Media).unwrap();
+        configuration.target = PlaybackTarget::Remote(PlayerId("remote".into()));
+        engine.configure_session(configuration, connection, &runtime).unwrap();
+        assert!(!switched_request.is_pending());
+        switched_request.complete(false);
+        assert_ne!(engine.player_state().playback_state, crate::music_assistant::models::queue::PlayState::Error);
+    }
+
+    #[test]
+    fn preferences_and_enqueue_only_do_not_consume_a_media_resolution_request() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let (configuration, connection) = configuration();
+        let mut engine = PlaybackEngine::new();
+        engine.configure_session(configuration, connection, &runtime).unwrap();
+        for option in [QueueOption::Add, QueueOption::Next, QueueOption::ReplaceNext] {
+            let _ = engine.queue_play_media(Vec::new(), option, None, false);
+            assert!(engine.pending_start.is_none());
+        }
+        let request = engine.begin_start(StartKind::Media).unwrap();
+        engine.set_volume(40);
+        for command in engine.take_pending_commands().unwrap() {
+            runtime.block_on(command).unwrap();
+        }
+        assert!(engine.pending_start.is_some());
+        assert!(request.is_pending());
+        assert!(!engine.has_pending_start_command);
     }
 
     #[test]

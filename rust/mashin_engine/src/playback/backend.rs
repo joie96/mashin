@@ -4,10 +4,14 @@ use crate::music_assistant::models::identifiers::QueueItemId;
 use crate::music_assistant::models::media::MediaItem;
 use crate::music_assistant::models::queue::{QueueOption, RepeatMode};
 use crate::playback::models::{MediaSessionState, PlayerState, Queue};
+use crate::playback::start::{PlaybackStart, StartObservation};
+use std::sync::{Arc, Mutex};
 
 pub(crate) type PlaybackCommand = futures_util::future::BoxFuture<'static, Result<(), String>>;
 
 pub(crate) trait PlaybackBackend: Send {
+    fn start_presentation(&self) -> Arc<Mutex<PlaybackStart>>;
+    fn start_observation(&self) -> StartObservation;
     fn activate(&mut self) -> Result<(), String>;
     fn deactivate(&mut self);
     fn shutdown(&mut self);

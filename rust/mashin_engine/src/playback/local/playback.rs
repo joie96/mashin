@@ -19,7 +19,9 @@ use crate::playback::local::mashin::receiver::{ConnectionState, ReceiverSnapshot
 use crate::playback::local::session::{LocalSession, LocalSessionConfiguration};
 use crate::playback::mode::PlaybackMode;
 use crate::playback::models::{MediaSessionState, PlaybackConnectionState, PlayerState, Queue};
-use std::sync::Arc;
+use crate::playback::start::{PlaybackStart, StartIdentity, StartObservation};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use uuid::Uuid;
 
 pub(crate) struct LocalPlayback {
@@ -30,6 +32,7 @@ pub(crate) struct LocalPlayback {
     last_queue: Option<Queue>,
     last_player: Option<PlayerState>,
     last_stream_id: Option<Uuid>,
+    start: Arc<Mutex<PlaybackStart>>,
 }
 
 impl LocalPlayback {
@@ -43,6 +46,7 @@ impl LocalPlayback {
             last_queue: None,
             last_player: None,
             last_stream_id: None,
+            start: Arc::new(Mutex::new(PlaybackStart::default())),
         }
     }
 
@@ -79,11 +83,33 @@ impl LocalPlayback {
 }
 
 impl PlaybackBackend for LocalPlayback {
+    // Presentation-only requests are independent from the protocol's native output state.
+    fn start_presentation(&self) -> Arc<Mutex<PlaybackStart>> {
+        self.start.clone()
+    }
+
+    fn start_observation(&self) -> StartObservation {
+        let output = self.session.as_ref().map(|session| session.output.snapshot());
+        StartObservation {
+            identity: StartIdentity::Local(output.as_ref().and_then(|output| output.current.as_ref())
+                .map(|stream| stream.stream_id)),
+            revision: output.as_ref().map(|output| output.resume.output_revision).unwrap_or(0),
+            state: output.as_ref().map(|output| match output.resume.output_state {
+                OutputState::Idle | OutputState::Ended => PlayState::Idle,
+                OutputState::Buffering => PlayState::Buffering,
+                OutputState::Playing => PlayState::Playing,
+                OutputState::Paused => PlayState::Paused,
+                OutputState::Error => PlayState::Error,
+            }).unwrap_or(PlayState::Uninitialized),
+        }
+    }
+
     // Configuration and presentation lifecycle.
     fn activate(&mut self) -> Result<(), String> {
         self.synchronize_projection()
     }
     fn deactivate(&mut self) {
+        self.start.lock().expect("playback start lock poisoned").cancel();
         self.target.deactivate();
         self.projected_player_id = None;
         self.last_queue = None;
@@ -278,15 +304,19 @@ impl LocalPlayback {
         };
         let output = session.output.snapshot();
         let stream_id = output.current.as_ref().map(|stream| stream.stream_id);
-        (
-            project_media_session_state(
+        let mut state = project_media_session_state(
                 self.target.queue(),
                 &output,
                 &session.receiver.snapshot(),
                 self.last_queue.as_ref(),
-            ),
-            stream_id,
-        )
+            );
+        state.player_state.playback_state = self.start.lock().expect("playback start lock poisoned")
+            .project(StartObservation {
+                identity: StartIdentity::Local(stream_id),
+                revision: output.resume.output_revision,
+                state: state.player_state.playback_state,
+            }, Instant::now());
+        (state, stream_id)
     }
 
     fn presentation_events(
@@ -555,6 +585,47 @@ mod tests {
             }
             assert_eq!(session.output.snapshot(), before);
         });
+    }
+
+    #[test]
+    fn start_presentation_does_not_change_native_protocol_state() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let connection = Arc::new(MusicAssistantConnection::new(
+            crate::music_assistant::models::session::MusicAssistantServerUrl("http://127.0.0.1:1".into()),
+            Some(crate::music_assistant::models::identifiers::AccessToken("test-token".into())),
+        ).unwrap());
+        let session = Arc::new(LocalSession::new(&runtime, &LocalSessionConfiguration {
+            device_id: "start-test".into(),
+            client_name: "Start test".into(),
+            cache_bytes: 1_048_576,
+            audio_profile: super::super::mashin::models::AudioProfileId::Flac,
+            volume: 30,
+        }, connection).unwrap());
+        runtime.block_on(session.output.execute(super::super::mashin::protocol::ControlCommand::SetMedia {
+            command_id: 1,
+            current: Some(super::super::mashin::models::test_stream()),
+            prepared: None,
+            media_revision: 1,
+            initial_output_state: OutputState::Paused,
+        })).unwrap();
+        let before = session.output.snapshot();
+        let mut backend = LocalPlayback::new();
+        backend.configure(session.clone());
+        let request = crate::playback::start::PlaybackStartRequest::begin(
+            backend.start_presentation(), crate::playback::start::StartKind::Resume,
+            backend.start_observation(),
+        );
+        backend.transport_play().unwrap();
+        assert_eq!(backend.player_state().playback_state, PlayState::Buffering);
+        assert_eq!(backend.presentation_snapshot().0.player_state.playback_state, PlayState::Buffering);
+        assert_eq!(session.output.snapshot(), before);
+        for command in backend.take_pending_commands() {
+            runtime.block_on(command).unwrap();
+        }
+        request.complete(true);
+        assert_eq!(backend.player_state().playback_state, PlayState::Buffering);
+        backend.deactivate();
+        assert!(!request.is_pending());
     }
 
     #[tokio::test]

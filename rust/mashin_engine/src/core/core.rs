@@ -201,6 +201,7 @@ where
     let should_load_user_data = coordinator.user_data_session_generation != session_generation
         && coordinator.session_configuration.is_some();
     drop(coordinator);
+    drop(_command_guard);
     for command in commands {
         CORE_NETWORK_RUNTIME
             .block_on(command)
@@ -211,7 +212,6 @@ where
         .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
     let events = collect_media_session_events(&coordinator, queue_before, player_state_before);
     drop(coordinator);
-    drop(_command_guard);
     if should_load_user_data {
         start_user_data_load();
     }
@@ -272,6 +272,7 @@ fn start_user_data_load() {
 // Client-owned playlists are expanded; MA owns every other playback decision.
 pub(crate) fn resolve_media_and_execute_command<F>(
     media_items: Vec<MediaItem>,
+    option: QueueOption,
     operation: F,
 ) -> Result<Vec<MediaSessionEvent>, CoreError>
 where
@@ -280,30 +281,74 @@ where
     let _command_guard = CORE_COMMAND_SERIALIZER
         .lock()
         .map_err(|_| CoreError::internal("core command serializer lock poisoned"))?;
-    let user_data = if media_items.iter().any(is_local_playlist) {
-        Some(read_or_load_user_data()?)
+    let is_starting = !media_items.is_empty()
+        && matches!(option, QueueOption::Play | QueueOption::Replace);
+    let start_request = if is_starting {
+        Some(
+            CORE_COORDINATOR
+                .lock()
+                .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?
+                .playback
+                .begin_start(crate::playback::start::StartKind::Media)
+                .map_err(CoreError::command_failed)?,
+        )
     } else {
         None
     };
-    let resolved_media_items = expand_local_playlist_media(media_items, user_data.as_ref())
-        .map_err(CoreError::command_failed)?;
-    CORE_NETWORK_RUNTIME.block_on(execute_resolved_media_command(
-        resolved_media_items,
-        operation,
-    ))
+    drop(_command_guard);
+    let result = (|| {
+        let user_data = if media_items.iter().any(is_local_playlist) {
+            Some(read_or_load_user_data()?)
+        } else {
+            None
+        };
+        let resolved_media_items = expand_local_playlist_media(media_items, user_data.as_ref())
+            .map_err(CoreError::command_failed)?;
+        CORE_NETWORK_RUNTIME.block_on(execute_resolved_media_command(
+            resolved_media_items,
+            start_request.as_ref(),
+            None,
+            operation,
+        ))
+    })();
+    if result.is_err() {
+        if let Some(request) = start_request {
+            request.complete(false);
+        }
+        let coordinator = CORE_COORDINATOR
+            .lock()
+            .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
+        publish_background_event(MediaSessionEvent::PlayerStateChanged {
+            player_state: coordinator.playback.player_state(),
+        });
+    }
+    result
 }
 
 // Shared media execution releases core ownership while the queued backend commands await I/O.
 async fn execute_resolved_media_command<F>(
     media_items: Vec<MediaItem>,
+    start_request: Option<&crate::playback::start::PlaybackStartRequest>,
+    selection_revision: Option<u64>,
     operation: F,
 ) -> Result<Vec<MediaSessionEvent>, CoreError>
 where
     F: FnOnce(&mut PlaybackEngine, Vec<MediaItem>) -> Result<(), String>,
 {
+    let command_guard = CORE_COMMAND_SERIALIZER
+        .lock()
+        .map_err(|_| CoreError::internal("core command serializer lock poisoned"))?;
     let mut coordinator = CORE_COORDINATOR
         .lock()
         .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
+    if start_request.is_some_and(|request| !request.is_pending()) {
+        return Err(CoreError::command_failed("playback start was cancelled or replaced"));
+    }
+    if selection_revision
+        .is_some_and(|revision| coordinator.playback.media_selection_revision() != revision)
+    {
+        return Err(CoreError::command_failed("radio selection changed while resolving media"));
+    }
     let queue_before = coordinator.playback.queue();
     let player_state_before = coordinator.playback.player_state();
     let result = operation(&mut coordinator.playback, media_items);
@@ -312,6 +357,7 @@ where
         .map_err(CoreError::command_failed)?;
     result.map_err(CoreError::command_failed)?;
     drop(coordinator);
+    drop(command_guard);
     for command in commands {
         command.await.map_err(CoreError::command_failed)?;
     }
@@ -991,23 +1037,12 @@ pub(crate) fn start_radio_and_execute_command(
             media_items,
             playlists,
             |media, option| async move {
-                let _command_guard = CORE_COMMAND_SERIALIZER
-                    .lock()
-                    .map_err(|_| "core command serializer lock poisoned".to_string())?;
                 let expected_revision = if option == QueueOption::Play {
                     selection_revision
                 } else {
                     selection_revision.wrapping_add(1)
                 };
-                {
-                    let coordinator = CORE_COORDINATOR
-                        .lock()
-                        .map_err(|_| "core coordinator lock poisoned".to_string())?;
-                    if coordinator.playback.media_selection_revision() != expected_revision {
-                        return Err("radio selection changed while resolving media".into());
-                    }
-                }
-                let events = execute_resolved_media_command(media, |playback, media| {
+                let events = execute_resolved_media_command(media, None, Some(expected_revision), |playback, media| {
                     playback.queue_play_media(media, option, None, false)
                 })
                 .await
@@ -1267,6 +1302,32 @@ mod tests {
         assert!(coordinator.configure_session(invalid_session).is_err());
 
         assert!(coordinator.session_configuration.is_none());
+    }
+
+    #[test]
+    fn pending_network_command_does_not_block_following_control_commands() {
+        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
+        let (started_sender, started_receiver) = std::sync::mpsc::channel();
+        let pending = std::thread::spawn(move || {
+            super::execute_command_and_collect_events(|coordinator| {
+                coordinator.pending_commands.push(Box::pin(async move {
+                    started_sender.send(()).unwrap();
+                    release_receiver.await.map_err(|_| "test release dropped".to_string())
+                }));
+                Ok(())
+            })
+        });
+        started_receiver.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+        let (control_sender, control_receiver) = std::sync::mpsc::channel();
+        let control = std::thread::spawn(move || {
+            let result = super::execute_command_and_collect_events(|_| Ok(()));
+            control_sender.send(result).unwrap();
+        });
+        let control_result = control_receiver.recv_timeout(std::time::Duration::from_secs(2));
+        release_sender.send(()).unwrap();
+        pending.join().unwrap().unwrap();
+        control.join().unwrap();
+        assert!(control_result.expect("control command must not await network completion").is_ok());
     }
 
     #[test]

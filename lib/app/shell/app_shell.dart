@@ -1019,8 +1019,12 @@ class _AppShellState extends State<AppShell> {
       } else {
         await _coreBridge.transportPlay();
       }
-    } catch (_) {
-      // Ignore playback command failures in shell-level controls.
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Wiedergabe fehlgeschlagen: $error')),
+        );
+      }
     }
   }
 

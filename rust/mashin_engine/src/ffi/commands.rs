@@ -675,7 +675,7 @@ pub extern "C" fn mashin_core_queue_play_media(request_json: *const c_char) -> i
             })
         }
         Ok(request) if request.option != QueueOption::Unknown => {
-            resolve_media_and_execute_playback_command(request.media_items, |playback, tracks| {
+            resolve_media_and_execute_playback_command(request.media_items, request.option, |playback, tracks| {
                 playback.queue_play_media(
                     tracks,
                     request.option,
@@ -875,12 +875,13 @@ where
     publish_command_result(core::execute_playback_command_and_collect_events(operation))
 }
 
-fn resolve_media_and_execute_playback_command<F>(media_items: Vec<MediaItem>, operation: F) -> i32
+fn resolve_media_and_execute_playback_command<F>(media_items: Vec<MediaItem>, option: QueueOption, operation: F) -> i32
 where
     F: FnOnce(&mut crate::playback::engine::PlaybackEngine, Vec<MediaItem>) -> Result<(), String>,
 {
     publish_command_result(core::resolve_media_and_execute_command(
         media_items,
+        option,
         operation,
     ))
 }

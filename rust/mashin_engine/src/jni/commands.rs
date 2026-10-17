@@ -204,7 +204,7 @@ pub(crate) fn execute_command(kind: &str, argument: Option<&str>) -> Result<(), 
                     playback.queue_play_media(Vec::new(), request.option, None, false)
                 })
             } else {
-                core::resolve_media_and_execute_command(request.media_items, |playback, tracks| {
+                core::resolve_media_and_execute_command(request.media_items, request.option, |playback, tracks| {
                     playback.queue_play_media(
                         tracks,
                         request.option,

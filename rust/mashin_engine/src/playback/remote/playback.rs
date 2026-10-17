@@ -9,12 +9,16 @@ use crate::music_assistant::playback_target::MusicAssistantPlaybackTarget;
 use crate::music_assistant::queue_projection::QueueSnapshotRequest;
 use crate::playback::backend::{PlaybackBackend, PlaybackCommand};
 use crate::playback::models::{PlayerState, Queue};
+use crate::playback::start::{PlaybackStart, StartIdentity, StartObservation};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 pub(crate) struct RemotePlayback {
     target: MusicAssistantPlaybackTarget,
     last_queue: Option<Queue>,
     last_queue_revision: Option<(QueueSnapshotRequest, bool)>,
     last_player: Option<PlayerState>,
+    start: Arc<Mutex<PlaybackStart>>,
 }
 
 impl RemotePlayback {
@@ -33,16 +37,32 @@ impl RemotePlayback {
             last_queue: None,
             last_queue_revision: None,
             last_player: None,
+            start: Arc::new(Mutex::new(PlaybackStart::default())),
         }
     }
 }
 
 impl PlaybackBackend for RemotePlayback {
+    // Remote presentation waits for authoritative MA playback observations.
+    fn start_presentation(&self) -> Arc<Mutex<PlaybackStart>> {
+        self.start.clone()
+    }
+
+    fn start_observation(&self) -> StartObservation {
+        let player = self.target.player_state();
+        StartObservation {
+            identity: StartIdentity::Remote(player.current_queue_item_id),
+            revision: 0,
+            state: player.playback_state,
+        }
+    }
+
     // Configuration and lifecycle.
     fn activate(&mut self) -> Result<(), String> {
         self.target.activate()
     }
     fn deactivate(&mut self) {
+        self.start.lock().expect("playback start lock poisoned").cancel();
         self.target.deactivate();
         self.last_queue = None;
         self.last_queue_revision = None;
@@ -120,7 +140,10 @@ impl PlaybackBackend for RemotePlayback {
         self.target.queue()
     }
     fn player_state(&self) -> PlayerState {
-        self.target.player_state()
+        let mut player = self.target.player_state();
+        player.playback_state = self.start.lock().expect("playback start lock poisoned")
+            .project(self.start_observation(), Instant::now());
+        player
     }
     fn take_pending_commands(&mut self) -> Vec<PlaybackCommand> {
         self.target.take_pending_commands()
@@ -137,7 +160,7 @@ impl PlaybackBackend for RemotePlayback {
                 publish_background_event(MediaSessionEvent::QueueChanged { queue });
             }
         }
-        let player = self.target.player_state();
+        let player = self.player_state();
         if self.last_player.as_ref() != Some(&player) {
             self.last_player = Some(player.clone());
             publish_background_event(MediaSessionEvent::PlayerStateChanged {
