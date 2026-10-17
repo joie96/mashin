@@ -443,7 +443,7 @@ async fn report(
                 activation: super::protocol::PreparedActivation {
                     previous_stream_id: activation.previous_stream_id,
                     stream_id: activation.stream_id,
-                    next_revision: activation.next_revision,
+                    media_revision: activation.media_revision,
                     previous_position_frame: activation.previous_position_frame,
                 },
                 output_revision: *output_revision,
@@ -452,12 +452,12 @@ async fn report(
             },
             AudioEvent::TrackStarted {
                 stream_id,
-                next_revision,
+                media_revision,
                 output_revision,
             } => ClientMessage::TrackStarted {
                 sequence: *sequence,
                 stream_id: *stream_id,
-                next_revision: *next_revision,
+                media_revision: *media_revision,
                 output_revision: *output_revision,
                 position_frame: 0,
             },
@@ -622,7 +622,7 @@ mod tests {
     use super::*;
 
     fn server_message(kind: &str, epoch: &str, payload: serde_json::Value) -> Message {
-        Message::Text(serde_json::json!({"protocol_version":2,"type":kind,"message_id":Uuid::new_v4().to_string(),"connection_epoch":epoch,"payload":payload}).to_string().into())
+        Message::Text(serde_json::json!({"protocol_version":3,"type":kind,"message_id":Uuid::new_v4().to_string(),"connection_epoch":epoch,"payload":payload}).to_string().into())
     }
 
     async fn next_json(socket: &mut WebSocketStream<TcpStream>, kind: &str) -> serde_json::Value {
@@ -658,9 +658,9 @@ mod tests {
                         let epoch = format!("epoch-{generation}");
                         control.send(server_message("welcome", &epoch, serde_json::json!({
                             "player_id":"mashin-test", "provider_version":"1", "server_revision":"test",
-                            "limits":protocol::Version1Limits::default(), "audio_profiles":AudioProfileId::ALL,
+                            "limits":protocol::ProtocolLimits::default(), "audio_profiles":AudioProfileId::ALL,
                             "selected_audio_profile":"flac", "audio_binding_id":format!("binding-{generation}"),
-                            "current_stream":null, "desired_output_state":"idle", "next_revision":0, "prepared_next":null
+                            "current_stream":null, "desired_output_state":"idle", "media_revision":0, "prepared_next":null
                         }))).await.unwrap();
                         let (stream, _) = listener.accept().await.unwrap();
                         let mut audio = tokio_tungstenite::accept_async(stream).await.unwrap();

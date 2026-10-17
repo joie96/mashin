@@ -18,7 +18,7 @@ pub(crate) struct AudioSnapshot {
 pub(crate) struct PreparedActivation {
     pub(crate) previous_stream_id: Uuid,
     pub(crate) stream_id: Uuid,
-    pub(crate) next_revision: u64,
+    pub(crate) media_revision: u64,
     pub(crate) previous_position_frame: u64,
 }
 
@@ -30,7 +30,7 @@ pub(crate) enum AudioEvent {
     },
     TrackStarted {
         stream_id: Uuid,
-        next_revision: u64,
+        media_revision: u64,
         output_revision: u64,
     },
     TrackEnded {
@@ -74,29 +74,22 @@ pub(crate) struct AudioStatus {
     pub(crate) position_frame: u64,
     pub(crate) volume_percent: u8,
     pub(crate) is_muted: bool,
-    pub(crate) next_revision: u64,
+    pub(crate) media_revision: u64,
     pub(crate) received_streams: Vec<ChunkCursor>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AudioCommand {
     ActivatePrepared {
         current_stream_id: Uuid,
         stream_id: Uuid,
-        next_revision: u64,
+        media_revision: u64,
     },
     SetMedia {
-        stream: AudioStream,
-        autoplay: bool,
-    },
-    PrepareNext {
-        current_stream_id: Uuid,
-        stream: AudioStream,
-        next_revision: u64,
-    },
-    ClearNext {
-        current_stream_id: Uuid,
-        next_revision: u64,
+        current: Option<AudioStream>,
+        prepared: Option<AudioStream>,
+        media_revision: u64,
+        initial_output_state: AudioState,
     },
     Play {
         stream_id: Option<Uuid>,

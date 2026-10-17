@@ -149,7 +149,7 @@ impl PlaybackBackend for LocalPlayback {
                 return self.local_command(AudioCommand::ActivatePrepared {
                     current_stream_id: current.stream_id,
                     stream_id: prepared.stream_id,
-                    next_revision: snapshot.resume.next_revision,
+                    media_revision: snapshot.resume.media_revision,
                 });
             }
             if snapshot.resume.activation.is_some() {
@@ -425,8 +425,10 @@ mod tests {
                 .output
                 .execute(super::super::mashin::protocol::ControlCommand::SetMedia {
                     command_id: 1,
-                    stream: super::super::mashin::models::test_stream(),
-                    autoplay: false,
+                    current: Some(super::super::mashin::models::test_stream()),
+                    prepared: None,
+                    media_revision: 1,
+                    initial_output_state: OutputState::Paused,
                 })
                 .await
                 .unwrap();

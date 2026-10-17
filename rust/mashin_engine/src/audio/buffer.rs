@@ -104,7 +104,8 @@ pub(crate) struct BufferStatistics {
 pub(crate) struct StreamBuffer {
     current: Option<CachedStream>,
     prepared: Option<CachedStream>,
-    next_revision: u64,
+    media_revision: u64,
+    announcement: Option<(Option<AudioStream>, Option<AudioStream>)>,
     byte_capacity: usize,
 }
 
@@ -114,16 +115,81 @@ impl StreamBuffer {
         Self {
             current: None,
             prepared: None,
-            next_revision: 0,
+            media_revision: 0,
+            announcement: None,
             byte_capacity,
         }
+    }
+
+    pub(crate) fn reconcile(
+        &mut self,
+        current: Option<AudioStream>,
+        prepared: Option<AudioStream>,
+        revision: u64,
+    ) -> Result<bool, String> {
+        if revision == 0 || revision < self.media_revision {
+            return Err("stale audio media revision".into());
+        }
+        let announcement = (current.clone(), prepared.clone());
+        if revision == self.media_revision {
+            return if self.announcement.as_ref() == Some(&announcement) {
+                Ok(false)
+            } else {
+                Err("audio media revision changed payload".into())
+            };
+        }
+        if prepared.is_some() && current.is_none()
+            || current
+                .as_ref()
+                .zip(prepared.as_ref())
+                .is_some_and(|(current, prepared)| current.stream_id == prepared.stream_id)
+        {
+            return Err("invalid audio media slots".into());
+        }
+        for descriptor in current.iter().chain(prepared.iter()) {
+            descriptor.validate()?;
+            if self
+                .current
+                .iter()
+                .chain(self.prepared.iter())
+                .any(|cached| {
+                    cached.descriptor.stream_id == descriptor.stream_id
+                        && cached.descriptor != *descriptor
+                })
+            {
+                return Err("audio stream descriptor changed".into());
+            }
+        }
+        let mut slots = [self.current.take(), self.prepared.take()];
+        let mut resolve = |descriptor: AudioStream| {
+            slots
+                .iter_mut()
+                .find_map(|slot| {
+                    if slot
+                        .as_ref()
+                        .is_some_and(|cached| cached.descriptor.stream_id == descriptor.stream_id)
+                    {
+                        slot.take()
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| {
+                    CachedStream::new(descriptor).expect("validated audio descriptor")
+                })
+        };
+        self.current = current.map(&mut resolve);
+        self.prepared = prepared.map(&mut resolve);
+        self.media_revision = revision;
+        self.announcement = Some(announcement);
+        Ok(true)
     }
 
     pub(crate) fn set_current(&mut self, descriptor: AudioStream) -> Result<(), String> {
         let stream = CachedStream::new(descriptor)?;
         self.current = Some(stream);
         self.prepared = None;
-        self.next_revision = 0;
+        self.media_revision = 0;
         Ok(())
     }
 
@@ -140,13 +206,13 @@ impl StreamBuffer {
             != Some(current_id)
             || self.prepared.is_some()
             || descriptor.stream_id == current_id
-            || revision <= self.next_revision
+            || revision <= self.media_revision
         {
             return Err("stale audio successor authorization".into());
         }
         let stream = CachedStream::new(descriptor)?;
         self.prepared = Some(stream);
-        self.next_revision = revision;
+        self.media_revision = revision;
         Ok(())
     }
 
@@ -156,12 +222,12 @@ impl StreamBuffer {
             .as_ref()
             .map(|current| current.descriptor.stream_id)
             != Some(current_id)
-            || revision <= self.next_revision
+            || revision <= self.media_revision
         {
             return Err("stale audio successor revocation".into());
         }
         self.prepared = None;
-        self.next_revision = revision;
+        self.media_revision = revision;
         Ok(())
     }
 
@@ -184,7 +250,7 @@ impl StreamBuffer {
         }
         let stream_id = next.descriptor.stream_id;
         self.current = Some(next);
-        Ok((stream_id, self.next_revision))
+        Ok((stream_id, self.media_revision))
     }
 
     // Explicit activation consumes only the exact previously authorized successor.
@@ -192,7 +258,7 @@ impl StreamBuffer {
         &mut self,
         current_stream_id: Uuid,
         stream_id: Uuid,
-        next_revision: u64,
+        media_revision: u64,
     ) -> Result<(), String> {
         if self
             .current
@@ -204,7 +270,7 @@ impl StreamBuffer {
                 .as_ref()
                 .map(|stream| stream.descriptor.stream_id)
                 != Some(stream_id)
-            || self.next_revision != next_revision
+            || self.media_revision != media_revision
         {
             return Err("stale prepared activation".into());
         }
@@ -215,7 +281,6 @@ impl StreamBuffer {
     pub(crate) fn clear(&mut self) {
         self.current = None;
         self.prepared = None;
-        self.next_revision = 0;
     }
 
     // Preserve rewind history until the combined A/B cache reaches 90% of its byte budget.
@@ -290,8 +355,8 @@ impl StreamBuffer {
     pub(crate) fn prepared(&self) -> Option<&CachedStream> {
         self.prepared.as_ref()
     }
-    pub(crate) fn next_revision(&self) -> u64 {
-        self.next_revision
+    pub(crate) fn media_revision(&self) -> u64 {
+        self.media_revision
     }
     pub(crate) fn retained_bytes(&self) -> usize {
         self.current
@@ -337,6 +402,52 @@ mod tests {
             encoded_bytes: bytes.into(),
             payload_offset: 41,
         }
+    }
+
+    #[test]
+    fn complete_state_moves_original_b_and_rejects_mutations_atomically() {
+        let mut cache = StreamBuffer::new(1000);
+        let current = test_stream();
+        let prepared = test_stream();
+        cache
+            .reconcile(Some(current.clone()), Some(prepared.clone()), 1)
+            .unwrap();
+        let encoded = chunk(prepared.stream_id, 1, 0, 48000, true);
+        let allocation = encoded.encoded_bytes.clone();
+        cache.retain(encoded).unwrap();
+        let replacement = test_stream();
+        cache
+            .reconcile(Some(replacement.clone()), Some(prepared.clone()), 2)
+            .unwrap();
+        assert_eq!(cache.cursors()[1].next_chunk_index, 2);
+        assert!(Arc::ptr_eq(
+            &allocation,
+            &cache.prepared().unwrap().chunk(1).unwrap().encoded_bytes
+        ));
+        let mut invalid = prepared.clone();
+        invalid.output_format.sample_rate_hz = 44100;
+        assert!(
+            cache
+                .reconcile(Some(replacement.clone()), Some(invalid), 3)
+                .is_err()
+        );
+        assert_eq!(cache.media_revision(), 2);
+        assert_eq!(cache.retained_bytes(), 44);
+        assert!(
+            !cache
+                .reconcile(Some(replacement.clone()), Some(prepared.clone()), 2)
+                .unwrap()
+        );
+        cache.reconcile(Some(prepared.clone()), None, 3).unwrap();
+        assert!(Arc::ptr_eq(
+            &allocation,
+            &cache.current().unwrap().chunk(1).unwrap().encoded_bytes
+        ));
+        assert!(cache.current().unwrap().is_complete());
+        assert_eq!(cache.cursors()[0].next_chunk_index, 2);
+        assert!(cache.reconcile(Some(replacement), None, 2).is_err());
+        cache.reconcile(None, None, 4).unwrap();
+        assert_eq!(cache.retained_bytes(), 0);
     }
 
     #[test]

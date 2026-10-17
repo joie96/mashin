@@ -66,3 +66,5 @@ app.*.map.json
 /android/app/src/main/jniLibs/
 
 other_projects
+# Widget Preview related
+.widget_preview/

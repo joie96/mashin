@@ -29,6 +29,7 @@ pub(crate) struct MashinAudioAdapter {
     pipeline: AudioPipeline,
     streams: Arc<std::sync::Mutex<HashMap<Uuid, StreamDescriptor>>>,
     commands: Arc<Mutex<()>>,
+    last_media: Arc<std::sync::Mutex<Option<ControlCommand>>>,
 }
 
 impl MashinAudioAdapter {
@@ -45,66 +46,54 @@ impl MashinAudioAdapter {
             pipeline: AudioPipeline::new(cache_bytes, volume_percent, is_muted)?,
             streams: Arc::new(std::sync::Mutex::new(HashMap::new())),
             commands: Arc::new(Mutex::new(())),
+            last_media: Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
     // Metadata must already exist when the worker publishes a newly accepted stream.
     pub(crate) async fn execute(&self, command: ControlCommand) -> Result<OutputSnapshot, String> {
         let _command = self.commands.lock().await;
-        let mut descriptor = None;
+        let announcement = if let ControlCommand::SetMedia { media_revision, .. } = &command {
+            let mut normalized = command.clone();
+            if let ControlCommand::SetMedia { command_id, .. } = &mut normalized {
+                *command_id = 0;
+            }
+            let previous = self
+                .last_media
+                .lock()
+                .map_err(|_| "Mashin media lock poisoned")?;
+            if previous.as_ref().is_some_and(|previous| matches!(previous, ControlCommand::SetMedia { media_revision: revision, .. } if revision == media_revision) && previous != &normalized) {
+                return Err("Mashin media revision changed payload".into());
+            }
+            Some(normalized)
+        } else {
+            None
+        };
+        let mut descriptors = Vec::new();
         let audio = match command {
-            ControlCommand::ActivatePrepared {
-                current_stream_id,
-                stream_id,
-                next_revision,
-                ..
-            } => AudioCommand::ActivatePrepared {
-                current_stream_id,
-                stream_id,
-                next_revision,
-            },
             ControlCommand::SetMedia {
-                stream, autoplay, ..
+                current,
+                prepared,
+                media_revision,
+                initial_output_state,
+                ..
             } => {
-                stream.validate()?;
-                descriptor = Some(stream.clone());
+                if media_revision == 0 || media_revision > MAX_INTEGER {
+                    return Err("invalid Mashin media revision".into());
+                }
+                for stream in current.iter().chain(prepared.iter()) {
+                    stream.validate()?;
+                    descriptors.push(stream.clone());
+                }
                 AudioCommand::SetMedia {
-                    stream: audio_stream(&stream),
-                    autoplay,
-                }
-            }
-            ControlCommand::PrepareNext {
-                current_stream_id,
-                stream,
-                next_revision,
-                ..
-            } => {
-                stream.validate()?;
-                super::streams::validate_successor(
-                    &self.pipeline.snapshot().status,
-                    current_stream_id,
-                    next_revision,
-                )?;
-                descriptor = Some(stream.clone());
-                AudioCommand::PrepareNext {
-                    current_stream_id,
-                    stream: audio_stream(&stream),
-                    next_revision,
-                }
-            }
-            ControlCommand::ClearNext {
-                current_stream_id,
-                next_revision,
-                ..
-            } => {
-                super::streams::validate_successor(
-                    &self.pipeline.snapshot().status,
-                    current_stream_id,
-                    next_revision,
-                )?;
-                AudioCommand::ClearNext {
-                    current_stream_id,
-                    next_revision,
+                    current: current.as_ref().map(audio_stream),
+                    prepared: prepared.as_ref().map(audio_stream),
+                    media_revision,
+                    initial_output_state: match initial_output_state {
+                        OutputState::Playing => AudioState::Playing,
+                        OutputState::Paused => AudioState::Paused,
+                        _ => return Err("invalid Mashin initial output state".into()),
+                    },
                 }
             }
             ControlCommand::Play { stream_id, .. } => AudioCommand::Play { stream_id },
@@ -116,33 +105,36 @@ impl MashinAudioAdapter {
             ControlCommand::SetMute { is_muted, .. } => AudioCommand::SetMute { is_muted },
             ControlCommand::StateRequest { .. } => return Ok(self.snapshot()),
         };
-        let previous = if let Some(stream) = &descriptor {
+        let previous = {
             let mut streams = self
                 .streams
                 .lock()
                 .map_err(|_| "Mashin metadata lock poisoned")?;
-            if streams
-                .get(&stream.stream_id)
-                .is_some_and(|previous| previous != stream)
-            {
+            if descriptors.iter().any(|stream| {
+                streams
+                    .get(&stream.stream_id)
+                    .is_some_and(|previous| previous != stream)
+            }) {
                 return Err("Mashin stream metadata is immutable".into());
             }
-            streams.insert(stream.stream_id, stream.clone())
-        } else {
-            None
+            let previous = streams.clone();
+            for stream in descriptors {
+                streams.insert(stream.stream_id, stream);
+            }
+            previous
         };
         if let Err(error) = self.pipeline.execute(audio).await {
-            if let Some(stream) = descriptor {
-                let mut streams = self
-                    .streams
-                    .lock()
-                    .map_err(|_| "Mashin metadata lock poisoned")?;
-                streams.remove(&stream.stream_id);
-                if let Some(previous) = previous {
-                    streams.insert(previous.stream_id, previous);
-                }
-            }
+            *self
+                .streams
+                .lock()
+                .map_err(|_| "Mashin metadata lock poisoned")? = previous;
             return Err(error);
+        }
+        if let Some(announcement) = announcement {
+            *self
+                .last_media
+                .lock()
+                .map_err(|_| "Mashin media lock poisoned")? = Some(announcement);
         }
         let mut streams = self
             .streams
@@ -203,14 +195,14 @@ impl MashinAudioAdapter {
                 welcome.desired_output_state,
                 OutputState::Idle | OutputState::Playing | OutputState::Paused
             )
-            || welcome.next_revision > MAX_INTEGER
+            || welcome.media_revision > MAX_INTEGER
         {
             return Err("invalid Mashin welcome".into());
         }
         if welcome.current_stream.as_ref().map(|state| &state.stream) != snapshot.current.as_ref()
             || welcome.prepared_next.as_ref().map(|state| &state.stream)
                 != snapshot.prepared.as_ref()
-            || welcome.next_revision != snapshot.resume.next_revision
+            || welcome.media_revision != snapshot.resume.media_revision
         {
             return Err("Mashin playback changed during handshake".into());
         }
@@ -294,7 +286,7 @@ fn project(snapshot: AudioSnapshot, streams: &HashMap<Uuid, StreamDescriptor>) -
                 .map(|activation| super::protocol::PreparedActivation {
                     previous_stream_id: activation.previous_stream_id,
                     stream_id: activation.stream_id,
-                    next_revision: activation.next_revision,
+                    media_revision: activation.media_revision,
                     previous_position_frame: activation.previous_position_frame,
                 }),
             current_stream_id: state.current_stream_id,
@@ -310,7 +302,7 @@ fn project(snapshot: AudioSnapshot, streams: &HashMap<Uuid, StreamDescriptor>) -
             position_frame: state.position_frame,
             volume_percent: state.volume_percent,
             is_muted: state.is_muted,
-            next_revision: state.next_revision,
+            media_revision: state.media_revision,
             received_streams: state
                 .received_streams
                 .into_iter()
@@ -374,8 +366,10 @@ mod tests {
         output
             .execute(ControlCommand::SetMedia {
                 command_id: 1,
-                stream: stream.clone(),
-                autoplay: false,
+                current: Some(stream.clone()),
+                prepared: None,
+                media_revision: 1,
+                initial_output_state: OutputState::Paused,
             })
             .await
             .unwrap();
@@ -393,8 +387,10 @@ mod tests {
         let accepted = output
             .execute(ControlCommand::SetMedia {
                 command_id: 1,
-                stream: stream.clone(),
-                autoplay: false,
+                current: Some(stream.clone()),
+                prepared: None,
+                media_revision: 1,
+                initial_output_state: OutputState::Paused,
             })
             .await
             .unwrap();
@@ -405,8 +401,10 @@ mod tests {
             output
                 .execute(ControlCommand::SetMedia {
                     command_id: 2,
-                    stream: changed,
-                    autoplay: false
+                    current: Some(changed),
+                    prepared: None,
+                    media_revision: 2,
+                    initial_output_state: OutputState::Paused,
                 })
                 .await
                 .is_err()
@@ -416,25 +414,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn complete_payload_stays_immutable_after_local_promotion() {
+        let output = MashinAudioAdapter::new(1_048_576, 30, false).unwrap();
+        let current = test_stream();
+        let prepared = test_stream();
+        let mut grant = ControlCommand::SetMedia {
+            command_id: 1,
+            current: Some(current.clone()),
+            prepared: Some(prepared.clone()),
+            media_revision: 1,
+            initial_output_state: OutputState::Playing,
+        };
+        output.execute(grant.clone()).await.unwrap();
+        output
+            .pipeline
+            .execute(AudioCommand::ActivatePrepared {
+                current_stream_id: current.stream_id,
+                stream_id: prepared.stream_id,
+                media_revision: 1,
+            })
+            .await
+            .unwrap();
+        let before = output.snapshot();
+        if let ControlCommand::SetMedia {
+            command_id,
+            current,
+            ..
+        } = &mut grant
+        {
+            *command_id = 2;
+            current.as_mut().unwrap().playback.queue_item_id.0 = "changed-history".into();
+        }
+        assert!(output.execute(grant).await.is_err());
+        assert_eq!(output.snapshot(), before);
+    }
+
+    #[tokio::test]
     async fn protocol_rejects_unsafe_successor_revision_before_audio_changes() {
         let output = MashinAudioAdapter::new(1_048_576, 30, false).unwrap();
         let current = test_stream();
         output
             .execute(ControlCommand::SetMedia {
                 command_id: 1,
-                stream: current.clone(),
-                autoplay: false,
+                current: Some(current.clone()),
+                prepared: None,
+                media_revision: 1,
+                initial_output_state: OutputState::Paused,
             })
             .await
             .unwrap();
         let before = output.snapshot();
         assert!(
             output
-                .execute(ControlCommand::PrepareNext {
+                .execute(ControlCommand::SetMedia {
                     command_id: 2,
-                    current_stream_id: current.stream_id,
-                    stream: test_stream(),
-                    next_revision: MAX_INTEGER + 1
+                    current: Some(current),
+                    prepared: Some(test_stream()),
+                    media_revision: MAX_INTEGER + 1,
+                    initial_output_state: OutputState::Paused,
                 })
                 .await
                 .is_err()

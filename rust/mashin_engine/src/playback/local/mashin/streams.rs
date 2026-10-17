@@ -5,20 +5,6 @@ use crate::audio::buffer::EncodedChunk;
 use std::sync::Arc;
 use uuid::Uuid;
 
-pub(crate) fn validate_successor(
-    status: &crate::audio::models::AudioStatus,
-    current: Uuid,
-    revision: u64,
-) -> Result<(), String> {
-    if status.current_stream_id != Some(current)
-        || revision <= status.next_revision
-        || revision > MAX_INTEGER
-    {
-        return Err("stale Mashin successor authorization".into());
-    }
-    Ok(())
-}
-
 pub(crate) fn parse_chunk(wire_bytes: Arc<[u8]>) -> Result<EncodedChunk, String> {
     if wire_bytes.len() <= HEADER_BYTES || wire_bytes.len() > HEADER_BYTES + MAX_PAYLOAD_BYTES {
         return Err("invalid Mashin audio message size".into());

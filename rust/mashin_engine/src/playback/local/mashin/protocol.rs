@@ -1,4 +1,4 @@
-//! Strict JSON boundary for Mashin V1; application code only sees typed messages.
+//! Strict JSON boundary for Mashin V3; application code only sees typed messages.
 
 use super::models::{AudioProfileId, MAX_INTEGER, OutputState, StreamCursor, StreamDescriptor};
 use serde::{Deserialize, Serialize};
@@ -30,27 +30,27 @@ macro_rules! fixed_limits {
     ($($name:ident = $value:literal),* $(,)?) => {
         #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
         #[serde(deny_unknown_fields)]
-        pub(crate) struct Version1Limits {
+        pub(crate) struct ProtocolLimits {
             $(pub(crate) $name: u64,)*
             pub(crate) max_server_buffer_metadata_bytes: u64,
             pub(crate) max_server_pending_audio_bytes: u64,
             pub(crate) max_control_message_bytes: u64,
         }
 
-        impl Version1Limits {
+        impl ProtocolLimits {
             pub(crate) fn validate(&self) -> Result<(), String> {
                 if $(self.$name != $value ||)*
                     !(1..=8_388_608).contains(&self.max_server_buffer_metadata_bytes)
                     || !(1..=1_048_576).contains(&self.max_server_pending_audio_bytes)
                     || !(1..=MAX_CONTROL_BYTES as u64).contains(&self.max_control_message_bytes) {
-                    return Err("incompatible Mashin V1 limits".into());
+                    return Err("incompatible Mashin V3 limits".into());
                 }
                 Ok(())
             }
         }
 
         #[cfg(test)]
-        impl Default for Version1Limits {
+        impl Default for ProtocolLimits {
             fn default() -> Self {
                 Self { $($name: $value,)* max_server_buffer_metadata_bytes: 8_388_608, max_server_pending_audio_bytes: 1_048_576, max_control_message_bytes: MAX_CONTROL_BYTES as u64 }
             }
@@ -114,13 +114,13 @@ pub(crate) struct Welcome {
     pub(crate) player_id: String,
     pub(crate) provider_version: String,
     pub(crate) server_revision: String,
-    pub(crate) limits: Version1Limits,
+    pub(crate) limits: ProtocolLimits,
     pub(crate) audio_profiles: Vec<AudioProfileId>,
     pub(crate) selected_audio_profile: AudioProfileId,
     pub(crate) audio_binding_id: String,
     pub(crate) current_stream: Option<StreamSnapshot>,
     pub(crate) desired_output_state: OutputState,
-    pub(crate) next_revision: u64,
+    pub(crate) media_revision: u64,
     pub(crate) prepared_next: Option<StreamSnapshot>,
 }
 
@@ -132,27 +132,14 @@ pub(crate) struct Welcome {
     deny_unknown_fields
 )]
 pub(crate) enum ControlCommand {
-    ActivatePrepared {
-        command_id: u64,
-        current_stream_id: Uuid,
-        stream_id: Uuid,
-        next_revision: u64,
-    },
     SetMedia {
         command_id: u64,
-        stream: StreamDescriptor,
-        autoplay: bool,
-    },
-    PrepareNext {
-        command_id: u64,
-        current_stream_id: Uuid,
-        stream: StreamDescriptor,
-        next_revision: u64,
-    },
-    ClearNext {
-        command_id: u64,
-        current_stream_id: Uuid,
-        next_revision: u64,
+        media_revision: u64,
+        #[serde(deserialize_with = "required_stream")]
+        current: Option<StreamDescriptor>,
+        #[serde(deserialize_with = "required_stream")]
+        prepared: Option<StreamDescriptor>,
+        initial_output_state: OutputState,
     },
     Play {
         command_id: u64,
@@ -182,10 +169,7 @@ pub(crate) enum ControlCommand {
 impl ControlCommand {
     pub(crate) fn command_id(&self) -> u64 {
         match self {
-            Self::ActivatePrepared { command_id, .. }
-            | Self::SetMedia { command_id, .. }
-            | Self::PrepareNext { command_id, .. }
-            | Self::ClearNext { command_id, .. }
+            Self::SetMedia { command_id, .. }
             | Self::Play { command_id, .. }
             | Self::Pause { command_id, .. }
             | Self::Stop { command_id, .. }
@@ -200,7 +184,7 @@ impl ControlCommand {
 pub(crate) struct PreparedActivation {
     pub(crate) previous_stream_id: Uuid,
     pub(crate) stream_id: Uuid,
-    pub(crate) next_revision: u64,
+    pub(crate) media_revision: u64,
     pub(crate) previous_position_frame: u64,
 }
 
@@ -212,7 +196,7 @@ pub(crate) struct ResumeState {
     pub(crate) position_frame: u64,
     pub(crate) volume_percent: u8,
     pub(crate) is_muted: bool,
-    pub(crate) next_revision: u64,
+    pub(crate) media_revision: u64,
     pub(crate) received_streams: Vec<StreamCursor>,
     pub(crate) activation: Option<PreparedActivation>,
 }
@@ -309,7 +293,7 @@ pub(crate) enum ClientMessage {
     TrackStarted {
         sequence: u64,
         stream_id: Uuid,
-        next_revision: u64,
+        media_revision: u64,
         output_revision: u64,
         position_frame: u64,
     },
@@ -376,6 +360,12 @@ struct RawEnvelope {
     payload: serde_json::Value,
 }
 
+fn required_stream<'de, Deserializer: serde::Deserializer<'de>>(
+    deserializer: Deserializer,
+) -> Result<Option<StreamDescriptor>, Deserializer::Error> {
+    Option::<StreamDescriptor>::deserialize(deserializer)
+}
+
 fn required_epoch<'de, Deserializer: serde::Deserializer<'de>>(
     deserializer: Deserializer,
 ) -> Result<Option<String>, Deserializer::Error> {
@@ -387,7 +377,7 @@ pub(crate) fn decode(text: &str, expected_epoch: Option<&str>) -> Result<ServerE
         return Err("Mashin control message is too large".into());
     }
     let raw: RawEnvelope = serde_json::from_str(text).map_err(|_| "invalid Mashin envelope")?;
-    if raw.protocol_version != 2
+    if raw.protocol_version != 3
         || raw.message_id.is_empty()
         || !raw.payload.is_object()
         || expected_epoch.is_some_and(|epoch| raw.connection_epoch.as_deref() != Some(epoch))
@@ -400,6 +390,18 @@ pub(crate) fn decode(text: &str, expected_epoch: Option<&str>) -> Result<ServerE
     if let ServerMessage::Command(command) = &message {
         if command.command_id() == 0 || command.command_id() > MAX_INTEGER {
             return Err("invalid Mashin command ID".into());
+        }
+        if let ControlCommand::SetMedia {
+            initial_output_state,
+            ..
+        } = command
+        {
+            if !matches!(
+                initial_output_state,
+                OutputState::Playing | OutputState::Paused
+            ) {
+                return Err("invalid Mashin initial output state".into());
+            }
         }
     }
     Ok(ServerEnvelope {
@@ -418,7 +420,7 @@ pub(crate) fn encode(message: ClientMessage, epoch: Option<&str>) -> Result<Stri
         message: ClientMessage,
     }
     let text = serde_json::to_string(&Envelope {
-        protocol_version: 2,
+        protocol_version: 3,
         message_id: Uuid::new_v4().to_string(),
         connection_epoch: epoch,
         message,
@@ -435,7 +437,7 @@ mod tests {
     use super::*;
 
     fn command(payload: serde_json::Value) -> String {
-        serde_json::json!({"protocol_version":2,"type":"set_volume","message_id":"test","connection_epoch":"epoch","payload":payload}).to_string()
+        serde_json::json!({"protocol_version":3,"type":"set_volume","message_id":"test","connection_epoch":"epoch","payload":payload}).to_string()
     }
 
     #[test]
@@ -472,25 +474,43 @@ mod tests {
     }
 
     #[test]
-    fn activation_is_v2_and_receipt_is_exact() {
+    fn media_state_is_v3_and_activation_receipt_is_exact() {
         let previous_stream_id = Uuid::new_v4();
         let stream_id = Uuid::new_v4();
         let mut envelope: serde_json::Value = serde_json::from_str(&command(serde_json::json!({
-            "command_id": 7, "current_stream_id": previous_stream_id,
-            "stream_id": stream_id, "next_revision": 3,
+            "command_id": 7, "current": null, "prepared": null,
+            "media_revision": 3, "initial_output_state": "paused",
         })))
         .unwrap();
-        envelope["type"] = "activate_prepared".into();
+        envelope["type"] = "set_media".into();
         assert!(matches!(
             decode(&envelope.to_string(), Some("epoch"))
                 .unwrap()
                 .message,
-            ServerMessage::Command(ControlCommand::ActivatePrepared {
-                next_revision: 3,
+            ServerMessage::Command(ControlCommand::SetMedia {
+                media_revision: 3,
                 ..
             })
         ));
-        envelope["protocol_version"] = 1.into();
+        for (field, value) in [
+            ("position_mode", "preserve"),
+            ("desired_output_state", "playing"),
+            ("initial_output_state", "idle"),
+            ("initial_output_state", "buffering"),
+        ] {
+            let mut invalid = envelope.clone();
+            invalid["payload"][field] = value.into();
+            assert!(decode(&invalid.to_string(), Some("epoch")).is_err());
+        }
+        for version in [1, 2] {
+            envelope["protocol_version"] = version.into();
+            assert!(decode(&envelope.to_string(), Some("epoch")).is_err());
+        }
+        envelope["protocol_version"] = 3.into();
+        envelope["payload"]
+            .as_object_mut()
+            .unwrap()
+            .remove("prepared");
         assert!(decode(&envelope.to_string(), Some("epoch")).is_err());
         let text = encode(
             ClientMessage::PreparedActivated {
@@ -498,7 +518,7 @@ mod tests {
                 activation: PreparedActivation {
                     previous_stream_id,
                     stream_id,
-                    next_revision: 3,
+                    media_revision: 3,
                     previous_position_frame: 12000,
                 },
                 output_revision: 2,
@@ -509,14 +529,14 @@ mod tests {
         )
         .unwrap();
         let actual: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(actual["protocol_version"], 2);
+        assert_eq!(actual["protocol_version"], 3);
         assert_eq!(actual["type"], "prepared_activated");
         assert_eq!(
             actual["payload"],
             serde_json::json!({
                 "sequence": 1, "activation": {
                     "previous_stream_id": previous_stream_id, "stream_id": stream_id,
-                    "next_revision": 3, "previous_position_frame": 12000,
+                    "media_revision": 3, "previous_position_frame": 12000,
                 }, "output_revision": 2, "output_state": "buffering", "position_frame": 0,
             })
         );

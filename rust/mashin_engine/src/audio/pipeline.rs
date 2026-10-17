@@ -90,6 +90,7 @@ struct PipelineState<Sink: OutputSink> {
     audible_events: VecDeque<(u64, AudioEvent)>,
     event_counter: u64,
     last_buffer_summary: Instant,
+    last_media: Option<AudioCommand>,
 }
 
 impl<Sink: OutputSink> PipelineState<Sink> {
@@ -117,21 +118,23 @@ impl<Sink: OutputSink> PipelineState<Sink> {
             audible_events: VecDeque::new(),
             event_counter: 0,
             last_buffer_summary: Instant::now(),
+            last_media: None,
         })
     }
 
     // Commands are applied atomically on the audio owner, never on a network task.
     fn execute(&mut self, command: AudioCommand) -> Result<(), String> {
+        let announcement = command.clone();
         match command {
             AudioCommand::ActivatePrepared {
                 current_stream_id,
                 stream_id,
-                next_revision,
+                media_revision,
             } => {
                 if self.activation.as_ref().is_some_and(|activation| {
                     activation.previous_stream_id == current_stream_id
                         && activation.stream_id == stream_id
-                        && activation.next_revision == next_revision
+                        && activation.media_revision == media_revision
                 }) && self
                     .cache
                     .current()
@@ -142,7 +145,7 @@ impl<Sink: OutputSink> PipelineState<Sink> {
                 let activation = crate::audio::models::PreparedActivation {
                     previous_stream_id: current_stream_id,
                     stream_id,
-                    next_revision,
+                    media_revision,
                     previous_position_frame: self.position_frame,
                 };
                 let output_revision = self
@@ -154,7 +157,7 @@ impl<Sink: OutputSink> PipelineState<Sink> {
                     .checked_add(1)
                     .ok_or("audio event overflow")?;
                 self.cache
-                    .activate_prepared(current_stream_id, stream_id, next_revision)?;
+                    .activate_prepared(current_stream_id, stream_id, media_revision)?;
                 self.reset_output();
                 self.activation = Some(activation.clone());
                 self.should_play = true;
@@ -172,34 +175,94 @@ impl<Sink: OutputSink> PipelineState<Sink> {
                 ));
             }
             AudioCommand::SetMedia {
-                stream, autoplay, ..
+                current,
+                prepared,
+                media_revision,
+                initial_output_state,
             } => {
-                self.cache.set_current(stream)?;
-                self.activation = None;
-                self.reset_output();
-                self.should_play = autoplay;
-                self.state = if autoplay {
-                    AudioState::Buffering
-                } else {
-                    AudioState::Paused
-                };
-            }
-            AudioCommand::PrepareNext {
-                current_stream_id,
-                stream,
-                next_revision,
-                ..
-            } => {
-                return self
+                if media_revision == self.cache.media_revision() {
+                    return if self.last_media.as_ref() == Some(&announcement) {
+                        Ok(())
+                    } else {
+                        Err("media revision changed payload".into())
+                    };
+                }
+                if !matches!(
+                    initial_output_state,
+                    AudioState::Playing | AudioState::Paused
+                ) || current.is_none() && prepared.is_some()
+                {
+                    return Err("invalid audio media state".into());
+                }
+                let previous = self
                     .cache
-                    .prepare_next(current_stream_id, stream, next_revision);
-            }
-            AudioCommand::ClearNext {
-                current_stream_id,
-                next_revision,
-                ..
-            } => {
-                return self.cache.clear_next(current_stream_id, next_revision);
+                    .current()
+                    .map(|stream| stream.descriptor.stream_id);
+                let target = current.as_ref().map(|stream| stream.stream_id);
+                let has_changed = previous != target;
+                if has_changed
+                    && current.as_ref().is_some_and(|descriptor| {
+                        self.cache
+                            .current()
+                            .into_iter()
+                            .chain(self.cache.prepared())
+                            .any(|cached| {
+                                cached.descriptor.stream_id == descriptor.stream_id
+                                    && cached.chunk(1).is_none()
+                                    && cached.cursor().next_chunk_index > 1
+                            })
+                    })
+                {
+                    return Err("restart chunk is no longer cached".into());
+                }
+                let activation = previous
+                    .zip(target)
+                    .filter(|(_, target)| {
+                        self.cache
+                            .prepared()
+                            .is_some_and(|stream| stream.descriptor.stream_id == *target)
+                    })
+                    .map(
+                        |(previous_stream_id, stream_id)| super::models::PreparedActivation {
+                            previous_stream_id,
+                            stream_id,
+                            media_revision: self.cache.media_revision(),
+                            previous_position_frame: self.position_frame,
+                        },
+                    );
+                if has_changed && self.event_counter == u64::MAX {
+                    return Err("audio event overflow".into());
+                }
+                self.cache.reconcile(current, prepared, media_revision)?;
+                self.last_media = Some(announcement);
+                if !has_changed {
+                    return Ok(());
+                }
+                self.reset_output();
+                self.revision = 0;
+                self.activation = activation.clone();
+                self.should_play = target.is_some() && initial_output_state == AudioState::Playing;
+                self.state = if target.is_none() {
+                    AudioState::Idle
+                } else if !self.should_play {
+                    AudioState::Paused
+                } else {
+                    AudioState::Buffering
+                };
+                if let Some(activation) = activation {
+                    self.event_counter += 1;
+                    if self.audible_events.len() == 32 {
+                        self.audible_events.pop_front();
+                    }
+                    self.audible_events.push_back((
+                        self.event_counter,
+                        AudioEvent::PreparedActivated {
+                            activation,
+                            output_revision: self.revision,
+                        },
+                    ));
+                }
+                return Ok(());
             }
             AudioCommand::Play { stream_id, .. } => {
                 self.require_stream(stream_id)?;
@@ -317,7 +380,7 @@ impl<Sink: OutputSink> PipelineState<Sink> {
                 position_frame: self.position_frame,
                 volume_percent: self.volume_percent,
                 is_muted: self.is_muted,
-                next_revision: self.cache.next_revision(),
+                media_revision: self.cache.media_revision(),
                 received_streams: self.cache.cursors(),
             },
             current: self.cache.current().map(|stream| stream.descriptor.clone()),
@@ -385,7 +448,7 @@ impl<Sink: OutputSink> PipelineState<Sink> {
                 .prepared()
                 .is_some_and(|stream| stream.cursor().next_chunk_index > 1)
             {
-                let (stream_id, next_revision) = self.cache.promote_next(self.position_frame)?;
+                let (stream_id, media_revision) = self.cache.promote_next(self.position_frame)?;
                 self.reset_output();
                 self.activation = None;
                 self.revision = self
@@ -395,7 +458,7 @@ impl<Sink: OutputSink> PipelineState<Sink> {
                 self.state = AudioState::Buffering;
                 events.push(AudioEvent::TrackStarted {
                     stream_id,
-                    next_revision,
+                    media_revision,
                     output_revision: self.revision,
                 });
             }
@@ -716,15 +779,26 @@ mod tests {
             let next = test_stream();
             output
                 .execute(AudioCommand::SetMedia {
-                    stream: current.clone(),
-                    autoplay,
+                    current: Some(current.clone()),
+                    prepared: None,
+                    media_revision: 1,
+                    initial_output_state: if autoplay {
+                        AudioState::Playing
+                    } else {
+                        AudioState::Paused
+                    },
                 })
                 .unwrap();
             output
-                .execute(AudioCommand::PrepareNext {
-                    current_stream_id: current.stream_id,
-                    stream: next.clone(),
-                    next_revision: 1,
+                .execute(AudioCommand::SetMedia {
+                    current: Some(current.clone()),
+                    prepared: Some(next.clone()),
+                    media_revision: 2,
+                    initial_output_state: if output.should_play {
+                        AudioState::Playing
+                    } else {
+                        AudioState::Paused
+                    },
                 })
                 .unwrap();
             for index in 1..=3 {
@@ -823,15 +897,22 @@ mod tests {
         let next = test_stream();
         output
             .execute(AudioCommand::SetMedia {
-                stream: current.clone(),
-                autoplay: false,
+                current: Some(current.clone()),
+                prepared: None,
+                media_revision: 1,
+                initial_output_state: AudioState::Paused,
             })
             .unwrap();
         output
-            .execute(AudioCommand::PrepareNext {
-                current_stream_id: current.stream_id,
-                stream: next.clone(),
-                next_revision: 1,
+            .execute(AudioCommand::SetMedia {
+                current: Some(current.clone()),
+                prepared: Some(next.clone()),
+                media_revision: 2,
+                initial_output_state: if output.should_play {
+                    AudioState::Playing
+                } else {
+                    AudioState::Paused
+                },
             })
             .unwrap();
         for index in 1..=3 {
@@ -875,8 +956,10 @@ mod tests {
         let stream = test_stream();
         output
             .execute(AudioCommand::SetMedia {
-                stream: stream.clone(),
-                autoplay: true,
+                current: Some(stream.clone()),
+                prepared: None,
+                media_revision: 1,
+                initial_output_state: AudioState::Playing,
             })
             .unwrap();
         for index in 1..=3 {
@@ -907,8 +990,10 @@ mod tests {
         let stream = test_stream();
         output
             .execute(AudioCommand::SetMedia {
-                stream: stream.clone(),
-                autoplay: false,
+                current: Some(stream.clone()),
+                prepared: None,
+                media_revision: 1,
+                initial_output_state: AudioState::Paused,
             })
             .unwrap();
         let mut first = chunk(stream.stream_id);
@@ -955,15 +1040,22 @@ mod tests {
         let next = test_stream();
         output
             .execute(AudioCommand::SetMedia {
-                stream: current.clone(),
-                autoplay: true,
+                current: Some(current.clone()),
+                prepared: None,
+                media_revision: 1,
+                initial_output_state: AudioState::Playing,
             })
             .unwrap();
         output
-            .execute(AudioCommand::PrepareNext {
-                current_stream_id: current.stream_id,
-                stream: next.clone(),
-                next_revision: 1,
+            .execute(AudioCommand::SetMedia {
+                current: Some(current.clone()),
+                prepared: Some(next.clone()),
+                media_revision: 2,
+                initial_output_state: if output.should_play {
+                    AudioState::Playing
+                } else {
+                    AudioState::Paused
+                },
             })
             .unwrap();
         let mut unfinished = chunk(current.stream_id);
@@ -993,7 +1085,7 @@ mod tests {
         let stale = AudioCommand::ActivatePrepared {
             current_stream_id: current.stream_id,
             stream_id: next.stream_id,
-            next_revision: 2,
+            media_revision: 3,
         };
         let before = output.snapshot();
         assert!(output.execute(stale).is_err());
@@ -1001,7 +1093,7 @@ mod tests {
         let activate = AudioCommand::ActivatePrepared {
             current_stream_id: current.stream_id,
             stream_id: next.stream_id,
-            next_revision: 1,
+            media_revision: 2,
         };
         output.execute(activate.clone()).unwrap();
         assert_eq!(output.cache.statistics(0).current_remaining_millis, 164_000);
@@ -1036,6 +1128,156 @@ mod tests {
     }
 
     #[test]
+    fn complete_media_state_preserves_output_and_replaces_only_changed_identity() {
+        let mut output = PipelineState::<FakeSink>::new(1024, 30, false).unwrap();
+        let current = test_stream();
+        let prepared = test_stream();
+        let announce = AudioCommand::SetMedia {
+            current: Some(current.clone()),
+            prepared: Some(prepared.clone()),
+            media_revision: 1,
+            initial_output_state: AudioState::Paused,
+        };
+        output.execute(announce).unwrap();
+        output.retain(chunk(current.stream_id)).unwrap();
+        output.retain(chunk(prepared.stream_id)).unwrap();
+        output.pump_with(|_, _| Ok(Arc::from([0i32]))).unwrap();
+        output.position_frame = 200;
+        output.revision = 4;
+        let bytes = output
+            .cache
+            .prepared()
+            .unwrap()
+            .chunk(1)
+            .unwrap()
+            .encoded_bytes
+            .clone();
+        let preserve = AudioCommand::SetMedia {
+            current: Some(current),
+            prepared: Some(prepared.clone()),
+            media_revision: 2,
+            initial_output_state: AudioState::Playing,
+        };
+        output.execute(preserve.clone()).unwrap();
+        assert_eq!(output.position_frame, 200);
+        assert_eq!(output.revision, 4);
+        assert!(!output.should_play);
+        assert!(output.sink.is_some());
+        let before = output.snapshot();
+        output.execute(preserve.clone()).unwrap();
+        assert_eq!(output.snapshot(), before);
+        let mut changed = preserve;
+        if let AudioCommand::SetMedia {
+            initial_output_state,
+            ..
+        } = &mut changed
+        {
+            *initial_output_state = AudioState::Paused;
+        }
+        assert!(output.execute(changed).is_err());
+        assert_eq!(output.snapshot(), before);
+        output
+            .execute(AudioCommand::Play {
+                stream_id: before.status.current_stream_id,
+            })
+            .unwrap();
+        let resumed = output.snapshot();
+        output
+            .execute(AudioCommand::SetMedia {
+                current: resumed.current.clone(),
+                prepared: Some(prepared.clone()),
+                media_revision: 3,
+                initial_output_state: AudioState::Paused,
+            })
+            .unwrap();
+        assert!(output.should_play);
+        assert_eq!(
+            output.snapshot().status.output_state,
+            resumed.status.output_state
+        );
+        assert_eq!(output.position_frame, resumed.status.position_frame);
+        assert_eq!(output.revision, resumed.status.output_revision);
+        let replacement = test_stream();
+        output
+            .execute(AudioCommand::SetMedia {
+                current: Some(replacement.clone()),
+                prepared: Some(prepared.clone()),
+                media_revision: 4,
+                initial_output_state: AudioState::Playing,
+            })
+            .unwrap();
+        assert_eq!(output.snapshot().current, Some(replacement));
+        assert_eq!(output.position_frame, 0);
+        assert_eq!(output.revision, 0);
+        assert!(Arc::ptr_eq(
+            &bytes,
+            &output
+                .cache
+                .prepared()
+                .unwrap()
+                .chunk(1)
+                .unwrap()
+                .encoded_bytes
+        ));
+        assert_eq!(
+            output.cache.prepared().unwrap().cursor().next_chunk_index,
+            2
+        );
+        output
+            .execute(AudioCommand::SetMedia {
+                current: None,
+                prepared: None,
+                media_revision: 5,
+                initial_output_state: AudioState::Playing,
+            })
+            .unwrap();
+        assert_eq!(output.state, AudioState::Idle);
+        assert!(!output.should_play);
+        assert_eq!(output.position_frame, 0);
+        assert_eq!(output.revision, 0);
+        assert!(output.snapshot().status.received_streams.is_empty());
+    }
+
+    #[test]
+    fn media_promotion_preserves_receipt_and_duplicate_does_not_rewind() {
+        let mut output = PipelineState::<FakeSink>::new(1024, 30, false).unwrap();
+        let current = test_stream();
+        let prepared = test_stream();
+        let grant = AudioCommand::SetMedia {
+            current: Some(current.clone()),
+            prepared: Some(prepared.clone()),
+            media_revision: 1,
+            initial_output_state: AudioState::Playing,
+        };
+        output.execute(grant.clone()).unwrap();
+        output.retain(chunk(prepared.stream_id)).unwrap();
+        output
+            .execute(AudioCommand::ActivatePrepared {
+                current_stream_id: current.stream_id,
+                stream_id: prepared.stream_id,
+                media_revision: 1,
+            })
+            .unwrap();
+        output.position_frame = 100;
+        output.execute(grant).unwrap();
+        assert_eq!(output.position_frame, 100);
+        let activation = output.activation.clone();
+        let promotion = AudioCommand::SetMedia {
+            current: Some(prepared.clone()),
+            prepared: None,
+            media_revision: 2,
+            initial_output_state: AudioState::Playing,
+        };
+        output.execute(promotion.clone()).unwrap();
+        assert_eq!(output.activation, activation);
+        assert_eq!(output.position_frame, 100);
+        assert_eq!(output.snapshot().current, Some(prepared));
+        output.position_frame = 200;
+        output.execute(promotion).unwrap();
+        assert_eq!(output.position_frame, 200);
+    }
+
+    #[test]
     fn buffer_summary_is_rate_limited_and_only_reports_configured_audio() {
         let mut output = PipelineState::<FakeSink>::new(1_048_576, 30, false).unwrap();
         let start = output.last_buffer_summary;
@@ -1047,8 +1289,10 @@ mod tests {
         let current = test_stream();
         output
             .execute(AudioCommand::SetMedia {
-                stream: current.clone(),
-                autoplay: false,
+                current: Some(current.clone()),
+                prepared: None,
+                media_revision: 1,
+                initial_output_state: AudioState::Paused,
             })
             .unwrap();
         output.retain(chunk(current.stream_id)).unwrap();
@@ -1090,15 +1334,22 @@ mod tests {
         let next = test_stream();
         output
             .execute(AudioCommand::SetMedia {
-                stream: current.clone(),
-                autoplay: true,
+                current: Some(current.clone()),
+                prepared: None,
+                media_revision: 1,
+                initial_output_state: AudioState::Playing,
             })
             .unwrap();
         output
-            .execute(AudioCommand::PrepareNext {
-                current_stream_id: current.stream_id,
-                stream: next.clone(),
-                next_revision: 1,
+            .execute(AudioCommand::SetMedia {
+                current: Some(current.clone()),
+                prepared: Some(next.clone()),
+                media_revision: 2,
+                initial_output_state: if output.should_play {
+                    AudioState::Playing
+                } else {
+                    AudioState::Paused
+                },
             })
             .unwrap();
         output.retain(chunk(current.stream_id)).unwrap();
@@ -1125,7 +1376,7 @@ mod tests {
             }
         );
         assert!(
-            matches!(events[1], AudioEvent::TrackStarted { stream_id, next_revision: 1, .. } if stream_id == next.stream_id)
+            matches!(events[1], AudioEvent::TrackStarted { stream_id, media_revision: 2, .. } if stream_id == next.stream_id)
         );
         assert_eq!(
             output.snapshot().status.current_stream_id,
@@ -1143,8 +1394,10 @@ mod tests {
         let stream = test_stream();
         output
             .execute(AudioCommand::SetMedia {
-                stream: stream.clone(),
-                autoplay: true,
+                current: Some(stream.clone()),
+                prepared: None,
+                media_revision: 1,
+                initial_output_state: AudioState::Playing,
             })
             .unwrap();
         let before = output.snapshot();
@@ -1167,8 +1420,10 @@ mod tests {
         assert!(
             output
                 .execute(AudioCommand::SetMedia {
-                    stream: invalid,
-                    autoplay: true
+                    current: Some(invalid),
+                    prepared: None,
+                    media_revision: 1,
+                    initial_output_state: AudioState::Playing,
                 })
                 .is_err()
         );
@@ -1181,8 +1436,10 @@ mod tests {
         let stream = test_stream();
         output
             .execute(AudioCommand::SetMedia {
-                stream: stream.clone(),
-                autoplay: true,
+                current: Some(stream.clone()),
+                prepared: None,
+                media_revision: 1,
+                initial_output_state: AudioState::Playing,
             })
             .unwrap();
         output.retain(chunk(stream.stream_id)).unwrap();
