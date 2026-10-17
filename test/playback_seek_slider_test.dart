@@ -8,9 +8,11 @@ void main() {
     double value = 20,
     double? bufferedValue = 60,
     bool enabled = true,
+    ThemeData? theme,
     Future<void> Function(double)? onSeek,
   }) => tester.pumpWidget(
     MaterialApp(
+      theme: theme,
       home: Scaffold(
         body: PlaybackSeekSlider(
           value: value,
@@ -30,6 +32,30 @@ void main() {
     final Slider slider = tester.widget<Slider>(find.byType(Slider));
     expect(slider.value, 20);
     expect(slider.secondaryTrackValue, 60);
+  });
+
+  testWidgets('buffer uses a subtle neutral color on mobile and desktop', (
+    WidgetTester tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    for (final double width in <double>[390, 1280]) {
+      tester.view.physicalSize = Size(width, 800);
+      for (final Brightness brightness in Brightness.values) {
+        final ThemeData theme = ThemeData(brightness: brightness);
+        await showSlider(tester, theme: theme);
+        await tester.pumpAndSettle();
+        final Slider slider = tester.widget<Slider>(find.byType(Slider));
+        expect(
+          slider.secondaryActiveColor,
+          theme.colorScheme.onSurface.withValues(alpha: 0.18),
+        );
+        expect(slider.activeColor, isNull);
+        expect(slider.value, 20);
+        expect(slider.secondaryTrackValue, 60);
+      }
+    }
   });
 
   testWidgets('clamps buffered end to the track duration', (

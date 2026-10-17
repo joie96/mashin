@@ -45,6 +45,9 @@ class _PlaybackSeekSliderState extends State<PlaybackSeekSlider> {
           widget.enabled && bufferedValue != null && bufferedValue > value
           ? bufferedValue
           : null,
+      secondaryActiveColor: Theme.of(context).colorScheme.onSurface.withValues(
+        alpha: 0.18,
+      ),
       padding: EdgeInsets.zero,
       onChanged: widget.enabled
           ? (double next) => setState(() => _dragValue = next)
