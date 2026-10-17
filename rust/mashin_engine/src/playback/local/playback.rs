@@ -4,6 +4,7 @@
 use crate::audio::models::AudioCommand;
 use crate::core::event_channel::publish_background_event;
 use crate::core::models::MediaSessionEvent;
+use crate::music_assistant::commands::PlayerCommand;
 use crate::music_assistant::connection::MusicAssistantConnection;
 use crate::music_assistant::models::identifiers::{PlayerId, QueueItemId};
 use crate::music_assistant::models::media::MediaItem;
@@ -161,7 +162,50 @@ impl PlaybackBackend for LocalPlayback {
         self.target.transport_previous()
     }
     fn transport_seek(&mut self, seconds: f64) -> Result<(), String> {
-        self.target.transport_seek(seconds)
+        let position_millis = seek_position_millis(seconds)?;
+        let session = self
+            .session
+            .as_ref()
+            .ok_or("Mashin session is not configured")?
+            .clone();
+        let stream_id = session
+            .output
+            .snapshot()
+            .current
+            .ok_or("No active Mashin stream")?
+            .stream_id;
+        self.pending_commands.push(Box::pin(async move {
+            let receiver = session.receiver.snapshot();
+            if receiver.control_connection != ConnectionState::Connected {
+                return Err("Local seek requires an active Mashin Control connection".into());
+            }
+            if session
+                .output
+                .seek_cached(stream_id, position_millis)
+                .await?
+            {
+                return Ok(());
+            }
+            if session.receiver.snapshot().control_connection != ConnectionState::Connected
+                || session.output.snapshot().resume.current_stream_id != Some(stream_id)
+            {
+                return Err("Mashin playback changed before seek fallback".into());
+            }
+            let player_id = PlayerId(
+                receiver
+                    .player_id
+                    .ok_or("Mashin player is not registered")?,
+            );
+            session
+                .connection
+                .client
+                .execute_player_command(
+                    &player_id,
+                    PlayerCommand::Seek((position_millis / 1000) as f64),
+                )
+                .await
+        }));
+        Ok(())
     }
     fn set_volume(&mut self, volume: u8) {
         let result = self.local_command(AudioCommand::SetVolume {
@@ -322,9 +366,85 @@ impl LocalPlayback {
     }
 }
 
+// Cached chunks start at whole seconds; invalid UI values never reach either seek path.
+fn seek_position_millis(seconds: f64) -> Result<u64, String> {
+    if !seconds.is_finite()
+        || seconds < 0.0
+        || seconds >= (super::mashin::models::MAX_INTEGER / 1000) as f64
+    {
+        return Err(
+            "seek position must be finite, nonnegative and within the supported range".into(),
+        );
+    }
+    Ok((seconds.floor() as u64) * 1000)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_seek_rounds_down_and_rejects_invalid_ui_targets() {
+        assert_eq!(seek_position_millis(40.9).unwrap(), 40_000);
+        assert_eq!(seek_position_millis(0.0).unwrap(), 0);
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, f64::MAX] {
+            assert!(seek_position_millis(invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn cached_seek_requires_live_control_before_either_seek_path() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            let connection = Arc::new(
+                MusicAssistantConnection::new(
+                    crate::music_assistant::models::session::MusicAssistantServerUrl(
+                        "http://127.0.0.1:1".into(),
+                    ),
+                    Some(crate::music_assistant::models::identifiers::AccessToken(
+                        "test-token".into(),
+                    )),
+                )
+                .unwrap(),
+            );
+            let session = Arc::new(
+                LocalSession::new(
+                    &runtime,
+                    &LocalSessionConfiguration {
+                        device_id: "test-device".into(),
+                        client_name: "Seek test".into(),
+                        cache_bytes: 1_048_576,
+                        audio_profile: super::super::mashin::models::AudioProfileId::Flac,
+                        volume: 30,
+                    },
+                    connection,
+                )
+                .unwrap(),
+            );
+            session
+                .output
+                .execute(super::super::mashin::protocol::ControlCommand::SetMedia {
+                    command_id: 1,
+                    stream: super::super::mashin::models::test_stream(),
+                    autoplay: false,
+                })
+                .await
+                .unwrap();
+            let before = session.output.snapshot();
+            let mut engine = LocalPlayback::new();
+            engine.configure(session.clone());
+            engine.transport_seek(40.9).unwrap();
+            let commands = engine.take_pending_commands();
+            assert_eq!(commands.len(), 1);
+            for command in commands {
+                assert_eq!(
+                    command.await.unwrap_err(),
+                    "Local seek requires an active Mashin Control connection"
+                );
+            }
+            assert_eq!(session.output.snapshot(), before);
+        });
+    }
 
     #[test]
     fn unconfigured_engine_has_no_audio_and_cannot_start_local_planning() {

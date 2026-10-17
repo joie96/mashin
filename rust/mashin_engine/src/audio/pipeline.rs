@@ -77,6 +77,7 @@ struct PipelineState<Sink: OutputSink> {
     state: AudioState,
     revision: u64,
     position_frame: u64,
+    position_origin_frame: u64,
     volume_percent: u8,
     is_muted: bool,
     should_play: bool,
@@ -103,6 +104,7 @@ impl<Sink: OutputSink> PipelineState<Sink> {
             state: AudioState::Idle,
             revision: 0,
             position_frame: 0,
+            position_origin_frame: 0,
             volume_percent,
             is_muted,
             should_play: false,
@@ -257,6 +259,45 @@ impl<Sink: OutputSink> PipelineState<Sink> {
         Ok(())
     }
 
+    // Cache misses leave both playback and receipt ownership untouched.
+    fn seek_cached(&mut self, stream_id: Uuid, position_frame: u64) -> Result<bool, String> {
+        self.require_stream(Some(stream_id))?;
+        if self.error.is_some() || self.state == AudioState::Idle {
+            return Err("no active native audio stream".into());
+        }
+        let current = self
+            .cache
+            .current()
+            .ok_or("no current native audio stream")?;
+        let sample_rate = u64::from(current.descriptor.output_format.sample_rate_hz);
+        if position_frame % sample_rate != 0 {
+            return Err("cached seek must start at a whole-second chunk boundary".into());
+        }
+        let index = position_frame / sample_rate + 1;
+        if !current
+            .chunk(index)
+            .is_some_and(|chunk| chunk.first_frame == position_frame)
+        {
+            return Ok(false);
+        }
+        let revision = self
+            .revision
+            .checked_add(1)
+            .ok_or("native audio output revision exhausted")?;
+        self.reset_output();
+        self.position_origin_frame = position_frame;
+        self.position_frame = position_frame;
+        self.decoded_frames = position_frame;
+        self.decoded_chunk_index = index;
+        self.revision = revision;
+        self.state = if self.should_play {
+            AudioState::Buffering
+        } else {
+            AudioState::Paused
+        };
+        Ok(true)
+    }
+
     fn retain(&mut self, chunk: EncodedChunk) -> Result<(), String> {
         self.cache.retain(chunk)
     }
@@ -321,7 +362,10 @@ impl<Sink: OutputSink> PipelineState<Sink> {
         };
         let stream_id = current.descriptor.stream_id;
         if let Some(sink) = &self.sink {
-            self.position_frame = sink.position_frame().min(self.decoded_frames);
+            self.position_frame = self
+                .position_origin_frame
+                .saturating_add(sink.position_frame())
+                .min(self.decoded_frames);
             if self.is_final_decoded && sink.is_audibly_drained() {
                 self.position_frame = self.decoded_frames;
             }
@@ -421,6 +465,7 @@ impl<Sink: OutputSink> PipelineState<Sink> {
     fn reset_output(&mut self) {
         self.sink = None;
         self.position_frame = 0;
+        self.position_origin_frame = 0;
         self.decoded_chunk_index = 1;
         self.decoded_frames = 0;
         self.is_final_decoded = false;
@@ -432,11 +477,15 @@ impl<Sink: OutputSink> PipelineState<Sink> {
 enum Operation {
     Command(AudioCommand),
     Retain(EncodedChunk),
+    SeekCached {
+        stream_id: Uuid,
+        position_frame: u64,
+    },
 }
 
 struct Request {
     operation: Operation,
-    response: oneshot::Sender<Result<AudioSnapshot, String>>,
+    response: oneshot::Sender<Result<(AudioSnapshot, bool), String>>,
 }
 
 struct Worker {
@@ -498,10 +547,11 @@ impl AudioPipeline {
                         };
                         let previous_event_id = output.event_counter;
                         let result = match request.operation {
-                            Operation::Command(command) => output.execute(command),
-                            Operation::Retain(chunk) => output.retain(chunk),
+                            Operation::Command(command) => output.execute(command).map(|()| true),
+                            Operation::Retain(chunk) => output.retain(chunk).map(|()| true),
+                            Operation::SeekCached { stream_id, position_frame } => output.seek_cached(stream_id, position_frame),
                         }
-                        .map(|()| output.snapshot());
+                        .map(|has_applied| (output.snapshot(), has_applied));
                         snapshots.send_replace(output.snapshot());
                         for (_, event) in output.audible_events.iter().filter(|(id, _)| *id > previous_event_id) {
                             let _ = event_sender.send(event.clone());
@@ -554,10 +604,26 @@ impl AudioPipeline {
 
     // Network tasks wait for the native acceptance boundary before acknowledging.
     pub(crate) async fn execute(&self, command: AudioCommand) -> Result<AudioSnapshot, String> {
-        self.submit(Operation::Command(command)).await
+        self.submit(Operation::Command(command))
+            .await
+            .map(|(snapshot, _)| snapshot)
     }
     pub(crate) async fn retain(&self, chunk: EncodedChunk) -> Result<AudioSnapshot, String> {
-        self.submit(Operation::Retain(chunk)).await
+        self.submit(Operation::Retain(chunk))
+            .await
+            .map(|(snapshot, _)| snapshot)
+    }
+    pub(crate) async fn seek_cached(
+        &self,
+        stream_id: Uuid,
+        position_frame: u64,
+    ) -> Result<bool, String> {
+        self.submit(Operation::SeekCached {
+            stream_id,
+            position_frame,
+        })
+        .await
+        .map(|(_, has_applied)| has_applied)
     }
     // Read-only state and audible-transition events.
     pub(crate) fn snapshot(&self) -> AudioSnapshot {
@@ -567,7 +633,7 @@ impl AudioPipeline {
         self.worker.events.subscribe()
     }
 
-    async fn submit(&self, operation: Operation) -> Result<AudioSnapshot, String> {
+    async fn submit(&self, operation: Operation) -> Result<(AudioSnapshot, bool), String> {
         let (response, receiver) = oneshot::channel();
         self.worker
             .requests
@@ -638,6 +704,157 @@ mod tests {
             encoded_bytes: Arc::from([1u8]),
             payload_offset: 0,
         }
+    }
+
+    #[test]
+    fn cached_seek_preserves_receipt_and_successor_and_rebases_output_clock() {
+        for autoplay in [true, false] {
+            let mut output = PipelineState::<FakeSink>::new(1024, 30, false).unwrap();
+            let current = test_stream();
+            let next = test_stream();
+            output
+                .execute(AudioCommand::SetMedia {
+                    stream: current.clone(),
+                    autoplay,
+                })
+                .unwrap();
+            output
+                .execute(AudioCommand::PrepareNext {
+                    current_stream_id: current.stream_id,
+                    stream: next.clone(),
+                    next_revision: 1,
+                })
+                .unwrap();
+            for index in 1..=3 {
+                let mut cached = chunk(current.stream_id);
+                cached.index = index;
+                cached.first_frame = (index - 1) * 48_000;
+                cached.frame_count = 48_000;
+                cached.is_final = index == 3;
+                output.retain(cached).unwrap();
+            }
+            output.retain(chunk(next.stream_id)).unwrap();
+            let current_bytes = output
+                .cache
+                .current()
+                .unwrap()
+                .chunk(2)
+                .unwrap()
+                .encoded_bytes
+                .clone();
+            let prepared_bytes = output
+                .cache
+                .prepared()
+                .unwrap()
+                .chunk(1)
+                .unwrap()
+                .encoded_bytes
+                .clone();
+            let before = output.snapshot();
+            assert!(!output.seek_cached(current.stream_id, 144_000).unwrap());
+            assert_eq!(output.snapshot(), before);
+            assert!(output.seek_cached(Uuid::new_v4(), 48_000).is_err());
+            assert_eq!(output.snapshot(), before);
+            assert!(output.seek_cached(current.stream_id, 48_001).is_err());
+            assert_eq!(output.snapshot(), before);
+            assert!(output.seek_cached(current.stream_id, 48_000).unwrap());
+            let after = output.snapshot();
+            assert_eq!(after.status.position_frame, 48_000);
+            assert_eq!(
+                after.status.output_revision,
+                before.status.output_revision + 1
+            );
+            assert_eq!(
+                after.status.received_streams,
+                before.status.received_streams
+            );
+            assert_eq!(after.prepared, before.prepared);
+            assert!(Arc::ptr_eq(
+                &current_bytes,
+                &output
+                    .cache
+                    .current()
+                    .unwrap()
+                    .chunk(2)
+                    .unwrap()
+                    .encoded_bytes
+            ));
+            assert!(Arc::ptr_eq(
+                &prepared_bytes,
+                &output
+                    .cache
+                    .prepared()
+                    .unwrap()
+                    .chunk(1)
+                    .unwrap()
+                    .encoded_bytes
+            ));
+            assert_eq!(
+                after.status.output_state,
+                if autoplay {
+                    AudioState::Buffering
+                } else {
+                    AudioState::Paused
+                }
+            );
+            output
+                .pump_with(|cached, _| {
+                    assert_eq!(cached.index, 2);
+                    Ok(Arc::from([0i32]))
+                })
+                .unwrap();
+            output.sink.as_ref().unwrap().position.set(4800);
+            output.pump_with(|_, _| Ok(Arc::from([0i32]))).unwrap();
+            assert_eq!(output.position_frame, 52_800);
+            assert!(!output.seek_cached(current.stream_id, 0).unwrap());
+        }
+    }
+
+    #[test]
+    fn cached_seek_supports_retained_backwards_targets_and_short_eof_chunks() {
+        let mut output = PipelineState::<FakeSink>::new(1024, 30, false).unwrap();
+        let stream = test_stream();
+        output
+            .execute(AudioCommand::SetMedia {
+                stream: stream.clone(),
+                autoplay: false,
+            })
+            .unwrap();
+        let mut first = chunk(stream.stream_id);
+        first.frame_count = 48_000;
+        first.is_final = false;
+        output.retain(first).unwrap();
+        let mut last = chunk(stream.stream_id);
+        last.index = 2;
+        last.first_frame = 48_000;
+        output.retain(last).unwrap();
+        let cursors = output.snapshot().status.received_streams;
+        assert!(output.seek_cached(stream.stream_id, 48_000).unwrap());
+        assert!(output.seek_cached(stream.stream_id, 0).unwrap());
+        assert!(output.seek_cached(stream.stream_id, 48_000).unwrap());
+        output
+            .pump_with(|cached, _| {
+                assert!(cached.is_final);
+                assert_eq!(cached.frame_count, 480);
+                Ok(Arc::from([0i32]))
+            })
+            .unwrap();
+        assert_eq!(output.decoded_frames, 48_480);
+        assert_eq!(output.snapshot().status.received_streams, cursors);
+        assert_eq!(output.state, AudioState::Paused);
+        assert!(output.audible_events.is_empty());
+        let before = output.snapshot();
+        assert!(!output.seek_cached(stream.stream_id, 96_000).unwrap());
+        assert_eq!(output.snapshot(), before);
+        output.revision = u64::MAX;
+        let before = output.snapshot();
+        assert!(output.seek_cached(stream.stream_id, 48_000).is_err());
+        assert_eq!(output.snapshot(), before);
+        output.revision = 0;
+        output
+            .execute(AudioCommand::Stop { stream_id: None })
+            .unwrap();
+        assert!(output.seek_cached(stream.stream_id, 0).is_err());
     }
 
     #[test]

@@ -162,6 +162,28 @@ impl MashinAudioAdapter {
         Ok(project(snapshot, &streams))
     }
 
+    // Serialize local seeks against provider commands, retaining immutable descriptor provenance.
+    pub(crate) async fn seek_cached(
+        &self,
+        stream_id: Uuid,
+        position_millis: u64,
+    ) -> Result<bool, String> {
+        let _command = self.commands.lock().await;
+        let snapshot = self.snapshot();
+        let stream = snapshot
+            .current
+            .as_ref()
+            .filter(|stream| stream.stream_id == stream_id)
+            .ok_or("Mashin playback changed before local seek")?;
+        if snapshot.resume.output_revision >= MAX_INTEGER {
+            return Err("Mashin output revision exhausted".into());
+        }
+        let Some(position_frame) = seek_position_frame(stream, position_millis)? else {
+            return Ok(false);
+        };
+        self.pipeline.seek_cached(stream_id, position_frame).await
+    }
+
     pub(crate) async fn retain(&self, chunk: EncodedChunk) -> Result<OutputSnapshot, String> {
         self.pipeline.retain(chunk).await?;
         Ok(self.snapshot())
@@ -231,6 +253,31 @@ impl MashinAudioAdapter {
 }
 
 // Protocol-specific metadata and wire representation stay at this boundary.
+fn seek_position_frame(
+    stream: &StreamDescriptor,
+    position_millis: u64,
+) -> Result<Option<u64>, String> {
+    if position_millis % 1000 != 0 {
+        return Err("Mashin cached seek must start at a whole second".into());
+    }
+    if stream
+        .duration_millis
+        .is_some_and(|duration| position_millis >= duration)
+    {
+        return Ok(None);
+    }
+    let Some(relative_millis) = position_millis.checked_sub(stream.media_start_position_millis)
+    else {
+        return Ok(None);
+    };
+    relative_millis
+        .checked_mul(u64::from(stream.output_format.sample_rate_hz))
+        .map(|frames| frames / 1000)
+        .filter(|frames| *frames <= MAX_INTEGER)
+        .map(Some)
+        .ok_or_else(|| "Mashin seek position exhausted".into())
+}
+
 fn audio_stream(stream: &StreamDescriptor) -> AudioStream {
     AudioStream {
         stream_id: stream.stream_id,
@@ -298,6 +345,46 @@ fn project(snapshot: AudioSnapshot, streams: &HashMap<Uuid, StreamDescriptor>) -
 mod tests {
     use super::super::models::test_stream;
     use super::*;
+
+    #[test]
+    fn cached_seek_uses_descriptor_origin_and_bounds() {
+        let mut stream = test_stream();
+        stream.media_start_position_millis = 150_000;
+        assert_eq!(seek_position_frame(&stream, 149_000).unwrap(), None);
+        assert_eq!(seek_position_frame(&stream, 150_000).unwrap(), Some(0));
+        assert_eq!(
+            seek_position_frame(&stream, 160_000).unwrap(),
+            Some(480_000)
+        );
+        assert_eq!(seek_position_frame(&stream, 180_000).unwrap(), None);
+        assert!(seek_position_frame(&stream, 160_001).is_err());
+        stream.output_format.sample_rate_hz = 44_100;
+        assert_eq!(
+            seek_position_frame(&stream, 160_000).unwrap(),
+            Some(441_000)
+        );
+        stream.duration_millis = None;
+        assert!(seek_position_frame(&stream, MAX_INTEGER / 1000 * 1000).is_err());
+    }
+
+    #[tokio::test]
+    async fn cached_seek_miss_and_stale_identity_leave_output_unchanged() {
+        let output = MashinAudioAdapter::new(1_048_576, 30, false).unwrap();
+        let stream = test_stream();
+        output
+            .execute(ControlCommand::SetMedia {
+                command_id: 1,
+                stream: stream.clone(),
+                autoplay: false,
+            })
+            .await
+            .unwrap();
+        let before = output.snapshot();
+        assert!(!output.seek_cached(stream.stream_id, 40_000).await.unwrap());
+        assert_eq!(output.snapshot(), before);
+        assert!(output.seek_cached(Uuid::new_v4(), 40_000).await.is_err());
+        assert_eq!(output.snapshot(), before);
+    }
 
     #[tokio::test]
     async fn accepted_audio_state_always_has_immutable_protocol_metadata() {
