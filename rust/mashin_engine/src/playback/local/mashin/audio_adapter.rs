@@ -183,7 +183,7 @@ impl MashinAudioAdapter {
 
     pub(crate) async fn reconcile(&self, welcome: Welcome) -> Result<OutputSnapshot, String> {
         let _command = self.commands.lock().await;
-        let snapshot = self.snapshot();
+        let mut snapshot = self.snapshot();
         welcome.limits.validate()?;
         let mut profiles = welcome.audio_profiles.clone();
         profiles.sort_by_key(|profile| format!("{profile:?}"));
@@ -199,12 +199,51 @@ impl MashinAudioAdapter {
         {
             return Err("invalid Mashin welcome".into());
         }
-        if welcome.current_stream.as_ref().map(|state| &state.stream) != snapshot.current.as_ref()
-            || welcome.prepared_next.as_ref().map(|state| &state.stream)
-                != snapshot.prepared.as_ref()
-            || welcome.media_revision != snapshot.resume.media_revision
-        {
-            return Err("Mashin playback changed during handshake".into());
+        if welcome.current_stream.as_ref().map(|state| &state.stream) != snapshot.current.as_ref() {
+            return Err(format!(
+                "Mashin current stream descriptor changed during handshake: client={:?}, server={:?}",
+                snapshot.current.as_ref().map(|stream| stream.stream_id),
+                welcome
+                    .current_stream
+                    .as_ref()
+                    .map(|state| state.stream.stream_id),
+            ));
+        }
+        if welcome.prepared_next.as_ref().map(|state| &state.stream) != snapshot.prepared.as_ref() {
+            return Err(format!(
+                "Mashin prepared stream descriptor changed during handshake: client={:?}, server={:?}",
+                snapshot.prepared.as_ref().map(|stream| stream.stream_id),
+                welcome
+                    .prepared_next
+                    .as_ref()
+                    .map(|state| state.stream.stream_id),
+            ));
+        }
+        if welcome.media_revision != snapshot.resume.media_revision {
+            if snapshot.current.is_none()
+                && snapshot.prepared.is_none()
+                && snapshot.resume.output_state == OutputState::Idle
+                && welcome.desired_output_state == OutputState::Idle
+            {
+                let reconciled = self
+                    .pipeline
+                    .reconcile_idle_revision(welcome.media_revision)
+                    .await?;
+                *self
+                    .last_media
+                    .lock()
+                    .map_err(|_| "Mashin media lock poisoned")? = None;
+                let streams = self
+                    .streams
+                    .lock()
+                    .map_err(|_| "Mashin metadata lock poisoned")?;
+                snapshot = project(reconciled, &streams);
+            } else {
+                return Err(format!(
+                    "Mashin media revision changed during handshake: client={}, server={}",
+                    snapshot.resume.media_revision, welcome.media_revision,
+                ));
+            }
         }
         for state in welcome
             .current_stream
@@ -335,8 +374,142 @@ fn project(snapshot: AudioSnapshot, streams: &HashMap<Uuid, StreamDescriptor>) -
 
 #[cfg(test)]
 mod tests {
-    use super::super::models::test_stream;
+    use super::super::models::{AudioProfileId, test_stream};
+    use super::super::protocol::ProtocolLimits;
     use super::*;
+
+    #[tokio::test]
+    async fn idle_handshake_adopts_revision_without_changing_output() {
+        let output = MashinAudioAdapter::new(1_048_576, 30, true).unwrap();
+        output
+            .execute(ControlCommand::SetMedia {
+                command_id: 1,
+                current: None,
+                prepared: None,
+                media_revision: 1,
+                initial_output_state: OutputState::Paused,
+            })
+            .await
+            .unwrap();
+        let mut expected = output.snapshot();
+        for revision in [7, 7, 0, 3] {
+            expected.resume.media_revision = revision;
+            assert_eq!(
+                output.reconcile(idle_welcome(revision)).await.unwrap(),
+                expected
+            );
+            assert_eq!(output.snapshot(), expected);
+            assert!(output.last_media.lock().unwrap().is_none());
+        }
+        let command = ControlCommand::SetMedia {
+            command_id: 2,
+            current: Some(test_stream()),
+            prepared: None,
+            media_revision: 4,
+            initial_output_state: OutputState::Paused,
+        };
+        let mut stale = command.clone();
+        if let ControlCommand::SetMedia { media_revision, .. } = &mut stale {
+            *media_revision = 3;
+        }
+        assert!(output.execute(stale).await.is_err());
+        assert_eq!(output.snapshot(), expected);
+        let accepted = output.execute(command.clone()).await.unwrap();
+        assert_eq!(output.execute(command.clone()).await.unwrap(), accepted);
+        let mut changed = command;
+        if let ControlCommand::SetMedia { prepared, .. } = &mut changed {
+            *prepared = Some(test_stream());
+        }
+        assert!(output.execute(changed).await.is_err());
+        assert_eq!(output.snapshot(), accepted);
+    }
+
+    #[tokio::test]
+    async fn handshake_revision_reconciliation_requires_both_sides_idle() {
+        let output = MashinAudioAdapter::new(1_048_576, 30, false).unwrap();
+        let before = output.snapshot();
+        for state in [OutputState::Playing, OutputState::Paused] {
+            let mut welcome = idle_welcome(7);
+            welcome.desired_output_state = state;
+            assert!(output.reconcile(welcome).await.is_err());
+            assert_eq!(output.snapshot(), before);
+        }
+        assert!(
+            output
+                .reconcile(idle_welcome(MAX_INTEGER + 1))
+                .await
+                .is_err()
+        );
+        assert_eq!(output.snapshot(), before);
+    }
+
+    #[tokio::test]
+    async fn handshake_preserves_registered_stream_and_revision_checks() {
+        let output = MashinAudioAdapter::new(1_048_576, 30, false).unwrap();
+        let current = test_stream();
+        let prepared = test_stream();
+        let before = output
+            .execute(ControlCommand::SetMedia {
+                command_id: 1,
+                current: Some(current.clone()),
+                prepared: Some(prepared.clone()),
+                media_revision: 1,
+                initial_output_state: OutputState::Paused,
+            })
+            .await
+            .unwrap();
+        let stream_snapshot = |stream| super::super::protocol::StreamSnapshot {
+            stream,
+            next_received_chunk_index: 1,
+            next_produced_chunk_index: 1,
+            is_complete: false,
+            final_frame_count: None,
+            error: None,
+        };
+        let mut welcome = idle_welcome(1);
+        welcome.current_stream = Some(stream_snapshot(current));
+        welcome.prepared_next = Some(stream_snapshot(prepared));
+        welcome.desired_output_state = OutputState::Paused;
+        assert_eq!(output.reconcile(welcome.clone()).await.unwrap(), before);
+        for change in ["current", "prepared", "revision", "descriptor"] {
+            let mut changed = welcome.clone();
+            let expected_reason = match change {
+                "current" => {
+                    changed.current_stream = None;
+                    "current stream descriptor"
+                }
+                "prepared" => {
+                    changed.prepared_next = None;
+                    "prepared stream descriptor"
+                }
+                "revision" => {
+                    changed.media_revision = 2;
+                    "media revision"
+                }
+                _ => {
+                    changed
+                        .current_stream
+                        .as_mut()
+                        .unwrap()
+                        .stream
+                        .playback
+                        .queue_item_id
+                        .0 = "changed".into();
+                    "current stream descriptor"
+                }
+            };
+            assert!(
+                output
+                    .reconcile(changed)
+                    .await
+                    .unwrap_err()
+                    .contains(expected_reason)
+            );
+            assert_eq!(output.snapshot(), before);
+        }
+        assert!(output.pipeline.reconcile_idle_revision(2).await.is_err());
+        assert_eq!(output.snapshot(), before);
+    }
 
     #[test]
     fn cached_seek_uses_descriptor_origin_and_bounds() {
@@ -478,5 +651,21 @@ mod tests {
         );
         assert_eq!(output.snapshot(), before);
         assert_eq!(output.streams.lock().unwrap().len(), 1);
+    }
+
+    fn idle_welcome(media_revision: u64) -> Welcome {
+        Welcome {
+            player_id: "mashin-test".into(),
+            provider_version: "1".into(),
+            server_revision: "test".into(),
+            limits: ProtocolLimits::default(),
+            audio_profiles: AudioProfileId::ALL.to_vec(),
+            selected_audio_profile: AudioProfileId::Flac,
+            audio_binding_id: "test-binding".into(),
+            current_stream: None,
+            desired_output_state: OutputState::Idle,
+            media_revision,
+            prepared_next: None,
+        }
     }
 }

@@ -527,6 +527,15 @@ impl<Sink: OutputSink> PipelineState<Sink> {
         Ok(())
     }
 
+    fn reconcile_idle_revision(&mut self, media_revision: u64) -> Result<(), String> {
+        if self.state != AudioState::Idle || self.sink.is_some() || self.should_play {
+            return Err("cannot reconcile media revision outside idle output".into());
+        }
+        self.cache.reconcile_idle_revision(media_revision)?;
+        self.last_media = None;
+        Ok(())
+    }
+
     fn reset_output(&mut self) {
         self.sink = None;
         self.position_frame = 0;
@@ -542,6 +551,7 @@ impl<Sink: OutputSink> PipelineState<Sink> {
 enum Operation {
     Command(AudioCommand),
     Retain(EncodedChunk),
+    ReconcileIdleRevision(u64),
     SeekCached {
         stream_id: Uuid,
         position_frame: u64,
@@ -614,6 +624,7 @@ impl AudioPipeline {
                         let result = match request.operation {
                             Operation::Command(command) => output.execute(command).map(|()| true),
                             Operation::Retain(chunk) => output.retain(chunk).map(|()| true),
+                            Operation::ReconcileIdleRevision(revision) => output.reconcile_idle_revision(revision).map(|()| true),
                             Operation::SeekCached { stream_id, position_frame } => output.seek_cached(stream_id, position_frame),
                         }
                         .map(|has_applied| (output.snapshot(), has_applied));
@@ -690,6 +701,16 @@ impl AudioPipeline {
         .await
         .map(|(_, has_applied)| has_applied)
     }
+    // Revalidate idle ownership on the worker before adopting a handshake revision.
+    pub(crate) async fn reconcile_idle_revision(
+        &self,
+        media_revision: u64,
+    ) -> Result<AudioSnapshot, String> {
+        self.submit(Operation::ReconcileIdleRevision(media_revision))
+            .await
+            .map(|(snapshot, _)| snapshot)
+    }
+
     // Read-only state and audible-transition events.
     pub(crate) fn snapshot(&self) -> AudioSnapshot {
         self.worker.snapshot.borrow().clone()

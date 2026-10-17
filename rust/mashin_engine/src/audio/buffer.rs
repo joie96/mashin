@@ -185,6 +185,16 @@ impl StreamBuffer {
         Ok(true)
     }
 
+    // Empty handshakes establish a revision baseline, not a new stream grant.
+    pub(crate) fn reconcile_idle_revision(&mut self, revision: u64) -> Result<(), String> {
+        if self.current.is_some() || self.prepared.is_some() {
+            return Err("cannot reconcile idle revision with registered audio streams".into());
+        }
+        self.media_revision = revision;
+        self.announcement = None;
+        Ok(())
+    }
+
     pub(crate) fn set_current(&mut self, descriptor: AudioStream) -> Result<(), String> {
         let stream = CachedStream::new(descriptor)?;
         self.current = Some(stream);

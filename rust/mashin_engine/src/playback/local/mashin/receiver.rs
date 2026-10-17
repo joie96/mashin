@@ -166,13 +166,18 @@ async fn run(
 ) {
     let mut delay = Duration::from_millis(500);
     let mut audio_connection_id = 0;
+    let mut connection_attempt = 0_u64;
     loop {
+        connection_attempt = connection_attempt.saturating_add(1);
+        LOGGER.debug(format_args!(
+            "Control connection attempt #{connection_attempt}"
+        ));
         snapshots.send_modify(|snapshot| {
             snapshot.control_connection = ConnectionState::Connecting;
             snapshot.audio_connection = ConnectionState::Disconnected;
         });
         let connected_at = Instant::now();
-        let _ = connect(
+        let result = connect(
             &mut configuration,
             &output,
             &snapshots,
@@ -180,6 +185,18 @@ async fn run(
             &mut audio_connection_id,
         )
         .await;
+        let was_connected = snapshots.borrow().control_connection == ConnectionState::Connected;
+        match result {
+            Ok(()) => LOGGER.debug("Control connection ended"),
+            Err(error) => LOGGER.debug(format_args!(
+                "{} on attempt #{connection_attempt}: {error}",
+                if was_connected {
+                    "Control connection lost"
+                } else {
+                    "Control connection attempt failed"
+                },
+            )),
+        }
         snapshots.send_modify(|snapshot| {
             snapshot.control_connection = ConnectionState::Disconnected;
             snapshot.audio_connection = ConnectionState::Disconnected;
@@ -187,6 +204,13 @@ async fn run(
         if connected_at.elapsed() >= Duration::from_secs(15) {
             delay = Duration::from_millis(500);
         }
+        let retained = output.snapshot();
+        LOGGER.debug(format_args!(
+            "Control reconnect scheduled in {} ms; retained_stream={:?}, buffered={} ms",
+            delay.as_millis(),
+            retained.resume.current_stream_id,
+            retained.buffered_duration_millis,
+        ));
         let retry = tokio::time::sleep(delay);
         tokio::pin!(retry);
         loop {
@@ -212,6 +236,7 @@ async fn connect(
     let (control_url, audio_url) = endpoints(&configuration.music_assistant_url)?;
     let mut events = output.subscribe();
     let mut control = open_socket(control_url, protocol::MAX_CONTROL_BYTES).await?;
+    LOGGER.debug("Control WebSocket connected; sending hello");
     let initial = output.snapshot();
     let mut last_event_id = initial.audible_events.last().map_or(0, |(id, _)| *id);
     send(
@@ -233,6 +258,10 @@ async fn connect(
     let welcome = match envelope.message {
         ServerMessage::Welcome(welcome) => welcome,
         ServerMessage::Error { error, .. } => {
+            LOGGER.debug(format_args!(
+                "Control handshake rejected: code={} retryable={}: {}",
+                error.code, error.is_retryable, error.message,
+            ));
             if matches!(
                 error.code.as_str(),
                 "cache_unavailable" | "stale_playback" | "stream_unavailable"
@@ -255,6 +284,10 @@ async fn connect(
         .ok_or("Mashin welcome has no connection epoch")?;
     output.reconcile(welcome.clone()).await?;
     configuration.audio_profile = welcome.selected_audio_profile;
+    LOGGER.debug(format_args!(
+        "Control handshake completed: player={}, audio_profile={:?}",
+        welcome.player_id, welcome.selected_audio_profile,
+    ));
     snapshots.send_modify(|snapshot| {
         snapshot.control_connection = ConnectionState::Connected;
         snapshot.player_id = Some(welcome.player_id.clone());
@@ -304,6 +337,7 @@ async fn connect(
                             if pending_binding.as_ref().map(|(pending, _)| pending.as_str()) != Some(&request_id) { return Err("unsolicited Mashin audio binding".into()); }
                             pending_binding = None;
                             *audio_connection_id = increment(*audio_connection_id)?;
+                            LOGGER.debug(format_args!("Audio reconnect binding received; starting connection #{audio_connection_id}"));
                             connecting = Some(connect_audio(audio_url.clone(), configuration.device_id.clone(), epoch.clone(), audio_binding_id, *audio_connection_id, output.clone()));
                         }
                         ServerMessage::AudioProfileChanged { request_id, status, selected_audio_profile, error, .. } => {
@@ -331,12 +365,14 @@ async fn connect(
                         }
                         _ => return Err("unexpected Mashin control message".into()),
                     },
+                    Message::Close(frame) => return Err(format!("Mashin control closed by peer (code={:?})", frame.as_ref().map(|frame| frame.code))),
                     _ => return Err("unexpected Mashin control frame".into()),
                 }
             }
             result = finish_connecting(&mut connecting) => {
                 connecting = None;
-                audio = Some(result?);
+                audio = Some(result.map_err(|error| format!("Mashin audio setup failed: {error}"))?);
+                LOGGER.debug(format_args!("Audio connection established: connection_id={audio_connection_id}"));
                 snapshots.send_modify(|snapshot| snapshot.audio_connection = ConnectionState::Connected);
                 report(&mut control, &epoch, output, &mut sequence, &mut last_event_id, true, *audio_connection_id).await?;
             }
@@ -359,12 +395,18 @@ async fn connect(
                     }
                     Ok(Message::Ping(payload)) => { send_frame(audio.as_mut().unwrap(), Message::Pong(payload)).await?; }
                     Ok(Message::Pong(_)) => {}
-                    _ => {
+                    message => {
+                        match message {
+                            Err(error) => LOGGER.debug(format_args!("Audio connection #{audio_connection_id} lost: {error}")),
+                            Ok(Message::Close(frame)) => LOGGER.debug(format_args!("Audio connection #{audio_connection_id} closed by peer (code={:?})", frame.as_ref().map(|frame| frame.code))),
+                            _ => LOGGER.debug(format_args!("Audio connection #{audio_connection_id} interrupted by unexpected frame")),
+                        }
                         audio = None;
                         snapshots.send_modify(|snapshot| snapshot.audio_connection = ConnectionState::Connecting);
                         let request_id = Uuid::new_v4().to_string();
                         sequence = increment(sequence)?;
                         send(&mut control, ClientMessage::AudioReconnectRequest { sequence, request_id: request_id.clone() }, Some(&epoch)).await?;
+                        LOGGER.debug(format_args!("Audio reconnect binding requested after connection #{audio_connection_id}"));
                         pending_binding = Some((request_id, Instant::now()));
                     }
                 }
@@ -547,6 +589,9 @@ fn connect_audio(
     output: MashinAudioAdapter,
 ) -> ConnectingAudio {
     Box::pin(async move {
+        LOGGER.debug(format_args!(
+            "Audio connection attempt: connection_id={audio_connection_id}"
+        ));
         tokio::time::timeout(Duration::from_secs(30), async {
             let mut socket = open_socket(url, HEADER_BYTES + MAX_PAYLOAD_BYTES).await?;
             send(
