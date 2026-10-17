@@ -585,6 +585,9 @@ class _MediaTableSectionDesktopState<T>
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
     final bool hasTitle = widget.title.trim().isNotEmpty;
+    final queueItemNumbers = T == QueueItem
+        ? widget.items.cast<QueueItem>().normalizedItemNumbers
+        : const <int>[];
 
     if (widget.maxItemsPerPage == 0) {
       final Widget rows = widget.isLoading
@@ -609,6 +612,9 @@ class _MediaTableSectionDesktopState<T>
                 child: _buildDesktopTypedRow(
                   item: widget.items[index],
                   index: index,
+                  queueItemNumber: queueItemNumbers.isEmpty
+                      ? null
+                      : queueItemNumbers[index],
                   isFirst: index == 0,
                   isSelected: _selectedIndexes.contains(index),
                   onToggleSelected: () => _toggleSelectedIndex(index),
@@ -638,6 +644,7 @@ class _MediaTableSectionDesktopState<T>
           context,
           colors,
           constrainToHeight: hasBoundedHeight,
+          queueItemNumbers: queueItemNumbers,
         );
 
         return Column(
@@ -796,6 +803,7 @@ class _MediaTableSectionDesktopState<T>
     BuildContext context,
     MashinColors colors, {
     required bool constrainToHeight,
+    required List<int> queueItemNumbers,
   }) {
     final bool useInternalScroll = constrainToHeight;
     final int visibleRowCount = _isExpanded ? widget.items.length : _chunkSize;
@@ -857,6 +865,9 @@ class _MediaTableSectionDesktopState<T>
         final Widget row = _buildDesktopTypedRow(
           item: widget.items[index],
           index: itemIndex,
+          queueItemNumber: queueItemNumbers.isEmpty
+              ? null
+              : queueItemNumbers[itemIndex],
           isFirst: index == 0,
           isSelected: _selectedIndexes.contains(itemIndex),
           onToggleSelected: () => _toggleSelectedIndex(itemIndex),
@@ -891,6 +902,7 @@ class _MediaTableSectionDesktopState<T>
               child: _buildDesktopPageList(
                 pageIndex: _currentPage,
                 useInternalScroll: useInternalScroll,
+                queueItemNumbers: queueItemNumbers,
               ),
             ),
           );
@@ -932,6 +944,7 @@ class _MediaTableSectionDesktopState<T>
   Widget _buildDesktopPageList({
     required int pageIndex,
     required bool useInternalScroll,
+    required List<int> queueItemNumbers,
   }) {
     final int start = pageIndex * _chunkSize;
     final int end = math.min(start + _chunkSize, widget.items.length);
@@ -953,6 +966,9 @@ class _MediaTableSectionDesktopState<T>
         return _buildDesktopTypedRow(
           item: chunkItems[index],
           index: itemIndex,
+          queueItemNumber: queueItemNumbers.isEmpty
+              ? null
+              : queueItemNumbers[itemIndex],
           isFirst: index == 0,
           isSelected: _selectedIndexes.contains(itemIndex),
           onToggleSelected: () => _toggleSelectedIndex(itemIndex),
@@ -1017,6 +1033,7 @@ class _MediaTableSectionDesktopState<T>
   Widget _buildDesktopTypedRow({
     required T item,
     required int index,
+    int? queueItemNumber,
     required bool isFirst,
     required bool isSelected,
     required VoidCallback onToggleSelected,
@@ -1113,7 +1130,7 @@ class _MediaTableSectionDesktopState<T>
       return _buildDesktopTableRowQueue(
         item: typedItem,
         coreEvents: widget.coreEvents,
-        index: index,
+        itemNumber: queueItemNumber ?? index + 1,
         isFirst: isFirst,
         isSelected: isSelected,
         isFavorite: _isItemFavorite(item, index),
@@ -1805,7 +1822,7 @@ Widget _buildDesktopTableRowArtist({
 Widget _buildDesktopTableRowQueue({
   required QueueItem item,
   required MashinCoreBridgeEvents coreEvents,
-  required int index,
+  required int itemNumber,
   required bool isFirst,
   required bool isSelected,
   required bool isFavorite,
@@ -1844,7 +1861,7 @@ Widget _buildDesktopTableRowQueue({
             child: DesktopPlaybackIndicator(
               coreEvents: coreEvents,
               item: item.mediaItem,
-              fallback: '${(item.sortIndex ?? index) + 1}',
+              fallback: '$itemNumber',
             ),
           ),
         ),

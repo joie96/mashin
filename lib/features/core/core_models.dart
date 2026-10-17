@@ -1351,6 +1351,24 @@ class QueueItem {
   }
 }
 
+extension QueueItemNumbering on List<QueueItem> {
+  // Derive labels from this snapshot without changing its playback order.
+  List<int> get normalizedItemNumbers {
+    final orderedIndexes = List<int>.generate(length, (index) => index);
+    orderedIndexes.sort((firstIndex, secondIndex) {
+      final comparison = (this[firstIndex].sortIndex ?? firstIndex).compareTo(
+        this[secondIndex].sortIndex ?? secondIndex,
+      );
+      return comparison != 0 ? comparison : firstIndex.compareTo(secondIndex);
+    });
+    final numbers = List<int>.filled(length, 0);
+    for (var rank = 0; rank < orderedIndexes.length; rank++) {
+      numbers[orderedIndexes[rank]] = rank + 1;
+    }
+    return numbers;
+  }
+}
+
 extension QueueItemAvailability on QueueItem {
   bool get isAvailable => available ?? mediaItem.isAvailable;
 

@@ -360,6 +360,9 @@ class _MediaTableSectionMobileState<T>
     final bool hasTitle = widget.title.trim().isNotEmpty;
     final bool hasPlayableContent =
         !widget.isLoading && _playableItemsFromIndex(0).isNotEmpty;
+    final queueItemNumbers = T == QueueItem
+        ? widget.items.cast<QueueItem>().normalizedItemNumbers
+        : const <int>[];
 
     return SliverMainAxisGroup(
       slivers: <Widget>[
@@ -401,6 +404,7 @@ class _MediaTableSectionMobileState<T>
                 context,
                 constrainToHeight: false,
                 fillScrollableViewport: false,
+                queueItemNumbers: queueItemNumbers,
               ),
             ),
           )
@@ -412,6 +416,9 @@ class _MediaTableSectionMobileState<T>
                 _buildMobileTypedRow(
                   item: widget.items[index],
                   index: index,
+                  queueItemNumber: queueItemNumbers.isEmpty
+                      ? null
+                      : queueItemNumbers[index],
                   isFirst: index == 0,
                   isSelected: _selectedIndexes.contains(index),
                   selectionModeActive: _isMobileSelectionMode,
@@ -437,6 +444,7 @@ class _MediaTableSectionMobileState<T>
     BuildContext context, {
     required bool constrainToHeight,
     required bool fillScrollableViewport,
+    required List<int> queueItemNumbers,
   }) {
     final bool useInternalScroll = fillScrollableViewport || constrainToHeight;
 
@@ -506,6 +514,9 @@ class _MediaTableSectionMobileState<T>
                     child: _buildMobileTypedRow(
                       item: chunkItems[localIndex],
                       index: itemIndex,
+                      queueItemNumber: queueItemNumbers.isEmpty
+                          ? null
+                          : queueItemNumbers[itemIndex],
                       isFirst: localIndex == 0,
                       isSelected: _selectedIndexes.contains(itemIndex),
                       selectionModeActive: _isMobileSelectionMode,
@@ -548,6 +559,9 @@ class _MediaTableSectionMobileState<T>
         return _buildMobileTypedRow(
           item: widget.items[index],
           index: itemIndex,
+          queueItemNumber: queueItemNumbers.isEmpty
+              ? null
+              : queueItemNumbers[itemIndex],
           isFirst: index == 0,
           isSelected: _selectedIndexes.contains(itemIndex),
           selectionModeActive: _isMobileSelectionMode,
@@ -570,6 +584,7 @@ class _MediaTableSectionMobileState<T>
   Widget _buildMobileTypedRow({
     required T item,
     required int index,
+    int? queueItemNumber,
     required bool isFirst,
     required bool isSelected,
     required bool selectionModeActive,
@@ -603,6 +618,7 @@ class _MediaTableSectionMobileState<T>
         opacity: typedItem.isAvailable ? 1 : 0.35,
         child: _buildMobileTableRowQueue(
           item: typedItem,
+          itemNumber: queueItemNumber ?? index + 1,
           isFirst: isFirst,
           isSelected: isSelected,
           selectionModeActive: selectionModeActive,
@@ -725,6 +741,7 @@ class _MediaTableSectionMobileState<T>
 
   Widget _buildMobileTableRowQueue({
     required QueueItem item,
+    required int itemNumber,
     required bool isFirst,
     required bool isSelected,
     required bool selectionModeActive,
@@ -766,6 +783,7 @@ class _MediaTableSectionMobileState<T>
       onMoreTap: onMoreTap,
       coreEvents: widget.coreEvents,
       playbackItem: item.mediaItem,
+      queueItemNumber: itemNumber,
     );
   }
 
@@ -919,6 +937,7 @@ class _MobileTableRowBase extends StatelessWidget {
   final VoidCallback? onMoreTap;
   final MashinCoreBridgeEvents coreEvents;
   final MediaItem? playbackItem;
+  final int? queueItemNumber;
 
   const _MobileTableRowBase({
     required this.title,
@@ -938,6 +957,7 @@ class _MobileTableRowBase extends StatelessWidget {
     this.onMoreTap,
     required this.coreEvents,
     this.playbackItem,
+    this.queueItemNumber,
   });
 
   @override
@@ -974,6 +994,17 @@ class _MobileTableRowBase extends StatelessWidget {
                     padding: const EdgeInsets.fromLTRB(8, 6, 58, 6),
                     child: Row(
                       children: <Widget>[
+                        if (queueItemNumber != null)
+                          SizedBox(
+                            width: 32,
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                '$queueItemNumber',
+                                style: textStyles.mobileSubtitle,
+                              ),
+                            ),
+                          ),
                         _DeferredMobileTableCover(
                           coverUrl: coverUrl,
                           fallbackIcon: fallbackIcon,
@@ -1137,6 +1168,7 @@ Widget _buildMobileTableRowBase({
   required VoidCallback? onMoreTap,
   required MashinCoreBridgeEvents coreEvents,
   MediaItem? playbackItem,
+  int? queueItemNumber,
 }) {
   return _MobileTableRowBase(
     title: title,
@@ -1156,6 +1188,7 @@ Widget _buildMobileTableRowBase({
     onMoreTap: onMoreTap,
     coreEvents: coreEvents,
     playbackItem: playbackItem,
+    queueItemNumber: queueItemNumber,
   );
 }
 

@@ -39,6 +39,105 @@ class _QueueBridge implements MashinCoreBridgeApi {
 
 void main() {
   for (final isMobile in <bool>[false, true]) {
+    for (final pageSize in <int>[0, 2]) {
+      testWidgets(
+        '${isMobile ? 'mobile' : 'desktop'} queue ranks use the full snapshot (page size $pageSize)',
+        (tester) async {
+          tester.view.physicalSize = Size(isMobile ? 360 : 1400, 850);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final bridge = _QueueBridge();
+          final events = MashinCoreBridgeEvents(coreBridge: bridge);
+          addTearDown(events.dispose);
+          final items = List<QueueItem>.generate(
+            4,
+            (index) => QueueItem(
+              queueItemId: 'queue-$index',
+              sortIndex: <int>[0, 12, 4, 9][index],
+              mediaItem: Track(
+                itemId: 'track-$index',
+                provider: 'test',
+                name: 'Track $index',
+                duration: 120,
+                artists: const <Artist>[],
+              ),
+            ),
+          );
+
+          Future<void> showSnapshot(List<QueueItem> snapshot) {
+            final table = isMobile
+                ? MediaTableSectionMobile<QueueItem>(
+                    title: '',
+                    items: snapshot,
+                    isLoading: false,
+                    emptyText: 'Leer',
+                    maxItemsPerPage: pageSize,
+                    coreBridge: bridge,
+                    coreEvents: events,
+                  )
+                : MediaTableSectionDesktop<QueueItem>(
+                    title: '',
+                    items: snapshot,
+                    isLoading: false,
+                    emptyText: 'Leer',
+                    maxItemsPerPage: pageSize,
+                    coreBridge: bridge,
+                    coreEvents: events,
+                  );
+            return tester.pumpWidget(
+              MaterialApp(
+                theme: AppTheme.dark(),
+                home: Scaffold(
+                  body: CustomScrollView(
+                    slivers: <Widget>[
+                      if (!isMobile && pageSize > 0)
+                        SliverToBoxAdapter(child: table)
+                      else
+                        table,
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }
+
+          List<String> displayedNumbers() => tester
+              .widgetList<Text>(find.byType(Text))
+              .map((text) => text.data ?? '')
+              .where((label) => RegExp(r'^\d+$').hasMatch(label))
+              .toList();
+
+          await showSnapshot(items);
+          await tester.pumpAndSettle();
+          if (pageSize == 0) {
+            expect(displayedNumbers(), <String>['1', '4', '2', '3']);
+            expect(
+              tester.getTopLeft(find.text('Track 0')).dy,
+              lessThan(tester.getTopLeft(find.text('Track 1')).dy),
+            );
+            expect(
+              tester.getTopLeft(find.text('Track 1')).dy,
+              lessThan(tester.getTopLeft(find.text('Track 2')).dy),
+            );
+          } else {
+            expect(displayedNumbers(), containsAll(<String>['1', '4']));
+          }
+
+          await showSnapshot(<QueueItem>[items[0], items[1], items[3]]);
+          await tester.pumpAndSettle();
+          if (pageSize == 0) {
+            expect(displayedNumbers(), <String>['1', '3', '2']);
+          } else {
+            expect(displayedNumbers(), containsAll(<String>['1', '3']));
+          }
+          expect(bridge.calls, isEmpty);
+          expect(items.map((item) => item.sortIndex), <int>[0, 12, 4, 9]);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+
     for (final action in <String>[
       'Als N\u00e4chstes spielen',
       'Als Letztes spielen',
