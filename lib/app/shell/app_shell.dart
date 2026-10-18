@@ -1109,7 +1109,6 @@ class _AppShellState extends State<AppShell> {
         context: context,
         anchorContext: anchorContext,
         width: 280,
-        height: 420,
         child: _AudioOptionsMenu(
           selectedAudioProfile: _audioProfile,
           onSelected: _setAudioProfile,
@@ -2015,17 +2014,26 @@ class _AudioOptionsMenu extends StatelessWidget {
                   ),
                 ),
               ),
-              _AudioProfileOption(
-                value: 'flac',
-                title: 'High Fidelity',
-                subtitle: 'FLAC',
+              const _AudioProfileOption(
+                value: 'opus_96k',
+                title: 'Low (Opus 96 kbit/s)',
               ),
-              for (final bitrate in [96, 128, 192, 256])
-                _AudioProfileOption(
-                  value: 'opus_${bitrate}k',
-                  title: 'Opus $bitrate kb/s',
-                  subtitle: 'Opus',
-                ),
+              const _AudioProfileOption(
+                value: 'opus_128k',
+                title: 'Medium (Opus 128 kbit/s)',
+              ),
+              const _AudioProfileOption(
+                value: 'opus_192k',
+                title: 'Default (Opus 192 kbit/s)',
+              ),
+              const _AudioProfileOption(
+                value: 'opus_256k',
+                title: 'High (Opus 256 kbit/s)',
+              ),
+              const _AudioProfileOption(
+                value: 'flac',
+                title: 'Studio (Flac)',
+              ),
             ],
           ),
         ),
@@ -2038,12 +2046,10 @@ class _AudioProfileOption extends StatelessWidget {
   const _AudioProfileOption({
     required this.value,
     required this.title,
-    required this.subtitle,
   });
 
   final String value;
   final String title;
-  final String subtitle;
 
   @override
   Widget build(BuildContext context) {
@@ -2052,7 +2058,6 @@ class _AudioProfileOption extends StatelessWidget {
       value: value,
       dense: true,
       title: Text(title, style: TextStyle(color: colors.textPrimary)),
-      subtitle: Text(subtitle, style: TextStyle(color: colors.textSecondary)),
       contentPadding: const EdgeInsets.symmetric(horizontal: 8),
     );
   }

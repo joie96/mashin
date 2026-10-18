@@ -77,6 +77,48 @@ class ContextMenuAction {
   bool get hasSubmenu => submenu.isNotEmpty;
 }
 
+class _DesktopCustomMenuLayout extends SingleChildLayoutDelegate {
+  _DesktopCustomMenuLayout({required this.anchorCenter, required this.width});
+
+  final Offset anchorCenter;
+  final double width;
+
+  // Content-sized layout and viewport positioning.
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) {
+    return BoxConstraints(
+      maxWidth: width,
+      maxHeight:
+          constraints.maxHeight -
+          2 * AppContextMenuController._desktopMenuViewportInset,
+    );
+  }
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) {
+    const viewportInset = AppContextMenuController._desktopMenuViewportInset;
+    const anchorGap = AppContextMenuController._desktopMenuAnchorGap;
+    double left = anchorCenter.dx - childSize.width - anchorGap;
+    double top = anchorCenter.dy - childSize.height - anchorGap;
+    if (left < viewportInset) {
+      left = anchorCenter.dx + anchorGap;
+    }
+    if (top < viewportInset) {
+      top = anchorCenter.dy + anchorGap;
+    }
+    return Offset(
+      left.clamp(viewportInset, size.width - childSize.width - viewportInset),
+      top.clamp(viewportInset, size.height - childSize.height - viewportInset),
+    );
+  }
+
+  @override
+  bool shouldRelayout(_DesktopCustomMenuLayout oldDelegate) {
+    return anchorCenter != oldDelegate.anchorCenter ||
+        width != oldDelegate.width;
+  }
+}
+
 /// Presents page-specific actions as an anchored popup on desktop and a bottom
 /// sheet on mobile; mobile submenus use dialogs layered above their parent.
 class AppContextMenuController {
@@ -197,7 +239,6 @@ class AppContextMenuController {
     required BuildContext anchorContext,
     required Widget child,
     required double width,
-    required double height,
   }) async {
     if (isCompactLayout(context)) {
       await _showMobileCustomDialog(
@@ -213,7 +254,6 @@ class AppContextMenuController {
       anchorContext: anchorContext,
       child: child,
       width: width,
-      height: height,
     );
   }
 
@@ -240,7 +280,6 @@ class AppContextMenuController {
     required BuildContext anchorContext,
     required Widget child,
     required double width,
-    required double height,
   }) async {
     final RenderBox overlayBox =
         Navigator.of(context).overlay!.context.findRenderObject()! as RenderBox;
@@ -248,23 +287,6 @@ class AppContextMenuController {
     final Offset anchorCenter = anchorBox.localToGlobal(
       anchorBox.size.center(Offset.zero),
       ancestor: overlayBox,
-    );
-
-    double left = anchorCenter.dx - width - _desktopMenuAnchorGap;
-    double top = anchorCenter.dy - height - _desktopMenuAnchorGap;
-    if (left < _desktopMenuViewportInset) {
-      left = anchorCenter.dx + _desktopMenuAnchorGap;
-    }
-    if (top < _desktopMenuViewportInset) {
-      top = anchorCenter.dy + _desktopMenuAnchorGap;
-    }
-    left = left.clamp(
-      _desktopMenuViewportInset,
-      overlayBox.size.width - width - _desktopMenuViewportInset,
-    );
-    top = top.clamp(
-      _desktopMenuViewportInset,
-      overlayBox.size.height - height - _desktopMenuViewportInset,
     );
 
     await showGeneralDialog<void>(
@@ -275,16 +297,12 @@ class AppContextMenuController {
       transitionDuration: _desktopMenuTransitionDuration,
       transitionBuilder: (_, animation, _, dialogChild) =>
           _buildDesktopMenuFade(animation, dialogChild),
-      pageBuilder: (_, _, _) => Stack(
-        children: <Widget>[
-          Positioned(
-            left: left,
-            top: top,
-            width: width,
-            height: height,
-            child: child,
-          ),
-        ],
+      pageBuilder: (_, _, _) => CustomSingleChildLayout(
+        delegate: _DesktopCustomMenuLayout(
+          anchorCenter: anchorCenter,
+          width: width,
+        ),
+        child: SizedBox(width: width, child: child),
       ),
     );
   }
