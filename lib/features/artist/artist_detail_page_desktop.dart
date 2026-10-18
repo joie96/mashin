@@ -105,7 +105,6 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
         icon: Icons.play_arrow,
         onSelected: () => widget.coreBridge.queuePlayMedia(
           tracks.isEmpty ? <MediaItem>[item] : tracks,
-          option: QueueOption.next,
         ),
       ),
       if (item is Album || item is Playlist)
@@ -138,7 +137,7 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
         iconQuarterTurns: 2,
         onSelected: () => widget.coreBridge.queuePlayMedia(
           tracks.isEmpty ? <MediaItem>[item] : tracks,
-          option: QueueOption.add,
+          option: QueueOption.next,
         ),
       ),
       ContextMenuAction(
@@ -149,6 +148,7 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
         icon: Icons.last_page,
         onSelected: () => widget.coreBridge.queuePlayMedia(
           tracks.isEmpty ? <MediaItem>[item] : tracks,
+          option: QueueOption.add,
         ),
       ),
     ];
