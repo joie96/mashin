@@ -61,9 +61,12 @@ app.*.map.json
 /windows/native/*.lib
 /windows/native/*.exp
 /windows/native/*.pdb
+/windows/native/ffmpeg/
+/windows/native/licenses/
 
 # Native Android artifacts
 /android/app/src/main/jniLibs/
+/android/app/src/main/assets/licenses/ffmpeg/
 
 other_projects
 # Widget Preview related

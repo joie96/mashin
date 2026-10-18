@@ -3,14 +3,22 @@
 
 use super::models::{AudioCodec, AudioFormat};
 use crate::audio::buffer::EncodedChunk;
-use flac_codec::decode::{FlacSampleReader, Metadata};
+use ffmpeg_next as ffmpeg;
 use std::io::Cursor;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+static FFMPEG_INITIALIZED: OnceLock<Result<(), String>> = OnceLock::new();
 
 pub(crate) fn decode_chunk(
     chunk: &EncodedChunk,
     format: &AudioFormat,
 ) -> Result<Arc<[i32]>, String> {
+    FFMPEG_INITIALIZED
+        .get_or_init(|| {
+            ffmpeg::init().map_err(|error| format!("FFmpeg initialization failed: {error:?}"))
+        })
+        .as_ref()
+        .map_err(Clone::clone)?;
     format.validate()?;
     if chunk.payload_offset >= chunk.encoded_bytes.len() {
         return Err("encoded audio payload is empty or out of range".into());
@@ -18,113 +26,152 @@ pub(crate) fn decode_chunk(
     if chunk.frame_count > format.sample_rate_hz as u64 || chunk.frame_count == 0 {
         return Err("invalid chunk frame count".into());
     }
-    let samples = match format.codec {
-        AudioCodec::Flac => decode_flac(chunk, format)?,
-        AudioCodec::Opus => decode_opus(chunk, format)?,
-    };
+    let samples = decode_audio(chunk, format)
+        .map_err(|error| format!("FFmpeg audio decode failed: {error}"))?;
     if samples.len() != chunk.frame_count as usize * format.channels as usize {
         return Err("decoded frame count differs from its header".into());
     }
     Ok(samples.into())
 }
 
-fn decode_flac(chunk: &EncodedChunk, format: &AudioFormat) -> Result<Vec<i32>, String> {
-    let mut reader = FlacSampleReader::new(chunk.payload())
-        .map_err(|error| format!("invalid FLAC stream: {error}"))?;
-    if reader.sample_rate() != format.sample_rate_hz
-        || reader.channel_count() != format.channels
-        || reader.bits_per_sample() != 16
+fn decode_audio(chunk: &EncodedChunk, format: &AudioFormat) -> Result<Vec<i32>, ffmpeg::Error> {
+    let io =
+        ffmpeg::format::context::StreamIo::from_read_seek(Cursor::new(chunk.payload().to_vec()))?;
+    let mut options = ffmpeg::Dictionary::new();
+    options.set("format_whitelist", "flac,ogg");
+    options.set("codec_whitelist", "flac,opus");
+    options.set("err_detect", "crccheck+bitstream+explode");
+    let mut input = ffmpeg::format::input_from_stream(io, None, Some(options))?;
+    if input.nb_streams() != 1 {
+        return Err(ffmpeg::Error::InvalidData);
+    }
+    let stream = input.stream(0).ok_or(ffmpeg::Error::StreamNotFound)?;
+    let parameters = stream.parameters();
+    let expected_codec = match format.codec {
+        AudioCodec::Flac => ffmpeg::codec::Id::FLAC,
+        AudioCodec::Opus => ffmpeg::codec::Id::OPUS,
+    };
+    if parameters.id() != expected_codec
+        || (format.codec == AudioCodec::Flac
+            && unsafe { (*parameters.as_ptr()).bits_per_raw_sample } != 16)
     {
-        return Err("FLAC format differs from descriptor".into());
+        return Err(ffmpeg::Error::InvalidData);
     }
-    let expected = chunk.frame_count as usize * format.channels as usize;
+    let mut context = ffmpeg::codec::context::Context::from_parameters(parameters)?.decoder();
+    context.set_packet_time_base(stream.time_base());
+    context.check(ffmpeg::codec::decoder::Check::CRC | ffmpeg::codec::decoder::Check::EXPLODE);
+    let mut decoder = context.audio()?;
+    if decoder.rate() != format.sample_rate_hz || decoder.channels() != u16::from(format.channels) {
+        return Err(ffmpeg::Error::InvalidData);
+    }
+    let mut converter = ffmpeg::software::resampling::Context::get(
+        decoder.format(),
+        decoder.channel_layout(),
+        decoder.rate(),
+        ffmpeg::format::Sample::I32(ffmpeg::format::sample::Type::Packed),
+        decoder.channel_layout(),
+        decoder.rate(),
+    )?;
+    let expected = chunk.frame_count as usize * usize::from(format.channels);
     let mut samples = Vec::with_capacity(expected);
-    let mut scratch = [0i32; 4096];
     loop {
-        let count = reader
-            .read(&mut scratch)
-            .map_err(|error| format!("FLAC decode failed: {error}"))?;
-        if count == 0 {
-            break;
+        let mut packet = ffmpeg::Packet::empty();
+        match packet.read(&mut input) {
+            Ok(()) => {
+                if packet.stream() != 0 || packet.is_corrupt() {
+                    return Err(ffmpeg::Error::InvalidData);
+                }
+                decoder.send_packet(&packet)?;
+                receive_samples(&mut decoder, &mut converter, format, expected, &mut samples)?;
+            }
+            Err(ffmpeg::Error::Eof) => break,
+            Err(error) => return Err(error),
         }
-        if samples.len() + count > expected {
-            return Err("FLAC exceeds chunk duration".into());
-        }
-        samples.extend(
-            scratch[..count]
-                .iter()
-                .map(|sample| sample.wrapping_shl(16)),
-        );
     }
+    decoder.send_eof()?;
+    receive_samples(&mut decoder, &mut converter, format, expected, &mut samples)?;
     Ok(samples)
 }
 
-fn decode_opus(chunk: &EncodedChunk, format: &AudioFormat) -> Result<Vec<i32>, String> {
-    let mut reader = ogg::PacketReader::new(Cursor::new(chunk.payload()));
-    let header = reader
-        .read_packet_expected()
-        .map_err(|error| format!("invalid Ogg Opus header: {error}"))?;
-    let bytes = &header.data;
-    if bytes.len() != 19
-        || &bytes[..8] != b"OpusHead"
-        || bytes[8] != 1
-        || bytes[9] != format.channels
-        || bytes[16..18] != [0, 0]
-        || bytes[18] != 0
-    {
-        return Err("unsupported Opus identification header".into());
-    }
-    let pre_skip = u16::from_le_bytes(bytes[10..12].try_into().unwrap()) as usize;
-    let serial = header.stream_serial();
-    let tags = reader
-        .read_packet_expected()
-        .map_err(|error| format!("missing Opus tags: {error}"))?;
-    if tags.stream_serial() != serial || !tags.data.starts_with(b"OpusTags") {
-        return Err("invalid Opus comment header".into());
-    }
-    let channels = format.channels as usize;
-    let expected_frames = chunk.frame_count as usize;
-    let maximum_frames = expected_frames + pre_skip + 960;
-    let mut samples = Vec::with_capacity(maximum_frames * channels);
-    let mut scratch = vec![0f32; 960 * channels];
-    let mut decoder = opus_rs::OpusDecoder::new(48000, channels).map_err(str::to_string)?;
-    let mut final_granule = None;
-    while let Some(packet) = reader
-        .read_packet()
-        .map_err(|error| format!("invalid Ogg Opus packet: {error}"))?
-    {
-        if packet.stream_serial() != serial || final_granule.is_some() {
-            return Err("unexpected chained Opus stream".into());
-        }
-        let frames = decoder
-            .decode(&packet.data, 960, &mut scratch)
-            .map_err(|error| format!("Opus decode failed: {error}"))?;
-        if frames != 960 || samples.len() / channels + frames > maximum_frames {
-            return Err("Opus exceeds chunk duration".into());
-        }
-        for sample in &scratch[..frames * channels] {
-            if !sample.is_finite() {
-                return Err("Opus returned non-finite audio".into());
+fn receive_samples(
+    decoder: &mut ffmpeg::decoder::Audio,
+    converter: &mut ffmpeg::software::resampling::Context,
+    format: &AudioFormat,
+    expected: usize,
+    samples: &mut Vec<i32>,
+) -> Result<(), ffmpeg::Error> {
+    loop {
+        let mut decoded = ffmpeg::frame::Audio::empty();
+        match decoder.receive_frame(&mut decoded) {
+            Ok(()) => {
+                if decoded.samples() == 0 {
+                    continue;
+                }
+                if decoded.rate() != format.sample_rate_hz
+                    || decoded.channels() != u16::from(format.channels)
+                    || decoded.format() != converter.input().format
+                    || decoded.channel_layout() != converter.input().channel_layout
+                    || samples.len() + decoded.samples() * usize::from(format.channels) > expected
+                {
+                    return Err(ffmpeg::Error::InvalidData);
+                }
+                let mut converted = ffmpeg::frame::Audio::empty();
+                if converter.run(&decoded, &mut converted)?.is_some() {
+                    return Err(ffmpeg::Error::InvalidData);
+                }
+                if converted.samples() > 0 {
+                    samples.extend_from_slice(converted.plane::<i32>(0));
+                }
             }
-            samples.push((sample.clamp(-1.0, 1.0) as f64 * i32::MAX as f64) as i32);
-        }
-        if packet.last_in_stream() {
-            final_granule = Some(packet.absgp_page());
+            Err(ffmpeg::Error::Eof) => return Ok(()),
+            Err(ffmpeg::Error::Other { errno }) if errno == ffmpeg::error::EAGAIN => return Ok(()),
+            Err(error) => return Err(error),
         }
     }
-    let final_granule = final_granule.ok_or("Opus chunk has no final granule")?;
-    if final_granule != (pre_skip + expected_frames) as u64
-        || final_granule > (samples.len() / channels) as u64
-    {
-        return Err("Opus granule differs from declared frames".into());
-    }
-    Ok(samples[pre_skip * channels..final_granule as usize * channels].to_vec())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::audio::models::test_format;
+    use base64::Engine;
+
+    #[derive(serde::Deserialize)]
+    struct Fixture {
+        name: String,
+        codec: String,
+        rate: u32,
+        channels: u8,
+        frames: u64,
+        history: u64,
+        payload: String,
+    }
+
+    fn fixtures() -> Vec<Fixture> {
+        serde_json::from_str(include_str!("../../tests/fixtures/audio.json")).unwrap()
+    }
+
+    fn fixture_chunk(fixture: &Fixture) -> EncodedChunk {
+        chunk(
+            base64::engine::general_purpose::STANDARD
+                .decode(&fixture.payload)
+                .unwrap(),
+            fixture.frames,
+        )
+    }
+
+    fn fixture_format(fixture: &Fixture) -> AudioFormat {
+        AudioFormat {
+            codec: if fixture.codec == "flac" {
+                AudioCodec::Flac
+            } else {
+                AudioCodec::Opus
+            },
+            sample_rate_hz: fixture.rate,
+            channels: fixture.channels,
+            bit_depth: (fixture.codec == "flac").then_some(16),
+        }
+    }
 
     fn chunk(payload: Vec<u8>, frames: u64) -> EncodedChunk {
         EncodedChunk {
@@ -148,87 +195,109 @@ mod tests {
     }
 
     #[test]
-    fn opus_256k_audio_packet_decodes_as_twenty_milliseconds() {
-        let mut encoder = opus_rs::OpusEncoder::new(48000, 2, opus_rs::Application::Audio).unwrap();
-        encoder.bitrate_bps = 256000;
-        let pcm: Vec<f32> = (0..960)
-            .flat_map(|frame| {
-                let sample = (frame as f32 * 440.0 * std::f32::consts::TAU / 48000.0).sin() * 0.25;
-                [sample, -sample]
-            })
-            .collect();
-        let mut packet = vec![0u8; 1276];
-        let size = encoder.encode(&pcm, 960, &mut packet).unwrap();
-        packet.truncate(size);
-        assert_eq!(packet[0] & 3, 0);
-        let mut writer = ogg::PacketWriter::new(Vec::new());
-        let mut header = b"OpusHead".to_vec();
-        header.extend_from_slice(&[1, 2]);
-        header.extend_from_slice(&0u16.to_le_bytes());
-        header.extend_from_slice(&48000u32.to_le_bytes());
-        header.extend_from_slice(&[0, 0, 0]);
-        writer
-            .write_packet(header, 1, ogg::PacketWriteEndInfo::EndPage, 0)
-            .unwrap();
-        let mut tags = b"OpusTags".to_vec();
-        tags.extend_from_slice(&[0; 8]);
-        writer
-            .write_packet(tags, 1, ogg::PacketWriteEndInfo::EndPage, 0)
-            .unwrap();
-        writer
-            .write_packet(packet, 1, ogg::PacketWriteEndInfo::EndStream, 960)
-            .unwrap();
-        let format = AudioFormat {
-            codec: AudioCodec::Opus,
-            sample_rate_hz: 48000,
-            bit_depth: None,
-            channels: 2,
-        };
-        let samples = decode_chunk(&chunk(writer.into_inner(), 960), &format).unwrap();
-        assert_eq!(samples.len(), 1920);
-        assert!(samples.iter().any(|sample| *sample != 0));
+    fn decodes_synthetic_reference_profiles_without_artifacts() {
+        for fixture in fixtures() {
+            let encoded = fixture_chunk(&fixture);
+            let format = fixture_format(&fixture);
+            let samples = decode_chunk(&encoded, &format)
+                .unwrap_or_else(|error| panic!("{}: {error}", fixture.name));
+            assert_eq!(
+                samples.len(),
+                fixture.frames as usize * usize::from(fixture.channels),
+                "{}",
+                fixture.name
+            );
+            if fixture.codec == "flac" {
+                for (index, sample) in samples.iter().enumerate() {
+                    let frame = index / usize::from(fixture.channels);
+                    let channel = index % usize::from(fixture.channels);
+                    let expected = ((frame * 73 + channel * 997) % 50000) as i32 - 25000;
+                    assert_eq!(*sample, expected << 16, "{} sample {index}", fixture.name);
+                }
+            } else {
+                let mut signal = 0.0;
+                let mut noise = 0.0;
+                for (index, sample) in samples.iter().enumerate() {
+                    let frame = index / 2 + fixture.history as usize;
+                    let (frequency, amplitude) = if index % 2 == 0 {
+                        (440.0, 0.2)
+                    } else {
+                        (997.0, 0.15)
+                    };
+                    let reference = amplitude
+                        * (frame as f64 * frequency * std::f64::consts::TAU / 48000.0).sin();
+                    let decoded = f64::from(*sample) / 2147483648.0;
+                    signal += reference * reference;
+                    noise += (decoded - reference).powi(2);
+                }
+                let snr = 10.0 * (signal / noise).log10();
+                assert!(snr > 35.0, "{}: SNR {snr:.2} dB", fixture.name);
+            }
+        }
     }
 
     #[test]
-    fn ogg_opus_honors_pre_skip_and_final_granule() {
-        let mut writer = ogg::PacketWriter::new(Vec::new());
-        let mut header = b"OpusHead".to_vec();
-        header.extend_from_slice(&[1, 2]);
-        header.extend_from_slice(&312u16.to_le_bytes());
-        header.extend_from_slice(&48000u32.to_le_bytes());
-        header.extend_from_slice(&[0, 0, 0]);
-        writer
-            .write_packet(header, 1, ogg::PacketWriteEndInfo::EndPage, 0)
+    fn rejects_truncated_audio_and_incorrect_frame_counts() {
+        for fixture in fixtures() {
+            let format = fixture_format(&fixture);
+            let mut encoded = fixture_chunk(&fixture);
+            encoded.frame_count -= 1;
+            assert!(
+                decode_chunk(&encoded, &format).is_err(),
+                "{} short header",
+                fixture.name
+            );
+            encoded.frame_count += 2;
+            assert!(
+                decode_chunk(&encoded, &format).is_err(),
+                "{} long header",
+                fixture.name
+            );
+            encoded.frame_count = fixture.frames;
+            encoded.encoded_bytes = encoded.encoded_bytes[..encoded.encoded_bytes.len() / 2].into();
+            assert!(
+                decode_chunk(&encoded, &format).is_err(),
+                "{} truncated",
+                fixture.name
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_codec_state_local_and_ignores_wire_header_bytes() {
+        for fixture in fixtures() {
+            let format = fixture_format(&fixture);
+            let mut encoded = fixture_chunk(&fixture);
+            let first = decode_chunk(&encoded, &format).unwrap();
+            let mut prefixed = vec![0xff; 41];
+            prefixed.extend_from_slice(encoded.payload());
+            encoded.encoded_bytes = prefixed.into();
+            encoded.payload_offset = 41;
+            assert_eq!(
+                decode_chunk(&encoded, &format).unwrap(),
+                first,
+                "{}",
+                fixture.name
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_codec_rate_and_channel_mismatches() {
+        let fixture = fixtures()
+            .into_iter()
+            .find(|fixture| fixture.name == "flac_48000_2")
             .unwrap();
-        let mut tags = b"OpusTags".to_vec();
-        tags.extend_from_slice(&[0; 8]);
-        writer
-            .write_packet(tags, 1, ogg::PacketWriteEndInfo::EndPage, 0)
-            .unwrap();
-        writer
-            .write_packet(
-                vec![0xfc, 0xff, 0xfe],
-                1,
-                ogg::PacketWriteEndInfo::EndStream,
-                900,
-            )
-            .unwrap();
-        let chunk = chunk(writer.into_inner(), 588);
-        let format = AudioFormat {
-            codec: AudioCodec::Opus,
-            sample_rate_hz: 48000,
-            bit_depth: None,
-            channels: 2,
-        };
-        let samples = decode_chunk(&chunk, &format).unwrap();
-        assert_eq!(samples.len(), 588 * 2);
-        assert!(decode_chunk(
-            &EncodedChunk {
-                frame_count: 589,
-                ..chunk
-            },
-            &format
-        )
-        .is_err());
+        let encoded = fixture_chunk(&fixture);
+        let mut format = fixture_format(&fixture);
+        format.channels = 1;
+        assert!(decode_chunk(&encoded, &format).is_err());
+        format.channels = 2;
+        format.sample_rate_hz = 44100;
+        assert!(decode_chunk(&encoded, &format).is_err());
+        format.sample_rate_hz = 48000;
+        format.codec = AudioCodec::Opus;
+        format.bit_depth = None;
+        assert!(decode_chunk(&encoded, &format).is_err());
     }
 }

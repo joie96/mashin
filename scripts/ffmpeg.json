@@ -1,0 +1,7 @@
+{
+  "version": "9.0.2",
+  "sha256": "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e",
+  "androidNdkVersion": "30.0.16248370",
+  "libraries": ["avcodec", "avformat", "avutil", "swresample"],
+  "windowsDlls": ["avcodec-63.dll", "avformat-63.dll", "avutil-61.dll", "swresample-7.dll"]
+}
