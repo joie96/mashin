@@ -1,7 +1,7 @@
 //! Application login, output selection, and transactional session persistence.
 
 use super::{CoreCoordinator, CORE_NETWORK_RUNTIME};
-use crate::core::config::{default_local_output, DEFAULT_LOCAL_VOLUME};
+use crate::core::config::{default_local_output, refresh_local_client_name, DEFAULT_LOCAL_VOLUME};
 use crate::core::models::{
     LogLevelPreference, LoginConfig, SelectedOutput, SessionConfig, ThemePreference,
 };
@@ -11,7 +11,8 @@ use crate::music_assistant::models::identifiers::AccessToken;
 
 impl CoreCoordinator {
     // Session configuration, persistence, and output selection.
-    pub(crate) fn configure_session(&mut self, session: SessionConfig) -> Result<(), String> {
+    pub(crate) fn configure_session(&mut self, mut session: SessionConfig) -> Result<(), String> {
+        refresh_local_client_name(&mut session.local);
         self.configure_and_persist_session(&session)?;
         crate::logging::set_minimum_level(session.log_level.as_str())?;
         self.invalidate_user_data();
@@ -23,9 +24,10 @@ impl CoreCoordinator {
         if self.session_configuration.is_some() {
             return Ok(true);
         }
-        let Some(session) = self.auth_store.load_session()? else {
+        let Some(mut session) = self.auth_store.load_session()? else {
             return Ok(false);
         };
+        refresh_local_client_name(&mut session.local);
         self.configure_selected_output(&session)?;
         crate::logging::set_minimum_level(session.log_level.as_str())?;
         self.invalidate_user_data();

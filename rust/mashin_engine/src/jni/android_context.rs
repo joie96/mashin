@@ -1,4 +1,4 @@
-//! Android application-context initialization required by CPAL and AAudio.
+//! Android application-context ownership and platform queries for native worker threads.
 
 use jni::objects::{JClass, JObject, JString, JValue};
 use jni::JavaVM;
@@ -71,6 +71,64 @@ pub(crate) fn initialize_android_context(
         }
     }
     Ok(())
+}
+
+// Android device identity uses the user-assigned name, or the model if unavailable.
+pub(crate) fn device_name() -> Result<String, String> {
+    let configured_name = with_attached_environment(|env| {
+        let context = ANDROID_APP_CONTEXT
+            .lock()
+            .map_err(|_| "Android application context lock poisoned".to_string())?
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "Android application context is not initialized".to_string())?;
+        let resolver = env
+            .call_method(
+                context.as_obj(),
+                "getContentResolver",
+                "()Landroid/content/ContentResolver;",
+                &[],
+            )
+            .and_then(|value| value.l())
+            .map_err(|error| format!("read Android content resolver failed: {error}"))?;
+        let key = env
+            .new_string("device_name")
+            .map_err(|error| format!("encode Android device name key failed: {error}"))?;
+        let value = env
+            .call_static_method(
+                "android/provider/Settings$Global",
+                "getString",
+                "(Landroid/content/ContentResolver;Ljava/lang/String;)Ljava/lang/String;",
+                &[
+                    JValue::Object(&resolver),
+                    JValue::Object(&JObject::from(key)),
+                ],
+            )
+            .and_then(|value| value.l())
+            .map_err(|error| format!("read Android device name failed: {error}"))?;
+        if value.is_null() {
+            return Ok(None);
+        }
+        let name: String = env
+            .get_string(&JString::from(value))
+            .map_err(|error| format!("decode Android device name failed: {error}"))?
+            .into();
+        Ok(Some(name))
+    });
+    if let Ok(Some(name)) = configured_name {
+        if !name.trim().is_empty() {
+            return Ok(name);
+        }
+    }
+    with_attached_environment(|env| {
+        let model = env
+            .get_static_field("android/os/Build", "MODEL", "Ljava/lang/String;")
+            .and_then(|value| value.l())
+            .map_err(|error| format!("read Android device model failed: {error}"))?;
+        env.get_string(&JString::from(model))
+            .map(|value| value.into())
+            .map_err(|error| format!("decode Android device model failed: {error}"))
+    })
 }
 
 // Android session persistence crosses the boundary only as one serialized SessionConfig value.

@@ -54,10 +54,58 @@ pub(crate) fn default_local_output() -> LocalOutputConfig {
     let platform = std::env::consts::OS;
     LocalOutputConfig {
         device_id: format!("mashin-{platform}-{}", uuid::Uuid::new_v4()),
-        client_name: format!("Mashin ({platform})"),
+        client_name: local_client_name(),
         cache_bytes: DEFAULT_LOCAL_CACHE_SIZE_BYTES,
         audio_profile: AudioProfileId::Flac,
     }
+}
+
+// Device display names are refreshed independently of the persisted receiver identity.
+pub(crate) fn refresh_local_client_name(configuration: &mut LocalOutputConfig) {
+    configuration.client_name = local_client_name();
+}
+
+fn local_client_name() -> String {
+    format_client_name(device_name().as_deref())
+}
+
+fn format_client_name(device_name: Option<&str>) -> String {
+    let name = device_name.map(str::trim).filter(|name| !name.is_empty());
+    match name {
+        Some(name) => {
+            let mut end = name.len().min(503);
+            while !name.is_char_boundary(end) {
+                end -= 1;
+            }
+            format!("Mashin ({})", &name[..end])
+        }
+        None => "Mashin".to_string(),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn device_name() -> Option<String> {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetComputerNameW(buffer: *mut u16, size: *mut u32) -> i32;
+    }
+
+    let mut buffer = [0u16; 256];
+    let mut size = buffer.len() as u32;
+    if unsafe { GetComputerNameW(buffer.as_mut_ptr(), &mut size) } == 0 {
+        return None;
+    }
+    String::from_utf16(&buffer[..size as usize]).ok()
+}
+
+#[cfg(target_os = "android")]
+fn device_name() -> Option<String> {
+    crate::jni::android_context::device_name().ok()
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "android")))]
+fn device_name() -> Option<String> {
+    std::env::var("HOSTNAME").ok()
 }
 
 #[cfg(test)]
@@ -75,8 +123,47 @@ mod tests {
     fn fresh_login_creates_a_device_identity_and_all_v1_profiles_are_supported() {
         let configuration = default_local_output();
         assert_ne!(configuration.device_id, default_local_output().device_id);
+        assert_eq!(configuration.client_name, super::local_client_name());
         assert_eq!(configuration.cache_bytes, 250 * 1024 * 1024);
         assert_eq!(configuration.audio_profile, AudioProfileId::Flac);
+    }
+
+    #[test]
+    fn client_name_uses_the_device_name_and_handles_missing_or_long_names() {
+        assert_eq!(
+            super::format_client_name(Some(" ERIC-PC ")),
+            "Mashin (ERIC-PC)"
+        );
+        assert_eq!(
+            super::format_client_name(Some("Pixel 9")),
+            "Mashin (Pixel 9)"
+        );
+        assert_eq!(super::format_client_name(Some("  ")), "Mashin");
+        assert_eq!(super::format_client_name(None), "Mashin");
+        let name = "\u{00e9}".repeat(300);
+        let formatted = super::format_client_name(Some(&name));
+        assert!(formatted.len() <= 512);
+        assert!(formatted.ends_with(')'));
+    }
+
+    #[test]
+    fn refreshing_a_stored_name_preserves_identity_and_playback_preferences() {
+        let mut configuration = default_local_output();
+        let original = configuration.clone();
+        configuration.client_name = "Mashin (windows)".into();
+
+        super::refresh_local_client_name(&mut configuration);
+
+        assert_eq!(configuration, original);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_device_name_matches_the_computer_name() {
+        assert_eq!(
+            super::device_name().unwrap().to_uppercase(),
+            std::env::var("COMPUTERNAME").unwrap().to_uppercase()
+        );
     }
 
     #[test]
