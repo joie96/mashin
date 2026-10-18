@@ -54,13 +54,7 @@
     {
       "label": "Release Build: Windows x64 EXE",
       "type": "shell",
-      "command": "flutter",
-      "args": [
-        "build",
-        "windows",
-        "--release",
-        "--target-platform=windows-x64"
-      ],
+      "command": "& '${workspaceFolder}/scripts/build_windows_app.ps1' -Architecture x64",
       "dependsOn": "Rust Mashin Engine: Windows x64 Release",
       "dependsOrder": "sequence",
       "group": "build",
@@ -69,13 +63,7 @@
     {
       "label": "Release Build: Windows arm64 EXE",
       "type": "shell",
-      "command": "flutter",
-      "args": [
-        "build",
-        "windows",
-        "--release",
-        "--target-platform=windows-arm64"
-      ],
+      "command": "& '${workspaceFolder}/scripts/build_windows_app.ps1' -Architecture arm64",
       "dependsOn": "Rust Mashin Engine: Windows arm64 Release",
       "dependsOrder": "sequence",
       "group": "build",
