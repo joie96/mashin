@@ -4,6 +4,7 @@ use super::client::MusicAssistantClient;
 use super::models::identifiers::{PlayerId, QueueId, QueueItemId};
 use super::models::media::MediaItem;
 use super::models::queue::{QueueOption, RepeatMode};
+use rand::seq::SliceRandom;
 use serde_json::{json, Value};
 
 pub(crate) enum PlayerCommand {
@@ -92,7 +93,7 @@ fn queue_command_request(
     let (name, arguments) = match command {
         QueueCommand::Clear => ("clear", json!({"queue_id": queue_id})),
         QueueCommand::PlayMedia {
-            media,
+            mut media,
             option,
             start_item,
             shuffle,
@@ -106,13 +107,16 @@ fn queue_command_request(
                 })
                 .transpose()?
                 .map(super::client::queue_media_payload);
+            if shuffle {
+                media.shuffle(&mut rand::rng());
+            }
             let media = media
                 .into_iter()
                 .map(super::client::queue_media_payload)
                 .collect::<Vec<_>>();
             (
                 "play_media",
-                json!({"queue_id":queue_id,"media":media,"option":option,"start_item":start,"shuffle":shuffle,"sort_by":"original"}),
+                json!({"queue_id":queue_id,"media":media,"option":option,"start_item":start,"sort_by":"original"}),
             )
         }
         QueueCommand::PlayIndex(index) => {
@@ -204,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn media_and_shuffle_are_forwarded_without_radio_mode_or_reordering() {
+    fn media_items_are_serialized_in_original_order_without_shuffle() {
         let media: Vec<MediaItem> = serde_json::from_value(json!([
             {"media_type":"album", "item_id":"album", "provider":"library", "name":"Album"},
             {"media_type":"track", "item_id":"track", "provider":"library", "name":"Track"}
@@ -216,7 +220,7 @@ mod tests {
                 media,
                 option: QueueOption::Play,
                 start_item: Some(1),
-                shuffle: true,
+                shuffle: false,
             },
         )
         .unwrap();
@@ -224,9 +228,48 @@ mod tests {
         assert_eq!(arguments["media"][0]["media_type"], "album");
         assert_eq!(arguments["media"][1]["item_id"], "track");
         assert_eq!(arguments["start_item"], arguments["media"][1]);
-        assert_eq!(arguments["shuffle"], true);
+        assert!(arguments.get("shuffle").is_none());
         assert!(arguments.get("radio_mode").is_none());
         assert!(arguments.get("startDownload").is_none());
+    }
+
+    #[test]
+    fn shuffle_reorders_items_locally_and_preserves_the_explicit_start_item() {
+        let media: Vec<MediaItem> = serde_json::from_value(json!([
+            {"media_type":"track", "item_id":"first", "provider":"library", "name":"First"},
+            {"media_type":"track", "item_id":"second", "provider":"library", "name":"Second"},
+            {"media_type":"track", "item_id":"third", "provider":"library", "name":"Third"}
+        ]))
+        .unwrap();
+        let original: Vec<Value> = media
+            .iter()
+            .cloned()
+            .map(super::super::client::queue_media_payload)
+            .collect();
+        let mut observed_reordering = false;
+        for _ in 0..32 {
+            let (name, arguments) = queue_command_request(
+                &QueueId("room".into()),
+                QueueCommand::PlayMedia {
+                    media: media.clone(),
+                    option: QueueOption::Play,
+                    start_item: Some(1),
+                    shuffle: true,
+                },
+            )
+            .unwrap();
+            assert_eq!(name, "play_media");
+            let shuffled = arguments["media"].as_array().unwrap();
+            assert_eq!(shuffled.len(), original.len());
+            for item in &original {
+                assert_eq!(shuffled.iter().filter(|entry| *entry == item).count(), 1);
+            }
+            assert_eq!(arguments["start_item"], original[1]);
+            assert!(arguments.get("shuffle").is_none());
+            assert_eq!(arguments["sort_by"], "original");
+            observed_reordering |= shuffled != &original;
+        }
+        assert!(observed_reordering);
     }
 
     #[tokio::test]

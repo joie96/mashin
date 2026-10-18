@@ -465,7 +465,7 @@ mod tests {
 
     fn media_arguments(identifier: &str, option: &str) -> serde_json::Value {
         json!({"queue_id":"room", "media":[super::super::client::queue_media_payload(MediaItem::Track(track(identifier)))],
-            "option":option, "start_item":null, "shuffle":false, "sort_by":"original"})
+            "option":option, "start_item":null, "sort_by":"original"})
     }
 
     fn track(identifier: &str) -> Track {
