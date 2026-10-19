@@ -48,7 +48,9 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.byTooltip('ytmusic'));
+        await tester.tap(
+            find.byKey(ValueKey<String>(isDesktop ? 'ytmusic--one' : 'detail-provider-cycle')),
+        );
         await tester.pumpAndSettle();
         expect(bridge.queries, contains('tracks:yt-playlist:ytmusic--one'));
         expect(

@@ -26,7 +26,9 @@ void main() {
         addTearDown(events.dispose);
         await tester.pumpWidget(
           MaterialApp(
-            theme: AppTheme.dark(),
+            theme: AppTheme.dark().copyWith(
+              visualDensity: isDesktop ? VisualDensity.compact : VisualDensity.standard,
+            ),
             home: Scaffold(
               body: isDesktop
                   ? ArtistDetailPageDesktop(
@@ -45,15 +47,35 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.byTooltip('deezer'), findsOneWidget);
-        expect(find.byTooltip('ytmusic'), findsOneWidget);
-        await tester.tap(find.byTooltip('ytmusic'));
+        final Finder cycleButton = find.byKey(
+          ValueKey<String>(isDesktop ? 'ytmusic--one' : 'detail-provider-cycle'),
+        );
+        final Finder initialButton = isDesktop
+            ? find.byKey(const ValueKey<String>('deezer--one')) : cycleButton;
+        expect(tester.getCenter(find.byKey(
+          ValueKey<String>('${isDesktop ? 'desktop' : 'mobile'}-provider-deezer--one'),
+        )).dy, tester.getCenter(initialButton).dy);
+        if (isDesktop) {
+          final Finder titleRow = find.ancestor(
+            of: cycleButton,
+            matching: find.byType(Row),
+          ).first;
+          final Finder title = find.descendant(
+            of: titleRow,
+            matching: find.byType(Text),
+          ).first;
+          expect(tester.getCenter(cycleButton).dy, tester.getCenter(title).dy);
+        }
+        await tester.tap(cycleButton);
         await tester.pumpAndSettle();
+        expect(tester.getCenter(find.byKey(
+          ValueKey<String>('${isDesktop ? 'desktop' : 'mobile'}-provider-ytmusic--one'),
+        )).dy, tester.getCenter(cycleButton).dy);
         expect(
           bridge.queries,
           contains('getArtistAlbums:channel:ytmusic--one'),
         );
-        await tester.tap(find.byTooltip('deezer'));
+        await tester.tap(isDesktop ? initialButton : cycleButton);
         await tester.pumpAndSettle();
         expect(
           bridge.queries.where(

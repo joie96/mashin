@@ -16,11 +16,23 @@ class DetailProviderSelection {
   // Section query identity and header options.
   String get selectedItemId => _selected?.itemId ?? itemId;
   String get selectedProvider => _selected?.providerInstance ?? provider;
-  List<ProviderMapping> get mappings =>
-      List<ProviderMapping>.unmodifiable(<ProviderMapping>[
-        ?_selected,
-        ..._mappings.where((mapping) => mapping != _selected),
-      ]);
+  List<ProviderMapping> get mappings {
+    final int selectedIndex = _mappings.indexWhere(
+      (mapping) => mapping == _selected,
+    );
+    final int startIndex = selectedIndex < 0 ? 0 : selectedIndex;
+    return List<ProviderMapping>.unmodifiable(<ProviderMapping>[
+      ..._mappings.skip(startIndex),
+      ..._mappings.take(startIndex),
+    ]);
+  }
+
+  ProviderMapping? get nextProvider => mappings
+      .where(
+        (mapping) =>
+            mapping.available && mapping.providerInstance != selectedProvider,
+      )
+      .firstOrNull;
 
   // Loading and persisting the cross-page preference.
   Future<void> initialize(MediaItem item) async {
