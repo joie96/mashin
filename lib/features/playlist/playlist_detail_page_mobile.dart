@@ -11,6 +11,7 @@ import '../core/core_userdata.dart';
 import '../shared/widgets/media_table_section_mobile.dart';
 import '../shared/widgets/media_image.dart';
 import 'playlist_detail_controller.dart';
+import '../shared/widgets/detail_provider_switcher.dart';
 import 'playlist_name_dialog.dart';
 
 /// Mobile playlist detail page: pinned banner header with centered actions and
@@ -420,6 +421,13 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
                       ),
                     ),
                   const SizedBox(height: 4),
+                  if (!isLoadingMetadata && !_controller.isPrivatePlaylist)
+                    DetailProviderSwitcher(
+                      selection: _controller.sectionProvider,
+                      item: playlist,
+                      isLoading: _controller.isLoadingSections,
+                      onSelected: _controller.selectProvider,
+                    ),
                   if (isLoadingMetadata)
                     _buildSkeletonLine(colors, width: 140, height: 14)
                   else

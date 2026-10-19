@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../core/core_bridge.dart';
 import '../core/core_models.dart';
 import '../core/core_userdata.dart';
+import '../shared/detail_provider_selection.dart';
 
 class AlbumDetailController extends ChangeNotifier {
   AlbumDetailController({
@@ -12,7 +13,13 @@ class AlbumDetailController extends ChangeNotifier {
     required this.itemId,
     required this.providerInstanceIdOrDomain,
     this.userDataController,
-  });
+  }) : sectionProvider = DetailProviderSelection(
+         itemId: itemId,
+         provider: providerInstanceIdOrDomain,
+       );
+
+  final DetailProviderSelection sectionProvider;
+  bool _isSelectingProvider = false;
 
   final MashinCoreBridgeApi coreBridge;
   final String itemId;
@@ -58,6 +65,11 @@ class AlbumDetailController extends ChangeNotifier {
   bool get isLoadingTracks => _isLoadingTracks;
   bool get isLoadingOtherAlbums => _isLoadingOtherAlbums;
   bool get isLoadingSimilarArtists => _isLoadingSimilarArtists;
+  bool get isLoadingSections =>
+      _isSelectingProvider ||
+      _isLoadingTracks ||
+      _isLoadingOtherAlbums ||
+      _isLoadingSimilarArtists;
   bool get isAlbumFavorite => _isAlbumFavorite;
   bool get isDescriptionExpanded => _isDescriptionExpanded;
   Listenable get metadataListenable => _metadataNotifier;
@@ -99,7 +111,41 @@ class AlbumDetailController extends ChangeNotifier {
     notifyListeners();
 
     await _loadMetadata();
+    if (_isDisposed) return;
+    final Album? originalAlbum = _album;
+    if (originalAlbum != null) {
+      await sectionProvider.initialize(originalAlbum);
+    }
+    await _loadSections();
+  }
+
+  // Provider changes never replace the original album or its metadata.
+  Future<void> selectProvider(ProviderMapping mapping) async {
+    if (_isDisposed || isLoadingSections) return;
+    _isSelectingProvider = true;
+    notifyListeners();
+    try {
+      await sectionProvider.select(mapping);
+      if (_isDisposed) return;
+      await _loadSections();
+    } finally {
+      _isSelectingProvider = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _loadSections() async {
+    _tracks = const <Track>[];
+    _otherAlbums = const <Album>[];
+    _similarArtists = const <Artist>[];
+    _isLoadingTracks = true;
+    _isLoadingOtherAlbums = true;
+    _isLoadingSimilarArtists = true;
+    _tracksNotifier.notifyListeners();
+    _relatedNotifier.notifyListeners();
+    notifyListeners();
     await Future.wait(<Future<void>>[_loadTracks(), _loadOtherAlbums()]);
+    if (_isDisposed) return;
     await _loadSimilarArtists();
   }
 
@@ -124,8 +170,8 @@ class AlbumDetailController extends ChangeNotifier {
   Future<void> _loadTracks() async {
     try {
       final List<Track> loaded = await coreBridge.getAlbumTracks(
-        itemId,
-        providerInstanceIdOrDomain,
+        sectionProvider.selectedItemId,
+        sectionProvider.selectedProvider,
       );
       final Album? loadedAlbum = _album;
       _tracks = List<Track>.unmodifiable(
@@ -170,7 +216,7 @@ class AlbumDetailController extends ChangeNotifier {
   }
 
   Future<void> _loadOtherAlbums() async {
-    final Artist? artist = _album?.artists.firstOrNull;
+    Artist? artist = _album?.artists.firstOrNull;
     if (artist == null) {
       _otherAlbums = const <Album>[];
       _isLoadingOtherAlbums = false;
@@ -180,13 +226,43 @@ class AlbumDetailController extends ChangeNotifier {
     }
 
     try {
+      if (sectionProvider.selectedProvider != 'library' &&
+          artist.provider != sectionProvider.selectedProvider) {
+        final Artist fullArtist = await coreBridge.getArtist(
+          artist.itemId,
+          artist.provider,
+        );
+        final ProviderMapping? mapping = fullArtist.providerMappings
+            .where(
+              (mapping) =>
+                  mapping.providerInstance ==
+                      sectionProvider.selectedProvider &&
+                  mapping.available,
+            )
+            .firstOrNull;
+        if (mapping == null) {
+          _otherAlbums = const <Album>[];
+          return;
+        }
+        artist = Artist(
+          itemId: mapping.itemId,
+          provider: mapping.providerInstance,
+          name: fullArtist.name,
+        );
+      }
       final List<Album> loaded = await coreBridge.getArtistAlbums(
         artist.itemId,
         artist.provider,
       );
       _otherAlbums = List<Album>.unmodifiable(
         loaded
-            .where((Album item) => item.itemId != itemId)
+            .where(
+              (Album item) =>
+                  !(item.itemId == itemId &&
+                      item.provider == providerInstanceIdOrDomain) &&
+                  !(item.itemId == sectionProvider.selectedItemId &&
+                      item.provider == sectionProvider.selectedProvider),
+            )
             .map(
               (Album item) =>
                   userDataController?.withFavoriteStatus(item) ?? item,

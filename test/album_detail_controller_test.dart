@@ -1,9 +1,100 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mashin_flutter/app/theme/app_theme.dart';
 import 'package:mashin_flutter/features/album/album_detail_controller.dart';
+import 'package:mashin_flutter/features/album/album_detail_page_desktop.dart';
+import 'package:mashin_flutter/features/album/album_detail_page_mobile.dart';
 import 'package:mashin_flutter/features/core/core_bridge.dart';
+import 'package:mashin_flutter/features/core/core_events.dart';
 import 'package:mashin_flutter/features/core/core_models.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() => SharedPreferences.setMockInitialValues(<String, Object>{}));
+
+  for (final isDesktop in <bool>[true, false]) {
+    testWidgets(
+      '${isDesktop ? 'desktop' : 'mobile'} album header switches only sections',
+      (tester) async {
+        tester.view.physicalSize = Size(isDesktop ? 1280 : 320, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final bridge = _FakeAlbumCoreBridge(hasMappings: true);
+        final events = MashinCoreBridgeEvents(coreBridge: bridge);
+        addTearDown(events.dispose);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.dark(),
+            home: Scaffold(
+              body: isDesktop
+                  ? AlbumDetailPageDesktop(
+                      coreBridge: bridge,
+                      coreEvents: events,
+                      itemId: 'album-1',
+                      providerInstanceIdOrDomain: 'library',
+                    )
+                  : AlbumDetailPageMobile(
+                      coreBridge: bridge,
+                      coreEvents: events,
+                      itemId: 'album-1',
+                      providerInstanceIdOrDomain: 'library',
+                    ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('ytmusic'));
+        await tester.pumpAndSettle();
+        expect(
+          bridge.queries,
+          contains('getAlbumTracks:yt-album:ytmusic--one'),
+        );
+        expect(
+          bridge.queries.where((query) => query == 'getAlbum:album-1:library'),
+          hasLength(1),
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  test(
+    'album provider switch preserves header and maps section artist',
+    () async {
+      final coreBridge = _FakeAlbumCoreBridge(hasMappings: true);
+      final controller = AlbumDetailController(
+        coreBridge: coreBridge,
+        itemId: 'album-1',
+        providerInstanceIdOrDomain: 'library',
+      );
+      addTearDown(controller.dispose);
+      await controller.loadAlbum();
+      final Album? original = controller.album;
+      expect(
+        coreBridge.queries,
+        contains('getAlbumTracks:dz-album:deezer--one'),
+      );
+      coreBridge.queries.clear();
+      await controller.selectProvider(controller.sectionProvider.mappings.last);
+      expect(identical(controller.album, original), isTrue);
+      expect(controller.album?.provider, 'library');
+      expect(
+        coreBridge.queries,
+        contains('getAlbumTracks:yt-album:ytmusic--one'),
+      );
+      expect(
+        coreBridge.queries,
+        contains('getArtistAlbums:yt-artist:ytmusic--one'),
+      );
+      expect(
+        coreBridge.queries.where((query) => query.startsWith('getAlbum:')),
+        isEmpty,
+      );
+    },
+  );
+
   test(
     'loads album details and similar-artist fallback through core queries',
     () async {
@@ -45,11 +136,23 @@ void main() {
 }
 
 class _FakeAlbumCoreBridge extends Fake implements MashinCoreBridgeApi {
+  _FakeAlbumCoreBridge({this.hasMappings = false});
+
+  final bool hasMappings;
   final List<String> queries = <String>[];
 
   @override
   Future<Album> getAlbum(String itemId, String provider) async {
     queries.add('getAlbum:$itemId:$provider');
+    if (hasMappings) {
+      return Album(
+        itemId: 'album-1',
+        provider: 'library',
+        name: 'Album',
+        artists: _album('album-1', 'Album').artists,
+        providerMappings: _providerMappings('album'),
+      );
+    }
     return _album('album-1', 'Album', version: 'Remastered');
   }
 
@@ -88,9 +191,31 @@ class _FakeAlbumCoreBridge extends Fake implements MashinCoreBridgeApi {
   @override
   Future<Artist> getArtist(String itemId, String provider) async {
     queries.add('getArtist:$itemId:$provider');
-    return Artist(itemId: itemId, provider: provider, name: 'Similar Artist');
+    return Artist(
+      itemId: itemId,
+      provider: provider,
+      name: 'Similar Artist',
+      providerMappings: hasMappings
+          ? _providerMappings('artist')
+          : const <ProviderMapping>[],
+    );
   }
 }
+
+List<ProviderMapping> _providerMappings(String kind) => <ProviderMapping>[
+  ProviderMapping(
+    itemId: 'dz-$kind',
+    providerDomain: 'deezer',
+    providerInstance: 'deezer--one',
+    available: true,
+  ),
+  ProviderMapping(
+    itemId: 'yt-$kind',
+    providerDomain: 'ytmusic',
+    providerInstance: 'ytmusic--one',
+    available: true,
+  ),
+];
 
 Album _album(String itemId, String name, {String version = ''}) => Album(
   itemId: itemId,

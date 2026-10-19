@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import '../core/core_bridge.dart';
 import '../core/core_models.dart';
 import '../core/core_userdata.dart';
+import '../shared/detail_provider_selection.dart';
 
 /// Loads and holds all data required by the artist detail page (metadata, albums,
 /// similar artists, top tracks) and exposes the playback/favorite/description actions
@@ -29,7 +30,13 @@ class ArtistDetailController extends ChangeNotifier {
     required this.itemId,
     required this.providerInstanceIdOrDomain,
     this.userDataController,
-  });
+  }) : sectionProvider = DetailProviderSelection(
+         itemId: itemId,
+         provider: providerInstanceIdOrDomain,
+       );
+
+  final DetailProviderSelection sectionProvider;
+  bool _isSelectingProvider = false;
 
   Artist? _artist;
   List<Album> _albums = const <Album>[];
@@ -68,6 +75,11 @@ class ArtistDetailController extends ChangeNotifier {
   bool get isLoadingAlbums => _isLoadingAlbums;
   bool get isLoadingSimilarArtists => _isLoadingSimilarArtists;
   bool get isLoadingTopTracks => _isLoadingTopTracks;
+  bool get isLoadingSections =>
+      _isSelectingProvider ||
+      _isLoadingAlbums ||
+      _isLoadingTopTracks ||
+      _isLoadingSimilarArtists;
 
   String get artistName {
     final String trimmed = _artist?.name.trim() ?? '';
@@ -102,8 +114,44 @@ class ArtistDetailController extends ChangeNotifier {
     notifyListeners();
 
     await _loadArtistMetadata();
+    if (_isDisposed) return;
+    final Artist? originalArtist = _artist;
+    if (originalArtist != null) {
+      await sectionProvider.initialize(originalArtist);
+    }
+    await _loadSections();
+  }
+
+  // Switching only reloads section data; metadata and library identity stay intact.
+  Future<void> selectProvider(ProviderMapping mapping) async {
+    if (_isDisposed || isLoadingSections) return;
+    _isSelectingProvider = true;
+    notifyListeners();
+    try {
+      await sectionProvider.select(mapping);
+      if (_isDisposed) return;
+      await _loadSections();
+    } finally {
+      _isSelectingProvider = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _loadSections() async {
+    _albums = const <Album>[];
+    _topTracks = const <Track>[];
+    _similarArtists = const <Artist>[];
+    _isLoadingAlbums = true;
+    _isLoadingTopTracks = true;
+    _isLoadingSimilarArtists = true;
+    _albumsNotifier.notifyListeners();
+    _topTracksNotifier.notifyListeners();
+    _similarArtistsNotifier.notifyListeners();
+    notifyListeners();
     await _loadAlbums();
+    if (_isDisposed) return;
     await _loadTopTracks();
+    if (_isDisposed) return;
     await _loadSimilarArtists();
   }
 
@@ -133,8 +181,8 @@ class ArtistDetailController extends ChangeNotifier {
     notifyListeners();
     try {
       final List<Album> albums = await coreBridge.getArtistAlbums(
-        itemId,
-        providerInstanceIdOrDomain,
+        sectionProvider.selectedItemId,
+        sectionProvider.selectedProvider,
       );
       _albums = List<Album>.unmodifiable(
         albums
@@ -161,8 +209,8 @@ class ArtistDetailController extends ChangeNotifier {
     notifyListeners();
     try {
       List<Artist> artists = await coreBridge.getSimilarArtists(
-        itemId,
-        providerInstanceIdOrDomain,
+        sectionProvider.selectedItemId,
+        sectionProvider.selectedProvider,
         limit: 25,
       );
       if (artists.isEmpty) {
@@ -190,8 +238,8 @@ class ArtistDetailController extends ChangeNotifier {
     notifyListeners();
     try {
       final List<Track> tracks = await coreBridge.getArtistTopTracks(
-        itemId,
-        providerInstanceIdOrDomain,
+        sectionProvider.selectedItemId,
+        sectionProvider.selectedProvider,
       );
       _topTracks = List<Track>.unmodifiable(
         tracks

@@ -12,6 +12,7 @@ import '../shared/widgets/media_row_section_mobile.dart';
 import '../shared/widgets/media_table_section_mobile.dart';
 import '../shared/widgets/media_image.dart';
 import 'album_detail_controller.dart';
+import '../shared/widgets/detail_provider_switcher.dart';
 
 class AlbumDetailPageMobile extends StatefulWidget {
   const AlbumDetailPageMobile({
@@ -334,6 +335,13 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
                       ),
                     ),
                   const SizedBox(height: 4),
+                  if (!isLoadingMetadata)
+                    DetailProviderSwitcher(
+                      selection: _controller.sectionProvider,
+                      item: album,
+                      isLoading: _controller.isLoadingSections,
+                      onSelected: _controller.selectProvider,
+                    ),
                   if (isLoadingMetadata)
                     _buildSkeletonLine(colors, width: 120, height: 14)
                   else

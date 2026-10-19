@@ -9,10 +9,10 @@ import '../core/core_events.dart';
 import '../shared/context_menu/context_menu_controller.dart';
 import '../core/core_userdata.dart';
 import '../shared/widgets/media_row_section_mobile.dart';
-import '../shared/widgets/media_table_section_desktop.dart';
 import '../shared/widgets/media_table_section_mobile.dart';
 import '../shared/widgets/media_image.dart';
 import 'artist_detail_controller.dart';
+import '../shared/widgets/detail_provider_switcher.dart';
 
 /// Mobile artist detail page: image banner header, centered actions, description and stacked album/similar-artist/top-track sections
 class ArtistDetailPageMobile extends StatefulWidget {
@@ -479,14 +479,12 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
               ),
               if (artist != null) ...<Widget>[
                 const SizedBox(width: 8),
-                Transform.translate(
-                  offset: const Offset(0, 3),
-                  child: MediaProviderIcon(
-                    providerLabel: artist.provider,
-                    iconSvg: ProviderManifestRegistry.iconSvgForProvider(
-                      artist.provider,
-                    ),
-                    size: 20,
+                Flexible(
+                  child: DetailProviderSwitcher(
+                    selection: _controller.sectionProvider,
+                    item: artist,
+                    isLoading: _controller.isLoadingSections,
+                    onSelected: _controller.selectProvider,
                   ),
                 ),
               ],

@@ -14,6 +14,7 @@ import '../shared/widgets/media_row_section_desktop.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
 import '../shared/widgets/media_image.dart';
 import 'album_detail_controller.dart';
+import '../shared/widgets/detail_provider_switcher.dart';
 
 class AlbumDetailPageDesktop extends StatefulWidget {
   const AlbumDetailPageDesktop({
@@ -289,6 +290,7 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
           SliverToBoxAdapter(
             child: ListenableBuilder(
               listenable: Listenable.merge(<Listenable>[
+                _controller,
                 _controller.metadataListenable,
                 _controller.tracksListenable,
               ]),
@@ -469,13 +471,27 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: <Widget>[
-                      Text(
-                        'ALBUM',
-                        style: TextStyle(
-                          color: colors.textSecondary,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
+                      Row(
+                        children: <Widget>[
+                          Text(
+                            'ALBUM',
+                            style: TextStyle(
+                              color: colors.textSecondary,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: DetailProviderSwitcher(
+                              selection: _controller.sectionProvider,
+                              item: album,
+                              isLoading:
+                                  isLoading || _controller.isLoadingSections,
+                              onSelected: _controller.selectProvider,
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 16),
                       Text(

@@ -10,8 +10,77 @@ import 'package:mashin_flutter/features/core/core_userdata.dart';
 import 'package:mashin_flutter/features/playlist/playlist_detail_controller.dart';
 import 'package:mashin_flutter/features/playlist/playlist_detail_page_desktop.dart';
 import 'package:mashin_flutter/features/playlist/playlist_detail_page_mobile.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  for (final isDesktop in <bool>[true, false]) {
+    testWidgets(
+      '${isDesktop ? 'desktop' : 'mobile'} external playlist header switches tracks',
+      (tester) async {
+        SharedPreferences.setMockInitialValues(<String, Object>{});
+        tester.view.physicalSize = Size(isDesktop ? 1280 : 320, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final bridge = _ProviderPlaylistCoreBridge();
+        final events = MashinCoreBridgeEvents(coreBridge: bridge);
+        addTearDown(events.dispose);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.dark(),
+            home: Scaffold(
+              body: isDesktop
+                  ? PlaylistDetailPageDesktop(
+                      coreBridge: bridge,
+                      coreEvents: events,
+                      itemId: 'playlist',
+                      providerInstanceIdOrDomain: 'library',
+                    )
+                  : PlaylistDetailPageMobile(
+                      coreBridge: bridge,
+                      coreEvents: events,
+                      itemId: 'playlist',
+                      providerInstanceIdOrDomain: 'library',
+                    ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('ytmusic'));
+        await tester.pumpAndSettle();
+        expect(bridge.queries, contains('tracks:yt-playlist:ytmusic--one'));
+        expect(
+          bridge.queries.where((query) => query.startsWith('metadata:')),
+          hasLength(1),
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  test(
+    'external playlist switches tracks without replacing library metadata',
+    () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final bridge = _ProviderPlaylistCoreBridge();
+      final controller = PlaylistDetailController(
+        coreBridge: bridge,
+        itemId: 'playlist',
+        providerInstanceIdOrDomain: 'library',
+      );
+      addTearDown(controller.dispose);
+      await controller.loadPlaylist();
+      final Playlist? original = controller.playlist;
+      expect(bridge.queries, contains('tracks:dz-playlist:deezer--one'));
+      bridge.queries.clear();
+      await controller.selectProvider(controller.sectionProvider.mappings.last);
+      expect(identical(controller.playlist, original), isTrue);
+      expect(bridge.queries, <String>['tracks:yt-playlist:ytmusic--one']);
+    },
+  );
+
   for (final isDesktop in <bool>[true, false]) {
     testWidgets(
       '${isDesktop ? 'desktop' : 'mobile'} playlist menu refreshes its cover',
@@ -415,6 +484,46 @@ class _FakePlaylistCoreBridge extends Fake implements MashinCoreBridgeApi {
     operations.add(
       'removePlaylistTracks:$playlistId:${positionsToRemove.join(',')}',
     );
+  }
+}
+
+class _ProviderPlaylistCoreBridge extends Fake implements MashinCoreBridgeApi {
+  final List<String> queries = <String>[];
+
+  @override
+  Future<Playlist> getPlaylist(String itemId, String provider) async {
+    queries.add('metadata:$itemId:$provider');
+    return const Playlist(
+      itemId: 'playlist',
+      provider: 'library',
+      name: 'Original playlist',
+      isEditable: false,
+      providerMappings: <ProviderMapping>[
+        ProviderMapping(
+          itemId: 'dz-playlist',
+          providerDomain: 'deezer',
+          providerInstance: 'deezer--one',
+          available: true,
+        ),
+        ProviderMapping(
+          itemId: 'yt-playlist',
+          providerDomain: 'ytmusic',
+          providerInstance: 'ytmusic--one',
+          available: true,
+        ),
+      ],
+    );
+  }
+
+  @override
+  Future<List<Track>> getPlaylistTracks(
+    String itemId,
+    String provider, {
+    bool forceRefresh = false,
+    bool allowDynamicTracks = false,
+  }) async {
+    queries.add('tracks:$itemId:$provider');
+    return const <Track>[];
   }
 }
 

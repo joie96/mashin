@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../core/core_bridge.dart';
 import '../core/core_models.dart';
 import '../core/core_userdata.dart';
+import '../shared/detail_provider_selection.dart';
 
 /// Loads and holds the data of a playlist detail page (metadata + tracks) and
 /// exposes the playback/favorite/edit actions used by the desktop and mobile pages.
@@ -14,7 +15,10 @@ class PlaylistDetailController extends ChangeNotifier {
     required this.itemId,
     required this.providerInstanceIdOrDomain,
     this.userDataController,
-  }) {
+  }) : sectionProvider = DetailProviderSelection(
+         itemId: itemId,
+         provider: providerInstanceIdOrDomain,
+       ) {
     userDataController?.addListener(_onUserDataChanged);
   }
 
@@ -22,6 +26,8 @@ class PlaylistDetailController extends ChangeNotifier {
   final String itemId;
   final String providerInstanceIdOrDomain;
   final UserData? userDataController;
+  final DetailProviderSelection sectionProvider;
+  bool _isSelectingProvider = false;
 
   Playlist? _playlist;
   List<Track> _tracks = const <Track>[];
@@ -55,6 +61,7 @@ class PlaylistDetailController extends ChangeNotifier {
 
   bool get isLoadingMetadata => _isLoadingMetadata;
   bool get isLoadingTracks => _isLoadingTracks;
+  bool get isLoadingSections => _isSelectingProvider || _isLoadingTracks;
   bool get isPlaylistFavorite => _isPlaylistFavorite;
   bool get isPlaylistDeleted => _isPlaylistDeleted;
   bool get isEditable => _playlist?.isEditable ?? false;
@@ -119,11 +126,21 @@ class PlaylistDetailController extends ChangeNotifier {
         // Private MA playlists use the Rust-owned snapshot, refreshed by MA events.
         if (isUserPlaylist || storedTracks.isNotEmpty) {
           _loadPrivatePlaylist(local, storedTracks);
+          if (!isUserPlaylist) {
+            await sectionProvider.initialize(local);
+            if (sectionProvider.mappings.isNotEmpty && !_isDisposed) {
+              await _loadTracks(loadGeneration);
+            }
+          }
           return;
         }
       }
 
       await _loadMetadata();
+      final Playlist? originalPlaylist = _playlist;
+      if (!_isDisposed && originalPlaylist != null) {
+        await sectionProvider.initialize(originalPlaylist);
+      }
       if (!_isDisposed && loadGeneration == _loadGeneration) {
         await _loadTracks(loadGeneration);
       }
@@ -133,6 +150,26 @@ class PlaylistDetailController extends ChangeNotifier {
         _isLoadingTracks = false;
         notifyListeners();
       }
+    }
+  }
+
+  // The library playlist stays authoritative for metadata and editing.
+  Future<void> selectProvider(ProviderMapping mapping) async {
+    if (_isDisposed || isPrivatePlaylist || isLoadingSections) return;
+    _isSelectingProvider = true;
+    notifyListeners();
+    try {
+      await sectionProvider.select(mapping);
+      if (_isDisposed) return;
+      final int loadGeneration = ++_loadGeneration;
+      _tracks = const <Track>[];
+      _isLoadingTracks = true;
+      notifyListeners();
+      await _loadTracks(loadGeneration);
+    } finally {
+      _isSelectingProvider = false;
+      _isLoadingTracks = false;
+      notifyListeners();
     }
   }
 
@@ -202,8 +239,8 @@ class PlaylistDetailController extends ChangeNotifier {
   Future<void> _loadTracks(int loadGeneration) async {
     try {
       final List<Track> loaded = await coreBridge.getPlaylistTracks(
-        itemId,
-        providerInstanceIdOrDomain,
+        sectionProvider.selectedItemId,
+        sectionProvider.selectedProvider,
         forceRefresh: true,
       );
       if (_isDisposed || loadGeneration != _loadGeneration) {

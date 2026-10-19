@@ -1,9 +1,122 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mashin_flutter/app/theme/app_theme.dart';
 import 'package:mashin_flutter/features/artist/artist_detail_controller.dart';
+import 'package:mashin_flutter/features/artist/artist_detail_page_desktop.dart';
+import 'package:mashin_flutter/features/artist/artist_detail_page_mobile.dart';
 import 'package:mashin_flutter/features/core/core_bridge.dart';
+import 'package:mashin_flutter/features/core/core_events.dart';
 import 'package:mashin_flutter/features/core/core_models.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() => SharedPreferences.setMockInitialValues(<String, Object>{}));
+
+  for (final isDesktop in <bool>[true, false]) {
+    testWidgets(
+      '${isDesktop ? 'desktop' : 'mobile'} header switches sections in both directions',
+      (tester) async {
+        tester.view.physicalSize = Size(isDesktop ? 1280 : 320, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final bridge = _FakeArtistCoreBridge(hasMappings: true);
+        final events = MashinCoreBridgeEvents(coreBridge: bridge);
+        addTearDown(events.dispose);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.dark(),
+            home: Scaffold(
+              body: isDesktop
+                  ? ArtistDetailPageDesktop(
+                      coreBridge: bridge,
+                      coreEvents: events,
+                      itemId: 'artist-1',
+                      providerInstanceIdOrDomain: 'library',
+                    )
+                  : ArtistDetailPageMobile(
+                      coreBridge: bridge,
+                      coreEvents: events,
+                      itemId: 'artist-1',
+                      providerInstanceIdOrDomain: 'library',
+                    ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('deezer'), findsOneWidget);
+        expect(find.byTooltip('ytmusic'), findsOneWidget);
+        await tester.tap(find.byTooltip('ytmusic'));
+        await tester.pumpAndSettle();
+        expect(
+          bridge.queries,
+          contains('getArtistAlbums:channel:ytmusic--one'),
+        );
+        await tester.tap(find.byTooltip('deezer'));
+        await tester.pumpAndSettle();
+        expect(
+          bridge.queries.where(
+            (query) => query == 'getArtistAlbums:406:deezer--one',
+          ),
+          hasLength(2),
+        );
+        expect(
+          bridge.queries.where(
+            (query) => query == 'getArtist:artist-1:library',
+          ),
+          hasLength(1),
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  test(
+    'provider switch reloads sections but retains library metadata',
+    () async {
+      final coreBridge = _FakeArtistCoreBridge(hasMappings: true);
+      final controller = ArtistDetailController(
+        coreBridge: coreBridge,
+        itemId: 'artist-1',
+        providerInstanceIdOrDomain: 'library',
+      );
+      addTearDown(controller.dispose);
+      await controller.loadArtist();
+      final Artist? original = controller.artist;
+      expect(controller.sectionProvider.selectedProvider, 'deezer--one');
+      expect(coreBridge.queries, contains('getArtistAlbums:406:deezer--one'));
+      coreBridge.queries.clear();
+
+      await controller.selectProvider(controller.sectionProvider.mappings.last);
+
+      expect(identical(controller.artist, original), isTrue);
+      expect(controller.artist?.provider, 'library');
+      expect(
+        coreBridge.queries,
+        contains('getArtistAlbums:channel:ytmusic--one'),
+      );
+      expect(
+        coreBridge.queries,
+        contains('getArtistTopTracks:channel:ytmusic--one'),
+      );
+      expect(
+        coreBridge.queries,
+        contains('getSimilarArtists:channel:ytmusic--one:25'),
+      );
+      expect(
+        coreBridge.queries.where(
+          (query) => query.startsWith('getArtist:artist-1'),
+        ),
+        isEmpty,
+      );
+      expect(
+        controller.sectionProvider.mappings.first.providerDomain,
+        'ytmusic',
+      );
+    },
+  );
+
   test(
     'loads artist details and fallback artists through core queries',
     () async {
@@ -36,13 +149,36 @@ void main() {
 }
 
 class _FakeArtistCoreBridge extends Fake implements MashinCoreBridgeApi {
+  _FakeArtistCoreBridge({this.hasMappings = false});
+
+  final bool hasMappings;
   final List<String> queries = <String>[];
 
   @override
   Future<Artist> getArtist(String itemId, String provider) async {
     queries.add('getArtist:$itemId:$provider');
     return switch (itemId) {
-      'artist-1' => _artist('artist-1', 'Primary Artist'),
+      'artist-1' => Artist(
+        itemId: 'artist-1',
+        provider: 'library',
+        name: 'Primary Artist',
+        providerMappings: hasMappings
+            ? const <ProviderMapping>[
+                ProviderMapping(
+                  itemId: '406',
+                  providerDomain: 'deezer',
+                  providerInstance: 'deezer--one',
+                  available: true,
+                ),
+                ProviderMapping(
+                  itemId: 'channel',
+                  providerDomain: 'ytmusic',
+                  providerInstance: 'ytmusic--one',
+                  available: true,
+                ),
+              ]
+            : const <ProviderMapping>[],
+      ),
       'artist-2' => _artist('artist-2', 'Similar Artist'),
       _ => throw StateError('unexpected artist $itemId'),
     };
@@ -108,9 +244,7 @@ Track _track(String itemId, String provider, {String artistId = 'artist-1'}) =>
       provider: provider,
       name: itemId == 'track-1' ? 'Top Track' : 'Fallback Track',
       duration: 120,
-      artists: <Artist>[
-        Artist.fromJson(_artistJson(artistId)),
-      ],
+      artists: <Artist>[Artist.fromJson(_artistJson(artistId))],
     );
 
 Map<String, dynamic> _artistJson([String itemId = 'artist-1']) =>

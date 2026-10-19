@@ -13,6 +13,7 @@ import '../shared/widgets/media_row_section_desktop.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
 import '../shared/widgets/media_image.dart';
 import 'artist_detail_controller.dart';
+import '../shared/widgets/detail_provider_switcher.dart';
 
 /// Desktop artist detail page: header with cover/name/actions, description and
 /// paginated album/similar-artist rows plus a top-tracks table
@@ -311,6 +312,7 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
           SliverToBoxAdapter(
             child: ListenableBuilder(
               listenable: Listenable.merge(<Listenable>[
+                _controller,
                 _controller.metadataListenable,
                 _controller.albumsListenable,
               ]),
@@ -531,14 +533,14 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
                                   ),
                                 ),
                                 if (artist != null) ...<Widget>[
-                                  const SizedBox(width: 16),
-                                  MediaProviderIcon(
-                                    providerLabel: artist.provider,
-                                    iconSvg:
-                                        ProviderManifestRegistry.iconSvgForProvider(
-                                          artist.provider,
-                                        ),
-                                    size: 28,
+                                  const SizedBox(width: 8),
+                                  Flexible(
+                                    child: DetailProviderSwitcher(
+                                      selection: _controller.sectionProvider,
+                                      item: artist,
+                                      isLoading: _controller.isLoadingSections,
+                                      onSelected: _controller.selectProvider,
+                                    ),
                                   ),
                                 ],
                               ],

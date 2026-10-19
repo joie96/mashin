@@ -12,6 +12,7 @@ import '../core/core_userdata.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
 import '../shared/widgets/media_image.dart';
 import 'playlist_detail_controller.dart';
+import '../shared/widgets/detail_provider_switcher.dart';
 import 'playlist_name_dialog.dart';
 
 /// Desktop playlist detail page with a shared scroll area for header and tracks.
@@ -446,13 +447,28 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: <Widget>[
-                      Text(
-                        'WIEDERGABELISTE',
-                        style: TextStyle(
-                          color: colors.textSecondary,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
+                      Row(
+                        children: <Widget>[
+                          Text(
+                            'WIEDERGABELISTE',
+                            style: TextStyle(
+                              color: colors.textSecondary,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          if (!_controller.isPrivatePlaylist)
+                            Flexible(
+                              child: DetailProviderSwitcher(
+                                selection: _controller.sectionProvider,
+                                item: playlist,
+                                isLoading:
+                                    isLoading || _controller.isLoadingSections,
+                                onSelected: _controller.selectProvider,
+                              ),
+                            ),
+                        ],
                       ),
                       const SizedBox(height: 16),
                       Text(
