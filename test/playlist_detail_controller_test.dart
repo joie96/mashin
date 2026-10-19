@@ -10,6 +10,7 @@ import 'package:mashin_flutter/features/core/core_userdata.dart';
 import 'package:mashin_flutter/features/playlist/playlist_detail_controller.dart';
 import 'package:mashin_flutter/features/playlist/playlist_detail_page_desktop.dart';
 import 'package:mashin_flutter/features/playlist/playlist_detail_page_mobile.dart';
+import 'package:mashin_flutter/features/shared/item_provider_selection.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -49,7 +50,11 @@ void main() {
         );
         await tester.pumpAndSettle();
         await tester.tap(
-            find.byKey(ValueKey<String>(isDesktop ? 'ytmusic--one' : 'detail-provider-cycle')),
+          find.byKey(
+            ValueKey<String>(
+              isDesktop ? 'ytmusic--one' : 'detail-provider-cycle',
+            ),
+          ),
         );
         await tester.pumpAndSettle();
         expect(bridge.queries, contains('tracks:yt-playlist:ytmusic--one'));
@@ -369,6 +374,85 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(controller.tracks.single.album?.year, 2014);
   });
+
+  test(
+    'private playlists accept mapped tracks without an original URI',
+    () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final coreBridge = _PrivatePlaylistCoreBridge();
+      coreBridge.addition.complete();
+      final userData = UserData(coreBridge: coreBridge);
+      addTearDown(userData.dispose);
+      addTearDown(coreBridge.changes.close);
+      final track = Track.fromJson(<String, dynamic>{
+        'item_id': 'original',
+        'provider': 'library',
+        'media_type': 'track',
+        'name': 'Original',
+        'provider_mappings': <Object?>[
+          <String, Object?>{
+            'item_id': 'dz',
+            'provider_instance': 'deezer--one',
+            'provider_domain': 'deezer',
+          },
+          <String, Object?>{
+            'item_id': 'yt',
+            'provider_instance': 'youtube--one',
+            'provider_domain': 'youtube',
+          },
+        ],
+      });
+      await ItemProviderSelection.forItem(track).cycle();
+      expect(
+        await userData.addPlaylistTracks('playlist-1', <Track>[track]),
+        isTrue,
+      );
+      final payload = await createSelectedProviderMediaItemPayload(track);
+      expect(payload['provider'], 'youtube--one');
+      expect(payload['uri'], 'youtube--one://track/yt');
+      expect(track.uri, isNull);
+    },
+  );
+
+  test(
+    'adding to an online playlist uses the selected track provider',
+    () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final coreBridge = _FakePlaylistCoreBridge();
+      final controller = PlaylistDetailController(
+        coreBridge: coreBridge,
+        itemId: 'playlist-1',
+        providerInstanceIdOrDomain: 'library',
+      );
+      addTearDown(controller.dispose);
+      final track = Track.fromJson(<String, dynamic>{
+        'item_id': 'original',
+        'provider': 'library',
+        'media_type': 'track',
+        'name': 'Original',
+        'uri': 'library://track/original',
+        'provider_mappings': <Object?>[
+          <String, Object?>{
+            'item_id': 'dz',
+            'provider_instance': 'deezer--one',
+            'provider_domain': 'deezer',
+          },
+          <String, Object?>{
+            'item_id': 'yt',
+            'provider_instance': 'youtube--one',
+            'provider_domain': 'youtube',
+          },
+        ],
+      });
+      await ItemProviderSelection.forItem(track).cycle();
+      await controller.addTracksToPlaylist('playlist-1', <MediaItem>[track]);
+      expect(coreBridge.operations, <String>[
+        'addPlaylistTracks:playlist-1:youtube--one://track/yt',
+      ]);
+      expect(track.uri, 'library://track/original');
+      expect(track.provider, 'library');
+    },
+  );
 
   test(
     'loads and edits an online playlist through core bridge methods',

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/core/core_models.dart';
+import '../../features/shared/item_provider_selection.dart';
 import '../../features/album/album_detail_page.dart';
 import '../../features/artist/artist_detail_page.dart';
 import '../../features/auth/login_screen.dart';
@@ -76,14 +77,17 @@ abstract final class AppRoutes {
     };
   }
 
-  static String artist(Artist artist) =>
-      _detail('artist', artist.provider, artist.itemId);
+  static String artist(Artist artist) => _detailForItem('artist', artist);
 
-  static String album(Album album) =>
-      _detail('album', album.provider, album.itemId);
+  static String album(Album album) => _detailForItem('album', album);
 
   static String playlist(Playlist playlist) =>
-      _detail('playlist', playlist.provider, playlist.itemId);
+      _detailForItem('playlist', playlist);
+
+  static String _detailForItem(String type, MediaItem item) {
+    final identity = ItemProviderSelection.forItem(item).selectedIdentity;
+    return _detail(type, identity.provider, identity.itemId);
+  }
 
   static String _detail(String type, String provider, String itemId) {
     return '/$type/${Uri.encodeComponent(provider)}/${Uri.encodeComponent(itemId)}';

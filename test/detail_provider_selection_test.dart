@@ -72,6 +72,69 @@ void main() {
     },
   );
 
+  testWidgets(
+    'mobile detail main provider keeps its anchor for one to three mappings',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      Rect? originalBounds;
+      Size? originalArea;
+      for (final count in <int>[0, 1, 2, 3]) {
+        final item = Artist(
+          itemId: '78',
+          provider: deezer.providerInstance,
+          name: 'Artist',
+          providerMappings: <ProviderMapping>[
+            if (count > 0) deezer,
+            if (count > 1) youtube,
+            if (count > 2)
+              const ProviderMapping(
+                itemId: 'third',
+                providerDomain: 'third',
+                providerInstance: 'third--account',
+                available: true,
+              ),
+          ],
+        );
+        final selection = DetailProviderSelection(
+          itemId: item.itemId,
+          provider: item.provider,
+        );
+        await selection.initialize(item);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.dark(),
+            home: Scaffold(
+              body: Center(
+                child: DetailProviderSwitcher(
+                  selection: selection,
+                  item: item,
+                  isLoading: false,
+                  onSelected: (_) async {},
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final primary = count == 0
+            ? find.byType(MediaProviderIcon)
+            : find.byKey(
+                const ValueKey<String>('mobile-provider-deezer--account'),
+              );
+        final bounds = tester.getRect(primary);
+        final area = tester.getSize(find.byType(DetailProviderSwitcher));
+        originalBounds ??= bounds;
+        originalArea ??= area;
+        expect(bounds, originalBounds);
+        expect(area, originalArea);
+        expect(tester.takeException(), isNull);
+      }
+    },
+  );
+
   for (final rowWidth in <double>[240, 80]) {
     testWidgets(
       'desktop shows all providers and swaps directly at width $rowWidth',

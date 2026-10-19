@@ -1,10 +1,11 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/core_models.dart';
+import 'item_provider_selection.dart';
 
 /// Selects section queries without replacing the page's original media item.
 class DetailProviderSelection {
-  static const String preferenceKey = 'details.preferred_provider';
+  static const String preferenceKey = preferredProviderPreferenceKey;
 
   DetailProviderSelection({required this.itemId, required this.provider});
 

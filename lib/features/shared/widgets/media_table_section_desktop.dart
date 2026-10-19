@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'detail_provider_switcher.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'dart:async';
@@ -345,6 +346,7 @@ class _MediaTableSectionDesktopState<T>
   }
 
   void _handleSectionPointerDown(PointerDownEvent event) {
+    if (MediaItemProviderIcon.handlesPointer(event)) return;
     _requestSectionFocus();
   }
 
@@ -400,6 +402,7 @@ class _MediaTableSectionDesktopState<T>
   }
 
   void _handleRowPointerDown(int index, PointerDownEvent event) {
+    if (MediaItemProviderIcon.handlesPointer(event)) return;
     if (event.kind == PointerDeviceKind.mouse &&
         (event.buttons & kSecondaryMouseButton) != 0) {
       _suppressedSelectionPointers.remove(event.pointer);
@@ -1532,15 +1535,7 @@ Widget _buildDesktopTableRowTrack({
           width: 80,
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              MediaProviderIcon(
-                providerLabel: _providerLabelFromId(item.provider),
-                iconSvg: ProviderManifestRegistry.iconSvgForProvider(
-                  item.provider,
-                ),
-                size: 16,
-              ),
-            ],
+            children: <Widget>[MediaItemProviderIcon(item: item)],
           ),
         ),
       ],
@@ -1628,15 +1623,7 @@ Widget _buildDesktopTableRowAlbum({
         width: 72,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            MediaProviderIcon(
-              providerLabel: _providerLabelFromId(item.provider),
-              iconSvg: ProviderManifestRegistry.iconSvgForProvider(
-                item.provider,
-              ),
-              size: 16,
-            ),
-          ],
+          children: <Widget>[MediaItemProviderIcon(item: item)],
         ),
       ),
     ],
@@ -1715,15 +1702,7 @@ Widget _buildDesktopTableRowPlaylist({
         width: 72,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            MediaProviderIcon(
-              providerLabel: _providerLabelFromId(item.provider),
-              iconSvg: ProviderManifestRegistry.iconSvgForProvider(
-                item.provider,
-              ),
-              size: 16,
-            ),
-          ],
+          children: <Widget>[MediaItemProviderIcon(item: item)],
         ),
       ),
     ],
@@ -1794,15 +1773,7 @@ Widget _buildDesktopTableRowArtist({
         width: 72,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            MediaProviderIcon(
-              providerLabel: _providerLabelFromId(item.provider),
-              iconSvg: ProviderManifestRegistry.iconSvgForProvider(
-                item.provider,
-              ),
-              size: 16,
-            ),
-          ],
+          children: <Widget>[MediaItemProviderIcon(item: item)],
         ),
       ),
     ],
@@ -2288,6 +2259,7 @@ class _DesktopTableRowBaseState extends State<_DesktopTableRowBase> {
   bool _isHovered = false;
 
   void _handleRowPointerDown(PointerDownEvent event) {
+    if (MediaItemProviderIcon.handlesPointer(event)) return;
     if (widget.onPointerDown == null) {
       return;
     }

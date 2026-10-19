@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'detail_provider_switcher.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../core/core_bridge.dart';
@@ -396,16 +397,13 @@ class _MobileSlideCard<T> extends StatelessWidget {
                         Positioned(
                           left: 6,
                           top: 6,
-                          child: IgnorePointer(
-                            child: MediaProviderIcon(
-                              providerLabel: data.mediaItem?.provider ?? '-',
-                              iconSvg:
-                                  ProviderManifestRegistry.iconSvgForProvider(
-                                    data.mediaItem?.provider ?? '',
-                                  ),
-                              size: 18,
-                            ),
-                          ),
+                          child: data.mediaItem == null
+                              ? const SizedBox.shrink()
+                              : MediaItemProviderIcon(
+                                  item: data.mediaItem!,
+                                  size: 18,
+                                  primaryIconOffset: Offset.zero,
+                                ),
                         ),
                       ],
                     ),

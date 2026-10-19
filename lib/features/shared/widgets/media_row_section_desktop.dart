@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'detail_provider_switcher.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'dart:math' as math;
@@ -1681,6 +1682,7 @@ Widget _buildDesktopMediaRowItemBase({
             coverUrl: coverUrl,
             providerLabel: providerLabel,
             providerIconSvg: providerIconSvg,
+            providerItem: playbackItem ?? titleLinkItem,
             onPlayTap: onPlayTap,
             isFavorite: isFavorite,
             onFavoriteTap: onFavoriteTap,
@@ -1855,6 +1857,7 @@ class _DesktopMediaCover extends StatefulWidget {
   final String? coverUrl;
   final String providerLabel;
   final String? providerIconSvg;
+  final MediaItem? providerItem;
   final VoidCallback? onPlayTap;
   final bool isFavorite;
   final VoidCallback? onFavoriteTap;
@@ -1873,6 +1876,7 @@ class _DesktopMediaCover extends StatefulWidget {
     required this.coverUrl,
     required this.providerLabel,
     required this.providerIconSvg,
+    this.providerItem,
     required this.onPlayTap,
     required this.isFavorite,
     required this.onFavoriteTap,
@@ -1973,17 +1977,6 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
                           ),
                   ),
           ),
-          Positioned(
-            left: 6,
-            top: 6,
-            child: IgnorePointer(
-              child: MediaProviderIcon(
-                providerLabel: widget.providerLabel,
-                iconSvg: widget.providerIconSvg,
-                size: 18,
-              ),
-            ),
-          ),
           if (showHoverPlay || showOverlayActions)
             Positioned.fill(
               child: IgnorePointer(
@@ -2075,6 +2068,21 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
                 ),
               ),
             ),
+          Positioned(
+            left: 6,
+            top: 6,
+            child: widget.providerItem == null
+                ? MediaProviderIcon(
+                    providerLabel: widget.providerLabel,
+                    iconSvg: widget.providerIconSvg,
+                    size: 18,
+                  )
+                : MediaItemProviderIcon(
+                    item: widget.providerItem!,
+                    size: 18,
+                    primaryIconOffset: Offset.zero,
+                  ),
+          ),
           if (showSelectControl)
             Positioned(
               right: 6,

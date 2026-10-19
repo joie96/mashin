@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'detail_provider_switcher.dart';
 import 'package:flutter/rendering.dart';
 import 'dart:async';
 import 'dart:math' as math;
@@ -476,6 +477,7 @@ Widget _buildMobileMediaRowAlbum({
   );
   return _buildMobileMediaRowItemBase(
     itemWidth: itemWidth,
+    playbackItem: item,
     coverSize: coverSize,
     icon: Icons.album_outlined,
     title: rowText.title,
@@ -503,6 +505,7 @@ Widget _buildMobileMediaRowPlaylist({
   );
   return _buildMobileMediaRowItemBase(
     itemWidth: itemWidth,
+    playbackItem: item,
     coverSize: coverSize,
     icon: Icons.queue_music_outlined,
     title: rowText.title,
@@ -526,6 +529,7 @@ Widget _buildMobileMediaRowArtist({
   final _MobileRowText rowText = _mobileRowText(item);
   return _buildMobileMediaRowItemBase(
     itemWidth: itemWidth,
+    playbackItem: item,
     coverSize: coverSize,
     coverBorderRadius: coverSize / 2,
     icon: Icons.person_outlined,
@@ -681,13 +685,17 @@ Widget _buildMobileMediaRowItemBase({
                   Positioned(
                     left: 6,
                     top: 6,
-                    child: IgnorePointer(
-                      child: MediaProviderIcon(
-                        providerLabel: providerLabel,
-                        iconSvg: providerIconSvg,
-                        size: 18,
-                      ),
-                    ),
+                    child: playbackItem == null
+                        ? MediaProviderIcon(
+                            providerLabel: providerLabel,
+                            iconSvg: providerIconSvg,
+                            size: 18,
+                          )
+                        : MediaItemProviderIcon(
+                            item: playbackItem,
+                            size: 18,
+                            primaryIconOffset: Offset.zero,
+                          ),
                   ),
                 ],
               ),

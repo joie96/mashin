@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'detail_provider_switcher.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../core/core_bridge.dart';
@@ -783,6 +784,7 @@ class _MediaTableSectionMobileState<T>
       onMoreTap: onMoreTap,
       coreEvents: widget.coreEvents,
       playbackItem: item.mediaItem,
+      allowsProviderSelection: false,
       queueItemNumber: itemNumber,
     );
   }
@@ -817,6 +819,7 @@ class _MediaTableSectionMobileState<T>
       onTap: onTap,
       onMoreTap: onMoreTap,
       coreEvents: widget.coreEvents,
+      playbackItem: item,
     );
   }
 
@@ -851,6 +854,7 @@ class _MediaTableSectionMobileState<T>
       onTap: onTap,
       onMoreTap: onMoreTap,
       coreEvents: widget.coreEvents,
+      playbackItem: item,
     );
   }
 
@@ -884,6 +888,7 @@ class _MediaTableSectionMobileState<T>
       onTap: onTap,
       onMoreTap: onMoreTap,
       coreEvents: widget.coreEvents,
+      playbackItem: item,
     );
   }
 
@@ -938,8 +943,10 @@ class _MobileTableRowBase extends StatelessWidget {
   final MashinCoreBridgeEvents coreEvents;
   final MediaItem? playbackItem;
   final int? queueItemNumber;
+  final bool allowsProviderSelection;
 
   const _MobileTableRowBase({
+    this.allowsProviderSelection = true,
     required this.title,
     required this.subtitle,
     required this.trailing,
@@ -1054,14 +1061,19 @@ class _MobileTableRowBase extends StatelessWidget {
                           const SizedBox(width: 10),
                         ],
                         SizedBox(
-                          width: 20,
+                          width: allowsProviderSelection && playbackItem != null
+                              ? 48
+                              : 20,
                           child: Align(
                             alignment: Alignment.center,
-                            child: MediaProviderIcon(
-                              providerLabel: providerLabel,
-                              iconSvg: providerIconSvg,
-                              size: 16,
-                            ),
+                            child:
+                                !allowsProviderSelection || playbackItem == null
+                                ? MediaProviderIcon(
+                                    providerLabel: providerLabel,
+                                    iconSvg: providerIconSvg,
+                                    size: 16,
+                                  )
+                                : MediaItemProviderIcon(item: playbackItem!),
                           ),
                         ),
                       ],
@@ -1151,6 +1163,7 @@ class _DeferredMobileTableCoverState extends State<_DeferredMobileTableCover> {
 }
 
 Widget _buildMobileTableRowBase({
+  bool allowsProviderSelection = true,
   required String title,
   required String subtitle,
   required String? trailing,
@@ -1171,6 +1184,7 @@ Widget _buildMobileTableRowBase({
   int? queueItemNumber,
 }) {
   return _MobileTableRowBase(
+    allowsProviderSelection: allowsProviderSelection,
     title: title,
     subtitle: subtitle,
     trailing: trailing,

@@ -6,6 +6,7 @@ import '../core/core_bridge.dart';
 import '../core/core_models.dart';
 import '../core/core_userdata.dart';
 import '../shared/detail_provider_selection.dart';
+import '../shared/item_provider_selection.dart';
 
 /// Loads and holds the data of a playlist detail page (metadata + tracks) and
 /// exposes the playback/favorite/edit actions used by the desktop and mobile pages.
@@ -461,13 +462,15 @@ class PlaylistDetailController extends ChangeNotifier {
     String playlistId,
     List<MediaItem> items,
   ) async {
-    final List<String> uris = items
-        .map((MediaItem item) => item.uri ?? '')
-        .where((String uri) => uri.isNotEmpty)
-        .toList(growable: false);
-    if (playlistId.trim().isEmpty || uris.isEmpty) {
-      return;
+    if (playlistId.trim().isEmpty) return;
+    final List<String> uris = <String>[];
+    for (final item in items) {
+      final selection = ItemProviderSelection.forItem(item);
+      await selection.initialize();
+      final uri = selection.selectedUri;
+      if (uri != null && uri.isNotEmpty) uris.add(uri);
     }
+    if (uris.isEmpty) return;
 
     final Playlist? current = _playlist;
     final bool isUserPlaylist =

@@ -6,8 +6,37 @@ import 'dart:io';
 import 'package:ffi/ffi.dart';
 
 import '../../app/logging/app_log_buffer.dart';
+import '../shared/item_provider_selection.dart';
 import 'android_bridge.dart';
 import 'core_models.dart';
+
+/// Resolves the selected source for actions without changing the original item.
+Future<Map<String, dynamic>> createSelectedProviderMediaItemPayload(
+  MediaItem item,
+) async {
+  final selection = ItemProviderSelection.forItem(item);
+  await selection.initialize();
+  final payload = createMusicAssistantMediaItemPayload(item);
+  final selected = selection.selected;
+  if (selected == null) return payload;
+  final identity = selection.selectedIdentity;
+  payload['item_id'] = identity.itemId;
+  payload['provider'] = identity.provider;
+  payload['uri'] = selection.selectedUri;
+  final serializedMappings = <(String, String), Map<String, dynamic>>{
+    for (final serialized
+        in (payload['provider_mappings'] as List).cast<Map<String, dynamic>>())
+      (
+        serialized['provider_instance'] as String,
+        serialized['item_id'] as String,
+      ): serialized,
+  };
+  payload['provider_mappings'] = <Map<String, dynamic>>[
+    for (final mapping in selection.mappings)
+      serializedMappings[(mapping.providerInstance, mapping.itemId)]!,
+  ];
+  return payload;
+}
 
 typedef _NativeVoidFn = ffi.Int32 Function();
 typedef _DartVoidFn = int Function();
@@ -652,11 +681,11 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     QueueOption option = QueueOption.replace,
     int? startItem,
     bool shuffle = false,
-  }) => _submitVoidOperation('queuePlayMedia', <String, Object?>{
+  }) async => _submitVoidOperation('queuePlayMedia', <String, Object?>{
     'request': <String, Object?>{
-      'mediaItems': mediaItems
-          .map(createMusicAssistantMediaItemPayload)
-          .toList(),
+      'mediaItems': await Future.wait(
+        mediaItems.map(createSelectedProviderMediaItemPayload),
+      ),
       'option': option.name.replaceAllMapped(
         RegExp('[A-Z]'),
         (match) => '_${match.group(0)!.toLowerCase()}',
@@ -670,12 +699,14 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   Future<void> startRadio(List<MediaItem> mediaItems) =>
       _submitMediaOperation('startRadio', mediaItems);
 
-  Future<void> _submitMediaOperation(String kind, List<MediaItem> mediaItems) =>
-      _submitVoidOperation(kind, <String, Object?>{
-        'mediaItems': mediaItems
-            .map(createMusicAssistantMediaItemPayload)
-            .toList(),
-      });
+  Future<void> _submitMediaOperation(
+    String kind,
+    List<MediaItem> mediaItems,
+  ) async => _submitVoidOperation(kind, <String, Object?>{
+    'mediaItems': await Future.wait(
+      mediaItems.map(createSelectedProviderMediaItemPayload),
+    ),
+  });
   // Queue item mutations.
 
   @override
@@ -776,11 +807,15 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
       );
 
   @override
-  Future<void> setUserDataFavorites(List<MediaItem> items, bool favorite) =>
-      _submitVoidOperation('setUserDataFavorites', <String, Object?>{
-        'mediaItems': items.map(createMusicAssistantMediaItemPayload).toList(),
-        'favorite': favorite,
-      });
+  Future<void> setUserDataFavorites(
+    List<MediaItem> items,
+    bool favorite,
+  ) async => _submitVoidOperation('setUserDataFavorites', <String, Object?>{
+    'mediaItems': await Future.wait(
+      items.map(createSelectedProviderMediaItemPayload),
+    ),
+    'favorite': favorite,
+  });
 
   @override
   Future<void> createPrivatePlaylist(String name) => _submitVoidOperation(
@@ -811,9 +846,11 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   Future<void> addPrivatePlaylistTracks(
     String playlistId,
     List<Track> tracks,
-  ) => _submitVoidOperation('addPrivatePlaylistTracks', <String, Object?>{
+  ) async => _submitVoidOperation('addPrivatePlaylistTracks', <String, Object?>{
     'playlistId': playlistId,
-    'tracks': tracks.map(createMusicAssistantMediaItemPayload).toList(),
+    'tracks': await Future.wait(
+      tracks.map(createSelectedProviderMediaItemPayload),
+    ),
   });
 
   @override

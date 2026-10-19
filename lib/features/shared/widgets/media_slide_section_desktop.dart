@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'detail_provider_switcher.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../core/core_bridge.dart';
@@ -454,15 +455,6 @@ class _DesktopSlideCardState<T> extends State<_DesktopSlideCard<T>> {
                                     size: 46,
                                   ),
                           ),
-                          Positioned(
-                            left: 6,
-                            top: 6,
-                            child: MediaProviderIcon(
-                              providerLabel: data.providerLabel,
-                              iconSvg: data.providerIconSvg,
-                              size: 18,
-                            ),
-                          ),
                           Positioned.fill(
                             child: AnimatedOpacity(
                               duration: const Duration(milliseconds: 140),
@@ -533,6 +525,16 @@ class _DesktopSlideCardState<T> extends State<_DesktopSlideCard<T>> {
                               ),
                             ),
                           ),
+                          if (data.mediaItem != null)
+                            Positioned(
+                              left: 6,
+                              top: 6,
+                              child: MediaItemProviderIcon(
+                                item: data.mediaItem!,
+                                size: 18,
+                                primaryIconOffset: Offset.zero,
+                              ),
+                            ),
                         ],
                       ),
                     ),

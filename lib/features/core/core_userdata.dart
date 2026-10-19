@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../shared/item_provider_selection.dart';
 import 'core_bridge.dart';
 import 'core_models.dart';
 
@@ -126,10 +127,16 @@ class UserData extends ChangeNotifier {
     String playlistId,
     Iterable<Track> tracks,
   ) async {
-    final List<Track> values = tracks
-        .where((track) => (track.uri ?? '').trim().isNotEmpty)
-        .toList(growable: false);
-    if (playlistId.trim().isEmpty || values.isEmpty) return false;
+    if (playlistId.trim().isEmpty) return false;
+    final List<Track> values = <Track>[];
+    for (final track in tracks) {
+      final selection = ItemProviderSelection.forItem(track);
+      await selection.initialize();
+      if ((selection.selectedUri ?? '').trim().isNotEmpty) {
+        values.add(track);
+      }
+    }
+    if (values.isEmpty) return false;
     await _coreBridge.addPrivatePlaylistTracks(playlistId, values);
     await _refreshSnapshot();
     return true;
