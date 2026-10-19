@@ -5,7 +5,6 @@ use super::client::MusicAssistantClient;
 use super::models::identifiers::MediaId;
 use super::models::media::{MediaItem, Track};
 use super::models::queue::QueueOption;
-use super::user_data::{LocalPlaylist, LOCAL_PLAYLIST_PROVIDER};
 use rand::seq::IndexedRandom;
 use std::collections::HashSet;
 
@@ -18,14 +17,13 @@ struct RadioSelection {
 pub(crate) async fn start_radio<Command, Completion>(
     client: &MusicAssistantClient,
     media: Vec<MediaItem>,
-    local_playlists: &[LocalPlaylist],
     mut play_media: Command,
 ) -> Result<(), String>
 where
     Command: FnMut(Vec<MediaItem>, QueueOption) -> Completion,
     Completion: std::future::Future<Output = Result<(), String>>,
 {
-    let selection = resolve_selection(client, media, local_playlists).await?;
+    let selection = resolve_selection(client, media).await?;
     let seed_uri = media_uri(&selection.seed)?;
     play_media(
         selection
@@ -55,7 +53,6 @@ where
 async fn resolve_selection(
     client: &MusicAssistantClient,
     media: Vec<MediaItem>,
-    local_playlists: &[LocalPlaylist],
 ) -> Result<RadioSelection, String> {
     let seed = media
         .iter()
@@ -110,20 +107,6 @@ async fn resolve_selection(
                 top.into_iter().take(25).collect()
             }
         }
-        MediaItem::Playlist(playlist)
-            if playlist
-                .media
-                .provider
-                .as_str()
-                .eq_ignore_ascii_case(LOCAL_PLAYLIST_PROVIDER) =>
-        {
-            local_playlists
-                .iter()
-                .find(|stored| stored.playlist.media.item_id == playlist.media.item_id)
-                .ok_or("local radio playlist is no longer available")?
-                .items
-                .clone()
-        }
         MediaItem::Playlist(playlist) => {
             client
                 .get_playlist_tracks(
@@ -144,12 +127,6 @@ async fn resolve_selection(
         .choose(&mut rand::rng())
         .cloned()
         .ok_or("radio requires at least one playable seed track")?;
-    let seed = if matches!(&seed, MediaItem::Playlist(playlist) if playlist.media.provider.as_str().eq_ignore_ascii_case(LOCAL_PLAYLIST_PROVIDER))
-    {
-        MediaItem::Track(started.clone())
-    } else {
-        seed
-    };
     Ok(RadioSelection {
         seed,
         started_tracks: vec![started],
@@ -232,7 +209,6 @@ mod tests {
         let selected = resolve_selection(
             &MusicAssistantClient::new("http://127.0.0.1:1", None),
             media,
-            &[],
         )
         .await
         .unwrap();
@@ -249,7 +225,7 @@ mod tests {
         )
         .unwrap();
         for media in [vec![], vec![MediaItem::Track(track("seed")), album]] {
-            assert!(start_radio(&client, media, &[], |_, _| async {
+            assert!(start_radio(&client, media, |_, _| async {
                 panic!("invalid selection must not start playback")
             })
             .await
@@ -283,27 +259,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn local_playlist_uses_its_selected_track_as_the_server_radio_seed() {
-        let playlist: LocalPlaylist = serde_json::from_value(json!({
-            "media_type":"playlist", "item_id":"local", "provider":LOCAL_PLAYLIST_PROVIDER,
-            "name":"Local", "items":[track("seed")],
+    async fn private_playlist_resolves_tracks_through_the_normal_ma_endpoint() {
+        let playlist = serde_json::from_value(json!({
+            "media_type":"playlist", "item_id":"42", "provider":"library", "name":"Private",
         }))
         .unwrap();
-        let client = MusicAssistantClient::new("http://127.0.0.1:1", None);
-        let selection = resolve_selection(
-            &client,
-            vec![MediaItem::Playlist(playlist.playlist.clone())],
-            &[playlist],
-        )
-        .await
-        .unwrap();
-        assert_eq!(media_uri(&selection.seed).unwrap(), "test://track/seed");
+        let (client, worker) = super::super::client::tests::server(vec![(
+            "music/playlists/playlist_tracks",
+            json!([track("seed")]),
+        )]);
+        let selection = resolve_selection(&client, vec![MediaItem::Playlist(playlist)])
+            .await
+            .unwrap();
+        assert_eq!(media_uri(&selection.seed).unwrap(), "library://playlist/42");
         assert_eq!(selection.started_tracks.len(), 1);
+        worker.join().unwrap();
     }
 
     #[tokio::test]
     async fn radio_http_contract_starts_seed_before_fetching_and_appending_recommendations() {
-        use super::super::commands::QueueCommand;
+        use super::super::client::QueueCommand;
         use super::super::models::identifiers::QueueId;
 
         for (start_status, radio_status, recommendations) in [
@@ -341,7 +316,6 @@ mod tests {
             let result = start_radio(
                 &client,
                 vec![MediaItem::Track(track("seed"))],
-                &[],
                 |media, option| {
                     client.execute_queue_command(
                         &queue_id,
@@ -362,7 +336,7 @@ mod tests {
 
     #[tokio::test]
     async fn container_radio_starts_a_track_and_retains_the_container_seed() {
-        use super::super::commands::QueueCommand;
+        use super::super::client::QueueCommand;
         use super::super::models::identifiers::QueueId;
 
         for (kind, command) in [
@@ -399,7 +373,7 @@ mod tests {
             let client = MusicAssistantClient::new(&url, None);
             let queue_id = QueueId("room".into());
             let media = serde_json::from_value(json!({"media_type":kind, "item_id":"container", "provider":"test", "name":"Container"})).unwrap();
-            start_radio(&client, vec![media], &[], |media, option| {
+            start_radio(&client, vec![media], |media, option| {
                 client.execute_queue_command(
                     &queue_id,
                     QueueCommand::PlayMedia {

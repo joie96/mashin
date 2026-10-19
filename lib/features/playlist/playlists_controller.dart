@@ -16,7 +16,7 @@ class PlaylistsController extends ChangeNotifier {
   final UserData userDataController;
 
   List<Playlist> get playlists => userDataController.playlists;
-  bool get isLoading => userDataController.isLoadingPreferences;
+  bool get isLoading => userDataController.isLoadingLibraryData;
 
   List<Track> tracksFor(List<Playlist> playlists) => playlists
       .expand(
@@ -31,15 +31,20 @@ class PlaylistsController extends ChangeNotifier {
   Future<void> shuffle(List<Track> tracks) =>
       coreBridge.queuePlayMedia(tracks, shuffle: true);
 
-  Future<void> playNext(List<Track> tracks) => coreBridge.queuePlayMedia(tracks, option: QueueOption.next);
+  Future<void> playNext(List<Track> tracks) =>
+      coreBridge.queuePlayMedia(tracks, option: QueueOption.next);
 
-  Future<void> playLast(List<Track> tracks) => coreBridge.queuePlayMedia(tracks, option: QueueOption.add);
+  Future<void> playLast(List<Track> tracks) =>
+      coreBridge.queuePlayMedia(tracks, option: QueueOption.add);
 
   Future<Playlist?> createPlaylist(String name) =>
-      userDataController.createLocalPlaylist(name);
+      userDataController.createPrivatePlaylist(name);
 
   Future<bool> renamePlaylist(Playlist playlist, String name) =>
       userDataController.renamePlaylist(playlist, name);
+
+  Future<bool> refreshPrivatePlaylistCover(Playlist playlist) =>
+      userDataController.refreshPrivatePlaylistCover(playlist);
 
   Future<void> deletePlaylists(List<Playlist> playlists) async {
     for (final Playlist playlist in playlists) {

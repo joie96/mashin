@@ -254,6 +254,9 @@ Map<String, dynamic> createMusicAssistantMediaItemPayload(MediaItem mediaItem) {
     payload['owner'] = mediaItem.owner;
     payload['is_editable'] = mediaItem.isEditable;
     payload['is_dynamic'] = mediaItem.isDynamic;
+    if (mediaItem.access != null) {
+      payload['access'] = mediaItem.access!.toJson();
+    }
   }
 
   return payload;
@@ -1120,6 +1123,35 @@ class BrowseFolder {
   );
 }
 
+class PlaylistAccess {
+  final String? owner;
+  final String sharing;
+  final List<String> sharedUsers;
+  final bool collaborative;
+
+  const PlaylistAccess({
+    required this.owner,
+    required this.sharing,
+    this.sharedUsers = const <String>[],
+    this.collaborative = false,
+  });
+
+  factory PlaylistAccess.fromJson(Map<String, dynamic> json) => PlaylistAccess(
+    owner: json['owner'] as String?,
+    sharing: json['sharing'] as String,
+    sharedUsers:
+        (json['shared_users'] as List?)?.cast<String>() ?? const <String>[],
+    collaborative: json['collaborative'] == true,
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'owner': owner,
+    'sharing': sharing,
+    'shared_users': sharedUsers,
+    'collaborative': collaborative,
+  };
+}
+
 class Playlist implements MediaItem {
   @override
   final String itemId;
@@ -1142,6 +1174,7 @@ class Playlist implements MediaItem {
   final String? owner;
   final bool isEditable;
   final bool isDynamic;
+  final PlaylistAccess? access;
   @override
   final List<ProviderMapping> providerMappings;
   @override
@@ -1166,6 +1199,7 @@ class Playlist implements MediaItem {
     this.available,
     this.owner,
     this.isDynamic = false,
+    this.access,
     this.providerMappings = const <ProviderMapping>[],
     this.metadata,
     this.favorite = false,
@@ -1210,6 +1244,9 @@ class Playlist implements MediaItem {
       owner: (json['owner'] as String?)?.trim(),
       isEditable: json['is_editable'] == true,
       isDynamic: json['is_dynamic'] == true,
+      access: json['access'] is Map<String, dynamic>
+          ? PlaylistAccess.fromJson(json['access'] as Map<String, dynamic>)
+          : null,
       providerMappings:
           (json['provider_mappings'] as List?)
               ?.whereType<Map<String, dynamic>>()

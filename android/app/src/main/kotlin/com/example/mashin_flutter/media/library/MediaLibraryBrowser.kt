@@ -243,7 +243,7 @@ internal class MediaLibraryBrowser(
         libraryItem("favorites:artists", "Artists", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.artist),
     )
 
-    private fun playlistItems(): List<MediaItem> = localPlaylistItems()
+    private fun playlistItems(): List<MediaItem> = privatePlaylistItems()
 
     private fun recommendationItems(
         folderId: String,
@@ -325,7 +325,7 @@ internal class MediaLibraryBrowser(
         return mediaItemsFromJson(items?.toString(), includeTrackListActions, mediaType = mediaType)
     }
 
-    private fun localPlaylistItems(): List<MediaItem> {
+    private fun privatePlaylistItems(): List<MediaItem> {
         val data = JSONObject(userDataSnapshot())
         return mediaItemsFromJson(data.optJSONArray("playlists")?.toString(), mediaType = "playlist")
     }
@@ -335,9 +335,6 @@ internal class MediaLibraryBrowser(
     private fun referencedItems(referenceId: String, queryKind: String): List<MediaItem> {
         val reference = serializedMediaItems[referenceId] ?: return emptyList()
         val item = JSONObject(reference)
-        if (queryKind == "playlistTracks" && item.optString("provider") == "mashin") {
-            return mediaItemsFromJson(item.optJSONArray("items")?.toString(), true, mediaType = "track")
-        }
         val fallbackIconResource = when (queryKind) {
             "artistAlbums" -> R.drawable.playlist_play
             "similarArtists" -> R.drawable.favorite

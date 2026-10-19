@@ -1,15 +1,57 @@
-use super::models::identifiers::{AccessToken, MediaId};
+use super::models::identifiers::{AccessToken, MediaId, PlayerId, QueueId, QueueItemId};
 use super::models::media::{
     Album, Artist, MediaItem, MediaItemFields, MediaType, MusicAssistantSearchResults, Playlist,
-    Track,
+    PlaylistSharing, Track,
 };
 use super::models::player::MusicAssistantPlayer;
-use super::models::queue::{MusicAssistantQueue, QueueItem};
+use super::models::queue::{MusicAssistantQueue, QueueItem, QueueOption, RepeatMode};
 use super::models::recommendation::MusicAssistantRecommendationFolder;
 use super::models::session::{MusicAssistantUser, ProviderInstance, ProviderManifest, ServerInfo};
+use rand::seq::SliceRandom;
 use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
+
+#[derive(Deserialize)]
+struct PlaylistTask {
+    id: String,
+    status: String,
+    #[serde(default)]
+    last_error: Option<String>,
+}
+
+pub(crate) enum PlayerCommand {
+    Play,
+    Pause,
+    Stop,
+    Next,
+    Previous,
+    Seek(f64),
+    Volume(u8),
+    Mute(bool),
+}
+
+pub(crate) enum QueueCommand {
+    Clear,
+    PlayMedia {
+        media: Vec<MediaItem>,
+        option: QueueOption,
+        start_item: Option<usize>,
+        shuffle: bool,
+    },
+    PlayIndex(usize),
+    PlayItem(QueueItemId),
+    MoveItem {
+        item_id: QueueItemId,
+        shift: i64,
+    },
+    DeleteItem(QueueItemId),
+    MoveItemToEnd(QueueItemId),
+    Shuffle(bool),
+    Repeat(RepeatMode),
+    Autoplay(bool),
+}
 
 struct ProviderAvailabilitySnapshot {
     endpoint: String,
@@ -79,6 +121,7 @@ impl From<HttpCommandError> for String {
 }
 
 pub(crate) struct MusicAssistantClient {
+    base_url: String,
     endpoint: String,
     access_token: Option<AccessToken>,
     http_client: reqwest::Client,
@@ -88,6 +131,7 @@ impl MusicAssistantClient {
     // Construction.
     pub(crate) fn new(base_url: &str, access_token: Option<AccessToken>) -> Self {
         Self {
+            base_url: base_url.trim_end_matches('/').to_owned(),
             endpoint: format!("{}/api", base_url.trim_end_matches('/')),
             access_token,
             http_client: reqwest::Client::builder()
@@ -96,6 +140,10 @@ impl MusicAssistantClient {
                 .build()
                 .expect("create Music Assistant HTTP client"),
         }
+    }
+
+    pub(crate) fn base_url(&self) -> &str {
+        &self.base_url
     }
 
     // Session, server, and provider queries.
@@ -127,10 +175,6 @@ impl MusicAssistantClient {
 
     pub(crate) async fn get_current_user(&self) -> Result<MusicAssistantUser, String> {
         self.execute_command("auth/me", json!({})).await
-    }
-
-    pub(crate) async fn update_user(&self, update: Value) -> Result<MusicAssistantUser, String> {
-        self.execute_command("auth/user/update", update).await
     }
 
     pub(crate) async fn get_provider_manifests(&self) -> Result<Vec<ProviderManifest>, String> {
@@ -201,18 +245,6 @@ impl MusicAssistantClient {
             item_reference_arguments(item_id, provider),
         )
         .await
-    }
-
-    // Complete incoming user-data media before insertion, never during playback or store reads.
-    pub(crate) async fn complete_user_data_media(
-        &self,
-        items: Vec<MediaItem>,
-    ) -> Result<Vec<MediaItem>, String> {
-        let mut completed = Vec::with_capacity(items.len());
-        for item in items {
-            completed.push(self.complete_user_data_item(item).await?);
-        }
-        Ok(completed)
     }
 
     pub(crate) async fn get_library_artists(
@@ -383,17 +415,190 @@ impl MusicAssistantClient {
     }
 
     // Playlist mutations.
+    // Favorites and canonical library identities.
+    pub(crate) async fn get_library_page<Item: DeserializeOwned>(
+        &self,
+        media_type: &str,
+        favorite: Option<bool>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<Item>, String> {
+        self.execute_command(
+            &format!("music/{media_type}/library_items"),
+            json!({
+                "favorite": favorite, "limit": limit, "offset": offset,
+                "summary": false, "sort_field": "sort_name", "sort_direction": "asc",
+            }),
+        )
+        .await
+    }
+
+    pub(crate) async fn set_favorite(
+        &self,
+        item: &MediaItem,
+        is_favorite: bool,
+    ) -> Result<(), String> {
+        self.execute_command::<Value>(
+            "music/favorites/set_item",
+            json!({"item": item, "favorite": if is_favorite { Some(true) } else { None }}),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    pub(crate) async fn resolve_library_item(
+        &self,
+        item: &MediaItem,
+    ) -> Result<Option<MediaItem>, String> {
+        let media_type =
+            serde_json::to_value(item).map_err(|error| error.to_string())?["media_type"].clone();
+        if item.fields().provider.as_str() == "library" {
+            return self
+                .execute_command(
+                    "music/item",
+                    json!({
+                        "media_type": media_type, "item_id": item.fields().item_id,
+                        "provider_instance_id_or_domain": "library", "allow_update_metadata": false,
+                    }),
+                )
+                .await
+                .map(Some);
+        }
+        self.execute_command(
+            "music/get_library_item",
+            json!({
+                "media_type": media_type,
+                "item_id": item.fields().item_id,
+                "provider_instance_id_or_domain": item.fields().provider,
+            }),
+        )
+        .await
+    }
+
+    // Playlist commands.
+    pub(crate) async fn create_private_playlist(
+        &self,
+        name: &str,
+        user_id: &str,
+    ) -> Result<Playlist, String> {
+        let created: Playlist = self
+            .execute_command("music/playlists/create_playlist", json!({"name": name}))
+            .await?;
+        self.execute_command(
+            "music/playlists/set_access",
+            json!({
+                "item_id": created.media.item_id, "sharing": "private", "owner": user_id,
+                "shared_users": [], "collaborative": false,
+            }),
+        )
+        .await
+    }
+
+    pub(crate) async fn rename_private_playlist(
+        &self,
+        playlist: &Playlist,
+        name: &str,
+    ) -> Result<(), String> {
+        let mut update = serde_json::to_value(MediaItem::Playlist(playlist.clone()))
+            .map_err(|error| error.to_string())?;
+        update["name"] = json!(name);
+        update["sort_name"] = json!(name);
+        self.execute_command::<Value>(
+            "music/playlists/update",
+            json!({
+                "item_id": playlist.media.item_id, "update": update, "overwrite": true,
+            }),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    pub(crate) async fn set_private_playlist_image(
+        &self,
+        playlist: &Playlist,
+        image: Option<String>,
+    ) -> Result<Playlist, String> {
+        let current = playlist.media.metadata.as_ref().and_then(|metadata| {
+            metadata
+                .images
+                .iter()
+                .find(|image| image.image_type == "thumb")
+        });
+        if current.map(|image| image.path.as_str()) == image.as_deref() {
+            return Ok(playlist.clone());
+        }
+        let mut update: Value = self.execute_command(
+            "music/playlists/get",
+            json!({"item_id":playlist.media.item_id, "provider_instance_id_or_domain":"library", "allow_update_metadata":false}),
+        ).await?;
+        let metadata = update
+            .get_mut("metadata")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| "MA returned playlist metadata without an object".to_string())?;
+        let mut images = match metadata.remove("images") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Array(images)) => images,
+            _ => return Err("MA returned invalid playlist images".into()),
+        };
+        images.retain(|image| image["type"] != "thumb");
+        if let Some(path) = image {
+            images.insert(
+                0,
+                json!(super::models::media::MediaItemImage {
+                    image_type: "thumb".into(),
+                    path,
+                    provider: super::models::identifiers::ProviderInstanceId("builtin".into()),
+                    remotely_accessible: false,
+                    proxy_id: None,
+                }),
+            );
+        }
+        metadata.insert("images".into(), json!(images));
+        self.execute_command(
+            "music/playlists/update",
+            json!({
+                "item_id": playlist.media.item_id,
+                "update": update, "overwrite": true,
+            }),
+        )
+        .await
+    }
+
+    pub(crate) async fn delete_private_playlist(&self, playlist_id: &str) -> Result<(), String> {
+        self.execute_command::<Value>(
+            "music/library/remove_item",
+            json!({"media_type": "playlist", "library_item_id": playlist_id}),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    pub(crate) async fn get_private_playlist(&self, playlist_id: &str) -> Result<Playlist, String> {
+        let user = self.get_current_user().await?;
+        let owned: Playlist = self.execute_command("music/playlists/get", json!({
+            "item_id": playlist_id, "provider_instance_id_or_domain": "library", "allow_update_metadata": false,
+        })).await?;
+        if !owned.access.as_ref().is_some_and(|access| {
+            access.owner.as_deref() == Some(user.user_id.as_str())
+                && access.sharing == PlaylistSharing::Private
+        }) {
+            return Err("playlist is not a private playlist owned by the current user".into());
+        }
+        Ok(owned)
+    }
+
     pub(crate) async fn add_playlist_tracks(
         &self,
         playlist_id: &str,
         uris: Vec<String>,
     ) -> Result<(), String> {
-        self.execute_command::<Value>(
-            "music/playlists/add_playlist_tracks",
-            json!({ "db_playlist_id": playlist_id, "uris": uris }),
-        )
-        .await
-        .map(|_| ())
+        let task = self
+            .execute_command::<PlaylistTask>(
+                "music/playlists/add_playlist_tracks",
+                json!({ "db_playlist_id": playlist_id, "uris": uris }),
+            )
+            .await?;
+        self.wait_for_playlist_task(task).await
     }
 
     pub(crate) async fn remove_playlist_tracks(
@@ -401,18 +606,83 @@ impl MusicAssistantClient {
         playlist_id: &str,
         positions_to_remove: Vec<u32>,
     ) -> Result<(), String> {
-        self.execute_command::<Value>(
-            "music/playlists/remove_playlist_tracks",
-            json!({
-                "db_playlist_id": playlist_id,
-                "positions_to_remove": positions_to_remove,
-            }),
-        )
-        .await
-        .map(|_| ())
+        let task = self
+            .execute_command::<PlaylistTask>(
+                "music/playlists/remove_playlist_tracks",
+                json!({
+                    "db_playlist_id": playlist_id,
+                    "positions_to_remove": positions_to_remove,
+                }),
+            )
+            .await?;
+        self.wait_for_playlist_task(task).await
+    }
+
+    // Playback and queue commands.
+    pub(crate) async fn execute_player_command(
+        &self,
+        player_id: &PlayerId,
+        command: PlayerCommand,
+    ) -> Result<(), String> {
+        let (name, arguments) = match command {
+            PlayerCommand::Play => ("play", json!({"player_id":player_id})),
+            PlayerCommand::Pause => ("pause", json!({"player_id":player_id})),
+            PlayerCommand::Stop => ("stop", json!({"player_id":player_id})),
+            PlayerCommand::Next => ("next", json!({"player_id":player_id})),
+            PlayerCommand::Previous => ("previous", json!({"player_id":player_id})),
+            PlayerCommand::Seek(position) => {
+                if !position.is_finite() || position < 0.0 {
+                    return Err("seek position must be finite and nonnegative".into());
+                }
+                (
+                    "seek",
+                    json!({"player_id":player_id,"position":position.round() as i64}),
+                )
+            }
+            PlayerCommand::Volume(volume) => (
+                "volume_set",
+                json!({"player_id":player_id,"volume_level":volume.min(100)}),
+            ),
+            PlayerCommand::Mute(muted) => {
+                ("volume_mute", json!({"player_id":player_id,"muted":muted}))
+            }
+        };
+        self.execute_command::<Value>(&format!("players/cmd/{name}"), arguments)
+            .await
+            .map(|_| ())
+    }
+
+    pub(crate) async fn execute_queue_command(
+        &self,
+        queue_id: &QueueId,
+        command: QueueCommand,
+    ) -> Result<(), String> {
+        let (name, arguments) = queue_command_request(queue_id, command)?;
+        self.execute_command::<Value>(&format!("player_queues/{name}"), arguments)
+            .await
+            .map(|_| ())
     }
 
     // Remote player and queue queries.
+    pub(crate) async fn get_player(
+        &self,
+        player_id: &PlayerId,
+    ) -> Result<MusicAssistantPlayer, String> {
+        self.execute_command("players/get", json!({"player_id": player_id}))
+            .await
+    }
+
+    pub(crate) async fn get_active_queue(
+        &self,
+        player_id: &PlayerId,
+    ) -> Result<Option<MusicAssistantQueue>, String> {
+        self.execute_command(
+            "player_queues/get_active_queue",
+            json!({"player_id": player_id}),
+        )
+        .await
+    }
+
     pub(crate) async fn get_players(
         &self,
         return_unavailable: bool,
@@ -445,83 +715,30 @@ impl MusicAssistantClient {
         .await
     }
 
-    // HTTP command transport.
-    fn complete_user_data_item(
-        &self,
-        mut item: MediaItem,
-    ) -> futures_util::future::BoxFuture<'_, Result<MediaItem, String>> {
-        Box::pin(async move {
-            if matches!(&item, MediaItem::Playlist(playlist) if playlist.media.provider.as_str() == super::user_data::LOCAL_PLAYLIST_PROVIDER)
-            {
-                return Ok(item);
-            }
-            if item.fields().provider_mappings.is_empty() {
-                let fields = item.fields();
-                item = match &item {
-                    MediaItem::Track(_) => MediaItem::Track(
-                        self.get_track(&fields.item_id, fields.provider.as_str())
-                            .await?,
-                    ),
-                    MediaItem::Album(_) => MediaItem::Album(
-                        self.get_album(&fields.item_id, fields.provider.as_str())
-                            .await?,
-                    ),
-                    MediaItem::Artist(_) => MediaItem::Artist(
-                        self.get_artist(&fields.item_id, fields.provider.as_str())
-                            .await?,
-                    ),
-                    MediaItem::Playlist(_) => MediaItem::Playlist(
-                        self.get_playlist(&fields.item_id, fields.provider.as_str())
-                            .await?,
-                    ),
-                    _ => return Err("unsupported user data media type".to_string()),
-                };
-                if item.fields().provider_mappings.is_empty() {
-                    return Err(format!(
-                        "complete provider mappings are required for {}:{}",
-                        item.fields().provider.as_str(),
-                        item.fields().item_id.as_str()
-                    ));
-                }
-            }
-            match &mut item {
-                MediaItem::Track(track) => {
-                    for artist in &mut track.artists {
-                        let MediaItem::Artist(completed) = self
-                            .complete_user_data_item(MediaItem::Artist(artist.clone()))
-                            .await?
-                        else {
-                            return Err("expected a completed artist".to_string());
-                        };
-                        *artist = completed;
+    // Accepted playlist operations must reach a terminal task state.
+    async fn wait_for_playlist_task(&self, mut task: PlaylistTask) -> Result<(), String> {
+        tokio::time::timeout(Duration::from_secs(120), async {
+            loop {
+                match task.status.as_str() {
+                    "success" => return Ok(()),
+                    "failed" | "cancelled" => {
+                        return Err(task
+                            .last_error
+                            .unwrap_or_else(|| "playlist operation failed".into()))
                     }
-                    if let Some(album) = track.album.take() {
-                        let MediaItem::Album(completed) = self
-                            .complete_user_data_item(MediaItem::Album(album))
-                            .await?
-                        else {
-                            return Err("expected a completed album".to_string());
-                        };
-                        track.album = Some(completed);
-                    }
+                    _ => {}
                 }
-                MediaItem::Album(album) => {
-                    for artist in &mut album.artists {
-                        let MediaItem::Artist(completed) = self
-                            .complete_user_data_item(MediaItem::Artist(artist.clone()))
-                            .await?
-                        else {
-                            return Err("expected a completed artist".to_string());
-                        };
-                        *artist = completed;
-                    }
-                }
-                _ => {}
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                task = self
+                    .execute_command("tasks/get", json!({"task_id": task.id}))
+                    .await?;
             }
-            Ok(item)
         })
+        .await
+        .map_err(|_| "playlist update confirmation timed out".to_string())?
     }
 
+    // HTTP command transport.
     async fn provider_availability(&self) -> Option<Vec<ProviderInstance>> {
         let mut snapshots = PROVIDER_AVAILABILITY.lock().await;
         snapshots.retain(|snapshot| snapshot.expires_at > Instant::now());
@@ -530,6 +747,7 @@ impl MusicAssistantClient {
         }) {
             return snapshot.providers.clone();
         }
+        drop(snapshots);
         let providers = tokio::time::timeout(
             Duration::from_secs(5),
             self.execute_http_command::<Vec<ProviderInstance>>("providers", json!({})),
@@ -537,6 +755,10 @@ impl MusicAssistantClient {
         .await
         .ok()
         .and_then(Result::ok);
+        let mut snapshots = PROVIDER_AVAILABILITY.lock().await;
+        snapshots.retain(|snapshot| {
+            snapshot.endpoint != self.endpoint || snapshot.access_token != self.access_token
+        });
         snapshots.push(ProviderAvailabilitySnapshot {
             endpoint: self.endpoint.clone(),
             access_token: self.access_token.clone(),
@@ -547,7 +769,7 @@ impl MusicAssistantClient {
         providers
     }
 
-    pub(crate) async fn execute_command<Response>(
+    async fn execute_command<Response>(
         &self,
         command: &str,
         arguments: Value,
@@ -708,38 +930,353 @@ fn merge_item_reference_arguments(item_id: &MediaId, provider: &str, arguments: 
     merged
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{item_reference_arguments, merge_item_reference_arguments, queue_media_payload};
-    use crate::music_assistant::models::identifiers::MediaId;
-    use crate::music_assistant::models::media::{MediaItem, Track};
-    use crate::music_assistant::user_data::{UserDataController, UserDataSnapshot};
-    use crate::music_assistant::user_data_store::StoredUserData;
-    use serde_json::{json, Value};
+fn queue_command_request(
+    queue_id: &QueueId,
+    command: QueueCommand,
+) -> Result<(&'static str, Value), String> {
+    let (name, arguments) = match command {
+        QueueCommand::Clear => ("clear", json!({"queue_id": queue_id})),
+        QueueCommand::PlayMedia {
+            mut media,
+            option,
+            start_item,
+            shuffle,
+        } => {
+            let start = start_item
+                .map(|index| {
+                    media
+                        .get(index)
+                        .cloned()
+                        .ok_or_else(|| "start item is outside the media request".to_string())
+                })
+                .transpose()?
+                .map(queue_media_payload);
+            if shuffle {
+                media.shuffle(&mut rand::rng());
+            }
+            let media = media
+                .into_iter()
+                .map(queue_media_payload)
+                .collect::<Vec<_>>();
+            (
+                "play_media",
+                json!({"queue_id":queue_id,"media":media,"option":option,"start_item":start,"sort_by":"original"}),
+            )
+        }
+        QueueCommand::PlayIndex(index) => {
+            ("play_index", json!({"queue_id":queue_id,"index":index}))
+        }
+        QueueCommand::PlayItem(item_id) => {
+            ("play_index", json!({"queue_id":queue_id,"index":item_id}))
+        }
+        QueueCommand::MoveItem { item_id, shift } => (
+            "move_item",
+            json!({"queue_id":queue_id,"queue_item_id":item_id,"pos_shift":shift}),
+        ),
+        QueueCommand::DeleteItem(item_id) => (
+            "delete_item",
+            json!({"queue_id":queue_id,"item_id_or_index":item_id}),
+        ),
+        QueueCommand::MoveItemToEnd(item_id) => (
+            "move_item_end",
+            json!({"queue_id":queue_id,"queue_item_id":item_id}),
+        ),
+        QueueCommand::Shuffle(enabled) => (
+            "shuffle",
+            json!({"queue_id":queue_id,"shuffle_enabled":enabled}),
+        ),
+        QueueCommand::Repeat(mode) => ("repeat", json!({"queue_id":queue_id,"repeat_mode":mode})),
+        QueueCommand::Autoplay(enabled) => (
+            "autoplay",
+            json!({"queue_id":queue_id,"autoplay_enabled":enabled}),
+        ),
+    };
+    Ok((name, arguments))
+}
 
-    #[tokio::test]
-    async fn complete_ingestion_keeps_mapped_media_without_network_requests() {
-        let client = super::MusicAssistantClient::new("http://127.0.0.1:0", None);
-        let item: MediaItem = serde_json::from_value(json!({
-            "media_type": "track", "item_id": "track", "provider": "ytmusic--test", "name": "Track",
-            "provider_mappings": [{ "item_id": "video", "provider_domain": "ytmusic", "provider_instance": "ytmusic--test" }],
-            "metadata": { "lyrics": "Full lyrics" }
-        })).unwrap();
-        let completed = client
-            .complete_user_data_media(vec![item.clone()])
-            .await
+#[cfg(test)]
+mod command_tests {
+    use super::*;
+
+    #[test]
+    fn queue_contract_uses_ma_item_ids_and_separate_clear_command() {
+        let queue = QueueId("room".into());
+        for (command, expected_name, expected) in [
+            (QueueCommand::Clear, "clear", json!({"queue_id":"room"})),
+            (
+                QueueCommand::MoveItemToEnd(QueueItemId("stable-item".into())),
+                "move_item_end",
+                json!({"queue_id":"room", "queue_item_id":"stable-item"}),
+            ),
+            (
+                QueueCommand::MoveItem {
+                    item_id: QueueItemId("stable-item".into()),
+                    shift: 0,
+                },
+                "move_item",
+                json!({"queue_id":"room", "queue_item_id":"stable-item", "pos_shift":0}),
+            ),
+            (
+                QueueCommand::Autoplay(true),
+                "autoplay",
+                json!({"queue_id":"room", "autoplay_enabled":true}),
+            ),
+            (
+                QueueCommand::Autoplay(false),
+                "autoplay",
+                json!({"queue_id":"room", "autoplay_enabled":false}),
+            ),
+            (
+                QueueCommand::PlayItem(QueueItemId("stable-item".into())),
+                "play_index",
+                json!({"queue_id":"room", "index":"stable-item"}),
+            ),
+            (
+                QueueCommand::DeleteItem(QueueItemId("stable-item".into())),
+                "delete_item",
+                json!({"queue_id":"room", "item_id_or_index":"stable-item"}),
+            ),
+            (
+                QueueCommand::MoveItem {
+                    item_id: QueueItemId("stable-item".into()),
+                    shift: -2,
+                },
+                "move_item",
+                json!({"queue_id":"room", "queue_item_id":"stable-item", "pos_shift":-2}),
+            ),
+        ] {
+            let (name, arguments) = queue_command_request(&queue, command).unwrap();
+            assert_eq!(name, expected_name);
+            assert_eq!(arguments, expected);
+        }
+    }
+
+    #[test]
+    fn media_items_are_serialized_in_original_order_without_shuffle() {
+        let media: Vec<MediaItem> = serde_json::from_value(json!([
+            {"media_type":"album", "item_id":"album", "provider":"library", "name":"Album"},
+            {"media_type":"track", "item_id":"track", "provider":"library", "name":"Track"}
+        ]))
+        .unwrap();
+        let (name, arguments) = queue_command_request(
+            &QueueId("room".into()),
+            QueueCommand::PlayMedia {
+                media,
+                option: QueueOption::Play,
+                start_item: Some(1),
+                shuffle: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(name, "play_media");
+        assert_eq!(arguments["media"][0]["media_type"], "album");
+        assert_eq!(arguments["media"][1]["item_id"], "track");
+        assert_eq!(arguments["start_item"], arguments["media"][1]);
+        assert!(arguments.get("shuffle").is_none());
+        assert!(arguments.get("radio_mode").is_none());
+        assert!(arguments.get("startDownload").is_none());
+    }
+
+    #[test]
+    fn shuffle_reorders_items_locally_and_preserves_the_explicit_start_item() {
+        let media: Vec<MediaItem> = serde_json::from_value(json!([
+            {"media_type":"track", "item_id":"first", "provider":"library", "name":"First"},
+            {"media_type":"track", "item_id":"second", "provider":"library", "name":"Second"},
+            {"media_type":"track", "item_id":"third", "provider":"library", "name":"Third"}
+        ]))
+        .unwrap();
+        let original: Vec<Value> = media.iter().cloned().map(queue_media_payload).collect();
+        let mut observed_reordering = false;
+        for _ in 0..32 {
+            let (name, arguments) = queue_command_request(
+                &QueueId("room".into()),
+                QueueCommand::PlayMedia {
+                    media: media.clone(),
+                    option: QueueOption::Play,
+                    start_item: Some(1),
+                    shuffle: true,
+                },
+            )
             .unwrap();
-        assert_eq!(completed, vec![item]);
+            assert_eq!(name, "play_media");
+            let shuffled = arguments["media"].as_array().unwrap();
+            assert_eq!(shuffled.len(), original.len());
+            for item in &original {
+                assert_eq!(shuffled.iter().filter(|entry| *entry == item).count(), 1);
+            }
+            assert_eq!(arguments["start_item"], original[1]);
+            assert!(arguments.get("shuffle").is_none());
+            assert_eq!(arguments["sort_by"], "original");
+            observed_reordering |= shuffled != &original;
+        }
+        assert!(observed_reordering);
     }
 
     #[tokio::test]
-    async fn incomplete_ingestion_fails_without_returning_partial_media() {
-        let client = super::MusicAssistantClient::new("http://127.0.0.1:0", None);
-        let item: MediaItem = serde_json::from_value(json!({
-            "media_type": "track", "item_id": "track", "provider": "ytmusic--test", "name": "Track"
+    async fn rejects_invalid_seek_and_start_without_sending_a_request() {
+        let client = MusicAssistantClient::new("http://127.0.0.1:1", None);
+        assert!(client
+            .execute_player_command(&PlayerId("player".into()), PlayerCommand::Seek(f64::NAN))
+            .await
+            .unwrap_err()
+            .contains("finite"));
+        assert!(client
+            .execute_queue_command(
+                &QueueId("queue".into()),
+                QueueCommand::PlayMedia {
+                    media: Vec::new(),
+                    option: QueueOption::Play,
+                    start_item: Some(1),
+                    shuffle: false,
+                }
+            )
+            .await
+            .unwrap_err()
+            .contains("outside"));
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use super::{item_reference_arguments, merge_item_reference_arguments, queue_media_payload};
+    use crate::music_assistant::models::identifiers::MediaId;
+    use crate::music_assistant::models::media::{MediaItem, Track};
+    use crate::music_assistant::user_data::UserDataSnapshot;
+    use serde_json::{json, Value};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    pub(crate) fn server(
+        responses: Vec<(&'static str, Value)>,
+    ) -> (MusicAssistantClient, std::thread::JoinHandle<Vec<Value>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let worker = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            let mut responses = responses.into_iter().peekable();
+            while responses.peek().is_some() {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut bytes = Vec::new();
+                let (body_start, length) = loop {
+                    let mut buffer = [0; 4096];
+                    let read = stream.read(&mut buffer).unwrap();
+                    assert!(read > 0);
+                    bytes.extend_from_slice(&buffer[..read]);
+                    if let Some(end) = bytes.windows(4).position(|value| value == b"\r\n\r\n") {
+                        let headers = String::from_utf8_lossy(&bytes[..end]);
+                        let length: usize = headers
+                            .lines()
+                            .find_map(|line| {
+                                line.to_ascii_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .map(|value| value.trim().parse().unwrap())
+                            })
+                            .unwrap();
+                        break (end + 4, length);
+                    }
+                };
+                while bytes.len() < body_start + length {
+                    let mut buffer = [0; 4096];
+                    let read = stream.read(&mut buffer).unwrap();
+                    assert!(read > 0);
+                    bytes.extend_from_slice(&buffer[..read]);
+                }
+                let request: Value =
+                    serde_json::from_slice(&bytes[body_start..body_start + length]).unwrap();
+                let response = if request["command"] == "providers" {
+                    json!([])
+                } else {
+                    let (expected, response) = responses.next().unwrap();
+                    assert_eq!(request["command"], expected);
+                    requests.push(request);
+                    response
+                };
+                let status = response
+                    .get("test_http_status")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(200);
+                let body = response.to_string();
+                write!(stream, "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+            }
+            requests
+        });
+        (
+            MusicAssistantClient::new(&format!("http://{address}"), None),
+            worker,
+        )
+    }
+
+    #[tokio::test]
+    async fn removing_a_favorite_sends_null_not_dislike() {
+        let (client, worker) = server(vec![("music/favorites/set_item", Value::Null)]);
+        let item = serde_json::from_value(
+            json!({"media_type":"track", "item_id":"1", "provider":"library", "name":"Track"}),
+        )
+        .unwrap();
+        client.set_favorite(&item, false).await.unwrap();
+        let requests = worker.join().unwrap();
+        assert!(requests[0]["args"]["favorite"].is_null());
+    }
+
+    #[tokio::test]
+    async fn playlist_tasks_are_confirmed_and_failures_are_returned() {
+        for status in ["success", "failed"] {
+            let (client, worker) = server(vec![
+                (
+                    "music/playlists/add_playlist_tracks",
+                    json!({"id":"task", "status":"pending"}),
+                ),
+                (
+                    "tasks/get",
+                    json!({"id":"task", "status":status, "last_error":"test failure"}),
+                ),
+            ]);
+            let result = client
+                .add_playlist_tracks("42", vec!["test://track/a".into()])
+                .await;
+            assert_eq!(result.is_ok(), status == "success");
+            worker.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn playlist_favorite_preserves_all_three_server_states() {
+        for favorite in [Value::Null, json!(true), json!(false)] {
+            let playlist: Playlist = serde_json::from_value(json!({
+                "item_id":"42", "provider":"library", "name":"Playlist", "favorite":favorite
+            }))
+            .unwrap();
+            assert_eq!(
+                serde_json::to_value(playlist).unwrap()["favorite"],
+                favorite
+            );
+        }
+        let playlist: Playlist = serde_json::from_value(json!({
+            "item_id":"42", "provider":"library", "name":"Playlist"
         }))
         .unwrap();
-        assert!(client.complete_user_data_media(vec![item]).await.is_err());
+        assert!(serde_json::to_value(playlist).unwrap()["favorite"].is_null());
+    }
+
+    #[tokio::test]
+    async fn private_playlist_creation_uses_default_builtin_and_sets_private_ownership() {
+        let playlist = json!({"item_id":"42", "provider":"library", "name":"Playlist"});
+        let (client, worker) = server(vec![
+            ("music/playlists/create_playlist", playlist.clone()),
+            ("music/playlists/set_access", playlist),
+        ]);
+        client
+            .create_private_playlist("Playlist", "user-one")
+            .await
+            .unwrap();
+        let requests = worker.join().unwrap();
+        assert_eq!(requests[0]["args"], json!({"name":"Playlist"}));
+        assert_eq!(requests[1]["args"]["owner"], "user-one");
+        assert_eq!(requests[1]["args"]["sharing"], "private");
     }
 
     #[test]
@@ -826,7 +1363,7 @@ mod tests {
     }
 
     #[test]
-    fn persisted_favorites_and_playlist_items_keep_complete_payloads() {
+    fn snapshot_favorites_and_playlist_items_keep_complete_queue_payloads() {
         for (domain, provider) in [
             ("ytmusic", "ytmusic--test"),
             ("deezer", "deezer--test"),
@@ -853,19 +1390,13 @@ mod tests {
                 let snapshot: UserDataSnapshot = serde_json::from_value(json!({
                     "favorites": { "tracks": [track], "albums": [album] },
                     "playlists": [{
-                        "item_id": "local", "provider": "mashin", "name": "Playlist",
+                        "item_id": "42", "provider": "library", "name": "Playlist",
                         "items": [track, track],
                     }],
                 }))
                 .unwrap();
-                let preferences = serde_json::from_value(json!({
-                    "mashin.user_data_version": 5,
-                    "mashin.user_data": StoredUserData::from_snapshot(&snapshot),
-                }))
-                .unwrap();
-                let restored = UserDataController::from_preferences(preferences)
-                    .unwrap()
-                    .snapshot();
+                let restored: UserDataSnapshot =
+                    serde_json::from_value(serde_json::to_value(snapshot).unwrap()).unwrap();
                 let favorite_track = restored.favorites.tracks[0].clone();
                 assert_eq!(favorite_track.media.provider_mappings.len(), 1);
                 let expected_track: Track = serde_json::from_value(track).unwrap();

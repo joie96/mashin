@@ -1,7 +1,6 @@
 use super::identifiers::{AccessToken, ProviderInstanceId, UserId};
 use super::media::deserialize_nullable_vec;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -30,8 +29,6 @@ pub(crate) struct MusicAssistantUser {
     pub(crate) provider_filter: Vec<ProviderInstanceId>,
     #[serde(default, deserialize_with = "deserialize_nullable_vec")]
     pub(crate) player_filter: Vec<String>,
-    #[serde(default)]
-    pub(crate) preferences: Map<String, Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ServerInfo {

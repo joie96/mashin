@@ -14,7 +14,11 @@ player.
 - Choose lossless FLAC or Opus at 96, 128, 192 or 256 kb/s for local playback.
 - See playback progress and buffered audio ahead of the current position.
 
-Favorites and Mashin playlists are stored in your Music Assistant user preferences.
+Favorites use Music Assistant's normal per-user favorites. Personal playlists are
+private Music Assistant playlists owned by your signed-in account. Favorites and
+playlists are managed exclusively through Music Assistant's official library APIs.
+Favorite changes appear immediately and synchronize in memory, independently per
+item. Pending changes are not persisted and are lost when the app exits.
 Scrobbling is handled by Music Assistant and its configured integrations.
 
 ## Getting Started

@@ -1,9 +1,9 @@
-//! JPEG collage for local playlist artwork, loaded outside the core coordinator lock.
+//! Randomized JPEG collage for MA playlist artwork, loaded outside the core coordinator lock.
 
 use super::models::media::{MediaItemImage, Track};
 use base64::Engine;
 use image::{codecs::jpeg::JpegEncoder, imageops, DynamicImage, Rgba, RgbaImage};
-use std::collections::HashSet;
+use rand::seq::SliceRandom;
 use std::time::Duration;
 
 const COLLAGE_SIZE: u32 = 500;
@@ -25,10 +25,11 @@ fn image_source(image: &MediaItemImage, base_url: &str) -> Option<String> {
     (!image.path.is_empty()).then(|| image.path.clone())
 }
 
-fn image_paths(tracks: &[Track], base_url: &str) -> Vec<String> {
-    let mut seen = HashSet::new();
-    tracks
-        .iter()
+fn image_paths(tracks: &[Track], base_url: &str, random: &mut impl rand::Rng) -> Vec<String> {
+    let mut candidates = tracks.iter().collect::<Vec<_>>();
+    candidates.shuffle(random);
+    candidates
+        .into_iter()
         .filter_map(|track| {
             track
                 .album
@@ -51,7 +52,6 @@ fn image_paths(tracks: &[Track], base_url: &str) -> Vec<String> {
                         .and_then(|image| image_source(image, base_url))
                 })
         })
-        .filter(|path| seen.insert(path.clone()))
         .take(TILE_COUNT)
         .collect()
 }
@@ -124,7 +124,8 @@ pub(crate) async fn build_playlist_collage(tracks: &[Track], base_url: &str) -> 
         .build()
         .ok()?;
     let mut images = Vec::new();
-    for path in image_paths(tracks, base_url) {
+    let paths = image_paths(tracks, base_url, &mut rand::rng());
+    for path in paths {
         if let Some(image) = load_image(&path, &client).await {
             images.push(image);
         }
@@ -139,6 +140,27 @@ pub(crate) async fn build_playlist_collage(tracks: &[Track], base_url: &str) -> 
 mod tests {
     use super::*;
     use image::GenericImageView;
+    use rand::{rngs::StdRng, SeedableRng};
+
+    #[test]
+    fn random_selection_uses_four_distinct_items_from_the_entire_playlist() {
+        let tracks = (0..100).map(|index| serde_json::from_value(serde_json::json!({
+            "item_id": index.to_string(), "provider":"library", "name":"Track",
+            "image":{"type":"thumb", "path":format!("https://example.org/{index}.jpg"), "provider":"builtin"}
+        })).unwrap()).collect::<Vec<Track>>();
+        let mut random = StdRng::seed_from_u64(42);
+        let paths = image_paths(&tracks, "https://music.example", &mut random);
+        assert_eq!(paths.len(), 4);
+        assert_eq!(
+            paths.iter().collect::<std::collections::HashSet<_>>().len(),
+            4
+        );
+        assert!(paths
+            .iter()
+            .any(|path| !["0.jpg", "1.jpg", "2.jpg", "3.jpg"]
+                .iter()
+                .any(|suffix| path.ends_with(suffix))));
+    }
 
     #[test]
     fn collage_is_a_500_pixel_jpeg_data_uri_with_repeated_tiles() {
@@ -166,7 +188,7 @@ mod tests {
                     "provider": "library", "proxy_id": "album-1" }] } }
         })).unwrap();
         assert_eq!(
-            image_paths(&[track], "https://music.example/"),
+            image_paths(&[track], "https://music.example/", &mut rand::rng()),
             ["https://music.example/imageproxy/album-1"]
         );
     }
@@ -180,7 +202,7 @@ mod tests {
                 "metadata": { "images": [{ "type": "thumb", "path": "", "provider": "library" }] } }
         })).unwrap();
         assert_eq!(
-            image_paths(&[track], "https://music.example"),
+            image_paths(&[track], "https://music.example", &mut rand::rng()),
             ["https://music.example/track.jpg"]
         );
     }

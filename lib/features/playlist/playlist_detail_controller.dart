@@ -14,7 +14,9 @@ class PlaylistDetailController extends ChangeNotifier {
     required this.itemId,
     required this.providerInstanceIdOrDomain,
     this.userDataController,
-  });
+  }) {
+    userDataController?.addListener(_onUserDataChanged);
+  }
 
   final MashinCoreBridgeApi coreBridge;
   final String itemId;
@@ -28,6 +30,8 @@ class PlaylistDetailController extends ChangeNotifier {
   bool _isLoadingMetadata = true;
   bool _isLoadingTracks = true;
   bool _isPlaylistFavorite = false;
+  bool _hasLoadedPrivatePlaylist = false;
+  bool _isPlaylistDeleted = false;
   bool _isDisposed = false;
   int _loadGeneration = 0;
 
@@ -42,6 +46,7 @@ class PlaylistDetailController extends ChangeNotifier {
   void dispose() {
     _isDisposed = true;
     _loadGeneration++;
+    userDataController?.removeListener(_onUserDataChanged);
     super.dispose();
   }
 
@@ -51,10 +56,11 @@ class PlaylistDetailController extends ChangeNotifier {
   bool get isLoadingMetadata => _isLoadingMetadata;
   bool get isLoadingTracks => _isLoadingTracks;
   bool get isPlaylistFavorite => _isPlaylistFavorite;
+  bool get isPlaylistDeleted => _isPlaylistDeleted;
   bool get isEditable => _playlist?.isEditable ?? false;
-  bool get isLocalPlaylist =>
-      _playlist?.provider.trim().toLowerCase() ==
-      UserData.localPlaylistProvider;
+  bool get isPrivatePlaylist =>
+      _playlist != null &&
+      (userDataController?.isPrivatePlaylist(_playlist!) ?? false);
 
   String get playlistName {
     final String name = _playlist?.name.trim() ?? '';
@@ -103,19 +109,16 @@ class PlaylistDetailController extends ChangeNotifier {
 
       if (local != null) {
         final bool isUserPlaylist =
-            local.provider.trim().toLowerCase() ==
-            UserData.localPlaylistProvider;
+            userDataController?.isPrivatePlaylist(local) ?? false;
         final List<Track> storedTracks =
             userDataController
                 ?.tracksForPlaylist(local.itemId)
                 .toList(growable: false) ??
             const <Track>[];
 
-        // User playlists always come from local storage.
-        // Favorited online playlists may exist locally without tracks and
-        // should still load online to get fresh content.
+        // Private MA playlists use the Rust-owned snapshot, refreshed by MA events.
         if (isUserPlaylist || storedTracks.isNotEmpty) {
-          _loadLocalPlaylist(local, storedTracks);
+          _loadPrivatePlaylist(local, storedTracks);
           return;
         }
       }
@@ -133,7 +136,40 @@ class PlaylistDetailController extends ChangeNotifier {
     }
   }
 
-  void _loadLocalPlaylist(Playlist playlist, List<Track> storedTracks) {
+  void _onUserDataChanged() {
+    if (_isDisposed || _isPlaylistDeleted) return;
+    final local = _resolvePlaylistFromUserData(
+      itemId,
+      providerInstanceIdOrDomain,
+    );
+    if (local == null && _hasLoadedPrivatePlaylist) {
+      _loadGeneration++;
+      _isPlaylistDeleted = true;
+      _playlist = null;
+      _tracks = const <Track>[];
+      _favoriteOverrides.clear();
+      _isPlaylistFavorite = false;
+      _isLoadingMetadata = false;
+      _isLoadingTracks = false;
+      notifyListeners();
+      return;
+    }
+    if (local == null ||
+        !(userDataController?.isPrivatePlaylist(local) ?? false)) {
+      return;
+    }
+    _loadGeneration++;
+    _loadPrivatePlaylist(
+      local,
+      userDataController!.tracksForPlaylist(local.itemId),
+    );
+    _isLoadingMetadata = false;
+    _isLoadingTracks = false;
+    notifyListeners();
+  }
+
+  void _loadPrivatePlaylist(Playlist playlist, List<Track> storedTracks) {
+    _hasLoadedPrivatePlaylist = true;
     _playlist = userDataController?.withFavoriteStatus(playlist) ?? playlist;
 
     _tracks = List<Track>.unmodifiable(
@@ -366,8 +402,7 @@ class PlaylistDetailController extends ChangeNotifier {
 
     try {
       final bool isUserPlaylist =
-          current.provider.trim().toLowerCase() ==
-          UserData.localPlaylistProvider;
+          userDataController?.isPrivatePlaylist(current) ?? false;
 
       if (isUserPlaylist && userDataController != null) {
         await userDataController!.removePlaylistTracks(current.itemId, <Track>[
@@ -399,8 +434,8 @@ class PlaylistDetailController extends ChangeNotifier {
 
     final Playlist? current = _playlist;
     final bool isUserPlaylist =
-        current?.provider.trim().toLowerCase() ==
-        UserData.localPlaylistProvider;
+        current != null &&
+        (userDataController?.isPrivatePlaylist(current) ?? false);
 
     if (isUserPlaylist && userDataController != null) {
       final List<Track> tracks = items.whereType<Track>().toList(

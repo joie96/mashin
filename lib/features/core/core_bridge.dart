@@ -139,11 +139,15 @@ abstract class MashinCoreBridgeApi {
   Future<Map<String, dynamic>> loadUserData();
   Future<Map<String, dynamic>> getUserData();
   Future<void> setUserDataFavorites(List<MediaItem> items, bool favorite);
-  Future<void> createLocalPlaylist(String name);
-  Future<void> renameLocalPlaylist(String playlistId, String name);
-  Future<void> removeLocalPlaylist(String playlistId);
-  Future<void> addLocalPlaylistTracks(String playlistId, List<Track> tracks);
-  Future<void> removeLocalPlaylistTracks(String playlistId, List<String> uris);
+  Future<void> createPrivatePlaylist(String name);
+  Future<void> renamePrivatePlaylist(String playlistId, String name);
+  Future<void> refreshPrivatePlaylistCover(String playlistId);
+  Future<void> removePrivatePlaylist(String playlistId);
+  Future<void> addPrivatePlaylistTracks(String playlistId, List<Track> tracks);
+  Future<void> removePrivatePlaylistTracks(
+    String playlistId,
+    List<String> uris,
+  );
   Future<void> dispose();
 }
 
@@ -779,36 +783,44 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
       });
 
   @override
-  Future<void> createLocalPlaylist(String name) => _submitVoidOperation(
-    'createLocalPlaylist',
+  Future<void> createPrivatePlaylist(String name) => _submitVoidOperation(
+    'createPrivatePlaylist',
     <String, Object?>{'name': name},
   );
 
   @override
-  Future<void> renameLocalPlaylist(String playlistId, String name) =>
-      _submitVoidOperation('renameLocalPlaylist', <String, Object?>{
+  Future<void> renamePrivatePlaylist(String playlistId, String name) =>
+      _submitVoidOperation('renamePrivatePlaylist', <String, Object?>{
         'playlistId': playlistId,
         'name': name,
       });
 
   @override
-  Future<void> removeLocalPlaylist(String playlistId) => _submitVoidOperation(
-    'removeLocalPlaylist',
+  Future<void> refreshPrivatePlaylistCover(String playlistId) =>
+      _submitVoidOperation('refreshPrivatePlaylistCover', <String, Object?>{
+        'playlistId': playlistId,
+      });
+
+  @override
+  Future<void> removePrivatePlaylist(String playlistId) => _submitVoidOperation(
+    'removePrivatePlaylist',
     <String, Object?>{'playlistId': playlistId},
   );
 
   @override
-  Future<void> addLocalPlaylistTracks(String playlistId, List<Track> tracks) =>
-      _submitVoidOperation('addLocalPlaylistTracks', <String, Object?>{
-        'playlistId': playlistId,
-        'tracks': tracks.map(createMusicAssistantMediaItemPayload).toList(),
-      });
+  Future<void> addPrivatePlaylistTracks(
+    String playlistId,
+    List<Track> tracks,
+  ) => _submitVoidOperation('addPrivatePlaylistTracks', <String, Object?>{
+    'playlistId': playlistId,
+    'tracks': tracks.map(createMusicAssistantMediaItemPayload).toList(),
+  });
 
   @override
-  Future<void> removeLocalPlaylistTracks(
+  Future<void> removePrivatePlaylistTracks(
     String playlistId,
     List<String> uris,
-  ) => _submitVoidOperation('removeLocalPlaylistTracks', <String, Object?>{
+  ) => _submitVoidOperation('removePrivatePlaylistTracks', <String, Object?>{
     'playlistId': playlistId,
     'uris': uris,
   });
@@ -1159,25 +1171,25 @@ class _RustBindings {
           .lookupFunction<_NativeMediaFavoriteFn, _DartMediaFavoriteFn>(
             'mashin_core_set_user_data_favorites',
           ),
-      createLocalPlaylist = library
+      createPrivatePlaylist = library
           .lookupFunction<_NativeCodecFn, _DartCodecFn>(
-            'mashin_core_create_local_playlist',
+            'mashin_core_create_private_playlist',
           ),
-      renameLocalPlaylist = library
+      renamePrivatePlaylist = library
           .lookupFunction<_NativePlaylistMutationFn, _DartPlaylistMutationFn>(
-            'mashin_core_rename_local_playlist',
+            'mashin_core_rename_private_playlist',
           ),
-      removeLocalPlaylist = library
+      removePrivatePlaylist = library
           .lookupFunction<_NativeCodecFn, _DartCodecFn>(
-            'mashin_core_remove_local_playlist',
+            'mashin_core_remove_private_playlist',
           ),
-      addLocalPlaylistTracks = library
+      addPrivatePlaylistTracks = library
           .lookupFunction<_NativePlaylistMutationFn, _DartPlaylistMutationFn>(
-            'mashin_core_add_local_playlist_tracks',
+            'mashin_core_add_private_playlist_tracks',
           ),
-      removeLocalPlaylistTracks = library
+      removePrivatePlaylistTracks = library
           .lookupFunction<_NativePlaylistMutationFn, _DartPlaylistMutationFn>(
-            'mashin_core_remove_local_playlist_tracks',
+            'mashin_core_remove_private_playlist_tracks',
           ),
       startMusicAssistantQuery = library
           .lookupFunction<
@@ -1236,11 +1248,11 @@ class _RustBindings {
   final _DartGetStringFn loadUserData;
   final _DartGetStringFn getUserData;
   final _DartMediaFavoriteFn setUserDataFavorites;
-  final _DartCodecFn createLocalPlaylist;
-  final _DartPlaylistMutationFn renameLocalPlaylist;
-  final _DartCodecFn removeLocalPlaylist;
-  final _DartPlaylistMutationFn addLocalPlaylistTracks;
-  final _DartPlaylistMutationFn removeLocalPlaylistTracks;
+  final _DartCodecFn createPrivatePlaylist;
+  final _DartPlaylistMutationFn renamePrivatePlaylist;
+  final _DartCodecFn removePrivatePlaylist;
+  final _DartPlaylistMutationFn addPrivatePlaylistTracks;
+  final _DartPlaylistMutationFn removePrivatePlaylistTracks;
   final _DartStartMusicAssistantQueryFn startMusicAssistantQuery;
   final _DartPlaylistMutationFn addPlaylistTracks;
   final _DartPlaylistMutationFn removePlaylistTracks;

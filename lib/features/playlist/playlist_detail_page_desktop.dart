@@ -47,6 +47,7 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
 
   late final PlaylistDetailController _controller;
   final GlobalKey _headerMenuAnchorKey = GlobalKey();
+  bool _hasHandledPlaylistDeletion = false;
 
   @override
   void initState() {
@@ -69,7 +70,14 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
   }
 
   void _onControllerChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    if (_controller.isPlaylistDeleted && !_hasHandledPlaylistDeletion) {
+      _hasHandledPlaylistDeletion = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onPlaylistDeleted?.call();
+      });
+    }
+    setState(() {});
   }
 
   // Context menus
@@ -262,7 +270,7 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
           playlist,
         ], option: QueueOption.add),
       ),
-      if (!_controller.isLocalPlaylist) ...<ContextMenuAction>[
+      if (!_controller.isPrivatePlaylist) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
         ContextMenuAction(
           label: _controller.isPlaylistFavorite
@@ -274,12 +282,19 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
           onSelected: _controller.togglePlaylistFavorite,
         ),
       ],
-      if (_controller.isLocalPlaylist) ...<ContextMenuAction>[
+      if (_controller.isPrivatePlaylist) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
         ContextMenuAction(
           label: 'Umbenennen',
           icon: Icons.edit_outlined,
           onSelected: _renamePlaylist,
+        ),
+        ContextMenuAction(
+          label: 'Cover aktualisieren',
+          icon: Icons.image_outlined,
+          isEnabled: playlist.isEditable,
+          onSelected: () =>
+              widget.userDataController!.refreshPrivatePlaylistCover(playlist),
         ),
         ContextMenuAction(
           label: 'Löschen',
@@ -294,7 +309,9 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
   Future<void> _renamePlaylist() async {
     final Playlist? playlist = _controller.playlist;
     final UserData? userData = widget.userDataController;
-    if (playlist == null || userData == null || !_controller.isLocalPlaylist) {
+    if (playlist == null ||
+        userData == null ||
+        !_controller.isPrivatePlaylist) {
       return;
     }
 
@@ -311,7 +328,9 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
   Future<void> _deletePlaylist() async {
     final Playlist? playlist = _controller.playlist;
     final UserData? userData = widget.userDataController;
-    if (playlist == null || userData == null || !_controller.isLocalPlaylist) {
+    if (playlist == null ||
+        userData == null ||
+        !_controller.isPrivatePlaylist) {
       return;
     }
 
@@ -323,9 +342,7 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
       return;
     }
 
-    if (await userData.removePlaylist(playlist)) {
-      widget.onPlaylistDeleted?.call();
-    }
+    await userData.removePlaylist(playlist);
   }
 
   Future<void> _showItemMenu(MediaItem item, {BuildContext? anchorContext}) {
@@ -491,7 +508,7 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
           onTap: _controller.shufflePlaylist,
         ),
         const SizedBox(width: 24),
-        if (!_controller.isLocalPlaylist) ...<Widget>[
+        if (!_controller.isPrivatePlaylist) ...<Widget>[
           _HeaderIconButton(
             tooltip: _controller.isPlaylistFavorite
                 ? 'Favorit entfernen'

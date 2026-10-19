@@ -58,30 +58,33 @@ class _PlaylistShellBridge implements MashinCoreBridgeApi {
   String? cover;
 
   @override
+  Stream<Map<String, dynamic>> get events => const Stream.empty();
+
+  @override
   Future<Map<String, dynamic>> getUserData() async => <String, dynamic>{
     'favorites': <String, dynamic>{},
     'playlists': _playlists,
   };
 
   @override
-  Future<void> createLocalPlaylist(String name) async {
+  Future<void> createPrivatePlaylist(String name) async {
     _playlists.add(<String, dynamic>{
       'item_id': '1',
-      'provider': UserData.localPlaylistProvider,
+      'provider': 'library',
       'name': name,
       'items': <Map<String, dynamic>>[],
     });
   }
 
   @override
-  Future<void> renameLocalPlaylist(String playlistId, String name) async {
+  Future<void> renamePrivatePlaylist(String playlistId, String name) async {
     _playlists.singleWhere(
       (playlist) => playlist['item_id'] == playlistId,
     )['name'] = name;
   }
 
   @override
-  Future<void> addLocalPlaylistTracks(
+  Future<void> addPrivatePlaylistTracks(
     String playlistId,
     List<Track> tracks,
   ) async {
@@ -104,7 +107,7 @@ class _PlaylistShellBridge implements MashinCoreBridgeApi {
         <String, dynamic>{
           'type': 'thumb',
           'path': cover,
-          'provider': UserData.localPlaylistProvider,
+          'provider': 'library',
         },
       ],
     };
@@ -222,7 +225,7 @@ void main() {
       );
       expect(find.text('Neue Playlist'), findsNothing);
 
-      final Playlist playlist = (await session.userData.createLocalPlaylist(
+      final Playlist playlist = (await session.userData.createPrivatePlaylist(
         'Neue Playlist',
       ))!;
       await tester.pump();

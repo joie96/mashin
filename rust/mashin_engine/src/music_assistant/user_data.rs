@@ -1,74 +1,14 @@
-//! Canonical Mashin favorites and local playlists persisted in Music Assistant user preferences.
+//! Session-owned MA favorites, private playlists, and volatile favorite synchronization.
 
 use super::client::MusicAssistantClient;
-use super::models::identifiers::{MediaId, MediaUri, ProviderInstanceId};
-use super::models::media::{
-    Album, Artist, MediaItem, MediaItemFields, MediaItemImage, MediaItemMetadata, Playlist, Track,
-};
-use super::models::session::MusicAssistantUser;
-use super::user_data_store::StoredUserData;
+use super::models::identifiers::MediaId;
+use super::models::media::{Album, Artist, MediaItem, Playlist, PlaylistSharing, Track};
+use super::playlist_collage::build_playlist_collage;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
-use std::time::{Duration, Instant};
+use std::collections::HashMap;
 
-pub(crate) const VERSION_PREFERENCE_KEY: &str = "mashin.user_data_version";
-pub(crate) const USER_DATA_PREFERENCE_KEY: &str = "mashin.user_data";
-pub(crate) const USER_DATA_VERSION: u64 = 5;
-pub(crate) const LOCAL_PLAYLIST_PROVIDER: &str = "mashin";
-pub(crate) const WRITE_DEBOUNCE: Duration = Duration::from_secs(2);
-
-pub(crate) struct UserDataWriteRequest {
-    pub(crate) revision: u64,
-    pub(crate) username: String,
-    pub(crate) preferences: Map<String, Value>,
-    pub(crate) client: MusicAssistantClient,
-}
-
-pub(crate) async fn persist_write_request(
-    request: UserDataWriteRequest,
-) -> Result<MusicAssistantUser, String> {
-    request
-        .client
-        .update_user(serde_json::json!({
-            "username": request.username,
-            "preferences": request.preferences,
-        }))
-        .await
-}
-
-/// Runs one coalescing write worker for a session-owned UserData instance.
-pub(crate) async fn flush_scheduled_write_after_debounce<ReadDelay, ReadRequest, FinishWrite>(
-    mut read_delay: ReadDelay,
-    mut read_request: ReadRequest,
-    mut finish_write: FinishWrite,
-) where
-    ReadDelay: FnMut() -> Option<Duration>,
-    ReadRequest: FnMut() -> Option<UserDataWriteRequest>,
-    FinishWrite: FnMut(u64, Result<MusicAssistantUser, String>) -> bool,
-{
-    loop {
-        let Some(delay) = read_delay() else {
-            return;
-        };
-        tokio::time::sleep(delay).await;
-
-        let Some(remaining_delay) = read_delay() else {
-            return;
-        };
-        if !remaining_delay.is_zero() {
-            continue;
-        }
-
-        let Some(request) = read_request() else {
-            return;
-        };
-        let revision = request.revision;
-        let response = persist_write_request(request).await;
-        if finish_write(revision, response) {
-            return;
-        }
-    }
-}
+const PAGE_SIZE: usize = 500;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Favorites {
@@ -83,11 +23,27 @@ pub(crate) struct Favorites {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct LocalPlaylist {
+pub(crate) struct PrivatePlaylist {
     #[serde(flatten)]
     pub(crate) playlist: Playlist,
     #[serde(default)]
     pub(crate) items: Vec<Track>,
+}
+
+impl PrivatePlaylist {
+    // Metadata-only events must not regenerate randomized artwork or trigger write loops.
+    fn has_same_tracks(&self, other: &Self) -> bool {
+        self.items.len() == other.items.len()
+            && self.items.iter().zip(&other.items).all(|(left, right)| {
+                match (&left.media.uri, &right.media.uri) {
+                    (Some(left), Some(right)) => left == right,
+                    _ => {
+                        left.media.provider == right.media.provider
+                            && left.media.item_id == right.media.item_id
+                    }
+                }
+            })
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -95,686 +51,565 @@ pub(crate) struct UserDataSnapshot {
     #[serde(default)]
     pub(crate) favorites: Favorites,
     #[serde(default)]
-    pub(crate) playlists: Vec<LocalPlaylist>,
+    pub(crate) playlists: Vec<PrivatePlaylist>,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct UserDataController {
-    additional_preferences: Map<String, Value>,
-    snapshot: UserDataSnapshot,
-    mutation_revision: u64,
-    last_mutated_at: Option<Instant>,
-    write_is_scheduled: bool,
-}
-
-impl UserDataController {
-    // Construction and snapshot reads.
-    pub(crate) fn from_preferences(mut preferences: Map<String, Value>) -> Result<Self, String> {
-        let version = preferences.remove(VERSION_PREFERENCE_KEY);
-        let stored_data = preferences.remove(USER_DATA_PREFERENCE_KEY);
-        if preferences.contains_key("mashin.favorites")
-            || preferences.contains_key("mashin.playlists")
-        {
-            return Err("unsupported legacy user data preferences".to_string());
-        }
-        let snapshot = match (version, stored_data) {
-            (None, None) => UserDataSnapshot::default(),
-            (Some(version), stored_data) => {
-                let version = version.as_u64().ok_or("invalid user data version")?;
-                if version != USER_DATA_VERSION {
-                    return Err(format!("unsupported user data version {version}"));
-                }
-                let stored_data = stored_data.ok_or("missing version five user data")?;
-                let stored = serde_json::from_value::<StoredUserData>(stored_data)
-                    .map_err(|error| format!("decode version five user data failed: {error}"))?;
-                stored.validate()?;
-                stored.to_snapshot()?
-            }
-            (None, Some(_)) => return Err("missing user data version".to_string()),
-        };
-        Ok(Self {
-            additional_preferences: preferences,
-            snapshot,
-            mutation_revision: 0,
-            last_mutated_at: None,
-            write_is_scheduled: false,
-        })
-    }
-
-    pub(crate) fn snapshot(&self) -> UserDataSnapshot {
-        self.snapshot.clone()
-    }
-
-    pub(crate) fn preferences(&self) -> Result<Map<String, Value>, String> {
-        let stored = StoredUserData::from_snapshot(&self.snapshot);
-        stored.validate()?;
-        let mut preferences = self.additional_preferences.clone();
-        preferences.insert(
-            VERSION_PREFERENCE_KEY.to_string(),
-            Value::from(USER_DATA_VERSION),
-        );
-        preferences.insert(
-            USER_DATA_PREFERENCE_KEY.to_string(),
-            serde_json::to_value(stored)
-                .map_err(|error| format!("serialize user data failed: {error}"))?,
-        );
-        Ok(preferences)
-    }
-
-    // Delayed preference persistence.
-    pub(crate) fn schedule_write(&mut self) -> bool {
-        self.mutation_revision = self.mutation_revision.wrapping_add(1);
-        self.last_mutated_at = Some(Instant::now());
-        let should_schedule = !self.write_is_scheduled;
-        self.write_is_scheduled = true;
-        should_schedule
-    }
-
-    pub(crate) fn write_delay(&self, now: Instant) -> Option<Duration> {
-        self.write_is_scheduled.then(|| {
-            WRITE_DEBOUNCE
-                .saturating_sub(now.saturating_duration_since(self.last_mutated_at.unwrap_or(now)))
-        })
-    }
-
-    pub(crate) fn pending_write(&self) -> Option<(u64, Map<String, Value>)> {
-        self.write_is_scheduled
-            .then(|| {
-                self.preferences()
-                    .ok()
-                    .map(|preferences| (self.mutation_revision, preferences))
-            })
-            .flatten()
-    }
-
-    pub(crate) fn finish_write(
-        &mut self,
-        written_revision: u64,
-        preferences: Option<Map<String, Value>>,
-    ) -> bool {
-        if self.mutation_revision != written_revision {
-            return false;
-        }
-        self.write_is_scheduled = false;
-        if let Some(preferences) = preferences {
-            if let Ok(reloaded) = Self::from_preferences(preferences) {
-                self.additional_preferences = reloaded.additional_preferences;
-                self.snapshot = reloaded.snapshot;
-            }
-        }
-        true
-    }
-
-    // Favorite and local-playlist commands.
-    pub(crate) fn set_favorites(&mut self, media_items: Vec<MediaItem>, is_favorite: bool) {
-        for media_item in media_items {
-            match media_item {
-                MediaItem::Track(track) => {
-                    update_favorite(&mut self.snapshot.favorites.tracks, track, is_favorite)
-                }
-                MediaItem::Album(album) => {
-                    update_favorite(&mut self.snapshot.favorites.albums, album, is_favorite)
-                }
-                MediaItem::Playlist(playlist) => update_favorite(
-                    &mut self.snapshot.favorites.playlists,
-                    playlist,
-                    is_favorite,
-                ),
-                MediaItem::Artist(artist) => {
-                    update_favorite(&mut self.snapshot.favorites.artists, artist, is_favorite)
-                }
-                _ => {}
-            }
-        }
-    }
-
-    pub(crate) fn create_local_playlist(&mut self, name: String) -> Result<Playlist, String> {
-        let name = name.trim();
-        if name.is_empty() {
-            return Err("local playlist name is required".to_string());
-        }
-        let playlist = Playlist {
-            media: MediaItemFields {
-                item_id: MediaId(self.next_local_playlist_id()),
-                provider: ProviderInstanceId(LOCAL_PLAYLIST_PROVIDER.to_string()),
-                name: name.to_string(),
-                sort_name: Some(name.to_string()),
-                uri: Some(MediaUri(format!("mashin://playlist/{}", name))),
-                is_playable: true,
-                available: None,
-                ..default_media_fields()
-            },
-            owner: String::new(),
-            is_editable: true,
-            is_dynamic: false,
-        };
-        self.snapshot.playlists.push(LocalPlaylist {
-            playlist: playlist.clone(),
-            items: Vec::new(),
-        });
-        self.snapshot.playlists.sort_by(compare_local_playlists);
-        Ok(playlist)
-    }
-
-    pub(crate) fn rename_local_playlist(
+impl UserDataSnapshot {
+    // A targeted refresh must preserve unrelated playlists and their loaded contents.
+    pub(crate) fn replace_playlist(
         &mut self,
         playlist_id: &str,
-        name: String,
-    ) -> Result<(), String> {
-        let playlist = self.local_playlist_mut(playlist_id)?;
-        let name = name.trim();
-        if name.is_empty() {
-            return Err("local playlist name is required".to_string());
-        }
-        playlist.playlist.media.name = name.to_string();
-        playlist.playlist.media.sort_name = Some(name.to_string());
-        self.snapshot.playlists.sort_by(compare_local_playlists);
-        Ok(())
-    }
-
-    pub(crate) fn remove_local_playlist(&mut self, playlist_id: &str) -> Result<(), String> {
-        let playlist_id = playlist_id.trim();
-        let initial_count = self.snapshot.playlists.len();
-        self.snapshot.playlists.retain(|playlist| {
-            !playlist
-                .playlist
-                .media
-                .item_id
-                .as_str()
-                .eq_ignore_ascii_case(playlist_id)
-        });
-        if self.snapshot.playlists.len() == initial_count {
-            return Err("local playlist was not found".to_string());
-        }
-        Ok(())
-    }
-
-    pub(crate) fn add_local_playlist_tracks(
-        &mut self,
-        playlist_id: &str,
-        tracks: Vec<Track>,
-    ) -> Result<(), String> {
-        self.local_playlist_mut(playlist_id)?.items.extend(tracks);
-        Ok(())
-    }
-
-    pub(crate) fn remove_local_playlist_tracks(
-        &mut self,
-        playlist_id: &str,
-        track_uris: Vec<String>,
-    ) -> Result<(), String> {
-        let track_uris: Vec<String> = track_uris
-            .into_iter()
-            .map(|uri| uri.trim().to_ascii_lowercase())
-            .filter(|uri| !uri.is_empty())
-            .collect();
-        if track_uris.is_empty() {
-            return Ok(());
-        }
-        self.local_playlist_mut(playlist_id)?.items.retain(|track| {
-            track.media.uri.as_ref().is_none_or(|uri| {
-                !track_uris
-                    .iter()
-                    .any(|candidate| candidate.eq_ignore_ascii_case(uri.as_str()))
-            })
-        });
-        Ok(())
-    }
-
-    pub(crate) fn set_local_playlist_cover(
-        &mut self,
-        playlist_id: &str,
-        data_uri: Option<String>,
-        clear_when_empty: bool,
-    ) -> Result<(), String> {
-        let playlist = self.local_playlist_mut(playlist_id)?;
-        if let Some(data_uri) = data_uri {
-            let metadata = playlist
-                .playlist
-                .media
-                .metadata
-                .get_or_insert_with(MediaItemMetadata::default);
-            metadata.images = vec![MediaItemImage {
-                image_type: "thumb".to_string(),
-                path: data_uri,
-                provider: ProviderInstanceId(LOCAL_PLAYLIST_PROVIDER.to_string()),
-                remotely_accessible: false,
-                proxy_id: None,
-            }];
-        } else if clear_when_empty {
-            if let Some(metadata) = playlist.playlist.media.metadata.as_mut() {
-                metadata.images.clear();
-            }
-        }
-        Ok(())
-    }
-
-    fn local_playlist_mut(&mut self, playlist_id: &str) -> Result<&mut LocalPlaylist, String> {
-        self.snapshot
-            .playlists
-            .iter_mut()
-            .find(|playlist| {
-                playlist
-                    .playlist
-                    .media
-                    .item_id
-                    .as_str()
-                    .eq_ignore_ascii_case(playlist_id.trim())
-            })
-            .ok_or_else(|| "local playlist was not found".to_string())
-    }
-
-    fn next_local_playlist_id(&self) -> String {
-        self.snapshot
+        playlist: Option<PrivatePlaylist>,
+    ) {
+        let position = self
             .playlists
             .iter()
-            .filter_map(|playlist| playlist.playlist.media.item_id.as_str().parse::<u64>().ok())
-            .max()
-            .unwrap_or(0)
-            .saturating_add(1)
-            .to_string()
-    }
-}
-
-fn update_favorite<T: FavoriteMedia>(favorites: &mut Vec<T>, mut item: T, is_favorite: bool) {
-    let Some(uri) = item.media_uri() else {
-        return;
-    };
-    if let Some(index) = favorites.iter().position(|favorite| {
-        favorite
-            .media_uri()
-            .is_some_and(|favorite_uri| favorite_uri.eq_ignore_ascii_case(uri))
-    }) {
-        if !is_favorite {
-            favorites.remove(index);
-        }
-        return;
-    }
-    if is_favorite {
-        item.set_favorite();
-        favorites.push(item);
-    }
-}
-
-trait FavoriteMedia {
-    fn media_uri(&self) -> Option<&str>;
-    fn set_favorite(&mut self);
-}
-
-macro_rules! favorite_media {
-    ($type:ty) => {
-        impl FavoriteMedia for $type {
-            fn media_uri(&self) -> Option<&str> {
-                self.media.uri.as_ref().map(|uri| uri.as_str())
+            .position(|entry| entry.playlist.media.item_id.as_str() == playlist_id);
+        match (position, playlist) {
+            (Some(position), Some(playlist)) => self.playlists[position] = playlist,
+            (Some(position), None) => {
+                self.playlists.remove(position);
             }
-            fn set_favorite(&mut self) {
-                self.media.favorite = true;
-            }
+            (None, Some(playlist)) => self.playlists.push(playlist),
+            (None, None) => {}
         }
-    };
-}
-
-favorite_media!(Track);
-favorite_media!(Album);
-favorite_media!(Playlist);
-favorite_media!(Artist);
-
-fn default_media_fields() -> MediaItemFields {
-    MediaItemFields {
-        item_id: MediaId(String::new()),
-        provider: ProviderInstanceId(String::new()),
-        name: String::new(),
-        version: String::new(),
-        sort_name: None,
-        uri: None,
-        external_ids: Vec::new(),
-        is_playable: true,
-        available: None,
-        provider_mappings: Vec::new(),
-        metadata: None,
-        favorite: false,
-        position: None,
-        date_added: None,
     }
 }
 
-fn compare_local_playlists(left: &LocalPlaylist, right: &LocalPlaylist) -> std::cmp::Ordering {
-    left.playlist
-        .media
-        .sort_name
-        .as_deref()
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .cmp(
-            &right
-                .playlist
-                .media
-                .sort_name
-                .as_deref()
-                .unwrap_or_default()
-                .to_ascii_lowercase(),
-        )
-        .then_with(|| {
-            left.playlist
-                .media
-                .name
-                .to_ascii_lowercase()
-                .cmp(&right.playlist.media.name.to_ascii_lowercase())
+impl MusicAssistantClient {
+    // Snapshot assembly loads typed MA pages without holding application locks.
+    pub(crate) async fn load_library_user_data(
+        &self,
+        user_id: &str,
+    ) -> Result<UserDataSnapshot, String> {
+        let favorites = self.load_favorites().await?;
+        let playlists = self.load_private_playlists(user_id).await?;
+        Ok(UserDataSnapshot {
+            favorites,
+            playlists,
         })
+    }
+
+    pub(crate) async fn load_favorites(&self) -> Result<Favorites, String> {
+        let (tracks, albums, artists, playlists) = tokio::try_join!(
+            self.favorite_pages("tracks"),
+            self.favorite_pages("albums"),
+            self.favorite_pages("artists"),
+            self.favorite_pages("playlists"),
+        )?;
+        Ok(Favorites {
+            tracks,
+            albums,
+            artists,
+            playlists,
+        })
+    }
+
+    pub(crate) async fn load_private_playlists(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<PrivatePlaylist>, String> {
+        let mut playlists = Vec::new();
+        let library_playlists: Vec<Playlist> = self.library_pages("playlists", None).await?;
+        for owned in library_playlists {
+            if !owned.access.as_ref().is_some_and(|access| {
+                access.owner.as_deref() == Some(user_id)
+                    && access.sharing == PlaylistSharing::Private
+            }) {
+                continue;
+            }
+            let items = self
+                .get_playlist_tracks(&owned.media.item_id, "library", true, false)
+                .await?;
+            playlists.push(PrivatePlaylist {
+                playlist: owned,
+                items,
+            });
+        }
+        Ok(playlists)
+    }
+
+    pub(crate) async fn load_private_playlist(
+        &self,
+        playlist_id: &str,
+        user_id: &str,
+    ) -> Result<Option<PrivatePlaylist>, String> {
+        let playlist = self
+            .get_playlist(&MediaId(playlist_id.to_owned()), "library")
+            .await?;
+        if !playlist.access.as_ref().is_some_and(|access| {
+            access.owner.as_deref() == Some(user_id) && access.sharing == PlaylistSharing::Private
+        }) {
+            return Ok(None);
+        }
+        let items = self
+            .get_playlist_tracks(&playlist.media.item_id, "library", true, false)
+            .await?;
+        Ok(Some(PrivatePlaylist { playlist, items }))
+    }
+
+    pub(crate) async fn refresh_playlist_collages(
+        &self,
+        previous: &UserDataSnapshot,
+        snapshot: &mut UserDataSnapshot,
+    ) -> Vec<String> {
+        let mut errors = Vec::new();
+        for current in &mut snapshot.playlists {
+            let Some(old) = previous
+                .playlists
+                .iter()
+                .find(|old| old.playlist.media.item_id == current.playlist.media.item_id)
+            else {
+                continue;
+            };
+            if old.has_same_tracks(current) || !current.playlist.is_editable {
+                continue;
+            }
+            if let Err(error) = self.refresh_private_playlist_cover(current).await {
+                errors.push(format!(
+                    "playlist {} artwork update failed: {error}",
+                    current.playlist.media.item_id.as_str()
+                ));
+            }
+        }
+        errors
+    }
+
+    pub(crate) async fn refresh_private_playlist_cover(
+        &self,
+        playlist: &mut PrivatePlaylist,
+    ) -> Result<(), String> {
+        if !playlist.playlist.is_editable {
+            return Err("playlist is not editable".into());
+        }
+        let image = build_playlist_collage(&playlist.items, self.base_url()).await;
+        if image.is_none() && !playlist.items.is_empty() {
+            return Err("playlist has no usable artwork".into());
+        }
+        playlist.playlist = self
+            .set_private_playlist_image(&playlist.playlist, image)
+            .await?;
+        Ok(())
+    }
+
+    // Full-list queries retain stable ordering across pages.
+    async fn favorite_pages<Item: DeserializeOwned>(
+        &self,
+        media_type: &str,
+    ) -> Result<Vec<Item>, String> {
+        self.library_pages(media_type, Some(true)).await
+    }
+
+    async fn library_pages<Item: DeserializeOwned>(
+        &self,
+        media_type: &str,
+        favorite: Option<bool>,
+    ) -> Result<Vec<Item>, String> {
+        let mut items = Vec::new();
+        loop {
+            let page = self
+                .get_library_page(media_type, favorite, PAGE_SIZE, items.len())
+                .await?;
+            let is_last_page = page.len() < PAGE_SIZE;
+            items.extend(page);
+            if is_last_page {
+                return Ok(items);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct LibraryUserData {
+    pub(crate) snapshot: UserDataSnapshot,
+    pub(crate) sync: FavoriteSync,
+    pub(crate) revision: u64,
+    pending_items: HashMap<String, MediaItem>,
+}
+
+impl LibraryUserData {
+    // Optimistic commands share one worker for provider and library identities.
+    pub(crate) fn submit(
+        &mut self,
+        item: MediaItem,
+        is_favorite: bool,
+    ) -> (String, MediaItem, bool) {
+        self.revision = self.revision.wrapping_add(1);
+        let (identity, canonical) = if let Some((identity, pending)) = self
+            .pending_items
+            .iter()
+            .find(|(_, candidate)| same_item(candidate, &item))
+        {
+            (identity.clone(), pending.clone())
+        } else {
+            let canonical = self
+                .snapshot
+                .favorites
+                .items()
+                .into_iter()
+                .find(|candidate| same_item(candidate, &item))
+                .unwrap_or(item);
+            (identity(&canonical), canonical)
+        };
+        self.snapshot
+            .favorites
+            .set_item(canonical.clone(), is_favorite);
+        self.pending_items
+            .insert(identity.clone(), canonical.clone());
+        let should_start = self.sync.submit(identity.clone(), is_favorite);
+        (identity, canonical, should_start)
+    }
+
+    pub(crate) fn finish(
+        &mut self,
+        identity: &str,
+        written_state: bool,
+        confirmed: Option<MediaItem>,
+    ) -> bool {
+        self.revision = self.revision.wrapping_add(1);
+        let pending = self.pending_items.get(identity).cloned();
+        if let Some(item) = &pending {
+            self.snapshot.favorites.set_item(item.clone(), false);
+        }
+        let is_finished = self.sync.finish(identity, written_state);
+        if let Some(item) = confirmed.or(pending) {
+            let is_favorite = if is_finished {
+                item.fields().favorite == Some(true)
+            } else {
+                self.sync.desired_state(identity).unwrap_or(false)
+            };
+            self.snapshot.favorites.set_item(item.clone(), is_favorite);
+            if !is_finished {
+                self.pending_items.insert(identity.to_owned(), item);
+            }
+        }
+        if is_finished {
+            self.pending_items.remove(identity);
+        }
+        is_finished
+    }
+
+    pub(crate) fn replace_snapshot(&mut self, mut snapshot: UserDataSnapshot) {
+        for (identity, item) in &self.pending_items {
+            if let Some(is_favorite) = self.sync.desired_state(identity) {
+                snapshot.favorites.set_item(item.clone(), is_favorite);
+            }
+        }
+        self.snapshot = snapshot;
+    }
+}
+
+impl Favorites {
+    // Snapshot projection and identity matching never perform network requests.
+    pub(crate) fn items(&self) -> Vec<MediaItem> {
+        self.tracks
+            .iter()
+            .cloned()
+            .map(MediaItem::Track)
+            .chain(self.albums.iter().cloned().map(MediaItem::Album))
+            .chain(self.artists.iter().cloned().map(MediaItem::Artist))
+            .chain(self.playlists.iter().cloned().map(MediaItem::Playlist))
+            .collect()
+    }
+
+    pub(crate) fn set_item(&mut self, item: MediaItem, is_favorite: bool) {
+        macro_rules! update {
+            ($items:expr, $variant:ident, $value:expr) => {{
+                $items.retain(|existing| !same_item(&MediaItem::$variant(existing.clone()), &item));
+                if is_favorite {
+                    let mut value = $value.clone();
+                    value.media.favorite = Some(true);
+                    $items.push(value);
+                }
+            }};
+        }
+        match &item {
+            MediaItem::Track(value) => update!(self.tracks, Track, value),
+            MediaItem::Album(value) => update!(self.albums, Album, value),
+            MediaItem::Artist(value) => update!(self.artists, Artist, value),
+            MediaItem::Playlist(value) => update!(self.playlists, Playlist, value),
+            _ => {}
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct FavoriteSync {
+    pending: HashMap<String, bool>,
+}
+
+impl FavoriteSync {
+    // Commands and worker coordination.
+    pub(crate) fn submit(&mut self, identity: String, is_favorite: bool) -> bool {
+        self.pending.insert(identity, is_favorite).is_none()
+    }
+
+    pub(crate) fn desired_state(&self, identity: &str) -> Option<bool> {
+        self.pending.get(identity).copied()
+    }
+
+    pub(crate) fn finish(&mut self, identity: &str, written_state: bool) -> bool {
+        if self.desired_state(identity) != Some(written_state) {
+            return false;
+        }
+        self.pending.remove(identity);
+        true
+    }
+}
+
+// Provider and library aliases identify the same item within one media type.
+pub(crate) fn same_item(left: &MediaItem, right: &MediaItem) -> bool {
+    if std::mem::discriminant(left) != std::mem::discriminant(right) {
+        return false;
+    }
+    let left = left.fields();
+    let right = right.fields();
+    (left.provider == right.provider && left.item_id == right.item_id)
+        || left.provider_mappings.iter().any(|mapping| {
+            (mapping.provider_instance == right.provider && mapping.item_id == right.item_id)
+                || right.provider_mappings.iter().any(|other| {
+                    mapping.provider_instance == other.provider_instance
+                        && mapping.item_id == other.item_id
+                })
+        })
+        || right.provider_mappings.iter().any(|mapping| {
+            mapping.provider_instance == left.provider && mapping.item_id == left.item_id
+        })
+}
+
+fn identity(item: &MediaItem) -> String {
+    format!(
+        "{:?}:{}:{}",
+        std::mem::discriminant(item),
+        item.fields().provider.as_str(),
+        item.fields().item_id.as_str()
+    )
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::client::tests::server;
     use super::*;
-    use std::time::Duration;
+    use serde_json::json;
 
-    fn track(uri: &str) -> Track {
+    #[tokio::test]
+    async fn favorite_loading_reads_every_page_with_full_items() {
+        let first = (0..PAGE_SIZE)
+            .map(|index| {
+                json!({
+                    "item_id":index.to_string(), "provider":"library", "name":"Track"
+                })
+            })
+            .collect::<Vec<_>>();
+        let (client, worker) = server(vec![
+            ("music/tracks/library_items", json!(first)),
+            (
+                "music/tracks/library_items",
+                json!([{
+                    "item_id":"last", "provider":"library", "name":"Last"
+                }]),
+            ),
+        ]);
+        let tracks: Vec<Track> = client.favorite_pages("tracks").await.unwrap();
+        assert_eq!(tracks.len(), PAGE_SIZE + 1);
+        let requests = worker.join().unwrap();
+        assert_eq!(requests[0]["args"]["favorite"], true);
+        assert_eq!(requests[0]["args"]["summary"], false);
+        assert_eq!(requests[1]["args"]["offset"], PAGE_SIZE);
+    }
+
+    #[tokio::test]
+    async fn private_playlist_loading_accepts_unrated_playlists() {
+        let (client, worker) = server(vec![
+            (
+                "music/playlists/library_items",
+                json!([
+                    {"item_id":"41", "provider":"library", "name":"Other", "favorite":null},
+                    {"item_id":"42", "provider":"library", "name":"Playlist",
+                     "favorite":null, "access":{"owner":"user-one", "sharing":"private"}}
+                ]),
+            ),
+            ("music/playlists/playlist_tracks", json!([])),
+        ]);
+        let playlists = client.load_private_playlists("user-one").await.unwrap();
+        assert_eq!(playlists.len(), 1);
+        assert_eq!(playlists[0].playlist.media.item_id.as_str(), "42");
+        worker.join().unwrap();
+    }
+
+    fn item(provider: &str, item_id: &str, favorite: bool) -> MediaItem {
         serde_json::from_value(serde_json::json!({
-            "item_id": "track-id",
-            "provider": "library",
-            "name": "Track",
-            "uri": uri,
-            "provider_mappings": [{ "item_id": "track-id", "provider_domain": "test", "provider_instance": "test--one" }],
-        }))
-        .expect("test track must deserialize")
+            "media_type":"track", "item_id":item_id, "provider":provider, "name":"Track", "favorite":favorite,
+            "provider_mappings":[{"provider_domain":"test", "provider_instance":"test-one", "item_id":"source"}]
+        })).unwrap()
+    }
+
+    #[tokio::test]
+    async fn targeted_playlist_refresh_loads_only_its_metadata_and_tracks() {
+        let (client, worker) = server(vec![
+            (
+                "music/playlists/get",
+                json!({"item_id":"42", "provider":"library", "name":"Playlist", "access":{"owner":"user-one", "sharing":"private"}}),
+            ),
+            (
+                "music/playlists/playlist_tracks",
+                json!([{"item_id":"new", "provider":"test", "name":"New"}]),
+            ),
+        ]);
+        let playlist = client
+            .load_private_playlist("42", "user-one")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(playlist.items.len(), 1);
+        let requests = worker.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[1]["args"]["force_refresh"], true);
+        assert_eq!(requests[1]["args"]["item_id"], "42");
     }
 
     #[test]
-    fn write_waits_for_the_full_debounce_after_the_latest_mutation() {
-        let mut controller =
-            UserDataController::from_preferences(Map::new()).expect("preferences must load");
-        let mutation_time = Instant::now();
-        controller.schedule_write();
-        controller.last_mutated_at = Some(mutation_time);
-
-        assert_eq!(controller.write_delay(mutation_time), Some(WRITE_DEBOUNCE));
-        assert_eq!(
-            controller.write_delay(mutation_time + Duration::from_secs(1)),
-            Some(Duration::from_secs(1))
-        );
-        assert_eq!(
-            controller.write_delay(mutation_time + Duration::from_secs(3)),
-            Some(Duration::ZERO)
-        );
-    }
-
-    #[test]
-    fn incomplete_version_five_media_fail_reads_and_writes_without_repair() {
-        let mut controller = UserDataController::from_preferences(Map::new()).unwrap();
-        let mut item = track("library://track/track-id");
-        item.media.provider_mappings.clear();
-        controller.set_favorites(vec![MediaItem::Track(item.clone())], true);
-        assert!(controller.preferences().unwrap_err().contains("missing provider mappings"));
-        let snapshot = UserDataSnapshot {
-            favorites: Favorites { tracks: vec![item], ..Favorites::default() },
-            playlists: Vec::new(),
+    fn targeted_playlist_replacement_preserves_other_contents_and_removes_lost_access() {
+        let playlist = |id: &str, name: &str| PrivatePlaylist {
+            playlist: serde_json::from_value(
+                json!({"item_id":id, "provider":"library", "name":name}),
+            )
+            .unwrap(),
+            items: Vec::new(),
         };
-        let preferences = serde_json::from_value(serde_json::json!({
-            "mashin.user_data_version": 5,
-            "mashin.user_data": StoredUserData::from_snapshot(&snapshot)
-        })).unwrap();
-        assert!(UserDataController::from_preferences(preferences).unwrap_err().contains("missing provider mappings"));
+        let mut snapshot = UserDataSnapshot {
+            playlists: vec![playlist("41", "Other"), playlist("42", "Old")],
+            ..Default::default()
+        };
+        snapshot.replace_playlist("42", Some(playlist("42", "New")));
+        assert_eq!(snapshot.playlists.len(), 2);
+        assert_eq!(snapshot.playlists[0].playlist.media.name, "Other");
+        assert_eq!(snapshot.playlists[1].playlist.media.name, "New");
+        snapshot.replace_playlist("42", None);
+        assert_eq!(snapshot.playlists.len(), 1);
     }
 
-    #[test]
-    fn invalid_nested_media_and_store_references_fail_integrity_checks() {
-        let mut controller = UserDataController::from_preferences(Map::new()).unwrap();
-        let mut item = track("library://track/track-id");
-        item.album = Some(serde_json::from_value(serde_json::json!({
-            "item_id": "album", "provider": "library", "name": "Album"
-        })).unwrap());
-        controller.set_favorites(vec![MediaItem::Track(item)], true);
-        assert!(controller.preferences().unwrap_err().contains("user data album"));
-        let mut controller = UserDataController::from_preferences(Map::new()).unwrap();
-        controller.set_favorites(vec![MediaItem::Track(track("library://track/track-id"))], true);
-        let mut preferences = controller.preferences().unwrap();
-        preferences[USER_DATA_PREFERENCE_KEY]["tracks"]["library:track-id"]["album_ref"] = serde_json::json!("library:missing");
-        assert!(UserDataController::from_preferences(preferences).unwrap_err().contains("missing album"));
-    }
-
-    #[test]
-    fn successful_preference_write_keeps_complete_active_media() {
-        let mut controller = UserDataController::from_preferences(Map::new()).unwrap();
-        let item: MediaItem = serde_json::from_value(serde_json::json!({
-            "media_type": "track", "item_id": "track", "provider": "jellyfin--test", "name": "Track",
-            "uri": "jellyfin--test://track/track",
-            "version": "Live", "duration": 233, "disc_number": 2, "track_number": 4,
-            "provider_mappings": [{ "item_id": "source", "provider_domain": "jellyfin", "provider_instance": "jellyfin--test", "details": "source details" }],
-            "metadata": { "lyrics": "Lyrics", "genres": ["Pop"] }
-        })).unwrap();
-        controller.set_favorites(vec![item], true);
-        let before_write = controller.snapshot();
-        controller.schedule_write();
-        let (revision, preferences) = controller.pending_write().unwrap();
-        assert!(controller.finish_write(revision, Some(preferences)));
-        assert_eq!(controller.snapshot(), before_write);
-        assert_eq!(controller.snapshot().favorites.tracks[0].media.provider_mappings.len(), 1);
-    }
-
-    #[test]
-    fn preferences_preserve_unrelated_music_assistant_values() {
-        let mut preferences = Map::new();
-        preferences.insert(
-            "music_assistant.theme".to_string(),
-            Value::String("dark".to_string()),
+    fn artwork_snapshot(track_ids: &[&str]) -> UserDataSnapshot {
+        use base64::Engine;
+        let mut bytes = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new(&mut bytes)
+            .encode_image(&image::DynamicImage::ImageRgb8(
+                image::RgbImage::from_pixel(2, 2, image::Rgb([20, 110, 220])),
+            ))
+            .unwrap();
+        let source = format!(
+            "data:image/jpeg;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
         );
-        let controller =
-            UserDataController::from_preferences(preferences).expect("preferences must load");
-
-        let preferences = controller
-            .preferences()
-            .expect("preferences must serialize");
-
-        assert_eq!(preferences["music_assistant.theme"], "dark");
-        assert_eq!(preferences[VERSION_PREFERENCE_KEY], USER_DATA_VERSION);
-        assert!(preferences.contains_key(USER_DATA_PREFERENCE_KEY));
-    }
-
-    #[test]
-    fn favorite_updates_are_case_insensitive() {
-        let mut controller =
-            UserDataController::from_preferences(Map::new()).expect("preferences must load");
-        let media_item = MediaItem::Track(track("library://track/UPPER"));
-
-        controller.set_favorites(vec![media_item], true);
-        controller.set_favorites(
-            vec![MediaItem::Track(track("LIBRARY://TRACK/upper"))],
-            false,
-        );
-
-        assert!(controller.snapshot().favorites.tracks.is_empty());
-    }
-
-    #[test]
-    fn playlist_track_removal_is_case_insensitive() {
-        let mut controller =
-            UserDataController::from_preferences(Map::new()).expect("preferences must load");
-        let playlist = controller
-            .create_local_playlist("Local".to_string())
-            .expect("playlist must be created");
-        controller
-            .add_local_playlist_tracks(
-                playlist.media.item_id.as_str(),
-                vec![track("library://track/UPPER")],
-            )
-            .expect("track must be added");
-
-        controller
-            .remove_local_playlist_tracks(
-                playlist.media.item_id.as_str(),
-                vec!["LIBRARY://TRACK/upper".to_string()],
-            )
-            .expect("track must be removed");
-
-        assert!(controller.snapshot().playlists[0].items.is_empty());
-    }
-
-    #[test]
-    fn youtube_favorites_preserve_album_years_and_covers_in_version_five() {
-        let mut controller = UserDataController::from_preferences(Map::new()).unwrap();
-        let items: Vec<MediaItem> = serde_json::from_value(serde_json::json!([
-            {
-                "media_type": "album", "item_id": "album", "provider": "ytmusic--test",
-                "name": "Album", "uri": "ytmusic--test://album/album", "year": "2026",
-                "provider_mappings": [{ "item_id": "album", "provider_domain": "ytmusic", "provider_instance": "ytmusic--test" }],
-                "metadata": { "images": [{
-                    "type": "thumb", "path": "https://yt3.googleusercontent.com/album",
-                    "provider": "ytmusic--test", "remotely_accessible": true,
-                    "proxy_id": "album-cover"
-                }] }
-            },
-            {
-                "media_type": "track", "item_id": "track", "provider": "ytmusic--test",
-                "name": "Track", "uri": "ytmusic--test://track/track", "image": null,
-                "provider_mappings": [{ "item_id": "track", "provider_domain": "ytmusic", "provider_instance": "ytmusic--test" }],
-                "metadata": { "images": [{
-                    "type": "thumb", "path": "https://yt3.googleusercontent.com/track",
-                    "provider": "ytmusic--test", "remotely_accessible": true,
-                    "proxy_id": "track-cover"
-                }], "genres": null }
-            }
-        ]))
-        .unwrap();
-        controller.set_favorites(items.clone(), true);
-        let preferences = controller.preferences().unwrap();
-        assert_eq!(preferences[VERSION_PREFERENCE_KEY], 5);
-        let mut restored = UserDataController::from_preferences(preferences).unwrap();
-        let snapshot = restored.snapshot();
-        assert_eq!(snapshot.favorites.albums[0].year, Some(2026));
-        assert_eq!(
-            snapshot.favorites.albums[0].media.metadata.as_ref().unwrap().images[0]
-                .proxy_id.as_deref(),
-            Some("album-cover")
-        );
-        assert_eq!(
-            snapshot.favorites.tracks[0].image.as_ref().unwrap().proxy_id.as_deref(),
-            Some("track-cover")
-        );
-        restored.set_favorites(items, false);
-        assert!(restored.snapshot().favorites.albums.is_empty());
-        assert!(restored.snapshot().favorites.tracks.is_empty());
-    }
-
-    #[test]
-    fn preferences_store_compact_tracks_with_nested_display_media() {
-        let mut controller =
-            UserDataController::from_preferences(Map::new()).expect("preferences must load");
-        let track: Track = serde_json::from_value(serde_json::json!({
-            "media_type": "track",
-            "item_id": "track-id",
-            "provider": "library",
-            "name": "Track",
-            "uri": "library://track/1",
-            "provider_mappings": [{ "item_id": "track-id", "provider_domain": "test", "provider_instance": "test--one" }],
-            "favorite": true,
-            "image": { "type": "thumb", "path": "track.jpg", "provider": "library", "proxy_id": "track-image" },
-            "artists": [{
-                "media_type": "artist",
-                "item_id": "artist-id",
-                "provider": "library",
-                "name": "Artist",
-                "provider_mappings": [{ "item_id": "artist-id", "provider_domain": "test", "provider_instance": "test--one" }],
-                "image": { "type": "thumb", "path": "artist.jpg", "provider": "library", "proxy_id": "artist-image" }
+        UserDataSnapshot {
+            playlists: vec![PrivatePlaylist {
+                playlist: serde_json::from_value(json!({
+                    "item_id":"42", "provider":"library", "name":"My playlist", "is_editable":true,
+                    "access":{"owner":"user-one", "sharing":"private"},
+                    "provider_mappings":[{"item_id":"source-playlist", "provider_domain":"builtin", "provider_instance":"builtin-one"}],
+                    "metadata":{"description":"Keep this", "images":[
+                        {"type":"thumb", "path":"old.jpg", "provider":"builtin"},
+                        {"type":"fanart", "path":"fanart.jpg", "provider":"builtin"}
+                    ]}
+                })).unwrap(),
+                items: track_ids.iter().map(|id| serde_json::from_value(json!({
+                    "item_id":id, "provider":"library", "name":"Track", "uri":format!("library://track/{id}"),
+                    "image":{"type":"thumb", "path":source, "provider":"builtin"}
+                })).unwrap()).collect(),
             }],
-            "album": {
-                "media_type": "album",
-                "item_id": "album-id",
-                "provider": "library",
-                "name": "Album",
-                "provider_mappings": [{ "item_id": "album-id", "provider_domain": "test", "provider_instance": "test--one" }],
-                "image": { "type": "thumb", "path": "album.jpg", "provider": "library", "proxy_id": "album-image" }
-            }
-        }))
-        .expect("test track must deserialize");
-
-        controller.set_favorites(vec![MediaItem::Track(track.clone())], true);
-        let playlist = controller
-            .create_local_playlist("Local".to_string())
-            .expect("playlist must be created");
-        controller
-            .add_local_playlist_tracks(playlist.media.item_id.as_str(), vec![track])
-            .expect("track must be added");
-
-        let preferences = controller
-            .preferences()
-            .expect("preferences must serialize");
-        assert_eq!(preferences[VERSION_PREFERENCE_KEY], USER_DATA_VERSION);
-        let data = &preferences[USER_DATA_PREFERENCE_KEY];
-        assert_eq!(data["tracks"].as_object().unwrap().len(), 1);
-        assert_eq!(data["albums"].as_object().unwrap().len(), 1);
-        assert_eq!(data["artists"].as_object().unwrap().len(), 1);
-        assert!(!preferences.contains_key("mashin.favorites"));
-        assert!(!preferences.contains_key("mashin.playlists"));
-
-        let restored = UserDataController::from_preferences(preferences)
-            .expect("compact preferences must deserialize");
-        let snapshot = restored.snapshot();
-        let serialized = serde_json::to_value(&snapshot).expect("serialize user data snapshot");
-        assert!(serialized["favorites"]["tracks"][0].get("media_type").is_none());
-        let mut android_track = serialized["favorites"]["tracks"][0].clone();
-        android_track["media_type"] = serde_json::json!("track");
-        assert!(matches!(
-            serde_json::from_value::<MediaItem>(android_track).expect("decode Android track"),
-            MediaItem::Track(_)
-        ));
-        assert_eq!(
-            serialized["favorites"]["tracks"][0]["album"]["metadata"]["images"][0]["proxy_id"],
-            "album-image"
-        );
-        assert_eq!(
-            snapshot.favorites.tracks[0]
-                .image
-                .as_ref()
-                .unwrap()
-                .proxy_id
-                .as_deref(),
-            Some("track-image")
-        );
-        assert_eq!(
-            snapshot.playlists[0].items[0].artists[0]
-                .media
-                .metadata
-                .as_ref()
-                .unwrap()
-                .images[0]
-                .proxy_id
-                .as_deref(),
-            Some("artist-image")
-        );
-        assert_eq!(
-            snapshot.playlists[0].items[0]
-                .album
-                .as_ref()
-                .unwrap()
-                .media
-                .metadata
-                .as_ref()
-                .unwrap()
-                .images[0]
-                .proxy_id
-                .as_deref(),
-            Some("album-image")
-        );
+            ..Default::default()
+        }
     }
 
-    #[test]
-    fn version_five_playlist_jpeg_survives_roundtrip() {
-        let mut controller = UserDataController::from_preferences(Map::new()).unwrap();
-        let playlist = controller
-            .create_local_playlist("Local".to_string())
-            .unwrap();
-        let id = playlist.media.item_id.as_str();
-        controller
-            .add_local_playlist_tracks(id, vec![track("library://track/1")])
-            .unwrap();
-        controller
-            .set_local_playlist_cover(id, Some("data:image/jpeg;base64,/9j/".to_string()), false)
-            .unwrap();
+    #[tokio::test]
+    async fn adding_or_removing_tracks_uploads_artwork_and_metadata_events_do_not_loop() {
+        for (before, after) in [(vec!["1"], vec!["1", "2"]), (vec!["1", "2"], vec!["2"])] {
+            let previous = artwork_snapshot(&before);
+            let mut snapshot = artwork_snapshot(&after);
+            let image =
+                build_playlist_collage(&snapshot.playlists[0].items, "https://music.example")
+                    .await
+                    .unwrap();
+            let mut confirmed = json!(snapshot.playlists[0].playlist);
+            confirmed["metadata"]["images"][0]["path"] = json!(image);
+            let mut stored = json!(snapshot.playlists[0].playlist);
+            stored["metadata"]["last_refresh"] = json!(12345);
+            stored["supported_mediatypes"] = json!(["track", "radio"]);
+            let (client, worker) = server(vec![
+                ("music/playlists/get", stored),
+                ("music/playlists/update", confirmed),
+            ]);
+            assert!(client
+                .refresh_playlist_collages(&previous, &mut snapshot)
+                .await
+                .is_empty());
+            assert_eq!(
+                snapshot.playlists[0]
+                    .playlist
+                    .media
+                    .metadata
+                    .as_ref()
+                    .unwrap()
+                    .images[0]
+                    .path,
+                image
+            );
+            let requests = worker.join().unwrap();
+            let args = &requests[1]["args"];
+            assert_eq!(args["item_id"], "42");
+            assert_eq!(args["overwrite"], true);
+            assert_eq!(args["update"]["name"], "My playlist");
+            assert_eq!(args["update"]["access"]["owner"], "user-one");
+            assert_eq!(args["update"]["metadata"]["description"], "Keep this");
+            assert_eq!(args["update"]["metadata"]["last_refresh"], 12345);
+            assert_eq!(
+                args["update"]["supported_mediatypes"],
+                json!(["track", "radio"])
+            );
+            let images = &args["update"]["metadata"]["images"];
+            assert_eq!(images[0]["type"], "thumb");
+            assert_eq!(images[0]["provider"], "builtin");
+            assert_eq!(images[0]["remotely_accessible"], false);
+            assert!(images[0]["path"]
+                .as_str()
+                .unwrap()
+                .starts_with("data:image/jpeg;base64,"));
+            assert_eq!(images[1]["path"], "fanart.jpg");
+            let mut metadata_event = snapshot.clone();
+            metadata_event.playlists[0].items[0].media.name = "Updated metadata".into();
+            assert!(client
+                .refresh_playlist_collages(&snapshot, &mut metadata_event)
+                .await
+                .is_empty());
+        }
+    }
 
-        let restored =
-            UserDataController::from_preferences(controller.preferences().unwrap()).unwrap();
+    #[tokio::test]
+    async fn explicit_cover_refresh_replaces_existing_artwork_without_track_changes() {
+        let mut snapshot = artwork_snapshot(&["1", "2"]);
+        let original = snapshot.playlists[0].clone();
+        let image = build_playlist_collage(&original.items, "https://music.example")
+            .await
+            .unwrap();
+        let stored = json!(original.playlist);
+        let mut confirmed = stored.clone();
+        confirmed["metadata"]["images"][0]["path"] = json!(image);
+        let (client, worker) = server(vec![
+            ("music/playlists/get", stored),
+            ("music/playlists/update", confirmed),
+        ]);
+        client
+            .refresh_private_playlist_cover(&mut snapshot.playlists[0])
+            .await
+            .unwrap();
+        assert!(original.has_same_tracks(&snapshot.playlists[0]));
+        let requests = worker.join().unwrap();
         assert_eq!(
-            restored.snapshot().playlists[0]
+            requests[1]["args"]["update"]["metadata"]["images"][0]["path"],
+            image
+        );
+        assert_eq!(
+            snapshot.playlists[0]
                 .playlist
                 .media
                 .metadata
@@ -782,99 +617,140 @@ mod tests {
                 .unwrap()
                 .images[0]
                 .path,
-            "data:image/jpeg;base64,/9j/"
+            image
         );
-        assert_eq!(restored.snapshot().playlists[0].items.len(), 1);
     }
 
-    #[test]
-    fn version_five_preserves_none_mapping_identities_and_null_audio_format() {
-        let mut controller = UserDataController::from_preferences(Map::new()).unwrap();
-        let playlist = controller.create_local_playlist("Local".to_string()).unwrap();
-        let mut value = serde_json::to_value(track("library://track/1")).unwrap();
-        value["provider_mappings"][0]["provider_domain"] = serde_json::json!("None");
-        value["provider_mappings"][0]["provider_instance"] = serde_json::json!("None");
-        value["provider_mappings"][0]["audio_format"] = Value::Null;
-        value["artists"] = serde_json::json!([{
-            "item_id": "2", "provider": "library", "name": "Electric Callboy",
-            "provider_mappings": [{
-                "item_id": "2", "provider_domain": "None", "provider_instance": "None"
-            }]
-        }]);
-        controller.add_local_playlist_tracks(playlist.media.item_id.as_str(),
-            vec![serde_json::from_value(value).unwrap()]).unwrap();
-        let preferences = controller.preferences().unwrap();
-        let restored = UserDataController::from_preferences(preferences.clone()).unwrap();
-        assert_eq!(restored.snapshot(), controller.snapshot());
-        assert_eq!(restored.preferences().unwrap(), preferences);
+    #[tokio::test]
+    async fn empty_playlist_clears_thumbnail_but_keeps_other_images() {
+        let previous = artwork_snapshot(&["1"]);
+        let mut snapshot = artwork_snapshot(&[]);
+        let stored = json!(snapshot.playlists[0].playlist);
+        let (client, worker) = server(vec![
+            ("music/playlists/get", stored.clone()),
+            ("music/playlists/update", stored),
+        ]);
+        assert!(client
+            .refresh_playlist_collages(&previous, &mut snapshot)
+            .await
+            .is_empty());
+        let requests = worker.join().unwrap();
+        let images = requests[1]["args"]["update"]["metadata"]["images"]
+            .as_array()
+            .unwrap();
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0]["type"], "fanart");
     }
 
-    #[test]
-    fn unsupported_or_incomplete_user_data_is_not_overwritten() {
-        let mut preferences = Map::new();
-        preferences.insert(VERSION_PREFERENCE_KEY.into(), Value::from(3));
-        assert!(UserDataController::from_preferences(preferences)
-            .unwrap_err()
-            .contains("unsupported user data version 3"));
-
-        let mut preferences = Map::new();
-        preferences.insert("mashin.favorites".into(), serde_json::json!({}));
-        assert!(UserDataController::from_preferences(preferences)
-            .unwrap_err()
-            .contains("unsupported legacy user data"));
-
-        let mut preferences = Map::new();
-        preferences.insert(
-            VERSION_PREFERENCE_KEY.into(),
-            Value::from(USER_DATA_VERSION),
-        );
-        assert!(UserDataController::from_preferences(preferences)
-            .unwrap_err()
-            .contains("missing version five user data"));
-
-        let mut preferences = Map::new();
-        preferences.insert(USER_DATA_PREFERENCE_KEY.into(), serde_json::json!({}));
-        assert!(UserDataController::from_preferences(preferences)
-            .unwrap_err()
-            .contains("missing user data version"));
-    }
-
-    #[test]
-    fn removing_last_cover_source_clears_playlist_image_in_version_five() {
-        let mut controller = UserDataController::from_preferences(Map::new()).unwrap();
-        let playlist = controller
-            .create_local_playlist("Local".to_string())
-            .unwrap();
-        let id = playlist.media.item_id.as_str();
-        controller
-            .add_local_playlist_tracks(id, vec![track("library://track/1")])
-            .unwrap();
-        controller
-            .set_local_playlist_cover(id, Some("data:image/jpeg;base64,/9j/".to_string()), false)
-            .unwrap();
+    #[tokio::test]
+    async fn artwork_failure_keeps_confirmed_tracks_and_initial_loading_does_not_write() {
+        let previous = artwork_snapshot(&["1"]);
+        let mut snapshot = artwork_snapshot(&["1", "2"]);
+        let (client, worker) = server(vec![
+            ("music/playlists/get", json!(snapshot.playlists[0].playlist)),
+            ("music/playlists/update", json!({"test_http_status":500})),
+        ]);
         assert_eq!(
-            controller.snapshot().playlists[0]
-                .playlist
-                .media
-                .metadata
-                .as_ref()
-                .unwrap()
-                .images
+            client
+                .refresh_playlist_collages(&previous, &mut snapshot)
+                .await
                 .len(),
             1
         );
-        controller
-            .remove_local_playlist_tracks(id, vec!["library://track/1".to_string()])
+        worker.join().unwrap();
+        assert_eq!(snapshot.playlists[0].items.len(), 2);
+        assert!(client
+            .refresh_playlist_collages(&UserDataSnapshot::default(), &mut snapshot)
+            .await
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn unchanged_artwork_is_not_written_again() {
+        let snapshot = artwork_snapshot(&["1"]);
+        let (client, worker) = server(vec![]);
+        client
+            .set_private_playlist_image(&snapshot.playlists[0].playlist, Some("old.jpg".into()))
+            .await
             .unwrap();
-        controller.set_local_playlist_cover(id, None, true).unwrap();
-        let restored =
-            UserDataController::from_preferences(controller.preferences().unwrap()).unwrap();
-        assert!(restored.snapshot().playlists[0].items.is_empty());
-        assert!(restored.snapshot().playlists[0]
-            .playlist
-            .media
-            .metadata
-            .as_ref()
-            .is_none_or(|metadata| metadata.images.is_empty()));
+        assert!(worker.join().unwrap().is_empty());
+    }
+
+    #[test]
+    fn optimistic_state_survives_refresh_and_an_older_write_completion() {
+        let mut cache = LibraryUserData::default();
+        let (identity, _, should_start) = cache.submit(item("test-one", "source", false), true);
+        assert!(should_start);
+        assert_eq!(cache.snapshot.favorites.tracks.len(), 1);
+        let (other_identity, _, should_start) = cache.submit(item("library", "42", true), false);
+        assert_eq!(identity, other_identity);
+        assert!(!should_start);
+        cache.replace_snapshot(UserDataSnapshot {
+            favorites: Favorites {
+                tracks: vec![match item("library", "42", true) {
+                    MediaItem::Track(track) => track,
+                    _ => unreachable!(),
+                }],
+                ..Favorites::default()
+            },
+            playlists: Vec::new(),
+        });
+        assert!(cache.snapshot.favorites.tracks.is_empty());
+        assert!(!cache.finish(&identity, true, Some(item("library", "42", true))));
+        assert!(cache.snapshot.favorites.tracks.is_empty());
+        assert!(cache.finish(&identity, false, Some(item("library", "42", false))));
+        assert!(cache.snapshot.favorites.tracks.is_empty());
+    }
+
+    #[test]
+    fn canonical_library_confirmation_keeps_the_existing_worker_identity() {
+        let mut cache = LibraryUserData::default();
+        let (identity, _, _) = cache.submit(item("test-one", "source", false), true);
+        cache.submit(item("test-one", "source", false), false);
+        assert!(!cache.finish(&identity, true, Some(item("library", "42", true))));
+        let (next_identity, _, should_start) = cache.submit(item("library", "42", true), true);
+        assert_eq!(next_identity, identity);
+        assert!(!should_start);
+        assert!(cache.finish(&identity, true, Some(item("library", "42", true))));
+        assert_eq!(cache.snapshot.favorites.tracks.len(), 1);
+    }
+
+    #[test]
+    fn confirmed_library_alias_replaces_provider_entry_without_duplicates() {
+        let mut cache = LibraryUserData::default();
+        let (identity, _, _) = cache.submit(item("test-one", "source", false), true);
+        assert!(cache.finish(&identity, true, Some(item("library", "42", true))));
+        assert_eq!(cache.snapshot.favorites.tracks.len(), 1);
+        assert_eq!(
+            cache.snapshot.favorites.tracks[0].media.provider.as_str(),
+            "library"
+        );
+        let (_, canonical, should_start) = cache.submit(item("test-one", "source", true), false);
+        assert!(should_start);
+        assert_eq!(canonical.fields().provider.as_str(), "library");
+        assert!(cache.snapshot.favorites.tracks.is_empty());
+    }
+
+    #[test]
+    fn separate_items_start_independent_workers_but_repeated_clicks_coalesce() {
+        let mut sync = FavoriteSync::default();
+        assert!(sync.submit("first".into(), true));
+        assert!(sync.submit("second".into(), true));
+        assert!(!sync.submit("first".into(), false));
+        assert!(!sync.finish("first", true));
+        assert_eq!(sync.desired_state("first"), Some(false));
+        assert!(sync.finish("second", true));
+        assert_eq!(sync.desired_state("second"), None);
+        assert!(sync.finish("first", false));
+        assert!(sync.submit("first".into(), true));
+    }
+
+    #[test]
+    fn clicking_back_to_the_inflight_state_does_not_require_another_write() {
+        let mut sync = FavoriteSync::default();
+        assert!(sync.submit("item".into(), true));
+        assert!(!sync.submit("item".into(), false));
+        assert!(!sync.submit("item".into(), true));
+        assert!(sync.finish("item", true));
     }
 }

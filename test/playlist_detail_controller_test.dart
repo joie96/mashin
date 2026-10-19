@@ -6,10 +6,272 @@ import 'package:mashin_flutter/app/theme/app_theme.dart';
 import 'package:mashin_flutter/features/core/core_bridge.dart';
 import 'package:mashin_flutter/features/core/core_events.dart';
 import 'package:mashin_flutter/features/core/core_models.dart';
+import 'package:mashin_flutter/features/core/core_userdata.dart';
 import 'package:mashin_flutter/features/playlist/playlist_detail_controller.dart';
 import 'package:mashin_flutter/features/playlist/playlist_detail_page_desktop.dart';
+import 'package:mashin_flutter/features/playlist/playlist_detail_page_mobile.dart';
 
 void main() {
+  for (final isDesktop in <bool>[true, false]) {
+    testWidgets(
+      '${isDesktop ? 'desktop' : 'mobile'} playlist menu refreshes its cover',
+      (tester) async {
+        tester.view.physicalSize = isDesktop
+            ? const Size(1280, 800)
+            : const Size(390, 844);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final bridge = _PrivatePlaylistCoreBridge();
+        final userData = UserData(coreBridge: bridge);
+        final coreEvents = MashinCoreBridgeEvents(coreBridge: bridge);
+        addTearDown(bridge.changes.close);
+        addTearDown(userData.dispose);
+        addTearDown(coreEvents.dispose);
+        await userData.loadLibraryData();
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.dark(),
+            home: Scaffold(
+              body: isDesktop
+                  ? PlaylistDetailPageDesktop(
+                      coreBridge: bridge,
+                      coreEvents: coreEvents,
+                      itemId: 'playlist-1',
+                      providerInstanceIdOrDomain: 'library',
+                      userDataController: userData,
+                    )
+                  : PlaylistDetailPageMobile(
+                      coreBridge: bridge,
+                      coreEvents: coreEvents,
+                      itemId: 'playlist-1',
+                      providerInstanceIdOrDomain: 'library',
+                      userDataController: userData,
+                    ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(
+          isDesktop
+              ? find.byTooltip('Weitere Optionen')
+              : find.byIcon(Icons.more_vert_outlined).first,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Cover aktualisieren'));
+        await tester.pumpAndSettle();
+        expect(bridge.operations, <String>[
+          'refreshPrivatePlaylistCover:playlist-1',
+        ]);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  test(
+    'cover refresh applies the confirmed snapshot and preserves the old cover on failure',
+    () async {
+      final bridge = _PrivatePlaylistCoreBridge()
+        ..coverPath = 'old-cover.jpg'
+        ..refreshedCoverPath = 'new-cover.jpg';
+      final userData = UserData(coreBridge: bridge);
+      addTearDown(bridge.changes.close);
+      addTearDown(userData.dispose);
+      await userData.loadLibraryData();
+      final controller = PlaylistDetailController(
+        coreBridge: bridge,
+        itemId: 'playlist-1',
+        providerInstanceIdOrDomain: 'library',
+        userDataController: userData,
+      );
+      addTearDown(controller.dispose);
+      await controller.loadPlaylist();
+      expect(controller.playlist!.primaryImage!.path, 'old-cover.jpg');
+      await userData.refreshPrivatePlaylistCover(userData.playlists.single);
+      expect(controller.playlist!.primaryImage!.path, 'new-cover.jpg');
+      bridge.shouldFailCoverRefresh = true;
+      bridge.refreshedCoverPath = 'unconfirmed-cover.jpg';
+      await expectLater(
+        userData.refreshPrivatePlaylistCover(userData.playlists.single),
+        throwsStateError,
+      );
+      expect(controller.playlist!.primaryImage!.path, 'new-cover.jpg');
+      expect(controller.tracks, hasLength(1));
+    },
+  );
+
+  for (final isDesktop in <bool>[true, false]) {
+    for (final isExternalDeletion in <bool>[true, false]) {
+      testWidgets(
+        '${isDesktop ? 'desktop' : 'mobile'} navigates back once after ${isExternalDeletion ? 'external' : 'local'} playlist deletion',
+        (tester) async {
+          tester.view.physicalSize = isDesktop
+              ? const Size(1280, 800)
+              : const Size(390, 844);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final bridge = _PrivatePlaylistCoreBridge();
+          final userData = UserData(coreBridge: bridge);
+          final coreEvents = MashinCoreBridgeEvents(coreBridge: bridge);
+          addTearDown(bridge.changes.close);
+          addTearDown(userData.dispose);
+          addTearDown(coreEvents.dispose);
+          await userData.loadLibraryData();
+          var navigationCount = 0;
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: AppTheme.dark(),
+              home: Builder(
+                builder: (context) => Scaffold(
+                  body: TextButton(
+                    onPressed: () => Navigator.of(context).push<void>(
+                      MaterialPageRoute(
+                        builder: (detailContext) {
+                          void onDeleted() {
+                            navigationCount++;
+                            Navigator.of(detailContext).pop();
+                          }
+
+                          return Scaffold(
+                            body: isDesktop
+                                ? PlaylistDetailPageDesktop(
+                                    coreBridge: bridge,
+                                    coreEvents: coreEvents,
+                                    itemId: 'playlist-1',
+                                    providerInstanceIdOrDomain: 'library',
+                                    userDataController: userData,
+                                    onPlaylistDeleted: onDeleted,
+                                  )
+                                : PlaylistDetailPageMobile(
+                                    coreBridge: bridge,
+                                    coreEvents: coreEvents,
+                                    itemId: 'playlist-1',
+                                    providerInstanceIdOrDomain: 'library',
+                                    userDataController: userData,
+                                    onPlaylistDeleted: onDeleted,
+                                  ),
+                          );
+                        },
+                      ),
+                    ),
+                    child: const Text('Playlist overview'),
+                  ),
+                ),
+              ),
+            ),
+          );
+          await tester.tap(find.text('Playlist overview'));
+          await tester.pumpAndSettle();
+          expect(find.text('Private'), findsOneWidget);
+          bridge.trackCount = 0;
+          bridge.changes.add(<String, dynamic>{'type': 'user_data_changed'});
+          await tester.pumpAndSettle();
+          expect(navigationCount, 0);
+          expect(find.text('Private'), findsOneWidget);
+          if (isExternalDeletion) {
+            bridge.hasPlaylist = false;
+            bridge.changes.add(<String, dynamic>{'type': 'user_data_changed'});
+          } else {
+            await userData.removePlaylist(userData.playlists.single);
+          }
+          await tester.pumpAndSettle();
+          expect(find.text('Playlist overview'), findsOneWidget);
+          expect(find.text('Private'), findsNothing);
+          bridge.changes.add(<String, dynamic>{'type': 'user_data_changed'});
+          await tester.pumpAndSettle();
+          expect(navigationCount, 1);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
+  test(
+    'updates an open private playlist when a delayed 50-track add completes',
+    () async {
+      final bridge = _PrivatePlaylistCoreBridge();
+      final userData = UserData(coreBridge: bridge);
+      addTearDown(userData.dispose);
+      addTearDown(bridge.changes.close);
+      await userData.loadLibraryData();
+      final addition = userData.addPlaylistTracks(
+        'playlist-1',
+        List<Track>.generate(
+          50,
+          (index) => _track('new-$index', uri: 'test://track/$index'),
+        ),
+      );
+      final controller = PlaylistDetailController(
+        coreBridge: bridge,
+        itemId: 'playlist-1',
+        providerInstanceIdOrDomain: 'library',
+        userDataController: userData,
+      );
+      addTearDown(controller.dispose);
+      await controller.loadPlaylist();
+      expect(controller.tracks, hasLength(1));
+      bridge.trackCount = 51;
+      bridge.changes.add(<String, dynamic>{'type': 'user_data_changed'});
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.tracks, hasLength(51));
+      bridge.addition.complete();
+      await addition;
+      expect(controller.tracks, hasLength(51));
+      expect(bridge.operations, isEmpty);
+    },
+  );
+
+  test(
+    'coalesces events and rejects an invalidated snapshot response',
+    () async {
+      final bridge = _PrivatePlaylistCoreBridge();
+      final userData = UserData(coreBridge: bridge);
+      addTearDown(bridge.changes.close);
+      addTearDown(userData.dispose);
+      await userData.loadLibraryData();
+      final appliedTrackCounts = <int>[];
+      userData.addListener(() {
+        appliedTrackCounts.add(userData.tracksForPlaylist('playlist-1').length);
+      });
+      final oldSnapshot = bridge.snapshot;
+      bridge.deferSnapshots = true;
+      bridge.changes.add(<String, dynamic>{'type': 'user_data_changed'});
+      await Future<void>.delayed(Duration.zero);
+      bridge.trackCount = 51;
+      for (var index = 0; index < 20; index++) {
+        bridge.changes.add(<String, dynamic>{'type': 'user_data_changed'});
+      }
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.snapshotReads, hasLength(1));
+      bridge.snapshotReads.first.complete(oldSnapshot);
+      await Future<void>.delayed(Duration.zero);
+      expect(appliedTrackCounts, isEmpty);
+      expect(bridge.snapshotReads, hasLength(2));
+      bridge.snapshotReads.last.complete(bridge.snapshot);
+      await Future<void>.delayed(Duration.zero);
+      expect(appliedTrackCounts, <int>[51]);
+    },
+  );
+
+  test('disposal cancels events and ignores an in-flight snapshot', () async {
+    final bridge = _PrivatePlaylistCoreBridge();
+    final userData = UserData(coreBridge: bridge);
+    addTearDown(bridge.changes.close);
+    await userData.loadLibraryData();
+    bridge.deferSnapshots = true;
+    bridge.changes.add(<String, dynamic>{'type': 'user_data_changed'});
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.changes.hasListener, isTrue);
+    var notifications = 0;
+    userData.addListener(() => notifications++);
+    userData.dispose();
+    expect(bridge.changes.hasListener, isFalse);
+    bridge.snapshotReads.single.complete(bridge.snapshot);
+    await Future<void>.delayed(Duration.zero);
+    expect(notifications, 0);
+  });
+
   test('shows playlist tracks before their album details arrive', () async {
     final coreBridge = _DeferredAlbumPlaylistCoreBridge();
     final controller = PlaylistDetailController(
@@ -154,6 +416,85 @@ class _FakePlaylistCoreBridge extends Fake implements MashinCoreBridgeApi {
       'removePlaylistTracks:$playlistId:${positionsToRemove.join(',')}',
     );
   }
+}
+
+class _PrivatePlaylistCoreBridge extends _FakePlaylistCoreBridge {
+  final changes = StreamController<Map<String, dynamic>>.broadcast();
+  final addition = Completer<void>();
+  final snapshotReads = <Completer<Map<String, dynamic>>>[];
+  bool deferSnapshots = false;
+  bool hasPlaylist = true;
+  String? coverPath;
+  String? refreshedCoverPath;
+  bool shouldFailCoverRefresh = false;
+  @override
+  int trackCount = 1;
+
+  @override
+  Stream<Map<String, dynamic>> get events => changes.stream;
+
+  @override
+  Future<Map<String, dynamic>> loadUserData() => getUserData();
+
+  @override
+  Future<Map<String, dynamic>> getUserData() {
+    if (!deferSnapshots) return Future.value(snapshot);
+    final read = Completer<Map<String, dynamic>>();
+    snapshotReads.add(read);
+    return read.future;
+  }
+
+  Map<String, dynamic> get snapshot => <String, dynamic>{
+    'favorites': <String, dynamic>{},
+    'playlists': <Object?>[
+      if (hasPlaylist)
+        <String, dynamic>{
+          'item_id': 'playlist-1',
+          'provider': 'library',
+          'name': 'Private',
+          'is_editable': true,
+          if (coverPath != null)
+            'metadata': <String, dynamic>{
+              'images': <Object?>[
+                <String, dynamic>{
+                  'type': 'thumb',
+                  'path': coverPath,
+                  'provider': 'builtin',
+                },
+              ],
+            },
+          'items': List.generate(
+            trackCount,
+            (index) => <String, dynamic>{
+              'item_id': 'track-$index',
+              'provider': 'library',
+              'name': 'Track $index',
+              'duration': 180,
+              'artists': <Object?>[],
+            },
+          ),
+        },
+    ],
+  };
+
+  @override
+  Future<void> refreshPrivatePlaylistCover(String playlistId) async {
+    operations.add('refreshPrivatePlaylistCover:$playlistId');
+    if (shouldFailCoverRefresh) throw StateError('Cover update failed');
+    coverPath = refreshedCoverPath;
+  }
+
+  @override
+  Future<void> removePrivatePlaylist(String playlistId) async {
+    hasPlaylist = false;
+    changes.add(<String, dynamic>{'type': 'user_data_changed'});
+  }
+
+  @override
+  Future<void> addPrivatePlaylistTracks(
+    String playlistId,
+    List<Track> tracks,
+  ) => addition.future;
 }
 
 class _DeferredAlbumPlaylistCoreBridge extends _FakePlaylistCoreBridge {

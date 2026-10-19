@@ -5,7 +5,7 @@ use super::client::MusicAssistantClient;
 use super::event_hub::MusicAssistantEvent;
 use super::models::identifiers::{PlayerId, QueueId};
 use super::models::player::MusicAssistantPlayer;
-use super::models::queue::{MusicAssistantQueue, PlayState};
+use super::models::queue::PlayState;
 use super::queue_projection::{QueueProjection, QueueSnapshotRequest};
 use crate::playback::mode::PlaybackMode;
 use crate::playback::models::{MediaSessionState, PlaybackConnectionState, PlayerState, Queue};
@@ -197,16 +197,9 @@ async fn load_snapshot(
     client: &MusicAssistantClient,
     player_id: &PlayerId,
 ) -> Result<QueueSnapshot, String> {
-    let metadata: Option<MusicAssistantQueue> = client
-        .execute_command(
-            "player_queues/get_active_queue",
-            serde_json::json!({"player_id": player_id}),
-        )
-        .await?;
+    let metadata = client.get_active_queue(player_id).await?;
     let metadata = metadata.ok_or_else(|| "MA player has no active queue".to_string())?;
-    let player = client
-        .execute_command("players/get", serde_json::json!({"player_id": player_id}))
-        .await?;
+    let player = client.get_player(player_id).await?;
     let mut items = Vec::new();
     loop {
         let page = client

@@ -46,6 +46,7 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
   static const double _bannerHeight = 220;
 
   late final PlaylistDetailController _controller;
+  bool _hasHandledPlaylistDeletion = false;
 
   @override
   void initState() {
@@ -68,7 +69,14 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
   }
 
   void _onChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    if (_controller.isPlaylistDeleted && !_hasHandledPlaylistDeletion) {
+      _hasHandledPlaylistDeletion = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onPlaylistDeleted?.call();
+      });
+    }
+    setState(() {});
   }
 
   List<ContextMenuAction> _buildItemMenuActions(
@@ -251,7 +259,7 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
           playlist,
         ], option: QueueOption.add),
       ),
-      if (!_controller.isLocalPlaylist) ...<ContextMenuAction>[
+      if (!_controller.isPrivatePlaylist) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
         ContextMenuAction(
           label: _controller.isPlaylistFavorite
@@ -263,12 +271,19 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
           onSelected: _controller.togglePlaylistFavorite,
         ),
       ],
-      if (_controller.isLocalPlaylist) ...<ContextMenuAction>[
+      if (_controller.isPrivatePlaylist) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
         ContextMenuAction(
           label: 'Umbenennen',
           icon: Icons.edit_outlined,
           onSelected: _renamePlaylist,
+        ),
+        ContextMenuAction(
+          label: 'Cover aktualisieren',
+          icon: Icons.image_outlined,
+          isEnabled: playlist.isEditable,
+          onSelected: () =>
+              widget.userDataController!.refreshPrivatePlaylistCover(playlist),
         ),
         ContextMenuAction(
           label: 'Löschen',
@@ -283,7 +298,9 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
   Future<void> _renamePlaylist() async {
     final Playlist? playlist = _controller.playlist;
     final UserData? userData = widget.userDataController;
-    if (playlist == null || userData == null || !_controller.isLocalPlaylist) {
+    if (playlist == null ||
+        userData == null ||
+        !_controller.isPrivatePlaylist) {
       return;
     }
     final String? name = await showPlaylistNameDialog(
@@ -299,7 +316,9 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
   Future<void> _deletePlaylist() async {
     final Playlist? playlist = _controller.playlist;
     final UserData? userData = widget.userDataController;
-    if (playlist == null || userData == null || !_controller.isLocalPlaylist) {
+    if (playlist == null ||
+        userData == null ||
+        !_controller.isPrivatePlaylist) {
       return;
     }
     final bool confirmed = await showDeletePlaylistDialog(
@@ -309,9 +328,7 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
     if (!confirmed || !mounted) {
       return;
     }
-    if (await userData.removePlaylist(playlist)) {
-      widget.onPlaylistDeleted?.call();
-    }
+    await userData.removePlaylist(playlist);
   }
 
   @override
@@ -427,7 +444,7 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
                             ? null
                             : _controller.shufflePlaylist,
                       ),
-                      if (!_controller.isLocalPlaylist) ...<Widget>[
+                      if (!_controller.isPrivatePlaylist) ...<Widget>[
                         const SizedBox(width: 14),
                         _MobileActionButton(
                           icon: _controller.isPlaylistFavorite

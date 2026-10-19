@@ -15,27 +15,27 @@ use crate::music_assistant::models::media::{
 use crate::music_assistant::models::queue::QueueOption;
 use crate::music_assistant::models::recommendation::MusicAssistantRecommendationFolder;
 use crate::music_assistant::models::session::ProviderManifest;
-use crate::music_assistant::playlist_collage::build_playlist_collage;
-use crate::music_assistant::user_data::{
-    flush_scheduled_write_after_debounce, persist_write_request, UserDataController,
-    UserDataSnapshot, UserDataWriteRequest,
-};
+use crate::music_assistant::user_data::LibraryUserData;
+use crate::music_assistant::user_data::UserDataSnapshot;
 use crate::playback::engine::PlaybackEngine;
 use crate::playback::models::{MediaSessionState, PlayerState, Queue};
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 
 #[path = "session.rs"]
 mod session;
 #[path = "settings.rs"]
 mod settings;
+#[path = "user_data.rs"]
+mod user_data;
+pub(crate) use user_data::*;
 
 pub(crate) static CORE_COORDINATOR: Lazy<Mutex<CoreCoordinator>> =
     Lazy::new(|| Mutex::new(CoreCoordinator::new()));
 static CORE_COMMAND_SERIALIZER: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-static CORE_USER_DATA_LOAD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+static CORE_USER_DATA_LOAD: Lazy<tokio::sync::Mutex<()>> =
+    Lazy::new(|| tokio::sync::Mutex::new(()));
 static LOGGER: Logger = Logger::new(module_path!());
 pub(crate) static CORE_NETWORK_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
     tokio::runtime::Builder::new_multi_thread()
@@ -56,7 +56,8 @@ pub(crate) struct CoreCoordinator {
     auth_store: Box<dyn AuthStore + Send>,
     playback: PlaybackEngine,
     session_configuration: Option<SessionConfig>,
-    user_data: Option<UserDataController>,
+    user_data: Option<LibraryUserData>,
+    user_data_events: Option<user_data::UserDataEvents>,
     user_data_session_generation: u64,
     connection:
         Option<std::sync::Arc<crate::music_assistant::connection::MusicAssistantConnection>>,
@@ -75,6 +76,7 @@ impl CoreCoordinator {
             playback: PlaybackEngine::new(),
             session_configuration: None,
             user_data: None,
+            user_data_events: None,
             user_data_session_generation: 0,
             connection: None,
             pending_commands: Vec::new(),
@@ -82,14 +84,12 @@ impl CoreCoordinator {
     }
 
     // Native shutdown removes all in-memory session data after extracting the final pending write.
-    pub(crate) fn shutdown(&mut self) -> Option<UserDataWriteRequest> {
-        let pending_write = self.pending_user_data_write();
+    pub(crate) fn shutdown(&mut self) {
         self.playback.shutdown();
         self.pending_commands.clear();
         self.connection = None;
         self.session_configuration = None;
         self.invalidate_user_data();
-        pending_write
     }
 
     // Platform state reads project the active engine without storing duplicate core state.
@@ -107,7 +107,7 @@ impl CoreCoordinator {
     }
 
     // User-data state.
-    fn replace_user_data(&mut self, user_data: UserDataController) {
+    fn replace_user_data(&mut self, user_data: LibraryUserData) {
         self.invalidate_user_data();
         self.user_data = Some(user_data);
     }
@@ -115,7 +115,7 @@ impl CoreCoordinator {
     fn replace_user_data_for_session(
         &mut self,
         session_generation: u64,
-        user_data: UserDataController,
+        user_data: LibraryUserData,
     ) -> Result<(), String> {
         if self.user_data_session_generation != session_generation {
             return Err("session changed while loading user data".to_string());
@@ -125,45 +125,16 @@ impl CoreCoordinator {
     }
 
     fn invalidate_user_data(&mut self) {
+        self.user_data_events = None;
         self.user_data = None;
         self.user_data_session_generation = self.user_data_session_generation.wrapping_add(1);
-    }
-
-    fn pending_user_data_write(&self) -> Option<UserDataWriteRequest> {
-        let session = self.session_configuration.as_ref()?.clone();
-        let (revision, preferences) = self.user_data.as_ref()?.pending_write()?;
-        Some(UserDataWriteRequest {
-            revision,
-            username: session.username,
-            preferences,
-            client: MusicAssistantClient::new(&session.music_assistant_url.0, session.access_token),
-        })
     }
 
     fn user_data_snapshot(&self) -> Result<UserDataSnapshot, String> {
         self.user_data
             .as_ref()
-            .map(UserDataController::snapshot)
+            .map(|user_data| user_data.snapshot.clone())
             .ok_or_else(|| "user data is not loaded".to_string())
-    }
-
-    // Commit only validated candidates; failed batches leave active user data untouched.
-    fn mutate_user_data<F>(
-        &mut self,
-        operation: F,
-    ) -> Result<serde_json::Map<String, serde_json::Value>, String>
-    where
-        F: FnOnce(&mut UserDataController) -> Result<(), String>,
-    {
-        let mut candidate = self
-            .user_data
-            .as_ref()
-            .ok_or_else(|| "user data is not loaded".to_string())?
-            .clone();
-        operation(&mut candidate)?;
-        let preferences = candidate.preferences()?;
-        self.user_data = Some(candidate);
-        Ok(preferences)
     }
 }
 
@@ -218,23 +189,16 @@ where
     Ok(events)
 }
 
-/// Stops native work after attempting the final coalesced UserData write for a bounded duration.
+/// Drops session-owned caches and pending favorite wishes without persisting them.
 pub(crate) fn shutdown() -> Result<(), CoreError> {
     let _command_guard = CORE_COMMAND_SERIALIZER
         .lock()
         .map_err(|_| CoreError::internal("core command serializer lock poisoned"))?;
-    let pending_write = CORE_COORDINATOR
+    CORE_COORDINATOR
         .lock()
         .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?
         .shutdown();
 
-    if let Some(write_request) = pending_write {
-        // An unavailable server must not prevent native shutdown.
-        let _ = CORE_NETWORK_RUNTIME.block_on(tokio::time::timeout(
-            Duration::from_secs(3),
-            persist_write_request(write_request),
-        ));
-    }
     Ok(())
 }
 
@@ -281,8 +245,8 @@ where
     let _command_guard = CORE_COMMAND_SERIALIZER
         .lock()
         .map_err(|_| CoreError::internal("core command serializer lock poisoned"))?;
-    let is_starting = !media_items.is_empty()
-        && matches!(option, QueueOption::Play | QueueOption::Replace);
+    let is_starting =
+        !media_items.is_empty() && matches!(option, QueueOption::Play | QueueOption::Replace);
     let start_request = if is_starting {
         Some(
             CORE_COORDINATOR
@@ -296,21 +260,12 @@ where
         None
     };
     drop(_command_guard);
-    let result = (|| {
-        let user_data = if media_items.iter().any(is_local_playlist) {
-            Some(read_or_load_user_data()?)
-        } else {
-            None
-        };
-        let resolved_media_items = expand_local_playlist_media(media_items, user_data.as_ref())
-            .map_err(CoreError::command_failed)?;
-        CORE_NETWORK_RUNTIME.block_on(execute_resolved_media_command(
-            resolved_media_items,
-            start_request.as_ref(),
-            None,
-            operation,
-        ))
-    })();
+    let result = CORE_NETWORK_RUNTIME.block_on(execute_resolved_media_command(
+        media_items,
+        start_request.as_ref(),
+        None,
+        operation,
+    ));
     if result.is_err() {
         if let Some(request) = start_request {
             request.complete(false);
@@ -342,12 +297,16 @@ where
         .lock()
         .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
     if start_request.is_some_and(|request| !request.is_pending()) {
-        return Err(CoreError::command_failed("playback start was cancelled or replaced"));
+        return Err(CoreError::command_failed(
+            "playback start was cancelled or replaced",
+        ));
     }
     if selection_revision
         .is_some_and(|revision| coordinator.playback.media_selection_revision() != revision)
     {
-        return Err(CoreError::command_failed("radio selection changed while resolving media"));
+        return Err(CoreError::command_failed(
+            "radio selection changed while resolving media",
+        ));
     }
     let queue_before = coordinator.playback.queue();
     let player_state_before = coordinator.playback.player_state();
@@ -371,32 +330,6 @@ where
     ))
 }
 
-fn is_local_playlist(item: &MediaItem) -> bool {
-    matches!(item, MediaItem::Playlist(playlist) if playlist.media.provider.as_str() == crate::music_assistant::user_data::LOCAL_PLAYLIST_PROVIDER)
-}
-
-fn expand_local_playlist_media(
-    media_items: Vec<MediaItem>,
-    user_data: Option<&UserDataSnapshot>,
-) -> Result<Vec<MediaItem>, String> {
-    let mut expanded = Vec::new();
-    for item in media_items {
-        if is_local_playlist(&item) {
-            let playlist = user_data
-                .and_then(|data| {
-                    data.playlists
-                        .iter()
-                        .find(|playlist| playlist.playlist.media.item_id == item.fields().item_id)
-                })
-                .ok_or("local playlist is no longer available")?;
-            expanded.extend(playlist.items.iter().cloned().map(MediaItem::Track));
-        } else {
-            expanded.push(item);
-        }
-    }
-    Ok(expanded)
-}
-
 // Music Assistant queries.
 fn music_assistant_client_for_query(operation: &str) -> Result<MusicAssistantClient, CoreError> {
     let session = CORE_COORDINATOR
@@ -411,298 +344,6 @@ fn music_assistant_client_for_query(operation: &str) -> Result<MusicAssistantCli
         &session.music_assistant_url.0,
         session.access_token,
     ))
-}
-
-// User-data queries and delayed persistence keep Music Assistant I/O outside the coordinator lock.
-fn load_user_data() -> Result<UserDataSnapshot, CoreError> {
-    let (client, session_generation) = {
-        let coordinator = CORE_COORDINATOR
-            .lock()
-            .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
-        let session = coordinator.session_configuration.as_ref().ok_or_else(|| {
-            CoreError::command_failed("a restored session is required to load user data")
-        })?;
-        (
-            MusicAssistantClient::new(&session.music_assistant_url.0, session.access_token.clone()),
-            coordinator.user_data_session_generation,
-        )
-    };
-    let user = CORE_NETWORK_RUNTIME
-        .block_on(client.get_current_user())
-        .map_err(CoreError::command_failed)?;
-    let user_data = UserDataController::from_preferences(user.preferences)
-        .map_err(CoreError::command_failed)?;
-    let snapshot = user_data.snapshot();
-    let mut coordinator = CORE_COORDINATOR
-        .lock()
-        .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
-    coordinator
-        .replace_user_data_for_session(session_generation, user_data)
-        .map_err(CoreError::command_failed)?;
-    Ok(snapshot)
-}
-
-pub(crate) fn read_user_data() -> Result<UserDataSnapshot, CoreError> {
-    CORE_COORDINATOR
-        .lock()
-        .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?
-        .user_data_snapshot()
-        .map_err(CoreError::command_failed)
-}
-
-pub(crate) fn read_or_load_user_data() -> Result<UserDataSnapshot, CoreError> {
-    let _load_guard = CORE_USER_DATA_LOAD
-        .lock()
-        .map_err(|_| CoreError::internal("user data load lock poisoned"))?;
-    let user_data = CORE_COORDINATOR
-        .lock()
-        .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?
-        .user_data
-        .as_ref()
-        .map(UserDataController::snapshot);
-    match user_data {
-        Some(snapshot) => Ok(snapshot),
-        None => load_user_data(),
-    }
-}
-
-// Complete sparse media only before insertion into the originating user-data session.
-pub(crate) fn set_user_data_favorites(
-    items: Vec<MediaItem>,
-    is_favorite: bool,
-) -> Result<UserDataSnapshot, CoreError> {
-    let (items, session_generation) = if is_favorite {
-        let (items, generation) = complete_user_data_media(items)?;
-        (items, Some(generation))
-    } else {
-        (items, None)
-    };
-    mutate_user_data(session_generation, |user_data| {
-        user_data.set_favorites(items, is_favorite);
-        Ok(())
-    })
-}
-
-pub(crate) fn add_local_playlist_tracks(
-    playlist_id: &str,
-    tracks: Vec<Track>,
-) -> Result<UserDataSnapshot, CoreError> {
-    let (items, session_generation) =
-        complete_user_data_media(tracks.into_iter().map(MediaItem::Track).collect())?;
-    let tracks = items
-        .into_iter()
-        .map(|item| match item {
-            MediaItem::Track(track) => Ok(track),
-            _ => Err(CoreError::internal("expected completed playlist track")),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    mutate_local_playlist_tracks(Some(session_generation), playlist_id, false, |user_data| {
-        user_data.add_local_playlist_tracks(playlist_id, tracks)
-    })
-}
-
-fn complete_user_data_media(items: Vec<MediaItem>) -> Result<(Vec<MediaItem>, u64), CoreError> {
-    let (client, session_generation) = {
-        let coordinator = CORE_COORDINATOR
-            .lock()
-            .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
-        let session = coordinator.session_configuration.as_ref().ok_or_else(|| {
-            CoreError::command_failed("a restored session is required to complete user data")
-        })?;
-        (
-            MusicAssistantClient::new(&session.music_assistant_url.0, session.access_token.clone()),
-            coordinator.user_data_session_generation,
-        )
-    };
-    let items = CORE_NETWORK_RUNTIME
-        .block_on(client.complete_user_data_media(items))
-        .map_err(CoreError::command_failed)?;
-    Ok((items, session_generation))
-}
-
-// User-data mutations serialize commands and reject stale network completions.
-pub(crate) fn mutate_user_data<F>(
-    expected_session_generation: Option<u64>,
-    operation: F,
-) -> Result<UserDataSnapshot, CoreError>
-where
-    F: FnOnce(&mut UserDataController) -> Result<(), String>,
-{
-    let _command_guard = CORE_COMMAND_SERIALIZER
-        .lock()
-        .map_err(|_| CoreError::internal("core command serializer lock poisoned"))?;
-    let (snapshot, session_generation, should_schedule) = {
-        let mut coordinator = CORE_COORDINATOR
-            .lock()
-            .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
-        coordinator.session_configuration.as_ref().ok_or_else(|| {
-            CoreError::command_failed("a restored session is required to modify user data")
-        })?;
-        if expected_session_generation
-            .is_some_and(|generation| generation != coordinator.user_data_session_generation)
-        {
-            return Err(CoreError::command_failed(
-                "user data session changed during media completion",
-            ));
-        }
-        coordinator
-            .mutate_user_data(operation)
-            .map_err(CoreError::command_failed)?;
-        let snapshot = coordinator
-            .user_data_snapshot()
-            .map_err(CoreError::command_failed)?;
-        let session_generation = coordinator.user_data_session_generation;
-        let should_schedule = coordinator
-            .user_data
-            .as_mut()
-            .expect("user data was checked above")
-            .schedule_write();
-        (snapshot, session_generation, should_schedule)
-    };
-
-    if should_schedule {
-        start_user_data_write_worker(session_generation);
-    }
-    crate::core::event_channel::publish_background_event(MediaSessionEvent::UserDataChanged);
-    Ok(snapshot)
-}
-
-/// Applies a local playlist mutation, renders its cover outside the coordinator lock, then persists both.
-pub(crate) fn mutate_local_playlist_tracks<F>(
-    expected_session_generation: Option<u64>,
-    playlist_id: &str,
-    clear_cover_when_empty: bool,
-    operation: F,
-) -> Result<UserDataSnapshot, CoreError>
-where
-    F: FnOnce(&mut UserDataController) -> Result<(), String>,
-{
-    let _command_guard = CORE_COMMAND_SERIALIZER
-        .lock()
-        .map_err(|_| CoreError::internal("core command serializer lock poisoned"))?;
-    let (tracks, base_url, session_generation) = {
-        let mut coordinator = CORE_COORDINATOR
-            .lock()
-            .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
-        if expected_session_generation
-            .is_some_and(|generation| generation != coordinator.user_data_session_generation)
-        {
-            return Err(CoreError::command_failed(
-                "user data session changed during media completion",
-            ));
-        }
-        let base_url = coordinator
-            .session_configuration
-            .as_ref()
-            .ok_or_else(|| {
-                CoreError::command_failed("a restored session is required to modify user data")
-            })?
-            .music_assistant_url
-            .0
-            .clone();
-        coordinator
-            .mutate_user_data(operation)
-            .map_err(CoreError::command_failed)?;
-        let tracks = coordinator
-            .user_data_snapshot()
-            .map_err(CoreError::command_failed)?
-            .playlists
-            .into_iter()
-            .find(|playlist| {
-                playlist
-                    .playlist
-                    .media
-                    .item_id
-                    .as_str()
-                    .eq_ignore_ascii_case(playlist_id)
-            })
-            .ok_or_else(|| CoreError::command_failed("local playlist was not found"))?
-            .items;
-        (tracks, base_url, coordinator.user_data_session_generation)
-    };
-    let cover = CORE_NETWORK_RUNTIME.block_on(build_playlist_collage(&tracks, &base_url));
-    let (snapshot, should_schedule) = {
-        let mut coordinator = CORE_COORDINATOR
-            .lock()
-            .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
-        if coordinator.user_data_session_generation != session_generation {
-            return Err(CoreError::command_failed(
-                "user data session changed during cover generation",
-            ));
-        }
-        coordinator
-            .mutate_user_data(|user_data| {
-                user_data.set_local_playlist_cover(playlist_id, cover, clear_cover_when_empty)
-            })
-            .map_err(CoreError::command_failed)?;
-        let snapshot = coordinator
-            .user_data_snapshot()
-            .map_err(CoreError::command_failed)?;
-        let should_schedule = coordinator
-            .user_data
-            .as_mut()
-            .expect("user data was checked above")
-            .schedule_write();
-        (snapshot, should_schedule)
-    };
-    if should_schedule {
-        start_user_data_write_worker(session_generation);
-    }
-    Ok(snapshot)
-}
-
-fn start_user_data_write_worker(session_generation: u64) {
-    CORE_NETWORK_RUNTIME.spawn(async move {
-        flush_scheduled_write_after_debounce(
-            || user_data_write_delay(session_generation),
-            || user_data_write_request(session_generation),
-            |revision, response| finish_user_data_write(session_generation, revision, response),
-        )
-        .await;
-    });
-}
-
-fn user_data_write_delay(session_generation: u64) -> Option<Duration> {
-    let coordinator = CORE_COORDINATOR.lock().ok()?;
-    if coordinator.user_data_session_generation != session_generation {
-        return None;
-    }
-    coordinator.user_data.as_ref()?.write_delay(Instant::now())
-}
-
-fn user_data_write_request(session_generation: u64) -> Option<UserDataWriteRequest> {
-    let coordinator = CORE_COORDINATOR.lock().ok()?;
-    if coordinator.user_data_session_generation != session_generation {
-        return None;
-    }
-    let session = coordinator.session_configuration.as_ref()?.clone();
-    let (revision, preferences) = coordinator.user_data.as_ref()?.pending_write()?;
-    Some(UserDataWriteRequest {
-        revision,
-        username: session.username,
-        preferences,
-        client: MusicAssistantClient::new(&session.music_assistant_url.0, session.access_token),
-    })
-}
-
-fn finish_user_data_write(
-    session_generation: u64,
-    written_revision: u64,
-    response: Result<crate::music_assistant::models::session::MusicAssistantUser, String>,
-) -> bool {
-    let Ok(mut coordinator) = CORE_COORDINATOR.lock() else {
-        return true;
-    };
-    if coordinator.user_data_session_generation != session_generation {
-        return true;
-    }
-    coordinator
-        .user_data
-        .as_mut()
-        .map(|user_data| {
-            user_data.finish_write(written_revision, response.ok().map(|user| user.preferences))
-        })
-        .unwrap_or(true)
 }
 
 pub(crate) fn start_music_assistant_query(
@@ -1022,29 +663,22 @@ pub(crate) fn start_radio_and_execute_command(
             .clone();
         (client, coordinator.playback.reserve_media_selection())
     };
-    let user_data = if media_items.iter().any(is_local_playlist) {
-        Some(read_or_load_user_data()?)
-    } else {
-        None
-    };
-    let playlists = user_data
-        .as_ref()
-        .map(|data| data.playlists.as_slice())
-        .unwrap_or(&[]);
     CORE_NETWORK_RUNTIME
         .block_on(crate::music_assistant::radio::start_radio(
             &client,
             media_items,
-            playlists,
             |media, option| async move {
                 let expected_revision = if option == QueueOption::Play {
                     selection_revision
                 } else {
                     selection_revision.wrapping_add(1)
                 };
-                let events = execute_resolved_media_command(media, None, Some(expected_revision), |playback, media| {
-                    playback.queue_play_media(media, option, None, false)
-                })
+                let events = execute_resolved_media_command(
+                    media,
+                    None,
+                    Some(expected_revision),
+                    |playback, media| playback.queue_play_media(media, option, None, false),
+                )
                 .await
                 .map_err(|error| error.message)?;
                 for event in events {
@@ -1312,12 +946,16 @@ mod tests {
             super::execute_command_and_collect_events(|coordinator| {
                 coordinator.pending_commands.push(Box::pin(async move {
                     started_sender.send(()).unwrap();
-                    release_receiver.await.map_err(|_| "test release dropped".to_string())
+                    release_receiver
+                        .await
+                        .map_err(|_| "test release dropped".to_string())
                 }));
                 Ok(())
             })
         });
-        started_receiver.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+        started_receiver
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
         let (control_sender, control_receiver) = std::sync::mpsc::channel();
         let control = std::thread::spawn(move || {
             let result = super::execute_command_and_collect_events(|_| Ok(()));
@@ -1327,7 +965,9 @@ mod tests {
         release_sender.send(()).unwrap();
         pending.join().unwrap().unwrap();
         control.join().unwrap();
-        assert!(control_result.expect("control command must not await network completion").is_ok());
+        assert!(control_result
+            .expect("control command must not await network completion")
+            .is_ok());
     }
 
     #[test]
@@ -1344,19 +984,6 @@ mod tests {
         assert_eq!(
             coordinator.playback.player_state().active_mode,
             crate::playback::mode::PlaybackMode::Local
-        );
-    }
-
-    #[tokio::test]
-    async fn remote_media_reaches_ma_without_local_expansion_or_shuffle() {
-        let media: Vec<crate::music_assistant::models::media::MediaItem> = serde_json::from_value(serde_json::json!([
-            {"media_type":"album", "item_id":"album", "provider":"library", "name":"Album", "uri":"library://album/album"},
-            {"media_type":"playlist", "item_id":"playlist", "provider":"library", "name":"Playlist", "uri":"library://playlist/playlist"}
-        ])).unwrap();
-        let resolved = super::expand_local_playlist_media(media.clone(), None).unwrap();
-        assert_eq!(
-            serde_json::to_value(resolved).unwrap(),
-            serde_json::to_value(media).unwrap()
         );
     }
 
@@ -1519,23 +1146,26 @@ mod tests {
     }
 
     #[test]
-    fn incomplete_user_data_mutations_fail_without_changing_active_state() {
+    fn favorite_mutations_accept_sparse_media_without_network_completion() {
         let mut coordinator = test_coordinator();
-        coordinator.user_data =
-            Some(super::UserDataController::from_preferences(serde_json::Map::new()).unwrap());
-        let original = coordinator.user_data_snapshot().unwrap();
+        coordinator.user_data = Some(super::LibraryUserData::default());
         let incomplete: crate::music_assistant::models::media::Track = serde_json::from_value(serde_json::json!({
             "item_id": "track", "provider": "library", "name": "Track", "uri": "library://track/track"
         })).unwrap();
-        let failure = coordinator
-            .mutate_user_data(|user_data| {
-                let playlist = user_data.create_local_playlist("New playlist".to_string())?;
-                user_data
-                    .add_local_playlist_tracks(playlist.media.item_id.as_str(), vec![incomplete])
-            })
-            .unwrap_err();
-        assert!(failure.contains("missing provider mappings"));
-        assert_eq!(coordinator.user_data_snapshot().unwrap(), original);
+        let (_, _, should_start) = coordinator.user_data.as_mut().unwrap().submit(
+            crate::music_assistant::models::media::MediaItem::Track(incomplete),
+            true,
+        );
+        assert!(should_start);
+        assert_eq!(
+            coordinator
+                .user_data_snapshot()
+                .unwrap()
+                .favorites
+                .tracks
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -1544,10 +1174,7 @@ mod tests {
         coordinator
             .configure_session(session_config())
             .expect("configure session");
-        coordinator.user_data = Some(
-            super::UserDataController::from_preferences(serde_json::Map::new())
-                .expect("empty preferences"),
-        );
+        coordinator.user_data = Some(super::LibraryUserData::default());
         let generation = coordinator.user_data_session_generation;
 
         assert!(coordinator
@@ -1568,8 +1195,7 @@ mod tests {
             .configure_session(session_config())
             .expect("replace session");
 
-        let user_data = super::UserDataController::from_preferences(serde_json::Map::new())
-            .expect("empty preferences");
+        let user_data = super::LibraryUserData::default();
         assert!(coordinator
             .replace_user_data_for_session(old_generation, user_data)
             .is_err());

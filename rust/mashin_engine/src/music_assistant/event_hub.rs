@@ -1,6 +1,6 @@
 //! One authenticated Music Assistant WebSocket owned by native session consumers.
 
-use super::models::identifiers::{AccessToken, PlayerId, QueueId};
+use super::models::identifiers::{AccessToken, MediaId, PlayerId, QueueId};
 use super::models::player::MusicAssistantPlayer;
 use super::models::queue::MusicAssistantQueue;
 use super::models::session::MusicAssistantServerUrl;
@@ -24,6 +24,7 @@ const EVENT_HUB_LOGGER: crate::logging::Logger = crate::logging::Logger::new("ev
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum EventHubLeaseReason {
     Playback,
+    UserData,
     AndroidAutoLiveState,
     ExplicitUserRefresh,
 }
@@ -32,6 +33,9 @@ pub(crate) enum EventHubLeaseReason {
 pub(crate) enum MusicAssistantEvent {
     Connected,
     Disconnected,
+    FavoritesChanged,
+    PlaylistsChanged,
+    PlaylistChanged(MediaId),
     QueueUpdated(MusicAssistantQueue),
     QueueItemsUpdated(QueueId),
     QueueRemoved(QueueId),
@@ -272,6 +276,20 @@ fn parse_event(payload: Value) -> Option<MusicAssistantEvent> {
     }
     let data = payload.get("data").cloned().unwrap_or(Value::Null);
     match event_name.as_str() {
+        "favorite_updated" => Some(MusicAssistantEvent::FavoritesChanged),
+        "media_item_updated" if object_id.starts_with("library://playlist/") => {
+            Some(MusicAssistantEvent::PlaylistChanged(MediaId(
+                object_id
+                    .trim_start_matches("library://playlist/")
+                    .to_owned(),
+            )))
+        }
+        "media_item_added" | "media_item_updated" | "media_item_deleted"
+            if object_id.starts_with("library://playlist/")
+                || data.get("media_type").and_then(Value::as_str) == Some("playlist") =>
+        {
+            Some(MusicAssistantEvent::PlaylistsChanged)
+        }
         "queue_added" | "queue_updated" | "queue_settings_updated" => serde_json::from_value(data)
             .ok()
             .map(MusicAssistantEvent::QueueUpdated),
@@ -300,6 +318,24 @@ mod tests {
         MusicAssistantEvent,
     };
     use serde_json::json;
+
+    #[test]
+    fn user_data_events_are_forwarded_without_playback_consumers() {
+        assert_eq!(
+            parse_event(
+                json!({"event":"favorite_updated", "object_id":"library://track/1", "data":{"favorite":true}})
+            ),
+            Some(MusicAssistantEvent::FavoritesChanged)
+        );
+        assert_eq!(
+            parse_event(
+                json!({"event":"media_item_updated", "object_id":"library://playlist/42", "data":{"media_type":"playlist"}})
+            ),
+            Some(MusicAssistantEvent::PlaylistChanged(super::MediaId(
+                "42".into()
+            )))
+        );
+    }
 
     #[test]
     fn builds_websocket_urls_without_query_or_fragment() {

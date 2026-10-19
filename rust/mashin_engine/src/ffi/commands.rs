@@ -183,26 +183,33 @@ fn execute_async_operation(request: CoreOperationRequest) -> Result<Value, CoreE
             "mediaItems",
             "favorite",
         ),
-        "createLocalPlaylist" => {
-            execute_text_command(mashin_core_create_local_playlist, &arguments, "name")
+        "createPrivatePlaylist" => {
+            execute_text_command(mashin_core_create_private_playlist, &arguments, "name")
         }
-        "renameLocalPlaylist" => execute_two_text_command(
-            mashin_core_rename_local_playlist,
+        "renamePrivatePlaylist" => execute_two_text_command(
+            mashin_core_rename_private_playlist,
             &arguments,
             "playlistId",
             "name",
         ),
-        "removeLocalPlaylist" => {
-            execute_text_command(mashin_core_remove_local_playlist, &arguments, "playlistId")
-        }
-        "addLocalPlaylistTracks" => execute_two_json_text_command(
-            mashin_core_add_local_playlist_tracks,
+        "refreshPrivatePlaylistCover" => with_text(&arguments, "playlistId", |playlist_id| {
+            serialize_operation_result(core::refresh_private_playlist_cover(
+                &playlist_id.to_string_lossy(),
+            ))
+        }),
+        "removePrivatePlaylist" => execute_text_command(
+            mashin_core_remove_private_playlist,
+            &arguments,
+            "playlistId",
+        ),
+        "addPrivatePlaylistTracks" => execute_two_json_text_command(
+            mashin_core_add_private_playlist_tracks,
             &arguments,
             "playlistId",
             "tracks",
         ),
-        "removeLocalPlaylistTracks" => execute_two_json_text_command(
-            mashin_core_remove_local_playlist_tracks,
+        "removePrivatePlaylistTracks" => execute_two_json_text_command(
+            mashin_core_remove_private_playlist_tracks,
             &arguments,
             "playlistId",
             "uris",
@@ -575,19 +582,15 @@ pub extern "C" fn mashin_core_set_user_data_favorites(
 }
 
 #[no_mangle]
-pub extern "C" fn mashin_core_create_local_playlist(name: *const c_char) -> i32 {
+pub extern "C" fn mashin_core_create_private_playlist(name: *const c_char) -> i32 {
     let result = read_required_c_string(name, "name")
         .map_err(CoreError::command_failed)
-        .and_then(|name| {
-            core::mutate_user_data(None, |user_data| {
-                user_data.create_local_playlist(name).map(|_| ())
-            })
-        });
+        .and_then(core::create_private_playlist);
     execute_user_data_mutation(result)
 }
 
 #[no_mangle]
-pub extern "C" fn mashin_core_rename_local_playlist(
+pub extern "C" fn mashin_core_rename_private_playlist(
     playlist_id: *const c_char,
     name: *const c_char,
 ) -> i32 {
@@ -596,40 +599,32 @@ pub extern "C" fn mashin_core_rename_local_playlist(
             read_required_c_string(name, "name").map(|name| (playlist_id, name))
         })
         .map_err(CoreError::command_failed)
-        .and_then(|(playlist_id, name)| {
-            core::mutate_user_data(None, |user_data| {
-                user_data.rename_local_playlist(&playlist_id, name)
-            })
-        });
+        .and_then(|(playlist_id, name)| core::rename_private_playlist(&playlist_id, name));
     execute_user_data_mutation(result)
 }
 
 #[no_mangle]
-pub extern "C" fn mashin_core_remove_local_playlist(playlist_id: *const c_char) -> i32 {
+pub extern "C" fn mashin_core_remove_private_playlist(playlist_id: *const c_char) -> i32 {
     let result = read_required_c_string(playlist_id, "playlist_id")
         .map_err(CoreError::command_failed)
-        .and_then(|playlist_id| {
-            core::mutate_user_data(None, |user_data| {
-                user_data.remove_local_playlist(&playlist_id)
-            })
-        });
+        .and_then(|playlist_id| core::remove_private_playlist(&playlist_id));
     execute_user_data_mutation(result)
 }
 
 #[no_mangle]
-pub extern "C" fn mashin_core_add_local_playlist_tracks(
+pub extern "C" fn mashin_core_add_private_playlist_tracks(
     playlist_id: *const c_char,
     tracks_json: *const c_char,
 ) -> i32 {
     let result = read_required_c_string(playlist_id, "playlist_id")
         .and_then(|playlist_id| parse_tracks(tracks_json).map(|tracks| (playlist_id, tracks)))
         .map_err(CoreError::command_failed)
-        .and_then(|(playlist_id, tracks)| core::add_local_playlist_tracks(&playlist_id, tracks));
+        .and_then(|(playlist_id, tracks)| core::add_private_playlist_tracks(&playlist_id, tracks));
     execute_user_data_mutation(result)
 }
 
 #[no_mangle]
-pub extern "C" fn mashin_core_remove_local_playlist_tracks(
+pub extern "C" fn mashin_core_remove_private_playlist_tracks(
     playlist_id: *const c_char,
     track_uris_json: *const c_char,
 ) -> i32 {
@@ -638,11 +633,7 @@ pub extern "C" fn mashin_core_remove_local_playlist_tracks(
             read_required_uri_array(track_uris_json).map(|uris| (playlist_id, uris))
         })
         .map_err(CoreError::command_failed)
-        .and_then(|(playlist_id, uris)| {
-            core::mutate_local_playlist_tracks(None, &playlist_id, true, |user_data| {
-                user_data.remove_local_playlist_tracks(&playlist_id, uris)
-            })
-        });
+        .and_then(|(playlist_id, uris)| core::remove_private_playlist_tracks(&playlist_id, uris));
     execute_user_data_mutation(result)
 }
 
@@ -675,14 +666,18 @@ pub extern "C" fn mashin_core_queue_play_media(request_json: *const c_char) -> i
             })
         }
         Ok(request) if request.option != QueueOption::Unknown => {
-            resolve_media_and_execute_playback_command(request.media_items, request.option, |playback, tracks| {
-                playback.queue_play_media(
-                    tracks,
-                    request.option,
-                    request.start_item,
-                    request.shuffle,
-                )
-            })
+            resolve_media_and_execute_playback_command(
+                request.media_items,
+                request.option,
+                |playback, tracks| {
+                    playback.queue_play_media(
+                        tracks,
+                        request.option,
+                        request.start_item,
+                        request.shuffle,
+                    )
+                },
+            )
         }
         Ok(_) => {
             record_and_publish_error(CoreError::command_failed("unknown queue option"));
@@ -875,7 +870,11 @@ where
     publish_command_result(core::execute_playback_command_and_collect_events(operation))
 }
 
-fn resolve_media_and_execute_playback_command<F>(media_items: Vec<MediaItem>, option: QueueOption, operation: F) -> i32
+fn resolve_media_and_execute_playback_command<F>(
+    media_items: Vec<MediaItem>,
+    option: QueueOption,
+    operation: F,
+) -> i32
 where
     F: FnOnce(&mut crate::playback::engine::PlaybackEngine, Vec<MediaItem>) -> Result<(), String>,
 {

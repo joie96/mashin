@@ -102,6 +102,13 @@ class _PlaylistsPageMobileState extends State<PlaylistsPageMobile> {
         onSelected: () => _renamePlaylist(playlists.single),
       ),
       ContextMenuAction(
+        label: 'Cover aktualisieren',
+        icon: Icons.image_outlined,
+        isEnabled: isSingleEditable,
+        onSelected: () =>
+            _controller.refreshPrivatePlaylistCover(playlists.single),
+      ),
+      ContextMenuAction(
         label: 'Löschen',
         icon: Icons.delete_outline,
         isEnabled: areAllEditable,

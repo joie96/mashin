@@ -4,7 +4,25 @@ import 'package:mashin_flutter/features/core/core_bridge.dart';
 import 'package:mashin_flutter/features/core/core_models.dart';
 import 'package:mashin_flutter/features/core/core_userdata.dart';
 
-class _UnusedCoreBridge extends Fake implements MashinCoreBridgeApi {}
+class _UnusedCoreBridge extends Fake implements MashinCoreBridgeApi {
+  @override
+  Stream<Map<String, dynamic>> get events => const Stream.empty();
+}
+
+class _FavoriteSnapshotBridge extends _UnusedCoreBridge {
+  @override
+  Future<Map<String, dynamic>> getUserData() => loadUserData();
+
+  @override
+  Future<Map<String, dynamic>> loadUserData() async => <String, dynamic>{
+    'favorites': <String, dynamic>{
+      'tracks': <Map<String, dynamic>>[
+        _mediaJson('track')..['favorite'] = true,
+      ],
+    },
+    'playlists': <Map<String, dynamic>>[],
+  };
+}
 
 Map<String, dynamic> _mediaJson(String mediaType) => <String, dynamic>{
   'media_type': mediaType,
@@ -46,6 +64,45 @@ Map<String, dynamic> _mediaJson(String mediaType) => <String, dynamic>{
 };
 
 void main() {
+  test(
+    'provider aliases without a URI use the confirmed library favorite',
+    () async {
+      final userData = UserData(coreBridge: _FavoriteSnapshotBridge());
+      await userData.loadLibraryData();
+      final providerItem = Track.fromJson(<String, dynamic>{
+        'item_id': 'source-id',
+        'provider': 'source--one',
+        'name': 'Track',
+      });
+      expect(userData.isFavorite(providerItem), isTrue);
+      userData.dispose();
+    },
+  );
+
+  test('playlist ownership survives favorite projection', () {
+    final userData = UserData(coreBridge: _UnusedCoreBridge());
+    final playlist = Playlist.fromJson(
+      _mediaJson('playlist')
+        ..['access'] = <String, dynamic>{
+          'owner': 'user-one',
+          'sharing': 'private',
+          'shared_users': <String>[],
+          'collaborative': false,
+        },
+    );
+    final projected = userData.withFavoriteStatus(playlist);
+    expect(
+      createMusicAssistantMediaItemPayload(projected)['access'],
+      <String, dynamic>{
+        'owner': 'user-one',
+        'sharing': 'private',
+        'shared_users': <String>[],
+        'collaborative': false,
+      },
+    );
+    userData.dispose();
+  });
+
   test('favorite projection preserves complete modeled media payloads', () {
     final userData = UserData(coreBridge: _UnusedCoreBridge());
     for (final mediaType in <String>['track', 'album', 'artist', 'playlist']) {

@@ -95,7 +95,7 @@ class _FakeFavoritesCoreBridge extends Fake implements MashinCoreBridgeApi {
 
 class _FakeUserDataController extends Fake implements UserData {
   @override
-  bool get isLoadingPreferences => false;
+  bool get isLoadingLibraryData => false;
 
   @override
   List<Track> get favoriteTracks => List<Track>.generate(

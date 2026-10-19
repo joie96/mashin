@@ -209,7 +209,7 @@ pub(crate) struct MediaItemFields {
     #[serde(default)]
     pub(crate) metadata: Option<MediaItemMetadata>,
     #[serde(default)]
-    pub(crate) favorite: bool,
+    pub(crate) favorite: Option<bool>,
     #[serde(default)]
     pub(crate) position: Option<u32>,
     #[serde(default)]
@@ -228,7 +228,11 @@ impl MediaItemFields {
     // Availability remains optimistic when neither mappings nor a server flag are known.
     pub(crate) fn is_available(&self) -> bool {
         self.available != Some(false)
-            && (self.provider_mappings.is_empty() || self.provider_mappings.iter().any(|mapping| mapping.available))
+            && (self.provider_mappings.is_empty()
+                || self
+                    .provider_mappings
+                    .iter()
+                    .any(|mapping| mapping.available))
     }
 }
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -260,6 +264,26 @@ pub(crate) struct Track {
     pub(crate) track_number: u16,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PlaylistAccess {
+    pub(crate) owner: Option<String>,
+    pub(crate) sharing: PlaylistSharing,
+    #[serde(default)]
+    pub(crate) shared_users: Vec<String>,
+    #[serde(default)]
+    pub(crate) collaborative: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum PlaylistSharing {
+    Private,
+    All,
+    Selected,
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Playlist {
     #[serde(flatten)]
     pub(crate) media: MediaItemFields,
@@ -269,6 +293,8 @@ pub(crate) struct Playlist {
     pub(crate) is_editable: bool,
     #[serde(default)]
     pub(crate) is_dynamic: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) access: Option<PlaylistAccess>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -507,18 +533,27 @@ mod tests {
             }))
             .unwrap();
             assert_eq!(album.year, expected);
-            assert_eq!(serde_json::to_value(album).unwrap()["year"], json!(expected));
+            assert_eq!(
+                serde_json::to_value(album).unwrap()["year"],
+                json!(expected)
+            );
         }
         let album: Album = serde_json::from_value(json!({
             "item_id": "album", "provider": "ytmusic--test", "name": "Album"
         }))
         .unwrap();
         assert_eq!(album.year, None);
-        for invalid in [json!("invalid"), json!(2020.5), json!(true), json!("2147483648")] {
+        for invalid in [
+            json!("invalid"),
+            json!(2020.5),
+            json!(true),
+            json!("2147483648"),
+        ] {
             assert!(serde_json::from_value::<Album>(json!({
                 "item_id": "album", "provider": "ytmusic--test", "name": "Album",
                 "year": invalid
-            })).is_err());
+            }))
+            .is_err());
         }
     }
 
@@ -544,7 +579,10 @@ mod tests {
         assert_eq!(results.tracks[0].album.as_ref().unwrap().year, Some(2023));
         let command = serde_json::to_value(MediaItem::Album(results.albums[0].clone())).unwrap();
         assert_eq!(command["year"], json!(2026));
-        assert!(matches!(serde_json::from_value::<MediaItem>(command).unwrap(), MediaItem::Album(_)));
+        assert!(matches!(
+            serde_json::from_value::<MediaItem>(command).unwrap(),
+            MediaItem::Album(_)
+        ));
     }
 
     #[test]

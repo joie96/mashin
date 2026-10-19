@@ -4,7 +4,7 @@
 use crate::audio::models::AudioCommand;
 use crate::core::event_channel::publish_background_event;
 use crate::core::models::MediaSessionEvent;
-use crate::music_assistant::commands::PlayerCommand;
+use crate::music_assistant::client::PlayerCommand;
 use crate::music_assistant::connection::MusicAssistantConnection;
 use crate::music_assistant::models::identifiers::{PlayerId, QueueItemId};
 use crate::music_assistant::models::media::MediaItem;

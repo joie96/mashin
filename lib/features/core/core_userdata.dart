@@ -1,16 +1,22 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import 'core_bridge.dart';
 import 'core_models.dart';
 
-/// Projects the Rust-owned favorites and local playlists for Flutter views.
+/// Projects the Rust-owned MA cache for Flutter views.
 class UserData extends ChangeNotifier {
-  static const String localPlaylistProvider = 'mashin';
-
-  UserData({required this._coreBridge});
+  UserData({required MashinCoreBridgeApi coreBridge})
+    : _coreBridge = coreBridge {
+    _eventSubscription = coreBridge.events.listen(_onCoreEvent);
+  }
 
   final MashinCoreBridgeApi _coreBridge;
-  bool _isLoadingPreferences = false;
+  late final StreamSubscription<Map<String, dynamic>> _eventSubscription;
+  Future<void>? _snapshotRefresh;
+  bool _needsSnapshotRefresh = false;
+  bool _isLoadingLibraryData = false;
   bool _isDisposed = false;
   List<Track> _favoriteTracks = const <Track>[];
   List<Album> _favoriteAlbums = const <Album>[];
@@ -20,35 +26,48 @@ class UserData extends ChangeNotifier {
   Map<String, List<Track>> _playlistTracksByPlaylistId =
       const <String, List<Track>>{};
 
-  bool get isLoadingPreferences => _isLoadingPreferences;
+  bool get isLoadingLibraryData => _isLoadingLibraryData;
   List<Track> get favoriteTracks => _favoriteTracks;
   List<Album> get favoriteAlbums => _favoriteAlbums;
   List<Playlist> get favoritePlaylists => _favoritePlaylists;
   List<Artist> get favoriteArtists => _favoriteArtists;
   List<Playlist> get playlists => _playlists;
 
+  bool isPrivatePlaylist(Playlist playlist) => _playlists.any(
+    (candidate) =>
+        candidate.itemId == playlist.itemId &&
+        candidate.provider == playlist.provider,
+  );
+
   List<Track> tracksForPlaylist(String playlistId) =>
       _playlistTracksByPlaylistId[playlistId.trim()] ?? const <Track>[];
 
-  Future<void> loadPreferences() async {
-    _isLoadingPreferences = true;
+  Future<void> loadLibraryData() async {
+    _isLoadingLibraryData = true;
     notifyListeners();
     try {
-      _applySnapshot(await _coreBridge.loadUserData());
+      await _coreBridge.loadUserData();
+      await _refreshSnapshot();
     } finally {
-      _isLoadingPreferences = false;
+      _isLoadingLibraryData = false;
       notifyListeners();
     }
   }
 
   bool isFavorite(MediaItem item) {
-    final String uri = item.uri?.trim() ?? '';
-    if (uri.isEmpty) return false;
     return switch (item.mediaType) {
-      MediaType.track => _favoriteTracks.any((item) => _sameUri(item.uri, uri)),
-      MediaType.album => _favoriteAlbums.any((item) => _sameUri(item.uri, uri)),
-      MediaType.artist => _favoriteArtists.any((item) => _sameUri(item.uri, uri)),
-      MediaType.playlist => _favoritePlaylists.any((item) => _sameUri(item.uri, uri)),
+      MediaType.track => _favoriteTracks.any(
+        (favorite) => _sameItem(favorite, item),
+      ),
+      MediaType.album => _favoriteAlbums.any(
+        (favorite) => _sameItem(favorite, item),
+      ),
+      MediaType.artist => _favoriteArtists.any(
+        (favorite) => _sameItem(favorite, item),
+      ),
+      MediaType.playlist => _favoritePlaylists.any(
+        (favorite) => _sameItem(favorite, item),
+      ),
       _ => false,
     };
   }
@@ -63,58 +82,100 @@ class UserData extends ChangeNotifier {
   }
 
   Future<void> setFavorite(Iterable<MediaItem> items, bool favorite) async {
-    await _coreBridge.setUserDataFavorites(items.toList(growable: false), favorite);
+    await _coreBridge.setUserDataFavorites(
+      items.toList(growable: false),
+      favorite,
+    );
     await _refreshSnapshot();
   }
 
-  Future<Playlist?> createLocalPlaylist(String name) async {
+  Future<Playlist?> createPrivatePlaylist(String name) async {
     final String normalizedName = name.trim();
     if (normalizedName.isEmpty) return null;
-    await _coreBridge.createLocalPlaylist(normalizedName);
+    await _coreBridge.createPrivatePlaylist(normalizedName);
     await _refreshSnapshot();
     return _playlists.lastWhere(
       (playlist) => playlist.name == normalizedName,
-      orElse: () => throw StateError('Rust did not return the created local playlist'),
+      orElse: () =>
+          throw StateError('Rust did not return the created private playlist'),
     );
   }
 
   Future<bool> renamePlaylist(Playlist playlist, String name) async {
     if (playlist.itemId.trim().isEmpty || name.trim().isEmpty) return false;
-    await _coreBridge.renameLocalPlaylist(playlist.itemId, name.trim());
+    await _coreBridge.renamePrivatePlaylist(playlist.itemId, name.trim());
+    await _refreshSnapshot();
+    return true;
+  }
+
+  Future<bool> refreshPrivatePlaylistCover(Playlist playlist) async {
+    if (!isPrivatePlaylist(playlist) || !playlist.isEditable) return false;
+    await _coreBridge.refreshPrivatePlaylistCover(playlist.itemId);
     await _refreshSnapshot();
     return true;
   }
 
   Future<bool> removePlaylist(Playlist playlist) async {
     if (playlist.itemId.trim().isEmpty) return false;
-    await _coreBridge.removeLocalPlaylist(playlist.itemId);
+    await _coreBridge.removePrivatePlaylist(playlist.itemId);
     await _refreshSnapshot();
     return true;
   }
 
-  Future<bool> addPlaylistTracks(String playlistId, Iterable<Track> tracks) async {
+  Future<bool> addPlaylistTracks(
+    String playlistId,
+    Iterable<Track> tracks,
+  ) async {
     final List<Track> values = tracks
         .where((track) => (track.uri ?? '').trim().isNotEmpty)
         .toList(growable: false);
     if (playlistId.trim().isEmpty || values.isEmpty) return false;
-    await _coreBridge.addLocalPlaylistTracks(playlistId, values);
+    await _coreBridge.addPrivatePlaylistTracks(playlistId, values);
     await _refreshSnapshot();
     return true;
   }
 
-  Future<bool> removePlaylistTracks(String playlistId, Iterable<Track> tracks) async {
+  Future<bool> removePlaylistTracks(
+    String playlistId,
+    Iterable<Track> tracks,
+  ) async {
     final List<String> uris = tracks
         .map((track) => track.uri?.trim() ?? '')
         .where((uri) => uri.isNotEmpty)
         .toList(growable: false);
     if (playlistId.trim().isEmpty || uris.isEmpty) return false;
-    await _coreBridge.removeLocalPlaylistTracks(playlistId, uris);
+    await _coreBridge.removePrivatePlaylistTracks(playlistId, uris);
     await _refreshSnapshot();
     return true;
   }
 
-  Future<void> _refreshSnapshot() async =>
-      _applySnapshot(await _coreBridge.getUserData());
+  Future<void> _onCoreEvent(Map<String, dynamic> event) async {
+    if (event['type'] != 'user_data_changed' || _isDisposed) return;
+    try {
+      await _refreshSnapshot();
+    } catch (error, stackTrace) {
+      FlutterError.reportError(
+        FlutterErrorDetails(exception: error, stack: stackTrace),
+      );
+    }
+  }
+
+  Future<void> _refreshSnapshot() {
+    _needsSnapshotRefresh = true;
+    return _snapshotRefresh ??= Future<void>.microtask(_drainSnapshotRefreshes);
+  }
+
+  Future<void> _drainSnapshotRefreshes() async {
+    try {
+      while (_needsSnapshotRefresh && !_isDisposed) {
+        _needsSnapshotRefresh = false;
+        final snapshot = await _coreBridge.getUserData();
+        if (!_isDisposed && !_needsSnapshotRefresh) _applySnapshot(snapshot);
+      }
+    } finally {
+      _snapshotRefresh = null;
+    }
+  }
 
   void _applySnapshot(Map<String, dynamic> snapshot) {
     final Map<String, dynamic> favorites = _map(snapshot['favorites']);
@@ -125,9 +186,14 @@ class UserData extends ChangeNotifier {
 
     final Map<String, List<Track>> tracksByPlaylist = <String, List<Track>>{};
     final List<Playlist> playlists = <Playlist>[];
-    for (final Map<String, dynamic> value in _listOfMaps(snapshot['playlists'])) {
+    for (final Map<String, dynamic> value in _listOfMaps(
+      snapshot['playlists'],
+    )) {
       try {
-        final Playlist playlist = _copyPlaylist(Playlist.fromJson(value), false);
+        final Playlist playlist = _copyPlaylist(
+          Playlist.fromJson(value),
+          false,
+        );
         playlists.add(playlist);
         tracksByPlaylist[playlist.itemId] = _readTracks(value['items'], false);
       } on FormatException {
@@ -136,29 +202,73 @@ class UserData extends ChangeNotifier {
     }
     playlists.sort(_comparePlaylists);
     _playlists = List<Playlist>.unmodifiable(playlists);
-    _playlistTracksByPlaylistId = Map<String, List<Track>>.unmodifiable(tracksByPlaylist);
+    _playlistTracksByPlaylistId = Map<String, List<Track>>.unmodifiable(
+      tracksByPlaylist,
+    );
     notifyListeners();
   }
 
   List<Track> _readTracks(Object? value, bool favorite) =>
-      List<Track>.unmodifiable(_listOfMaps(value).map((json) => _copyTrack(Track.fromJson(json), favorite)));
+      List<Track>.unmodifiable(
+        _listOfMaps(
+          value,
+        ).map((json) => _copyTrack(Track.fromJson(json), favorite)),
+      );
   List<Album> _readAlbums(Object? value, bool favorite) =>
-      List<Album>.unmodifiable(_listOfMaps(value).map((json) => _copyAlbum(Album.fromJson(json), favorite)));
+      List<Album>.unmodifiable(
+        _listOfMaps(
+          value,
+        ).map((json) => _copyAlbum(Album.fromJson(json), favorite)),
+      );
   List<Playlist> _readPlaylists(Object? value, bool favorite) =>
-      List<Playlist>.unmodifiable(_listOfMaps(value).map((json) => _copyPlaylist(Playlist.fromJson(json), favorite)));
+      List<Playlist>.unmodifiable(
+        _listOfMaps(
+          value,
+        ).map((json) => _copyPlaylist(Playlist.fromJson(json), favorite)),
+      );
   List<Artist> _readArtists(Object? value, bool favorite) =>
-      List<Artist>.unmodifiable(_listOfMaps(value).map((json) => _copyArtist(Artist.fromJson(json), favorite)));
+      List<Artist>.unmodifiable(
+        _listOfMaps(
+          value,
+        ).map((json) => _copyArtist(Artist.fromJson(json), favorite)),
+      );
 
-  Map<String, dynamic> _map(Object? value) =>
-      value is Map ? Map<String, dynamic>.from(value) : const <String, dynamic>{};
+  Map<String, dynamic> _map(Object? value) => value is Map
+      ? Map<String, dynamic>.from(value)
+      : const <String, dynamic>{};
   List<Map<String, dynamic>> _listOfMaps(Object? value) => value is List
-      ? value.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList(growable: false)
+      ? value
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList(growable: false)
       : const <Map<String, dynamic>>[];
   bool _sameUri(String? left, String right) =>
-      (left ?? '').trim().toLowerCase() == right.toLowerCase();
+      right.isNotEmpty && (left ?? '').trim() == right;
+  bool _sameItem(MediaItem left, MediaItem right) =>
+      (left.provider == right.provider && left.itemId == right.itemId) ||
+      _sameUri(left.uri, right.uri ?? '') ||
+      left.providerMappings.any(
+        (mapping) =>
+            (mapping.providerInstance == right.provider &&
+                mapping.itemId == right.itemId) ||
+            right.providerMappings.any(
+              (other) =>
+                  mapping.providerInstance == other.providerInstance &&
+                  mapping.itemId == other.itemId,
+            ),
+      ) ||
+      right.providerMappings.any(
+        (mapping) =>
+            mapping.providerInstance == left.provider &&
+            mapping.itemId == left.itemId,
+      );
   int _comparePlaylists(Playlist left, Playlist right) {
-    final int sortComparison = (left.sortName ?? '').toLowerCase().compareTo((right.sortName ?? '').toLowerCase());
-    return sortComparison != 0 ? sortComparison : left.name.toLowerCase().compareTo(right.name.toLowerCase());
+    final int sortComparison = (left.sortName ?? '').toLowerCase().compareTo(
+      (right.sortName ?? '').toLowerCase(),
+    );
+    return sortComparison != 0
+        ? sortComparison
+        : left.name.toLowerCase().compareTo(right.name.toLowerCase());
   }
 
   // Favorite projection changes membership only, never playback or provider data.
@@ -230,6 +340,7 @@ class UserData extends ChangeNotifier {
     dateAdded: item.dateAdded,
     isEditable: item.isEditable,
     isDynamic: item.isDynamic,
+    access: item.access,
     sortName: item.sortName,
     uri: item.uri,
     isPlayable: item.isPlayable,
@@ -243,6 +354,7 @@ class UserData extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
+    unawaited(_eventSubscription.cancel());
     super.dispose();
   }
 

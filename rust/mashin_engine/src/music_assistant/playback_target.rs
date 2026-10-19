@@ -1,7 +1,7 @@
 //! Shared player commands and server-owned queue projection; never owns local audio.
 
 use crate::core::core::CORE_NETWORK_RUNTIME;
-use crate::music_assistant::commands::{PlayerCommand, QueueCommand};
+use crate::music_assistant::client::{PlayerCommand, QueueCommand};
 use crate::music_assistant::connection::MusicAssistantConnection;
 use crate::music_assistant::event_hub::EventHubLeaseReason;
 use crate::music_assistant::models::identifiers::{PlayerId, QueueItemId};

@@ -100,7 +100,7 @@ class _AppShellState extends State<AppShell> {
       _userDataController?.playlists ?? const <Playlist>[];
 
   bool get _isLoadingSidebarPlaylists =>
-      _userDataController?.isLoadingPreferences ?? false;
+      _userDataController?.isLoadingLibraryData ?? false;
 
   /// Current playback and queue state
   QueueItem? get _currentQueueItem {
@@ -541,7 +541,7 @@ class _AppShellState extends State<AppShell> {
                     currentTrackInfo:
                         currentTrackInfo ?? const SizedBox.shrink(),
                     playbackState:
-                      _coreEvents.mediaSessionState.playerState.playbackState,
+                        _coreEvents.mediaSessionState.playerState.playbackState,
                     currentSeconds: _currentTrackPositionSeconds,
                     maxSeconds: _currentTrackMaxSeconds,
                     trackTransitionKey: _currentQueueItem?.queueItemId ?? '',
@@ -886,7 +886,7 @@ class _AppShellState extends State<AppShell> {
 
     final String? name = await showPlaylistNameDialog(context: context);
     if (name != null) {
-      await controller.createLocalPlaylist(name);
+      await controller.createPrivatePlaylist(name);
     }
   }
 
@@ -946,6 +946,13 @@ class _AppShellState extends State<AppShell> {
           label: 'Umbenennen',
           icon: Icons.edit_outlined,
           onSelected: () => _renamePlaylist(playlist),
+          isEnabled: playlist.isEditable,
+        ),
+        ContextMenuAction(
+          label: 'Cover aktualisieren',
+          icon: Icons.image_outlined,
+          onSelected: () =>
+              _userDataController!.refreshPrivatePlaylistCover(playlist),
           isEnabled: playlist.isEditable,
         ),
         ContextMenuAction(
@@ -2030,10 +2037,7 @@ class _AudioOptionsMenu extends StatelessWidget {
                 value: 'opus_256k',
                 title: 'High (Opus 256 kbit/s)',
               ),
-              const _AudioProfileOption(
-                value: 'flac',
-                title: 'Studio (Flac)',
-              ),
+              const _AudioProfileOption(value: 'flac', title: 'Studio (Flac)'),
             ],
           ),
         ),
@@ -2043,10 +2047,7 @@ class _AudioOptionsMenu extends StatelessWidget {
 }
 
 class _AudioProfileOption extends StatelessWidget {
-  const _AudioProfileOption({
-    required this.value,
-    required this.title,
-  });
+  const _AudioProfileOption({required this.value, required this.title});
 
   final String value;
   final String title;
