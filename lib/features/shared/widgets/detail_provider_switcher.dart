@@ -172,7 +172,6 @@ class MediaItemProviderIcon extends StatefulWidget {
 
 class _MediaItemProviderIconState extends State<MediaItemProviderIcon> {
   static const Size _iconArea = Size(48, 48);
-  static const double _iconInset = 8;
   static const double _stackIconSize = 24;
   static const double _stackHeight = 40;
   late ItemProviderSelection _selection;
@@ -226,7 +225,10 @@ class _MediaItemProviderIconState extends State<MediaItemProviderIcon> {
             ProviderManifestRegistry.getByProvider(provider)?.name ?? provider;
         final primaryIconOffset =
             widget.primaryIconOffset ??
-            Offset(_iconInset, (_iconArea.height - widget.size) / 2);
+            Offset(
+              (_iconArea.width - widget.size) / 2,
+              (_iconArea.height - widget.size) / 2,
+            );
         if (!_selection.canCycle) {
           return SizedBox.fromSize(
             size: _iconArea,

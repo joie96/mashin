@@ -117,8 +117,8 @@ void main() {
             expect(area, originalArea);
             if (primaryIconOffset == null) {
               expect(
-                bounds.center.dy,
-                tester.getCenter(find.byType(MediaItemProviderIcon)).dy,
+                bounds.center,
+                tester.getCenter(find.byType(MediaItemProviderIcon)),
               );
             } else {
               expect(
@@ -338,12 +338,27 @@ void main() {
       await tester.pumpAndSettle();
       final provider = find.byTooltip('Zu deezer wechseln');
       expect(provider, findsOneWidget);
+      final primary = find.byKey(
+        const ValueKey<String>('mobile-provider-youtube--one'),
+      );
+      final primaryBounds = tester.getRect(primary);
+      final providerCell = find.ancestor(
+        of: find.byType(MediaItemProviderIcon),
+        matching: find.byType(Row),
+      ).first;
+      expect(primaryBounds.center.dx, tester.getCenter(providerCell).dx);
       await tester.tap(provider);
       await tester.pump(kDoubleTapTimeout);
       await tester.pumpAndSettle();
       expect(
         ItemProviderSelection.forItem(item).selected?.providerInstance,
         'deezer--one',
+      );
+      expect(
+        tester.getRect(find.byKey(
+          const ValueKey<String>('mobile-provider-deezer--one'),
+        )),
+        primaryBounds,
       );
       expect(selections, 0);
       expect(activations, 0);
