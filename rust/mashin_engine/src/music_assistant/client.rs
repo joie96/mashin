@@ -1,7 +1,7 @@
 use super::models::identifiers::{AccessToken, MediaId, PlayerId, QueueId, QueueItemId};
 use super::models::media::{
-    Album, Artist, MediaItem, MediaItemFields, MediaType, MusicAssistantSearchResults, Playlist,
-    PlaylistSharing, Track,
+    Album, Artist, MediaItem, MediaItemFields, MediaItemImage, MediaType,
+    MusicAssistantSearchResults, Playlist, PlaylistSharing, Track,
 };
 use super::models::player::MusicAssistantPlayer;
 use super::models::queue::{MusicAssistantQueue, QueueItem, QueueOption, RepeatMode};
@@ -11,7 +11,13 @@ use rand::seq::SliceRandom;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
+
+struct ArtworkCacheEntry {
+    expires_at: Instant,
+    image: Option<MediaItemImage>,
+}
 
 #[derive(Deserialize)]
 struct PlaylistTask {
@@ -125,6 +131,7 @@ pub(crate) struct MusicAssistantClient {
     endpoint: String,
     access_token: Option<AccessToken>,
     http_client: reqwest::Client,
+    artwork_cache: tokio::sync::Mutex<HashMap<(String, String, String), ArtworkCacheEntry>>,
 }
 
 impl MusicAssistantClient {
@@ -134,6 +141,7 @@ impl MusicAssistantClient {
             base_url: base_url.trim_end_matches('/').to_owned(),
             endpoint: format!("{}/api", base_url.trim_end_matches('/')),
             access_token,
+            artwork_cache: tokio::sync::Mutex::new(HashMap::new()),
             http_client: reqwest::Client::builder()
                 .connect_timeout(std::time::Duration::from_secs(5))
                 .timeout(std::time::Duration::from_secs(30))
@@ -782,12 +790,131 @@ impl MusicAssistantClient {
             .await
             .map_err(String::from)?;
         if command.starts_with("music/") {
+            self.fill_missing_artwork(&mut response).await;
             let providers = self.provider_availability().await;
             annotate_media_availability(&mut response, providers.as_deref());
         }
         serde_json::from_value(response).map_err(|error| {
             format!("Music Assistant command '{command}' returned invalid data: {error}")
         })
+    }
+
+    // Artwork enrichment stays at the response boundary and preserves item identity and metadata.
+    async fn fill_missing_artwork(&self, response: &mut Value) {
+        let mut pending = vec![response];
+        while let Some(value) = pending.pop() {
+            let media_type = value
+                .get("media_type")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if let Some(media_type) = media_type {
+                if let Ok(fields) = serde_json::from_value::<MediaItemFields>(value.clone()) {
+                    let preview = value
+                        .get("image")
+                        .cloned()
+                        .and_then(|image| serde_json::from_value::<MediaItemImage>(image).ok());
+                    let has_image = fields
+                        .metadata
+                        .as_ref()
+                        .is_some_and(|metadata| metadata.images.iter().any(usable_artwork))
+                        || preview.as_ref().is_some_and(usable_artwork);
+                    if !has_image {
+                        if let Some(image) = self.find_provider_artwork(&media_type, &fields).await
+                        {
+                            let metadata = value
+                                .as_object_mut()
+                                .unwrap()
+                                .entry("metadata")
+                                .or_insert_with(|| json!({}));
+                            if !metadata.is_object() {
+                                *metadata = json!({});
+                            }
+                            metadata["images"] = json!([image]);
+                        }
+                    }
+                }
+            }
+            match value {
+                Value::Array(items) => pending.extend(items.iter_mut()),
+                Value::Object(fields) => pending.extend(fields.values_mut()),
+                _ => {}
+            }
+        }
+    }
+
+    // Raw item requests cannot re-enter enrichment; misses and successful lookups share a session cache.
+    async fn find_provider_artwork(
+        &self,
+        media_type: &str,
+        fields: &MediaItemFields,
+    ) -> Option<MediaItemImage> {
+        for mapping in &fields.provider_mappings {
+            let provider = mapping.provider_instance.as_str();
+            if provider.is_empty()
+                || provider == "library"
+                || mapping.item_id.as_str().is_empty()
+                || (provider == fields.provider.as_str() && mapping.item_id == fields.item_id)
+            {
+                continue;
+            }
+            let key = (
+                media_type.to_owned(),
+                provider.to_owned(),
+                mapping.item_id.as_str().to_owned(),
+            );
+            {
+                let cache = self.artwork_cache.lock().await;
+                if let Some(entry) = cache
+                    .get(&key)
+                    .filter(|entry| entry.expires_at > Instant::now())
+                {
+                    if entry.image.is_some() {
+                        return entry.image.clone();
+                    }
+                    continue;
+                }
+            }
+            let result = self
+                .execute_http_command::<MediaItem>(
+                    "music/item",
+                    json!({
+                        "media_type": media_type,
+                        "item_id": mapping.item_id,
+                        "provider_instance_id_or_domain": provider,
+                        "allow_update_metadata": false,
+                    }),
+                )
+                .await;
+            let image = result.ok().and_then(|item| {
+                item.fields()
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| {
+                        metadata
+                            .images
+                            .iter()
+                            .find(|image| usable_artwork(image))
+                            .cloned()
+                    })
+                    .or_else(|| match item {
+                        MediaItem::Track(track) => track.image.filter(usable_artwork),
+                        _ => None,
+                    })
+            });
+            let mut cache = self.artwork_cache.lock().await;
+            cache.retain(|_, entry| entry.expires_at > Instant::now());
+            cache.insert(
+                key,
+                ArtworkCacheEntry {
+                    expires_at: Instant::now() + Duration::from_secs(300),
+                    image: image.clone(),
+                },
+            );
+            if image.is_some() {
+                return image;
+            }
+        }
+        None
     }
 
     async fn execute_http_command<Response>(
@@ -844,6 +971,14 @@ impl MusicAssistantClient {
             }
         })
     }
+}
+
+fn usable_artwork(image: &MediaItemImage) -> bool {
+    !image.path.trim().is_empty()
+        || image
+            .proxy_id
+            .as_ref()
+            .is_some_and(|proxy| !proxy.trim().is_empty())
 }
 
 // Transport always sends modeled media objects, including nested media type tags.
@@ -1208,6 +1343,133 @@ pub(crate) mod tests {
             MusicAssistantClient::new(&format!("http://{address}"), None),
             worker,
         )
+    }
+
+    #[tokio::test]
+    async fn missing_artwork_tries_mappings_and_reuses_cached_results() {
+        let source = json!({"media_type":"artist", "item_id":"library-artist", "provider":"library", "name":"Original",
+        "metadata":{"description":"Original description", "images":[]},
+        "provider_mappings":[
+            {"item_id":"empty", "provider_instance":"first", "provider_domain":"first"},
+            {"item_id":"found", "provider_instance":"second", "provider_domain":"second"},
+            {"item_id":"unused", "provider_instance":"third", "provider_domain":"third"}
+        ]});
+        let image =
+            json!({"type":"thumb", "path":"https://example.com/artist.jpg", "provider":"second"});
+        let (client, worker) = server(vec![
+            ("music/artists/get", source.clone()),
+            (
+                "music/item",
+                json!({"media_type":"artist", "item_id":"empty", "provider":"first", "name":"Empty"}),
+            ),
+            (
+                "music/item",
+                json!({"media_type":"artist", "item_id":"found", "provider":"second", "name":"Other", "metadata":{"images":[image.clone()]}}),
+            ),
+            ("music/artists/get", source),
+        ]);
+        for _ in 0..2 {
+            let artist = client
+                .get_artist(&MediaId("library-artist".into()), "library")
+                .await
+                .unwrap();
+            assert_eq!(artist.media.item_id.as_str(), "library-artist");
+            assert_eq!(artist.media.provider.as_str(), "library");
+            assert_eq!(artist.media.name, "Original");
+            let metadata = artist.media.metadata.unwrap();
+            assert_eq!(
+                metadata.description.as_deref(),
+                Some("Original description")
+            );
+            assert_eq!(
+                serde_json::to_value(&metadata.images[0]).unwrap()["path"],
+                image["path"]
+            );
+        }
+        let requests = worker.join().unwrap();
+        assert_eq!(requests.len(), 4);
+        assert_eq!(
+            requests[1]["args"]["provider_instance_id_or_domain"],
+            "first"
+        );
+        assert_eq!(
+            requests[2]["args"]["provider_instance_id_or_domain"],
+            "second"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_artwork_keeps_items_when_providers_fail_and_caches_misses() {
+        let source = json!({"media_type":"artist", "item_id":"original", "provider":"library", "name":"Original",
+        "metadata":{"description":"Keep this", "images":[]},
+        "provider_mappings":[
+            {"item_id":"failed", "provider_instance":"first", "provider_domain":"first"},
+            {"item_id":"empty", "provider_instance":"second", "provider_domain":"second"}
+        ]});
+        let (client, worker) = server(vec![
+            ("music/artists/get", source.clone()),
+            ("music/item", json!({"test_http_status":500})),
+            (
+                "music/item",
+                json!({"media_type":"artist", "item_id":"empty", "provider":"second", "name":"Empty"}),
+            ),
+            ("music/artists/get", source),
+        ]);
+        for _ in 0..2 {
+            let artist = client
+                .get_artist(&MediaId("original".into()), "library")
+                .await
+                .unwrap();
+            let metadata = artist.media.metadata.unwrap();
+            assert_eq!(metadata.description.as_deref(), Some("Keep this"));
+            assert!(metadata.images.is_empty());
+        }
+        assert_eq!(worker.join().unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn missing_artwork_enriches_nested_search_items_without_replacing_metadata() {
+        let source = json!({"artists":[{"media_type":"artist", "item_id":"original", "provider":"library", "name":"Original",
+            "metadata":{"description":"Keep this", "genres":["Rock"]},
+            "provider_mappings":[{"item_id":"source", "provider_instance":"other", "provider_domain":"other"}]}]});
+        let (client, worker) = server(vec![
+            ("music/search", source),
+            (
+                "music/item",
+                json!({"media_type":"artist", "item_id":"source", "provider":"other", "name":"Other", "metadata":{"description":"Do not copy", "images":[{"type":"thumb", "path":"", "provider":"other", "proxy_id":"artist-proxy"}]}}),
+            ),
+        ]);
+        let result: Value = client
+            .execute_command("music/search", json!({}))
+            .await
+            .unwrap();
+        let artist = &result["artists"][0];
+        assert_eq!(artist["provider"], "library");
+        assert_eq!(artist["item_id"], "original");
+        assert_eq!(artist["name"], "Original");
+        assert_eq!(artist["metadata"]["description"], "Keep this");
+        assert_eq!(artist["metadata"]["genres"], json!(["Rock"]));
+        assert_eq!(artist["metadata"]["images"][0]["proxy_id"], "artist-proxy");
+        assert_eq!(worker.join().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn existing_artwork_never_fetches_provider_items() {
+        let (client, worker) = server(vec![(
+            "music/artists/get",
+            json!({"media_type":"artist", "item_id":"original", "provider":"library", "name":"Original",
+            "metadata":{"images":[{"type":"thumb", "path":"https://example.com/original.jpg", "provider":"library"}]},
+            "provider_mappings":[{"item_id":"other", "provider_instance":"other", "provider_domain":"other"}]}),
+        )]);
+        let artist = client
+            .get_artist(&MediaId("original".into()), "library")
+            .await
+            .unwrap();
+        assert_eq!(
+            artist.media.metadata.unwrap().images[0].path,
+            "https://example.com/original.jpg"
+        );
+        assert_eq!(worker.join().unwrap().len(), 1);
     }
 
     #[tokio::test]
