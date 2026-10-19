@@ -769,7 +769,7 @@ class _MediaTableSectionMobileState<T>
       title: title,
       subtitle: subtitle.isEmpty ? '-' : subtitle,
       trailing: _formatDuration(item.duration ?? 0),
-      coverUrl: item.mediaItem.imageUriForSize(80),
+      coverUrl: item.imageUriForSize(80),
       fallbackIcon: Icons.music_note_outlined,
       providerLabel: _providerLabelFromId(provider),
       providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(provider),

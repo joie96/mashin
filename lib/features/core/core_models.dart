@@ -1356,6 +1356,7 @@ class QueueItem {
   final bool? available;
   final MediaItem mediaItem;
   final int? originalIndex;
+  final MediaItemImage? image;
 
   const QueueItem({
     required this.queueItemId,
@@ -1366,6 +1367,7 @@ class QueueItem {
     this.sortIndex,
     this.available,
     this.originalIndex,
+    this.image,
   });
 
   factory QueueItem.fromJson(Map<String, dynamic> json) {
@@ -1384,7 +1386,18 @@ class QueueItem {
       available: json['available'] as bool?,
       mediaItem: mediaItemFromJson(mediaItemJson),
       originalIndex: (json['index'] as num?)?.toInt(),
+      image: json['image'] is Map<String, dynamic>
+          ? MediaItemImage.fromJson(json['image'] as Map<String, dynamic>)
+          : null,
     );
+  }
+
+  // Queue artwork is also supplied for media items without full metadata.
+  String? imageUriForSize(int requestedSize) {
+    return image?.getProxyPath(
+          size: MediaItemImage.mapToAllowedSize(requestedSize),
+        ) ??
+        mediaItem.imageUriForSize(requestedSize);
   }
 }
 

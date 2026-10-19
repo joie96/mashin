@@ -668,7 +668,7 @@ MediaSlideItemData resolveMediaSlideItemData(Object? item) {
       title: _prefer(mediaItem.name, 'Unbekannter Titel'),
       subtitle: track == null ? '-' : _trackSubtitle(track),
       tertiary: _formatDuration(item.duration ?? track?.duration ?? 0),
-      coverUrl: mediaItem.imageUriForSize(512),
+      coverUrl: item.imageUriForSize(512),
       fallbackIcon: Icons.music_note_outlined,
       providerLabel: _providerLabelFromId(provider),
       providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(provider),

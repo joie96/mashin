@@ -1868,7 +1868,7 @@ Widget _buildDesktopTableRowQueue({
         _buildDesktopTableSizedCell(
           width: 48,
           child: MediaTableCover(
-            coverUrl: mediaItem.imageUriForSize(80),
+            coverUrl: item.imageUriForSize(80),
             fallbackIcon: Icons.music_note_outlined,
             size: 48,
             radius: 8,

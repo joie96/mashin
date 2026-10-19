@@ -738,7 +738,7 @@ class _SwipeablePlayerArtworkState extends State<_SwipeablePlayerArtwork> {
             for (int index = 0; index < widget.queue.items.length; index++)
               index == widget.queue.currentIndex
                   ? widget.coverUrl
-                  : widget.queue.items[index].mediaItem.imageUriForSize(512),
+                  : widget.queue.items[index].imageUriForSize(512),
           ];
 
     return ClipRect(

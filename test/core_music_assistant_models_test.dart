@@ -64,6 +64,54 @@ Map<String, dynamic> _mediaJson(String mediaType) => <String, dynamic>{
 };
 
 void main() {
+  test('queue artwork survives parsing without media artwork', () {
+    final item = QueueItem.fromJson(<String, dynamic>{
+      'queue_item_id': 'queued-track',
+      'media_item': <String, dynamic>{
+        'media_type': 'track',
+        'item_id': 'track-id',
+        'provider': 'library',
+        'name': 'Queued track',
+      },
+      'image': <String, dynamic>{
+        'type': 'thumb',
+        'path': 'https://example.com/queue-cover.jpg',
+        'provider': 'test',
+        'remotely_accessible': true,
+      },
+    });
+
+    expect(item.mediaItem.imageUriForSize(80), isNull);
+    expect(item.image, isNotNull);
+    expect(item.imageUriForSize(80), item.image!.getProxyPath(size: 80));
+    expect(item.imageUriForSize(512), item.image!.getProxyPath(size: 512));
+  });
+
+  test('queue artwork falls back to media artwork when absent or null', () {
+    for (final hasImageField in <bool>[false, true]) {
+      final json = <String, dynamic>{
+        'queue_item_id': 'queued-track',
+        'media_item': _mediaJson('track')
+          ..['metadata'] = <String, dynamic>{
+            'images': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'type': 'thumb',
+                'path': 'https://example.com/media-cover.jpg',
+                'provider': 'test',
+                'remotely_accessible': true,
+              },
+            ],
+          },
+        if (hasImageField) 'image': null,
+      };
+      final item = QueueItem.fromJson(json);
+
+      expect(item.image, isNull);
+      expect(item.imageUriForSize(80), isNotNull);
+      expect(item.imageUriForSize(80), item.mediaItem.imageUriForSize(80));
+    }
+  });
+
   test(
     'provider aliases without a URI use the confirmed library favorite',
     () async {

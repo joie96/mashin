@@ -174,12 +174,12 @@ class _AppShellState extends State<AppShell> {
   }
 
   String? get _currentTrackCoverUrl {
-    final url = _currentQueueItem?.mediaItem.imageUriForSize(80)?.trim() ?? '';
+    final url = _currentQueueItem?.imageUriForSize(80)?.trim() ?? '';
     return url.isEmpty ? null : url;
   }
 
   String? get _currentQueueCoverUrl {
-    final url = _currentQueueItem?.mediaItem.imageUriForSize(512)?.trim() ?? '';
+    final url = _currentQueueItem?.imageUriForSize(512)?.trim() ?? '';
     return url.isEmpty ? null : url;
   }
 

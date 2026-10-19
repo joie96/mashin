@@ -6,6 +6,7 @@ import 'package:mashin_flutter/features/core/core_events.dart';
 import 'package:mashin_flutter/features/core/core_models.dart';
 import 'package:mashin_flutter/features/queue/queue_overlay_desktop.dart';
 import 'package:mashin_flutter/features/queue/queue_overlay_mobile.dart';
+import 'package:mashin_flutter/features/shared/widgets/media_image.dart';
 import 'package:mashin_flutter/features/shared/widgets/media_table_section_desktop.dart';
 import 'package:mashin_flutter/features/shared/widgets/media_table_section_mobile.dart';
 
@@ -55,6 +56,12 @@ void main() {
             (index) => QueueItem(
               queueItemId: 'queue-$index',
               sortIndex: <int>[0, 12, 4, 9][index],
+              image: MediaItemImage.fromJson(<String, dynamic>{
+                'type': 'thumb',
+                'path': 'https://example.com/queue-cover-$index.jpg',
+                'provider': 'test',
+                'remotely_accessible': true,
+              }),
               mediaItem: Track(
                 itemId: 'track-$index',
                 provider: 'test',
@@ -110,6 +117,18 @@ void main() {
 
           await showSnapshot(items);
           await tester.pumpAndSettle();
+          for (final item in items.take(
+            pageSize == 0 ? items.length : pageSize,
+          )) {
+            expect(
+              find.byWidgetPredicate(
+                (widget) =>
+                    widget is MediaImage &&
+                    widget.source == item.imageUriForSize(80),
+              ),
+              findsOneWidget,
+            );
+          }
           if (pageSize == 0) {
             expect(displayedNumbers(), <String>['1', '4', '2', '3']);
             expect(

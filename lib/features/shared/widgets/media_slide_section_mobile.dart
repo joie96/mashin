@@ -555,7 +555,7 @@ MediaSlideItemData resolveMediaSlideItemData(Object? item) {
       mediaItem: mediaItem,
       title: _prefer(mediaItem.name, 'Unbekannter Titel'),
       subtitle: track == null ? '-' : _trackSubtitle(track),
-      coverUrl: mediaItem.imageUriForSize(512),
+      coverUrl: item.imageUriForSize(512),
       fallbackIcon: Icons.music_note_outlined,
     );
   }
