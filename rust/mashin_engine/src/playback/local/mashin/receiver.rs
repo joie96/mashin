@@ -653,9 +653,9 @@ fn endpoints(base_url: &str) -> Result<(String, String), String> {
     url.set_scheme(scheme)
         .map_err(|_| "invalid Mashin websocket URL")?;
     let path = url.path().trim_end_matches('/').to_string();
-    url.set_path(&format!("{path}/mashin/v1/control"));
+    url.set_path(&format!("{path}/mashin-stream/v3/control"));
     let control = url.to_string();
-    url.set_path(&format!("{path}/mashin/v1/audio"));
+    url.set_path(&format!("{path}/mashin-stream/v3/audio"));
     Ok((control, url.to_string()))
 }
 
@@ -817,8 +817,15 @@ mod tests {
         assert_eq!(
             endpoints("https://ma.example:8095/proxy/").unwrap(),
             (
-                "wss://ma.example:8095/proxy/mashin/v1/control".into(),
-                "wss://ma.example:8095/proxy/mashin/v1/audio".into()
+                "wss://ma.example:8095/proxy/mashin-stream/v3/control".into(),
+                "wss://ma.example:8095/proxy/mashin-stream/v3/audio".into()
+            )
+        );
+        assert_eq!(
+            endpoints("http://ma.example:8095").unwrap(),
+            (
+                "ws://ma.example:8095/mashin-stream/v3/control".into(),
+                "ws://ma.example:8095/mashin-stream/v3/audio".into()
             )
         );
         assert!(endpoints("http://ma.example/?token=secret").is_err());
