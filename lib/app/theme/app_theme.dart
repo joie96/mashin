@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 class AppTheme {
   const AppTheme._();
 
+  static const Duration tooltipWaitDuration = Duration(milliseconds: 600);
+
   static const Color _darkBgPrimary = Color(0xFF0C0C0C);
   static const Color _darkBgSecondary = Color(0xFF141414);
   static const Color _darkBgTertiary = Color(0xFF1F1F21);
@@ -36,6 +38,7 @@ class AppTheme {
   static ThemeData dark() {
     final base = ThemeData.dark(useMaterial3: true);
     return base.copyWith(
+      tooltipTheme: const TooltipThemeData(waitDuration: tooltipWaitDuration),
       scaffoldBackgroundColor: _darkBgPrimary,
       colorScheme: const ColorScheme.dark(
         primary: _darkAccent,
@@ -69,6 +72,7 @@ class AppTheme {
   static ThemeData light() {
     final base = ThemeData.light(useMaterial3: true);
     return base.copyWith(
+      tooltipTheme: const TooltipThemeData(waitDuration: tooltipWaitDuration),
       scaffoldBackgroundColor: _lightBgPrimary,
       colorScheme: const ColorScheme.light(
         primary: _lightAccent,

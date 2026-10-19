@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mashin_flutter/app/theme/app_theme.dart';
@@ -94,7 +95,7 @@ void main() {
                 ),
               )
               .size,
-          18,
+          16,
         );
         for (final Finder buttonFinder in <Finder>[
           deezerButton,
@@ -114,14 +115,43 @@ void main() {
             expect(style.shape!.resolve(states), isA<CircleBorder>());
             expect(style.side!.resolve(states), BorderSide.none);
             expect(style.backgroundColor!.resolve(states), Colors.transparent);
-            expect(
-              style.overlayColor!.resolve(states),
-              states.contains(WidgetState.hovered)
-                  ? tester.element(buttonFinder).mashinColors.hover
-                  : Colors.transparent,
-            );
+            expect(style.overlayColor!.resolve(states), Colors.transparent);
           }
         }
+        final Finder youtubeScale = find.descendant(
+          of: youtubeButton,
+          matching: find.byType(AnimatedScale),
+        );
+        final TestGesture mouse = await tester.createGesture(
+          kind: PointerDeviceKind.mouse,
+        );
+        await mouse.addPointer(location: const Offset(300, 700));
+        await mouse.moveTo(tester.getCenter(deezerButton));
+        await tester.pumpAndSettle();
+        expect(
+          tester
+              .widget<AnimatedScale>(
+                find.descendant(
+                  of: deezerButton,
+                  matching: find.byType(AnimatedScale),
+                ),
+              )
+              .scale,
+          1,
+        );
+        await mouse.moveTo(tester.getCenter(youtubeButton));
+        await tester.pumpAndSettle();
+        final AnimatedScale hoveredScale = tester.widget<AnimatedScale>(
+          youtubeScale,
+        );
+        expect(hoveredScale.scale, 1.5);
+        expect(hoveredScale.duration, const Duration(milliseconds: 140));
+        expect(hoveredScale.curve, Curves.easeOutCubic);
+        expect(tester.getSize(youtubeButton), buttonSize);
+        await mouse.moveTo(const Offset(300, 700));
+        await tester.pumpAndSettle();
+        expect(tester.widget<AnimatedScale>(youtubeScale).scale, 1);
+        await mouse.removePointer();
         await tester.tap(find.byTooltip('ytmusic'));
         await tester.pumpAndSettle();
         expect(selection.selectedProvider, youtube.providerInstance);
@@ -148,7 +178,7 @@ void main() {
                 ),
               )
               .size,
-          18,
+          16,
         );
         expect(
           tester.getTopLeft(find.byTooltip('ytmusic')).dx,
