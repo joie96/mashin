@@ -998,7 +998,7 @@ class _MobileTableRowBase extends StatelessWidget {
                   splashColor: splashColor,
                   highlightColor: highlightColor,
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 6, 58, 6),
+                    padding: const EdgeInsets.fromLTRB(8, 6, 48, 6),
                     child: Row(
                       children: <Widget>[
                         if (queueItemNumber != null)
