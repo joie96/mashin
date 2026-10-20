@@ -13,6 +13,31 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues(<String, Object>{}));
 
+  test(
+    'artist play and shuffle retain the selected provider for top tracks',
+    () async {
+      final bridge = _FakeArtistCoreBridge(hasMappings: true);
+      final controller = ArtistDetailController(
+        coreBridge: bridge,
+        itemId: 'artist-1',
+        providerInstanceIdOrDomain: 'library',
+      );
+      addTearDown(controller.dispose);
+      await controller.loadArtist();
+      await controller.selectProvider(controller.sectionProvider.mappings.last);
+
+      await controller.playArtist();
+      expect(bridge.playedItems, controller.topTracks);
+      expect(bridge.playedProvider, 'ytmusic--one');
+      expect(bridge.playedShuffle, isFalse);
+
+      await controller.shuffleArtist();
+      expect(bridge.playedItems, controller.topTracks);
+      expect(bridge.playedProvider, 'ytmusic--one');
+      expect(bridge.playedShuffle, isTrue);
+    },
+  );
+
   for (final isDesktop in <bool>[true, false]) {
     testWidgets(
       '${isDesktop ? 'desktop' : 'mobile'} header switches sections in both directions',
@@ -27,7 +52,9 @@ void main() {
         await tester.pumpWidget(
           MaterialApp(
             theme: AppTheme.dark().copyWith(
-              visualDensity: isDesktop ? VisualDensity.compact : VisualDensity.standard,
+              visualDensity: isDesktop
+                  ? VisualDensity.compact
+                  : VisualDensity.standard,
             ),
             home: Scaffold(
               body: isDesktop
@@ -48,29 +75,48 @@ void main() {
         );
         await tester.pumpAndSettle();
         final Finder cycleButton = find.byKey(
-          ValueKey<String>(isDesktop ? 'ytmusic--one' : 'detail-provider-cycle'),
+          ValueKey<String>(
+            isDesktop ? 'ytmusic--one' : 'detail-provider-cycle',
+          ),
         );
         final Finder initialButton = isDesktop
-            ? find.byKey(const ValueKey<String>('deezer--one')) : cycleButton;
-        expect(tester.getCenter(find.byKey(
-          ValueKey<String>('${isDesktop ? 'desktop' : 'mobile'}-provider-deezer--one'),
-        )).dy, tester.getCenter(initialButton).dy);
+            ? find.byKey(const ValueKey<String>('deezer--one'))
+            : cycleButton;
+        expect(
+          tester
+              .getCenter(
+                find.byKey(
+                  ValueKey<String>(
+                    '${isDesktop ? 'desktop' : 'mobile'}-provider-deezer--one',
+                  ),
+                ),
+              )
+              .dy,
+          tester.getCenter(initialButton).dy,
+        );
         if (isDesktop) {
-          final Finder titleRow = find.ancestor(
-            of: cycleButton,
-            matching: find.byType(Row),
-          ).first;
-          final Finder title = find.descendant(
-            of: titleRow,
-            matching: find.byType(Text),
-          ).first;
+          final Finder titleRow = find
+              .ancestor(of: cycleButton, matching: find.byType(Row))
+              .first;
+          final Finder title = find
+              .descendant(of: titleRow, matching: find.byType(Text))
+              .first;
           expect(tester.getCenter(cycleButton).dy, tester.getCenter(title).dy);
         }
         await tester.tap(cycleButton);
         await tester.pumpAndSettle();
-        expect(tester.getCenter(find.byKey(
-          ValueKey<String>('${isDesktop ? 'desktop' : 'mobile'}-provider-ytmusic--one'),
-        )).dy, tester.getCenter(cycleButton).dy);
+        expect(
+          tester
+              .getCenter(
+                find.byKey(
+                  ValueKey<String>(
+                    '${isDesktop ? 'desktop' : 'mobile'}-provider-ytmusic--one',
+                  ),
+                ),
+              )
+              .dy,
+          tester.getCenter(cycleButton).dy,
+        );
         expect(
           bridge.queries,
           contains('getArtistAlbums:channel:ytmusic--one'),
@@ -175,6 +221,22 @@ class _FakeArtistCoreBridge extends Fake implements MashinCoreBridgeApi {
 
   final bool hasMappings;
   final List<String> queries = <String>[];
+  List<MediaItem> playedItems = <MediaItem>[];
+  bool playedShuffle = false;
+  String? playedProvider;
+
+  @override
+  Future<void> queuePlayMedia(
+    List<MediaItem> mediaItems, {
+    QueueOption option = QueueOption.replace,
+    int? startItem,
+    bool shuffle = false,
+    String? providerInstance,
+  }) async {
+    playedItems = mediaItems;
+    playedShuffle = shuffle;
+    playedProvider = providerInstance;
+  }
 
   @override
   Future<Artist> getArtist(String itemId, String provider) async {

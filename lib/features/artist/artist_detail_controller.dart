@@ -605,7 +605,10 @@ class ArtistDetailController extends ChangeNotifier {
       return;
     }
     try {
-      await coreBridge.queuePlayMedia(items);
+      await coreBridge.queuePlayMedia(
+        items,
+        providerInstance: sectionProvider.selectedProvider,
+      );
     } catch (_) {
       // Ignore playback failures to keep the UI responsive.
     }
@@ -617,7 +620,11 @@ class ArtistDetailController extends ChangeNotifier {
       return;
     }
     try {
-      await coreBridge.queuePlayMedia(items, shuffle: true);
+      await coreBridge.queuePlayMedia(
+        items,
+        shuffle: true,
+        providerInstance: sectionProvider.selectedProvider,
+      );
     } catch (_) {
       // Ignore playback failures to keep the UI responsive.
     }

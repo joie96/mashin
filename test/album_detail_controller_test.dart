@@ -13,6 +13,29 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues(<String, Object>{}));
 
+  test('album play and shuffle send the loaded provider tracks', () async {
+    final bridge = _FakeAlbumCoreBridge(hasMappings: true);
+    final controller = AlbumDetailController(
+      coreBridge: bridge,
+      itemId: 'album-1',
+      providerInstanceIdOrDomain: 'library',
+    );
+    addTearDown(controller.dispose);
+    await controller.loadAlbum();
+    await controller.selectProvider(controller.sectionProvider.mappings.last);
+
+    await controller.playAlbum();
+    expect(bridge.playedItems, controller.tracks);
+    expect(bridge.playedItems.single.provider, 'ytmusic--one');
+    expect(bridge.playedProvider, 'ytmusic--one');
+    expect(bridge.playedShuffle, isFalse);
+
+    await controller.shuffleAlbum();
+    expect(bridge.playedItems, controller.tracks);
+    expect(bridge.playedProvider, 'ytmusic--one');
+    expect(bridge.playedShuffle, isTrue);
+  });
+
   for (final isDesktop in <bool>[true, false]) {
     testWidgets(
       '${isDesktop ? 'desktop' : 'mobile'} album header switches only sections',
@@ -46,7 +69,11 @@ void main() {
         );
         await tester.pumpAndSettle();
         await tester.tap(
-            find.byKey(ValueKey<String>(isDesktop ? 'ytmusic--one' : 'detail-provider-cycle')),
+          find.byKey(
+            ValueKey<String>(
+              isDesktop ? 'ytmusic--one' : 'detail-provider-cycle',
+            ),
+          ),
         );
         await tester.pumpAndSettle();
         expect(
@@ -142,6 +169,22 @@ class _FakeAlbumCoreBridge extends Fake implements MashinCoreBridgeApi {
 
   final bool hasMappings;
   final List<String> queries = <String>[];
+  List<MediaItem> playedItems = <MediaItem>[];
+  bool playedShuffle = false;
+  String? playedProvider;
+
+  @override
+  Future<void> queuePlayMedia(
+    List<MediaItem> mediaItems, {
+    QueueOption option = QueueOption.replace,
+    int? startItem,
+    bool shuffle = false,
+    String? providerInstance,
+  }) async {
+    playedItems = mediaItems;
+    playedShuffle = shuffle;
+    playedProvider = providerInstance;
+  }
 
   @override
   Future<Album> getAlbum(String itemId, String provider) async {

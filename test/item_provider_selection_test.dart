@@ -13,6 +13,23 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class _UnusedBridge extends Fake implements MashinCoreBridgeApi {}
 
+class _PlaybackQueryBridge extends Fake implements MashinCoreBridgeApi {
+  final queries = <(String, String, String)>[];
+  List<Track> tracks = <Track>[];
+
+  @override
+  Future<List<Track>> getAlbumTracks(String itemId, String provider) async {
+    queries.add(('album', itemId, provider));
+    return tracks;
+  }
+
+  @override
+  Future<List<Track>> getArtistTopTracks(String itemId, String provider) async {
+    queries.add(('artist', itemId, provider));
+    return tracks;
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(
@@ -38,6 +55,170 @@ void main() {
         'provider_domain': 'youtube',
       },
     ],
+  });
+
+  test(
+    'album and artist playback expands the selected provider into tracks',
+    () async {
+      final source = track();
+      final bridge = _PlaybackQueryBridge()..tracks = <Track>[source];
+      for (final item in <MediaItem>[
+        Album(
+          itemId: 'album',
+          provider: 'library',
+          name: 'Album',
+          artists: const <Artist>[],
+          providerMappings: source.providerMappings,
+        ),
+        Artist(
+          itemId: 'artist',
+          provider: 'library',
+          name: 'Artist',
+          providerMappings: source.providerMappings,
+        ),
+      ]) {
+        final selection = ItemProviderSelection.forItem(item);
+        await selection.initialize();
+        await selection.cycle();
+        final resolved = await resolveQueuePlayMedia(bridge, <MediaItem>[item]);
+        final payloads = resolved.mediaItems;
+
+        expect(bridge.queries.last, (
+          item is Album ? 'album' : 'artist',
+          'dz',
+          'deezer--one',
+        ));
+        expect(payloads.single['media_type'], 'track');
+        expect(payloads.single['provider'], 'deezer--one');
+        expect(payloads.single['item_id'], 'dz');
+        expect(payloads.single['uri'], 'deezer--one://track/dz');
+        expect(source.provider, 'library');
+        expect(
+          (await createSelectedProviderMediaItemPayload(source))['provider'],
+          'youtube--one',
+        );
+      }
+    },
+  );
+
+  test(
+    'detail track playback uses the explicit provider without changing selection',
+    () async {
+      final item = track();
+      final resolved = await resolveQueuePlayMedia(
+        _PlaybackQueryBridge(),
+        <MediaItem>[item],
+        providerInstance: 'deezer--one',
+      );
+
+      expect(resolved.mediaItems.single['provider'], 'deezer--one');
+      expect(resolved.mediaItems.single['item_id'], 'dz');
+      expect(
+        (await createSelectedProviderMediaItemPayload(item))['provider'],
+        'youtube--one',
+      );
+    },
+  );
+
+  test(
+    'playback rejects a missing selected provider instead of falling back',
+    () async {
+      await expectLater(
+        resolveQueuePlayMedia(_PlaybackQueryBridge(), <MediaItem>[
+          track(),
+        ], providerInstance: 'missing--one'),
+        throwsStateError,
+      );
+    },
+  );
+
+  test('empty album expansion does not send the album object', () async {
+    final resolved =
+        await resolveQueuePlayMedia(_PlaybackQueryBridge(), <MediaItem>[
+          Album(
+            itemId: 'album',
+            provider: 'deezer--one',
+            name: 'Empty',
+            artists: const <Artist>[],
+          ),
+        ]);
+
+    expect(resolved.mediaItems, isEmpty);
+  });
+
+  test(
+    'mixed playback preserves track order while expanding album and artist',
+    () async {
+      final bridge = _PlaybackQueryBridge()
+        ..tracks = <Track>[
+          Track(
+            itemId: 'first',
+            provider: 'youtube--one',
+            name: 'First',
+            duration: 120,
+            artists: const <Artist>[],
+          ),
+          Track(
+            itemId: 'second',
+            provider: 'youtube--one',
+            name: 'Second',
+            duration: 120,
+            artists: const <Artist>[],
+          ),
+        ];
+      final resolved = await resolveQueuePlayMedia(bridge, <MediaItem>[
+        track(),
+        Album(
+          itemId: 'album',
+          provider: 'youtube--one',
+          name: 'Album',
+          artists: const <Artist>[],
+        ),
+        Artist(itemId: 'artist', provider: 'youtube--one', name: 'Artist'),
+      ], startItem: 2);
+      final payloads = resolved.mediaItems;
+
+      expect(payloads.map((payload) => payload['item_id']), <String>[
+        'yt',
+        'first',
+        'second',
+        'first',
+        'second',
+      ]);
+      expect(resolved.startItem, 3);
+      expect(
+        payloads.map((payload) => payload['media_type']),
+        everyElement('track'),
+      );
+      expect(bridge.queries, <(String, String, String)>[
+        ('album', 'album', 'youtube--one'),
+        ('artist', 'artist', 'youtube--one'),
+      ]);
+    },
+  );
+
+  test('album expansion skips unplayable tracks', () async {
+    final bridge = _PlaybackQueryBridge()
+      ..tracks = <Track>[
+        Track(
+          itemId: 'unavailable',
+          provider: 'youtube--one',
+          name: 'Unavailable',
+          duration: 120,
+          isPlayable: false,
+          artists: const <Artist>[],
+        ),
+      ];
+
+    final resolved = await resolveQueuePlayMedia(bridge, <MediaItem>[
+      Album(
+        itemId: 'album',
+        provider: 'youtube--one',
+        name: 'Album',
+        artists: const <Artist>[],
+      ),
+    ]);
+    expect(resolved.mediaItems, isEmpty);
   });
 
   for (final size in <double>[16, 18]) {
@@ -342,10 +523,12 @@ void main() {
         const ValueKey<String>('mobile-provider-youtube--one'),
       );
       final primaryBounds = tester.getRect(primary);
-      final providerCell = find.ancestor(
-        of: find.byType(MediaItemProviderIcon),
-        matching: find.byType(Row),
-      ).first;
+      final providerCell = find
+          .ancestor(
+            of: find.byType(MediaItemProviderIcon),
+            matching: find.byType(Row),
+          )
+          .first;
       expect(primaryBounds.center.dx, tester.getCenter(providerCell).dx);
       await tester.tap(provider);
       await tester.pump(kDoubleTapTimeout);
@@ -355,9 +538,9 @@ void main() {
         'deezer--one',
       );
       expect(
-        tester.getRect(find.byKey(
-          const ValueKey<String>('mobile-provider-deezer--one'),
-        )),
+        tester.getRect(
+          find.byKey(const ValueKey<String>('mobile-provider-deezer--one')),
+        ),
         primaryBounds,
       );
       expect(selections, 0);

@@ -12,17 +12,43 @@ import 'core_models.dart';
 
 /// Resolves the selected source for actions without changing the original item.
 Future<Map<String, dynamic>> createSelectedProviderMediaItemPayload(
-  MediaItem item,
-) async {
+  MediaItem item, {
+  String? providerInstance,
+}) async {
+  final requestedProvider = providerInstance?.trim();
+  final hasProviderOverride =
+      requestedProvider != null &&
+      requestedProvider.isNotEmpty &&
+      requestedProvider != 'library';
   final selection = ItemProviderSelection.forItem(item);
-  await selection.initialize();
+  if (!hasProviderOverride) await selection.initialize();
   final payload = createMusicAssistantMediaItemPayload(item);
-  final selected = selection.selected;
-  if (selected == null) return payload;
-  final identity = selection.selectedIdentity;
-  payload['item_id'] = identity.itemId;
-  payload['provider'] = identity.provider;
-  payload['uri'] = selection.selectedUri;
+  final selected = hasProviderOverride
+      ? item.providerMappings
+            .where(
+              (mapping) =>
+                  mapping.available &&
+                  mapping.itemId.isNotEmpty &&
+                  mapping.providerInstance == requestedProvider,
+            )
+            .firstOrNull
+      : selection.selected;
+  if (selected == null) {
+    if (hasProviderOverride &&
+        (item.provider != requestedProvider ||
+            item.providerMappings.any(
+              (mapping) => mapping.providerInstance == requestedProvider,
+            ))) {
+      throw StateError(
+        'Media item has no available mapping for $requestedProvider',
+      );
+    }
+    return payload;
+  }
+  payload['item_id'] = selected.itemId;
+  payload['provider'] = selected.providerInstance;
+  payload['uri'] =
+      '${selected.providerInstance}://${mediaTypeToJson(item.mediaType)}/${selected.itemId}';
   final serializedMappings = <(String, String), Map<String, dynamic>>{
     for (final serialized
         in (payload['provider_mappings'] as List).cast<Map<String, dynamic>>())
@@ -31,11 +57,65 @@ Future<Map<String, dynamic>> createSelectedProviderMediaItemPayload(
         serialized['item_id'] as String,
       ): serialized,
   };
+  final mappings = hasProviderOverride
+      ? <ProviderMapping>[
+          selected,
+          ...item.providerMappings.where((mapping) => mapping != selected),
+        ]
+      : selection.mappings;
   payload['provider_mappings'] = <Map<String, dynamic>>[
-    for (final mapping in selection.mappings)
+    for (final mapping in mappings)
       serializedMappings[(mapping.providerInstance, mapping.itemId)]!,
   ];
   return payload;
+}
+
+/// Expands albums and artists without applying each track's provider preference.
+Future<({List<Map<String, dynamic>> mediaItems, int? startItem})>
+resolveQueuePlayMedia(
+  MashinCoreBridgeApi coreBridge,
+  List<MediaItem> mediaItems, {
+  String? providerInstance,
+  int? startItem,
+}) async {
+  if (startItem != null && (startItem < 0 || startItem >= mediaItems.length)) {
+    throw RangeError.index(startItem, mediaItems, 'startItem');
+  }
+  final payloads = <Map<String, dynamic>>[];
+  int? resolvedStartItem;
+  for (final (index, item) in mediaItems.indexed) {
+    final offset = payloads.length;
+    final payload = await createSelectedProviderMediaItemPayload(
+      item,
+      providerInstance: providerInstance,
+    );
+    if (item is! Album && item is! Artist) {
+      payloads.add(payload);
+      if (index == startItem) resolvedStartItem = offset;
+      continue;
+    }
+    final itemId = payload['item_id'] as String;
+    final provider = payload['provider'] as String;
+    final tracks = item is Album
+        ? await coreBridge.getAlbumTracks(itemId, provider)
+        : await coreBridge.getArtistTopTracks(itemId, provider);
+    for (final track in tracks) {
+      if (!track.canPlay) continue;
+      payloads.add(
+        await createSelectedProviderMediaItemPayload(
+          track,
+          providerInstance: provider,
+        ),
+      );
+    }
+    if (index == startItem) {
+      if (payloads.length == offset) {
+        throw StateError('The selected start item has no playable tracks');
+      }
+      resolvedStartItem = offset;
+    }
+  }
+  return (mediaItems: payloads, startItem: resolvedStartItem);
 }
 
 typedef _NativeVoidFn = ffi.Int32 Function();
@@ -149,6 +229,7 @@ abstract class MashinCoreBridgeApi {
     QueueOption option = QueueOption.replace,
     int? startItem,
     bool shuffle = false,
+    String? providerInstance,
   });
   Future<void> startRadio(List<MediaItem> mediaItems);
   Future<void> moveQueueItem(String itemId, int positionShift);
@@ -674,26 +755,34 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   Future<void> setMuted(bool muted) =>
       _submitVoidOperation('setMuted', <String, Object?>{'muted': muted});
 
-  // Queue commands resolve media in Rust before mutating the canonical queue.
+  // Queue commands expand selected sources before mutating the canonical queue.
   @override
   Future<void> queuePlayMedia(
     List<MediaItem> mediaItems, {
     QueueOption option = QueueOption.replace,
     int? startItem,
     bool shuffle = false,
-  }) async => _submitVoidOperation('queuePlayMedia', <String, Object?>{
-    'request': <String, Object?>{
-      'mediaItems': await Future.wait(
-        mediaItems.map(createSelectedProviderMediaItemPayload),
-      ),
-      'option': option.name.replaceAllMapped(
-        RegExp('[A-Z]'),
-        (match) => '_${match.group(0)!.toLowerCase()}',
-      ),
-      'startItem': startItem,
-      'shuffle': shuffle,
-    },
-  });
+    String? providerInstance,
+  }) async {
+    final resolved = await resolveQueuePlayMedia(
+      this,
+      mediaItems,
+      providerInstance: providerInstance,
+      startItem: startItem,
+    );
+    if (mediaItems.isNotEmpty && resolved.mediaItems.isEmpty) return;
+    await _submitVoidOperation('queuePlayMedia', <String, Object?>{
+      'request': <String, Object?>{
+        'mediaItems': resolved.mediaItems,
+        'option': option.name.replaceAllMapped(
+          RegExp('[A-Z]'),
+          (match) => '_${match.group(0)!.toLowerCase()}',
+        ),
+        'startItem': resolved.startItem,
+        'shuffle': shuffle,
+      },
+    });
+  }
 
   @override
   Future<void> startRadio(List<MediaItem> mediaItems) =>

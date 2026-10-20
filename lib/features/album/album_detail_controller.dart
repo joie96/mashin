@@ -408,18 +408,24 @@ class AlbumDetailController extends ChangeNotifier {
   }
 
   Future<void> playAlbum() async {
-    final Album? current = _album;
-    if (current == null) {
+    if (_tracks.isEmpty) {
       return;
     }
-    await coreBridge.queuePlayMedia(<MediaItem>[current]);
+    await coreBridge.queuePlayMedia(
+      _tracks,
+      providerInstance: sectionProvider.selectedProvider,
+    );
   }
 
   Future<void> shuffleAlbum() async {
     if (_tracks.isEmpty) {
       return;
     }
-    await coreBridge.queuePlayMedia(_tracks, shuffle: true);
+    await coreBridge.queuePlayMedia(
+      _tracks,
+      shuffle: true,
+      providerInstance: sectionProvider.selectedProvider,
+    );
   }
 
   Future<void> startTrackRadio(Track track) async {

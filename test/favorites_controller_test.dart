@@ -83,6 +83,7 @@ class _FakeFavoritesCoreBridge extends Fake implements MashinCoreBridgeApi {
     QueueOption option = QueueOption.play,
     int? startItem,
     bool shuffle = false,
+    String? providerInstance,
   }) async {
     playedItems = items;
   }
