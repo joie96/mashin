@@ -16,9 +16,9 @@ class PlaybackSessionCommandsTest {
         val actions = PlaybackCommandKind.entries.map { it.action }
         assertEquals(actions.size, actions.distinct().size)
         assertTrue(actions.containsAll(listOf("transportPlay", "transportPause", "transportSeek", "queuePlayMedia", "selectRemotePlayer",
-            "moveQueueItem", "moveQueueItemToEnd", "deleteQueueItem")))
+            "moveQueueItem", "moveQueueItemToEnd", "deleteQueueItems")))
         assertFalse(actions.any { it in listOf("play", "pause", "seekSeconds", "activate",
-            "insertQueueItems", "appendQueueItems", "moveQueueItems", "deleteQueueItems") })
+            "insertQueueItems", "appendQueueItems", "moveQueueItems", "deleteQueueItem") })
     }
 
     @Test

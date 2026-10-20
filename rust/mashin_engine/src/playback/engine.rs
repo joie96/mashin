@@ -183,8 +183,8 @@ impl PlaybackEngine {
         self.with_active_backend(|engine| engine.move_queue_item_to_end(item_id))
     }
 
-    pub(crate) fn delete_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {
-        self.with_active_backend(|engine| engine.delete_queue_item(item_id))
+    pub(crate) fn delete_queue_items(&mut self, item_ids: Vec<QueueItemId>) -> Result<(), String> {
+        self.with_active_backend(|engine| engine.delete_queue_items(item_ids))
     }
 
     pub(crate) fn select_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {

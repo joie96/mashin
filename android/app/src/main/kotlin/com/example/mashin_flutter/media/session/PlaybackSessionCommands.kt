@@ -31,7 +31,7 @@ internal enum class PlaybackCommandKind(val action: String, val canStartPlayback
     StartRadio("startRadio", true),
     MoveQueueItem("moveQueueItem"),
     MoveQueueItemToEnd("moveQueueItemToEnd"),
-    DeleteQueueItem("deleteQueueItem"),
+    DeleteQueueItems("deleteQueueItems"),
     SelectQueueItem("selectQueueItem", true),
     PlayQueueIndex("playQueueIndex", true),
     SetAudioProfile("setAudioProfile"),

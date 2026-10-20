@@ -24,7 +24,7 @@ enum AndroidCoreCommand {
   startRadio,
   moveQueueItem,
   moveQueueItemToEnd,
-  deleteQueueItem,
+  deleteQueueItems,
   selectQueueItem,
   playQueueIndex,
   setAudioProfile,

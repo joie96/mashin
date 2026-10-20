@@ -277,6 +277,26 @@ mod tests {
     }
 
     #[test]
+    fn queue_mutation_keeps_local_selection_and_position_after_reconnect() {
+        let snapshot = server_snapshot();
+        let mut bootstrap = QueueBootstrap::default();
+        bootstrap.start_loading();
+        let mut local = local_state(&snapshot);
+        bootstrap.project(&mut local, Some(&snapshot), false);
+        bootstrap.take_local_authority();
+        local.queue.current_index = None;
+        local.player_state.current_index = None;
+        local.player_state.current_queue_item_id = Some(QueueItemId("local-stream".into()));
+        local.player_state.position_millis = Some(42_000);
+        let expected = local.clone();
+        bootstrap.project(&mut local, None, false);
+        bootstrap.start_loading();
+        bootstrap.project(&mut local, Some(&snapshot), false);
+        assert!(matches!(bootstrap, QueueBootstrap::Local));
+        assert_eq!(local, expected);
+    }
+
+    #[test]
     fn an_empty_initial_queue_completes_bootstrap() {
         let mut bootstrap = QueueBootstrap::default();
         bootstrap.start_loading();

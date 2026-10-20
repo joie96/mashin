@@ -145,9 +145,9 @@ impl PlaybackBackend for LocalPlayback {
         self.take_local_authority();
         self.target.move_queue_item_to_end(item_id)
     }
-    fn delete_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {
+    fn delete_queue_items(&mut self, item_ids: Vec<QueueItemId>) -> Result<(), String> {
         self.take_local_authority();
-        self.target.delete_queue_item(item_id)
+        self.target.delete_queue_items(item_ids)
     }
     fn select_queue_item(&mut self, id: QueueItemId) -> Result<(), String> {
         self.take_local_authority();

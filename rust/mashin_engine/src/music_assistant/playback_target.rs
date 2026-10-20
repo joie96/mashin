@@ -122,8 +122,49 @@ impl MusicAssistantPlaybackTarget {
         self.queue_command(QueueCommand::MoveItemToEnd(item_id))
     }
 
-    pub(crate) fn delete_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {
-        self.queue_command(QueueCommand::DeleteItem(item_id))
+    pub(crate) fn delete_queue_items(&mut self, item_ids: Vec<QueueItemId>) -> Result<(), String> {
+        let mut seen = std::collections::HashSet::new();
+        let item_ids = item_ids
+            .into_iter()
+            .filter(|item_id| seen.insert(item_id.clone()))
+            .collect::<Vec<_>>();
+        if item_ids.is_empty()
+            || item_ids
+                .iter()
+                .any(|item_id| item_id.as_str().trim().is_empty())
+        {
+            return Err("queue item IDs must not be empty".into());
+        }
+        let projection = self
+            .projection
+            .as_ref()
+            .ok_or("remote queue is not active")?;
+        let client = self
+            .configuration
+            .as_ref()
+            .ok_or("remote player is not configured")?
+            .connection
+            .client
+            .clone();
+        let mutation = projection.begin_mutation()?;
+        self.pending_commands.push(Box::pin(async move {
+            let total = item_ids.len();
+            for (completed, item_id) in item_ids.into_iter().enumerate() {
+                mutation.check_connection().map_err(|error| {
+                    format!("Queue deletion stopped after {completed}/{total} requests: {error}")
+                })?;
+                client
+                    .execute_queue_command(mutation.queue_id(), QueueCommand::DeleteItem(item_id))
+                    .await
+                    .map_err(|error| {
+                        format!(
+                            "Queue deletion stopped after {completed}/{total} requests: {error}"
+                        )
+                    })?;
+            }
+            mutation.check_connection()
+        }));
+        Ok(())
     }
 
     pub(crate) fn select_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {
@@ -270,6 +311,13 @@ impl Drop for MusicAssistantPlaybackTarget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::music_assistant::client::tests::server_with_request_handler;
+    use crate::music_assistant::event_hub::MusicAssistantEvent;
+    use crate::music_assistant::models::identifiers::{AccessToken, QueueId};
+    use crate::music_assistant::models::session::MusicAssistantServerUrl;
+    use serde_json::{json, Value};
+    use std::time::{Duration, Instant};
+    use tokio::sync::broadcast;
 
     #[test]
     pub(crate) fn unconfigured_remote_has_no_local_audio_and_rejects_commands() {
@@ -278,6 +326,170 @@ mod tests {
         assert_eq!(engine.player_state().buffered_position_millis, None);
         assert!(engine.transport_play().is_err());
         assert!(engine.play_queue_index(0).is_err());
+        assert!(engine
+            .delete_queue_items(Vec::new())
+            .unwrap_err()
+            .contains("must not be empty"));
+        assert!(engine
+            .delete_queue_items(vec![QueueItemId(" ".into())])
+            .unwrap_err()
+            .contains("must not be empty"));
         engine.shutdown();
+    }
+
+    // HTTP responses deliver queue events before acknowledging each mutation.
+    #[test]
+    fn deletion_batches_survive_item_events_and_stop_on_failure_or_reconnect() {
+        for scenario in ["success", "failure", "reconnect"] {
+            CORE_NETWORK_RUNTIME.block_on(async {
+                let items = (1..=3)
+                    .map(|index| {
+                        json!({
+                            "queue_id":"queue", "queue_item_id":format!("item-{index}"),
+                            "name":format!("Item {index}")
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let mut responses = snapshot_responses(json!(items));
+                responses.push((
+                    "player_queues/delete_item",
+                    if scenario == "failure" {
+                        json!({"test_http_status":400})
+                    } else {
+                        Value::Null
+                    },
+                ));
+                if scenario == "success" {
+                    responses.push(("player_queues/delete_item", Value::Null));
+                }
+                let remaining = match scenario {
+                    "success" => items[2..].to_vec(),
+                    "failure" => items.clone(),
+                    _ => items[1..].to_vec(),
+                };
+                responses.extend(snapshot_responses(json!(remaining)));
+                let (event_sender, receiver) = broadcast::channel(64);
+                let events = event_sender.clone();
+                let (client, worker) = server_with_request_handler(responses, move |request| {
+                    if request["command"] != "player_queues/delete_item" {
+                        return;
+                    }
+                    events
+                        .send(MusicAssistantEvent::QueueItemsUpdated(QueueId(
+                            "queue".into(),
+                        )))
+                        .unwrap();
+                    if scenario == "reconnect" {
+                        events.send(MusicAssistantEvent::Disconnected).unwrap();
+                        events.send(MusicAssistantEvent::Connected).unwrap();
+                    }
+                    let deadline = Instant::now() + Duration::from_secs(3);
+                    while events.len() > 0 {
+                        assert!(
+                            Instant::now() < deadline,
+                            "projection did not consume queue events"
+                        );
+                        std::thread::yield_now();
+                    }
+                });
+                let client = Arc::new(client);
+                let mut connection = MusicAssistantConnection::new(
+                    MusicAssistantServerUrl("http://127.0.0.1:1".into()),
+                    Some(AccessToken("test-token".into())),
+                )
+                .unwrap();
+                connection.client = client.clone();
+                let mut target = MusicAssistantPlaybackTarget {
+                    configuration: Some(MusicAssistantPlaybackTargetConfiguration {
+                        player_id: PlayerId("queue".into()),
+                        connection: Arc::new(connection),
+                    }),
+                    projection: Some(MusicAssistantQueueController::new(
+                        &CORE_NETWORK_RUNTIME,
+                        client,
+                        receiver,
+                        PlayerId("queue".into()),
+                        true,
+                    )),
+                    pending_commands: Vec::new(),
+                };
+                wait_for_synchronization(&target).await;
+                target
+                    .delete_queue_items(vec![
+                        QueueItemId("item-1".into()),
+                        QueueItemId("item-2".into()),
+                        QueueItemId("item-1".into()),
+                    ])
+                    .unwrap();
+                let mut commands = target.take_pending_commands();
+                assert_eq!(commands.len(), 1);
+                let result = commands.pop().unwrap().await;
+                assert_eq!(
+                    result.is_ok(),
+                    scenario == "success",
+                    "{scenario}: {result:?}"
+                );
+                if scenario == "failure" {
+                    assert!(result.unwrap_err().contains("0/2"));
+                } else if scenario == "reconnect" {
+                    assert!(result.unwrap_err().contains("1/2"));
+                }
+                wait_for_synchronization(&target).await;
+                assert_eq!(target.queue().items.len(), remaining.len());
+                let requests = worker.join().unwrap();
+                let deletions = requests
+                    .iter()
+                    .filter(|request| request["command"] == "player_queues/delete_item")
+                    .map(|request| request["args"]["item_id_or_index"].clone())
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    deletions,
+                    if scenario == "success" {
+                        vec![json!("item-1"), json!("item-2")]
+                    } else {
+                        vec![json!("item-1")]
+                    }
+                );
+                assert!(requests.iter().all(|request| request["args"]
+                    .get("queue_id")
+                    .is_none_or(|queue_id| queue_id == "queue")));
+                assert_eq!(
+                    requests
+                        .iter()
+                        .filter(|request| request["command"] == "player_queues/items")
+                        .count(),
+                    2
+                );
+                drop(event_sender);
+            });
+        }
+    }
+
+    // Shared snapshot fixtures retain stable queue identities across the batch.
+    fn snapshot_responses(items: Value) -> Vec<(&'static str, Value)> {
+        vec![
+            (
+                "player_queues/get_active_queue",
+                json!({"queue_id":"queue"}),
+            ),
+            (
+                "players/get",
+                json!({
+                    "player_id":"queue", "provider":"test", "type":"player", "name":"Player",
+                    "available":true, "device_info":{"model":"test","manufacturer":"test"}
+                }),
+            ),
+            ("player_queues/items", items),
+        ]
+    }
+
+    async fn wait_for_synchronization(target: &MusicAssistantPlaybackTarget) {
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !target.projection.as_ref().unwrap().is_synchronized() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("queue snapshot did not synchronize");
     }
 }

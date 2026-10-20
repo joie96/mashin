@@ -155,8 +155,8 @@ fn execute_async_operation(request: CoreOperationRequest) -> Result<Value, CoreE
         "moveQueueItemToEnd" => {
             execute_text_command(mashin_core_move_queue_item_to_end, &arguments, "itemId")
         }
-        "deleteQueueItem" => {
-            execute_text_command(mashin_core_delete_queue_item, &arguments, "itemId")
+        "deleteQueueItems" => {
+            execute_json_text_command(mashin_core_delete_queue_items, &arguments, "itemIds")
         }
         "selectQueueItem" => {
             execute_text_command(mashin_core_select_queue_item, &arguments, "itemId")
@@ -745,10 +745,10 @@ pub extern "C" fn mashin_core_move_queue_item_to_end(item_id: *const c_char) -> 
 }
 
 #[no_mangle]
-pub extern "C" fn mashin_core_delete_queue_item(item_id: *const c_char) -> i32 {
-    match read_required_c_string(item_id, "itemId") {
-        Ok(item_id) => {
-            execute_playback_command(|playback| playback.delete_queue_item(QueueItemId(item_id)))
+pub extern "C" fn mashin_core_delete_queue_items(item_ids: *const c_char) -> i32 {
+    match read_required_json_array::<QueueItemId>(item_ids, "itemIds") {
+        Ok(item_ids) => {
+            execute_playback_command(|playback| playback.delete_queue_items(item_ids))
         }
         Err(error) => {
             record_and_publish_error(error);

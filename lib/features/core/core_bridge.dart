@@ -234,7 +234,7 @@ abstract class MashinCoreBridgeApi {
   Future<void> startRadio(List<MediaItem> mediaItems);
   Future<void> moveQueueItem(String itemId, int positionShift);
   Future<void> moveQueueItemToEnd(String itemId);
-  Future<void> deleteQueueItem(String itemId);
+  Future<void> deleteQueueItems(List<String> itemIds);
   Future<void> selectQueueItem(String itemId);
   Future<void> playQueueIndex(int index);
   Future<void> setAudioProfile(String audioProfile);
@@ -812,9 +812,9 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   );
 
   @override
-  Future<void> deleteQueueItem(String itemId) => _submitVoidOperation(
-    'deleteQueueItem',
-    <String, Object?>{'itemId': itemId},
+  Future<void> deleteQueueItems(List<String> itemIds) => _submitVoidOperation(
+    'deleteQueueItems',
+    <String, Object?>{'itemIds': itemIds},
   );
 
   @override
@@ -1257,8 +1257,8 @@ class _RustBindings {
       moveQueueItemToEnd = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
         'mashin_core_move_queue_item_to_end',
       ),
-      deleteQueueItem = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
-        'mashin_core_delete_queue_item',
+      deleteQueueItems = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
+        'mashin_core_delete_queue_items',
       ),
       queueSelect = library.lookupFunction<_NativeCodecFn, _DartCodecFn>(
         'mashin_core_select_queue_item',
@@ -1363,7 +1363,7 @@ class _RustBindings {
   final _DartCodecFn startRadio;
   final _DartQueueMoveFn moveQueueItem;
   final _DartCodecFn moveQueueItemToEnd;
-  final _DartCodecFn deleteQueueItem;
+  final _DartCodecFn deleteQueueItems;
   final _DartCodecFn queueSelect;
   final _DartVolumeFn queuePlay;
   final _DartCodecFn setAudioProfile;

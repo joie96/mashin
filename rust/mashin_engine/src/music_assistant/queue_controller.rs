@@ -10,7 +10,7 @@ use super::queue_projection::{QueueProjection, QueueSnapshotRequest};
 use crate::playback::mode::PlaybackMode;
 use crate::playback::models::{MediaSessionState, PlaybackConnectionState, PlayerState, Queue};
 use std::sync::{Arc, Mutex};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Notify};
 use tokio::task::JoinHandle;
 
 struct QueueState {
@@ -18,6 +18,8 @@ struct QueueState {
     player: Option<MusicAssistantPlayer>,
     player_revision: u64,
     is_connected: bool,
+    connection_revision: u64,
+    is_mutating: bool,
 }
 
 struct QueueSnapshot {
@@ -27,7 +29,43 @@ struct QueueSnapshot {
 
 pub(crate) struct MusicAssistantQueueController {
     state: Arc<Mutex<QueueState>>,
+    refresh_requested: Arc<Notify>,
     worker: JoinHandle<()>,
+}
+
+pub(crate) struct QueueMutation {
+    state: Arc<Mutex<QueueState>>,
+    refresh_requested: Arc<Notify>,
+    connection_revision: u64,
+    queue_id: QueueId,
+}
+
+impl QueueMutation {
+    // Commands remain bound to the connection and queue selected when the batch began.
+    pub(crate) fn check_connection(&self) -> Result<(), String> {
+        let state = self.state.lock().map_err(|_| "queue state lock poisoned")?;
+        if !state.is_connected
+            || state.connection_revision != self.connection_revision
+            || state.projection.queue().queue_id != self.queue_id
+        {
+            return Err("queue deletion interrupted by a connection or queue change".into());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn queue_id(&self) -> &QueueId {
+        &self.queue_id
+    }
+}
+
+impl Drop for QueueMutation {
+    // Cancellation and partial failures must also resume snapshot loading.
+    fn drop(&mut self) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.is_mutating = false;
+        state.projection.invalidate();
+        self.refresh_requested.notify_one();
+    }
 }
 
 impl MusicAssistantQueueController {
@@ -44,9 +82,39 @@ impl MusicAssistantQueueController {
             player: None,
             player_revision: 0,
             is_connected,
+            connection_revision: 0,
+            is_mutating: false,
         }));
-        let worker = runtime.spawn(run_projection(client, events, player_id, state.clone()));
-        Self { state, worker }
+        let refresh_requested = Arc::new(Notify::new());
+        let worker = runtime.spawn(run_projection(
+            client,
+            events,
+            player_id,
+            state.clone(),
+            refresh_requested.clone(),
+        ));
+        Self {
+            state,
+            refresh_requested,
+            worker,
+        }
+    }
+
+    // Batch mutations defer server snapshots without changing local playback authority.
+    pub(crate) fn begin_mutation(&self) -> Result<QueueMutation, String> {
+        let mut state = self.state.lock().map_err(|_| "queue state lock poisoned")?;
+        if !state.is_connected || !state.projection.is_synchronized() || state.is_mutating {
+            return Err("remote queue is synchronizing".into());
+        }
+        let mutation = QueueMutation {
+            state: self.state.clone(),
+            refresh_requested: self.refresh_requested.clone(),
+            connection_revision: state.connection_revision,
+            queue_id: state.projection.queue().queue_id.clone(),
+        };
+        state.is_mutating = true;
+        state.projection.invalidate();
+        Ok(mutation)
     }
 
     // Read-only projections.
@@ -91,6 +159,10 @@ impl MusicAssistantQueueController {
 
 impl Drop for MusicAssistantQueueController {
     fn drop(&mut self) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.is_connected = false;
+        state.connection_revision += 1;
+        state.projection.invalidate();
         self.worker.abort();
     }
 }
@@ -101,6 +173,7 @@ async fn run_projection(
     mut events: broadcast::Receiver<MusicAssistantEvent>,
     player_id: PlayerId,
     state: Arc<Mutex<QueueState>>,
+    refresh_requested: Arc<Notify>,
 ) {
     let mut snapshot: Option<
         futures_util::future::BoxFuture<
@@ -112,7 +185,7 @@ async fn run_projection(
     loop {
         let should_refresh = {
             let state = state.lock().unwrap_or_else(|error| error.into_inner());
-            state.is_connected && !state.projection.is_synchronized()
+            state.is_connected && !state.is_mutating && !state.projection.is_synchronized()
         };
         if snapshot.is_none() && should_refresh && tokio::time::Instant::now() >= retry_at {
             let (request, player_revision) = {
@@ -135,10 +208,12 @@ async fn run_projection(
                 let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
                 match event {
                     Ok(MusicAssistantEvent::Connected) => {
+                        state.connection_revision += 1;
                         state.is_connected = true;
                         state.projection.invalidate();
                     }
                     Ok(MusicAssistantEvent::Disconnected) => {
+                        state.connection_revision += 1;
                         state.is_connected = false;
                         state.projection.invalidate();
                     }
@@ -162,7 +237,10 @@ async fn run_projection(
                             state.player_revision += 1;
                             if let Some(player) = state.player.as_mut() { player.elapsed_time = Some(elapsed_seconds); }
                         }
-                    Err(broadcast::error::RecvError::Lagged(_)) => state.projection.invalidate(),
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        state.connection_revision += 1;
+                        state.projection.invalidate();
+                    }
                     Err(broadcast::error::RecvError::Closed) => break,
                     _ => {}
                 }
@@ -189,6 +267,7 @@ async fn run_projection(
                 }
             }
             _ = tokio::time::sleep_until(retry_at), if snapshot.is_none() && should_refresh => {}
+            _ = refresh_requested.notified() => {}
         }
     }
 }
@@ -272,6 +351,8 @@ mod tests {
             player: Some(player),
             player_revision: 0,
             is_connected: true,
+            connection_revision: 0,
+            is_mutating: false,
         };
         let result = project_remote_player(&state);
         assert_eq!(result.position_millis, Some(12500));
@@ -288,10 +369,87 @@ mod tests {
             player: None,
             player_revision: 0,
             is_connected: false,
+            connection_revision: 0,
+            is_mutating: false,
         };
         assert_eq!(
             project_remote_player(&state).connection_state,
             PlaybackConnectionState::Reconnecting
         );
+    }
+
+    // Batch lifetime and reconnect isolation.
+    #[test]
+    fn mutation_survives_item_events_but_not_reconnects() {
+        let state = Arc::new(Mutex::new(QueueState {
+            projection: QueueProjection::new(QueueId("queue".into())),
+            player: None,
+            player_revision: 0,
+            is_connected: true,
+            connection_revision: 4,
+            is_mutating: true,
+        }));
+        let mutation = QueueMutation {
+            state: state.clone(),
+            refresh_requested: Arc::new(Notify::new()),
+            connection_revision: 4,
+            queue_id: QueueId("queue".into()),
+        };
+        state.lock().unwrap().projection.invalidate();
+        assert!(mutation.check_connection().is_ok());
+        state.lock().unwrap().connection_revision += 2;
+        assert!(mutation.check_connection().is_err());
+        drop(mutation);
+        let state = state.lock().unwrap();
+        assert!(!state.is_mutating);
+        assert!(!state.projection.is_synchronized());
+    }
+
+    #[tokio::test]
+    async fn dropping_mutation_wakes_the_snapshot_worker() {
+        let state = Arc::new(Mutex::new(QueueState {
+            projection: QueueProjection::new(QueueId("queue".into())),
+            player: None,
+            player_revision: 0,
+            is_connected: true,
+            connection_revision: 0,
+            is_mutating: true,
+        }));
+        let refresh_requested = Arc::new(Notify::new());
+        let mutation = QueueMutation {
+            state,
+            refresh_requested: refresh_requested.clone(),
+            connection_revision: 0,
+            queue_id: QueueId("queue".into()),
+        };
+        drop(mutation);
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            refresh_requested.notified(),
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn dropping_the_controller_interrupts_its_active_mutation() {
+        let mut projection = QueueProjection::new(QueueId("queue".into()));
+        assert!(projection.apply_snapshot(projection.begin_snapshot(), projection.queue().clone()));
+        let controller = MusicAssistantQueueController {
+            state: Arc::new(Mutex::new(QueueState {
+                projection,
+                player: None,
+                player_revision: 0,
+                is_connected: true,
+                connection_revision: 0,
+                is_mutating: false,
+            })),
+            refresh_requested: Arc::new(Notify::new()),
+            worker: tokio::spawn(std::future::pending()),
+        };
+        let mutation = controller.begin_mutation().unwrap();
+        assert!(controller.begin_mutation().is_err());
+        drop(controller);
+        assert!(mutation.check_connection().is_err());
     }
 }

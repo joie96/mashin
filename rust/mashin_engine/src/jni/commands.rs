@@ -75,8 +75,8 @@ enum PlaybackCommand {
     MoveQueueItemToEnd {
         item_id: QueueItemId,
     },
-    DeleteQueueItem {
-        item_id: QueueItemId,
+    DeleteQueueItems {
+        item_ids: Vec<QueueItemId>,
     },
     SelectQueueItem {
         item_id: QueueItemId,
@@ -228,9 +228,9 @@ pub(crate) fn execute_command(kind: &str, argument: Option<&str>) -> Result<(), 
                 playback.move_queue_item_to_end(item_id)
             })
         }
-        PlaybackCommand::DeleteQueueItem { item_id } => {
+        PlaybackCommand::DeleteQueueItems { item_ids } => {
             core::execute_playback_command_and_collect_events(|playback| {
-                playback.delete_queue_item(item_id)
+            playback.delete_queue_items(item_ids)
             })
         }
         PlaybackCommand::SelectQueueItem { item_id } => {
@@ -381,6 +381,8 @@ mod tests {
             ),
             ("moveQueueItemToEnd", r#"{"itemIds":["item-1"]}"#),
             ("deleteQueueItem", r#"{"itemId":0}"#),
+            ("deleteQueueItem", r#"{"itemId":"item-1"}"#),
+            ("deleteQueueItems", r#"{"itemIds":["item-1",2]}"#),
             ("playQueueIndex", r#"{"index":-1}"#),
         ] {
             assert!(decode_command(kind, Some(arguments)).is_err(), "{kind}");
@@ -401,7 +403,7 @@ mod tests {
         )
         .is_ok());
         assert!(decode_command("moveQueueItemToEnd", Some(r#"{"itemId":"item-1"}"#)).is_ok());
-        assert!(decode_command("deleteQueueItem", Some(r#"{"itemId":"item-1"}"#)).is_ok());
+        assert!(decode_command("deleteQueueItems", Some(r#"{"itemIds":["item-1","item-2"]}"#)).is_ok());
         assert!(decode_command("transportRepeatMode", Some(r#"{"mode":2}"#)).is_ok());
     }
 

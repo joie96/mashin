@@ -214,14 +214,12 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
       ContextMenuAction(
         label: 'Aus Queue entfernen',
         icon: Icons.remove_circle_outline,
-        onSelected: () async {
-          for (final String itemId
-              in targets
-                  .map((QueueItem target) => target.queueItemId)
-                  .where((String id) => id.isNotEmpty)) {
-            await widget.coreBridge.deleteQueueItem(itemId);
-          }
-        },
+        onSelected: () => widget.coreBridge.deleteQueueItems(
+          targets
+              .map((QueueItem target) => target.queueItemId)
+              .where((String id) => id.isNotEmpty)
+              .toList(growable: false),
+        ),
       ),
       if (track != null &&
           (onOpenArtist != null || onOpenAlbum != null)) ...<ContextMenuAction>[

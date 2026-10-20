@@ -24,7 +24,7 @@ pub(crate) trait PlaybackBackend: Send {
     ) -> Result<(), String>;
     fn move_queue_item(&mut self, item_id: QueueItemId, position_shift: i32) -> Result<(), String>;
     fn move_queue_item_to_end(&mut self, item_id: QueueItemId) -> Result<(), String>;
-    fn delete_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String>;
+    fn delete_queue_items(&mut self, item_ids: Vec<QueueItemId>) -> Result<(), String>;
     fn select_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String>;
     fn play_queue_index(&mut self, index: usize) -> Result<(), String>;
     fn transport_play(&mut self) -> Result<(), String>;

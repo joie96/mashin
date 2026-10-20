@@ -133,15 +133,17 @@ class RustSessionPlayerTest {
     }
 
     @Test
-    fun deletionCapturesStableIdsAndStopsAfterFailure() {
+    fun deletionCapturesAllStableIdsInOneAcknowledgedBatch() {
         val acknowledgement = SettableFuture.create<Void>()
         response = acknowledgement
         val completion = invokeCommand("handleRemoveMediaItems", 1, 3)
-        assertEquals(listOf("queue-1"), requestedIds())
+        assertEquals(PlaybackCommandKind.DeleteQueueItems, requests.single().kind)
+        val itemIds = JSONObject(requests.single().arguments).getJSONArray("itemIds")
+        assertEquals(listOf("queue-1", "queue-2"), (0 until itemIds.length()).map { itemIds.getString(it) })
+        assertFalse(completion.isDone)
         acknowledgement.setException(IllegalStateException("server rejected deletion"))
         assertThrows(ExecutionException::class.java) { completion.get() }
-        assertEquals(listOf("queue-1"), requestedIds())
-        assertEquals(PlaybackCommandKind.DeleteQueueItem, requests.single().kind)
+        assertEquals(1, requests.size)
     }
 
     @Test

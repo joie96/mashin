@@ -47,57 +47,62 @@ void main() {
     );
   });
 
-  test('queue mutations forward single IDs and MA move parameters', () async {
-    final calls = <MethodCall>[];
-    messenger.setMockMethodCallHandler(channel, (call) async {
-      calls.add(call);
-      return null;
-    });
-    final bridge = AndroidBridge();
-    await bridge.execute(AndroidCoreCommand.moveQueueItem, const {
-      'itemId': 'stable',
-      'positionShift': 0,
-    });
-    await bridge.execute(AndroidCoreCommand.moveQueueItem, const {
-      'itemId': 'stable',
-      'positionShift': -2,
-    });
-    await bridge.execute(AndroidCoreCommand.moveQueueItemToEnd, const {
-      'itemId': 'stable',
-    });
-    await bridge.execute(AndroidCoreCommand.deleteQueueItem, const {
-      'itemId': 'stable',
-    });
-    expect(calls.map((call) => call.arguments), <Object?>[
-      {
-        'command': 'moveQueueItem',
-        'arguments': {'itemId': 'stable', 'positionShift': 0},
-      },
-      {
-        'command': 'moveQueueItem',
-        'arguments': {'itemId': 'stable', 'positionShift': -2},
-      },
-      {
-        'command': 'moveQueueItemToEnd',
-        'arguments': {'itemId': 'stable'},
-      },
-      {
-        'command': 'deleteQueueItem',
-        'arguments': {'itemId': 'stable'},
-      },
-    ]);
-    expect(
-      AndroidCoreCommand.values.map((command) => command.name),
-      isNot(
-        anyOf(
-          contains('insertQueueItems'),
-          contains('appendQueueItems'),
-          contains('moveQueueItems'),
-          contains('deleteQueueItems'),
+  test(
+    'queue mutations forward deletion batches and MA move parameters',
+    () async {
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return null;
+      });
+      final bridge = AndroidBridge();
+      await bridge.execute(AndroidCoreCommand.moveQueueItem, const {
+        'itemId': 'stable',
+        'positionShift': 0,
+      });
+      await bridge.execute(AndroidCoreCommand.moveQueueItem, const {
+        'itemId': 'stable',
+        'positionShift': -2,
+      });
+      await bridge.execute(AndroidCoreCommand.moveQueueItemToEnd, const {
+        'itemId': 'stable',
+      });
+      await bridge.execute(AndroidCoreCommand.deleteQueueItems, const {
+        'itemIds': ['stable', 'second'],
+      });
+      expect(calls.map((call) => call.arguments), <Object?>[
+        {
+          'command': 'moveQueueItem',
+          'arguments': {'itemId': 'stable', 'positionShift': 0},
+        },
+        {
+          'command': 'moveQueueItem',
+          'arguments': {'itemId': 'stable', 'positionShift': -2},
+        },
+        {
+          'command': 'moveQueueItemToEnd',
+          'arguments': {'itemId': 'stable'},
+        },
+        {
+          'command': 'deleteQueueItems',
+          'arguments': {
+            'itemIds': ['stable', 'second'],
+          },
+        },
+      ]);
+      expect(
+        AndroidCoreCommand.values.map((command) => command.name),
+        isNot(
+          anyOf(
+            contains('insertQueueItems'),
+            contains('appendQueueItems'),
+            contains('moveQueueItems'),
+            contains('deleteQueueItem'),
+          ),
         ),
-      ),
-    );
-  });
+      );
+    },
+  );
 
   test('settings are submitted in one complete Android command', () async {
     MethodCall? receivedCall;

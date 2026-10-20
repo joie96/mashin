@@ -1285,6 +1285,13 @@ pub(crate) mod tests {
     pub(crate) fn server(
         responses: Vec<(&'static str, Value)>,
     ) -> (MusicAssistantClient, std::thread::JoinHandle<Vec<Value>>) {
+        server_with_request_handler(responses, |_| {})
+    }
+
+    pub(crate) fn server_with_request_handler(
+        responses: Vec<(&'static str, Value)>,
+        mut handle_request: impl FnMut(&Value) + Send + 'static,
+    ) -> (MusicAssistantClient, std::thread::JoinHandle<Vec<Value>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let worker = std::thread::spawn(move || {
@@ -1327,6 +1334,7 @@ pub(crate) mod tests {
                 } else {
                     let (expected, response) = responses.next().unwrap();
                     assert_eq!(request["command"], expected);
+                    handle_request(&request);
                     requests.push(request);
                     response
                 };

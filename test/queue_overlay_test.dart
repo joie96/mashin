@@ -12,6 +12,7 @@ import 'package:mashin_flutter/features/shared/widgets/media_table_section_mobil
 
 class _QueueBridge implements MashinCoreBridgeApi {
   final calls = <(String, String, int?)>[];
+  final deletedBatches = <List<String>>[];
 
   // Record only the direct server mutation contract.
   @override
@@ -25,8 +26,8 @@ class _QueueBridge implements MashinCoreBridgeApi {
   }
 
   @override
-  Future<void> deleteQueueItem(String itemId) async {
-    calls.add(('delete', itemId, null));
+  Future<void> deleteQueueItems(List<String> itemIds) async {
+    deletedBatches.add(List<String>.of(itemIds));
   }
 
   @override
@@ -275,13 +276,18 @@ void main() {
             ('end', 'queue-1', null),
             ('end', 'queue-3', null),
           ],
-          'Aus Queue entfernen' => <(String, String, int?)>[
-            ('delete', 'queue-3', null),
-            ('delete', 'queue-1', null),
-          ],
+          'Aus Queue entfernen' => <(String, String, int?)>[],
           _ => <(String, String, int?)>[('select', 'queue-3', null)],
         };
         expect(bridge.calls, expected);
+        expect(
+          bridge.deletedBatches,
+          action == 'Aus Queue entfernen'
+              ? <List<String>>[
+                  <String>['queue-3', 'queue-1'],
+                ]
+              : <List<String>>[],
+        );
         expect(items.map((item) => item.queueItemId), <String>[
           'queue-0',
           'queue-1',

@@ -91,14 +91,9 @@ internal class RustSessionPlayer(
 
     override fun handleRemoveMediaItems(fromIndex: Int, toIndex: Int): ListenableFuture<*> {
         val itemIds = snapshot.mediaItems.subList(fromIndex, toIndex).map { it.mediaId }
-        var completion: ListenableFuture<*> = Futures.immediateVoidFuture()
-        for (itemId in itemIds) {
-            completion = Futures.transformAsync(completion, {
-                dispatchCommand(PlaybackRequest(PlaybackCommandKind.DeleteQueueItem,
-                    JSONObject().put("itemId", itemId).toString()))
-            }, MoreExecutors.directExecutor())
-        }
-        return completion
+        if (itemIds.isEmpty()) return Futures.immediateVoidFuture()
+        return dispatchCommand(PlaybackRequest(PlaybackCommandKind.DeleteQueueItems,
+            JSONObject().put("itemIds", JSONArray(itemIds)).toString()))
     }
 
     override fun handleMoveMediaItems(fromIndex: Int, toIndex: Int, newIndex: Int): ListenableFuture<*> {
