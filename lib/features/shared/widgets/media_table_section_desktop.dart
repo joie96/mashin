@@ -1808,7 +1808,7 @@ Widget _buildDesktopTableRowQueue({
   ValueChanged<int>? onArtistPointerDown,
   ValueChanged<Album>? onAlbumTap,
 }) {
-  final String provider = _resolveQueueProvider(item);
+  final String provider = item.playbackProvider;
   final MediaItem mediaItem = item.mediaItem;
   final Track? track = mediaItem is Track ? mediaItem : null;
   final String title = mediaItem.name.trim().isNotEmpty
@@ -3544,28 +3544,6 @@ String formatDuration(int seconds) {
   final int minutes = seconds ~/ 60;
   final int remainingSeconds = seconds % 60;
   return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
-}
-
-String _resolveQueueProvider(QueueItem item) {
-  final String directProvider = _stripOrEmpty(item.mediaItem.provider);
-  if (directProvider.isNotEmpty) {
-    return directProvider;
-  }
-
-  final List<ProviderMapping> mappings = item.mediaItem.providerMappings;
-  for (final ProviderMapping mapping in mappings) {
-    final String domain = _stripOrEmpty(mapping.providerDomain);
-    if (domain.isNotEmpty) {
-      return domain;
-    }
-
-    final String instance = _stripOrEmpty(mapping.providerInstance);
-    if (instance.isNotEmpty) {
-      return instance;
-    }
-  }
-
-  return '';
 }
 
 String _providerLabelFromId(String providerOrDomain) {

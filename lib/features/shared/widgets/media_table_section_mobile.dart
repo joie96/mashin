@@ -754,7 +754,7 @@ class _MediaTableSectionMobileState<T>
   }) {
     final MediaItem mediaItem = item.mediaItem;
     final Track? track = mediaItem is Track ? mediaItem : null;
-    final String provider = item.mediaItem.provider.trim();
+    final String provider = item.playbackProvider;
     final String title = item.mediaItem.name.trim().isNotEmpty
         ? item.mediaItem.name.trim()
         : item.name.trim().isNotEmpty

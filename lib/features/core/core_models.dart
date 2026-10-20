@@ -1357,6 +1357,7 @@ class QueueItem {
   final MediaItem mediaItem;
   final int? originalIndex;
   final MediaItemImage? image;
+  final String? streamProvider;
 
   const QueueItem({
     required this.queueItemId,
@@ -1368,6 +1369,7 @@ class QueueItem {
     this.available,
     this.originalIndex,
     this.image,
+    this.streamProvider,
   });
 
   factory QueueItem.fromJson(Map<String, dynamic> json) {
@@ -1389,7 +1391,26 @@ class QueueItem {
       image: json['image'] is Map<String, dynamic>
           ? MediaItemImage.fromJson(json['image'] as Map<String, dynamic>)
           : null,
+      streamProvider: json['streamdetails'] is Map<String, dynamic>
+          ? (json['streamdetails']['provider'] as String?)?.trim()
+          : null,
     );
+  }
+
+  // Resolve the playback source without changing the media item's identity.
+  String get playbackProvider {
+    final stream = streamProvider?.trim() ?? '';
+    if (stream.isNotEmpty && stream != 'library') return stream;
+    final direct = mediaItem.provider.trim();
+    if (direct.isNotEmpty && direct != 'library') return direct;
+    for (final mapping in mediaItem.providerMappings) {
+      if (!mapping.available) continue;
+      final instance = mapping.providerInstance.trim();
+      if (instance.isNotEmpty && instance != 'library') return instance;
+      final domain = mapping.providerDomain.trim();
+      if (domain.isNotEmpty && domain != 'library') return domain;
+    }
+    return direct;
   }
 
   // Queue artwork is also supplied for media items without full metadata.

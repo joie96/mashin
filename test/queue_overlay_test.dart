@@ -51,11 +51,21 @@ void main() {
           final bridge = _QueueBridge();
           final events = MashinCoreBridgeEvents(coreBridge: bridge);
           addTearDown(events.dispose);
+          final providerIcon = Uri.dataFromString(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">'
+            '<rect width="16" height="16" fill="red"/></svg>',
+            mimeType: 'image/svg+xml',
+          ).toString();
+          ProviderManifestRegistry.registerIconData(
+            'queue-source',
+            providerIcon,
+          );
           final items = List<QueueItem>.generate(
             4,
             (index) => QueueItem(
               queueItemId: 'queue-$index',
               sortIndex: <int>[0, 12, 4, 9][index],
+              streamProvider: index == 0 ? 'queue-source--stream' : null,
               image: MediaItemImage.fromJson(<String, dynamic>{
                 'type': 'thumb',
                 'path': 'https://example.com/queue-cover-$index.jpg',
@@ -64,7 +74,17 @@ void main() {
               }),
               mediaItem: Track(
                 itemId: 'track-$index',
-                provider: 'test',
+                provider: index < 2 ? 'library' : 'queue-source--direct',
+                providerMappings: index == 1
+                    ? <ProviderMapping>[
+                        ProviderMapping.fromJson(<String, dynamic>{
+                          'item_id': 'source-track',
+                          'provider_domain': 'queue-source',
+                          'provider_instance': 'queue-source--mapped',
+                          'available': true,
+                        }),
+                      ]
+                    : const <ProviderMapping>[],
                 name: 'Track $index',
                 duration: 120,
                 artists: const <Artist>[],
@@ -117,6 +137,14 @@ void main() {
 
           await showSnapshot(items);
           await tester.pumpAndSettle();
+          final providerIcons = tester.widgetList<MediaProviderIcon>(
+            find.byType(MediaProviderIcon),
+          );
+          expect(providerIcons.length, greaterThanOrEqualTo(2));
+          expect(
+            providerIcons.map((icon) => icon.iconSvg),
+            everyElement(providerIcon),
+          );
           for (final item in items.take(
             pageSize == 0 ? items.length : pageSize,
           )) {

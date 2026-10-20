@@ -64,6 +64,57 @@ Map<String, dynamic> _mediaJson(String mediaType) => <String, dynamic>{
 };
 
 void main() {
+  test(
+    'queue playback provider prefers stream details over library mappings',
+    () {
+      final item = QueueItem.fromJson(<String, dynamic>{
+        'queue_item_id': 'queued-track',
+        'media_item': _mediaJson('track'),
+        'streamdetails': <String, dynamic>{'provider': 'deezer--one'},
+      });
+
+      expect(item.playbackProvider, 'deezer--one');
+      expect(item.mediaItem.provider, 'library');
+    },
+  );
+
+  test(
+    'queue playback provider resolves library mappings without a stream',
+    () {
+      for (final streamDetails in <Object?>[
+        null,
+        <String, dynamic>{'provider': '  '},
+      ]) {
+        final item = QueueItem.fromJson(<String, dynamic>{
+          'queue_item_id': 'queued-track',
+          'media_item': _mediaJson('track'),
+          'streamdetails': streamDetails,
+        });
+
+        expect(item.playbackProvider, 'source--one');
+      }
+    },
+  );
+
+  test(
+    'queue playback provider preserves direct providers and unmapped items',
+    () {
+      for (final provider in <String>['deezer--one', 'library', '']) {
+        final item = QueueItem.fromJson(<String, dynamic>{
+          'queue_item_id': 'queued-track',
+          'media_item': <String, dynamic>{
+            'media_type': 'track',
+            'item_id': 'track-id',
+            'provider': provider,
+            'name': 'Track',
+          },
+        });
+
+        expect(item.playbackProvider, provider);
+      }
+    },
+  );
+
   test('queue artwork survives parsing without media artwork', () {
     final item = QueueItem.fromJson(<String, dynamic>{
       'queue_item_id': 'queued-track',
