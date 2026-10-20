@@ -9,6 +9,8 @@ import '../detail_provider_selection.dart';
 import 'media_table_section_desktop.dart';
 
 class DetailProviderSwitcher extends StatefulWidget {
+  static const double mobileWidth = _DetailProviderSwitcherState._buttonWidth;
+
   const DetailProviderSwitcher({
     super.key,
     required this.selection,

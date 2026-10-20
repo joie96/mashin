@@ -5,6 +5,7 @@ import 'package:mashin_flutter/app/theme/app_theme.dart';
 import 'package:mashin_flutter/features/core/core_models.dart';
 import 'package:mashin_flutter/features/shared/detail_provider_selection.dart';
 import 'package:mashin_flutter/features/shared/widgets/detail_provider_switcher.dart';
+import 'package:mashin_flutter/features/shared/widgets/detail_title_mobile.dart';
 import 'package:mashin_flutter/features/shared/widgets/media_table_section_desktop.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -134,6 +135,67 @@ void main() {
       }
     },
   );
+
+  testWidgets('mobile detail title stays centered beside provider icons', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    for (final width in <double>[320, 390, 600]) {
+      tester.view.physicalSize = Size(width, 800);
+      for (final count in <int>[0, 1, 2]) {
+        final item = Artist(
+          itemId: '78',
+          provider: deezer.providerInstance,
+          name: 'Artist',
+          providerMappings: <ProviderMapping>[
+            if (count > 0) deezer,
+            if (count > 1) youtube,
+          ],
+        );
+        final selection = DetailProviderSelection(
+          itemId: item.itemId,
+          provider: item.provider,
+        );
+        await selection.initialize(item);
+        for (final title in <String>[
+          'Artist',
+          'A very long album or artist title that wraps onto multiple lines',
+        ]) {
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: AppTheme.dark(),
+              home: Scaffold(
+                body: MobileDetailTitle(
+                  title: title,
+                  providerSwitcher: DetailProviderSwitcher(
+                    selection: selection,
+                    item: item,
+                    isLoading: false,
+                    onSelected: (_) async {},
+                  ),
+                ),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final titleBounds = tester.getRect(find.text(title));
+          final providerBounds = tester.getRect(
+            find.byType(DetailProviderSwitcher),
+          );
+          expect(titleBounds.center.dx, closeTo(width / 2, 0.01));
+          expect(providerBounds.left, closeTo(titleBounds.right + 8, 0.01));
+          expect(
+            providerBounds.center.dy,
+            closeTo(titleBounds.center.dy, 0.01),
+          );
+          expect(providerBounds.right, lessThanOrEqualTo(width - 16));
+          expect(tester.takeException(), isNull);
+        }
+      }
+    }
+  });
 
   for (final rowWidth in <double>[240, 80]) {
     testWidgets(

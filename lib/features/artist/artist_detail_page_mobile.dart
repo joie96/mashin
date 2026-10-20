@@ -13,6 +13,7 @@ import '../shared/widgets/media_table_section_mobile.dart';
 import '../shared/widgets/media_image.dart';
 import 'artist_detail_controller.dart';
 import '../shared/widgets/detail_provider_switcher.dart';
+import '../shared/widgets/detail_title_mobile.dart';
 
 /// Mobile artist detail page: image banner header, centered actions, description and stacked album/similar-artist/top-track sections
 class ArtistDetailPageMobile extends StatefulWidget {
@@ -462,34 +463,16 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
 
     return Column(
       children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: <Widget>[
-              Flexible(
-                child: Text(
-                  _controller.artistName,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.headlineSmall,
+        MobileDetailTitle(
+          title: _controller.artistName,
+          providerSwitcher: artist == null
+              ? null
+              : DetailProviderSwitcher(
+                  selection: _controller.sectionProvider,
+                  item: artist,
+                  isLoading: _controller.isLoadingSections,
+                  onSelected: _controller.selectProvider,
                 ),
-              ),
-              if (artist != null) ...<Widget>[
-                const SizedBox(width: 8),
-                Flexible(
-                  child: DetailProviderSwitcher(
-                    selection: _controller.sectionProvider,
-                    item: artist,
-                    isLoading: _controller.isLoadingSections,
-                    onSelected: _controller.selectProvider,
-                  ),
-                ),
-              ],
-            ],
-          ),
         ),
         const SizedBox(height: 4),
         Text(
