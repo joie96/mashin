@@ -32,7 +32,7 @@ where
             .cloned()
             .map(MediaItem::Track)
             .collect(),
-        QueueOption::Play,
+        QueueOption::Replace,
     )
     .await?;
     let candidates = client
@@ -277,7 +277,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn radio_http_contract_starts_seed_before_fetching_and_appending_recommendations() {
+    async fn radio_http_contract_replaces_queue_before_fetching_and_appending_recommendations() {
         use super::super::client::QueueCommand;
         use super::super::models::identifiers::QueueId;
 
@@ -289,7 +289,7 @@ mod tests {
         ] {
             let mut requests = vec![(
                 "player_queues/play_media",
-                media_arguments("seed", "play"),
+                media_arguments("seed", "replace"),
                 json!(null),
                 start_status,
             )];
@@ -335,7 +335,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn container_radio_starts_a_track_and_retains_the_container_seed() {
+    async fn container_radio_replaces_queue_and_retains_the_container_seed() {
         use super::super::client::QueueCommand;
         use super::super::models::identifiers::QueueId;
 
@@ -355,7 +355,7 @@ mod tests {
                 ("providers", json!({}), json!([]), 200),
                 (
                     "player_queues/play_media",
-                    media_arguments("seed", "play"),
+                    media_arguments("seed", "replace"),
                     json!(null),
                     200,
                 ),

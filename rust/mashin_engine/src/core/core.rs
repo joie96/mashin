@@ -668,7 +668,7 @@ pub(crate) fn start_radio_and_execute_command(
             &client,
             media_items,
             |media, option| async move {
-                let expected_revision = if option == QueueOption::Play {
+                let expected_revision = if option == QueueOption::Replace {
                     selection_revision
                 } else {
                     selection_revision.wrapping_add(1)
