@@ -5,8 +5,8 @@ use super::client::MusicAssistantClient;
 use super::models::identifiers::MediaId;
 use super::models::media::{MediaItem, Track};
 use super::models::queue::QueueOption;
+use super::user_data::same_item;
 use rand::seq::IndexedRandom;
-use std::collections::HashSet;
 
 struct RadioSelection {
     seed: MediaItem,
@@ -168,31 +168,27 @@ fn media_uri(item: &MediaItem) -> Result<String, String> {
 fn filter_recommendations(tracks: Vec<Track>, started: &[Track]) -> Vec<Track> {
     let mut excluded = started
         .iter()
-        .map(|track| track_key(track))
-        .collect::<HashSet<_>>();
-    tracks
-        .into_iter()
-        .filter(|track| track.media.is_playable && track.media.is_available())
-        .filter(|track| track.duration <= 20 * 60)
-        .filter(|track| excluded.insert(track_key(track)))
-        .collect()
-}
-
-fn track_key(track: &Track) -> String {
-    track
-        .media
-        .uri
-        .as_ref()
-        .map(|uri| uri.as_str())
-        .filter(|uri| !uri.trim().is_empty())
-        .map(str::to_owned)
-        .unwrap_or_else(|| {
-            format!(
-                "{}:{}",
-                track.media.provider.as_str(),
-                track.media.item_id.as_str()
-            )
-        })
+        .cloned()
+        .map(MediaItem::Track)
+        .collect::<Vec<_>>();
+    let mut recommendations = Vec::new();
+    for track in tracks {
+        if !track.media.is_playable || !track.media.is_available() || track.duration > 20 * 60 {
+            continue;
+        }
+        let candidate = MediaItem::Track(track.clone());
+        if excluded.iter().any(|item| {
+            same_item(item, &candidate)
+                || item.fields().uri.as_ref().is_some_and(|uri| {
+                    !uri.as_str().trim().is_empty() && candidate.fields().uri.as_ref() == Some(uri)
+                })
+        }) {
+            continue;
+        }
+        excluded.push(candidate);
+        recommendations.push(track);
+    }
+    recommendations
 }
 
 #[cfg(test)]
@@ -276,13 +272,73 @@ mod tests {
         worker.join().unwrap();
     }
 
+    #[test]
+    fn radio_filter_excludes_seeds_with_uri_and_provider_aliases() {
+        let seed: Track = serde_json::from_value(json!({
+            "item_id":"42", "provider":"library", "name":"Seed", "duration":200,
+            "provider_mappings":[{
+                "item_id":"source", "provider_instance":"test-one", "provider_domain":"test"
+            }]
+        }))
+        .unwrap();
+        let library_result: Track = serde_json::from_value(json!({
+            "item_id":"42", "provider":"library", "uri":"library://track/42",
+            "name":"Seed", "duration":200
+        }))
+        .unwrap();
+        let provider_result: Track = serde_json::from_value(json!({
+            "item_id":"source", "provider":"test-one", "name":"Seed", "duration":200
+        }))
+        .unwrap();
+        let filtered = filter_recommendations(
+            vec![library_result, provider_result, track("next")],
+            &[seed],
+        );
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].media.item_id.as_str(), "next");
+    }
+
+    #[test]
+    fn radio_filter_excludes_all_seeds_and_deduplicates_provider_aliases() {
+        let library_track: Track = serde_json::from_value(json!({
+            "item_id":"42", "provider":"library", "name":"Mapped", "duration":200,
+            "provider_mappings":[{
+                "item_id":"source", "provider_instance":"test", "provider_domain":"test"
+            }]
+        }))
+        .unwrap();
+        let source = track("source");
+        let other_seed = track("other-seed");
+        let filtered = filter_recommendations(
+            vec![library_track.clone(), other_seed.clone(), track("next")],
+            &[source.clone(), other_seed],
+        );
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].media.item_id.as_str(), "next");
+        for candidates in [
+            vec![source.clone(), library_track.clone()],
+            vec![library_track, source],
+        ] {
+            assert_eq!(filter_recommendations(candidates, &[]).len(), 1);
+        }
+    }
+
     #[tokio::test]
     async fn radio_http_contract_replaces_queue_before_fetching_and_appending_recommendations() {
         use super::super::client::QueueCommand;
         use super::super::models::identifiers::QueueId;
 
+        let mut seed_with_uri = track("seed");
+        seed_with_uri.media.uri = Some(super::super::models::identifiers::MediaUri(
+            "test://track/seed".into(),
+        ));
         for (start_status, radio_status, recommendations) in [
-            (200, 200, vec![track("seed"), track("next"), track("next")]),
+            (
+                200,
+                200,
+                vec![seed_with_uri.clone(), track("next"), track("next")],
+            ),
+            (200, 200, vec![seed_with_uri]),
             (200, 200, vec![]),
             (200, 500, vec![]),
             (503, 200, vec![]),
@@ -300,7 +356,10 @@ mod tests {
                 }), json!(recommendations), radio_status));
                 if radio_status == 200 {
                     requests.push(("providers", json!({}), json!([]), 200));
-                    if !recommendations.is_empty() {
+                    if recommendations
+                        .iter()
+                        .any(|track| track.media.item_id.as_str() == "next")
+                    {
                         requests.push((
                             "player_queues/play_media",
                             media_arguments("next", "add"),
@@ -365,7 +424,13 @@ mod tests {
                         "item_id":format!("test://{kind}/container"), "provider_instance_id_or_domain":"radio_playlist",
                         "force_refresh":true, "allow_dynamic_tracks":true,
                     }),
-                    json!([]),
+                    json!([track("seed"), track("next")]),
+                    200,
+                ),
+                (
+                    "player_queues/play_media",
+                    media_arguments("next", "add"),
+                    json!(null),
                     200,
                 ),
             ];
