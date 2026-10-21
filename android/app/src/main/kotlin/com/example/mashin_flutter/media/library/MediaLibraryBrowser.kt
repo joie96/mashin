@@ -32,6 +32,7 @@ import org.json.JSONObject
 internal class MediaLibraryBrowser(
     private val context: Context,
     private val search: MediaLibrarySearch = MediaLibrarySearch { kind, argument -> RustCoreBridge.query(kind, argument) },
+    private val query: (String, String?) -> String? = { kind, argument -> RustCoreBridge.query(kind, argument) },
     private val dispatchCommand: (PlaybackRequest) -> ListenableFuture<*>,
 ) : MediaLibraryService.MediaLibrarySession.Callback {
     private val browseExecutor = MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor())
@@ -211,7 +212,7 @@ internal class MediaLibraryBrowser(
             libraryItem("node:favorites", "Favoriten", false, iconResource = R.drawable.favorite),
         )
         "node:home" -> homeItems()
-        "node:discover" -> emptyList()
+        "node:discover" -> discoverItems()
         "node:playlists" -> playlistItems()
         "node:favorites" -> favoriteCategoryItems()
         "home:recommendations" -> recommendationItems("recommendations", "track")
@@ -219,7 +220,12 @@ internal class MediaLibraryBrowser(
         "home:playlistSuggestions" -> recommendationItems("artist_playlists", "playlist", normalizePlaylistNames = true)
         "home:topTracks" -> recommendationItems("top_tracks", "track")
         "home:topArtists" -> recommendationItems("top_artists", "artist")
-        "home:recent" -> mediaItemsFromJson(RustCoreBridge.query("recentlyPlayed", null), true, mediaType = "track")
+        "home:recent" -> mediaItemsFromJson(query("recentlyPlayed", null), true, mediaType = "track")
+        "discover:exploration" -> discoverRecommendationItems("user_exploration_weekly", "track", true)
+        "discover:albums" -> discoverRecommendationItems("sitewide_top_albums_weekly", "album")
+        "discover:similarUsers" -> discoverRecommendationItems("similarusers_jam_weekly", "track", true)
+        "discover:artists" -> discoverRecommendationItems("sitewide_top_artists_weekly", "artist")
+        "discover:tracks" -> discoverRecommendationItems("sitewide_top_tracks_weekly", "track")
         "favorites:tracks" -> userDataItems("tracks", "track", true)
         "favorites:albums" -> userDataItems("albums", "album")
         "favorites:playlists" -> userDataItems("playlists", "playlist")
@@ -243,7 +249,44 @@ internal class MediaLibraryBrowser(
         libraryItem("favorites:artists", "Artists", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.artist),
     )
 
+    private fun discoverItems(): List<MediaItem> = listOf(
+        libraryItem("discover:exploration", "Entdecke etwas Neues", false, iconResource = R.drawable.music_note_2),
+        libraryItem("discover:albums", "Alben der Woche", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.album),
+        libraryItem("discover:similarUsers", "Andere Nutzer hören", false, iconResource = R.drawable.groups),
+        libraryItem("discover:artists", "Artists der Woche", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.artist),
+        libraryItem("discover:tracks", "Songs der Woche", false, iconResource = R.drawable.music_note),
+    )
+
     private fun playlistItems(): List<MediaItem> = privatePlaylistItems()
+
+    // Exploration and similar-user recommendations contain playlists rather than direct tracks.
+    private fun discoverRecommendationItems(
+        folderId: String,
+        mediaType: String,
+        expandPlaylistTracks: Boolean = false,
+    ): List<MediaItem> {
+        val folders = JSONArray(query("recommendations", null) ?: "[]")
+        val selected = JSONArray()
+        for (folderIndex in 0 until folders.length()) {
+            val folder = folders.optJSONObject(folderIndex) ?: continue
+            if (folder.optString("item_id") != folderId) continue
+            val items = folder.optJSONArray("items") ?: continue
+            for (itemIndex in 0 until items.length()) {
+                val item = items.optJSONObject(itemIndex) ?: continue
+                if (item.optString("item_id").isBlank() || item.optString("provider").isBlank()) continue
+                if (item.optString("media_type") != if (expandPlaylistTracks) "playlist" else mediaType) continue
+                if (expandPlaylistTracks) {
+                    val tracks = JSONArray(query("playlistTracks", itemReference(item)) ?: "[]")
+                    for (trackIndex in 0 until tracks.length()) {
+                        tracks.optJSONObject(trackIndex)?.let(selected::put)
+                    }
+                } else {
+                    selected.put(item)
+                }
+            }
+        }
+        return mediaItemsFromJson(selected.toString(), includeTrackListActions = mediaType == "track", mediaType = mediaType)
+    }
 
     private fun recommendationItems(
         folderId: String,
@@ -251,7 +294,7 @@ internal class MediaLibraryBrowser(
         limit: Int = Int.MAX_VALUE,
         normalizePlaylistNames: Boolean = false,
     ): List<MediaItem> {
-        val folders = JSONArray(RustCoreBridge.query("recommendations", null) ?: "[]")
+        val folders = JSONArray(query("recommendations", null) ?: "[]")
         val folder = (0 until folders.length()).mapNotNull(folders::optJSONObject).firstOrNull {
             it.optString("item_id").equals(folderId, ignoreCase = true)
         } ?: return emptyList()
@@ -330,7 +373,7 @@ internal class MediaLibraryBrowser(
         return mediaItemsFromJson(data.optJSONArray("playlists")?.toString(), mediaType = "playlist")
     }
 
-    private fun userDataSnapshot(): String = RustCoreBridge.query("userData", null) ?: "{}"
+    private fun userDataSnapshot(): String = query("userData", null) ?: "{}"
 
     private fun referencedItems(referenceId: String, queryKind: String): List<MediaItem> {
         val reference = serializedMediaItems[referenceId] ?: return emptyList()
@@ -341,7 +384,7 @@ internal class MediaLibraryBrowser(
             else -> null
         }
         return mediaItemsFromJson(
-            RustCoreBridge.query(queryKind, itemReference(JSONObject(reference))),
+            query(queryKind, itemReference(JSONObject(reference))),
             includeTrackListActions = queryKind != "artistAlbums" && queryKind != "similarArtists",
             fallbackIconResource = fallbackIconResource,
             mediaType = when (queryKind) {
@@ -442,7 +485,7 @@ internal class MediaLibraryBrowser(
         val proxyId = image.optString("proxy_id").takeUnless { it == "null" }
         val path = image.optString("path")
         val source = if (!proxyId.isNullOrEmpty()) {
-            val settings = JSONObject(RustCoreBridge.query("sessionSettings", null) ?: "{}")
+            val settings = JSONObject(query("sessionSettings", null) ?: "{}")
             val baseUrl = settings.optString("musicAssistantUrl").trimEnd('/')
             if (baseUrl.isNotEmpty()) "$baseUrl/imageproxy/$proxyId" else path
         } else path
