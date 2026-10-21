@@ -308,6 +308,39 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
           const SliverPadding(padding: EdgeInsets.only(top: 24)),
           _sectionSliver(
             ListenableBuilder(
+              listenable: _controller.artistSectionsListenable,
+              builder: (BuildContext context, Widget? child) => Column(
+                children: <Widget>[
+                  for (final HomeArtistSection section
+                      in _controller.artistSections)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 24),
+                      child: MediaRowSectionDesktop<Artist>(
+                        title: section.title,
+                        items: section.artists,
+                        isLoading: _controller.isLoadingArtistSections,
+                        emptyText: 'Keine Künstlerempfehlungen verfügbar.',
+                        coreBridge: widget.coreBridge,
+                        coreEvents: widget.coreEvents,
+                        isRowFavorite: (Artist item, int _) =>
+                            _controller.isItemFavorite(item),
+                        onRowFavoriteTap: (Artist item, int _) =>
+                            _controller.setFavorite(item, !item.favorite),
+                        onRowMoreAnchorTap:
+                            (Artist item, int _, BuildContext anchor) =>
+                                _showItemMenu(item, anchorContext: anchor),
+                        onRowContextMenu:
+                            (Artist item, int _, Offset position) =>
+                                _showItemMenuAtPosition(item, position),
+                        onArtistTap: widget.onOpenArtist,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          _sectionSliver(
+            ListenableBuilder(
               listenable: _controller.recentListensListenable,
               builder: (BuildContext context, Widget? child) =>
                   MediaRowSectionDesktop<Track>(

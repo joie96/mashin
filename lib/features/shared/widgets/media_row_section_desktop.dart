@@ -944,6 +944,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
       return _buildDesktopMediaRowPlaylistSkeleton(
         itemWidth: itemWidth,
         coverSize: coverSize,
+        showPlaylistDetails: widget.showPlaylistDetails,
       );
     }
     if (T == Artist) {
@@ -2249,11 +2250,12 @@ Widget _buildDesktopMediaRowAlbumSkeleton({
 Widget _buildDesktopMediaRowPlaylistSkeleton({
   required double itemWidth,
   required double coverSize,
+  required bool showPlaylistDetails,
 }) {
   return _buildDesktopMediaRowSkeletonBase(
     itemWidth: itemWidth,
     coverSize: coverSize,
-    lineCount: 2,
+    lineCount: showPlaylistDetails ? 2 : 1,
   );
 }
 

@@ -13,9 +13,9 @@ class ExploreController extends ChangeNotifier {
   bool _isDisposed = false;
   bool _isLoading = false;
   bool _hasLoadError = false;
-  List<Playlist> _weeklyExploration = const <Playlist>[];
+  List<Track> _weeklyExploration = const <Track>[];
   List<Album> _weeklyAlbums = const <Album>[];
-  List<Playlist> _similarUsersJam = const <Playlist>[];
+  List<Track> _similarUsersJam = const <Track>[];
   List<Track> _weeklyTracks = const <Track>[];
   List<Artist> _weeklyArtists = const <Artist>[];
 
@@ -29,9 +29,9 @@ class ExploreController extends ChangeNotifier {
   // Recommendation snapshots.
   bool get isLoading => _isLoading;
   bool get hasLoadError => _hasLoadError;
-  List<Playlist> get weeklyExploration => _weeklyExploration;
+  List<Track> get weeklyExploration => _weeklyExploration;
   List<Album> get weeklyAlbums => _weeklyAlbums;
-  List<Playlist> get similarUsersJam => _similarUsersJam;
+  List<Track> get similarUsersJam => _similarUsersJam;
   List<Track> get weeklyTracks => _weeklyTracks;
   List<Artist> get weeklyArtists => _weeklyArtists;
 
@@ -44,18 +44,18 @@ class ExploreController extends ChangeNotifier {
       final List<RecommendationFolder> folders = await coreBridge
           .getRecommendations();
       if (_isDisposed) return;
-      _weeklyExploration = _itemsFromFolders<Playlist>(
-        folders,
-        'user_exploration_weekly',
-      );
+      final List<List<Track>> playlistTracks =
+          await Future.wait(<Future<List<Track>>>[
+            _tracksFromPlaylistFolders(folders, 'user_exploration_weekly'),
+            _tracksFromPlaylistFolders(folders, 'similarusers_jam_weekly'),
+          ]);
+      if (_isDisposed) return;
+      _weeklyExploration = playlistTracks[0];
       _weeklyAlbums = _itemsFromFolders<Album>(
         folders,
         'sitewide_top_albums_weekly',
       );
-      _similarUsersJam = _itemsFromFolders<Playlist>(
-        folders,
-        'similarusers_jam_weekly',
-      );
+      _similarUsersJam = playlistTracks[1];
       _weeklyTracks = _itemsFromFolders<Track>(
         folders,
         'sitewide_top_tracks_weekly',
@@ -90,6 +90,25 @@ class ExploreController extends ChangeNotifier {
   }
 
   // Folder mapping.
+  Future<List<Track>> _tracksFromPlaylistFolders(
+    List<RecommendationFolder> folders,
+    String itemId,
+  ) async {
+    final List<Playlist> playlists = _itemsFromFolders<Playlist>(
+      folders,
+      itemId,
+    );
+    final List<List<Track>> tracks = await Future.wait(
+      playlists.map(
+        (Playlist playlist) =>
+            coreBridge.getPlaylistTracks(playlist.itemId, playlist.provider),
+      ),
+    );
+    return _withFavoriteStatuses(
+      tracks.expand((List<Track> items) => items).toList(growable: false),
+    );
+  }
+
   List<T> _itemsFromFolders<T extends MediaItem>(
     List<RecommendationFolder> folders,
     String itemId,

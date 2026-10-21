@@ -1226,10 +1226,7 @@ class Playlist implements MediaItem {
   }
 
   factory Playlist.fromJson(Map<String, dynamic> json) {
-    final metadataJson = json['metadata'];
-    final metadata = metadataJson is Map<String, dynamic>
-        ? MediaItemMetadata.fromJson(metadataJson)
-        : null;
+    final metadata = _metadataFromJson(json);
 
     return Playlist(
       itemId: (json['item_id'] as String?)?.trim() ?? '',

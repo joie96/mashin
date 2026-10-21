@@ -7,18 +7,23 @@ import '../core/core_models.dart';
 import '../core/core_bridge.dart';
 import '../core/core_userdata.dart';
 
-class HomeSimilarArtistSection {
-  const HomeSimilarArtistSection({required this.title, required this.artists});
+class HomeArtistSection {
+  const HomeArtistSection({required this.title, required this.artists});
 
   final String title;
   final List<Artist> artists;
 }
 
 class HomeController extends ChangeNotifier {
-  HomeController({required this.coreBridge, this.userDataController});
+  HomeController({
+    required this.coreBridge,
+    this.userDataController,
+    math.Random? random,
+  }) : _random = random ?? math.Random();
 
   final MashinCoreBridgeApi coreBridge;
   final UserData? userDataController;
+  final math.Random _random;
 
   bool _isDisposed = false;
   final ChangeNotifier _recommendationsNotifier = ChangeNotifier();
@@ -26,7 +31,7 @@ class HomeController extends ChangeNotifier {
   final ChangeNotifier _artistPlaylistsNotifier = ChangeNotifier();
   final ChangeNotifier _topTracksNotifier = ChangeNotifier();
   final ChangeNotifier _topArtistsNotifier = ChangeNotifier();
-  final ChangeNotifier _similarArtistsNotifier = ChangeNotifier();
+  final ChangeNotifier _artistSectionsNotifier = ChangeNotifier();
   final ChangeNotifier _recentListensNotifier = ChangeNotifier();
 
   bool _isLoadingRecommendations = true;
@@ -34,7 +39,7 @@ class HomeController extends ChangeNotifier {
   bool _isLoadingPlaylists = true;
   bool _isLoadingTopTracks = true;
   bool _isLoadingTopArtists = true;
-  bool _isLoadingSimilarArtists = true;
+  bool _isLoadingArtistSections = true;
   bool _isLoadingRecentListens = true;
 
   List<Track> _recommendationItems = const <Track>[];
@@ -42,8 +47,7 @@ class HomeController extends ChangeNotifier {
   List<Playlist> _artistPlaylists = const <Playlist>[];
   List<Track> _topTracks = const <Track>[];
   List<Artist> _topArtists = const <Artist>[];
-  List<HomeSimilarArtistSection> _similarArtistSections =
-      const <HomeSimilarArtistSection>[];
+  List<HomeArtistSection> _artistSections = const <HomeArtistSection>[];
   List<Track> _recentListens = const <Track>[];
 
   bool get isLoadingRecommendations => _isLoadingRecommendations;
@@ -51,7 +55,7 @@ class HomeController extends ChangeNotifier {
   bool get isLoadingPlaylists => _isLoadingPlaylists;
   bool get isLoadingTopTracks => _isLoadingTopTracks;
   bool get isLoadingTopArtists => _isLoadingTopArtists;
-  bool get isLoadingSimilarArtists => _isLoadingSimilarArtists;
+  bool get isLoadingArtistSections => _isLoadingArtistSections;
   bool get isLoadingRecentListens => _isLoadingRecentListens;
 
   List<Track> get recommendationItems => _recommendationItems;
@@ -59,8 +63,7 @@ class HomeController extends ChangeNotifier {
   List<Playlist> get artistPlaylists => _artistPlaylists;
   List<Track> get topTracks => _topTracks;
   List<Artist> get topArtists => _topArtists;
-  List<HomeSimilarArtistSection> get similarArtistSections =>
-      _similarArtistSections;
+  List<HomeArtistSection> get artistSections => _artistSections;
   List<Track> get recentListens => _recentListens;
 
   Listenable get recommendationsListenable => _recommendationsNotifier;
@@ -68,7 +71,7 @@ class HomeController extends ChangeNotifier {
   Listenable get artistPlaylistsListenable => _artistPlaylistsNotifier;
   Listenable get topTracksListenable => _topTracksNotifier;
   Listenable get topArtistsListenable => _topArtistsNotifier;
-  Listenable get similarArtistsListenable => _similarArtistsNotifier;
+  Listenable get artistSectionsListenable => _artistSectionsNotifier;
   Listenable get recentListensListenable => _recentListensNotifier;
 
   bool get showNoRecommendations =>
@@ -79,8 +82,8 @@ class HomeController extends ChangeNotifier {
       !_isLoadingPlaylists && _artistPlaylists.isEmpty;
   bool get showNoTopTracks => !_isLoadingTopTracks && _topTracks.isEmpty;
   bool get showNoTopArtists => !_isLoadingTopArtists && _topArtists.isEmpty;
-  bool get showNoSimilarArtists =>
-      !_isLoadingSimilarArtists && _similarArtistSections.isEmpty;
+  bool get showNoArtistSections =>
+      !_isLoadingArtistSections && _artistSections.isEmpty;
   bool get showNoRecentListens =>
       !_isLoadingRecentListens && _recentListens.isEmpty;
 
@@ -103,7 +106,7 @@ class HomeController extends ChangeNotifier {
     _notifySection(_artistPlaylistsNotifier);
     _notifySection(_topTracksNotifier);
     _notifySection(_topArtistsNotifier);
-    _notifySection(_similarArtistsNotifier);
+    _notifySection(_artistSectionsNotifier);
   }
 
   Future<void> load() async {
@@ -117,9 +120,9 @@ class HomeController extends ChangeNotifier {
     _artistPlaylists = _withFavoriteStatuses(_artistPlaylists);
     _topTracks = _withFavoriteStatuses(_topTracks);
     _topArtists = _withFavoriteStatuses(_topArtists);
-    _similarArtistSections = _similarArtistSections
+    _artistSections = _artistSections
         .map(
-          (HomeSimilarArtistSection section) => HomeSimilarArtistSection(
+          (HomeArtistSection section) => HomeArtistSection(
             title: section.title,
             artists: _withFavoriteStatuses(section.artists),
           ),
@@ -169,7 +172,7 @@ class HomeController extends ChangeNotifier {
     _isLoadingPlaylists = true;
     _isLoadingTopTracks = true;
     _isLoadingTopArtists = true;
-    _isLoadingSimilarArtists = true;
+    _isLoadingArtistSections = true;
     _notifyRecommendationSections();
     notifyListeners();
 
@@ -204,23 +207,35 @@ class HomeController extends ChangeNotifier {
       _topArtists = _withFavoriteStatuses(
         _artistsFromFolder(recommendationFolders, 'user_top_artists_monthly'),
       );
-      _similarArtistSections = _similarArtistSectionsFromFolders(
+      final List<HomeArtistSection> genreSections = _artistSectionsFromFolders(
         recommendationFolders,
+        'user_genre_artists_',
       );
+      final List<HomeArtistSection> similarSections =
+          _artistSectionsFromFolders(
+            recommendationFolders,
+            'user_similar_artists_',
+          );
+      _artistSections = <HomeArtistSection>[
+        for (int index = 0; index < 2; index++) ...<HomeArtistSection>[
+          if (index < genreSections.length) genreSections[index],
+          if (index < similarSections.length) similarSections[index],
+        ],
+      ];
     } catch (_) {
       _recommendationItems = const <Track>[];
       _genrePlaylists = const <Playlist>[];
       _artistPlaylists = const <Playlist>[];
       _topTracks = const <Track>[];
       _topArtists = const <Artist>[];
-      _similarArtistSections = const <HomeSimilarArtistSection>[];
+      _artistSections = const <HomeArtistSection>[];
     } finally {
       _isLoadingRecommendations = false;
       _isLoadingGenrePlaylists = false;
       _isLoadingPlaylists = false;
       _isLoadingTopTracks = false;
       _isLoadingTopArtists = false;
-      _isLoadingSimilarArtists = false;
+      _isLoadingArtistSections = false;
       _notifyRecommendationSections();
       notifyListeners();
     }
@@ -303,17 +318,22 @@ class HomeController extends ChangeNotifier {
         const <Playlist>[];
   }
 
-  List<HomeSimilarArtistSection> _similarArtistSectionsFromFolders(
+  List<HomeArtistSection> _artistSectionsFromFolders(
     List<RecommendationFolder> folders,
+    String prefix,
   ) {
-    return folders
+    final Set<(String, String)> seen = <(String, String)>{};
+    final List<HomeArtistSection> sections = folders
         .where(
           (RecommendationFolder folder) =>
-              folder.itemId.toLowerCase().startsWith('user_similar_artists_'),
+              folder.itemId.toLowerCase().startsWith(prefix) &&
+              seen.add((folder.provider, folder.itemId)),
         )
         .map(
-          (RecommendationFolder folder) => HomeSimilarArtistSection(
-            title: _normalizeSimilarArtistSectionTitle(folder.title),
+          (RecommendationFolder folder) => HomeArtistSection(
+            title: prefix == 'user_similar_artists_'
+                ? _normalizeSimilarArtistSectionTitle(folder.title)
+                : folder.title,
             artists: _withFavoriteStatuses(
               folder.items
                   .whereType<Artist>()
@@ -322,8 +342,16 @@ class HomeController extends ChangeNotifier {
             ),
           ),
         )
-        .where((HomeSimilarArtistSection section) => section.artists.isNotEmpty)
-        .take(5)
+        .where((HomeArtistSection section) => section.artists.isNotEmpty)
+        .toList(growable: false);
+    _shuffle(sections);
+    return sections
+        .take(2)
+        .map((HomeArtistSection section) {
+          final List<Artist> artists = section.artists.toList();
+          _shuffle(artists);
+          return HomeArtistSection(title: section.title, artists: artists);
+        })
         .toList(growable: false);
   }
 
@@ -361,13 +389,7 @@ class HomeController extends ChangeNotifier {
   }
 
   void _shuffle<T>(List<T> items) {
-    final math.Random random = math.Random();
-    for (int index = items.length - 1; index > 0; index--) {
-      final int swapIndex = random.nextInt(index + 1);
-      final T item = items[index];
-      items[index] = items[swapIndex];
-      items[swapIndex] = item;
-    }
+    items.shuffle(_random);
   }
 
   @override
@@ -378,7 +400,7 @@ class HomeController extends ChangeNotifier {
     _artistPlaylistsNotifier.dispose();
     _topTracksNotifier.dispose();
     _topArtistsNotifier.dispose();
-    _similarArtistsNotifier.dispose();
+    _artistSectionsNotifier.dispose();
     _recentListensNotifier.dispose();
     super.dispose();
   }

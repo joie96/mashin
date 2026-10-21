@@ -12,11 +12,14 @@ import 'package:mashin_flutter/features/shared/widgets/media_row_section_desktop
 import 'package:mashin_flutter/features/shared/widgets/media_row_section_mobile.dart';
 import 'package:mashin_flutter/features/shared/widgets/media_slide_section_desktop.dart';
 import 'package:mashin_flutter/features/shared/widgets/media_slide_section_mobile.dart';
+import 'package:mashin_flutter/features/shared/widgets/media_table_section_desktop.dart';
+import 'package:mashin_flutter/features/shared/widgets/media_table_section_mobile.dart';
 
 class _ExploreBridge implements MashinCoreBridgeApi {
   bool shouldFail = false;
   bool shouldReturnEmpty = false;
   int recommendationCalls = 0;
+  final List<(String, String)> playlistCalls = <(String, String)>[];
   Completer<List<RecommendationFolder>>? pendingRecommendations;
 
   @override
@@ -101,19 +104,50 @@ class _ExploreBridge implements MashinCoreBridgeApi {
   }
 
   @override
+  Future<List<Track>> getPlaylistTracks(
+    String itemId,
+    String provider, {
+    bool forceRefresh = false,
+    bool allowDynamicTracks = false,
+  }) async {
+    playlistCalls.add((itemId, provider));
+    return List<Track>.generate(
+      8,
+      (int index) => Track(
+        itemId: '$itemId-track-$index',
+        provider: provider,
+        name: '$itemId Track $index',
+        duration: 180,
+        artists: const <Artist>[],
+      ),
+    );
+  }
+
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 void main() {
   test('explore maps all five weekly folders', () async {
-    final ExploreController controller = ExploreController(
-      coreBridge: _ExploreBridge(),
-    );
+    final _ExploreBridge bridge = _ExploreBridge();
+    final ExploreController controller = ExploreController(coreBridge: bridge);
     addTearDown(controller.dispose);
     await controller.load();
-    expect(controller.weeklyExploration.single.itemId, 'exploration');
+    expect(controller.weeklyExploration, hasLength(8));
+    expect(controller.weeklyExploration.first.itemId, 'exploration-track-0');
     expect(controller.weeklyAlbums.single.itemId, 'sitewide_top_albums_weekly');
-    expect(controller.similarUsersJam.single.itemId, 'similarusers_jam_latest');
+    expect(controller.similarUsersJam, hasLength(8));
+    expect(
+      controller.similarUsersJam.first.itemId,
+      'similarusers_jam_latest-track-0',
+    );
+    expect(
+      bridge.playlistCalls,
+      unorderedEquals(<(String, String)>[
+        ('exploration', 'lb'),
+        ('similarusers_jam_latest', 'lb'),
+      ]),
+    );
     expect(controller.weeklyTracks.single.itemId, 'chart');
     expect(controller.weeklyArtists.single.itemId, 'artist');
     expect(controller.isLoading, isFalse);
@@ -126,7 +160,7 @@ void main() {
     addTearDown(controller.dispose);
     await controller.load();
     final List<Album> albums = controller.weeklyAlbums;
-    final List<Playlist> jams = controller.similarUsersJam;
+    final List<Track> jams = controller.similarUsersJam;
     bridge.shouldFail = true;
     await controller.load();
     expect(controller.weeklyAlbums, same(albums));
@@ -201,8 +235,8 @@ void main() {
         if (isCompact) {
           expect(
             tester
-                .widget<MediaSlideSectionMobile<Playlist>>(
-                  find.byType(MediaSlideSectionMobile<Playlist>),
+                .widget<MediaSlideSectionMobile<Track>>(
+                  find.byType(MediaSlideSectionMobile<Track>),
                 )
                 .isLoading,
             isTrue,
@@ -210,8 +244,8 @@ void main() {
         } else {
           expect(
             tester
-                .widget<MediaSlideSectionDesktop<Playlist>>(
-                  find.byType(MediaSlideSectionDesktop<Playlist>),
+                .widget<MediaSlideSectionDesktop<Track>>(
+                  find.byType(MediaSlideSectionDesktop<Track>),
                 )
                 .isLoading,
             isTrue,
@@ -254,17 +288,11 @@ void main() {
           coreBridge: bridge,
         );
         addTearDown(events.dispose);
-        Playlist? openedPlaylist;
         await tester.pumpWidget(
           MaterialApp(
             theme: AppTheme.dark(),
             home: Scaffold(
-              body: ExploreScreen(
-                coreBridge: bridge,
-                coreEvents: events,
-                onOpenPlaylist: (Playlist playlist) =>
-                    openedPlaylist = playlist,
-              ),
+              body: ExploreScreen(coreBridge: bridge, coreEvents: events),
             ),
           ),
         );
@@ -273,8 +301,8 @@ void main() {
           'Entdecke etwas Neues',
           'Alben der Woche',
           'Andere Nutzer hören',
-          'Songs der Woche',
           'Artists der Woche',
+          'Songs der Woche',
         ];
         double previous = -1;
         for (final String heading in headings) {
@@ -285,8 +313,8 @@ void main() {
         expect(
           find.byType(
             isCompact
-                ? MediaSlideSectionMobile<Playlist>
-                : MediaSlideSectionDesktop<Playlist>,
+                ? MediaSlideSectionMobile<Track>
+                : MediaSlideSectionDesktop<Track>,
           ),
           findsOneWidget,
         );
@@ -303,8 +331,8 @@ void main() {
         final Finder heading = find.text('Entdecken');
         final Finder slider = find.byType(
           isCompact
-              ? MediaSlideSectionMobile<Playlist>
-              : MediaSlideSectionDesktop<Playlist>,
+              ? MediaSlideSectionMobile<Track>
+              : MediaSlideSectionDesktop<Track>,
         );
         final Finder albums = find.byType(
           isCompact
@@ -313,8 +341,8 @@ void main() {
         );
         final Finder jams = find.byType(
           isCompact
-              ? MediaRowSectionMobile<Playlist>
-              : MediaRowSectionDesktop<Playlist>,
+              ? MediaTableSectionMobile<Track>
+              : MediaTableSectionDesktop<Track>,
         );
         final Finder tracks = find.byType(
           isCompact
@@ -340,10 +368,11 @@ void main() {
           slider,
           albums,
           jams,
-          tracks,
           artists,
+          tracks,
         ];
         for (int index = 1; index < sections.length; index++) {
+          if (isCompact && (index == 2 || index == 3)) continue;
           expect(
             tester.getTopLeft(sections[index]).dy -
                 tester.getBottomLeft(sections[index - 1]).dy,
@@ -351,12 +380,18 @@ void main() {
           );
         }
         expect(find.byTooltip('Aktualisieren'), findsNothing);
-        await tester.tap(find.text('Weekly Mix').first);
-        await tester.pump();
-        expect(openedPlaylist?.itemId, 'exploration');
-        await tester.tap(find.text('Similar Listener Weekly Jams').first);
-        await tester.pump();
-        expect(openedPlaylist?.itemId, 'similarusers_jam_latest');
+        expect(find.text('Weekly Mix'), findsNothing);
+        expect(find.text('Similar Listener Weekly Jams'), findsNothing);
+        expect(find.text('exploration Track 0'), findsWidgets);
+        if (isCompact) {
+          final MediaTableSectionMobile<Track> table = tester.widget(jams);
+          expect(table.maxItemsPerPage, 3);
+          expect(table.items, hasLength(8));
+        } else {
+          final MediaTableSectionDesktop<Track> table = tester.widget(jams);
+          expect(table.maxItemsPerPage, 5);
+          expect(table.items, hasLength(8));
+        }
         expect(tester.takeException(), isNull);
       },
     );

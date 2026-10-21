@@ -283,7 +283,7 @@ pub(crate) enum PlaylistSharing {
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct Playlist {
     #[serde(flatten)]
     pub(crate) media: MediaItemFields,
@@ -391,6 +391,22 @@ struct AlbumInput {
 }
 
 #[derive(Deserialize)]
+struct PlaylistInput {
+    #[serde(flatten)]
+    media: MediaItemFields,
+    #[serde(default)]
+    owner: String,
+    #[serde(default)]
+    is_editable: bool,
+    #[serde(default)]
+    is_dynamic: bool,
+    #[serde(default)]
+    access: Option<PlaylistAccess>,
+    #[serde(default)]
+    image: Option<MediaItemImage>,
+}
+
+#[derive(Deserialize)]
 struct PodcastInput {
     #[serde(flatten)]
     media: MediaItemFields,
@@ -436,6 +452,21 @@ impl<'de> Deserialize<'de> for Album {
             year: input.year,
             artists: input.artists,
             album_type: input.album_type,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for Playlist {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let input = PlaylistInput::deserialize(deserializer)?;
+        let mut media = input.media;
+        include_mapping_image(&mut media, input.image);
+        Ok(Self {
+            media,
+            owner: input.owner,
+            is_editable: input.is_editable,
+            is_dynamic: input.is_dynamic,
+            access: input.access,
         })
     }
 }
@@ -601,6 +632,26 @@ mod tests {
 
     #[test]
     fn normalizes_mapping_images_into_complete_media_models() {
+        let playlist: MediaItem = serde_json::from_value(json!({
+            "media_type": "playlist",
+            "item_id": "artist-radio",
+            "provider": "listenbrainz_recommendations--test",
+            "name": "Radio: Artist",
+            "image": {
+                "type": "thumb",
+                "path": "https://example.test/artist.jpg",
+                "provider": "url",
+                "remotely_accessible": true,
+                "proxy_id": "playlist-proxy-id"
+            }
+        }))
+        .expect("playlist mapping should deserialize");
+        let serialized = serde_json::to_value(playlist).expect("playlist should serialize");
+        assert_eq!(
+            serialized["metadata"]["images"][0]["proxy_id"],
+            "playlist-proxy-id"
+        );
+
         let track: MediaItem = serde_json::from_value(json!({
             "media_type": "track",
             "item_id": "track-1",

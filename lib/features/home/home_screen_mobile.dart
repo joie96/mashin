@@ -298,7 +298,7 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
         ),
         const SliverPadding(padding: EdgeInsets.only(top: _sectionGap)),
         _sectionSliver(
-          _SimilarArtistsSections(
+          _ArtistSections(
             controller: _controller,
             coreBridge: widget.coreBridge,
             coreEvents: widget.coreEvents,
@@ -397,8 +397,8 @@ class _GenrePlaylistsSection extends StatelessWidget {
   }
 }
 
-class _SimilarArtistsSections extends StatelessWidget {
-  const _SimilarArtistsSections({
+class _ArtistSections extends StatelessWidget {
+  const _ArtistSections({
     required this.controller,
     required this.coreBridge,
     required this.coreEvents,
@@ -417,12 +417,11 @@ class _SimilarArtistsSections extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: controller.similarArtistsListenable,
+      listenable: controller.artistSectionsListenable,
       builder: (BuildContext context, Widget? child) {
-        final List<HomeSimilarArtistSection> sections =
-            controller.similarArtistSections;
+        final List<HomeArtistSection> sections = controller.artistSections;
         final bool showPlaceholder =
-            controller.isLoadingSimilarArtists || sections.isEmpty;
+            controller.isLoadingArtistSections || sections.isEmpty;
 
         return Column(
           children: <Widget>[
@@ -434,14 +433,14 @@ class _SimilarArtistsSections extends StatelessWidget {
               if (index > 0) SizedBox(height: sectionGap),
               MediaRowSectionMobile<Artist>(
                 title: showPlaceholder
-                    ? 'Ähnliche Künstler:innen'
+                    ? 'Künstler:innen entdecken'
                     : sections[index].title,
                 isLoading:
-                    showPlaceholder && controller.isLoadingSimilarArtists,
+                    showPlaceholder && controller.isLoadingArtistSections,
                 items: showPlaceholder
                     ? const <Artist>[]
                     : sections[index].artists,
-                emptyText: 'Keine ähnlichen Künstler:innen verfügbar.',
+                emptyText: 'Keine Künstlerempfehlungen verfügbar.',
                 coreBridge: coreBridge,
                 coreEvents: coreEvents,
                 onItemTap: onItemTap,

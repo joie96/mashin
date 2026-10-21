@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mashin_flutter/app/theme/app_theme.dart';
@@ -6,8 +8,13 @@ import 'package:mashin_flutter/features/core/core_events.dart';
 import 'package:mashin_flutter/features/core/core_models.dart';
 import 'package:mashin_flutter/features/home/home_screen_desktop.dart';
 import 'package:mashin_flutter/features/home/home_controller.dart';
+import 'package:mashin_flutter/features/home/home_screen_mobile.dart';
+import 'package:mashin_flutter/features/shared/widgets/media_row_section_desktop.dart';
+import 'package:mashin_flutter/features/shared/widgets/media_row_section_mobile.dart';
 
 class _HomeCoreBridge implements MashinCoreBridgeApi {
+  List<RecommendationFolder> artistFolders = <RecommendationFolder>[];
+
   @override
   Future<List<RecommendationFolder>> getRecommendations() async {
     final List<Track> tracks = List<Track>.generate(
@@ -31,6 +38,7 @@ class _HomeCoreBridge implements MashinCoreBridgeApi {
     );
 
     return <RecommendationFolder>[
+      ...artistFolders,
       RecommendationFolder(
         itemId: 'user_recommendations',
         provider: 'listenbrainz_recommendations--test',
@@ -57,7 +65,7 @@ class _HomeCoreBridge implements MashinCoreBridgeApi {
       ),
       for (final String id in <String>[
         'user_top_artists_monthly',
-        'user_similar_artists_seed_monthly',
+        if (artistFolders.isEmpty) 'user_similar_artists_seed_monthly',
       ])
         RecommendationFolder(
           itemId: id,
@@ -99,8 +107,131 @@ void main() {
     expect(controller.topTracks, hasLength(12));
     expect(controller.artistPlaylists, hasLength(1));
     expect(controller.topArtists, hasLength(1));
-    expect(controller.similarArtistSections.single.artists, hasLength(1));
+    expect(controller.artistSections.single.artists, hasLength(1));
   });
+
+  List<RecommendationFolder> artistFolders() => <RecommendationFolder>[
+    for (final String category in <String>['genre', 'similar'])
+      for (int index = 0; index < 5; index++)
+        RecommendationFolder(
+          itemId:
+              'user_${category}_artists_${category == 'genre' ? index % 4 : index}_monthly',
+          provider: 'lb',
+          title: '$category ${category == 'genre' ? index % 4 : index}',
+          items: List<Artist>.generate(
+            8,
+            (int artistIndex) => Artist(
+              itemId: '$category-$index-$artistIndex',
+              provider: 'lb',
+              name: 'Artist $artistIndex',
+            ),
+          ),
+        ),
+  ];
+
+  test(
+    'home samples distinct artist sections and shuffles their contents',
+    () async {
+      final List<RecommendationFolder> folders = artistFolders();
+      final Set<String> selections = <String>{};
+      for (int seed = 0; seed < 8; seed++) {
+        final HomeController controller = HomeController(
+          coreBridge: _HomeCoreBridge()..artistFolders = folders,
+          random: math.Random(seed),
+        );
+        addTearDown(controller.dispose);
+        await controller.load();
+        await Future<void>.delayed(Duration.zero);
+        final List<HomeArtistSection> sections = controller.artistSections;
+        expect(sections, hasLength(4));
+        expect(
+          sections.map((section) => section.title.split(' ').first),
+          <String>['genre', 'similar', 'genre', 'similar'],
+        );
+        expect(sections.map((section) => section.title).toSet(), hasLength(4));
+        selections.add(sections.map((section) => section.title).join(','));
+        for (final HomeArtistSection section in sections) {
+          final List<Artist> original = folders
+              .firstWhere((folder) => folder.title == section.title)
+              .items
+              .whereType<Artist>()
+              .toList();
+          expect(section.artists, unorderedEquals(original));
+          expect(section.artists, isNot(orderedEquals(original)));
+        }
+        final List<HomeArtistSection> before = controller.artistSections;
+        controller.refreshFavoriteStatuses();
+        expect(
+          controller.artistSections.map((section) => section.title),
+          before.map((section) => section.title),
+        );
+        for (int index = 0; index < before.length; index++) {
+          expect(
+            controller.artistSections[index].artists,
+            before[index].artists,
+          );
+        }
+      }
+      expect(selections.length, greaterThan(1));
+    },
+  );
+
+  for (final bool isCompact in <bool>[true, false]) {
+    testWidgets(
+      'home interleaves artist sections before recent tracks on ${isCompact ? 'mobile' : 'desktop'}',
+      (WidgetTester tester) async {
+        tester.view.physicalSize = Size(isCompact ? 412 : 1100, 850);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final _HomeCoreBridge bridge = _HomeCoreBridge()
+          ..artistFolders = artistFolders();
+        final MashinCoreBridgeEvents events = MashinCoreBridgeEvents(
+          coreBridge: bridge,
+        );
+        addTearDown(events.dispose);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.dark(),
+            home: Scaffold(
+              body: isCompact
+                  ? HomeScreenMobile(coreBridge: bridge, coreEvents: events)
+                  : HomeScreenDesktop(coreBridge: bridge, coreEvents: events),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        tester.view.physicalSize = Size(isCompact ? 412 : 1100, 6000);
+        await tester.pumpAndSettle();
+        final List<String> titles = isCompact
+            ? tester
+                  .widgetList<MediaRowSectionMobile<Artist>>(
+                    find.byType(MediaRowSectionMobile<Artist>),
+                  )
+                  .map((section) => section.title)
+                  .toList()
+            : tester
+                  .widgetList<MediaRowSectionDesktop<Artist>>(
+                    find.byType(MediaRowSectionDesktop<Artist>),
+                  )
+                  .map((section) => section.title)
+                  .toList();
+        expect(titles, hasLength(5));
+        expect(titles.first, 'Deine Lieblingskünstler:innen');
+        expect(titles.skip(1).map((title) => title.split(' ').first), <String>[
+          'genre',
+          'similar',
+          'genre',
+          'similar',
+        ]);
+        expect(
+          tester.getTopLeft(find.text('Kürzlich gespielt')).dy,
+          greaterThan(tester.getTopLeft(find.text(titles.last)).dy),
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 
   testWidgets('desktop home keeps scroll extent stable after loading', (
     WidgetTester tester,

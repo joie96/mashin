@@ -363,6 +363,29 @@ void main() {
     expect(track.album?.primaryImage?.path, 'cover.jpg');
   });
 
+  test('compact playlist images survive recommendation decoding', () {
+    MediaItemImage.configureProxyBaseUrl('http://music-assistant.local:8095');
+    final Playlist playlist = Playlist.fromJson(<String, dynamic>{
+      'item_id': 'artist-radio',
+      'provider': 'listenbrainz_recommendations--test',
+      'name': 'Radio: Artist',
+      'media_type': 'playlist',
+      'image': <String, dynamic>{
+        'type': 'thumb',
+        'path': 'https://example.test/artist.jpg',
+        'provider': 'url',
+        'remotely_accessible': true,
+        'proxy_id': 'artist-cover',
+      },
+    });
+
+    expect(playlist.primaryImage?.path, 'https://example.test/artist.jpg');
+    expect(
+      playlist.imageUriForSize(256),
+      'http://music-assistant.local:8095/imageproxy/artist-cover?size=256',
+    );
+  });
+
   test('resolves sized proxy URLs for playlist and album artwork', () {
     MediaItemImage.configureProxyBaseUrl('http://music-assistant.local:8095/');
     final Map<String, dynamic> image = <String, dynamic>{

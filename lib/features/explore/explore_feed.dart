@@ -11,6 +11,8 @@ import '../shared/widgets/media_row_section_desktop.dart';
 import '../shared/widgets/media_row_section_mobile.dart';
 import '../shared/widgets/media_slide_section_desktop.dart';
 import '../shared/widgets/media_slide_section_mobile.dart';
+import '../shared/widgets/media_table_section_desktop.dart';
+import '../shared/widgets/media_table_section_mobile.dart';
 import 'explore_controller.dart';
 
 class ExploreFeed extends StatefulWidget {
@@ -103,31 +105,33 @@ class _ExploreFeedState extends State<ExploreFeed> {
         const SliverPadding(padding: EdgeInsets.only(top: 20)),
         _section(_explorationSlider()),
         for (final Widget section in <Widget>[
-          _mediaRow<Album>(
-            'Alben der Woche',
-            _controller.weeklyAlbums,
-            'Keine Album-Charts verfügbar.',
+          _section(
+            _mediaRow<Album>(
+              'Alben der Woche',
+              _controller.weeklyAlbums,
+              'Keine Album-Charts verfügbar.',
+            ),
           ),
-          _mediaRow<Playlist>(
-            'Andere Nutzer hören',
-            _controller.similarUsersJam,
-            'Kein Weekly Jam ähnlicher Nutzer verfügbar.',
+          _similarUsersTable(),
+          _section(
+            _mediaRow<Artist>(
+              'Artists der Woche',
+              _controller.weeklyArtists,
+              'Keine Artist-Charts verfügbar.',
+            ),
           ),
-          _mediaRow<Track>(
-            'Songs der Woche',
-            _controller.weeklyTracks,
-            'Keine Track-Charts verfügbar.',
-          ),
-          _mediaRow<Artist>(
-            'Artists der Woche',
-            _controller.weeklyArtists,
-            'Keine Artist-Charts verfügbar.',
+          _section(
+            _mediaRow<Track>(
+              'Songs der Woche',
+              _controller.weeklyTracks,
+              'Keine Track-Charts verfügbar.',
+            ),
           ),
         ]) ...<Widget>[
           SliverPadding(
             padding: EdgeInsets.only(top: widget.isCompact ? 32 : 20),
           ),
-          _section(section),
+          section,
         ],
         const SliverPadding(padding: EdgeInsets.only(bottom: 28)),
       ],
@@ -141,35 +145,84 @@ class _ExploreFeedState extends State<ExploreFeed> {
 
   Widget _explorationSlider() {
     if (widget.isCompact) {
-      return MediaSlideSectionMobile<Playlist>(
+      return MediaSlideSectionMobile<Track>(
         title: 'Entdecke etwas Neues',
         items: _controller.weeklyExploration,
         isLoading: _controller.isLoading,
         emptyText: 'Keine Weekly Exploration verfügbar.',
         coreBridge: widget.coreBridge,
         coreEvents: widget.coreEvents,
-        onItemTap: widget.onOpenPlaylist,
-        onSelectionMenuTap: (List<Playlist> items) =>
-            unawaited(_showMenu(items)),
+        onItemTap: _openItem,
+        onSelectionMenuTap: (List<Track> items) => unawaited(_showMenu(items)),
       );
     }
-    return MediaSlideSectionDesktop<Playlist>(
+    return MediaSlideSectionDesktop<Track>(
       title: 'Entdecke etwas Neues',
       items: _controller.weeklyExploration,
       isLoading: _controller.isLoading,
       emptyText: 'Keine Weekly Exploration verfügbar.',
       coreBridge: widget.coreBridge,
       coreEvents: widget.coreEvents,
-      isRowFavorite: (Playlist item, int index) => item.favorite,
+      isRowFavorite: (Track item, int index) => item.favorite,
       onRowFavoriteTap: widget.userDataController == null
           ? null
-          : (Playlist item, int index) =>
+          : (Track item, int index) =>
                 _controller.setFavorite(item, !item.favorite),
-      onRowMoreAnchorTap: (Playlist item, int index, BuildContext anchor) =>
-          unawaited(_showMenu(<Playlist>[item], anchor: anchor)),
-      onRowContextMenu: (Playlist item, int index, Offset position) =>
-          unawaited(_showMenu(<Playlist>[item], position: position)),
-      onPlaylistTap: widget.onOpenPlaylist,
+      onRowMoreAnchorTap: (Track item, int index, BuildContext anchor) =>
+          unawaited(_showMenu(<Track>[item], anchor: anchor)),
+      onRowContextMenu: (Track item, int index, Offset position) =>
+          unawaited(_showMenu(<Track>[item], position: position)),
+      onArtistTap: widget.onOpenArtist,
+      onAlbumTap: widget.onOpenAlbum,
+    );
+  }
+
+  Widget _similarUsersTable() {
+    const String title = 'Andere Nutzer hören';
+    const String emptyText = 'Kein Weekly Jam ähnlicher Nutzer verfügbar.';
+    if (widget.isCompact) {
+      return SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        sliver: MediaTableSectionMobile<Track>(
+          title: title,
+          items: _controller.similarUsersJam,
+          isLoading: _controller.isLoading,
+          emptyText: emptyText,
+          maxItemsPerPage: 3,
+          skeletonRowCount: 3,
+          coreBridge: widget.coreBridge,
+          coreEvents: widget.coreEvents,
+          onRowTap: (Track item, int index) =>
+              unawaited(_showMenu(<Track>[item])),
+          onSelectionMenuTap: (List<Track> items) =>
+              unawaited(_showMenu(items)),
+        ),
+      );
+    }
+    return _section(
+      MediaTableSectionDesktop<Track>(
+        title: title,
+        items: _controller.similarUsersJam,
+        isLoading: _controller.isLoading,
+        emptyText: emptyText,
+        maxItemsPerPage: 5,
+        skeletonRowCount: 5,
+        coreBridge: widget.coreBridge,
+        coreEvents: widget.coreEvents,
+        isRowFavorite: (Track item, int index) => item.favorite,
+        onRowFavoriteTap: widget.userDataController == null
+            ? null
+            : (Track item, int index) =>
+                  _controller.setFavorite(item, !item.favorite),
+        onRowMoreAnchorTap: (Track item, int index, BuildContext anchor) =>
+            unawaited(_showMenu(<Track>[item], anchor: anchor)),
+        onRowContextMenu: (Track item, int index, Offset position) =>
+            unawaited(_showMenu(<Track>[item], position: position)),
+        onRowSelectionContextMenu: (List<Track> items, Offset position) =>
+            unawaited(_showMenu(items, position: position)),
+        onArtistTap: widget.onOpenArtist,
+        onAlbumTap: widget.onOpenAlbum,
+      ),
     );
   }
 
