@@ -50,6 +50,17 @@ class RustSessionPlayerTest {
 
     // New media use a single MA media-play request, never a queue difference.
     @Test
+    fun legacyControllersCanPrepareAndPlayBrowseSelections() {
+        player.updateState(PlaybackSnapshot.empty())
+        assertTrue(player.isCommandAvailable(Player.COMMAND_PREPARE))
+        player.setMediaItem(media("browse:track:test:new"))
+        player.prepare()
+        player.play()
+        assertEquals(listOf("browse:track:test:new"), starts)
+        assertTrue(requests.isEmpty())
+    }
+
+    @Test
     fun setMediaItemsReplacesOnceAndKeepsTheRequestedStartIndex() {
         invokeCommand("handleSetMediaItems", listOf(media("new"), media("queue-2")), 1, C.TIME_UNSET).get()
         assertEquals(listOf(PlaybackCommandKind.QueuePlayMedia), requests.map { it.kind })

@@ -36,6 +36,55 @@ import org.robolectric.annotation.LooperMode
 class PlaybackSessionCallbackTest {
     // Controller browsing and search contracts.
     @Test
+    fun legacySelectionPublishesBufferingThenCanonicalPlayback() {
+        val context = RuntimeEnvironment.getApplication()
+        val browser = MediaLibraryBrowser(context) { Futures.immediateVoidFuture() }
+        val completion = SettableFuture.create<Void?>()
+        val selections = mutableListOf<String>()
+        val requests = mutableListOf<PlaybackRequest>()
+        val player = RustSessionPlayer(
+            { request -> requests.add(request); Futures.immediateVoidFuture() },
+            { mediaId -> selections.add(mediaId); completion },
+            browser::resolveLibraryMediaItem,
+        )
+        val callback = PlaybackSessionCallback(context.packageName, browser) {
+            Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
+        val session = MediaLibrarySession.Builder(context, player, callback).build()
+        val controller = MediaSession.ControllerInfo.createTestOnlyControllerInfo(
+            "com.google.android.projection.gearhead", 1, 1000, 0, 0, true, Bundle.EMPTY, true)
+        try {
+            val resolved = callback.onSetMediaItems(session, controller,
+                listOf(androidx.media3.common.MediaItem.Builder().setMediaId("browse:track:library:track-1").build()),
+                androidx.media3.common.C.INDEX_UNSET, androidx.media3.common.C.TIME_UNSET).get()
+            player.setMediaItems(resolved.mediaItems, true)
+            player.prepare()
+            player.play()
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(listOf("browse:track:library:track-1"), selections)
+            assertEquals(Player.STATE_BUFFERING, player.playbackState)
+            assertTrue(player.playWhenReady)
+            assertFalse(completion.isDone)
+
+            player.updateState(PlaybackSnapshotMapper.fromPlayerState(
+                JSONObject("""{"playbackState":"playing","currentQueueItemId":"queue-1","activeMode":"local"}"""),
+                JSONObject("""{"items":[{"queue_item_id":"queue-1","name":"Track","media_item":
+                    {"media_type":"track","item_id":"track-1","provider":"library","name":"Track"}}]}"""),
+            ))
+            completion.set(null)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(player.isPlaying)
+            assertEquals("queue-1", player.currentMediaItem?.mediaId)
+            assertEquals("Track", player.mediaMetadata.title)
+            assertTrue(requests.isEmpty())
+        } finally {
+            session.release()
+            player.release()
+            browser.close()
+        }
+    }
+
+    @Test
     fun controllersCanBrowseAndControlPlayback() {
         val context = RuntimeEnvironment.getApplication()
         val browser = MediaLibraryBrowser(context) { Futures.immediateVoidFuture() }

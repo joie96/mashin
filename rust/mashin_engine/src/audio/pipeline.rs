@@ -272,8 +272,10 @@ impl<Sink: OutputSink> PipelineState<Sink> {
                 if self.cache.current().is_none() {
                     return Err("no current native audio stream".into());
                 }
-                if let Some(sink) = &self.sink {
-                    sink.transport_play()?;
+                if !self.should_play {
+                    if let Some(sink) = &self.sink {
+                        sink.transport_play()?;
+                    }
                 }
                 self.should_play = true;
                 self.state = if self.decoded_frames > self.position_frame {
@@ -284,8 +286,10 @@ impl<Sink: OutputSink> PipelineState<Sink> {
             }
             AudioCommand::Pause { stream_id, .. } => {
                 self.require_stream(stream_id)?;
-                if let Some(sink) = &self.sink {
-                    sink.transport_pause()?;
+                if self.should_play {
+                    if let Some(sink) = &self.sink {
+                        sink.transport_pause()?;
+                    }
                 }
                 self.should_play = false;
                 self.state = if self.cache.current().is_some() {
@@ -751,18 +755,26 @@ mod tests {
     struct FakeSink {
         position: Cell<u64>,
         is_drained: Cell<bool>,
+        is_playing: Cell<bool>,
     }
     impl OutputSink for FakeSink {
         fn new(_: &AudioFormat, _: u8, _: bool) -> Result<Self, String> {
             Ok(Self {
                 position: Cell::new(0),
                 is_drained: Cell::new(false),
+                is_playing: Cell::new(true),
             })
         }
         fn transport_play(&self) -> Result<(), String> {
+            if self.is_playing.replace(true) {
+                return Err("native audio stream is already started".into());
+            }
             Ok(())
         }
         fn transport_pause(&self) -> Result<(), String> {
+            if !self.is_playing.replace(false) {
+                return Err("native audio stream is already paused".into());
+            }
             Ok(())
         }
         fn enqueue(&self, _: Arc<[i32]>) -> Result<(), String> {
@@ -793,6 +805,31 @@ mod tests {
             is_final: true,
             encoded_bytes: Arc::from([1u8]),
             payload_offset: 0,
+        }
+    }
+
+    #[test]
+    fn repeated_transport_commands_do_not_restart_or_repause_the_native_stream() {
+        let mut output = PipelineState::<FakeSink>::new(1024, 30, false).unwrap();
+        let current = test_stream();
+        output.execute(AudioCommand::SetMedia {
+            current: Some(current.clone()),
+            prepared: None,
+            media_revision: 1,
+            initial_output_state: AudioState::Playing,
+        }).unwrap();
+        output.retain(chunk(current.stream_id)).unwrap();
+        output.pump_with(|_, _| Ok(Arc::from([0i32; 960]))).unwrap();
+        for should_play in [true, true, false, false, true, true] {
+            let command = if should_play {
+                AudioCommand::Play { stream_id: Some(current.stream_id) }
+            } else {
+                AudioCommand::Pause { stream_id: Some(current.stream_id) }
+            };
+            output.execute(command).unwrap();
+            assert_eq!(output.sink.as_ref().unwrap().is_playing.get(), should_play);
+            assert_eq!(output.state, if should_play { AudioState::Playing } else { AudioState::Paused });
+            assert!(output.error.is_none());
         }
     }
 

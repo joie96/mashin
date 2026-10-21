@@ -120,6 +120,9 @@ internal class RustSessionPlayer(
         return Futures.immediateFailedFuture<Any>(UnsupportedOperationException("MA does not support replacing a queue range; set media items instead"))
     }
 
+    // Media selection already prepares Rust playback; legacy controllers still require this command.
+    override fun handlePrepare(): ListenableFuture<*> = Futures.immediateVoidFuture()
+
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
         if (playWhenReady && (snapshot.mediaItems.isEmpty() || snapshot.hasPlaybackIntent)) {
             return Futures.immediateVoidFuture()
@@ -191,6 +194,7 @@ internal class RustSessionPlayer(
             .add(Player.COMMAND_GET_VOLUME)
             .add(Player.COMMAND_SET_MEDIA_ITEM)
             .add(Player.COMMAND_CHANGE_MEDIA_ITEMS)
+            .add(Player.COMMAND_PREPARE)
             .add(Player.COMMAND_PLAY_PAUSE)
             .add(Player.COMMAND_STOP)
             .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
