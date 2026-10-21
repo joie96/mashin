@@ -171,6 +171,10 @@ class AppRouter {
                         userDataController: session.userDataController,
                         onOpenArtist: (Artist artist) =>
                             context.push(AppRoutes.artist(artist)),
+                        onOpenAlbum: (Album album) =>
+                            context.push(AppRoutes.album(album)),
+                        onOpenPlaylist: (Playlist playlist) =>
+                            context.push(AppRoutes.playlist(playlist)),
                       ),
                     ),
               ),

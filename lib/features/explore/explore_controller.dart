@@ -1,20 +1,8 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 
 import '../core/core_bridge.dart';
 import '../core/core_models.dart';
 import '../core/core_userdata.dart';
-
-class ExploreSimilarArtistSection {
-  const ExploreSimilarArtistSection({
-    required this.title,
-    required this.artists,
-  });
-
-  final String title;
-  final List<Artist> artists;
-}
 
 class ExploreController extends ChangeNotifier {
   ExploreController({required this.coreBridge, this.userDataController});
@@ -23,105 +11,106 @@ class ExploreController extends ChangeNotifier {
   final UserData? userDataController;
 
   bool _isDisposed = false;
-  bool _isLoadingSimilarArtists = true;
-  List<ExploreSimilarArtistSection> _similarArtistSections =
-      const <ExploreSimilarArtistSection>[];
+  bool _isLoading = false;
+  bool _hasLoadError = false;
+  List<Playlist> _weeklyExploration = const <Playlist>[];
+  List<Album> _weeklyAlbums = const <Album>[];
+  List<Playlist> _similarUsersJam = const <Playlist>[];
+  List<Track> _weeklyTracks = const <Track>[];
+  List<Artist> _weeklyArtists = const <Artist>[];
 
-  bool get isLoadingSimilarArtists => _isLoadingSimilarArtists;
-  List<ExploreSimilarArtistSection> get similarArtistSections =>
-      _similarArtistSections;
-
-  @override
-  void notifyListeners() {
-    if (!_isDisposed) {
-      super.notifyListeners();
-    }
-  }
-
-  Future<void> load() async {
-    _isLoadingSimilarArtists = true;
-    notifyListeners();
-
-    try {
-      final List<RecommendationFolder> folders = await coreBridge
-          .getRecommendations();
-      _similarArtistSections = _similarArtistSectionsFromFolders(folders);
-    } catch (_) {
-      _similarArtistSections = const <ExploreSimilarArtistSection>[];
-    } finally {
-      _isLoadingSimilarArtists = false;
-      notifyListeners();
-    }
-  }
-
-  void refreshFavoriteStatuses() {
-    _similarArtistSections = _similarArtistSections
-        .map(
-          (ExploreSimilarArtistSection section) => ExploreSimilarArtistSection(
-            title: section.title,
-            artists: _withFavoriteStatuses(section.artists),
-          ),
-        )
-        .toList(growable: false);
-    notifyListeners();
-  }
-
-  bool isItemFavorite(MediaItem item) => item.favorite;
-
-  Future<void> setFavorite(MediaItem item, bool favorite) async {
-    await userDataController?.setFavorite(<MediaItem>[item], favorite);
-  }
-
-  List<T> _withFavoriteStatuses<T extends MediaItem>(List<T> items) {
-    final UserData? controller = userDataController;
-    if (controller == null) {
-      return items;
-    }
-    return items
-        .map((T item) => controller.withFavoriteStatus(item))
-        .toList(growable: false);
-  }
-
-  bool _isValidPlayable(MediaItem item) {
-    return item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty;
-  }
-
-  List<ExploreSimilarArtistSection> _similarArtistSectionsFromFolders(
-    List<RecommendationFolder> folders,
-  ) {
-    return folders
-        .where(
-          (RecommendationFolder folder) =>
-              folder.itemId.toLowerCase().startsWith('similar_artists_'),
-        )
-        .map(
-          (RecommendationFolder folder) => ExploreSimilarArtistSection(
-            title: _normalizeSimilarArtistSectionTitle(folder.title),
-            artists: _withFavoriteStatuses(
-              folder.items
-                  .whereType<Artist>()
-                  .where(_isValidPlayable)
-                  .toList(growable: false),
-            ),
-          ),
-        )
-        .where(
-          (ExploreSimilarArtistSection section) => section.artists.isNotEmpty,
-        )
-        .take(5)
-        .toList(growable: false);
-  }
-
-  String _normalizeSimilarArtistSectionTitle(String title) {
-    return title.replaceFirst(
-      RegExp(r'^Similar Artists for\s*', caseSensitive: false),
-      'Ähnlich zu ',
-    );
-  }
-
+  // Lifecycle.
   @override
   void dispose() {
     _isDisposed = true;
     super.dispose();
+  }
+
+  // Recommendation snapshots.
+  bool get isLoading => _isLoading;
+  bool get hasLoadError => _hasLoadError;
+  List<Playlist> get weeklyExploration => _weeklyExploration;
+  List<Album> get weeklyAlbums => _weeklyAlbums;
+  List<Playlist> get similarUsersJam => _similarUsersJam;
+  List<Track> get weeklyTracks => _weeklyTracks;
+  List<Artist> get weeklyArtists => _weeklyArtists;
+
+  Future<void> load() async {
+    if (_isDisposed || _isLoading) return;
+    _isLoading = true;
+    _hasLoadError = false;
+    notifyListeners();
+    try {
+      final List<RecommendationFolder> folders = await coreBridge
+          .getRecommendations();
+      if (_isDisposed) return;
+      _weeklyExploration = _itemsFromFolders<Playlist>(
+        folders,
+        'user_exploration_weekly',
+      );
+      _weeklyAlbums = _itemsFromFolders<Album>(
+        folders,
+        'sitewide_top_albums_weekly',
+      );
+      _similarUsersJam = _itemsFromFolders<Playlist>(
+        folders,
+        'similarusers_jam_weekly',
+      );
+      _weeklyTracks = _itemsFromFolders<Track>(
+        folders,
+        'sitewide_top_tracks_weekly',
+      );
+      _weeklyArtists = _itemsFromFolders<Artist>(
+        folders,
+        'sitewide_top_artists_weekly',
+      );
+    } catch (_) {
+      if (!_isDisposed) _hasLoadError = true;
+    } finally {
+      if (!_isDisposed) {
+        _isLoading = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  // Favorite commands and updates.
+  Future<void> setFavorite(MediaItem item, bool favorite) async {
+    await userDataController?.setFavorite(<MediaItem>[item], favorite);
+  }
+
+  void refreshFavoriteStatuses() {
+    if (_isDisposed) return;
+    _weeklyExploration = _withFavoriteStatuses(_weeklyExploration);
+    _weeklyAlbums = _withFavoriteStatuses(_weeklyAlbums);
+    _similarUsersJam = _withFavoriteStatuses(_similarUsersJam);
+    _weeklyTracks = _withFavoriteStatuses(_weeklyTracks);
+    _weeklyArtists = _withFavoriteStatuses(_weeklyArtists);
+    notifyListeners();
+  }
+
+  // Folder mapping.
+  List<T> _itemsFromFolders<T extends MediaItem>(
+    List<RecommendationFolder> folders,
+    String itemId,
+  ) => _withFavoriteStatuses(
+    folders
+        .where((RecommendationFolder folder) => folder.itemId == itemId)
+        .expand((RecommendationFolder folder) => folder.items)
+        .whereType<T>()
+        .where(
+          (T item) =>
+              item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty,
+        )
+        .toList(growable: false),
+  );
+
+  List<T> _withFavoriteStatuses<T extends MediaItem>(List<T> items) {
+    final UserData? controller = userDataController;
+    return controller == null
+        ? items
+        : items
+              .map((T item) => controller.withFavoriteStatus(item))
+              .toList(growable: false);
   }
 }

@@ -29,6 +29,7 @@ class MediaSlideSectionDesktop<T> extends StatefulWidget {
   final DesktopRowContextMenuAction<T>? onRowContextMenu;
   final ValueChanged<Artist>? onArtistTap;
   final ValueChanged<Album>? onAlbumTap;
+  final ValueChanged<Playlist>? onPlaylistTap;
 
   const MediaSlideSectionDesktop({
     super.key,
@@ -47,6 +48,7 @@ class MediaSlideSectionDesktop<T> extends StatefulWidget {
     this.onRowContextMenu,
     this.onArtistTap,
     this.onAlbumTap,
+    this.onPlaylistTap,
   });
 
   @override
@@ -348,6 +350,7 @@ class _MediaSlideSectionDesktopState<T>
                         onMoreTap: _openMore,
                         onArtistTap: widget.onArtistTap,
                         onAlbumTap: widget.onAlbumTap,
+                        onPlaylistTap: widget.onPlaylistTap,
                       ),
                     ),
                   ),
@@ -375,6 +378,7 @@ class _DesktopSlideCard<T> extends StatefulWidget {
   final ValueChanged<BuildContext>? onMoreTap;
   final ValueChanged<Artist>? onArtistTap;
   final ValueChanged<Album>? onAlbumTap;
+  final ValueChanged<Playlist>? onPlaylistTap;
 
   const _DesktopSlideCard({
     required this.item,
@@ -387,6 +391,7 @@ class _DesktopSlideCard<T> extends StatefulWidget {
     required this.onMoreTap,
     required this.onArtistTap,
     required this.onAlbumTap,
+    required this.onPlaylistTap,
   });
 
   @override
@@ -550,7 +555,7 @@ class _DesktopSlideCardState<T> extends State<_DesktopSlideCard<T>> {
                         coreEvents: widget.coreEvents,
                         item: data.mediaItem,
                         builder: (BuildContext context, bool isCurrent) {
-                          return Text(
+                          final Widget title = Text(
                             data.title,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -561,6 +566,15 @@ class _DesktopSlideCardState<T> extends State<_DesktopSlideCard<T>> {
                                   shadows: _artworkTextShadows,
                                 ),
                           );
+                          if (widget.item case final Playlist playlist) {
+                            return InkWell(
+                              onTap: widget.onPlaylistTap == null
+                                  ? null
+                                  : () => widget.onPlaylistTap!(playlist),
+                              child: title,
+                            );
+                          }
+                          return title;
                         },
                       ),
                       const SizedBox(height: 6),

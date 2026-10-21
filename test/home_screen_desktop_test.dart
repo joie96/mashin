@@ -5,6 +5,7 @@ import 'package:mashin_flutter/features/core/core_bridge.dart';
 import 'package:mashin_flutter/features/core/core_events.dart';
 import 'package:mashin_flutter/features/core/core_models.dart';
 import 'package:mashin_flutter/features/home/home_screen_desktop.dart';
+import 'package:mashin_flutter/features/home/home_controller.dart';
 
 class _HomeCoreBridge implements MashinCoreBridgeApi {
   @override
@@ -31,23 +32,41 @@ class _HomeCoreBridge implements MashinCoreBridgeApi {
 
     return <RecommendationFolder>[
       RecommendationFolder(
-        itemId: 'recommendations',
+        itemId: 'user_recommendations',
         provider: 'listenbrainz_recommendations--test',
         title: 'Empfehlungen',
         items: <MediaItem>[tracks.first],
       ),
       RecommendationFolder(
-        itemId: 'genre_playlists',
+        itemId: 'user_genre_playlists_monthly',
         provider: 'listenbrainz_recommendations--test',
         title: 'Genres',
         items: genres,
       ),
       RecommendationFolder(
-        itemId: 'top_tracks',
+        itemId: 'user_top_tracks_monthly',
         provider: 'listenbrainz_recommendations--test',
         title: 'Tracks',
         items: tracks,
       ),
+      RecommendationFolder(
+        itemId: 'user_artist_playlists_monthly',
+        provider: 'listenbrainz_recommendations--test',
+        title: 'Artist Playlists',
+        items: <MediaItem>[genres.first],
+      ),
+      for (final String id in <String>[
+        'user_top_artists_monthly',
+        'user_similar_artists_seed_monthly',
+      ])
+        RecommendationFolder(
+          itemId: id,
+          provider: 'listenbrainz_recommendations--test',
+          title: 'Artists',
+          items: const <MediaItem>[
+            Artist(itemId: 'artist', provider: 'test', name: 'Artist'),
+          ],
+        ),
     ];
   }
 
@@ -68,6 +87,21 @@ class _HomeCoreBridge implements MashinCoreBridgeApi {
 }
 
 void main() {
+  test('home maps renamed ListenBrainz folders', () async {
+    final HomeController controller = HomeController(
+      coreBridge: _HomeCoreBridge(),
+    );
+    addTearDown(controller.dispose);
+    await controller.load();
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.recommendationItems, hasLength(1));
+    expect(controller.genrePlaylists, hasLength(9));
+    expect(controller.topTracks, hasLength(12));
+    expect(controller.artistPlaylists, hasLength(1));
+    expect(controller.topArtists, hasLength(1));
+    expect(controller.similarArtistSections.single.artists, hasLength(1));
+  });
+
   testWidgets('desktop home keeps scroll extent stable after loading', (
     WidgetTester tester,
   ) async {

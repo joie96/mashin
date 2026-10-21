@@ -15,12 +15,16 @@ class ExploreScreen extends StatelessWidget {
     required this.coreEvents,
     this.userDataController,
     this.onOpenArtist,
+    this.onOpenAlbum,
+    this.onOpenPlaylist,
   });
 
   final MashinCoreBridgeApi coreBridge;
   final MashinCoreBridgeEvents coreEvents;
   final UserData? userDataController;
   final ValueChanged<Artist>? onOpenArtist;
+  final ValueChanged<Album>? onOpenAlbum;
+  final ValueChanged<Playlist>? onOpenPlaylist;
 
   @override
   Widget build(BuildContext context) {
@@ -30,6 +34,8 @@ class ExploreScreen extends StatelessWidget {
         coreEvents: coreEvents,
         userDataController: userDataController,
         onOpenArtist: onOpenArtist,
+        onOpenAlbum: onOpenAlbum,
+        onOpenPlaylist: onOpenPlaylist,
       );
     }
 
@@ -38,6 +44,8 @@ class ExploreScreen extends StatelessWidget {
       coreEvents: coreEvents,
       userDataController: userDataController,
       onOpenArtist: onOpenArtist,
+      onOpenAlbum: onOpenAlbum,
+      onOpenPlaylist: onOpenPlaylist,
     );
   }
 }

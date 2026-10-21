@@ -182,27 +182,27 @@ class HomeController extends ChangeNotifier {
 
       final List<Track> recommendations = _tracksFromFolder(
         recommendationFolders,
-        'recommendations',
+        'user_recommendations',
       );
       _shuffle(recommendations);
       _recommendationItems = _withFavoriteStatuses(recommendations);
       _genrePlaylists = _withFavoriteStatuses(
         _playlistsFromFolder(
           recommendationFolders,
-          'genre_playlists',
+          'user_genre_playlists_monthly',
         ).map(_withNormalizedPlaylistName).take(9).toList(growable: false),
       );
       _artistPlaylists = _withFavoriteStatuses(
         _playlistsFromFolder(
           recommendationFolders,
-          'artist_playlists',
+          'user_artist_playlists_monthly',
         ).map(_withNormalizedPlaylistName).toList(growable: false),
       );
       _topTracks = _withFavoriteStatuses(
-        _tracksFromFolder(recommendationFolders, 'top_tracks'),
+        _tracksFromFolder(recommendationFolders, 'user_top_tracks_monthly'),
       );
       _topArtists = _withFavoriteStatuses(
-        _artistsFromFolder(recommendationFolders, 'top_artists'),
+        _artistsFromFolder(recommendationFolders, 'user_top_artists_monthly'),
       );
       _similarArtistSections = _similarArtistSectionsFromFolders(
         recommendationFolders,
@@ -309,7 +309,7 @@ class HomeController extends ChangeNotifier {
     return folders
         .where(
           (RecommendationFolder folder) =>
-              folder.itemId.toLowerCase().startsWith('similar_artists_'),
+              folder.itemId.toLowerCase().startsWith('user_similar_artists_'),
         )
         .map(
           (RecommendationFolder folder) => HomeSimilarArtistSection(

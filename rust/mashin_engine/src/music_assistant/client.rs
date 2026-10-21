@@ -400,8 +400,24 @@ impl MusicAssistantClient {
     pub(crate) async fn get_recommendations(
         &self,
     ) -> Result<Vec<MusicAssistantRecommendationFolder>, String> {
-        self.execute_command("music/recommendations", json!({}))
-            .await
+        let mut folders: Vec<MusicAssistantRecommendationFolder> = self
+            .execute_command("music/recommendations", json!({}))
+            .await?;
+        for folder in &mut folders {
+            if !folder.items.is_empty() {
+                continue;
+            }
+            if let Ok(items) = self
+                .execute_command(
+                    "music/recommendations/items",
+                    json!({"provider": folder.provider, "item_id": folder.item_id}),
+                )
+                .await
+            {
+                folder.items = items;
+            }
+        }
+        Ok(folders)
     }
 
     pub(crate) async fn search_media(
@@ -1351,6 +1367,41 @@ pub(crate) mod tests {
             MusicAssistantClient::new(&format!("http://{address}"), None),
             worker,
         )
+    }
+
+    #[tokio::test]
+    async fn recommendations_hydrate_empty_rows_and_preserve_embedded_items() {
+        let track =
+            json!({"media_type":"track", "item_id":"track", "provider":"library", "name":"Track"});
+        let (client, worker) = server(vec![
+            (
+                "music/recommendations",
+                json!([
+                    {"item_id":"user_recommendations", "provider":"listenbrainz", "items":[track.clone()]},
+                    {"item_id":"user_exploration_weekly", "provider":"listenbrainz"},
+                    {"item_id":"sitewide_top_tracks_weekly", "provider":"listenbrainz"}
+                ]),
+            ),
+            (
+                "music/recommendations/items",
+                json!({"test_http_status":500}),
+            ),
+            ("music/recommendations/items", json!([track])),
+        ]);
+        let folders = client.get_recommendations().await.unwrap();
+        assert_eq!(folders[0].items.len(), 1);
+        assert!(folders[1].items.is_empty());
+        assert_eq!(folders[2].items.len(), 1);
+        let requests = worker.join().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(
+            requests[1]["args"],
+            json!({"provider":"listenbrainz", "item_id":"user_exploration_weekly"})
+        );
+        assert_eq!(
+            requests[2]["args"],
+            json!({"provider":"listenbrainz", "item_id":"sitewide_top_tracks_weekly"})
+        );
     }
 
     #[tokio::test]
