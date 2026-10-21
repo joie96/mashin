@@ -169,7 +169,7 @@ async fn run(
     let mut connection_attempt = 0_u64;
     loop {
         connection_attempt = connection_attempt.saturating_add(1);
-        LOGGER.debug(format_args!(
+        LOGGER.info(format_args!(
             "Control connection attempt #{connection_attempt}"
         ));
         snapshots.send_modify(|snapshot| {
@@ -187,8 +187,8 @@ async fn run(
         .await;
         let was_connected = snapshots.borrow().control_connection == ConnectionState::Connected;
         match result {
-            Ok(()) => LOGGER.debug("Control connection ended"),
-            Err(error) => LOGGER.debug(format_args!(
+            Ok(()) => LOGGER.info("Control connection ended"),
+            Err(error) => LOGGER.info(format_args!(
                 "{} on attempt #{connection_attempt}: {error}",
                 if was_connected {
                     "Control connection lost"
@@ -205,7 +205,7 @@ async fn run(
             delay = Duration::from_millis(500);
         }
         let retained = output.snapshot();
-        LOGGER.debug(format_args!(
+        LOGGER.info(format_args!(
             "Control reconnect scheduled in {} ms; retained_stream={:?}, buffered={} ms",
             delay.as_millis(),
             retained.resume.current_stream_id,
@@ -258,7 +258,7 @@ async fn connect(
     let welcome = match envelope.message {
         ServerMessage::Welcome(welcome) => welcome,
         ServerMessage::Error { error, .. } => {
-            LOGGER.debug(format_args!(
+            LOGGER.warn(format_args!(
                 "Control handshake rejected: code={} retryable={}: {}",
                 error.code, error.is_retryable, error.message,
             ));
@@ -267,6 +267,10 @@ async fn connect(
                 "cache_unavailable" | "stale_playback" | "stream_unavailable"
             ) && !(error.code == "stream_unavailable" && error.is_retryable)
             {
+                LOGGER.info(format_args!(
+                    "Stopping retained playback after handshake rejection: code={}; control reconnect will continue",
+                    error.code,
+                ));
                 output
                     .execute(ControlCommand::Stop {
                         command_id: 0,
@@ -284,7 +288,7 @@ async fn connect(
         .ok_or("Mashin welcome has no connection epoch")?;
     output.reconcile(welcome.clone()).await?;
     configuration.audio_profile = welcome.selected_audio_profile;
-    LOGGER.debug(format_args!(
+    LOGGER.info(format_args!(
         "Control handshake completed: player={}, audio_profile={:?}",
         welcome.player_id, welcome.selected_audio_profile,
     ));
@@ -359,6 +363,7 @@ async fn connect(
                                 if error.code == "stream_unavailable" && error.is_retryable {
                                     return Err("Mashin audio transport interrupted".into());
                                 }
+                                LOGGER.info(format_args!("Stopping retained playback after server error: code={}; control reconnect will continue", error.code));
                                 output.execute(ControlCommand::Stop { command_id: 0, stream_id: None }).await?;
                                 return Err("Mashin server revoked retained playback".into());
                             }
@@ -372,7 +377,7 @@ async fn connect(
             result = finish_connecting(&mut connecting) => {
                 connecting = None;
                 audio = Some(result.map_err(|error| format!("Mashin audio setup failed: {error}"))?);
-                LOGGER.debug(format_args!("Audio connection established: connection_id={audio_connection_id}"));
+                LOGGER.info(format_args!("Audio connection established: connection_id={audio_connection_id}"));
                 snapshots.send_modify(|snapshot| snapshot.audio_connection = ConnectionState::Connected);
                 report(&mut control, &epoch, output, &mut sequence, &mut last_event_id, true, *audio_connection_id).await?;
             }
@@ -397,16 +402,16 @@ async fn connect(
                     Ok(Message::Pong(_)) => {}
                     message => {
                         match message {
-                            Err(error) => LOGGER.debug(format_args!("Audio connection #{audio_connection_id} lost: {error}")),
-                            Ok(Message::Close(frame)) => LOGGER.debug(format_args!("Audio connection #{audio_connection_id} closed by peer (code={:?})", frame.as_ref().map(|frame| frame.code))),
-                            _ => LOGGER.debug(format_args!("Audio connection #{audio_connection_id} interrupted by unexpected frame")),
+                            Err(error) => LOGGER.info(format_args!("Audio connection #{audio_connection_id} lost: {error}")),
+                            Ok(Message::Close(frame)) => LOGGER.info(format_args!("Audio connection #{audio_connection_id} closed by peer (code={:?})", frame.as_ref().map(|frame| frame.code))),
+                            _ => LOGGER.info(format_args!("Audio connection #{audio_connection_id} interrupted by unexpected frame")),
                         }
                         audio = None;
                         snapshots.send_modify(|snapshot| snapshot.audio_connection = ConnectionState::Connecting);
                         let request_id = Uuid::new_v4().to_string();
                         sequence = increment(sequence)?;
                         send(&mut control, ClientMessage::AudioReconnectRequest { sequence, request_id: request_id.clone() }, Some(&epoch)).await?;
-                        LOGGER.debug(format_args!("Audio reconnect binding requested after connection #{audio_connection_id}"));
+                        LOGGER.info(format_args!("Audio reconnect binding requested after connection #{audio_connection_id}"));
                         pending_binding = Some((request_id, Instant::now()));
                     }
                 }
@@ -589,7 +594,7 @@ fn connect_audio(
     output: MashinAudioAdapter,
 ) -> ConnectingAudio {
     Box::pin(async move {
-        LOGGER.debug(format_args!(
+        LOGGER.info(format_args!(
             "Audio connection attempt: connection_id={audio_connection_id}"
         ));
         tokio::time::timeout(Duration::from_secs(30), async {

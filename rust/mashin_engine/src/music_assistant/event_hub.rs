@@ -13,11 +13,15 @@ use std::sync::{
 };
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
-use tokio::time::{sleep, Duration};
+use tokio::time::{sleep, Duration, Instant};
 use tokio_tungstenite::tungstenite::Message;
 
 const RECONNECT_DELAY: Duration = Duration::from_secs(2);
+const CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
 const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(10);
+const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+const PING_INTERVAL: Duration = Duration::from_secs(5);
+const PONG_TIMEOUT: Duration = Duration::from_secs(15);
 const EVENT_CHANNEL_CAPACITY: usize = 64;
 const EVENT_HUB_LOGGER: crate::logging::Logger = crate::logging::Logger::new("event_hub");
 
@@ -127,6 +131,7 @@ impl MusicAssistantEventHub {
     fn stop_worker(&mut self) {
         self.is_connected.store(false, Ordering::Release);
         if let Some(worker) = self.worker.take() {
+            EVENT_HUB_LOGGER.info("Music Assistant event hub worker stopped");
             worker.abort();
         }
     }
@@ -144,7 +149,12 @@ async fn run_event_worker(
     event_sender: broadcast::Sender<MusicAssistantEvent>,
     is_connected: Arc<AtomicBool>,
 ) {
+    let mut connection_attempt = 0_u64;
     loop {
+        connection_attempt = connection_attempt.saturating_add(1);
+        EVENT_HUB_LOGGER.info(format_args!(
+            "Music Assistant event hub connection attempt #{connection_attempt}"
+        ));
         let result =
             connect_and_forward_events(&websocket_url, &access_token, &event_sender, &is_connected)
                 .await;
@@ -153,6 +163,10 @@ async fn run_event_worker(
             EVENT_HUB_LOGGER.warn(format!("Music Assistant event hub disconnected: {error}"));
         }
         let _ = event_sender.send(MusicAssistantEvent::Disconnected);
+        EVENT_HUB_LOGGER.info(format_args!(
+            "Music Assistant event hub reconnect scheduled in {} ms",
+            RECONNECT_DELAY.as_millis(),
+        ));
         sleep(RECONNECT_DELAY).await;
     }
 }
@@ -163,11 +177,16 @@ async fn connect_and_forward_events(
     event_sender: &broadcast::Sender<MusicAssistantEvent>,
     is_connected: &AtomicBool,
 ) -> Result<(), String> {
-    let (mut websocket, _) = tokio_tungstenite::connect_async(websocket_url)
-        .await
-        .map_err(|error| format!("connect Music Assistant event hub failed: {error}"))?;
-    websocket
-        .send(Message::Text(
+    let (mut websocket, _) = tokio::time::timeout(
+        CONNECTION_TIMEOUT,
+        tokio_tungstenite::connect_async(websocket_url),
+    )
+    .await
+    .map_err(|_| "Music Assistant event hub connection timed out".to_string())?
+    .map_err(|error| format!("connect Music Assistant event hub failed: {error}"))?;
+    tokio::time::timeout(
+        WRITE_TIMEOUT,
+        websocket.send(Message::Text(
             json!({
                 "message_id": "mashin-event-hub-auth",
                 "command": "auth",
@@ -175,9 +194,11 @@ async fn connect_and_forward_events(
             })
             .to_string()
             .into(),
-        ))
-        .await
-        .map_err(|error| format!("authenticate Music Assistant event hub failed: {error}"))?;
+        )),
+    )
+    .await
+    .map_err(|_| "Music Assistant event hub authentication write timed out".to_string())?
+    .map_err(|error| format!("authenticate Music Assistant event hub failed: {error}"))?;
 
     tokio::time::timeout(AUTHENTICATION_TIMEOUT, async {
         while let Some(message) = websocket.next().await {
@@ -209,18 +230,54 @@ async fn connect_and_forward_events(
     .await
     .map_err(|_| "Music Assistant authentication timed out".to_string())??;
     is_connected.store(true, Ordering::Release);
+    EVENT_HUB_LOGGER.info("Music Assistant event hub connected and authenticated");
     let _ = event_sender.send(MusicAssistantEvent::Connected);
 
-    while let Some(message) = websocket.next().await {
+    let mut ping = tokio::time::interval_at(Instant::now() + PING_INTERVAL, PING_INTERVAL);
+    ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut outstanding_ping: Option<(Vec<u8>, Instant)> = None;
+    loop {
+        let message = tokio::select! {
+            message = websocket.next() => match message {
+                Some(message) => message,
+                None => break,
+            },
+            _ = async {
+                match &outstanding_ping {
+                    Some((_, sent)) => tokio::time::sleep_until(*sent + PONG_TIMEOUT).await,
+                    None => std::future::pending().await,
+                }
+            } => return Err("Music Assistant event hub liveness timed out".to_string()),
+            _ = ping.tick() => {
+                if outstanding_ping.is_none() {
+                    let payload = uuid::Uuid::new_v4().as_bytes().to_vec();
+                    tokio::time::timeout(WRITE_TIMEOUT, websocket.send(Message::Ping(payload.clone().into())))
+                        .await
+                        .map_err(|_| "Music Assistant event hub ping write timed out".to_string())?
+                        .map_err(|error| format!("Music Assistant event hub ping failed: {error}"))?;
+                    outstanding_ping = Some((payload, Instant::now()));
+                }
+                continue;
+            }
+        };
         let message =
             message.map_err(|error| format!("read Music Assistant event failed: {error}"))?;
         let payload = match message {
             Message::Text(payload) => payload,
             Message::Ping(payload) => {
-                websocket
-                    .send(Message::Pong(payload))
+                tokio::time::timeout(WRITE_TIMEOUT, websocket.send(Message::Pong(payload)))
                     .await
+                    .map_err(|_| "Music Assistant event hub pong write timed out".to_string())?
                     .map_err(|error| format!("MA event pong failed: {error}"))?;
+                continue;
+            }
+            Message::Pong(payload) => {
+                if outstanding_ping
+                    .as_ref()
+                    .is_some_and(|(expected, _)| expected.as_slice() == payload.as_ref())
+                {
+                    outstanding_ping = None;
+                }
                 continue;
             }
             Message::Close(_) => break,
@@ -432,5 +489,122 @@ mod tests {
             "message_id": "mashin-event-hub-auth",
             "result": { "authenticated": false },
         })));
+    }
+
+    #[tokio::test]
+    async fn detects_unresponsive_authenticated_connection() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (release, hold_connection) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            assert!(matches!(
+                socket.next().await.unwrap().unwrap(),
+                Message::Text(_)
+            ));
+            socket
+                .send(Message::Text(
+                    json!({
+                        "message_id":"mashin-event-hub-auth", "result":{"authenticated":true}
+                    })
+                    .to_string()
+                    .into(),
+                ))
+                .await
+                .unwrap();
+            let _ = hold_connection.await;
+            drop(socket);
+        });
+        let (sender, _) = tokio::sync::broadcast::channel(8);
+        let connected = std::sync::atomic::AtomicBool::new(false);
+        let result = tokio::time::timeout(
+            tokio::time::Duration::from_secs(25),
+            super::connect_and_forward_events(
+                &format!("ws://{address}"),
+                "test-token",
+                &sender,
+                &connected,
+            ),
+        )
+        .await;
+        let _ = release.send(());
+        server.await.unwrap();
+        assert_eq!(
+            result.expect("unresponsive connection must not hang indefinitely"),
+            Err("Music Assistant event hub liveness timed out".to_string()),
+        );
+    }
+
+    #[tokio::test]
+    async fn reconnects_after_stalled_connection_and_resumes_events() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (release, hold_connection) = tokio::sync::oneshot::channel::<()>();
+        let server =
+            tokio::spawn(async move {
+                let mut retained_sockets = Vec::new();
+                for generation in 0..2 {
+                    let (stream, _) = listener.accept().await.unwrap();
+                    let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+                    assert!(matches!(
+                        socket.next().await.unwrap().unwrap(),
+                        Message::Text(_)
+                    ));
+                    socket.send(Message::Text(json!({
+                    "message_id":"mashin-event-hub-auth", "result":{"authenticated":true}
+                }).to_string().into())).await.unwrap();
+                    if generation == 1 {
+                        for _ in 0..2 {
+                            let Message::Ping(payload) = socket.next().await.unwrap().unwrap()
+                            else {
+                                panic!("expected event hub heartbeat");
+                            };
+                            socket.send(Message::Pong(payload)).await.unwrap();
+                        }
+                        socket
+                            .send(Message::Text(
+                                json!({
+                                    "event":"queue_items_updated", "object_id":"reconnected-player"
+                                })
+                                .to_string()
+                                .into(),
+                            ))
+                            .await
+                            .unwrap();
+                    }
+                    retained_sockets.push(socket);
+                }
+                let _ = hold_connection.await;
+                drop(retained_sockets);
+            });
+        let (sender, mut events) = tokio::sync::broadcast::channel(8);
+        let connected = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let worker = tokio::spawn(super::run_event_worker(
+            format!("ws://{address}"),
+            "test-token".into(),
+            sender,
+            connected.clone(),
+        ));
+        let result = tokio::time::timeout(tokio::time::Duration::from_secs(40), async {
+            assert_eq!(events.recv().await.unwrap(), MusicAssistantEvent::Connected);
+            assert_eq!(events.recv().await.unwrap(), MusicAssistantEvent::Disconnected);
+            assert!(!connected.load(std::sync::atomic::Ordering::Acquire));
+            assert_eq!(events.recv().await.unwrap(), MusicAssistantEvent::Connected);
+            assert!(matches!(events.recv().await.unwrap(), MusicAssistantEvent::QueueItemsUpdated(queue_id)
+                if queue_id.0 == "reconnected-player"));
+            assert!(connected.load(std::sync::atomic::Ordering::Acquire));
+        }).await;
+        worker.abort();
+        let _ = worker.await;
+        let _ = release.send(());
+        server.await.unwrap();
+        result.expect("event hub must reconnect and resume live events");
     }
 }
