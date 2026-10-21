@@ -8,11 +8,37 @@ import 'package:mashin_flutter/features/core/core_events.dart';
 import 'package:mashin_flutter/features/core/core_models.dart';
 import 'package:mashin_flutter/features/shared/selection/selection_controller.dart';
 import 'package:mashin_flutter/features/shared/widgets/media_image.dart';
+import 'package:mashin_flutter/features/shared/widgets/media_row_section_desktop.dart';
+import 'package:mashin_flutter/features/shared/widgets/media_row_section_mobile.dart';
+import 'package:mashin_flutter/features/shared/widgets/media_slide_section_desktop.dart';
+import 'package:mashin_flutter/features/shared/widgets/media_slide_section_mobile.dart';
 import 'package:mashin_flutter/features/shared/widgets/media_table_section_desktop.dart';
+import 'package:mashin_flutter/features/shared/widgets/media_table_section_mobile.dart';
 
 class _UnusedCoreBridge implements MashinCoreBridgeApi {
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _PlaybackCoreBridge extends _UnusedCoreBridge {
+  final List<List<MediaItem>> radioRequests = <List<MediaItem>>[];
+  final List<List<MediaItem>> playRequests = <List<MediaItem>>[];
+
+  @override
+  Future<void> startRadio(List<MediaItem> mediaItems) async {
+    radioRequests.add(mediaItems);
+  }
+
+  @override
+  Future<void> queuePlayMedia(
+    List<MediaItem> mediaItems, {
+    QueueOption option = QueueOption.replace,
+    int? startItem,
+    bool shuffle = false,
+    String? providerInstance,
+  }) async {
+    playRequests.add(mediaItems);
+  }
 }
 
 class _ControlledDeferredScrollPhysics extends ClampingScrollPhysics {
@@ -39,6 +65,141 @@ class _ControlledDeferredScrollPhysics extends ClampingScrollPhysics {
 }
 
 void main() {
+  // Primary playback contracts across mobile and desktop section layouts.
+  for (final String layout in <String>[
+    'mobile slider',
+    'desktop slider',
+    'mobile row',
+    'desktop row',
+    'mobile table',
+    'desktop table',
+  ]) {
+    for (final bool startsTrackRadio in <bool>[false, true]) {
+      testWidgets('$layout primary playback radio=$startsTrackRadio', (
+        WidgetTester tester,
+      ) async {
+        tester.view.physicalSize = const Size(1200, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final _PlaybackCoreBridge bridge = _PlaybackCoreBridge();
+        final MashinCoreBridgeEvents events = MashinCoreBridgeEvents(
+          coreBridge: bridge,
+        );
+        addTearDown(events.dispose);
+        final List<Track> tracks = List<Track>.generate(
+          3,
+          (int index) => Track(
+            itemId: 'playback-$index',
+            provider: 'test',
+            name: 'Playback $index',
+            duration: 120,
+            artists: const <Artist>[],
+          ),
+        );
+        final Widget section = switch (layout) {
+          'mobile slider' => MediaSlideSectionMobile<Track>(
+            title: 'Tracks',
+            items: tracks,
+            isLoading: false,
+            emptyText: 'Empty',
+            coreBridge: bridge,
+            coreEvents: events,
+            startsTrackRadio: startsTrackRadio,
+          ),
+          'desktop slider' => MediaSlideSectionDesktop<Track>(
+            title: 'Tracks',
+            items: tracks,
+            isLoading: false,
+            emptyText: 'Empty',
+            coreBridge: bridge,
+            coreEvents: events,
+            startsTrackRadio: startsTrackRadio,
+          ),
+          'mobile row' => MediaRowSectionMobile<Track>(
+            title: 'Tracks',
+            items: tracks,
+            isLoading: false,
+            emptyText: 'Empty',
+            coreBridge: bridge,
+            coreEvents: events,
+            startsTrackRadio: startsTrackRadio,
+          ),
+          'desktop row' => MediaRowSectionDesktop<Track>(
+            title: 'Tracks',
+            items: tracks,
+            isLoading: false,
+            emptyText: 'Empty',
+            coreBridge: bridge,
+            coreEvents: events,
+            startsTrackRadio: startsTrackRadio,
+          ),
+          'mobile table' => CustomScrollView(
+            slivers: <Widget>[
+              MediaTableSectionMobile<Track>(
+                title: 'Tracks',
+                items: tracks,
+                isLoading: false,
+                emptyText: 'Empty',
+                coreBridge: bridge,
+                coreEvents: events,
+                startsTrackRadio: startsTrackRadio,
+              ),
+            ],
+          ),
+          _ => MediaTableSectionDesktop<Track>(
+            title: 'Tracks',
+            items: tracks,
+            isLoading: false,
+            emptyText: 'Empty',
+            coreBridge: bridge,
+            coreEvents: events,
+            startsTrackRadio: startsTrackRadio,
+          ),
+        };
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.dark(),
+            home: Scaffold(body: section),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byIcon(Icons.play_arrow).first);
+        await tester.pump();
+        if (startsTrackRadio) {
+          expect(bridge.radioRequests.single, <MediaItem>[tracks.first]);
+          expect(bridge.playRequests, isEmpty);
+        } else {
+          expect(bridge.playRequests.single, tracks);
+          expect(bridge.radioRequests, isEmpty);
+        }
+        bridge.radioRequests.clear();
+        bridge.playRequests.clear();
+        if (layout.endsWith('table')) {
+          await tester.tap(find.text('Playback 1'));
+          if (layout == 'desktop table') {
+            await tester.pump(const Duration(milliseconds: 50));
+            await tester.tap(find.text('Playback 1'));
+          }
+          await tester.pumpAndSettle();
+          if (startsTrackRadio) {
+            expect(bridge.radioRequests.single, <MediaItem>[tracks[1]]);
+            expect(bridge.playRequests, isEmpty);
+          } else {
+            expect(bridge.playRequests.single, tracks.sublist(1));
+            expect(bridge.radioRequests, isEmpty);
+          }
+        } else if (startsTrackRadio && layout.startsWith('mobile')) {
+          await tester.tap(find.text('Playback 0'));
+          await tester.pump();
+          expect(bridge.radioRequests.single, <MediaItem>[tracks.first]);
+          expect(bridge.playRequests, isEmpty);
+        }
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
+
   testWidgets('rapid desktop wheel scroll loads newly visible covers', (
     WidgetTester tester,
   ) async {

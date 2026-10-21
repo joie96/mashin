@@ -147,6 +147,7 @@ class _ExploreFeedState extends State<ExploreFeed> {
     if (widget.isCompact) {
       return MediaSlideSectionMobile<Track>(
         title: 'Entdecke etwas Neues',
+        startsTrackRadio: true,
         items: _controller.weeklyExploration,
         isLoading: _controller.isLoading,
         emptyText: 'Keine Weekly Exploration verfügbar.',
@@ -158,6 +159,7 @@ class _ExploreFeedState extends State<ExploreFeed> {
     }
     return MediaSlideSectionDesktop<Track>(
       title: 'Entdecke etwas Neues',
+      startsTrackRadio: true,
       items: _controller.weeklyExploration,
       isLoading: _controller.isLoading,
       emptyText: 'Keine Weekly Exploration verfügbar.',
@@ -234,6 +236,7 @@ class _ExploreFeedState extends State<ExploreFeed> {
     if (widget.isCompact) {
       return MediaRowSectionMobile<T>(
         title: title,
+        startsTrackRadio: T == Track,
         items: items,
         emptyText: emptyText,
         isLoading: _controller.isLoading,
@@ -246,6 +249,7 @@ class _ExploreFeedState extends State<ExploreFeed> {
     }
     return MediaRowSectionDesktop<T>(
       title: title,
+      startsTrackRadio: T == Track,
       items: items,
       emptyText: emptyText,
       isLoading: _controller.isLoading,

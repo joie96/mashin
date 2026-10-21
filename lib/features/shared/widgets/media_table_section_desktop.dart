@@ -45,6 +45,7 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
   final DesktopRowFavoriteResolver<T>? isRowFavorite;
   final MashinCoreBridgeApi coreBridge;
   final MashinCoreBridgeEvents coreEvents;
+  final bool startsTrackRadio;
   final ValueChanged<Artist>? onArtistTap;
   final ValueChanged<Album>? onAlbumTap;
   final ValueChanged<Playlist>? onPlaylistTap;
@@ -70,6 +71,7 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
     this.isRowFavorite,
     required this.coreBridge,
     required this.coreEvents,
+    this.startsTrackRadio = false,
     this.onArtistTap,
     this.onAlbumTap,
     this.onPlaylistTap,
@@ -273,7 +275,12 @@ class _MediaTableSectionDesktopState<T>
     }
 
     try {
-      await widget.coreBridge.queuePlayMedia(playItems);
+      if (widget.startsTrackRadio && item is Track) {
+        if (!_isValidPlayable(item)) return false;
+        await widget.coreBridge.startRadio(<MediaItem>[item]);
+      } else {
+        await widget.coreBridge.queuePlayMedia(playItems);
+      }
       return true;
     } catch (_) {
       return false;
@@ -552,9 +559,13 @@ class _MediaTableSectionDesktopState<T>
 
     unawaited(() async {
       try {
-        await widget.coreBridge.queuePlayMedia(
-          _isTrackSection ? playItems : <MediaItem>[playItems.first],
-        );
+        if (widget.startsTrackRadio && _isTrackSection) {
+          await widget.coreBridge.startRadio(<MediaItem>[playItems.first]);
+        } else {
+          await widget.coreBridge.queuePlayMedia(
+            _isTrackSection ? playItems : <MediaItem>[playItems.first],
+          );
+        }
       } catch (_) {
         // Ignore failures to keep header interactions responsive.
       }

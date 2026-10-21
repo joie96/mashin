@@ -354,6 +354,7 @@ class _RecommendationsSection extends StatelessWidget {
       builder: (BuildContext context, Widget? child) =>
           MediaSlideSectionMobile<Track>(
             title: 'Unsere Empfehlungen für dich',
+            startsTrackRadio: true,
             isLoading: controller.isLoadingRecommendations,
             items: controller.recommendationItems,
             emptyText: 'Keine Empfehlungen verfügbar.',
@@ -515,6 +516,7 @@ class _TopTracksSection extends StatelessWidget {
         builder: (BuildContext context, Widget? child) {
           return MediaRowSectionMobile<Track>(
             title: 'Deine Lieblingssongs',
+            startsTrackRadio: true,
             isLoading: controller.isLoadingTopTracks,
             items: controller.topTracks,
             emptyText: 'Keine Top-Tracks verfügbar.',
@@ -589,6 +591,7 @@ class _RecentListensSection extends StatelessWidget {
         builder: (BuildContext context, Widget? child) {
           return MediaRowSectionMobile<Track>(
             title: 'Kürzlich gespielt',
+            startsTrackRadio: true,
             isLoading: controller.isLoadingRecentListens,
             items: controller.recentListens,
             emptyText: 'Keine kürzlich gehörten Tracks verfügbar.',

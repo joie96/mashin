@@ -26,6 +26,7 @@ class MediaTableSectionMobile<T> extends StatefulWidget {
   final ValueChanged<List<T>>? onSelectionMenuTap;
   final MashinCoreBridgeApi coreBridge;
   final MashinCoreBridgeEvents coreEvents;
+  final bool startsTrackRadio;
   final String Function(Playlist playlist)? playlistSubtitleBuilder;
 
   const MediaTableSectionMobile({
@@ -43,6 +44,7 @@ class MediaTableSectionMobile<T> extends StatefulWidget {
     this.onSelectionMenuTap,
     required this.coreBridge,
     required this.coreEvents,
+    this.startsTrackRadio = false,
     this.playlistSubtitleBuilder,
   });
 
@@ -120,9 +122,13 @@ class _MediaTableSectionMobileState<T>
 
     unawaited(() async {
       try {
-        await widget.coreBridge.queuePlayMedia(
-          _isTrackSection ? playItems : <MediaItem>[playItems.first],
-        );
+        if (widget.startsTrackRadio && _isTrackSection) {
+          await widget.coreBridge.startRadio(<MediaItem>[playItems.first]);
+        } else {
+          await widget.coreBridge.queuePlayMedia(
+            _isTrackSection ? playItems : <MediaItem>[playItems.first],
+          );
+        }
       } catch (_) {
         // Ignore failures to keep header interactions responsive.
       }
@@ -172,7 +178,12 @@ class _MediaTableSectionMobileState<T>
     }
 
     try {
-      await widget.coreBridge.queuePlayMedia(playItems);
+      if (widget.startsTrackRadio && item is Track) {
+        if (!_isValidPlayable(item)) return false;
+        await widget.coreBridge.startRadio(<MediaItem>[item]);
+      } else {
+        await widget.coreBridge.queuePlayMedia(playItems);
+      }
       return true;
     } catch (_) {
       return false;

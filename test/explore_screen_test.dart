@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -134,7 +135,12 @@ void main() {
     addTearDown(controller.dispose);
     await controller.load();
     expect(controller.weeklyExploration, hasLength(8));
-    expect(controller.weeklyExploration.first.itemId, 'exploration-track-0');
+    expect(
+      controller.weeklyExploration.map((Track track) => track.itemId),
+      unorderedEquals(
+        List<String>.generate(8, (int index) => 'exploration-track-$index'),
+      ),
+    );
     expect(controller.weeklyAlbums.single.itemId, 'sitewide_top_albums_weekly');
     expect(controller.similarUsersJam, hasLength(8));
     expect(
@@ -152,6 +158,39 @@ void main() {
     expect(controller.weeklyArtists.single.itemId, 'artist');
     expect(controller.isLoading, isFalse);
     expect(controller.hasLoadError, isFalse);
+  });
+
+  test('exploration tracks are shuffled on every load', () async {
+    final ExploreController controller = ExploreController(
+      coreBridge: _ExploreBridge(),
+      random: math.Random(42),
+    );
+    addTearDown(controller.dispose);
+    final math.Random expectedRandom = math.Random(42);
+    final List<String> originalOrder = List<String>.generate(
+      8,
+      (int index) => 'exploration-track-$index',
+    );
+    List<String> previousOrder = originalOrder;
+
+    for (int loadIndex = 0; loadIndex < 2; loadIndex++) {
+      final List<String> expectedOrder = List<String>.of(originalOrder)
+        ..shuffle(expectedRandom);
+      await controller.load();
+      final List<String> actualOrder = controller.weeklyExploration
+          .map((Track track) => track.itemId)
+          .toList(growable: false);
+      expect(actualOrder, expectedOrder);
+      expect(actualOrder, isNot(orderedEquals(previousOrder)));
+      expect(
+        controller.similarUsersJam.map((Track track) => track.itemId),
+        List<String>.generate(
+          8,
+          (int index) => 'similarusers_jam_latest-track-$index',
+        ),
+      );
+      previousOrder = actualOrder;
+    }
   });
 
   test('failed refresh preserves loaded explore contents', () async {
@@ -382,13 +421,39 @@ void main() {
         expect(find.byTooltip('Aktualisieren'), findsNothing);
         expect(find.text('Weekly Mix'), findsNothing);
         expect(find.text('Similar Listener Weekly Jams'), findsNothing);
-        expect(find.text('exploration Track 0'), findsWidgets);
+        expect(find.textContaining('exploration Track '), findsWidgets);
         if (isCompact) {
           final MediaTableSectionMobile<Track> table = tester.widget(jams);
+          expect(table.startsTrackRadio, isFalse);
+          expect(
+            tester
+                .widget<MediaSlideSectionMobile<Track>>(slider)
+                .startsTrackRadio,
+            isTrue,
+          );
+          expect(
+            tester
+                .widget<MediaRowSectionMobile<Track>>(tracks)
+                .startsTrackRadio,
+            isTrue,
+          );
           expect(table.maxItemsPerPage, 3);
           expect(table.items, hasLength(8));
         } else {
           final MediaTableSectionDesktop<Track> table = tester.widget(jams);
+          expect(table.startsTrackRadio, isFalse);
+          expect(
+            tester
+                .widget<MediaSlideSectionDesktop<Track>>(slider)
+                .startsTrackRadio,
+            isTrue,
+          );
+          expect(
+            tester
+                .widget<MediaRowSectionDesktop<Track>>(tracks)
+                .startsTrackRadio,
+            isTrue,
+          );
           expect(table.maxItemsPerPage, 5);
           expect(table.items, hasLength(8));
         }

@@ -24,6 +24,7 @@ class MediaRowSectionMobile<T> extends StatefulWidget {
   final int skeletonCount;
   final MashinCoreBridgeApi coreBridge;
   final MashinCoreBridgeEvents? coreEvents;
+  final bool startsTrackRadio;
   final ValueChanged<T>? onItemTap;
   final ValueChanged<List<T>>? onSelectionMenuTap;
   final bool showAlbumArtist;
@@ -41,6 +42,7 @@ class MediaRowSectionMobile<T> extends StatefulWidget {
     this.skeletonCount = 6,
     required this.coreBridge,
     this.coreEvents,
+    this.startsTrackRadio = false,
     this.onItemTap,
     this.onSelectionMenuTap,
     this.showAlbumArtist = true,
@@ -171,9 +173,13 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
 
     unawaited(() async {
       try {
-        await widget.coreBridge.queuePlayMedia(
-          _isTrackSection ? playItems : <MediaItem>[playItems.first],
-        );
+        if (widget.startsTrackRadio && _isTrackSection) {
+          await widget.coreBridge.startRadio(<MediaItem>[playItems.first]);
+        } else {
+          await widget.coreBridge.queuePlayMedia(
+            _isTrackSection ? playItems : <MediaItem>[playItems.first],
+          );
+        }
       } catch (_) {
         // Ignore failures to keep header interactions responsive.
       }
@@ -214,7 +220,13 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
 
     unawaited(() async {
       try {
-        await widget.coreBridge.queuePlayMedia(<MediaItem>[item]);
+        if (widget.startsTrackRadio && item is Track) {
+          await widget.coreBridge.startRadio(<MediaItem>[item]);
+        } else {
+          await widget.coreBridge.queuePlayMedia(
+            item is Track ? _playableItemsFromIndex(index) : <MediaItem>[item],
+          );
+        }
       } catch (_) {
         // Ignore failures to keep row interactions responsive.
       }
@@ -347,7 +359,9 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
                     _selectionController.select(index, items.length),
                 onToggleSelection: () =>
                     _selectionController.toggle(index, items.length),
-                onTap: _itemTapCallback(items[index]),
+                onTap: widget.startsTrackRadio && items[index] is Track
+                    ? () => _onPlayTap(index)
+                    : _itemTapCallback(items[index]),
                 child: _buildMobileTypedRow(
                   item: items[index],
                   index: index,

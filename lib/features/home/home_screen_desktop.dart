@@ -187,6 +187,7 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
               builder: (BuildContext context, Widget? child) =>
                   MediaSlideSectionDesktop<Track>(
                     title: 'Unsere Empfehlungen für dich',
+                    startsTrackRadio: true,
                     isLoading: _controller.isLoadingRecommendations,
                     items: _controller.recommendationItems,
                     emptyText: 'Keine Empfehlungen verfügbar.',
@@ -261,6 +262,7 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
               builder: (BuildContext context, Widget? child) =>
                   MediaRowSectionDesktop<Track>(
                     title: 'Deine Lieblingssongs',
+                    startsTrackRadio: true,
                     isLoading: _controller.isLoadingTopTracks,
                     items: _controller.topTracks,
                     emptyText: 'Keine Top-Tracks verfügbar.',
@@ -345,6 +347,7 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
               builder: (BuildContext context, Widget? child) =>
                   MediaRowSectionDesktop<Track>(
                     title: 'Kürzlich gespielt',
+                    startsTrackRadio: true,
                     isLoading: _controller.isLoadingRecentListens,
                     items: _controller.recentListens,
                     emptyText: 'Keine kürzlich gehörten Tracks verfügbar.',

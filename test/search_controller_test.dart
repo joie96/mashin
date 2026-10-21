@@ -9,6 +9,8 @@ import 'package:mashin_flutter/features/core/core_models.dart';
 import 'package:mashin_flutter/features/search/search_controller.dart';
 import 'package:mashin_flutter/features/search/search_screen_desktop.dart';
 import 'package:mashin_flutter/features/search/search_screen_mobile.dart';
+import 'package:mashin_flutter/features/shared/widgets/media_table_section_desktop.dart';
+import 'package:mashin_flutter/features/shared/widgets/media_table_section_mobile.dart';
 
 void main() {
   test('loads every search result type through the core bridge', () async {
@@ -194,6 +196,14 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.search);
     await tester.pump();
     expect(coreBridge.query, 'jazz');
+    expect(
+      tester
+          .widget<MediaTableSectionMobile<Track>>(
+            find.byType(MediaTableSectionMobile<Track>),
+          )
+          .startsTrackRadio,
+      isTrue,
+    );
 
     await tester.enterText(find.byType(TextField), 'rock');
     await tester.pump(const Duration(milliseconds: 400));
@@ -297,6 +307,14 @@ void main() {
     await tester.pumpWidget(searchPage('jazz'));
     await tester.pumpAndSettle();
     expect(coreBridge.query, 'jazz');
+    expect(
+      tester
+          .widget<MediaTableSectionDesktop<Track>>(
+            find.byType(MediaTableSectionDesktop<Track>),
+          )
+          .startsTrackRadio,
+      isTrue,
+    );
     expect(find.byType(CustomScrollView), findsOneWidget);
 
     final ScrollPosition position = tester

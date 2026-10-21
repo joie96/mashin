@@ -318,6 +318,7 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
             slivers: <Widget>[
               MediaTableSectionMobile<Track>(
                 title: 'Titel',
+                startsTrackRadio: true,
                 items: _controller.tracks,
                 isLoading: _controller.isLoading,
                 emptyText: 'Keine favorisierten Titel.',

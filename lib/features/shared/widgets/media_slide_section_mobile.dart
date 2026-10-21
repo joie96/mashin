@@ -24,6 +24,7 @@ class MediaSlideSectionMobile<T> extends StatefulWidget {
   final int skeletonCount;
   final MashinCoreBridgeApi? coreBridge;
   final MashinCoreBridgeEvents? coreEvents;
+  final bool startsTrackRadio;
   final ValueChanged<T>? onItemTap;
   final ValueChanged<List<T>>? onSelectionMenuTap;
 
@@ -40,6 +41,7 @@ class MediaSlideSectionMobile<T> extends StatefulWidget {
     this.skeletonCount = 4,
     this.coreBridge,
     this.coreEvents,
+    this.startsTrackRadio = false,
     this.onItemTap,
     this.onSelectionMenuTap,
   });
@@ -118,7 +120,11 @@ class _MediaSlideSectionMobileState<T>
 
     unawaited(() async {
       try {
-        await bridge.queuePlayMedia(<MediaItem>[item]);
+        if (widget.startsTrackRadio && item is Track) {
+          await bridge.startRadio(<MediaItem>[item]);
+        } else {
+          await bridge.queuePlayMedia(<MediaItem>[item]);
+        }
       } catch (_) {
         // Keep row interactions responsive when playback rejects an item.
       }
@@ -151,9 +157,13 @@ class _MediaSlideSectionMobileState<T>
 
     unawaited(() async {
       try {
-        await bridge.queuePlayMedia(
-          _isTrackSection ? playItems : <MediaItem>[playItems.first],
-        );
+        if (widget.startsTrackRadio && _isTrackSection) {
+          await bridge.startRadio(<MediaItem>[playItems.first]);
+        } else {
+          await bridge.queuePlayMedia(
+            _isTrackSection ? playItems : <MediaItem>[playItems.first],
+          );
+        }
       } catch (_) {
         // Keep header interactions responsive when playback rejects an item.
       }
@@ -252,11 +262,13 @@ class _MediaSlideSectionMobileState<T>
             onToggleSelection: () =>
                 _selectionController.toggle(index, widget.items.length),
             onTap:
-                widget.onItemTap == null ||
+                (widget.onItemTap == null && !widget.startsTrackRadio) ||
                     (widget.items[index] is Track &&
                         !(widget.items[index] as Track).canPlay)
                 ? null
-                : () => widget.onItemTap!(widget.items[index]),
+                : () => widget.startsTrackRadio && widget.items[index] is Track
+                      ? _playItem(index)
+                      : widget.onItemTap?.call(widget.items[index]),
             child: Opacity(
               opacity:
                   resolvePlayableMediaItem(widget.items[index])?.canPlay ==

@@ -372,6 +372,7 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
         _sectionSliver(
           MediaTableSectionDesktop<Track>(
             title: 'Titel',
+            startsTrackRadio: true,
             items: _controller.tracks,
             isLoading: _controller.isLoading,
             emptyText: 'Keine favorisierten Titel.',

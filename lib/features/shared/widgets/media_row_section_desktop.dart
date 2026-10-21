@@ -32,6 +32,7 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
   final int skeletonCount;
   final MashinCoreBridgeApi coreBridge;
   final MashinCoreBridgeEvents? coreEvents;
+  final bool startsTrackRadio;
   final bool enableSelection;
   final DesktopRowAction<T>? onRowMoreTap;
   final DesktopRowMoreAnchorAction<T>? onRowMoreAnchorTap;
@@ -57,6 +58,7 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
     this.skeletonCount = 8,
     required this.coreBridge,
     this.coreEvents,
+    this.startsTrackRadio = false,
     this.enableSelection = true,
     this.onRowMoreTap,
     this.onRowMoreAnchorTap,
@@ -590,7 +592,15 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
 
     unawaited(() async {
       try {
-        await widget.coreBridge.queuePlayMedia(<MediaItem>[item]);
+        if (widget.startsTrackRadio && item is Track) {
+          await widget.coreBridge.startRadio(<MediaItem>[item]);
+        } else {
+          await widget.coreBridge.queuePlayMedia(
+            item is Track
+                ? _playableItemsFromIndex(absoluteIndex)
+                : <MediaItem>[item],
+          );
+        }
       } catch (_) {
         // Ignore failures to keep row interactions responsive.
       }
@@ -605,9 +615,13 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
 
     unawaited(() async {
       try {
-        await widget.coreBridge.queuePlayMedia(
-          _isTrackSection ? playItems : <MediaItem>[playItems.first],
-        );
+        if (widget.startsTrackRadio && _isTrackSection) {
+          await widget.coreBridge.startRadio(<MediaItem>[playItems.first]);
+        } else {
+          await widget.coreBridge.queuePlayMedia(
+            _isTrackSection ? playItems : <MediaItem>[playItems.first],
+          );
+        }
       } catch (_) {
         // Ignore failures to keep header interactions responsive.
       }

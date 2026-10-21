@@ -291,6 +291,7 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
               slivers: <Widget>[
                 MediaTableSectionMobile<Track>(
                   title: 'Tracks',
+                  startsTrackRadio: true,
                   items: _controller.tracks,
                   isLoading: _controller.isLoadingTracks,
                   emptyText: 'Keine Tracks gefunden.',

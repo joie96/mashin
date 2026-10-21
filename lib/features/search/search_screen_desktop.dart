@@ -446,6 +446,7 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
           _sectionSliver(
             MediaTableSectionDesktop<Track>(
               title: 'Tracks',
+              startsTrackRadio: true,
               items: _controller.tracks,
               isLoading: _controller.isLoadingTracks,
               emptyText: 'Keine Tracks gefunden.',

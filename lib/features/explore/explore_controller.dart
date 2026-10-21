@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 
 import '../core/core_bridge.dart';
@@ -5,10 +7,15 @@ import '../core/core_models.dart';
 import '../core/core_userdata.dart';
 
 class ExploreController extends ChangeNotifier {
-  ExploreController({required this.coreBridge, this.userDataController});
+  ExploreController({
+    required this.coreBridge,
+    this.userDataController,
+    math.Random? random,
+  }) : _random = random ?? math.Random();
 
   final MashinCoreBridgeApi coreBridge;
   final UserData? userDataController;
+  final math.Random _random;
 
   bool _isDisposed = false;
   bool _isLoading = false;
@@ -50,7 +57,7 @@ class ExploreController extends ChangeNotifier {
             _tracksFromPlaylistFolders(folders, 'similarusers_jam_weekly'),
           ]);
       if (_isDisposed) return;
-      _weeklyExploration = playlistTracks[0];
+      _weeklyExploration = playlistTracks[0]..shuffle(_random);
       _weeklyAlbums = _itemsFromFolders<Album>(
         folders,
         'sitewide_top_albums_weekly',

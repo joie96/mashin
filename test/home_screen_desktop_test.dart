@@ -11,6 +11,8 @@ import 'package:mashin_flutter/features/home/home_controller.dart';
 import 'package:mashin_flutter/features/home/home_screen_mobile.dart';
 import 'package:mashin_flutter/features/shared/widgets/media_row_section_desktop.dart';
 import 'package:mashin_flutter/features/shared/widgets/media_row_section_mobile.dart';
+import 'package:mashin_flutter/features/shared/widgets/media_slide_section_desktop.dart';
+import 'package:mashin_flutter/features/shared/widgets/media_slide_section_mobile.dart';
 
 class _HomeCoreBridge implements MashinCoreBridgeApi {
   List<RecommendationFolder> artistFolders = <RecommendationFolder>[];
@@ -203,6 +205,45 @@ void main() {
         await tester.pumpAndSettle();
         tester.view.physicalSize = Size(isCompact ? 412 : 1100, 6000);
         await tester.pumpAndSettle();
+        if (isCompact) {
+          expect(
+            tester
+                .widget<MediaSlideSectionMobile<Track>>(
+                  find.byType(MediaSlideSectionMobile<Track>),
+                )
+                .startsTrackRadio,
+            isTrue,
+          );
+          final List<MediaRowSectionMobile<Track>> trackSections = tester
+              .widgetList<MediaRowSectionMobile<Track>>(
+                find.byType(MediaRowSectionMobile<Track>),
+              )
+              .toList();
+          expect(trackSections, hasLength(2));
+          expect(
+            trackSections.every((section) => section.startsTrackRadio),
+            isTrue,
+          );
+        } else {
+          expect(
+            tester
+                .widget<MediaSlideSectionDesktop<Track>>(
+                  find.byType(MediaSlideSectionDesktop<Track>),
+                )
+                .startsTrackRadio,
+            isTrue,
+          );
+          final List<MediaRowSectionDesktop<Track>> trackSections = tester
+              .widgetList<MediaRowSectionDesktop<Track>>(
+                find.byType(MediaRowSectionDesktop<Track>),
+              )
+              .toList();
+          expect(trackSections, hasLength(2));
+          expect(
+            trackSections.every((section) => section.startsTrackRadio),
+            isTrue,
+          );
+        }
         final List<String> titles = isCompact
             ? tester
                   .widgetList<MediaRowSectionMobile<Artist>>(

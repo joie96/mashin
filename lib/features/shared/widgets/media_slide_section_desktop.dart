@@ -22,6 +22,7 @@ class MediaSlideSectionDesktop<T> extends StatefulWidget {
   final double coverSize;
   final MashinCoreBridgeApi? coreBridge;
   final MashinCoreBridgeEvents? coreEvents;
+  final bool startsTrackRadio;
   final DesktopRowAction<T>? onRowFavoriteTap;
   final DesktopRowFavoriteResolver<T>? isRowFavorite;
   final DesktopRowAction<T>? onRowMoreTap;
@@ -41,6 +42,7 @@ class MediaSlideSectionDesktop<T> extends StatefulWidget {
     this.coverSize = 200,
     this.coreBridge,
     this.coreEvents,
+    this.startsTrackRadio = false,
     this.onRowFavoriteTap,
     this.isRowFavorite,
     this.onRowMoreTap,
@@ -110,7 +112,11 @@ class _MediaSlideSectionDesktopState<T>
 
     unawaited(() async {
       try {
-        await bridge.queuePlayMedia(<MediaItem>[item]);
+        if (widget.startsTrackRadio && item is Track) {
+          await bridge.startRadio(<MediaItem>[item]);
+        } else {
+          await bridge.queuePlayMedia(<MediaItem>[item]);
+        }
       } catch (_) {
         // Keep card interactions responsive when playback rejects an item.
       }
@@ -143,9 +149,13 @@ class _MediaSlideSectionDesktopState<T>
 
     unawaited(() async {
       try {
-        await bridge.queuePlayMedia(
-          _isTrackSection ? playItems : <MediaItem>[playItems.first],
-        );
+        if (widget.startsTrackRadio && _isTrackSection) {
+          await bridge.startRadio(<MediaItem>[playItems.first]);
+        } else {
+          await bridge.queuePlayMedia(
+            _isTrackSection ? playItems : <MediaItem>[playItems.first],
+          );
+        }
       } catch (_) {
         // Keep header interactions responsive when playback rejects an item.
       }
