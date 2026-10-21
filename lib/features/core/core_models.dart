@@ -2132,6 +2132,27 @@ class MediaSessionState {
   });
 }
 
+class PreferredProvider {
+  const PreferredProvider({
+    required this.providerInstance,
+    required this.providerDomain,
+  });
+
+  final String providerInstance;
+  final String providerDomain;
+
+  factory PreferredProvider.fromJson(Map<String, dynamic> json) =>
+      PreferredProvider(
+        providerInstance: json['providerInstance'] as String,
+        providerDomain: json['providerDomain'] as String,
+      );
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'providerInstance': providerInstance,
+    'providerDomain': providerDomain,
+  };
+}
+
 class SessionSettingsUpdate {
   const SessionSettingsUpdate({
     required this.localCacheSizeBytes,
@@ -2158,6 +2179,7 @@ class SessionSettings {
     required this.localCacheSizeBytes,
     required this.isDarkTheme,
     required this.logLevel,
+    this.preferredProvider,
   });
 
   final String musicAssistantUrl;
@@ -2166,6 +2188,7 @@ class SessionSettings {
   final int localCacheSizeBytes;
   final bool isDarkTheme;
   final LogLevelPreference logLevel;
+  final PreferredProvider? preferredProvider;
 
   factory SessionSettings.fromJson(Map<String, dynamic> json) {
     return SessionSettings(
@@ -2176,6 +2199,12 @@ class SessionSettings {
           (json['localCacheSizeBytes'] as num?)?.toInt() ?? 250 * 1024 * 1024,
       isDarkTheme: json['theme'] != 'light',
       logLevel: LogLevelPreference.parse(json['logLevel'] as String? ?? 'info'),
+      preferredProvider: switch (json['preferredProvider']) {
+        final Map<String, dynamic> preferred => PreferredProvider.fromJson(
+          preferred,
+        ),
+        _ => null,
+      },
     );
   }
 }

@@ -5,6 +5,7 @@ import '../../features/core/core_events.dart';
 import '../../features/core/core_bridge.dart';
 import '../../features/core/core_models.dart';
 import '../../features/core/core_userdata.dart';
+import 'preferred_provider_controller.dart';
 
 class AppSessionController extends ChangeNotifier {
   static const Duration _startupTimeout = Duration(seconds: 5);
@@ -15,6 +16,7 @@ class AppSessionController extends ChangeNotifier {
     coreBridge = MashinCoreBridge();
     coreEvents = MashinCoreBridgeEvents(coreBridge: coreBridge);
     _instance = this;
+    PreferredProviderController.instance.addListener(notifyListeners);
   }
 
   static AppSessionController? _instance;
@@ -43,6 +45,8 @@ class AppSessionController extends ChangeNotifier {
   int get localCacheSizeBytes => _localCacheSizeBytes;
   bool get isDarkTheme => _isDarkTheme;
   LogLevelPreference get logLevel => _logLevel;
+  PreferredProvider? get preferredProvider =>
+      PreferredProviderController.instance.preferredProvider;
   Future<void> get initialSettingsReady => _initialSettingsReady.future;
 
   Future<void> initialize() async {
@@ -151,6 +155,10 @@ class AppSessionController extends ChangeNotifier {
     _localCacheSizeBytes = settings.localCacheSizeBytes;
     _isDarkTheme = settings.isDarkTheme;
     _logLevel = settings.logLevel;
+    PreferredProviderController.instance.initialize(
+      preferredProvider: settings.preferredProvider,
+      persist: coreBridge.setPreferredProvider,
+    );
   }
 
   Future<void> _initializeUserData() async {
@@ -201,11 +209,13 @@ class AppSessionController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
+    PreferredProviderController.instance.removeListener(notifyListeners);
     _disposeUserDataController();
     coreEvents.dispose();
     unawaited(_disposeCoreBridge());
     if (identical(_instance, this)) {
       _instance = null;
+      PreferredProviderController.instance.reset();
     }
     super.dispose();
   }

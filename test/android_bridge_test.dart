@@ -129,6 +129,36 @@ void main() {
     });
   });
 
+  test(
+    'preferred provider forwards typed settings and automatic selection',
+    () async {
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return null;
+      });
+      const preferred = PreferredProvider(
+        providerInstance: 'tidal-instance',
+        providerDomain: 'tidal',
+      );
+      for (final value in <PreferredProvider?>[preferred, null]) {
+        await AndroidBridge().execute(AndroidCoreCommand.setPreferredProvider, {
+          'preferredProvider': value?.toJson(),
+        });
+      }
+      expect(calls.map((call) => call.arguments), <Object?>[
+        {
+          'command': 'setPreferredProvider',
+          'arguments': {'preferredProvider': preferred.toJson()},
+        },
+        {
+          'command': 'setPreferredProvider',
+          'arguments': {'preferredProvider': null},
+        },
+      ]);
+    },
+  );
+
   test('settings commit is acknowledged by the Android service', () async {
     MethodCall? receivedCall;
     messenger.setMockMethodCallHandler(channel, (call) async {

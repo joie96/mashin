@@ -11,16 +11,22 @@ import 'package:mashin_flutter/features/playlist/playlist_detail_controller.dart
 import 'package:mashin_flutter/features/playlist/playlist_detail_page_desktop.dart';
 import 'package:mashin_flutter/features/playlist/playlist_detail_page_mobile.dart';
 import 'package:mashin_flutter/features/shared/item_provider_selection.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:mashin_flutter/app/session/preferred_provider_controller.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(
+    () => PreferredProviderController.instance.initialize(
+      preferredProvider: null,
+      persist: (_) async {},
+    ),
+  );
+  tearDown(PreferredProviderController.instance.reset);
 
   for (final isDesktop in <bool>[true, false]) {
     testWidgets(
       '${isDesktop ? 'desktop' : 'mobile'} external playlist header switches tracks',
       (tester) async {
-        SharedPreferences.setMockInitialValues(<String, Object>{});
         tester.view.physicalSize = Size(isDesktop ? 1280 : 320, 900);
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.resetPhysicalSize);
@@ -70,7 +76,6 @@ void main() {
   test(
     'external playlist switches tracks without replacing library metadata',
     () async {
-      SharedPreferences.setMockInitialValues(<String, Object>{});
       final bridge = _ProviderPlaylistCoreBridge();
       final controller = PlaylistDetailController(
         coreBridge: bridge,
@@ -378,7 +383,6 @@ void main() {
   test(
     'private playlists accept mapped tracks without an original URI',
     () async {
-      SharedPreferences.setMockInitialValues(<String, Object>{});
       final coreBridge = _PrivatePlaylistCoreBridge();
       coreBridge.addition.complete();
       final userData = UserData(coreBridge: coreBridge);
@@ -417,7 +421,6 @@ void main() {
   test(
     'adding to an online playlist uses the selected track provider',
     () async {
-      SharedPreferences.setMockInitialValues(<String, Object>{});
       final coreBridge = _FakePlaylistCoreBridge();
       final controller = PlaylistDetailController(
         coreBridge: coreBridge,

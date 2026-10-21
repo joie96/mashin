@@ -58,6 +58,10 @@ enum PlaybackCommand {
         #[serde(flatten)]
         settings: crate::core::models::SessionSettingsUpdate,
     },
+    SetPreferredProvider {
+        #[serde(deserialize_with = "Option::deserialize")]
+        preferred_provider: Option<crate::core::models::PreferredProvider>,
+    },
     SetUserDataFavorites {
         media_items: Vec<MediaItem>,
         favorite: bool,
@@ -188,6 +192,11 @@ pub(crate) fn execute_command(kind: &str, argument: Option<&str>) -> Result<(), 
         PlaybackCommand::SaveSessionSettings { settings } => {
             execute_core_command(|coordinator| coordinator.save_session_settings(settings))
         }
+        PlaybackCommand::SetPreferredProvider { preferred_provider } => {
+            execute_core_command(|coordinator| {
+                coordinator.set_preferred_provider(preferred_provider)
+            })
+        }
         PlaybackCommand::SetUserDataFavorites {
             media_items,
             favorite,
@@ -282,6 +291,34 @@ mod tests {
     use super::{decode_command, execute_command};
 
     // Platform command contracts.
+    #[test]
+    fn preferred_provider_commands_require_named_settings_or_explicit_null() {
+        let command = decode_command("setPreferredProvider", Some(r#"{"preferredProvider":{"providerInstance":"tidal-instance","providerDomain":"tidal"}}"#)).unwrap();
+        assert!(
+            matches!(command, super::PlaybackCommand::SetPreferredProvider { preferred_provider: Some(preferred) } if preferred.provider_instance == "tidal-instance" && preferred.provider_domain == "tidal")
+        );
+        assert!(matches!(
+            decode_command(
+                "setPreferredProvider",
+                Some(r#"{"preferredProvider":null}"#)
+            )
+            .unwrap(),
+            super::PlaybackCommand::SetPreferredProvider {
+                preferred_provider: None
+            }
+        ));
+        for arguments in [
+            r#"{}"#,
+            r#"{"preferredProvider":"tidal-instance"}"#,
+            r#"{"preferredProvider":{"providerInstance":"tidal-instance"}}"#,
+        ] {
+            assert!(
+                decode_command("setPreferredProvider", Some(arguments)).is_err(),
+                "{arguments}"
+            );
+        }
+    }
+
     #[test]
     fn mashin_profile_contract_rejects_removed_command_names_and_fields() {
         let command =

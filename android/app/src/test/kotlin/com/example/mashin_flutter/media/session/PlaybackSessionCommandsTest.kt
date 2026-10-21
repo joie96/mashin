@@ -42,4 +42,17 @@ class PlaybackSessionCommandsTest {
         assertFalse(PlaybackRequest(PlaybackCommandKind.QueuePlayMedia,
             """{"request":{"mediaItems":[],"option":"replace"}}""").canStartPlayback)
     }
+
+    @Test
+    fun preferredProviderSettingsRoundTripWithoutStartingPlayback() {
+        for (arguments in listOf(
+            """{"preferredProvider":{"providerInstance":"tidal-instance","providerDomain":"tidal"}}""",
+            """{"preferredProvider":null}""",
+        )) {
+            val request = PlaybackRequest(PlaybackCommandKind.SetPreferredProvider, arguments)
+            assertEquals("setPreferredProvider", request.kind.action)
+            assertFalse(request.canStartPlayback)
+            assertEquals(request, PlaybackSessionCommands.decode(PlaybackSessionCommands.encode(request)))
+        }
+    }
 }

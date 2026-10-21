@@ -7,11 +7,17 @@ import 'package:mashin_flutter/features/artist/artist_detail_page_mobile.dart';
 import 'package:mashin_flutter/features/core/core_bridge.dart';
 import 'package:mashin_flutter/features/core/core_events.dart';
 import 'package:mashin_flutter/features/core/core_models.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:mashin_flutter/app/session/preferred_provider_controller.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  setUp(() => SharedPreferences.setMockInitialValues(<String, Object>{}));
+  setUp(
+    () => PreferredProviderController.instance.initialize(
+      preferredProvider: null,
+      persist: (_) async {},
+    ),
+  );
+  tearDown(PreferredProviderController.instance.reset);
 
   test(
     'artist play and shuffle retain the selected provider for top tracks',

@@ -137,6 +137,25 @@ fn execute_async_operation(request: CoreOperationRequest) -> Result<Value, CoreE
                 Err(CoreError::command_failed("settings could not be saved"))
             }
         }
+        "setPreferredProvider" => {
+            let preferred_provider =
+                serde_json::from_value::<Option<crate::core::models::PreferredProvider>>(
+                    arguments.get("preferredProvider").cloned().ok_or_else(|| {
+                        CoreError::command_failed("preferredProvider is required")
+                    })?,
+                )
+                .map_err(|_| CoreError::command_failed("invalid preferred provider"))?;
+            let status = execute_core_command(|coordinator| {
+                coordinator.set_preferred_provider(preferred_provider)
+            });
+            if status == 0 {
+                Ok(Value::Null)
+            } else {
+                Err(CoreError::command_failed(
+                    "preferred provider could not be saved",
+                ))
+            }
+        }
         "saveLogSnapshot" => serialize_operation_result(
             crate::logging::save_log_snapshot().map_err(CoreError::internal),
         ),

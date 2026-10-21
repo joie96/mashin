@@ -9,7 +9,7 @@ import 'package:mashin_flutter/features/core/core_events.dart';
 import 'package:mashin_flutter/features/shared/item_provider_selection.dart';
 import 'package:mashin_flutter/features/shared/widgets/detail_provider_switcher.dart';
 import 'package:mashin_flutter/features/shared/widgets/media_table_section_desktop.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:mashin_flutter/app/session/preferred_provider_controller.dart';
 
 class _UnusedBridge extends Fake implements MashinCoreBridgeApi {}
 
@@ -33,10 +33,15 @@ class _PlaybackQueryBridge extends Fake implements MashinCoreBridgeApi {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(
-    () => SharedPreferences.setMockInitialValues(<String, Object>{
-      preferredProviderPreferenceKey: <String>['youtube--one', 'youtube'],
-    }),
+    () => PreferredProviderController.instance.initialize(
+      preferredProvider: const PreferredProvider(
+        providerInstance: 'youtube--one',
+        providerDomain: 'youtube',
+      ),
+      persist: (_) async {},
+    ),
   );
+  tearDown(PreferredProviderController.instance.reset);
 
   Track track() => Track.fromJson(<String, dynamic>{
     'item_id': '1',
@@ -394,10 +399,11 @@ void main() {
       await reloaded.initialize();
       expect(reloaded.mappings.first.providerInstance, 'youtube--one');
       expect(
-        (await SharedPreferences.getInstance()).getStringList(
-          preferredProviderPreferenceKey,
-        ),
-        <String>['youtube--one', 'youtube'],
+        PreferredProviderController.instance.preferredProvider?.toJson(),
+        <String, Object?>{
+          'providerInstance': 'youtube--one',
+          'providerDomain': 'youtube',
+        },
       );
       expect(item.provider, 'library');
       expect(item.name, 'Original');
@@ -563,9 +569,13 @@ void main() {
   test(
     'unavailable providers are skipped and missing preference falls back',
     () async {
-      SharedPreferences.setMockInitialValues(<String, Object>{
-        preferredProviderPreferenceKey: <String>['missing', 'missing'],
-      });
+      PreferredProviderController.instance.initialize(
+        preferredProvider: const PreferredProvider(
+          providerInstance: 'missing',
+          providerDomain: 'missing',
+        ),
+        persist: (_) async {},
+      );
       final item = MediaItem(
         itemId: '1',
         provider: 'library',

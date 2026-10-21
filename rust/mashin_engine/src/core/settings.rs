@@ -3,6 +3,29 @@
 use super::{CoreCoordinator, CORE_COORDINATOR};
 
 impl CoreCoordinator {
+    // Provider preference changes do not reconfigure playback or overwrite other settings.
+    pub(crate) fn set_preferred_provider(
+        &mut self,
+        preferred_provider: Option<crate::core::models::PreferredProvider>,
+    ) -> Result<(), String> {
+        if preferred_provider.as_ref().is_some_and(|preferred| {
+            preferred.provider_instance.trim().is_empty()
+                || preferred.provider_domain.trim().is_empty()
+                || preferred.provider_instance == "library"
+                || preferred.provider_domain == "library"
+        }) {
+            return Err("preferred provider must identify a music provider".to_string());
+        }
+        let mut session = self
+            .session_configuration
+            .clone()
+            .ok_or_else(|| "a restored session is required before saving settings".to_string())?;
+        session.preferred_provider = preferred_provider;
+        self.auth_store.save_session(session.clone())?;
+        self.session_configuration = Some(session);
+        Ok(())
+    }
+
     // Commit all settings together; failed persistence restores the previous playback configuration.
     pub(crate) fn save_session_settings(
         &mut self,

@@ -228,6 +228,13 @@ impl Default for LogLevelPreference {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct PreferredProvider {
+    pub(crate) provider_instance: String,
+    pub(crate) provider_domain: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SessionConfig {
     pub(crate) music_assistant_url: MusicAssistantServerUrl,
     pub(crate) access_token: Option<AccessToken>,
@@ -240,6 +247,8 @@ pub(crate) struct SessionConfig {
     pub(crate) theme: ThemePreference,
     #[serde(default)]
     pub(crate) log_level: LogLevelPreference,
+    #[serde(default)]
+    pub(crate) preferred_provider: Option<PreferredProvider>,
 }
 
 #[derive(Deserialize)]
@@ -274,6 +283,23 @@ mod tests {
     use super::{MediaSessionEvent, MusicAssistantQuery, MusicAssistantQueryRequest};
     use crate::music_assistant::models::media::MediaType;
     use crate::playback::models::PlayerState;
+
+    #[test]
+    fn preferred_provider_uses_named_instance_and_domain_fields() {
+        let preferred = super::PreferredProvider {
+            provider_instance: "tidal-instance".to_string(),
+            provider_domain: "tidal".to_string(),
+        };
+        let serialized = serde_json::to_value(&preferred).unwrap();
+        assert_eq!(
+            serialized,
+            serde_json::json!({"providerInstance": "tidal-instance", "providerDomain": "tidal"})
+        );
+        assert_eq!(
+            serde_json::from_value::<super::PreferredProvider>(serialized).unwrap(),
+            preferred
+        );
+    }
 
     #[test]
     fn serializes_player_state_events_with_the_dart_contract_key() {

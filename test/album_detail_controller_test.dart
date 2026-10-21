@@ -7,11 +7,17 @@ import 'package:mashin_flutter/features/album/album_detail_page_mobile.dart';
 import 'package:mashin_flutter/features/core/core_bridge.dart';
 import 'package:mashin_flutter/features/core/core_events.dart';
 import 'package:mashin_flutter/features/core/core_models.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:mashin_flutter/app/session/preferred_provider_controller.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  setUp(() => SharedPreferences.setMockInitialValues(<String, Object>{}));
+  setUp(
+    () => PreferredProviderController.instance.initialize(
+      preferredProvider: null,
+      persist: (_) async {},
+    ),
+  );
+  tearDown(PreferredProviderController.instance.reset);
 
   test('album play and shuffle send the loaded provider tracks', () async {
     final bridge = _FakeAlbumCoreBridge(hasMappings: true);

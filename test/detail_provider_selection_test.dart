@@ -7,11 +7,17 @@ import 'package:mashin_flutter/features/shared/detail_provider_selection.dart';
 import 'package:mashin_flutter/features/shared/widgets/detail_provider_switcher.dart';
 import 'package:mashin_flutter/features/shared/widgets/detail_title_mobile.dart';
 import 'package:mashin_flutter/features/shared/widgets/media_table_section_desktop.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:mashin_flutter/app/session/preferred_provider_controller.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  setUp(() => SharedPreferences.setMockInitialValues(<String, Object>{}));
+  setUp(
+    () => PreferredProviderController.instance.initialize(
+      preferredProvider: null,
+      persist: (_) async {},
+    ),
+  );
+  tearDown(PreferredProviderController.instance.reset);
 
   const deezer = ProviderMapping(
     itemId: '406',
@@ -557,12 +563,7 @@ void main() {
       expect(selection.selectedProvider, deezer.providerInstance);
       expect(artist.itemId, '78');
       expect(artist.provider, 'library');
-      expect(
-        (await SharedPreferences.getInstance()).getStringList(
-          DetailProviderSelection.preferenceKey,
-        ),
-        isNull,
-      );
+      expect(PreferredProviderController.instance.preferredProvider, isNull);
     },
   );
 
@@ -586,12 +587,13 @@ void main() {
   );
 
   test('explicit provider takes precedence over saved preference', () async {
-    SharedPreferences.setMockInitialValues(<String, Object>{
-      DetailProviderSelection.preferenceKey: <String>[
-        'ytmusic--account',
-        'ytmusic',
-      ],
-    });
+    PreferredProviderController.instance.initialize(
+      preferredProvider: const PreferredProvider(
+        providerInstance: 'ytmusic--account',
+        providerDomain: 'ytmusic',
+      ),
+      persist: (_) async {},
+    );
     final selection = DetailProviderSelection(
       itemId: deezer.itemId,
       provider: deezer.providerInstance,
@@ -600,13 +602,47 @@ void main() {
     expect(selection.selectedProvider, deezer.providerInstance);
   });
 
+  test(
+    'detail selection persists through core settings and preserves selection on failure',
+    () async {
+      PreferredProvider? submitted;
+      PreferredProviderController.instance.initialize(
+        preferredProvider: null,
+        persist: (preferred) async {
+          submitted = preferred;
+        },
+      );
+      final selection = DetailProviderSelection(
+        itemId: '78',
+        provider: 'library',
+      );
+      await selection.initialize(artist);
+      await selection.select(youtube);
+      expect(submitted?.providerInstance, youtube.providerInstance);
+      expect(submitted?.providerDomain, youtube.providerDomain);
+      PreferredProviderController.instance.initialize(
+        preferredProvider: submitted,
+        persist: (_) async {
+          throw StateError('secure storage unavailable');
+        },
+      );
+      await expectLater(selection.select(deezer), throwsStateError);
+      expect(selection.selectedProvider, youtube.providerInstance);
+      expect(
+        PreferredProviderController.instance.preferredProvider,
+        same(submitted),
+      );
+    },
+  );
+
   test('missing preference falls back and library mapping is hidden', () async {
-    SharedPreferences.setMockInitialValues(<String, Object>{
-      DetailProviderSelection.preferenceKey: <String>[
-        'missing--account',
-        'missing',
-      ],
-    });
+    PreferredProviderController.instance.initialize(
+      preferredProvider: const PreferredProvider(
+        providerInstance: 'missing--account',
+        providerDomain: 'missing',
+      ),
+      persist: (_) async {},
+    );
     final selection = DetailProviderSelection(
       itemId: '78',
       provider: 'library',

@@ -1,9 +1,7 @@
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../app/session/preferred_provider_controller.dart';
 import '../core/core_models.dart';
-
-const String preferredProviderPreferenceKey = 'details.preferred_provider';
 
 /// Owns transient mapping order for one loaded object, not a persisted item ID.
 class ItemProviderSelection extends ChangeNotifier {
@@ -72,16 +70,18 @@ class ItemProviderSelection extends ChangeNotifier {
       }
       return;
     }
-    final preferences = await SharedPreferences.getInstance();
-    final preferred = preferences.getStringList(preferredProviderPreferenceKey);
+    final preferred = PreferredProviderController.instance.preferredProvider;
     final mapping =
         available
             .where(
-              (mapping) => mapping.providerInstance == preferred?.firstOrNull,
+              (mapping) =>
+                  mapping.providerInstance == preferred?.providerInstance,
             )
             .firstOrNull ??
         available
-            .where((mapping) => mapping.providerDomain == preferred?.lastOrNull)
+            .where(
+              (mapping) => mapping.providerDomain == preferred?.providerDomain,
+            )
             .firstOrNull ??
         available.firstOrNull;
     if (mapping != null) _rotateTo(mapping);

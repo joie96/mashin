@@ -819,6 +819,7 @@ mod tests {
             volume: 100,
             theme: ThemePreference::Dark,
             log_level: LogLevelPreference::Info,
+            preferred_provider: None,
         }
     }
 
@@ -897,6 +898,69 @@ mod tests {
             .playback
             .checkpoint()
             .shares_local_session(&native));
+    }
+
+    #[test]
+    fn preferred_provider_persists_without_reconfiguring_playback_and_survives_settings_save() {
+        let mut coordinator = test_coordinator();
+        coordinator.configure_session(session_config()).unwrap();
+        let native = coordinator.playback.checkpoint();
+        let preferred = crate::core::models::PreferredProvider {
+            provider_instance: "tidal-instance".into(),
+            provider_domain: "tidal".into(),
+        };
+        coordinator
+            .set_preferred_provider(Some(preferred.clone()))
+            .unwrap();
+        assert!(coordinator
+            .playback
+            .checkpoint()
+            .shares_local_session(&native));
+        assert_eq!(
+            coordinator
+                .auth_store
+                .load_session()
+                .unwrap()
+                .unwrap()
+                .preferred_provider,
+            Some(preferred.clone())
+        );
+        coordinator
+            .save_session_settings(settings_update())
+            .unwrap();
+        assert_eq!(
+            crate::core::config::session_settings(coordinator.session_configuration.as_ref())
+                .preferred_provider,
+            Some(preferred)
+        );
+        coordinator.set_preferred_provider(None).unwrap();
+        assert_eq!(
+            coordinator
+                .auth_store
+                .load_session()
+                .unwrap()
+                .unwrap()
+                .preferred_provider,
+            None
+        );
+    }
+
+    #[test]
+    fn preferred_provider_failed_write_preserves_memory_and_stored_settings() {
+        let store = TestAuthStore::new();
+        let should_fail_writes = store.should_fail_writes.clone();
+        let mut coordinator = CoreCoordinator::with_auth_store(Box::new(store));
+        coordinator.configure_session(session_config()).unwrap();
+        let previous = coordinator.session_configuration.clone();
+        should_fail_writes.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(coordinator
+            .set_preferred_provider(Some(crate::core::models::PreferredProvider {
+                provider_instance: "tidal-instance".into(),
+                provider_domain: "tidal".into(),
+            }))
+            .is_err());
+        assert_eq!(coordinator.session_configuration, previous);
+        assert_eq!(coordinator.auth_store.load_session().unwrap(), previous);
     }
 
     #[test]

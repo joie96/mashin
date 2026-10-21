@@ -1,12 +1,8 @@
-import 'package:shared_preferences/shared_preferences.dart';
-
+import '../../app/session/preferred_provider_controller.dart';
 import '../core/core_models.dart';
-import 'item_provider_selection.dart';
 
 /// Selects section queries without replacing the page's original media item.
 class DetailProviderSelection {
-  static const String preferenceKey = preferredProviderPreferenceKey;
-
   DetailProviderSelection({required this.itemId, required this.provider});
 
   final String itemId;
@@ -63,13 +59,14 @@ class DetailProviderSelection {
           .firstOrNull;
       return;
     }
-    final SharedPreferences preferences = await SharedPreferences.getInstance();
-    final List<String>? preferred = preferences.getStringList(preferenceKey);
+    final preferred = PreferredProviderController.instance.preferredProvider;
     _selected = available
-        .where((mapping) => mapping.providerInstance == preferred?.firstOrNull)
+        .where(
+          (mapping) => mapping.providerInstance == preferred?.providerInstance,
+        )
         .firstOrNull;
     _selected ??= available
-        .where((mapping) => mapping.providerDomain == preferred?.lastOrNull)
+        .where((mapping) => mapping.providerDomain == preferred?.providerDomain)
         .firstOrNull;
     _selected ??= available.first;
   }
@@ -78,13 +75,12 @@ class DetailProviderSelection {
     if (!_mappings.contains(mapping) || !mapping.available) {
       throw ArgumentError('Provider is not available for this item');
     }
-    final SharedPreferences preferences = await SharedPreferences.getInstance();
-    if (!await preferences.setStringList(preferenceKey, <String>[
-      mapping.providerInstance,
-      mapping.providerDomain,
-    ])) {
-      throw StateError('Preferred provider could not be saved');
-    }
+    await PreferredProviderController.instance.setPreferredProvider(
+      PreferredProvider(
+        providerInstance: mapping.providerInstance,
+        providerDomain: mapping.providerDomain,
+      ),
+    );
     _selected = mapping;
   }
 }

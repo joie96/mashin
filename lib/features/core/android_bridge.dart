@@ -20,6 +20,7 @@ enum AndroidCoreCommand {
   setVolume,
   setMuted,
   saveSessionSettings,
+  setPreferredProvider,
   queuePlayMedia,
   startRadio,
   moveQueueItem,

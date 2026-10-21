@@ -234,6 +234,7 @@ mod tests {
             volume: 100,
             theme: ThemePreference::Dark,
             log_level: LogLevelPreference::Info,
+            preferred_provider: None,
         }
     }
 
@@ -250,6 +251,29 @@ mod tests {
         let session = session_config();
         let serialized = encode_session(session.clone()).unwrap();
         assert_eq!(decode_session(&serialized), Some(session));
+    }
+
+    #[test]
+    fn preferred_provider_defaults_for_existing_sessions_and_round_trips() {
+        let mut session = session_config();
+        let mut existing = serde_json::to_value(super::StoredSession {
+            format_version: super::SESSION_STORAGE_VERSION,
+            session: session.clone(),
+        })
+        .unwrap();
+        existing["session"]
+            .as_object_mut()
+            .unwrap()
+            .remove("preferredProvider");
+        assert_eq!(decode_session(&existing.to_string()), Some(session.clone()));
+        session.preferred_provider = Some(crate::core::models::PreferredProvider {
+            provider_instance: "tidal-instance".into(),
+            provider_domain: "tidal".into(),
+        });
+        assert_eq!(
+            decode_session(&encode_session(session.clone()).unwrap()),
+            Some(session)
+        );
     }
 
     #[test]

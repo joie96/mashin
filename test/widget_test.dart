@@ -9,7 +9,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image/image.dart' as img;
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mashin_flutter/app/navigation/app_router.dart';
 import 'package:mashin_flutter/app/session/app_session_controller.dart';
@@ -168,8 +167,6 @@ void main() {
   testWidgets('shows login screen when no session exists', (
     WidgetTester tester,
   ) async {
-    SharedPreferences.setMockInitialValues(<String, Object>{});
-
     final session = AppSessionController();
     await tester.pumpWidget(MashinApp(session: session));
     await tester.runAsync(session.initialize);
