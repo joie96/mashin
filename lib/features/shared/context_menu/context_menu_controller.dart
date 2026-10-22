@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -705,25 +706,27 @@ class _DesktopContextMenuState extends State<_DesktopContextMenu> {
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: colors.border),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: widget.actions
-                .asMap()
-                .entries
-                .map((entry) {
-                  final int index = entry.key;
-                  final ContextMenuAction action = entry.value;
-                  final Key key = ValueKey<int>(index);
-                  return action.isSeparator
-                      ? _DesktopContextMenuSeparator(key: key)
-                      : _DesktopContextMenuActionTile(
-                          key: key,
-                          action: action,
-                          onSelected: widget.onSelected,
-                          submenuController: _submenuController,
-                        );
-                })
-                .toList(growable: false),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: widget.actions
+                  .asMap()
+                  .entries
+                  .map((entry) {
+                    final int index = entry.key;
+                    final ContextMenuAction action = entry.value;
+                    final Key key = ValueKey<int>(index);
+                    return action.isSeparator
+                        ? _DesktopContextMenuSeparator(key: key)
+                        : _DesktopContextMenuActionTile(
+                            key: key,
+                            action: action,
+                            onSelected: widget.onSelected,
+                            submenuController: _submenuController,
+                          );
+                  })
+                  .toList(growable: false),
+            ),
           ),
         ),
       ),
@@ -850,9 +853,17 @@ class _DesktopContextMenuActionTileState
         overlay.context.findRenderObject() as RenderBox? ??
         Navigator.of(context).overlay!.context.findRenderObject()! as RenderBox;
 
-    const double submenuWidth = AppContextMenuController._desktopMenuWidth;
-    final double submenuHeight = AppContextMenuController._measureMenuHeight(
-      widget.action.submenu,
+    final double viewportInset = math.min(
+      AppContextMenuController._desktopMenuViewportInset,
+      math.min(overlayBox.size.width, overlayBox.size.height) / 2,
+    );
+    final double submenuWidth = math.min(
+      AppContextMenuController._desktopMenuWidth,
+      overlayBox.size.width - 2 * viewportInset,
+    );
+    final double submenuHeight = math.min(
+      AppContextMenuController._measureMenuHeight(widget.action.submenu),
+      overlayBox.size.height - 2 * viewportInset,
     );
 
     final RenderBox tileBox = context.findRenderObject()! as RenderBox;
@@ -867,27 +878,19 @@ class _DesktopContextMenuActionTileState
 
     double left = tileBottomRight.dx;
     double top = tileTopLeft.dy;
-    if (left + submenuWidth >
-        overlayBox.size.width -
-            AppContextMenuController._desktopMenuViewportInset) {
+    if (left + submenuWidth > overlayBox.size.width - viewportInset) {
       left = tileTopLeft.dx - submenuWidth;
     }
-    if (top + submenuHeight >
-        overlayBox.size.height -
-            AppContextMenuController._desktopMenuViewportInset) {
+    if (top + submenuHeight > overlayBox.size.height - viewportInset) {
       top = tileBottomRight.dy - submenuHeight;
     }
     left = left.clamp(
-      AppContextMenuController._desktopMenuViewportInset,
-      overlayBox.size.width -
-          submenuWidth -
-          AppContextMenuController._desktopMenuViewportInset,
+      viewportInset,
+      overlayBox.size.width - submenuWidth - viewportInset,
     );
     top = top.clamp(
-      AppContextMenuController._desktopMenuViewportInset,
-      overlayBox.size.height -
-          submenuHeight -
-          AppContextMenuController._desktopMenuViewportInset,
+      viewportInset,
+      overlayBox.size.height - submenuHeight - viewportInset,
     );
 
     _submenuEntry = OverlayEntry(
@@ -898,6 +901,7 @@ class _DesktopContextMenuActionTileState
               left: left,
               top: top,
               width: submenuWidth,
+              height: submenuHeight,
               child: FadeTransition(
                 opacity: _submenuAnimation,
                 child: _DesktopContextMenu(
