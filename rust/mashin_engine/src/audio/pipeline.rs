@@ -448,8 +448,8 @@ impl<Sink: OutputSink> PipelineState<Sink> {
             if !self.has_reported_end {
                 events.push(AudioEvent::TrackEnded { stream_id });
                 self.has_reported_end = true;
-                self.state = AudioState::Ended;
             }
+            self.state = AudioState::Buffering;
             if self
                 .cache
                 .prepared()
@@ -1520,6 +1520,66 @@ mod tests {
             output.snapshot().status.received_streams[0].next_chunk_index,
             2
         );
+    }
+
+    #[test]
+    fn audible_end_waits_for_successor_without_losing_playback_intent() {
+        let mut output = PipelineState::<FakeSink>::new(1_048_576, 30, false).unwrap();
+        let current = test_stream();
+        output
+            .execute(AudioCommand::SetMedia {
+                current: Some(current.clone()),
+                prepared: None,
+                media_revision: 1,
+                initial_output_state: AudioState::Playing,
+            })
+            .unwrap();
+        output.retain(chunk(current.stream_id)).unwrap();
+        output.pump_with(|_, _| Ok(Arc::from([]))).unwrap();
+        output.sink.as_ref().unwrap().is_drained.set(true);
+        assert_eq!(
+            output.pump().unwrap(),
+            vec![AudioEvent::TrackEnded {
+                stream_id: current.stream_id,
+            }]
+        );
+        assert_eq!(output.snapshot().status.output_state, AudioState::Buffering);
+        assert!(output.pump().unwrap().is_empty());
+        output
+            .execute(AudioCommand::Pause {
+                stream_id: Some(current.stream_id),
+            })
+            .unwrap();
+        assert!(output.pump().unwrap().is_empty());
+        assert_eq!(output.snapshot().status.output_state, AudioState::Paused);
+        output
+            .execute(AudioCommand::Play {
+                stream_id: Some(current.stream_id),
+            })
+            .unwrap();
+        let next = test_stream();
+        output
+            .execute(AudioCommand::SetMedia {
+                current: Some(current.clone()),
+                prepared: Some(next.clone()),
+                media_revision: 2,
+                initial_output_state: AudioState::Playing,
+            })
+            .unwrap();
+        assert!(output.pump().unwrap().is_empty());
+        output.retain(chunk(next.stream_id)).unwrap();
+        let events = output.pump().unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            events[0],
+            AudioEvent::TrackStarted { stream_id, .. } if stream_id == next.stream_id
+        ));
+        output
+            .execute(AudioCommand::Stop {
+                stream_id: Some(next.stream_id),
+            })
+            .unwrap();
+        assert_eq!(output.snapshot().status.output_state, AudioState::Idle);
     }
 
     #[test]
