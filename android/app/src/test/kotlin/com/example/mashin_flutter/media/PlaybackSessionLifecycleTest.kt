@@ -15,227 +15,183 @@ import org.robolectric.annotation.LooperMode
 @LooperMode(LooperMode.Mode.PAUSED)
 class PlaybackSessionLifecycleTest {
     private val lifecycle = PlaybackSessionLifecycle()
-    private var shutdownRequests = 0
+    private var serviceStopRequests = 0
 
     init {
-        lifecycle.attachSession { shutdownRequests++ }
+        lifecycle.attachSession { serviceStopRequests++ }
     }
 
-    // Activity closure and recreation.
+    // Activity closure relinquishes started ownership, never bound session ownership.
     @Test
-    fun closingActivityKeepsSessionWithAndroidAutoConnected() {
-        val activity = Any()
-        lifecycle.attachActivity(activity)
-        lifecycle.attachAndroidAutoController(Any())
-        lifecycle.detachActivity(activity, false)
-        advanceTime(5_000)
-        assertEquals(0, shutdownRequests)
-    }
-
-    @Test
-    fun closingLastActivityWithoutAndroidAutoEndsSession() {
+    fun closingLastIdleActivityRequestsServiceStop() {
         val first = Any()
         val second = Any()
         lifecycle.attachActivity(first)
         lifecycle.attachActivity(second)
         lifecycle.detachActivity(first, false)
-        assertEquals(0, shutdownRequests)
+        assertEquals(0, serviceStopRequests)
         lifecycle.detachActivity(second, false)
-        assertEquals(1, shutdownRequests)
+        assertEquals(1, serviceStopRequests)
     }
 
     @Test
-    fun removingActivityTaskEndsSession() {
+    fun removingIdleActivityTaskRequestsServiceStop() {
         lifecycle.attachActivity(Any())
         lifecycle.removeActivityTask()
-        assertEquals(1, shutdownRequests)
+        assertEquals(1, serviceStopRequests)
     }
 
     @Test
-    fun removingActivityTaskKeepsSessionWithAndroidAutoConnected() {
-        lifecycle.attachActivity(Any())
-        lifecycle.attachAndroidAutoController(Any())
-        lifecycle.removeActivityTask()
-        advanceTime(5_000)
-        assertEquals(0, shutdownRequests)
-    }
-
-    @Test
-    fun recreationDoesNotEndSessionWhenAndroidAutoDisconnects() {
+    fun activityRecreationKeepsServiceUntilReplacementCloses() {
         val activity = Any()
-        val controller = Any()
         lifecycle.attachActivity(activity)
-        lifecycle.attachAndroidAutoController(controller)
         lifecycle.detachActivity(activity, true)
-        lifecycle.detachAndroidAutoController(controller)
-        advanceTime(5_000)
-        assertEquals(0, shutdownRequests)
+        lifecycle.updateForegroundState(isForegroundRequired = false)
+        advanceTime(600_000)
+        assertEquals(0, serviceStopRequests)
         val replacement = Any()
         lifecycle.attachActivity(replacement)
         lifecycle.detachActivity(replacement, false)
-        assertEquals(1, shutdownRequests)
-    }
-
-    // Android Auto disconnect and remaining UI ownership.
-    @Test
-    fun androidAutoDisconnectWithoutActivityEndsSessionAfterFiveSeconds() {
-        val controller = Any()
-        lifecycle.attachAndroidAutoController(controller)
-        lifecycle.detachAndroidAutoController(controller)
-        advanceTime(4_999)
-        assertEquals(0, shutdownRequests)
-        advanceTime(1)
-        assertEquals(1, shutdownRequests)
-        advanceTime(5_000)
-        assertEquals(1, shutdownRequests)
+        assertEquals(1, serviceStopRequests)
     }
 
     @Test
-    fun androidAutoDisconnectKeepsSessionForMinimizedActivity() {
+    fun foregroundDemotionKeepsServiceForMinimizedActivity() {
         lifecycle.attachActivity(Any())
-        val controller = Any()
-        lifecycle.attachAndroidAutoController(controller)
-        lifecycle.detachAndroidAutoController(controller)
-        advanceTime(5_000)
-        assertEquals(0, shutdownRequests)
+        lifecycle.updateForegroundState(isForegroundRequired = true)
+        lifecycle.updateForegroundState(isForegroundRequired = false)
+        assertEquals(0, serviceStopRequests)
     }
 
     @Test
-    fun androidAutoDisconnectWaitsForLastController() {
-        val first = Any()
-        val second = Any()
-        lifecycle.attachAndroidAutoController(first)
-        lifecycle.attachAndroidAutoController(second)
-        lifecycle.detachAndroidAutoController(first)
-        advanceTime(5_000)
-        assertEquals(0, shutdownRequests)
-        lifecycle.detachAndroidAutoController(second)
-        assertEquals(0, shutdownRequests)
-        advanceTime(5_000)
-        assertEquals(1, shutdownRequests)
+    fun unrelatedActivityDetachDoesNotRequestServiceStop() {
+        lifecycle.detachActivity(Any(), false)
+        assertEquals(0, serviceStopRequests)
+    }
+
+    // Pauses follow Media3 foreground decisions rather than legacy controller inactivity.
+    @Test
+    fun pauseAfterLegacyInactivityKeepsSessionUntilMedia3DemotesService() {
+        lifecycle.updatePlaybackState(hasPlaybackIntent = true, isPlaybackStarting = false)
+        lifecycle.updateForegroundState(isForegroundRequired = true)
+        advanceTime(305_000)
+        lifecycle.updatePlaybackState(hasPlaybackIntent = false, isPlaybackStarting = false)
+        advanceTime(599_999)
+        assertEquals(0, serviceStopRequests)
+        lifecycle.updateForegroundState(isForegroundRequired = false)
+        assertEquals(1, serviceStopRequests)
     }
 
     @Test
-    fun androidAutoReconnectCancelsPendingShutdown() {
-        val controller = Any()
-        lifecycle.attachAndroidAutoController(controller)
-        lifecycle.detachAndroidAutoController(controller)
-        advanceTime(4_999)
-        lifecycle.attachAndroidAutoController(Any())
-        advanceTime(5_000)
-        assertEquals(0, shutdownRequests)
+    fun resumingPausedPlaybackPreventsStopAfterForegroundDemotion() {
+        lifecycle.updateForegroundState(isForegroundRequired = true)
+        advanceTime(599_999)
+        lifecycle.updatePlaybackState(hasPlaybackIntent = true, isPlaybackStarting = false)
+        lifecycle.updateForegroundState(isForegroundRequired = false)
+        assertEquals(0, serviceStopRequests)
     }
 
     @Test
-    fun repeatedDisconnectDoesNotExtendGrace() {
-        val controller = Any()
-        lifecycle.attachAndroidAutoController(controller)
-        lifecycle.detachAndroidAutoController(controller)
-        advanceTime(4_000)
-        lifecycle.detachAndroidAutoController(controller)
-        advanceTime(1_000)
-        assertEquals(1, shutdownRequests)
-    }
-
-    @Test
-    fun anotherDisconnectAfterReconnectGetsFullGrace() {
-        val first = Any()
-        val second = Any()
-        lifecycle.attachAndroidAutoController(first)
-        lifecycle.detachAndroidAutoController(first)
-        advanceTime(4_000)
-        lifecycle.attachAndroidAutoController(second)
-        lifecycle.detachAndroidAutoController(second)
-        advanceTime(1_000)
-        assertEquals(0, shutdownRequests)
-        advanceTime(4_000)
-        assertEquals(1, shutdownRequests)
-    }
-
-    @Test
-    fun attachingActivityCancelsPendingShutdown() {
-        val controller = Any()
-        lifecycle.attachAndroidAutoController(controller)
-        lifecycle.detachAndroidAutoController(controller)
-        advanceTime(4_000)
-        lifecycle.attachActivity(Any())
-        advanceTime(5_000)
-        assertEquals(0, shutdownRequests)
-    }
-
-    @Test
-    fun closingActivityDuringGraceWaitsForOriginalDeadline() {
+    fun closingActivityDuringPausedForegroundGraceKeepsService() {
         val activity = Any()
-        val controller = Any()
         lifecycle.attachActivity(activity)
-        lifecycle.attachAndroidAutoController(controller)
-        lifecycle.detachAndroidAutoController(controller)
-        advanceTime(4_000)
+        lifecycle.updateForegroundState(isForegroundRequired = true)
         lifecycle.detachActivity(activity, false)
-        assertEquals(0, shutdownRequests)
-        advanceTime(1_000)
-        assertEquals(1, shutdownRequests)
+        advanceTime(600_000)
+        assertEquals(0, serviceStopRequests)
+        lifecycle.updateForegroundState(isForegroundRequired = false)
+        assertEquals(1, serviceStopRequests)
     }
 
     @Test
-    fun removingActivityTaskDuringGraceWaitsForOriginalDeadline() {
-        val controller = Any()
+    fun removingActivityTaskDuringPausedForegroundGraceKeepsService() {
         lifecycle.attachActivity(Any())
-        lifecycle.attachAndroidAutoController(controller)
-        lifecycle.detachAndroidAutoController(controller)
-        advanceTime(4_000)
+        lifecycle.updateForegroundState(isForegroundRequired = true)
         lifecycle.removeActivityTask()
-        assertEquals(0, shutdownRequests)
-        advanceTime(1_000)
-        assertEquals(1, shutdownRequests)
+        assertEquals(0, serviceStopRequests)
     }
 
     @Test
-    fun closingActivityAfterGraceEndsUnownedSession() {
+    fun repeatedIdleUpdatesRequestServiceStopOnlyOnce() {
+        lifecycle.updateForegroundState(isForegroundRequired = false)
+        lifecycle.updateForegroundState(isForegroundRequired = false)
+        lifecycle.removeActivityTask()
+        assertEquals(1, serviceStopRequests)
+    }
+
+    @Test
+    fun newPlaybackAllowsAnotherStopRequestAfterDemotion() {
+        lifecycle.updateForegroundState(isForegroundRequired = false)
+        lifecycle.updateForegroundState(isForegroundRequired = true)
+        lifecycle.updateForegroundState(isForegroundRequired = false)
+        assertEquals(2, serviceStopRequests)
+    }
+
+    // Queued starts remain protected before the native snapshot and notification are ready.
+    @Test
+    fun pendingStartKeepsServiceAfterForegroundDemotion() {
+        lifecycle.updatePlaybackState(hasPlaybackIntent = false, isPlaybackStarting = true)
+        lifecycle.updateForegroundState(isForegroundRequired = false)
+        assertEquals(0, serviceStopRequests)
+        lifecycle.updatePlaybackState(hasPlaybackIntent = true, isPlaybackStarting = false)
+        assertEquals(0, serviceStopRequests)
+    }
+
+    @Test
+    fun failedStartRequestsServiceStopWhenMedia3NoLongerNeedsForeground() {
+        lifecycle.updatePlaybackState(hasPlaybackIntent = false, isPlaybackStarting = true)
+        lifecycle.updateForegroundState(isForegroundRequired = true)
+        lifecycle.updatePlaybackState(hasPlaybackIntent = false, isPlaybackStarting = false)
+        assertEquals(0, serviceStopRequests)
+        lifecycle.updateForegroundState(isForegroundRequired = false)
+        assertEquals(1, serviceStopRequests)
+    }
+
+    @Test
+    fun closingActivityDuringPlaybackKeepsService() {
         val activity = Any()
-        val controller = Any()
         lifecycle.attachActivity(activity)
-        lifecycle.attachAndroidAutoController(controller)
-        lifecycle.detachAndroidAutoController(controller)
-        advanceTime(5_000)
-        assertEquals(0, shutdownRequests)
+        lifecycle.updatePlaybackState(hasPlaybackIntent = true, isPlaybackStarting = false)
         lifecycle.detachActivity(activity, false)
-        assertEquals(1, shutdownRequests)
+        assertEquals(0, serviceStopRequests)
     }
 
     @Test
-    fun unrelatedControllerDisconnectDoesNotEndSession() {
-        lifecycle.detachAndroidAutoController(Any())
-        advanceTime(5_000)
-        assertEquals(0, shutdownRequests)
-    }
-
-    @Test
-    fun detachedSessionDoesNotReceiveShutdownRequests() {
-        val controller = Any()
-        lifecycle.attachAndroidAutoController(controller)
-        lifecycle.detachAndroidAutoController(controller)
-        lifecycle.detachSession()
+    fun removingActivityTaskDuringPendingStartKeepsService() {
+        lifecycle.attachActivity(Any())
+        lifecycle.updatePlaybackState(hasPlaybackIntent = false, isPlaybackStarting = true)
         lifecycle.removeActivityTask()
-        advanceTime(5_000)
-        assertEquals(0, shutdownRequests)
+        assertEquals(0, serviceStopRequests)
+    }
+
+    // Session replacement must not inherit foreground or playback ownership.
+    @Test
+    fun initialIdleSnapshotDoesNotEndNewSession() {
+        lifecycle.updatePlaybackState(hasPlaybackIntent = false, isPlaybackStarting = false)
+        assertEquals(0, serviceStopRequests)
     }
 
     @Test
-    fun oldDisconnectDoesNotShutdownReplacementSession() {
-        val controller = Any()
-        lifecycle.attachAndroidAutoController(controller)
-        lifecycle.detachAndroidAutoController(controller)
-        advanceTime(4_000)
+    fun detachedSessionDoesNotReceiveServiceStopRequests() {
         lifecycle.detachSession()
-        var replacementShutdownRequests = 0
-        lifecycle.attachSession { replacementShutdownRequests++ }
-        advanceTime(5_000)
-        assertEquals(0, shutdownRequests)
-        assertEquals(0, replacementShutdownRequests)
+        lifecycle.updateForegroundState(isForegroundRequired = false)
+        lifecycle.removeActivityTask()
+        assertEquals(0, serviceStopRequests)
     }
 
-    // Advance the main looper deterministically without waiting on wall-clock time.
+    @Test
+    fun replacementSessionDoesNotRetainOldOwnership() {
+        lifecycle.updateForegroundState(isForegroundRequired = true)
+        lifecycle.updatePlaybackState(hasPlaybackIntent = true, isPlaybackStarting = false)
+        lifecycle.detachSession()
+        var replacementStopRequests = 0
+        lifecycle.attachSession { replacementStopRequests++ }
+        lifecycle.updateForegroundState(isForegroundRequired = false)
+        assertEquals(0, serviceStopRequests)
+        assertEquals(1, replacementStopRequests)
+    }
+
+    // No application timer should end a session while Media3 still requires foreground.
     private fun advanceTime(milliseconds: Long) {
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(milliseconds))
     }

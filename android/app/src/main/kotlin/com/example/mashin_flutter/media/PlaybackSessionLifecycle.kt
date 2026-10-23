@@ -1,84 +1,71 @@
 package com.example.mashin_flutter.media
 
-import android.os.Handler
-import android.os.Looper
-
-/** Tracks activity and Android Auto ownership on the main thread, including reconnect grace. */
+/** Requests service stops on the main thread; Android bindings retain ownership until onDestroy. */
 internal class PlaybackSessionLifecycle {
     companion object {
-        private const val ANDROID_AUTO_RECONNECT_GRACE_MS = 5_000L
         val shared = PlaybackSessionLifecycle()
     }
 
-    private val mainHandler = Handler(Looper.getMainLooper())
     private val activities = mutableSetOf<Any>()
-    private val androidAutoControllers = mutableSetOf<Any>()
     private var isActivityRecreating = false
-    private var shutdownSession: (() -> Unit)? = null
-    private var pendingShutdown: Runnable? = null
-    private var shutdownGeneration = 0L
+    private var shouldKeepSessionForPlayback = false
+    private var isForegroundRequired = false
+    private var hasRequestedServiceStop = false
+    private var requestServiceStop: (() -> Unit)? = null
 
     // Session ownership and activity lifecycle.
-    fun attachSession(shutdownSession: () -> Unit) {
-        cancelPendingShutdown()
-        this.shutdownSession = shutdownSession
+    fun attachSession(requestServiceStop: () -> Unit) {
+        this.requestServiceStop = requestServiceStop
+        hasRequestedServiceStop = false
     }
 
     fun detachSession() {
-        cancelPendingShutdown()
-        shutdownSession = null
-        androidAutoControllers.clear()
+        requestServiceStop = null
+        shouldKeepSessionForPlayback = false
+        isForegroundRequired = false
+        hasRequestedServiceStop = false
     }
 
     fun attachActivity(activity: Any) {
-        cancelPendingShutdown()
         activities.add(activity)
         isActivityRecreating = false
+        hasRequestedServiceStop = false
     }
 
     fun detachActivity(activity: Any, isChangingConfigurations: Boolean) {
         if (!activities.remove(activity)) return
         isActivityRecreating = isChangingConfigurations
-        shutdownIfUnowned()
+        stopServiceIfIdle()
     }
 
     fun removeActivityTask() {
         activities.clear()
         isActivityRecreating = false
-        shutdownIfUnowned()
+        stopServiceIfIdle()
     }
 
-    // Android Auto connection ownership.
-    fun attachAndroidAutoController(controller: Any) {
-        cancelPendingShutdown()
-        androidAutoControllers.add(controller)
+    // Media3 owns the paused foreground grace; queued starts also prevent service stops.
+    fun updatePlaybackState(hasPlaybackIntent: Boolean, isPlaybackStarting: Boolean) {
+        val shouldKeepSession = hasPlaybackIntent || isPlaybackStarting
+        if (shouldKeepSessionForPlayback == shouldKeepSession) return
+        shouldKeepSessionForPlayback = shouldKeepSession
+        stopServiceIfIdle()
     }
 
-    fun detachAndroidAutoController(controller: Any) {
-        if (!androidAutoControllers.remove(controller)) return
-        if (androidAutoControllers.isNotEmpty() || shutdownSession == null) return
-        cancelPendingShutdown()
-        val generation = shutdownGeneration
-        val shutdown = Runnable {
-            if (generation != shutdownGeneration) return@Runnable
-            pendingShutdown = null
-            shutdownIfUnowned()
+    fun updateForegroundState(isForegroundRequired: Boolean) {
+        this.isForegroundRequired = isForegroundRequired
+        stopServiceIfIdle()
+    }
+
+    // stopSelf relinquishes started ownership without releasing sessions held by bound browsers.
+    private fun stopServiceIfIdle() {
+        if (activities.isNotEmpty() || isActivityRecreating || shouldKeepSessionForPlayback || isForegroundRequired) {
+            hasRequestedServiceStop = false
+            return
         }
-        pendingShutdown = shutdown
-        mainHandler.postDelayed(shutdown, ANDROID_AUTO_RECONNECT_GRACE_MS)
-    }
-
-    // Pending shutdowns must not outlive their session or a newly attached owner.
-    private fun cancelPendingShutdown() {
-        shutdownGeneration++
-        pendingShutdown?.let(mainHandler::removeCallbacks)
-        pendingShutdown = null
-    }
-
-    private fun shutdownIfUnowned() {
-        if (activities.isEmpty() && androidAutoControllers.isEmpty() &&
-            !isActivityRecreating && pendingShutdown == null) {
-            shutdownSession?.invoke()
-        }
+        val requestStop = requestServiceStop ?: return
+        if (hasRequestedServiceStop) return
+        hasRequestedServiceStop = true
+        requestStop()
     }
 }

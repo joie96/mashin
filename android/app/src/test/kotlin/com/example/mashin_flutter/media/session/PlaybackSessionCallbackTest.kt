@@ -8,7 +8,6 @@ import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
-import com.example.mashin_flutter.media.PlaybackSessionLifecycle
 import com.example.mashin_flutter.media.library.MediaLibraryBrowser
 import com.example.mashin_flutter.media.library.MediaLibrarySearch
 import com.example.mashin_flutter.media.library.SearchMediaCategory
@@ -89,10 +88,7 @@ class PlaybackSessionCallbackTest {
         val context = RuntimeEnvironment.getApplication()
         val browser = MediaLibraryBrowser(context) { Futures.immediateVoidFuture() }
         val player = RustSessionPlayer({ Futures.immediateVoidFuture() }, browser::startPlayback, browser::resolveLibraryMediaItem)
-        val lifecycle = PlaybackSessionLifecycle()
-        var shutdownRequests = 0
-        lifecycle.attachSession { shutdownRequests++ }
-        val callback = PlaybackSessionCallback(context.packageName, browser, lifecycle) {
+        val callback = PlaybackSessionCallback(context.packageName, browser) {
             Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
         val session = MediaLibrarySession.Builder(context, player, callback).build()
@@ -127,14 +123,11 @@ class PlaybackSessionCallbackTest {
                 }
                 assertFalse(result.availablePlayerCommands == Player.Commands.EMPTY)
                 callback.onDisconnected(session, controller)
-                assertEquals(0, shutdownRequests)
-                shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(4_999))
-                assertEquals(0, shutdownRequests)
-                shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1))
-                assertEquals(if (packageName == "com.google.android.projection.gearhead") 1 else 0, shutdownRequests)
+                shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMinutes(10))
+                assertEquals(player, session.player)
+                assertTrue(player.availableCommands.contains(Player.COMMAND_PLAY_PAUSE))
             }
         } finally {
-            lifecycle.detachSession()
             session.release()
             player.release()
             browser.close()

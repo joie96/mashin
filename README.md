@@ -46,10 +46,14 @@ Android playback supports a media notification, headset controls, background
 playback and Android Auto media controls. Playback can continue with the screen
 off or while the app is minimized.
 
-Closing the last app activity ends local playback unless Android Auto remains
-connected. Android Auto has a short reconnect grace period to avoid interrupting
-playback during brief reconnections. Device-specific battery and network
-restrictions can still affect background playback.
+Closing the last app activity does not interrupt running or starting playback.
+Paused playback follows Media3's foreground grace period, normally ten minutes.
+Android Auto controller inactivity does not end the session. After foreground
+playback ends, existing service bindings can keep the session available; resources
+are released when the service is destroyed. Reconnecting retrieves the queue and
+playback state from Music Assistant rather than a separate local playback store.
+Device-specific battery and network restrictions can still affect background
+playback.
 
 ## FFmpeg And Licenses
 

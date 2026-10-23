@@ -52,9 +52,11 @@ class PlaybackService : MediaLibraryService() {
     @Volatile private var isDestroyed = false
     private var hasRestoredSession = false
     private var pendingPlaybackStarts = 0
+    private var notificationUpdateGeneration = 0L
     private var isSnapshotRefreshQueued = false
     private var isCoreReady = false
     private var isProcessingCommand = false
+    private var isProcessingPlaybackStart = false
     private var initializationError: String? = null
     private data class PendingCommand(val request: PlaybackRequest, val completion: SettableFuture<SessionResult>)
     private val pendingCommands = ArrayDeque<PendingCommand>()
@@ -84,7 +86,7 @@ class PlaybackService : MediaLibraryService() {
             .build()
         mediaLibrarySession = session
         addSession(session)
-        PlaybackSessionLifecycle.shared.attachSession(::shutdownSession)
+        PlaybackSessionLifecycle.shared.attachSession { stopSelf() }
         setListener(object : androidx.media3.session.MediaSessionService.Listener {
             override fun onForegroundServiceStartNotAllowedException() {
                 Log.e(TAG, "Foreground playback was rejected by Android")
@@ -124,12 +126,12 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
-        shutdownSession()
+        releaseSession()
         super.onDestroy()
     }
 
-    // Release the session immediately: bound controllers can delay service destruction.
-    private fun shutdownSession() {
+    // Session and native resources belong to the service, not individual controller connections.
+    private fun releaseSession() {
         if (isDestroyed) return
         isDestroyed = true
         PlaybackSessionLifecycle.shared.detachSession()
@@ -157,7 +159,6 @@ class PlaybackService : MediaLibraryService() {
                 Log.e(TAG, "Native shutdown failed", error)
             }
         }
-        stopSelf()
     }
 
     // Playback commands are acknowledged only after Rust execution and Media3 synchronization.
@@ -174,6 +175,7 @@ class PlaybackService : MediaLibraryService() {
             return completion
         }
         pendingCommands.addLast(PendingCommand(request, completion))
+        updatePlaybackLifecycle()
         executeNextCommand()
         return completion
     }
@@ -185,6 +187,7 @@ class PlaybackService : MediaLibraryService() {
         val request = pending.request
         val completion = pending.completion
         isProcessingCommand = true
+        isProcessingPlaybackStart = request.canStartPlayback
         var requiresPlaybackStartup = false
         try {
             check(initializationError == null || request.kind == PlaybackCommandKind.Login) { initializationError.orEmpty() }
@@ -199,7 +202,9 @@ class PlaybackService : MediaLibraryService() {
             triggerNotificationUpdate()
             completion.set(failedResult(error.message ?: "Playback startup failed"))
             isProcessingCommand = false
+            isProcessingPlaybackStart = false
             mainHandler.post(::executeNextCommand)
+            updatePlaybackLifecycle()
             return
         }
         coreExecutor.execute {
@@ -236,21 +241,32 @@ class PlaybackService : MediaLibraryService() {
                     completion.set(result)
                 }
                 isProcessingCommand = false
+                isProcessingPlaybackStart = false
                 executeNextCommand()
+                updatePlaybackLifecycle()
             }
         }
     }
 
     // Media3 takes over notification management after the pending startup completes.
-    override fun onUpdateNotificationAsync(session: MediaSession, startInForegroundRequired: Boolean): ListenableFuture<Void?> =
-        if (isDestroyed || pendingPlaybackStarts > 0) Futures.immediateFuture(null)
-        else super.onUpdateNotificationAsync(session, startInForegroundRequired)
+    override fun onUpdateNotificationAsync(session: MediaSession, startInForegroundRequired: Boolean): ListenableFuture<Void?> {
+        val generation = ++notificationUpdateGeneration
+        if (isDestroyed || pendingPlaybackStarts > 0) return Futures.immediateFuture(null)
+        return Futures.transform(super.onUpdateNotificationAsync(session, startInForegroundRequired), {
+            if (!isDestroyed && generation == notificationUpdateGeneration) {
+                PlaybackSessionLifecycle.shared.updateForegroundState(startInForegroundRequired)
+            }
+            null
+        }, ContextCompat.getMainExecutor(this))
+    }
 
     private fun startPlaybackForeground() {
         val session = checkNotNull(mediaLibrarySession)
         ContextCompat.startForegroundService(this, Intent(this, PlaybackService::class.java))
         ServiceCompat.startForeground(this, DefaultMediaNotificationProvider.DEFAULT_NOTIFICATION_ID,
             notificationProvider.createStartupNotification(session), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+        notificationUpdateGeneration++
+        PlaybackSessionLifecycle.shared.updateForegroundState(isForegroundRequired = true)
         if (!wakeLock.isHeld) wakeLock.acquire()
     }
 
@@ -280,6 +296,16 @@ class PlaybackService : MediaLibraryService() {
             audioFocus.release()
             if (wakeLock.isHeld) wakeLock.release()
         }
+        if (!isProcessingCommand) updatePlaybackLifecycle()
+    }
+
+    // Preserve queued and executing starts before Media3 can observe their playback state.
+    private fun updatePlaybackLifecycle() {
+        if (isDestroyed) return
+        PlaybackSessionLifecycle.shared.updatePlaybackState(
+            hasPlaybackIntent = snapshot.hasPlaybackIntent,
+            isPlaybackStarting = isProcessingPlaybackStart || pendingCommands.any { it.request.canStartPlayback },
+        )
     }
 
     // Core events only schedule reads; a long Rust operation never blocks Android's main thread.
