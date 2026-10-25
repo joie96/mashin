@@ -240,7 +240,6 @@ abstract class MashinCoreBridgeApi {
   Future<void> setAudioProfile(String audioProfile);
   Future<void> saveSessionSettings(SessionSettingsUpdate settings);
   Future<void> setPreferredProvider(PreferredProvider? preferredProvider);
-  Future<String> saveLogSnapshot();
   void log(LogLevelPreference level, String category, String message);
   Future<void> addPlaylistTracks(String playlistId, List<String> uris);
   Future<void> removePlaylistTracks(
@@ -840,13 +839,6 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     await _submitVoidOperation('saveSessionSettings', settings.toJson());
     _reapplyRuntimeLogLevelOverride();
   }
-
-  @override
-  Future<String> saveLogSnapshot() => _submitOperation<String>(
-    'saveLogSnapshot',
-    const <String, Object?>{},
-    (Object? result) => result! as String,
-  );
 
   @override
   Future<void> setPreferredProvider(PreferredProvider? preferredProvider) =>

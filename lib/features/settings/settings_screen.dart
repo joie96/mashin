@@ -20,7 +20,6 @@ class SettingsScreen extends StatelessWidget {
       logLevel: session.logLevel,
     ),
     onSave: session.saveSessionSettings,
-    onSaveLogSnapshot: session.coreBridge.saveLogSnapshot,
   );
 }
 
@@ -30,13 +29,11 @@ class SettingsEditor extends StatefulWidget {
     required this.musicAssistantUrl,
     required this.settings,
     required this.onSave,
-    required this.onSaveLogSnapshot,
   });
 
   final String musicAssistantUrl;
   final SessionSettingsUpdate settings;
   final Future<void> Function(SessionSettingsUpdate) onSave;
-  final Future<String> Function() onSaveLogSnapshot;
 
   @override
   State<SettingsEditor> createState() => _SettingsEditorState();
@@ -125,7 +122,6 @@ class _SettingsEditorState extends State<SettingsEditor> {
             logLevel: _logLevel,
             onThemeChanged: (value) => setState(() => _isDarkTheme = value),
             onLogLevelChanged: (value) => setState(() => _logLevel = value),
-            onSaveLogSnapshot: widget.onSaveLogSnapshot,
             onSave: _save,
             onCancel: _cancel,
             isSaving: _isSaving,
@@ -137,7 +133,6 @@ class _SettingsEditorState extends State<SettingsEditor> {
             logLevel: _logLevel,
             onThemeChanged: (value) => setState(() => _isDarkTheme = value),
             onLogLevelChanged: (value) => setState(() => _logLevel = value),
-            onSaveLogSnapshot: widget.onSaveLogSnapshot,
             onSave: _save,
             onCancel: _cancel,
             isSaving: _isSaving,

@@ -40,6 +40,8 @@ pub(crate) extern "system" fn initialize(
     ) {
         android_context::clear_pending_exception(&mut env);
         throw_core_error(&mut env, &error);
+    } else {
+        crate::logging::initialize();
     }
 }
 

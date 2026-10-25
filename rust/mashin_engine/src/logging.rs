@@ -1,17 +1,95 @@
 use chrono::{DateTime, Local};
 use once_cell::sync::Lazy;
-use std::collections::VecDeque;
 use std::env;
 use std::fmt;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Mutex;
 
 static MINIMUM_LOG_LEVEL: AtomicU8 = AtomicU8::new(LogLevel::Info as u8);
-const LOG_CAPACITY: usize = 10_000;
-static LOG_LINES: Lazy<Mutex<VecDeque<String>>> = Lazy::new(|| Mutex::new(VecDeque::new()));
+static LOG_FILE: Lazy<Mutex<DailyLogFile>> = Lazy::new(|| Mutex::new(DailyLogFile::default()));
+const MAX_LOG_FILES: usize = 3;
+
+// Owns the process-wide append handle; callers serialize writes and rotation with LOG_FILE.
+#[derive(Default)]
+struct DailyLogFile {
+    active_file: Option<(PathBuf, File)>,
+    has_started: bool,
+}
+
+impl DailyLogFile {
+    // Persistent output and daily rotation.
+    fn append_current(&mut self, line: &str) -> Result<PathBuf, String> {
+        let directory = self
+            .active_file
+            .as_ref()
+            .and_then(|(path, _)| path.parent().map(Path::to_path_buf))
+            .map(Ok)
+            .unwrap_or_else(|| {
+                if cfg!(test) {
+                    Ok(env::temp_dir().join(format!("mashin-test-logs-{}", std::process::id())))
+                } else {
+                    log_directory()
+                }
+            })?;
+        self.append(&directory, Local::now(), line)
+            .map_err(|error| format!("write daily log failed: {error}"))
+    }
+
+    fn append(
+        &mut self,
+        directory: &Path,
+        timestamp: DateTime<Local>,
+        line: &str,
+    ) -> io::Result<PathBuf> {
+        let path = directory.join(format!("mashin-{}.log", timestamp.format("%Y-%m-%d")));
+        if self.active_file.as_ref().map(|(path, _)| path) != Some(&path) {
+            fs::create_dir_all(directory)?;
+            let mut file = OpenOptions::new().append(true).create(true).open(&path)?;
+            if !self.has_started {
+                writeln!(
+                    file,
+                    "\n========== App Start {} ==========",
+                    timestamp.format("%Y-%m-%d %H:%M:%S")
+                )?;
+            }
+            self.active_file = None;
+            Self::prune(directory, &path)?;
+            self.active_file = Some((path.clone(), file));
+            self.has_started = true;
+        }
+        if !line.is_empty() {
+            if let Some((_, file)) = &mut self.active_file {
+                writeln!(file, "{line}")?;
+            }
+        }
+        Ok(path)
+    }
+
+    fn prune(directory: &Path, active_path: &Path) -> io::Result<()> {
+        let mut paths = Vec::new();
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if entry.file_type()?.is_file()
+                && name.starts_with("mashin-")
+                && name.ends_with(".log")
+                && entry.path() != active_path
+            {
+                paths.push(entry.path());
+            }
+        }
+        paths.sort();
+        let excess = paths.len().saturating_sub(MAX_LOG_FILES - 1);
+        for path in paths.into_iter().take(excess) {
+            fs::remove_file(path)?;
+        }
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -62,47 +140,15 @@ pub(crate) fn log_external(level: &str, category: &str, message: &str) -> Result
     Ok(())
 }
 
-// Export a snapshot without holding the logger lock across filesystem I/O.
-pub(crate) fn save_log_snapshot() -> Result<String, String> {
-    let lines: Vec<String> = LOG_LINES
+// Logging failures must not prevent startup; subsequent writes retry initialization.
+pub(crate) fn initialize() {
+    let result = LOG_FILE
         .lock()
-        .map_err(|_| "log buffer lock poisoned".to_string())?
-        .iter()
-        .cloned()
-        .collect();
-    if lines.is_empty() {
-        return Err("no log entries to save".to_string());
+        .map_err(|_| "log file lock poisoned".to_string())
+        .and_then(|mut log_file| log_file.append_current(""));
+    if let Err(error) = result {
+        let _ = writeln!(io::stderr().lock(), "Mashin log persistence: {error}");
     }
-    let directory = log_directory()?;
-    let path = write_log_snapshot(&lines, &directory, Local::now())?;
-    Ok(path.to_string_lossy().into_owned())
-}
-
-fn write_log_snapshot(
-    lines: &[String],
-    directory: &Path,
-    timestamp: DateTime<Local>,
-) -> Result<PathBuf, String> {
-    fs::create_dir_all(directory).map_err(|error| {
-        format!(
-            "create log directory {} failed: {error}",
-            directory.display()
-        )
-    })?;
-    let path = directory.join(format!(
-        "mashin-{}.log",
-        timestamp.format("%Y-%m-%d_%H-%M-%S-%6f")
-    ));
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)
-        .map_err(|error| format!("create log file {} failed: {error}", path.display()))?;
-    for line in lines {
-        writeln!(file, "{line}")
-            .map_err(|error| format!("write log file {} failed: {error}", path.display()))?;
-    }
-    Ok(path)
 }
 
 #[cfg(target_os = "android")]
@@ -179,27 +225,27 @@ fn emit_log(level: LogLevel, category: &str, message: &str) {
     }
 
     let message = message.replace('\n', " ");
-    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+    let now = Local::now();
+    let timestamp = now.format("%Y-%m-%d %H:%M:%S%.3f");
     let text = format!(
         "[{timestamp}] [{}] {}: {message}",
         level.short_name(),
         category,
     );
-    if let Ok(mut lines) = LOG_LINES.lock() {
-        retain_log_line(&mut lines, text.clone());
+    let persistence = (|| {
+        LOG_FILE
+            .lock()
+            .map_err(|_| "log file lock poisoned".to_string())?
+            .append_current(&text)
+    })();
+    if let Err(error) = persistence {
+        let _ = writeln!(io::stderr().lock(), "Mashin log persistence: {error}");
     }
     #[cfg(target_os = "android")]
     android_log(level, &text);
     let mut stderr = io::stderr().lock();
     let _ = writeln!(stderr, "{text}");
     crate::ffi::event_channel::publish_flutter_log_event(&text);
-}
-
-fn retain_log_line(lines: &mut VecDeque<String>, text: String) {
-    if lines.len() == LOG_CAPACITY {
-        lines.pop_front();
-    }
-    lines.push_back(text);
 }
 
 #[cfg(target_os = "android")]
@@ -239,12 +285,8 @@ unsafe extern "C" {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        log_external, retain_log_line, set_minimum_level, write_log_snapshot, LogLevel,
-        LOG_CAPACITY, MINIMUM_LOG_LEVEL,
-    };
+    use super::{log_external, set_minimum_level, DailyLogFile, LogLevel, MINIMUM_LOG_LEVEL};
     use chrono::{Local, TimeZone};
-    use std::collections::VecDeque;
     use std::fs;
     use std::sync::atomic::Ordering;
 
@@ -276,33 +318,48 @@ mod tests {
     }
 
     #[test]
-    fn retains_only_the_newest_log_lines() {
-        let mut lines = VecDeque::new();
-        for index in 0..=LOG_CAPACITY {
-            retain_log_line(&mut lines, format!("line {index}"));
-        }
-        assert_eq!(lines.len(), LOG_CAPACITY);
-        assert_eq!(lines.front().unwrap(), "line 1");
-        assert_eq!(lines.back().unwrap(), "line 10000");
-    }
-
-    #[test]
-    fn writes_a_dated_snapshot_without_overwriting_it() {
-        let directory =
-            std::env::temp_dir().join(format!("mashin-log-test-{}", std::process::id()));
+    fn appends_daily_logs_across_restarts_and_retains_three_files() {
+        let directory = std::env::temp_dir().join(format!(
+            "mashin-log-test-{}-{}",
+            std::process::id(),
+            Local::now().timestamp_nanos_opt().unwrap()
+        ));
         let timestamp = Local
             .with_ymd_and_hms(2026, 9, 23, 15, 4, 5)
             .single()
             .unwrap();
-        let lines = vec!["first".to_string(), "second".to_string()];
-        let path = write_log_snapshot(&lines, &directory, timestamp).unwrap();
-        assert_eq!(
-            path.file_name().unwrap(),
-            "mashin-2026-09-23_15-04-05-000000.log"
-        );
-        assert_eq!(fs::read_to_string(&path).unwrap(), "first\nsecond\n");
-        assert!(write_log_snapshot(&lines, &directory, timestamp).is_err());
-        fs::remove_file(path).unwrap();
-        fs::remove_dir(directory).unwrap();
+        let mut writer = DailyLogFile::default();
+        let path = writer.append(&directory, timestamp, "first").unwrap();
+        writer.append(&directory, timestamp, "second").unwrap();
+        assert_eq!(path.file_name().unwrap(), "mashin-2026-09-23.log");
+        drop(writer);
+        let mut writer = DailyLogFile::default();
+        writer.append(&directory, timestamp, "third").unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert_eq!(text.matches("App Start").count(), 2);
+        assert!(text.contains("first\nsecond\n"));
+        assert!(text.ends_with("third\n"));
+        fs::write(directory.join("unrelated.txt"), "keep").unwrap();
+        fs::write(
+            directory.join("mashin-2026-09-22_12-00-00-000000.log"),
+            "legacy",
+        )
+        .unwrap();
+        for day in 24..=26 {
+            let timestamp = Local
+                .with_ymd_and_hms(2026, 9, day, 0, 0, 0)
+                .single()
+                .unwrap();
+            let path = writer.append(&directory, timestamp, "next day").unwrap();
+            assert!(!fs::read_to_string(path).unwrap().contains("App Start"));
+        }
+        assert!(!path.exists());
+        assert!(!directory
+            .join("mashin-2026-09-22_12-00-00-000000.log")
+            .exists());
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 4);
+        assert!(directory.join("unrelated.txt").exists());
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
     }
 }

@@ -22,7 +22,6 @@ void main() {
             logLevel: LogLevelPreference.info,
           ),
           onSave: (update) async => saved.add(update),
-          onSaveLogSnapshot: () async => '',
         )),
       ));
       await tester.pumpAndSettle();
@@ -43,6 +42,9 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Log'));
       await tester.pumpAndSettle();
+      expect(find.byTooltip('Logpfad anzeigen'), findsNothing);
+      expect(find.byTooltip('Log speichern'), findsNothing);
+      expect(find.byIcon(Icons.folder_outlined), findsNothing);
       await tester.tap(find.byType(DropdownButtonFormField<LogLevelPreference>));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Debug').last);

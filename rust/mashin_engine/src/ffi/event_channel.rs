@@ -55,6 +55,9 @@ impl FlutterEventChannel {
 // Event callback registration.
 #[no_mangle]
 pub extern "C" fn mashin_core_set_event_callback(callback: Option<EventCallback>) -> i32 {
+    if callback.is_some() {
+        crate::logging::initialize();
+    }
     FLUTTER_EVENT_CHANNEL
         .set_callback(callback)
         .map_or(-1, |_| 0)

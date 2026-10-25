@@ -42,7 +42,6 @@ class SettingsScreenDesktop extends StatelessWidget {
     required this.logLevel,
     required this.onThemeChanged,
     required this.onLogLevelChanged,
-    required this.onSaveLogSnapshot,
     required this.onSave,
     required this.onCancel,
     required this.isSaving,
@@ -54,7 +53,6 @@ class SettingsScreenDesktop extends StatelessWidget {
   final LogLevelPreference logLevel;
   final ValueChanged<bool> onThemeChanged;
   final ValueChanged<LogLevelPreference> onLogLevelChanged;
-  final Future<String> Function() onSaveLogSnapshot;
   final VoidCallback onSave;
   final VoidCallback onCancel;
   final bool isSaving;
@@ -111,7 +109,6 @@ class SettingsScreenDesktop extends StatelessWidget {
                       _DesktopLogTab(
                         logLevel: logLevel,
                         onLogLevelChanged: onLogLevelChanged,
-                        onSaveLogSnapshot: onSaveLogSnapshot,
                       ),
                     ],
                   ),
@@ -134,12 +131,10 @@ class _DesktopLogTab extends StatelessWidget {
   const _DesktopLogTab({
     required this.logLevel,
     required this.onLogLevelChanged,
-    required this.onSaveLogSnapshot,
   });
 
   final LogLevelPreference logLevel;
   final ValueChanged<LogLevelPreference> onLogLevelChanged;
-  final Future<String> Function() onSaveLogSnapshot;
 
   @override
   Widget build(BuildContext context) {
@@ -160,8 +155,6 @@ class _DesktopLogTab extends StatelessWidget {
                 shouldUseCompactFieldLayout: true,
               ),
             ),
-            const SizedBox(width: 8),
-            SettingsSaveLogButton(onSave: onSaveLogSnapshot),
           ],
         ),
         const SizedBox(height: 12),

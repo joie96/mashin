@@ -14,7 +14,6 @@ class SettingsScreenMobile extends StatelessWidget {
     required this.logLevel,
     required this.onThemeChanged,
     required this.onLogLevelChanged,
-    required this.onSaveLogSnapshot,
     required this.onSave,
     required this.onCancel,
     required this.isSaving,
@@ -26,7 +25,6 @@ class SettingsScreenMobile extends StatelessWidget {
   final LogLevelPreference logLevel;
   final ValueChanged<bool> onThemeChanged;
   final ValueChanged<LogLevelPreference> onLogLevelChanged;
-  final Future<String> Function() onSaveLogSnapshot;
   final VoidCallback onSave;
   final VoidCallback onCancel;
   final bool isSaving;
@@ -146,17 +144,9 @@ class SettingsScreenMobile extends StatelessWidget {
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 12),
-                    Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: SettingsLogLevelField(
-                            logLevel: logLevel,
-                            onChanged: onLogLevelChanged,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        SettingsSaveLogButton(onSave: onSaveLogSnapshot),
-                      ],
+                    SettingsLogLevelField(
+                      logLevel: logLevel,
+                      onChanged: onLogLevelChanged,
                     ),
                     const SizedBox(height: 32),
                     Text(

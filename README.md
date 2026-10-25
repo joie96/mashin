@@ -55,6 +55,18 @@ playback state from Music Assistant rather than a separate local playback store.
 Device-specific battery and network restrictions can still affect background
 playback.
 
+## Logs
+
+Logs are written automatically to `mashin-YYYY-MM-DD.log` using the local date.
+Restarting the app appends an `App Start` separator to the same day's file.
+The logger keeps at most three Mashin log files, deleting the oldest first,
+including older manually saved snapshots. The configured log level still applies.
+
+- Windows: `%LOCALAPPDATA%\Mashin\Logs`.
+- Android: the app's external files directory, under `Logs`.
+- macOS/iOS: `~/Library/Logs/Mashin`.
+- Linux: `$XDG_STATE_HOME/mashin/logs`, or `~/.local/state/mashin/logs`.
+
 ## FFmpeg And Licenses
 
 Mashin includes shared [FFmpeg 9.0.2](https://ffmpeg.org/) libraries for FLAC and
