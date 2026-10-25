@@ -41,101 +41,136 @@ class SettingsEditor extends StatefulWidget {
 
 class _SettingsEditorState extends State<SettingsEditor> {
   late final TextEditingController _cacheSizeController;
+  late final FocusNode _cacheSizeFocusNode;
   late SessionSettingsUpdate _savedSettings;
-  late bool _isDarkTheme;
-  late LogLevelPreference _logLevel;
-  bool _isSaving = false;
+  late SessionSettingsUpdate _settings;
+  Future<void> _pendingSave = Future<void>.value();
 
-  // Draft construction and lifecycle.
+  // Editor construction and lifecycle.
   @override
   void initState() {
     super.initState();
-    _cacheSizeController = TextEditingController();
     _savedSettings = widget.settings;
-    _restoreDraft();
+    _settings = widget.settings;
+    _cacheSizeController = TextEditingController(
+      text: '${_settings.localCacheSizeBytes ~/ _bytesPerMegabyte}',
+    );
+    _cacheSizeFocusNode = FocusNode()..addListener(_onCacheSizeFocusChanged);
   }
 
   @override
   void dispose() {
+    _saveCacheSize(shouldShowError: false);
+    _cacheSizeFocusNode.removeListener(_onCacheSizeFocusChanged);
+    _cacheSizeFocusNode.dispose();
     _cacheSizeController.dispose();
     super.dispose();
   }
 
-  // Draft commands; no setting is applied before the single save operation.
-  void _restoreDraft() {
-    _cacheSizeController.text =
-        '${_savedSettings.localCacheSizeBytes ~/ _bytesPerMegabyte}';
-    _isDarkTheme = _savedSettings.isDarkTheme;
-    _logLevel = _savedSettings.logLevel;
+  // Field commits and ordered persistence.
+  void _onCacheSizeFocusChanged() {
+    if (!_cacheSizeFocusNode.hasFocus) {
+      _saveCacheSize();
+    }
   }
 
-  void _cancel() {
-    FocusScope.of(context).unfocus();
-    setState(_restoreDraft);
-  }
-
-  Future<void> _save() async {
+  void _saveCacheSize({bool shouldShowError = true}) {
     final int? cacheSizeMb = int.tryParse(_cacheSizeController.text.trim());
     if (cacheSizeMb == null || cacheSizeMb < 25 || cacheSizeMb > 1000) {
-      _showMessage('Cache-Groesse muss zwischen 25 und 1000 MB liegen.');
+      _cacheSizeController.text =
+          '${_settings.localCacheSizeBytes ~/ _bytesPerMegabyte}';
+      if (shouldShowError) {
+        _showMessage('Cache-Groesse muss zwischen 25 und 1000 MB liegen.');
+      }
       return;
     }
-    final update = SessionSettingsUpdate(
-      localCacheSizeBytes: cacheSizeMb * _bytesPerMegabyte,
-      isDarkTheme: _isDarkTheme,
-      logLevel: _logLevel,
+    _cacheSizeController.text = '$cacheSizeMb';
+    _saveSettings(
+      SessionSettingsUpdate(
+        localCacheSizeBytes: cacheSizeMb * _bytesPerMegabyte,
+        isDarkTheme: _settings.isDarkTheme,
+        logLevel: _settings.logLevel,
+      ),
     );
-    FocusScope.of(context).unfocus();
-    setState(() => _isSaving = true);
-    try {
-      await widget.onSave(update);
-      if (!mounted) {
-        return;
-      }
-      _savedSettings = update;
-      _showMessage('Einstellungen gespeichert.');
-    } catch (_) {
-      if (mounted) {
-        _showMessage(
-          'Einstellungen konnten nicht gespeichert werden. Verbindung und Eingaben pruefen.',
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isSaving = false);
-      }
+  }
+
+  void _saveSettings(SessionSettingsUpdate update) {
+    if (update.localCacheSizeBytes == _settings.localCacheSizeBytes &&
+        update.isDarkTheme == _settings.isDarkTheme &&
+        update.logLevel == _settings.logLevel) {
+      return;
     }
+    _settings = update;
+    _pendingSave = _pendingSave.then((_) async {
+      try {
+        await widget.onSave(update);
+        _savedSettings = update;
+      } catch (_) {
+        if (mounted) {
+          if (identical(_settings, update)) {
+            setState(() => _settings = _savedSettings);
+            if (!_cacheSizeFocusNode.hasFocus) {
+              _cacheSizeController.text =
+                  '${_savedSettings.localCacheSizeBytes ~/ _bytesPerMegabyte}';
+            }
+          }
+          _showMessage(
+            'Einstellungen konnten nicht gespeichert werden. Verbindung und Eingaben pruefen.',
+          );
+        }
+      }
+    });
+  }
+
+  void _saveTheme(bool value) {
+    setState(
+      () => _saveSettings(
+        SessionSettingsUpdate(
+          localCacheSizeBytes: _settings.localCacheSizeBytes,
+          isDarkTheme: value,
+          logLevel: _settings.logLevel,
+        ),
+      ),
+    );
+  }
+
+  void _saveLogLevel(LogLevelPreference value) {
+    setState(
+      () => _saveSettings(
+        SessionSettingsUpdate(
+          localCacheSizeBytes: _settings.localCacheSizeBytes,
+          isDarkTheme: _settings.isDarkTheme,
+          logLevel: value,
+        ),
+      ),
+    );
   }
 
   void _showMessage(String message) => ScaffoldMessenger.of(
     context,
   ).showSnackBar(SnackBar(content: Text(message)));
 
-  // Responsive presentation with one shared draft across tabs and layouts.
+  // Responsive presentation with shared settings across tabs and layouts.
   @override
   Widget build(BuildContext context) {
     final screen = isCompactLayout(context)
         ? SettingsScreenMobile(
             musicAssistantUrl: widget.musicAssistantUrl,
             cacheSizeController: _cacheSizeController,
-            isDarkTheme: _isDarkTheme,
-            logLevel: _logLevel,
-            onThemeChanged: (value) => setState(() => _isDarkTheme = value),
-            onLogLevelChanged: (value) => setState(() => _logLevel = value),
-            onSave: _save,
-            onCancel: _cancel,
-            isSaving: _isSaving,
+            cacheSizeFocusNode: _cacheSizeFocusNode,
+            isDarkTheme: _settings.isDarkTheme,
+            logLevel: _settings.logLevel,
+            onThemeChanged: _saveTheme,
+            onLogLevelChanged: _saveLogLevel,
           )
         : SettingsScreenDesktop(
             musicAssistantUrl: widget.musicAssistantUrl,
             cacheSizeController: _cacheSizeController,
-            isDarkTheme: _isDarkTheme,
-            logLevel: _logLevel,
-            onThemeChanged: (value) => setState(() => _isDarkTheme = value),
-            onLogLevelChanged: (value) => setState(() => _logLevel = value),
-            onSave: _save,
-            onCancel: _cancel,
-            isSaving: _isSaving,
+            cacheSizeFocusNode: _cacheSizeFocusNode,
+            isDarkTheme: _settings.isDarkTheme,
+            logLevel: _settings.logLevel,
+            onThemeChanged: _saveTheme,
+            onLogLevelChanged: _saveLogLevel,
           );
     return screen;
   }

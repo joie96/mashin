@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../app/theme/app_theme.dart';
 import '../core/core_models.dart';
 import 'settings_log_view.dart';
-import 'settings_actions.dart';
 
 const double _desktopSettingsControlWidth = 280;
 const BoxConstraints _desktopSettingsFieldConstraints = BoxConstraints.tightFor(
@@ -38,24 +37,20 @@ class SettingsScreenDesktop extends StatelessWidget {
     super.key,
     required this.musicAssistantUrl,
     required this.cacheSizeController,
+    required this.cacheSizeFocusNode,
     required this.isDarkTheme,
     required this.logLevel,
     required this.onThemeChanged,
     required this.onLogLevelChanged,
-    required this.onSave,
-    required this.onCancel,
-    required this.isSaving,
   });
 
   final String musicAssistantUrl;
   final TextEditingController cacheSizeController;
+  final FocusNode cacheSizeFocusNode;
   final bool isDarkTheme;
   final LogLevelPreference logLevel;
   final ValueChanged<bool> onThemeChanged;
   final ValueChanged<LogLevelPreference> onLogLevelChanged;
-  final VoidCallback onSave;
-  final VoidCallback onCancel;
-  final bool isSaving;
 
   @override
   Widget build(BuildContext context) {
@@ -96,28 +91,21 @@ class SettingsScreenDesktop extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Expanded(
-                child: AbsorbPointer(
-                  absorbing: isSaving,
-                  child: TabBarView(
-                    children: <Widget>[
-                      _DesktopSettingsForm(
-                        musicAssistantUrl: musicAssistantUrl,
-                        cacheSizeController: cacheSizeController,
-                        isDarkTheme: isDarkTheme,
-                        onThemeChanged: onThemeChanged,
-                      ),
-                      _DesktopLogTab(
-                        logLevel: logLevel,
-                        onLogLevelChanged: onLogLevelChanged,
-                      ),
-                    ],
-                  ),
+                child: TabBarView(
+                  children: <Widget>[
+                    _DesktopSettingsForm(
+                      musicAssistantUrl: musicAssistantUrl,
+                      cacheSizeController: cacheSizeController,
+                      cacheSizeFocusNode: cacheSizeFocusNode,
+                      isDarkTheme: isDarkTheme,
+                      onThemeChanged: onThemeChanged,
+                    ),
+                    _DesktopLogTab(
+                      logLevel: logLevel,
+                      onLogLevelChanged: onLogLevelChanged,
+                    ),
+                  ],
                 ),
-              ),
-              SettingsActions(
-                onSave: onSave,
-                onCancel: onCancel,
-                isSaving: isSaving,
               ),
             ],
           ),
@@ -173,12 +161,14 @@ class _DesktopSettingsForm extends StatelessWidget {
   const _DesktopSettingsForm({
     required this.musicAssistantUrl,
     required this.cacheSizeController,
+    required this.cacheSizeFocusNode,
     required this.isDarkTheme,
     required this.onThemeChanged,
   });
 
   final String musicAssistantUrl;
   final TextEditingController cacheSizeController;
+  final FocusNode cacheSizeFocusNode;
   final bool isDarkTheme;
   final ValueChanged<bool> onThemeChanged;
 
@@ -217,6 +207,8 @@ class _DesktopSettingsForm extends StatelessWidget {
               child: TextField(
                 key: const Key('settings-cache-size'),
                 controller: cacheSizeController,
+                focusNode: cacheSizeFocusNode,
+                onTapOutside: (_) => cacheSizeFocusNode.unfocus(),
                 keyboardType: TextInputType.number,
                 decoration: _desktopSettingsFieldDecoration(
                   colors: colors,
