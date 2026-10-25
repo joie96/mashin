@@ -100,7 +100,7 @@ class _AppShellState extends State<AppShell> {
       _userDataController?.playlists ?? const <Playlist>[];
 
   bool get _isLoadingSidebarPlaylists =>
-      _userDataController?.isLoadingLibraryData ?? false;
+      _userDataController?.isLoadingPlaylists ?? false;
 
   /// Current playback and queue state
   QueueItem? get _currentQueueItem {

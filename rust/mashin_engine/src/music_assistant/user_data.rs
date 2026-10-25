@@ -4,6 +4,7 @@ use super::client::MusicAssistantClient;
 use super::models::identifiers::MediaId;
 use super::models::media::{Album, Artist, MediaItem, Playlist, PlaylistSharing, Track};
 use super::playlist_collage::build_playlist_collage;
+use futures_util::{stream, StreamExt, TryStreamExt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -28,6 +29,8 @@ pub(crate) struct PrivatePlaylist {
     pub(crate) playlist: Playlist,
     #[serde(default)]
     pub(crate) items: Vec<Track>,
+    #[serde(default)]
+    pub(crate) is_loading_tracks: bool,
 }
 
 impl PrivatePlaylist {
@@ -52,6 +55,8 @@ pub(crate) struct UserDataSnapshot {
     pub(crate) favorites: Favorites,
     #[serde(default)]
     pub(crate) playlists: Vec<PrivatePlaylist>,
+    #[serde(default)]
+    pub(crate) is_loading_playlists: bool,
 }
 
 impl UserDataSnapshot {
@@ -87,6 +92,7 @@ impl MusicAssistantClient {
         Ok(UserDataSnapshot {
             favorites,
             playlists,
+            is_loading_playlists: false,
         })
     }
 
@@ -109,6 +115,23 @@ impl MusicAssistantClient {
         &self,
         user_id: &str,
     ) -> Result<Vec<PrivatePlaylist>, String> {
+        let playlists = self.load_private_playlist_metadata(user_id).await?;
+        stream::iter(playlists.into_iter().map(|mut playlist| async move {
+            playlist.items = self
+                .get_playlist_tracks(&playlist.playlist.media.item_id, "library", true, false)
+                .await?;
+            playlist.is_loading_tracks = false;
+            Ok(playlist)
+        }))
+        .buffered(3)
+        .try_collect()
+        .await
+    }
+
+    pub(crate) async fn load_private_playlist_metadata(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<PrivatePlaylist>, String> {
         let mut playlists = Vec::new();
         let library_playlists: Vec<Playlist> = self.library_pages("playlists", None).await?;
         for owned in library_playlists {
@@ -118,12 +141,10 @@ impl MusicAssistantClient {
             }) {
                 continue;
             }
-            let items = self
-                .get_playlist_tracks(&owned.media.item_id, "library", true, false)
-                .await?;
             playlists.push(PrivatePlaylist {
                 playlist: owned,
-                items,
+                items: Vec::new(),
+                is_loading_tracks: true,
             });
         }
         Ok(playlists)
@@ -145,7 +166,11 @@ impl MusicAssistantClient {
         let items = self
             .get_playlist_tracks(&playlist.media.item_id, "library", true, false)
             .await?;
-        Ok(Some(PrivatePlaylist { playlist, items }))
+        Ok(Some(PrivatePlaylist {
+            playlist,
+            items,
+            is_loading_tracks: false,
+        }))
     }
 
     pub(crate) async fn refresh_playlist_collages(
@@ -222,6 +247,7 @@ impl MusicAssistantClient {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct LibraryUserData {
     pub(crate) snapshot: UserDataSnapshot,
+    pub(crate) has_loaded_library_data: bool,
     pub(crate) sync: FavoriteSync,
     pub(crate) revision: u64,
     pending_items: HashMap<String, MediaItem>,
@@ -419,6 +445,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn private_playlist_metadata_is_available_before_tracks() {
+        let (client, worker) = server(vec![(
+            "music/playlists/library_items",
+            json!([{"item_id":"42", "provider":"library", "name":"Playlist",
+                "access":{"owner":"user-one", "sharing":"private"}}]),
+        )]);
+        let playlists = client
+            .load_private_playlist_metadata("user-one")
+            .await
+            .unwrap();
+        assert_eq!(playlists.len(), 1);
+        assert!(playlists[0].is_loading_tracks);
+        assert!(playlists[0].items.is_empty());
+        assert_eq!(
+            serde_json::to_value(&playlists[0]).unwrap()["is_loading_tracks"],
+            true
+        );
+        assert_eq!(worker.join().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
     async fn private_playlist_loading_accepts_unrated_playlists() {
         let (client, worker) = server(vec![
             (
@@ -476,6 +523,7 @@ mod tests {
             )
             .unwrap(),
             items: Vec::new(),
+            is_loading_tracks: false,
         };
         let mut snapshot = UserDataSnapshot {
             playlists: vec![playlist("41", "Other"), playlist("42", "Old")],
@@ -516,6 +564,7 @@ mod tests {
                     "item_id":id, "provider":"library", "name":"Track", "uri":format!("library://track/{id}"),
                     "image":{"type":"thumb", "path":source, "provider":"builtin"}
                 })).unwrap()).collect(),
+                is_loading_tracks: false,
             }],
             ..Default::default()
         }
@@ -694,6 +743,7 @@ mod tests {
                 ..Favorites::default()
             },
             playlists: Vec::new(),
+            is_loading_playlists: false,
         });
         assert!(cache.snapshot.favorites.tracks.is_empty());
         assert!(!cache.finish(&identity, true, Some(item("library", "42", true))));

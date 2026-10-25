@@ -12,16 +12,16 @@ class AppSessionController extends ChangeNotifier {
   static const Duration _sessionStartupTimeout = Duration(seconds: 20);
   static const Duration _userDataLoadTimeout = Duration(minutes: 2);
 
-  AppSessionController() {
-    coreBridge = MashinCoreBridge();
-    coreEvents = MashinCoreBridgeEvents(coreBridge: coreBridge);
+  AppSessionController({MashinCoreBridge? coreBridge})
+    : coreBridge = coreBridge ?? MashinCoreBridge() {
+    coreEvents = MashinCoreBridgeEvents(coreBridge: this.coreBridge);
     _instance = this;
     PreferredProviderController.instance.addListener(notifyListeners);
   }
 
   static AppSessionController? _instance;
 
-  late final MashinCoreBridge coreBridge;
+  final MashinCoreBridge coreBridge;
   late final MashinCoreBridgeEvents coreEvents;
 
   UserData? _userDataController;
@@ -34,7 +34,6 @@ class AppSessionController extends ChangeNotifier {
   late int _localCacheSizeBytes;
   bool _isDarkTheme = true;
   LogLevelPreference _logLevel = LogLevelPreference.info;
-  final Completer<void> _initialSettingsReady = Completer<void>();
 
   UserData? get userDataController => _userDataController;
   String get baseUrl => _baseUrl;
@@ -47,18 +46,19 @@ class AppSessionController extends ChangeNotifier {
   LogLevelPreference get logLevel => _logLevel;
   PreferredProvider? get preferredProvider =>
       PreferredProviderController.instance.preferredProvider;
-  Future<void> get initialSettingsReady => _initialSettingsReady.future;
 
   Future<void> initialize() async {
     try {
       await _restoreSession();
+      if (_isDisposed) return;
       await _refreshSessionSettings();
-      _initialSettingsReady.complete();
-      await _initializeUserData().timeout(_userDataLoadTimeout);
-      await _loadProviderIcons().timeout(_startupTimeout);
-      await coreEvents.start().timeout(_startupTimeout);
+      if (_isDisposed) return;
+      _initializeUserDataController();
+      _isLoading = false;
+      notifyListeners();
+      await _loadSessionData();
     } catch (error, stackTrace) {
-      if (!_initialSettingsReady.isCompleted) {
+      if (_isLoading) {
         _isAuthenticated = false;
       }
       coreBridge.log(
@@ -67,9 +67,6 @@ class AppSessionController extends ChangeNotifier {
         'Startup bootstrap failed: $error | $stackTrace',
       );
     } finally {
-      if (!_initialSettingsReady.isCompleted) {
-        _initialSettingsReady.complete();
-      }
       if (!_isDisposed) {
         _isLoading = false;
         notifyListeners();
@@ -96,10 +93,11 @@ class AppSessionController extends ChangeNotifier {
       }
 
       await _refreshSessionSettings();
+      if (_isDisposed) return null;
       _isAuthenticated = true;
-      await _initializeUserData();
-      await _loadProviderIcons();
+      _initializeUserDataController();
       notifyListeners();
+      unawaited(_loadSessionData());
       return null;
     } catch (_) {
       return 'Verbindung fehlgeschlagen. Bitte Server-URL prüfen.';
@@ -161,14 +159,55 @@ class AppSessionController extends ChangeNotifier {
     );
   }
 
-  Future<void> _initializeUserData() async {
+  // Session projections exist before background loading so views can subscribe.
+  void _initializeUserDataController() {
     _disposeUserDataController();
     if (!_isAuthenticated) {
       return;
     }
     final controller = UserData(coreBridge: coreBridge);
     _userDataController = controller;
-    await controller.loadLibraryData();
+  }
+
+  // Independent startup tasks cannot prevent other sections from becoming ready.
+  Future<void> _loadSessionData() async {
+    final controller = _userDataController;
+    if (controller == null || _isDisposed) return;
+    await Future.wait(<Future<void>>[
+      _runStartupTask('library', () async {
+        await controller.loadLibraryData(waitFor: _preloadRecommendations());
+      }, _userDataLoadTimeout),
+      _runStartupTask('provider icons', _loadProviderIcons, _startupTimeout),
+      _runStartupTask('playback events', coreEvents.start, _startupTimeout),
+    ]);
+  }
+
+  Future<void> _preloadRecommendations() async {
+    try {
+      await coreBridge.getRecommendations();
+    } catch (error) {
+      coreBridge.log(
+        LogLevelPreference.warn,
+        'AppSessionController',
+        'Recommendations preload failed: $error',
+      );
+    }
+  }
+
+  Future<void> _runStartupTask(
+    String name,
+    Future<void> Function() operation,
+    Duration timeout,
+  ) async {
+    try {
+      await operation().timeout(timeout);
+    } catch (error, stackTrace) {
+      coreBridge.log(
+        LogLevelPreference.error,
+        'AppSessionController',
+        'Loading $name failed: $error | $stackTrace',
+      );
+    }
   }
 
   Future<void> _loadProviderIcons() async {

@@ -16,7 +16,7 @@ class PlaylistsController extends ChangeNotifier {
   final UserData userDataController;
 
   List<Playlist> get playlists => userDataController.playlists;
-  bool get isLoading => userDataController.isLoadingLibraryData;
+  bool get isLoading => userDataController.isLoadingPlaylists;
 
   List<Track> tracksFor(List<Playlist> playlists) => playlists
       .expand(

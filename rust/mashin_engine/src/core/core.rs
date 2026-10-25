@@ -107,20 +107,15 @@ impl CoreCoordinator {
     }
 
     // User-data state.
-    fn replace_user_data(&mut self, user_data: LibraryUserData) {
-        self.invalidate_user_data();
-        self.user_data = Some(user_data);
-    }
-
-    fn replace_user_data_for_session(
+    fn update_initial_user_data(
         &mut self,
         session_generation: u64,
-        user_data: LibraryUserData,
+        update: impl FnOnce(&mut LibraryUserData),
     ) -> Result<(), String> {
         if self.user_data_session_generation != session_generation {
             return Err("session changed while loading user data".to_string());
         }
-        self.replace_user_data(user_data);
+        update(self.user_data.get_or_insert_with(LibraryUserData::default));
         Ok(())
     }
 
@@ -184,7 +179,7 @@ where
     let events = collect_media_session_events(&coordinator, queue_before, player_state_before);
     drop(coordinator);
     if should_load_user_data {
-        start_user_data_load();
+        start_session_data_load();
     }
     Ok(events)
 }
@@ -220,13 +215,24 @@ pub(crate) fn restore_persisted_session_and_collect_events(
     drop(coordinator);
     drop(_command_guard);
     if should_load_user_data {
-        start_user_data_load();
+        start_session_data_load();
     }
     Ok((has_restored_session, events))
 }
 
-fn start_user_data_load() {
-    spawn_blocking_operation(|| {
+fn start_session_data_load() {
+    let Ok(client) = music_assistant_client_for_query("preload session data") else {
+        return;
+    };
+    spawn_blocking_operation(move || {
+        if let Err(error) = CORE_NETWORK_RUNTIME.block_on(client.get_recommendations()) {
+            LOGGER.warn(format!("load recommendations failed: {error}"));
+        }
+        CORE_NETWORK_RUNTIME.spawn(async move {
+            if let Err(error) = client.preload_recommendation_playlists().await {
+                LOGGER.warn(format!("load recommendation playlists failed: {error}"));
+            }
+        });
         if let Err(error) = read_or_load_user_data() {
             LOGGER.warn(format!("load user data failed: {}", error.message));
         }
@@ -331,19 +337,18 @@ where
 }
 
 // Music Assistant queries.
-fn music_assistant_client_for_query(operation: &str) -> Result<MusicAssistantClient, CoreError> {
-    let session = CORE_COORDINATOR
+fn music_assistant_client_for_query(
+    operation: &str,
+) -> Result<std::sync::Arc<MusicAssistantClient>, CoreError> {
+    CORE_COORDINATOR
         .lock()
         .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?
-        .session_configuration
-        .clone()
+        .connection
+        .as_ref()
+        .map(|connection| connection.client.clone())
         .ok_or_else(|| {
             CoreError::command_failed(format!("a restored session is required to {operation}"))
-        })?;
-    Ok(MusicAssistantClient::new(
-        &session.music_assistant_url.0,
-        session.access_token,
-    ))
+        })
 }
 
 pub(crate) fn start_music_assistant_query(
@@ -1259,11 +1264,26 @@ mod tests {
             .configure_session(session_config())
             .expect("replace session");
 
-        let user_data = super::LibraryUserData::default();
         assert!(coordinator
-            .replace_user_data_for_session(old_generation, user_data)
+            .update_initial_user_data(old_generation, |data| data.has_loaded_library_data = true)
             .is_err());
         assert!(coordinator.user_data.is_none());
+    }
+
+    #[test]
+    fn initial_user_data_progress_preserves_session_generation_and_workers() {
+        let mut coordinator = test_coordinator();
+        let generation = coordinator.user_data_session_generation;
+        coordinator
+            .update_initial_user_data(generation, |data| data.revision = 42)
+            .unwrap();
+        coordinator
+            .update_initial_user_data(generation, |data| data.has_loaded_library_data = true)
+            .unwrap();
+        assert_eq!(coordinator.user_data_session_generation, generation);
+        let data = coordinator.user_data.as_ref().unwrap();
+        assert_eq!(data.revision, 42);
+        assert!(data.has_loaded_library_data);
     }
 
     #[test]

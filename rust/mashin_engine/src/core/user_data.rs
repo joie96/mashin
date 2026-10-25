@@ -4,6 +4,7 @@ use super::*;
 use crate::music_assistant::event_hub::{
     EventHubLeaseReason, MusicAssistantEvent, MusicAssistantEventHub,
 };
+use futures_util::{stream, StreamExt};
 use std::sync::Arc;
 
 pub(super) struct UserDataEvents {
@@ -31,28 +32,69 @@ pub(crate) fn read_user_data() -> Result<UserDataSnapshot, CoreError> {
 
 pub(crate) fn read_or_load_user_data() -> Result<UserDataSnapshot, CoreError> {
     let _load_guard = CORE_NETWORK_RUNTIME.block_on(CORE_USER_DATA_LOAD.lock());
-    if let Ok(snapshot) = read_user_data() {
-        return Ok(snapshot);
+    {
+        let coordinator = CORE_COORDINATOR
+            .lock()
+            .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
+        if let Some(data) = coordinator
+            .user_data
+            .as_ref()
+            .filter(|data| data.has_loaded_library_data)
+        {
+            return Ok(data.snapshot.clone());
+        }
     }
     let (client, generation) = session_client()?;
-    let snapshot = CORE_NETWORK_RUNTIME
+    CORE_NETWORK_RUNTIME
         .block_on(async {
             let user = client.get_current_user().await?;
-            client.load_library_user_data(user.user_id.as_str()).await
+            let favorites = client.load_favorites().await?;
+            publish_initial_user_data(generation, |data| {
+                let mut snapshot = data.snapshot.clone();
+                snapshot.favorites = favorites;
+                snapshot.is_loading_playlists = true;
+                data.replace_snapshot(snapshot);
+            })?;
+            let playlists = client
+                .load_private_playlist_metadata(user.user_id.as_str())
+                .await?;
+            publish_initial_user_data(generation, |data| {
+                data.snapshot.playlists = playlists.clone();
+                data.snapshot.is_loading_playlists = false;
+            })?;
+            let mut pending = stream::iter(playlists.into_iter().map(|mut playlist| {
+                let client = client.clone();
+                async move {
+                    let items = client
+                        .get_playlist_tracks(
+                            &playlist.playlist.media.item_id,
+                            "library",
+                            true,
+                            false,
+                        )
+                        .await;
+                    match items {
+                        Ok(items) => playlist.items = items,
+                        Err(error) => {
+                            LOGGER.warn(format!("load private playlist tracks failed: {error}"))
+                        }
+                    }
+                    playlist.is_loading_tracks = false;
+                    playlist
+                }
+            }))
+            .buffer_unordered(3);
+            while let Some(playlist) = pending.next().await {
+                let playlist_id = playlist.playlist.media.item_id.as_str().to_owned();
+                publish_initial_user_data(generation, |data| {
+                    data.snapshot.replace_playlist(&playlist_id, Some(playlist));
+                })?;
+            }
+            publish_initial_user_data(generation, |data| data.has_loaded_library_data = true)
         })
         .map_err(CoreError::command_failed)?;
-    let mut coordinator = CORE_COORDINATOR
-        .lock()
-        .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
-    let mut data = LibraryUserData::default();
-    data.snapshot = snapshot.clone();
-    coordinator
-        .replace_user_data_for_session(generation, data)
-        .map_err(CoreError::command_failed)?;
-    drop(coordinator);
     start_user_data_events()?;
-    publish_background_event(MediaSessionEvent::UserDataChanged);
-    Ok(snapshot)
+    read_user_data()
 }
 
 pub(crate) fn refresh_user_data() -> Result<UserDataSnapshot, CoreError> {
@@ -403,6 +445,20 @@ pub(crate) fn remove_private_playlist_tracks(
         Some(generation),
         UserDataRefresh::Playlist(playlist_id.to_owned()),
     ))
+}
+
+// Initial snapshots retain favorite workers and reject completions from replaced sessions.
+fn publish_initial_user_data(
+    generation: u64,
+    update: impl FnOnce(&mut LibraryUserData),
+) -> Result<(), String> {
+    let mut coordinator = CORE_COORDINATOR
+        .lock()
+        .map_err(|_| "core coordinator lock poisoned".to_string())?;
+    coordinator.update_initial_user_data(generation, update)?;
+    drop(coordinator);
+    publish_background_event(MediaSessionEvent::UserDataChanged);
+    Ok(())
 }
 
 // Session guards protect all network completions from logout and account replacement.

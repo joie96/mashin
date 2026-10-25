@@ -21,6 +21,12 @@ Favorite changes appear immediately and synchronize in memory, independently per
 item. Pending changes are not persisted and are lost when the app exits.
 Scrobbling is handled by Music Assistant and its configured integrations.
 
+Home opens without waiting for the full library or provider icons. Recommendations
+are requested first and shared by Home and Explore for the active native session,
+including Explore's recommended playlist tracks. A new native session loads fresh
+recommendations. Favorites, playlist metadata and playlist contents become available
+progressively in the background; normal library playlists remain live.
+
 ## Getting Started
 
 Mashin requires a running Music Assistant server and a Music Assistant account.

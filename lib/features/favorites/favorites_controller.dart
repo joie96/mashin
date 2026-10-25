@@ -38,7 +38,7 @@ class FavoritesController extends ChangeNotifier {
     super.dispose();
   }
 
-  bool get isLoading => userDataController.isLoadingLibraryData;
+  bool get isLoading => userDataController.isLoadingFavorites;
 
   List<Track> get tracks => userDataController.favoriteTracks;
   List<Album> get albums => userDataController.favoriteAlbums;

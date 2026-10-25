@@ -7,12 +7,16 @@ use super::models::player::MusicAssistantPlayer;
 use super::models::queue::{MusicAssistantQueue, QueueItem, QueueOption, RepeatMode};
 use super::models::recommendation::MusicAssistantRecommendationFolder;
 use super::models::session::{MusicAssistantUser, ProviderInstance, ProviderManifest, ServerInfo};
+use futures_util::{stream, StreamExt};
 use rand::seq::SliceRandom;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+type CachedPlaylistTracks = Arc<tokio::sync::Mutex<Option<Vec<Track>>>>;
 
 struct ArtworkCacheEntry {
     expires_at: Instant,
@@ -132,6 +136,9 @@ pub(crate) struct MusicAssistantClient {
     access_token: Option<AccessToken>,
     http_client: reqwest::Client,
     artwork_cache: tokio::sync::Mutex<HashMap<(String, String, String), ArtworkCacheEntry>>,
+    recommendations: tokio::sync::Mutex<Option<Vec<MusicAssistantRecommendationFolder>>>,
+    recommendation_playlist_tracks:
+        tokio::sync::Mutex<HashMap<(String, String), CachedPlaylistTracks>>,
 }
 
 impl MusicAssistantClient {
@@ -142,6 +149,8 @@ impl MusicAssistantClient {
             endpoint: format!("{}/api", base_url.trim_end_matches('/')),
             access_token,
             artwork_cache: tokio::sync::Mutex::new(HashMap::new()),
+            recommendations: tokio::sync::Mutex::new(None),
+            recommendation_playlist_tracks: tokio::sync::Mutex::new(HashMap::new()),
             http_client: reqwest::Client::builder()
                 .connect_timeout(std::time::Duration::from_secs(5))
                 .timeout(std::time::Duration::from_secs(30))
@@ -338,16 +347,37 @@ impl MusicAssistantClient {
         force_refresh: bool,
         allow_dynamic_tracks: bool,
     ) -> Result<Vec<Track>, String> {
-        self.execute_command(
-            "music/playlists/playlist_tracks",
-            json!({
-                "item_id": item_id,
-                "provider_instance_id_or_domain": provider,
-                "force_refresh": force_refresh,
-                "allow_dynamic_tracks": allow_dynamic_tracks,
-            }),
-        )
-        .await
+        let cached_tracks = if force_refresh || allow_dynamic_tracks {
+            None
+        } else {
+            self.recommendation_playlist_tracks
+                .lock()
+                .await
+                .get(&(provider.to_owned(), item_id.as_str().to_owned()))
+                .cloned()
+        };
+        let mut snapshot = match cached_tracks.as_ref() {
+            Some(tracks) => Some(tracks.lock().await),
+            None => None,
+        };
+        if let Some(Some(tracks)) = snapshot.as_deref() {
+            return Ok(tracks.clone());
+        }
+        let tracks: Vec<Track> = self
+            .execute_command(
+                "music/playlists/playlist_tracks",
+                json!({
+                    "item_id": item_id,
+                    "provider_instance_id_or_domain": provider,
+                    "force_refresh": force_refresh,
+                    "allow_dynamic_tracks": allow_dynamic_tracks,
+                }),
+            )
+            .await?;
+        if let Some(snapshot) = snapshot.as_deref_mut() {
+            *snapshot = Some(tracks.clone());
+        }
+        Ok(tracks)
     }
 
     pub(crate) async fn get_album_tracks(
@@ -400,24 +430,75 @@ impl MusicAssistantClient {
     pub(crate) async fn get_recommendations(
         &self,
     ) -> Result<Vec<MusicAssistantRecommendationFolder>, String> {
+        let mut snapshot = self.recommendations.lock().await;
+        if let Some(folders) = snapshot.as_ref() {
+            return Ok(folders.clone());
+        }
         let mut folders: Vec<MusicAssistantRecommendationFolder> = self
             .execute_command("music/recommendations", json!({}))
             .await?;
-        for folder in &mut folders {
-            if !folder.items.is_empty() {
-                continue;
-            }
-            if let Ok(items) = self
-                .execute_command(
-                    "music/recommendations/items",
-                    json!({"provider": folder.provider, "item_id": folder.item_id}),
-                )
-                .await
-            {
-                folder.items = items;
+        let empty_folders = folders
+            .iter()
+            .enumerate()
+            .filter(|(_, folder)| folder.items.is_empty())
+            .map(|(index, folder)| (index, folder.provider.clone(), folder.item_id.clone()))
+            .collect::<Vec<_>>();
+        let rows = stream::iter(empty_folders.into_iter().map(
+            |(index, provider, item_id)| async move {
+                let items = self
+                    .execute_command(
+                        "music/recommendations/items",
+                        json!({"provider": provider, "item_id": item_id}),
+                    )
+                    .await;
+                (index, items)
+            },
+        ))
+        .buffer_unordered(3)
+        .collect::<Vec<_>>()
+        .await;
+        let mut is_complete = true;
+        for (index, items) in rows {
+            match items {
+                Ok(items) => folders[index].items = items,
+                Err(_) => is_complete = false,
             }
         }
+        let mut playlist_tracks = self.recommendation_playlist_tracks.lock().await;
+        for playlist in recommendation_playlists(&folders) {
+            playlist_tracks
+                .entry((
+                    playlist.media.provider.as_str().to_owned(),
+                    playlist.media.item_id.as_str().to_owned(),
+                ))
+                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(None)));
+        }
+        if is_complete {
+            *snapshot = Some(folders.clone());
+        }
         Ok(folders)
+    }
+
+    pub(crate) async fn preload_recommendation_playlists(&self) -> Result<(), String> {
+        let folders = self.get_recommendations().await?;
+        let playlists = recommendation_playlists(&folders);
+        let results = stream::iter(playlists.into_iter().map(|playlist| async move {
+            self.get_playlist_tracks(
+                &playlist.media.item_id,
+                &playlist.media.provider,
+                false,
+                false,
+            )
+            .await
+            .map(|_| ())
+        }))
+        .buffer_unordered(3)
+        .collect::<Vec<_>>()
+        .await;
+        results
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .map(|_| ())
     }
 
     pub(crate) async fn search_media(
@@ -997,6 +1078,24 @@ fn usable_artwork(image: &MediaItemImage) -> bool {
             .is_some_and(|proxy| !proxy.trim().is_empty())
 }
 
+// Only recommendation-owned playlists are frozen; normal library playlists stay live.
+fn recommendation_playlists(folders: &[MusicAssistantRecommendationFolder]) -> Vec<Playlist> {
+    folders
+        .iter()
+        .filter(|folder| {
+            matches!(
+                folder.item_id.as_str(),
+                "user_exploration_weekly" | "similarusers_jam_weekly"
+            )
+        })
+        .flat_map(|folder| &folder.items)
+        .filter_map(|item| match item {
+            MediaItem::Playlist(playlist) => Some(playlist.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 // Transport always sends modeled media objects, including nested media type tags.
 pub(crate) fn queue_media_payload(media_item: MediaItem) -> Value {
     let mut payload = json!(&media_item);
@@ -1367,6 +1466,74 @@ pub(crate) mod tests {
             MusicAssistantClient::new(&format!("http://{address}"), None),
             worker,
         )
+    }
+
+    #[tokio::test]
+    async fn recommendations_are_isolated_between_sessions() {
+        let (first, first_worker) = server(vec![("music/recommendations", json!([]))]);
+        let (second, second_worker) = server(vec![(
+            "music/recommendations",
+            json!([{
+                "item_id":"user_recommendations", "provider":"listenbrainz",
+                "items":[{"media_type":"track", "item_id":"other", "provider":"library", "name":"Other"}]
+            }]),
+        )]);
+        assert!(first.get_recommendations().await.unwrap().is_empty());
+        assert_eq!(second.get_recommendations().await.unwrap().len(), 1);
+        assert!(first.get_recommendations().await.unwrap().is_empty());
+        assert_eq!(first_worker.join().unwrap().len(), 1);
+        assert_eq!(second_worker.join().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn recommendations_preload_and_reuse_explore_playlist_tracks() {
+        let (client, worker) = server(vec![
+            (
+                "music/recommendations",
+                json!([{
+                    "item_id":"user_exploration_weekly", "provider":"listenbrainz",
+                    "items":[{"media_type":"playlist", "item_id":"weekly", "provider":"listenbrainz", "name":"Weekly"}]
+                }]),
+            ),
+            (
+                "music/playlists/playlist_tracks",
+                json!([{
+                    "item_id":"track", "provider":"library", "name":"Track"
+                }]),
+            ),
+        ]);
+        client.get_recommendations().await.unwrap();
+        let weekly = MediaId("weekly".into());
+        let (preload, explore) = tokio::join!(
+            client.preload_recommendation_playlists(),
+            client.get_playlist_tracks(&weekly, "listenbrainz", false, false),
+        );
+        preload.unwrap();
+        assert_eq!(explore.unwrap().len(), 1);
+        client.preload_recommendation_playlists().await.unwrap();
+        assert_eq!(worker.join().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn recommendations_share_inflight_and_completed_requests() {
+        let (client, worker) = server(vec![("music/recommendations", json!([]))]);
+        let (home, explore) =
+            tokio::join!(client.get_recommendations(), client.get_recommendations());
+        assert!(home.unwrap().is_empty());
+        assert!(explore.unwrap().is_empty());
+        assert!(client.get_recommendations().await.unwrap().is_empty());
+        assert_eq!(worker.join().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn recommendations_retry_failed_requests() {
+        let (client, worker) = server(vec![
+            ("music/recommendations", json!({"test_http_status":500})),
+            ("music/recommendations", json!([])),
+        ]);
+        assert!(client.get_recommendations().await.is_err());
+        assert!(client.get_recommendations().await.unwrap().is_empty());
+        assert_eq!(worker.join().unwrap().len(), 2);
     }
 
     #[tokio::test]

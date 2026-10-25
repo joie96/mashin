@@ -18,6 +18,9 @@ class UserData extends ChangeNotifier {
   Future<void>? _snapshotRefresh;
   bool _needsSnapshotRefresh = false;
   bool _isLoadingLibraryData = false;
+  bool _isLoadingFavorites = false;
+  bool _isLoadingPlaylists = false;
+  Set<String> _loadingPlaylistIds = <String>{};
   bool _isDisposed = false;
   List<Track> _favoriteTracks = const <Track>[];
   List<Album> _favoriteAlbums = const <Album>[];
@@ -28,6 +31,10 @@ class UserData extends ChangeNotifier {
       const <String, List<Track>>{};
 
   bool get isLoadingLibraryData => _isLoadingLibraryData;
+  bool get isLoadingFavorites => _isLoadingFavorites;
+  bool get isLoadingPlaylists => _isLoadingPlaylists;
+  bool isLoadingPlaylistTracks(String playlistId) =>
+      _loadingPlaylistIds.contains(playlistId);
   List<Track> get favoriteTracks => _favoriteTracks;
   List<Album> get favoriteAlbums => _favoriteAlbums;
   List<Playlist> get favoritePlaylists => _favoritePlaylists;
@@ -43,15 +50,24 @@ class UserData extends ChangeNotifier {
   List<Track> tracksForPlaylist(String playlistId) =>
       _playlistTracksByPlaylistId[playlistId.trim()] ?? const <Track>[];
 
-  Future<void> loadLibraryData() async {
+  Future<void> loadLibraryData({Future<void>? waitFor}) async {
     _isLoadingLibraryData = true;
+    _isLoadingFavorites = true;
+    _isLoadingPlaylists = true;
     notifyListeners();
     try {
-      await _coreBridge.loadUserData();
-      await _refreshSnapshot();
+      await waitFor;
+      if (_isDisposed) return;
+      final snapshot = await _coreBridge.loadUserData();
+      if (!_isDisposed) _applySnapshot(snapshot);
+    } catch (_) {
+      _loadingPlaylistIds = <String>{};
+      rethrow;
     } finally {
       _isLoadingLibraryData = false;
-      notifyListeners();
+      _isLoadingFavorites = false;
+      _isLoadingPlaylists = false;
+      if (!_isDisposed) notifyListeners();
     }
   }
 
@@ -185,6 +201,8 @@ class UserData extends ChangeNotifier {
   }
 
   void _applySnapshot(Map<String, dynamic> snapshot) {
+    _isLoadingFavorites = false;
+    _isLoadingPlaylists = snapshot['is_loading_playlists'] == true;
     final Map<String, dynamic> favorites = _map(snapshot['favorites']);
     _favoriteTracks = _readTracks(favorites['tracks'], true);
     _favoriteAlbums = _readAlbums(favorites['albums'], true);
@@ -192,6 +210,7 @@ class UserData extends ChangeNotifier {
     _favoriteArtists = _readArtists(favorites['artists'], true);
 
     final Map<String, List<Track>> tracksByPlaylist = <String, List<Track>>{};
+    final loadingPlaylistIds = <String>{};
     final List<Playlist> playlists = <Playlist>[];
     for (final Map<String, dynamic> value in _listOfMaps(
       snapshot['playlists'],
@@ -202,6 +221,9 @@ class UserData extends ChangeNotifier {
           false,
         );
         playlists.add(playlist);
+        if (value['is_loading_tracks'] == true) {
+          loadingPlaylistIds.add(playlist.itemId);
+        }
         tracksByPlaylist[playlist.itemId] = _readTracks(value['items'], false);
       } on FormatException {
         continue;
@@ -209,6 +231,7 @@ class UserData extends ChangeNotifier {
     }
     playlists.sort(_comparePlaylists);
     _playlists = List<Playlist>.unmodifiable(playlists);
+    _loadingPlaylistIds = loadingPlaylistIds;
     _playlistTracksByPlaylistId = Map<String, List<Track>>.unmodifiable(
       tracksByPlaylist,
     );

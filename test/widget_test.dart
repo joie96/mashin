@@ -5,6 +5,8 @@
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -26,6 +28,64 @@ import 'dart:convert';
 class _LightThemeSession extends AppSessionController {
   @override
   bool get isDarkTheme => false;
+}
+
+class _StartupBridge extends Fake implements MashinCoreBridge {
+  final recommendationsStarted = Completer<void>();
+  final recommendations = Completer<List<RecommendationFolder>>();
+  final library = Completer<Map<String, dynamic>>();
+  final manifests = Completer<List<ProviderManifest>>();
+  bool hasStartedLibrary = false;
+  bool hasRefreshedQueue = false;
+
+  @override
+  Stream<Map<String, dynamic>> get events => const Stream.empty();
+  @override
+  Stream<Queue> get queueChanges => const Stream.empty();
+  @override
+  Stream<PlayerState> get playerStateChanges => const Stream.empty();
+  @override
+  bool get isServiceOwnedPlayback => true;
+
+  @override
+  Future<bool> restorePersistedSession() async => true;
+
+  @override
+  Future<SessionSettings> getSessionSettings() async => const SessionSettings(
+    musicAssistantUrl: 'http://localhost:8095',
+    username: 'test',
+    audioProfile: 'lossless',
+    localCacheSizeBytes: 262144000,
+    isDarkTheme: false,
+    logLevel: LogLevelPreference.info,
+  );
+
+  @override
+  Future<List<RecommendationFolder>> getRecommendations() {
+    if (!recommendationsStarted.isCompleted) recommendationsStarted.complete();
+    return recommendations.future;
+  }
+
+  @override
+  Future<Map<String, dynamic>> loadUserData() {
+    hasStartedLibrary = true;
+    return library.future;
+  }
+
+  @override
+  Future<List<ProviderManifest>> getProviderManifests() => manifests.future;
+
+  @override
+  Future<void> refreshQueue() async => hasRefreshedQueue = true;
+
+  @override
+  Future<void> refreshPlayerState() async {}
+
+  @override
+  void log(LogLevelPreference level, String category, String message) {}
+
+  @override
+  Future<void> dispose() async {}
 }
 
 class _AuthenticatedSessionWithoutUserData extends AppSessionController {
@@ -118,6 +178,50 @@ class _PlaylistShellBridge implements MashinCoreBridgeApi {
 }
 
 void main() {
+  test(
+    'startup releases home before background data and prioritizes recommendations',
+    () async {
+      final bridge = _StartupBridge();
+      final session = AppSessionController(coreBridge: bridge);
+      addTearDown(session.dispose);
+      final startup = session.initialize();
+      await bridge.recommendationsStarted.future;
+
+      expect(session.isLoading, isFalse);
+      expect(session.isAuthenticated, isTrue);
+      expect(session.userDataController, isNotNull);
+      expect(session.isDarkTheme, isFalse);
+      expect(bridge.hasStartedLibrary, isFalse);
+      expect(bridge.hasRefreshedQueue, isTrue);
+
+      bridge.recommendations.complete(<RecommendationFolder>[]);
+      bridge.library.complete(<String, dynamic>{});
+      bridge.manifests.complete(<ProviderManifest>[]);
+      await startup;
+      expect(bridge.hasStartedLibrary, isTrue);
+      expect(session.userDataController!.isLoadingLibraryData, isFalse);
+    },
+  );
+
+  test(
+    'startup library failure does not stop playback initialization',
+    () async {
+      final bridge = _StartupBridge();
+      final session = AppSessionController(coreBridge: bridge);
+      addTearDown(session.dispose);
+      final startup = session.initialize();
+      await bridge.recommendationsStarted.future;
+      bridge.recommendations.complete(<RecommendationFolder>[]);
+      bridge.manifests.complete(<ProviderManifest>[]);
+      await Future<void>.delayed(Duration.zero);
+      bridge.library.completeError(StateError('Unavailable'));
+      await startup;
+      expect(session.isLoading, isFalse);
+      expect(session.isAuthenticated, isTrue);
+      expect(bridge.hasRefreshedQueue, isTrue);
+    },
+  );
+
   testWidgets('protected routes require initialized user data', (
     WidgetTester tester,
   ) async {

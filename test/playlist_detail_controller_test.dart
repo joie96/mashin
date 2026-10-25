@@ -23,6 +23,41 @@ void main() {
   );
   tearDown(PreferredProviderController.instance.reset);
 
+  test(
+    'private playlist metadata keeps tracks loading until their snapshot arrives',
+    () async {
+      final bridge = _PrivatePlaylistCoreBridge()
+        ..isLoadingTracks = true
+        ..trackCount = 0;
+      final userData = UserData(coreBridge: bridge);
+      final controller = PlaylistDetailController(
+        coreBridge: bridge,
+        itemId: 'playlist-1',
+        providerInstanceIdOrDomain: 'library',
+        userDataController: userData,
+      );
+      addTearDown(bridge.changes.close);
+      addTearDown(userData.dispose);
+      addTearDown(controller.dispose);
+      await userData.loadLibraryData();
+      await controller.loadPlaylist();
+      expect(userData.isLoadingFavorites, isFalse);
+      expect(userData.isLoadingPlaylists, isFalse);
+      expect(controller.playlistName, 'Private');
+      expect(controller.isLoadingMetadata, isFalse);
+      expect(controller.isLoadingTracks, isTrue);
+      expect(controller.tracks, isEmpty);
+
+      bridge
+        ..isLoadingTracks = false
+        ..trackCount = 2;
+      bridge.changes.add(<String, dynamic>{'type': 'user_data_changed'});
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.isLoadingTracks, isFalse);
+      expect(controller.tracks, hasLength(2));
+    },
+  );
+
   for (final isDesktop in <bool>[true, false]) {
     testWidgets(
       '${isDesktop ? 'desktop' : 'mobile'} external playlist header switches tracks',
@@ -622,6 +657,7 @@ class _PrivatePlaylistCoreBridge extends _FakePlaylistCoreBridge {
   final snapshotReads = <Completer<Map<String, dynamic>>>[];
   bool deferSnapshots = false;
   bool hasPlaylist = true;
+  bool isLoadingTracks = false;
   String? coverPath;
   String? refreshedCoverPath;
   bool shouldFailCoverRefresh = false;
@@ -651,6 +687,7 @@ class _PrivatePlaylistCoreBridge extends _FakePlaylistCoreBridge {
           'provider': 'library',
           'name': 'Private',
           'is_editable': true,
+          'is_loading_tracks': isLoadingTracks,
           if (coverPath != null)
             'metadata': <String, dynamic>{
               'images': <Object?>[

@@ -148,7 +148,10 @@ class PlaylistDetailController extends ChangeNotifier {
     } finally {
       if (!_isDisposed && loadGeneration == _loadGeneration) {
         _isLoadingMetadata = false;
-        _isLoadingTracks = false;
+        _isLoadingTracks =
+            _playlist != null &&
+            (userDataController?.isLoadingPlaylistTracks(_playlist!.itemId) ??
+                false);
         notifyListeners();
       }
     }
@@ -202,7 +205,9 @@ class PlaylistDetailController extends ChangeNotifier {
       userDataController!.tracksForPlaylist(local.itemId),
     );
     _isLoadingMetadata = false;
-    _isLoadingTracks = false;
+    _isLoadingTracks = userDataController!.isLoadingPlaylistTracks(
+      local.itemId,
+    );
     notifyListeners();
   }
 
