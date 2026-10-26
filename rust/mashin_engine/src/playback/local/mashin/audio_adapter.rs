@@ -181,9 +181,13 @@ impl MashinAudioAdapter {
         Ok(self.snapshot())
     }
 
-    pub(crate) async fn reconcile(&self, welcome: Welcome) -> Result<OutputSnapshot, String> {
+    pub(crate) async fn reconcile(
+        &self,
+        welcome: Welcome,
+        offered: &OutputSnapshot,
+    ) -> Result<OutputSnapshot, String> {
         let _command = self.commands.lock().await;
-        let mut snapshot = self.snapshot();
+        let mut snapshot = offered.clone();
         welcome.limits.validate()?;
         let mut profiles = welcome.audio_profiles.clone();
         profiles.sort_by_key(|profile| format!("{profile:?}"));
@@ -267,7 +271,7 @@ impl MashinAudioAdapter {
                 return Err("Mashin server did not reconcile retained chunks".into());
             }
         }
-        Ok(snapshot)
+        Ok(self.snapshot())
     }
 
     // App-local controls use the audio contract without fabricated protocol IDs.
@@ -417,7 +421,7 @@ mod tests {
             assert!(output.pipeline.snapshot().status.output_revision > 0);
             assert_eq!(
                 output
-                    .reconcile(idle_welcome(2))
+                    .reconcile(idle_welcome(2), &snapshot)
                     .await
                     .unwrap()
                     .resume
@@ -469,7 +473,7 @@ mod tests {
         for revision in [7, 7, 0, 3] {
             expected.resume.media_revision = revision;
             assert_eq!(
-                output.reconcile(idle_welcome(revision)).await.unwrap(),
+                output.reconcile(idle_welcome(revision), &output.snapshot()).await.unwrap(),
                 expected
             );
             assert_eq!(output.snapshot(), expected);
@@ -505,11 +509,11 @@ mod tests {
         for state in [OutputState::Playing, OutputState::Paused] {
             let mut welcome = idle_welcome(7);
             welcome.desired_output_state = state;
-            assert!(output.reconcile(welcome).await.is_err());
+            assert!(output.reconcile(welcome, &before).await.is_err());
             assert_eq!(output.snapshot(), before);
         }
         assert!(output
-            .reconcile(idle_welcome(MAX_INTEGER + 1))
+            .reconcile(idle_welcome(MAX_INTEGER + 1), &before)
             .await
             .is_err());
         assert_eq!(output.snapshot(), before);
@@ -542,7 +546,7 @@ mod tests {
         welcome.current_stream = Some(stream_snapshot(current));
         welcome.prepared_next = Some(stream_snapshot(prepared));
         welcome.desired_output_state = OutputState::Paused;
-        assert_eq!(output.reconcile(welcome.clone()).await.unwrap(), before);
+        assert_eq!(output.reconcile(welcome.clone(), &before).await.unwrap(), before);
         for change in ["current", "prepared", "revision", "descriptor"] {
             let mut changed = welcome.clone();
             let expected_reason = match change {
@@ -571,7 +575,7 @@ mod tests {
                 }
             };
             assert!(output
-                .reconcile(changed)
+                .reconcile(changed, &before)
                 .await
                 .unwrap_err()
                 .contains(expected_reason));
@@ -579,6 +583,40 @@ mod tests {
         }
         assert!(output.pipeline.reconcile_idle_revision(2).await.is_err());
         assert_eq!(output.snapshot(), before);
+    }
+
+    #[tokio::test]
+    async fn welcome_validates_the_offered_snapshot_without_reverting_local_playback() {
+        let output = MashinAudioAdapter::new(1_048_576, 30, false).unwrap();
+        let current = test_stream();
+        let prepared = test_stream();
+        let offered = output.execute(ControlCommand::SetMedia {
+            command_id: 1,
+            current: Some(current.clone()),
+            prepared: Some(prepared.clone()),
+            media_revision: 1,
+            initial_output_state: OutputState::Paused,
+        }).await.unwrap();
+        let stream_snapshot = |stream| super::super::protocol::StreamSnapshot {
+            stream, next_received_chunk_index: 1, next_produced_chunk_index: 1,
+            is_complete: false, final_frame_count: None, error: None,
+        };
+        let mut welcome = idle_welcome(1);
+        welcome.current_stream = Some(stream_snapshot(current));
+        welcome.prepared_next = Some(stream_snapshot(prepared.clone()));
+        welcome.desired_output_state = OutputState::Paused;
+        let activated = output.execute(ControlCommand::SetMedia {
+            command_id: 2,
+            current: Some(prepared),
+            prepared: None,
+            media_revision: 2,
+            initial_output_state: OutputState::Paused,
+        }).await.unwrap();
+        assert_eq!(output.reconcile(welcome.clone(), &offered).await.unwrap(), activated);
+        assert_eq!(output.snapshot(), activated);
+        welcome.current_stream = None;
+        assert!(output.reconcile(welcome, &offered).await.is_err());
+        assert_eq!(output.snapshot(), activated);
     }
 
     #[test]
