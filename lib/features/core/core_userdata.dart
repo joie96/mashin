@@ -26,6 +26,8 @@ class UserData extends ChangeNotifier {
   List<Album> _favoriteAlbums = const <Album>[];
   List<Playlist> _favoritePlaylists = const <Playlist>[];
   List<Artist> _favoriteArtists = const <Artist>[];
+  Set<(MediaType, String, String)> _favoriteIdentityKeys = {};
+  Set<(MediaType, String)> _favoriteUriKeys = {};
   List<Playlist> _playlists = const <Playlist>[];
   Map<String, List<Track>> _playlistTracksByPlaylistId =
       const <String, List<Track>>{};
@@ -50,13 +52,12 @@ class UserData extends ChangeNotifier {
   List<Track> tracksForPlaylist(String playlistId) =>
       _playlistTracksByPlaylistId[playlistId.trim()] ?? const <Track>[];
 
-  Future<void> loadLibraryData({Future<void>? waitFor}) async {
+  Future<void> loadLibraryData() async {
     _isLoadingLibraryData = true;
     _isLoadingFavorites = true;
     _isLoadingPlaylists = true;
     notifyListeners();
     try {
-      await waitFor;
       if (_isDisposed) return;
       final snapshot = await _coreBridge.loadUserData();
       if (!_isDisposed) _applySnapshot(snapshot);
@@ -71,26 +72,16 @@ class UserData extends ChangeNotifier {
     }
   }
 
-  bool isFavorite(MediaItem item) {
-    return switch (item.mediaType) {
-      MediaType.track => _favoriteTracks.any(
-        (favorite) => _sameItem(favorite, item),
-      ),
-      MediaType.album => _favoriteAlbums.any(
-        (favorite) => _sameItem(favorite, item),
-      ),
-      MediaType.artist => _favoriteArtists.any(
-        (favorite) => _sameItem(favorite, item),
-      ),
-      MediaType.playlist => _favoritePlaylists.any(
-        (favorite) => _sameItem(favorite, item),
-      ),
-      _ => false,
-    };
-  }
+  // Reads the current Rust snapshot without restarting its session-owned loading.
+  Future<void> refreshLibrarySnapshot() => _refreshSnapshot();
+
+  bool isFavorite(MediaItem item) =>
+      _favoriteUriKeys.contains((item.mediaType, item.uri ?? '')) ||
+      _itemIdentityKeys(item).any(_favoriteIdentityKeys.contains);
 
   T withFavoriteStatus<T extends MediaItem>(T item) {
     final bool favorite = isFavorite(item);
+    if (item.favorite == favorite) return item;
     if (item is Track) return _copyTrack(item, favorite) as T;
     if (item is Album) return _copyAlbum(item, favorite) as T;
     if (item is Artist) return _copyArtist(item, favorite) as T;
@@ -172,10 +163,13 @@ class UserData extends ChangeNotifier {
     return true;
   }
 
+  // Snapshot refresh and event processing.
   Future<void> _onCoreEvent(Map<String, dynamic> event) async {
-    if (event['type'] != 'user_data_changed' || _isDisposed) return;
+    if (_isDisposed) return;
     try {
-      await _refreshSnapshot();
+      if (event['type'] == 'user_data_changed') {
+        await _refreshSnapshot();
+      }
     } catch (error, stackTrace) {
       FlutterError.reportError(
         FlutterErrorDetails(exception: error, stack: stackTrace),
@@ -201,13 +195,25 @@ class UserData extends ChangeNotifier {
   }
 
   void _applySnapshot(Map<String, dynamic> snapshot) {
-    _isLoadingFavorites = false;
+    _isLoadingFavorites = snapshot['is_loading_favorites'] == true;
     _isLoadingPlaylists = snapshot['is_loading_playlists'] == true;
     final Map<String, dynamic> favorites = _map(snapshot['favorites']);
     _favoriteTracks = _readTracks(favorites['tracks'], true);
     _favoriteAlbums = _readAlbums(favorites['albums'], true);
     _favoritePlaylists = _readPlaylists(favorites['playlists'], true);
     _favoriteArtists = _readArtists(favorites['artists'], true);
+    final favoriteItems = <MediaItem>[
+      ..._favoriteTracks,
+      ..._favoriteAlbums,
+      ..._favoritePlaylists,
+      ..._favoriteArtists,
+    ];
+    _favoriteIdentityKeys = favoriteItems.expand(_itemIdentityKeys).toSet();
+    _favoriteUriKeys = {
+      for (final item in favoriteItems)
+        if ((item.uri ?? '').trim().isNotEmpty)
+          (item.mediaType, item.uri!.trim()),
+    };
 
     final Map<String, List<Track>> tracksByPlaylist = <String, List<Track>>{};
     final loadingPlaylistIds = <String>{};
@@ -272,26 +278,15 @@ class UserData extends ChangeNotifier {
             .map((item) => Map<String, dynamic>.from(item))
             .toList(growable: false)
       : const <Map<String, dynamic>>[];
-  bool _sameUri(String? left, String right) =>
-      right.isNotEmpty && (left ?? '').trim() == right;
-  bool _sameItem(MediaItem left, MediaItem right) =>
-      (left.provider == right.provider && left.itemId == right.itemId) ||
-      _sameUri(left.uri, right.uri ?? '') ||
-      left.providerMappings.any(
-        (mapping) =>
-            (mapping.providerInstance == right.provider &&
-                mapping.itemId == right.itemId) ||
-            right.providerMappings.any(
-              (other) =>
-                  mapping.providerInstance == other.providerInstance &&
-                  mapping.itemId == other.itemId,
-            ),
-      ) ||
-      right.providerMappings.any(
-        (mapping) =>
-            mapping.providerInstance == left.provider &&
-            mapping.itemId == left.itemId,
-      );
+  Iterable<(MediaType, String, String)> _itemIdentityKeys(
+    MediaItem item,
+  ) sync* {
+    yield (item.mediaType, item.provider, item.itemId);
+    for (final mapping in item.providerMappings) {
+      yield (item.mediaType, mapping.providerInstance, mapping.itemId);
+    }
+  }
+
   int _comparePlaylists(Playlist left, Playlist right) {
     final int sortComparison = (left.sortName ?? '').toLowerCase().compareTo(
       (right.sortName ?? '').toLowerCase(),

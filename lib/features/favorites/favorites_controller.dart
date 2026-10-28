@@ -4,9 +4,7 @@ import '../core/core_bridge.dart';
 import '../core/core_models.dart';
 import '../core/core_userdata.dart';
 
-/// Exposes the favorited tracks/albums/playlists/artists held by [UserData]
-/// plus the radio/favorite-toggle actions used by the desktop and mobile favorites pages.
-/// favorites come from the already loaded user preferences snapshot instead of a dedicated network call.
+/// Reads the Rust favorites snapshot before exposing its shared Flutter projection.
 class FavoritesController extends ChangeNotifier {
   FavoritesController({
     required this.coreBridge,
@@ -19,6 +17,26 @@ class FavoritesController extends ChangeNotifier {
   final UserData userDataController;
 
   bool _isDisposed = false;
+  bool _isLoadingSnapshot = true;
+  bool _hasReadSnapshot = false;
+  bool _hasLoadError = false;
+
+  // Initial snapshot loading; live updates preserve already visible contents.
+  Future<void> load() async {
+    if (_isDisposed) return;
+    _isLoadingSnapshot = true;
+    _hasLoadError = false;
+    notifyListeners();
+    try {
+      await userDataController.refreshLibrarySnapshot();
+      if (!_isDisposed) _hasReadSnapshot = true;
+    } catch (_) {
+      if (!_isDisposed) _hasLoadError = true;
+    } finally {
+      _isLoadingSnapshot = false;
+      notifyListeners();
+    }
+  }
 
   @override
   void notifyListeners() {
@@ -28,7 +46,7 @@ class FavoritesController extends ChangeNotifier {
   }
 
   void _onUserDataChanged() {
-    notifyListeners();
+    if (_hasReadSnapshot) notifyListeners();
   }
 
   @override
@@ -38,12 +56,19 @@ class FavoritesController extends ChangeNotifier {
     super.dispose();
   }
 
-  bool get isLoading => userDataController.isLoadingFavorites;
+  bool get isLoading =>
+      !_hasLoadError &&
+      (_isLoadingSnapshot || userDataController.isLoadingFavorites);
+  bool get hasLoadError => _hasLoadError;
 
-  List<Track> get tracks => userDataController.favoriteTracks;
-  List<Album> get albums => userDataController.favoriteAlbums;
-  List<Playlist> get playlists => userDataController.favoritePlaylists;
-  List<Artist> get artists => userDataController.favoriteArtists;
+  List<Track> get tracks =>
+      _hasReadSnapshot ? userDataController.favoriteTracks : const [];
+  List<Album> get albums =>
+      _hasReadSnapshot ? userDataController.favoriteAlbums : const [];
+  List<Playlist> get playlists =>
+      _hasReadSnapshot ? userDataController.favoritePlaylists : const [];
+  List<Artist> get artists =>
+      _hasReadSnapshot ? userDataController.favoriteArtists : const [];
 
   List<Playlist> get playlistsForAdding => userDataController.playlists;
 

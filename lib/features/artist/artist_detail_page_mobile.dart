@@ -56,7 +56,9 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
       providerInstanceIdOrDomain: widget.providerInstanceIdOrDomain,
       userDataController: widget.userDataController,
     )..addListener(_onControllerChanged);
-    unawaited(_controller.loadArtist());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_controller.loadArtist());
+    });
   }
 
   void _onControllerChanged() {

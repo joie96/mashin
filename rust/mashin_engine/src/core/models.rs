@@ -103,7 +103,9 @@ pub(crate) struct CoreOperationRequest {
     rename_all_fields = "camelCase"
 )]
 pub(crate) enum MusicAssistantQuery {
-    Recommendations,
+    Recommendations {
+        view: crate::music_assistant::models::recommendation::RecommendationView,
+    },
     ProviderManifests,
     ProviderIconData {
         provider: String,
@@ -273,6 +275,7 @@ pub(crate) struct LoginConfig {
 pub(crate) enum MediaSessionEvent {
     QueueChanged { queue: Queue },
     PlayerStateChanged { player_state: PlayerState },
+    RecommendationsChanged,
     UserDataChanged,
     OperationCompleted { request_id: u64, result: Value },
     OperationFailed { request_id: u64, error: CoreError },

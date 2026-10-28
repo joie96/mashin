@@ -25,6 +25,7 @@ class AppSessionController extends ChangeNotifier {
   late final MashinCoreBridgeEvents coreEvents;
 
   UserData? _userDataController;
+  Future<void>? _initialization;
   String _baseUrl = '';
   String? _username;
   late String _audioProfile;
@@ -47,7 +48,9 @@ class AppSessionController extends ChangeNotifier {
   PreferredProvider? get preferredProvider =>
       PreferredProviderController.instance.preferredProvider;
 
-  Future<void> initialize() async {
+  Future<void> initialize() => _initialization ??= _initialize();
+
+  Future<void> _initialize() async {
     try {
       await _restoreSession();
       if (_isDisposed) return;
@@ -169,29 +172,25 @@ class AppSessionController extends ChangeNotifier {
     _userDataController = controller;
   }
 
-  // Independent startup tasks cannot prevent other sections from becoming ready.
+  // Rust owns the ordered data load; icons and playback remain independent.
   Future<void> _loadSessionData() async {
     final controller = _userDataController;
     if (controller == null || _isDisposed) return;
+    final library = _runStartupTask(
+      'library',
+      controller.loadLibraryData,
+      _userDataLoadTimeout,
+    );
     await Future.wait(<Future<void>>[
-      _runStartupTask('library', () async {
-        await controller.loadLibraryData(waitFor: _preloadRecommendations());
-      }, _userDataLoadTimeout),
-      _runStartupTask('provider icons', _loadProviderIcons, _startupTimeout),
+      library.then(
+        (_) => _runStartupTask(
+          'provider icons',
+          _loadProviderIcons,
+          _startupTimeout,
+        ),
+      ),
       _runStartupTask('playback events', coreEvents.start, _startupTimeout),
     ]);
-  }
-
-  Future<void> _preloadRecommendations() async {
-    try {
-      await coreBridge.getRecommendations();
-    } catch (error) {
-      coreBridge.log(
-        LogLevelPreference.warn,
-        'AppSessionController',
-        'Recommendations preload failed: $error',
-      );
-    }
   }
 
   Future<void> _runStartupTask(

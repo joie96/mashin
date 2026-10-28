@@ -59,7 +59,9 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
       providerInstanceIdOrDomain: widget.providerInstanceIdOrDomain,
       userDataController: widget.userDataController,
     )..addListener(_onControllerChanged);
-    unawaited(_controller.loadPlaylist());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_controller.loadPlaylist());
+    });
   }
 
   @override

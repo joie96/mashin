@@ -7,9 +7,13 @@ import 'package:mashin_flutter/features/core/core_bridge.dart';
 import 'package:mashin_flutter/features/core/core_events.dart';
 import 'package:mashin_flutter/features/core/core_models.dart';
 import 'package:mashin_flutter/features/core/core_userdata.dart';
+import 'package:mashin_flutter/features/favorites/favorites_controller.dart';
+import 'package:mashin_flutter/features/playlist/playlists_controller.dart';
 import 'package:mashin_flutter/features/playlist/playlist_detail_controller.dart';
 import 'package:mashin_flutter/features/playlist/playlist_detail_page_desktop.dart';
 import 'package:mashin_flutter/features/playlist/playlist_detail_page_mobile.dart';
+import 'package:mashin_flutter/features/playlist/playlists_page_mobile.dart';
+import 'package:mashin_flutter/features/shared/widgets/media_table_section_mobile.dart';
 import 'package:mashin_flutter/features/shared/item_provider_selection.dart';
 import 'package:mashin_flutter/app/session/preferred_provider_controller.dart';
 
@@ -22,6 +26,186 @@ void main() {
     ),
   );
   tearDown(PreferredProviderController.instance.reset);
+
+  for (final isDetail in <bool>[false, true]) {
+    testWidgets(
+      '${isDetail ? 'private playlist detail' : 'playlist list'} first frame is skeletal despite loaded UserData',
+      (tester) async {
+        final bridge = _PrivatePlaylistCoreBridge();
+        final userData = UserData(coreBridge: bridge);
+        final events = MashinCoreBridgeEvents(coreBridge: bridge);
+        addTearDown(bridge.changes.close);
+        addTearDown(userData.dispose);
+        addTearDown(events.dispose);
+        await userData.loadLibraryData();
+        bridge.deferSnapshots = true;
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.dark(),
+            home: Scaffold(
+              body: isDetail
+                  ? PlaylistDetailPageMobile(
+                      coreBridge: bridge,
+                      coreEvents: events,
+                      itemId: 'playlist-1',
+                      providerInstanceIdOrDomain: 'library',
+                      userDataController: userData,
+                    )
+                  : PlaylistsPageMobile(
+                      coreBridge: bridge,
+                      coreEvents: events,
+                      userDataController: userData,
+                      onOpenPlaylist: (_) {},
+                    ),
+            ),
+          ),
+        );
+        expect(find.text('Private'), findsNothing);
+        expect(bridge.snapshotReads, hasLength(1));
+        if (!isDetail) {
+          final table = tester.widget<MediaTableSectionMobile<Playlist>>(
+            find.byType(MediaTableSectionMobile<Playlist>),
+          );
+          expect(table.isLoading, isTrue);
+          expect(table.items, isEmpty);
+        }
+        bridge.snapshotReads.single.complete(bridge.snapshot);
+        await tester.pumpAndSettle();
+        expect(find.text('Private'), findsWidgets);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  test(
+    'favorites and playlists wait for a fresh asynchronous snapshot',
+    () async {
+      final bridge = _PrivatePlaylistCoreBridge()..hasFavorite = true;
+      final userData = UserData(coreBridge: bridge);
+      await userData.loadLibraryData();
+      final favorites = FavoritesController(
+        coreBridge: bridge,
+        userDataController: userData,
+      );
+      final playlists = PlaylistsController(
+        coreBridge: bridge,
+        userDataController: userData,
+      );
+      addTearDown(bridge.changes.close);
+      addTearDown(userData.dispose);
+      addTearDown(favorites.dispose);
+      addTearDown(playlists.dispose);
+      expect(userData.favoriteTracks, hasLength(1));
+      expect(userData.playlists, hasLength(1));
+      expect(favorites.tracks, isEmpty);
+      expect(playlists.playlists, isEmpty);
+      expect(favorites.isLoading, isTrue);
+      expect(playlists.isLoading, isTrue);
+      bridge.deferSnapshots = true;
+      final loading = Future.wait([favorites.load(), playlists.load()]);
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.snapshotReads, hasLength(1));
+      expect(favorites.isLoading, isTrue);
+      expect(playlists.isLoading, isTrue);
+      bridge.snapshotReads.single.complete(bridge.snapshot);
+      await loading;
+      expect(favorites.isLoading, isFalse);
+      expect(playlists.isLoading, isFalse);
+      expect(favorites.tracks, hasLength(1));
+      expect(playlists.playlists, hasLength(1));
+      bridge.deferSnapshots = false;
+      bridge.hasFavorite = false;
+      bridge.changes.add({'type': 'user_data_changed'});
+      await Future<void>.delayed(Duration.zero);
+      expect(favorites.tracks, isEmpty);
+      expect(playlists.playlists, hasLength(1));
+      expect(favorites.isLoading, isFalse);
+      expect(playlists.isLoading, isFalse);
+    },
+  );
+
+  test('snapshot errors end favorites and playlist skeletons', () async {
+    final bridge = _PrivatePlaylistCoreBridge()..deferSnapshots = true;
+    final userData = UserData(coreBridge: bridge);
+    final favorites = FavoritesController(
+      coreBridge: bridge,
+      userDataController: userData,
+    );
+    final playlists = PlaylistsController(
+      coreBridge: bridge,
+      userDataController: userData,
+    );
+    addTearDown(bridge.changes.close);
+    addTearDown(userData.dispose);
+    addTearDown(favorites.dispose);
+    addTearDown(playlists.dispose);
+    final loading = Future.wait([favorites.load(), playlists.load()]);
+    await Future<void>.delayed(Duration.zero);
+    bridge.snapshotReads.single.completeError(
+      StateError('Snapshot unavailable'),
+    );
+    await loading;
+    expect(favorites.isLoading, isFalse);
+    expect(playlists.isLoading, isFalse);
+    expect(favorites.hasLoadError, isTrue);
+    expect(playlists.hasLoadError, isTrue);
+  });
+
+  test('page disposal ignores an in-flight initial library snapshot', () async {
+    final bridge = _PrivatePlaylistCoreBridge()..deferSnapshots = true;
+    final userData = UserData(coreBridge: bridge);
+    final favorites = FavoritesController(
+      coreBridge: bridge,
+      userDataController: userData,
+    );
+    final playlists = PlaylistsController(
+      coreBridge: bridge,
+      userDataController: userData,
+    );
+    addTearDown(bridge.changes.close);
+    addTearDown(userData.dispose);
+    final loading = Future.wait([favorites.load(), playlists.load()]);
+    await Future<void>.delayed(Duration.zero);
+    favorites.dispose();
+    playlists.dispose();
+    bridge.snapshotReads.single.complete(bridge.snapshot);
+    await loading;
+    expect(favorites.tracks, isEmpty);
+    expect(playlists.playlists, isEmpty);
+  });
+
+  test(
+    'private playlist ignores cached data until its Rust read completes',
+    () async {
+      final bridge = _PrivatePlaylistCoreBridge();
+      final userData = UserData(coreBridge: bridge);
+      await userData.loadLibraryData();
+      final controller = PlaylistDetailController(
+        coreBridge: bridge,
+        itemId: 'playlist-1',
+        providerInstanceIdOrDomain: 'library',
+        userDataController: userData,
+      );
+      addTearDown(bridge.changes.close);
+      addTearDown(userData.dispose);
+      addTearDown(controller.dispose);
+      await userData.refreshLibrarySnapshot();
+      expect(controller.playlist, isNull);
+      expect(controller.tracks, isEmpty);
+      bridge.deferSnapshots = true;
+      final loading = controller.loadPlaylist();
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.isLoadingMetadata, isTrue);
+      expect(controller.isLoadingTracks, isTrue);
+      expect(controller.tracks, isEmpty);
+      bridge.trackCount = 2;
+      bridge.snapshotReads.single.complete(bridge.snapshot);
+      await loading;
+      expect(controller.isLoadingMetadata, isFalse);
+      expect(controller.isLoadingTracks, isFalse);
+      expect(controller.tracks, hasLength(2));
+    },
+  );
 
   test(
     'private playlist metadata keeps tracks loading until their snapshot arrives',
@@ -564,7 +748,7 @@ void main() {
 class _FakePlaylistCoreBridge extends Fake implements MashinCoreBridgeApi {
   _FakePlaylistCoreBridge({this.trackCount = 1});
 
-  final int trackCount;
+  int trackCount;
   final List<String> operations = <String>[];
 
   @override
@@ -657,12 +841,11 @@ class _PrivatePlaylistCoreBridge extends _FakePlaylistCoreBridge {
   final snapshotReads = <Completer<Map<String, dynamic>>>[];
   bool deferSnapshots = false;
   bool hasPlaylist = true;
+  bool hasFavorite = false;
   bool isLoadingTracks = false;
   String? coverPath;
   String? refreshedCoverPath;
   bool shouldFailCoverRefresh = false;
-  @override
-  int trackCount = 1;
 
   @override
   Stream<Map<String, dynamic>> get events => changes.stream;
@@ -679,7 +862,16 @@ class _PrivatePlaylistCoreBridge extends _FakePlaylistCoreBridge {
   }
 
   Map<String, dynamic> get snapshot => <String, dynamic>{
-    'favorites': <String, dynamic>{},
+    'favorites': <String, dynamic>{
+      'tracks': <Object?>[
+        if (hasFavorite)
+          <String, dynamic>{
+            'item_id': 'favorite-1',
+            'provider': 'library',
+            'name': 'Favorite',
+          },
+      ],
+    },
     'playlists': <Object?>[
       if (hasPlaylist)
         <String, dynamic>{

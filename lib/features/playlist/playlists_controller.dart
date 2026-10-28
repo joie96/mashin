@@ -14,9 +14,35 @@ class PlaylistsController extends ChangeNotifier {
 
   final MashinCoreBridgeApi coreBridge;
   final UserData userDataController;
+  bool _isDisposed = false;
+  bool _isLoadingSnapshot = true;
+  bool _hasReadSnapshot = false;
+  bool _hasLoadError = false;
 
-  List<Playlist> get playlists => userDataController.playlists;
-  bool get isLoading => userDataController.isLoadingPlaylists;
+  // Initial snapshot loading; live updates preserve already visible contents.
+  Future<void> load() async {
+    if (_isDisposed) return;
+    _isLoadingSnapshot = true;
+    _hasLoadError = false;
+    notifyListeners();
+    try {
+      await userDataController.refreshLibrarySnapshot();
+      if (!_isDisposed) _hasReadSnapshot = true;
+    } catch (_) {
+      if (!_isDisposed) _hasLoadError = true;
+    } finally {
+      _isLoadingSnapshot = false;
+      if (!_isDisposed) notifyListeners();
+    }
+  }
+
+  // Current page projection.
+  List<Playlist> get playlists =>
+      _hasReadSnapshot ? userDataController.playlists : const [];
+  bool get isLoading =>
+      !_hasLoadError &&
+      (_isLoadingSnapshot || userDataController.isLoadingPlaylists);
+  bool get hasLoadError => _hasLoadError;
 
   List<Track> tracksFor(List<Playlist> playlists) => playlists
       .expand(
@@ -53,11 +79,12 @@ class PlaylistsController extends ChangeNotifier {
   }
 
   void _onUserDataChanged() {
-    notifyListeners();
+    if (_hasReadSnapshot) notifyListeners();
   }
 
   @override
   void dispose() {
+    _isDisposed = true;
     userDataController.removeListener(_onUserDataChanged);
     super.dispose();
   }

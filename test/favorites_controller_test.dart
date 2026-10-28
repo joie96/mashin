@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mashin_flutter/app/theme/app_theme.dart';
@@ -7,8 +9,46 @@ import 'package:mashin_flutter/features/core/core_models.dart';
 import 'package:mashin_flutter/features/core/core_userdata.dart';
 import 'package:mashin_flutter/features/favorites/favorites_controller.dart';
 import 'package:mashin_flutter/features/favorites/favorites_screen_desktop.dart';
+import 'package:mashin_flutter/features/shared/widgets/media_table_section_desktop.dart';
 
 void main() {
+  testWidgets(
+    'favorites first frame stays skeletal until the snapshot arrives',
+    (tester) async {
+      final userData = _FakeUserDataController()
+        ..pendingSnapshot = Completer<void>();
+      final bridge = _FakeFavoritesCoreBridge();
+      final events = MashinCoreBridgeEvents(coreBridge: bridge);
+      addTearDown(events.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.dark(),
+          home: Scaffold(
+            body: FavoritesScreenDesktop(
+              coreBridge: bridge,
+              coreEvents: events,
+              userDataController: userData,
+            ),
+          ),
+        ),
+      );
+      final firstTable = tester.widget<MediaTableSectionDesktop<Track>>(
+        find.byType(MediaTableSectionDesktop<Track>),
+      );
+      expect(firstTable.isLoading, isTrue);
+      expect(firstTable.items, isEmpty);
+      expect(userData.snapshotReads, 1);
+      userData.pendingSnapshot!.complete();
+      await tester.pumpAndSettle();
+      final loadedTable = tester.widget<MediaTableSectionDesktop<Track>>(
+        find.byType(MediaTableSectionDesktop<Track>),
+      );
+      expect(loadedTable.isLoading, isFalse);
+      expect(loadedTable.items, hasLength(12));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   test(
     'passes the artist to the radio command without separate playback',
     () async {
@@ -95,6 +135,18 @@ class _FakeFavoritesCoreBridge extends Fake implements MashinCoreBridgeApi {
 }
 
 class _FakeUserDataController extends Fake implements UserData {
+  Completer<void>? pendingSnapshot;
+  int snapshotReads = 0;
+
+  @override
+  Future<void> refreshLibrarySnapshot() {
+    snapshotReads++;
+    return pendingSnapshot?.future ?? Future<void>.value();
+  }
+
+  @override
+  bool get isLoadingFavorites => false;
+
   @override
   bool get isLoadingLibraryData => false;
 

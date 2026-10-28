@@ -311,7 +311,9 @@ class PlaybackService : MediaLibraryService() {
     // Core events only schedule reads; a long Rust operation never blocks Android's main thread.
     private fun applyCoreEvent(payload: String) {
         val eventType = JSONObject(payload).optString("type")
-        if (isDestroyed || isSnapshotRefreshQueued || eventType !in listOf("player_state_changed", "queue_changed", "user_data_changed")) return
+        if (isDestroyed) return
+        browser?.onCoreEvent(eventType)
+        if (isSnapshotRefreshQueued || eventType !in listOf("player_state_changed", "queue_changed", "user_data_changed")) return
         isSnapshotRefreshQueued = true
         coreExecutor.execute {
             try {

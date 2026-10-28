@@ -4,7 +4,7 @@ use super::*;
 use crate::music_assistant::event_hub::{
     EventHubLeaseReason, MusicAssistantEvent, MusicAssistantEventHub,
 };
-use futures_util::{stream, StreamExt};
+use crate::music_assistant::user_data::InitialSessionDataUpdate;
 use std::sync::Arc;
 
 pub(super) struct UserDataEvents {
@@ -36,64 +36,59 @@ pub(crate) fn read_or_load_user_data() -> Result<UserDataSnapshot, CoreError> {
         let coordinator = CORE_COORDINATOR
             .lock()
             .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
-        if let Some(data) = coordinator
-            .user_data
-            .as_ref()
-            .filter(|data| data.has_loaded_library_data)
-        {
-            return Ok(data.snapshot.clone());
+        if let Some(data) = coordinator.user_data.as_ref() {
+            if let Some(result) = &data.initial_load_result {
+                result.clone().map_err(CoreError::command_failed)?;
+                return Ok(data.snapshot.clone());
+            }
         }
     }
     let (client, generation) = session_client()?;
-    CORE_NETWORK_RUNTIME
-        .block_on(async {
-            let user = client.get_current_user().await?;
-            let favorites = client.load_favorites().await?;
-            publish_initial_user_data(generation, |data| {
-                let mut snapshot = data.snapshot.clone();
-                snapshot.favorites = favorites;
-                snapshot.is_loading_playlists = true;
-                data.replace_snapshot(snapshot);
-            })?;
-            let playlists = client
-                .load_private_playlist_metadata(user.user_id.as_str())
-                .await?;
-            publish_initial_user_data(generation, |data| {
-                data.snapshot.playlists = playlists.clone();
-                data.snapshot.is_loading_playlists = false;
-            })?;
-            let mut pending = stream::iter(playlists.into_iter().map(|mut playlist| {
-                let client = client.clone();
-                async move {
-                    let items = client
-                        .get_playlist_tracks(
-                            &playlist.playlist.media.item_id,
-                            "library",
-                            true,
-                            false,
-                        )
-                        .await;
-                    match items {
-                        Ok(items) => playlist.items = items,
-                        Err(error) => {
-                            LOGGER.warn(format!("load private playlist tracks failed: {error}"))
-                        }
-                    }
-                    playlist.is_loading_tracks = false;
-                    playlist
-                }
-            }))
-            .buffer_unordered(3);
-            while let Some(playlist) = pending.next().await {
+    publish_initial_user_data(generation, |data| {
+        data.snapshot.is_loading_favorites = true;
+        data.snapshot.is_loading_playlists = true;
+    })
+    .map_err(CoreError::command_failed)?;
+    let result = CORE_NETWORK_RUNTIME.block_on(client.load_initial_session_data(|update| {
+        match update {
+            InitialSessionDataUpdate::Recommendations => {
+                publish_background_event(MediaSessionEvent::RecommendationsChanged);
+                Ok(())
+            }
+            InitialSessionDataUpdate::UserIdentity(user_id) => CORE_COORDINATOR
+                .lock()
+                .map_err(|_| "core coordinator lock poisoned".to_owned())?
+                .remember_current_user_id(generation, user_id),
+            InitialSessionDataUpdate::Favorites(favorites) => {
+                publish_initial_user_data(generation, |data| {
+                    let mut snapshot = data.snapshot.clone();
+                    snapshot.favorites = favorites;
+                    snapshot.is_loading_favorites = false;
+                    data.replace_snapshot(snapshot);
+                })
+            }
+            InitialSessionDataUpdate::Playlists(playlists) => {
+                publish_initial_user_data(generation, |data| {
+                    data.snapshot.playlists = playlists;
+                    data.snapshot.is_loading_playlists = false;
+                })
+            }
+            InitialSessionDataUpdate::Playlist(playlist) => {
                 let playlist_id = playlist.playlist.media.item_id.as_str().to_owned();
                 publish_initial_user_data(generation, |data| {
                     data.snapshot.replace_playlist(&playlist_id, Some(playlist));
-                })?;
+                })
             }
-            publish_initial_user_data(generation, |data| data.has_loaded_library_data = true)
-        })
-        .map_err(CoreError::command_failed)?;
+        }
+    }));
+    publish_initial_user_data(generation, |data| {
+        data.snapshot.is_loading_favorites = false;
+        data.snapshot.is_loading_playlists = false;
+        data.initial_load_result = Some(result.clone());
+    })
+    .map_err(CoreError::command_failed)?;
     start_user_data_events()?;
+    result.map_err(CoreError::command_failed)?;
     read_user_data()
 }
 
@@ -134,19 +129,19 @@ async fn refresh_user_data_for_session(
     let result = async {
         match &refresh {
             UserDataRefresh::All => {
-                let user = client.get_current_user().await?;
-                snapshot = client.load_library_user_data(user.user_id.as_str()).await?;
+                let user_id = current_session_user_id(&client, generation).await?;
+                snapshot = client.load_library_user_data(user_id.as_str()).await?;
             }
             UserDataRefresh::Favorites => snapshot.favorites = client.load_favorites().await?,
             UserDataRefresh::Playlists => {
-                let user = client.get_current_user().await?;
-                snapshot.playlists = client.load_private_playlists(user.user_id.as_str()).await?;
+                let user_id = current_session_user_id(&client, generation).await?;
+                snapshot.playlists = client.load_private_playlists(user_id.as_str()).await?;
             }
             UserDataRefresh::Playlist(playlist_id)
             | UserDataRefresh::PlaylistCover(playlist_id) => {
-                let user = client.get_current_user().await?;
+                let user_id = current_session_user_id(&client, generation).await?;
                 let playlist = client
-                    .load_private_playlist(playlist_id, user.user_id.as_str())
+                    .load_private_playlist(playlist_id, user_id.as_str())
                     .await?;
                 snapshot.replace_playlist(playlist_id, playlist);
             }
@@ -337,9 +332,9 @@ pub(crate) fn create_private_playlist(name: String) -> Result<UserDataSnapshot, 
     let (client, generation) = session_client()?;
     CORE_NETWORK_RUNTIME
         .block_on(async {
-            let user = client.get_current_user().await?;
+            let user_id = current_session_user_id(&client, generation).await?;
             client
-                .create_private_playlist(name.trim(), user.user_id.as_str())
+                .create_private_playlist(name.trim(), user_id.as_str())
                 .await
         })
         .map_err(CoreError::command_failed)?;
@@ -462,6 +457,18 @@ fn publish_initial_user_data(
 }
 
 // Session guards protect all network completions from logout and account replacement.
+async fn current_session_user_id(
+    client: &MusicAssistantClient,
+    generation: u64,
+) -> Result<crate::music_assistant::models::identifiers::UserId, String> {
+    let user_id = client.get_current_user_id().await?;
+    CORE_COORDINATOR
+        .lock()
+        .map_err(|_| "core coordinator lock poisoned".to_owned())?
+        .remember_current_user_id(generation, user_id.clone())?;
+    Ok(user_id)
+}
+
 fn session_client() -> Result<(Arc<MusicAssistantClient>, u64), CoreError> {
     let coordinator = CORE_COORDINATOR
         .lock()

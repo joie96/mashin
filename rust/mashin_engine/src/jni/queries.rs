@@ -5,7 +5,7 @@ use crate::core::models::CoreError;
 use crate::music_assistant::models::media::{
     Album, Artist, MediaType, MusicAssistantSearchResults, Playlist, Track,
 };
-use crate::music_assistant::models::recommendation::MusicAssistantRecommendationFolder;
+use crate::music_assistant::models::recommendation::RecommendationSnapshot;
 use crate::music_assistant::models::session::ProviderManifest;
 use crate::music_assistant::user_data::UserDataSnapshot;
 use crate::playback::models::{PlayerState, Queue};
@@ -35,6 +35,11 @@ struct ItemReferenceQuery {
     allow_lookup: bool,
 }
 
+#[derive(Deserialize)]
+struct RecommendationQuery {
+    view: crate::music_assistant::models::recommendation::RecommendationView,
+}
+
 // JNI query routing.
 pub(crate) fn execute_query(kind: &str, argument: Option<&str>) -> Result<String, String> {
     match kind {
@@ -42,8 +47,13 @@ pub(crate) fn execute_query(kind: &str, argument: Option<&str>) -> Result<String
         "queue" => serialize_query(get_queue()),
         "playerState" => serialize_query(get_player_state()),
         "mediaSessionState" => serialize_query(core::read_media_session_state()),
-        "userData" => serialize_query(core::read_or_load_user_data()),
-        "recommendations" => serialize_query(get_recommendations()),
+        "userData" => serialize_query(get_user_data()),
+        "recommendations" => {
+            let request: RecommendationQuery =
+                serde_json::from_str(required_text_argument(argument)?)
+                    .map_err(|error| format!("invalid Android recommendation query: {error}"))?;
+            serialize_query(get_recommendations(request.view))
+        }
         "providerManifests" => serialize_query(get_provider_manifests()),
         "providerIconData" => {
             serialize_query(get_provider_icon_data(required_text_argument(argument)?))
@@ -52,7 +62,11 @@ pub(crate) fn execute_query(kind: &str, argument: Option<&str>) -> Result<String
         "searchMedia" => {
             let request: SearchMediaQuery = serde_json::from_str(required_text_argument(argument)?)
                 .map_err(|error| format!("invalid Android search media query: {error}"))?;
-            serialize_query(search_media(&request.query, request.media_type, request.limit))
+            serialize_query(search_media(
+                &request.query,
+                request.media_type,
+                request.limit,
+            ))
         }
         "artist" => with_item_reference(argument, |item| {
             serialize_query(get_artist(&item.item_id, &item.provider))
@@ -143,8 +157,10 @@ pub(crate) fn get_user_data() -> Result<UserDataSnapshot, CoreError> {
 }
 
 // Music Assistant library queries.
-pub(crate) fn get_recommendations() -> Result<Vec<MusicAssistantRecommendationFolder>, CoreError> {
-    core::read_music_assistant_recommendations()
+pub(crate) fn get_recommendations(
+    view: crate::music_assistant::models::recommendation::RecommendationView,
+) -> Result<RecommendationSnapshot, CoreError> {
+    core::read_music_assistant_recommendations(view)
 }
 
 pub(crate) fn get_recently_played_tracks(limit: u32) -> Result<Vec<Track>, CoreError> {
@@ -252,17 +268,20 @@ mod tests {
             assert_eq!(request.media_type, media_type);
             assert_eq!(request.limit, 25);
         }
-        let request: SearchMediaQuery = serde_json::from_str(
-            r#"{"query":"jazz","mediaType":"track"}"#,
-        )
-        .expect("decode default search limit");
+        let request: SearchMediaQuery =
+            serde_json::from_str(r#"{"query":"jazz","mediaType":"track"}"#)
+                .expect("decode default search limit");
         assert_eq!(request.limit, 50);
     }
 
     #[test]
     fn android_search_media_rejects_invalid_and_unfiltered_requests() {
-        for argument in [None, Some("jazz"), Some(r#"{"query":"jazz"}"#),
-            Some(r#"{"query":"jazz","mediaType":"unknown"}"#)] {
+        for argument in [
+            None,
+            Some("jazz"),
+            Some(r#"{"query":"jazz"}"#),
+            Some(r#"{"query":"jazz","mediaType":"unknown"}"#),
+        ] {
             assert!(execute_query("searchMedia", argument).is_err());
         }
         assert!(execute_query("search", Some("jazz"))

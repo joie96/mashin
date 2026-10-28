@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -11,14 +12,28 @@ class ExploreController extends ChangeNotifier {
     required this.coreBridge,
     this.userDataController,
     math.Random? random,
-  }) : _random = random ?? math.Random();
+  }) : _random = random ?? math.Random() {
+    _eventSubscription = coreBridge.events.listen((event) {
+      if (_hasStartedLoading && event['type'] == 'recommendations_changed') {
+        unawaited(load());
+      }
+    });
+  }
 
   final MashinCoreBridgeApi coreBridge;
   final UserData? userDataController;
   final math.Random _random;
+  StreamSubscription<Map<String, dynamic>>? _eventSubscription;
+  Future<void>? _snapshotRefresh;
+  bool _needsSnapshotRefresh = false;
+  RecommendationSnapshot _snapshot = const RecommendationSnapshot(
+    isLoading: true,
+  );
+  bool _hasLoadedExploration = false;
+  bool _hasStartedLoading = false;
 
   bool _isDisposed = false;
-  bool _isLoading = false;
+  bool _isLoading = true;
   bool _hasLoadError = false;
   List<Track> _weeklyExploration = const <Track>[];
   List<Album> _weeklyAlbums = const <Album>[];
@@ -30,6 +45,7 @@ class ExploreController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
+    unawaited(_eventSubscription?.cancel());
     super.dispose();
   }
 
@@ -41,44 +57,76 @@ class ExploreController extends ChangeNotifier {
   List<Track> get similarUsersJam => _similarUsersJam;
   List<Track> get weeklyTracks => _weeklyTracks;
   List<Artist> get weeklyArtists => _weeklyArtists;
+  bool isFolderLoading(String itemId) => _snapshot.isFolderLoading(itemId);
 
-  Future<void> load() async {
-    if (_isDisposed || _isLoading) return;
-    _isLoading = true;
+  Future<void> load() {
+    if (_isDisposed) return Future.value();
+    _hasStartedLoading = true;
+    _needsSnapshotRefresh = true;
+    return _snapshotRefresh ??= Future<void>.microtask(() async {
+      try {
+        while (_needsSnapshotRefresh && !_isDisposed) {
+          _needsSnapshotRefresh = false;
+          await _loadSnapshot();
+        }
+      } finally {
+        _snapshotRefresh = null;
+      }
+    });
+  }
+
+  Future<void> _loadSnapshot() async {
+    _isLoading = _snapshot.isLoading;
     _hasLoadError = false;
     notifyListeners();
     try {
-      final List<RecommendationFolder> folders = await coreBridge
-          .getRecommendations();
+      final snapshot = await coreBridge.getRecommendations(
+        view: RecommendationView.explore,
+      );
       if (_isDisposed) return;
-      final List<List<Track>> playlistTracks =
-          await Future.wait(<Future<List<Track>>>[
-            _tracksFromPlaylistFolders(folders, 'user_exploration_weekly'),
-            _tracksFromPlaylistFolders(folders, 'similarusers_jam_weekly'),
-          ]);
-      if (_isDisposed) return;
-      _weeklyExploration = playlistTracks[0]..shuffle(_random);
-      _weeklyAlbums = _itemsFromFolders<Album>(
-        folders,
-        'sitewide_top_albums_weekly',
-      );
-      _similarUsersJam = playlistTracks[1];
-      _weeklyTracks = _itemsFromFolders<Track>(
-        folders,
-        'sitewide_top_tracks_weekly',
-      );
-      _weeklyArtists = _itemsFromFolders<Artist>(
-        folders,
-        'sitewide_top_artists_weekly',
-      );
+      _applySnapshot(snapshot);
     } catch (_) {
-      if (!_isDisposed) _hasLoadError = true;
+      if (!_isDisposed) {
+        _hasLoadError = true;
+        _snapshot = RecommendationSnapshot(folders: _snapshot.folders);
+      }
     } finally {
       if (!_isDisposed) {
-        _isLoading = false;
+        _isLoading = _snapshot.isLoading;
         notifyListeners();
       }
     }
+  }
+
+  void _applySnapshot(RecommendationSnapshot snapshot) {
+    _snapshot = snapshot;
+    _isLoading = snapshot.isLoading;
+    final folders = snapshot.folders;
+    if (!_hasLoadedExploration) {
+      _weeklyExploration = _tracksFromPlaylistFolders(
+        folders,
+        'user_exploration_weekly',
+      )..shuffle(_random);
+      _hasLoadedExploration = !snapshot.isFolderLoading(
+        'user_exploration_weekly',
+      );
+    }
+    _weeklyAlbums = _itemsFromFolders<Album>(
+      folders,
+      'sitewide_top_albums_weekly',
+    );
+    _similarUsersJam = _tracksFromPlaylistFolders(
+      folders,
+      'similarusers_jam_weekly',
+    );
+    _weeklyTracks = _itemsFromFolders<Track>(
+      folders,
+      'sitewide_top_tracks_weekly',
+    );
+    _weeklyArtists = _itemsFromFolders<Artist>(
+      folders,
+      'sitewide_top_artists_weekly',
+    );
   }
 
   // Favorite commands and updates.
@@ -97,22 +145,20 @@ class ExploreController extends ChangeNotifier {
   }
 
   // Folder mapping.
-  Future<List<Track>> _tracksFromPlaylistFolders(
+  List<Track> _tracksFromPlaylistFolders(
     List<RecommendationFolder> folders,
     String itemId,
-  ) async {
-    final List<Playlist> playlists = _itemsFromFolders<Playlist>(
-      folders,
-      itemId,
-    );
-    final List<List<Track>> tracks = await Future.wait(
-      playlists.map(
-        (Playlist playlist) =>
-            coreBridge.getPlaylistTracks(playlist.itemId, playlist.provider),
-      ),
-    );
+  ) {
     return _withFavoriteStatuses(
-      tracks.expand((List<Track> items) => items).toList(growable: false),
+      folders
+          .where((folder) => folder.itemId == itemId)
+          .expand(
+            (folder) => <Track>[
+              ...folder.items.whereType<Track>(),
+              ...folder.playlistTracks,
+            ],
+          )
+          .toList(growable: false),
     );
   }
 

@@ -40,6 +40,7 @@ class PlaylistDetailController extends ChangeNotifier {
   bool _hasLoadedPrivatePlaylist = false;
   bool _isPlaylistDeleted = false;
   bool _isDisposed = false;
+  bool _isReadingSnapshot = false;
   int _loadGeneration = 0;
 
   @override
@@ -104,12 +105,29 @@ class PlaylistDetailController extends ChangeNotifier {
 
   // Data loading
   Future<void> loadPlaylist() async {
+    if (_isDisposed) return;
     final int loadGeneration = ++_loadGeneration;
     _isLoadingMetadata = true;
     _isLoadingTracks = true;
     notifyListeners();
 
     try {
+      final userData = userDataController;
+      if (userData != null) {
+        _isReadingSnapshot = true;
+        try {
+          await userData.refreshLibrarySnapshot();
+        } catch (_) {
+          if (!_isDisposed && loadGeneration == _loadGeneration) {
+            _playlist = null;
+            _tracks = const <Track>[];
+          }
+          return;
+        } finally {
+          _isReadingSnapshot = false;
+        }
+        if (_isDisposed || loadGeneration != _loadGeneration) return;
+      }
       final Playlist? local = _resolvePlaylistFromUserData(
         itemId,
         providerInstanceIdOrDomain,
@@ -178,7 +196,12 @@ class PlaylistDetailController extends ChangeNotifier {
   }
 
   void _onUserDataChanged() {
-    if (_isDisposed || _isPlaylistDeleted) return;
+    if (_isDisposed ||
+        _isPlaylistDeleted ||
+        _isReadingSnapshot ||
+        _loadGeneration == 0) {
+      return;
+    }
     final local = _resolvePlaylistFromUserData(
       itemId,
       providerInstanceIdOrDomain,

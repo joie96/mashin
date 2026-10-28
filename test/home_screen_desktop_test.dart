@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:mashin_flutter/app/theme/app_theme.dart';
 import 'package:mashin_flutter/features/core/core_bridge.dart';
 import 'package:mashin_flutter/features/core/core_events.dart';
 import 'package:mashin_flutter/features/core/core_models.dart';
+import 'package:mashin_flutter/features/core/core_userdata.dart';
 import 'package:mashin_flutter/features/home/home_screen_desktop.dart';
 import 'package:mashin_flutter/features/home/home_controller.dart';
 import 'package:mashin_flutter/features/home/home_screen_mobile.dart';
@@ -16,9 +18,25 @@ import 'package:mashin_flutter/features/shared/widgets/media_slide_section_mobil
 
 class _HomeCoreBridge implements MashinCoreBridgeApi {
   List<RecommendationFolder> artistFolders = <RecommendationFolder>[];
+  RecommendationSnapshot? snapshot;
+  int recommendationCalls = 0;
+  final eventController = StreamController<Map<String, dynamic>>.broadcast(
+    sync: true,
+  );
 
   @override
-  Future<List<RecommendationFolder>> getRecommendations() async {
+  Stream<Map<String, dynamic>> get events => eventController.stream;
+
+  @override
+  Future<RecommendationSnapshot> getRecommendations({
+    required RecommendationView view,
+  }) async {
+    if (view == RecommendationView.explore) {
+      return const RecommendationSnapshot();
+    }
+    expect(view, RecommendationView.home);
+    recommendationCalls += 1;
+    if (snapshot != null) return snapshot!;
     final List<Track> tracks = List<Track>.generate(
       12,
       (int index) => Track(
@@ -39,45 +57,47 @@ class _HomeCoreBridge implements MashinCoreBridgeApi {
       ),
     );
 
-    return <RecommendationFolder>[
-      ...artistFolders,
-      RecommendationFolder(
-        itemId: 'user_recommendations',
-        provider: 'listenbrainz_recommendations--test',
-        title: 'Empfehlungen',
-        items: <MediaItem>[tracks.first],
-      ),
-      RecommendationFolder(
-        itemId: 'user_genre_playlists_monthly',
-        provider: 'listenbrainz_recommendations--test',
-        title: 'Genres',
-        items: genres,
-      ),
-      RecommendationFolder(
-        itemId: 'user_top_tracks_monthly',
-        provider: 'listenbrainz_recommendations--test',
-        title: 'Tracks',
-        items: tracks,
-      ),
-      RecommendationFolder(
-        itemId: 'user_artist_playlists_monthly',
-        provider: 'listenbrainz_recommendations--test',
-        title: 'Artist Playlists',
-        items: <MediaItem>[genres.first],
-      ),
-      for (final String id in <String>[
-        'user_top_artists_monthly',
-        if (artistFolders.isEmpty) 'user_similar_artists_seed_monthly',
-      ])
+    return RecommendationSnapshot(
+      folders: <RecommendationFolder>[
+        ...artistFolders,
         RecommendationFolder(
-          itemId: id,
+          itemId: 'user_recommendations',
           provider: 'listenbrainz_recommendations--test',
-          title: 'Artists',
-          items: const <MediaItem>[
-            Artist(itemId: 'artist', provider: 'test', name: 'Artist'),
-          ],
+          title: 'Empfehlungen',
+          items: <MediaItem>[tracks.first],
         ),
-    ];
+        RecommendationFolder(
+          itemId: 'user_genre_playlists_monthly',
+          provider: 'listenbrainz_recommendations--test',
+          title: 'Genres',
+          items: genres,
+        ),
+        RecommendationFolder(
+          itemId: 'user_top_tracks_monthly',
+          provider: 'listenbrainz_recommendations--test',
+          title: 'Tracks',
+          items: tracks,
+        ),
+        RecommendationFolder(
+          itemId: 'user_artist_playlists_monthly',
+          provider: 'listenbrainz_recommendations--test',
+          title: 'Artist Playlists',
+          items: <MediaItem>[genres.first],
+        ),
+        for (final String id in <String>[
+          'user_top_artists_monthly',
+          if (artistFolders.isEmpty) 'user_similar_artists_seed_monthly',
+        ])
+          RecommendationFolder(
+            itemId: id,
+            provider: 'listenbrainz_recommendations--test',
+            title: 'Artists',
+            items: const <MediaItem>[
+              Artist(itemId: 'artist', provider: 'test', name: 'Artist'),
+            ],
+          ),
+      ],
+    );
   }
 
   @override
@@ -97,6 +117,151 @@ class _HomeCoreBridge implements MashinCoreBridgeApi {
 }
 
 void main() {
+  test(
+    'home starts with skeletons and reads Rust after page recreation',
+    () async {
+      final bridge = _HomeCoreBridge();
+      final userData = UserData(coreBridge: bridge);
+      addTearDown(userData.dispose);
+      addTearDown(bridge.eventController.close);
+      final first = HomeController(
+        coreBridge: bridge,
+        userDataController: userData,
+      );
+      expect(first.recommendationItems, isEmpty);
+      expect(first.isLoadingRecommendations, isTrue);
+      expect(bridge.recommendationCalls, 0);
+      await first.load();
+      await Future<void>.delayed(Duration.zero);
+      expect(first.recommendationItems, isNotEmpty);
+      first.dispose();
+
+      final reopened = HomeController(
+        coreBridge: bridge,
+        userDataController: userData,
+      );
+      addTearDown(reopened.dispose);
+      expect(reopened.isLoadingRecommendations, isTrue);
+      expect(reopened.isLoadingGenrePlaylists, isTrue);
+      expect(reopened.recommendationItems, isEmpty);
+      expect(reopened.recentListens, isEmpty);
+      expect(reopened.isLoadingRecentListens, isTrue);
+      await reopened.load();
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.recommendationCalls, 2);
+      expect(reopened.recommendationItems, isNotEmpty);
+      expect(reopened.recentListens.single.itemId, 'recent-track');
+    },
+  );
+
+  test('home retains per-folder loading from the Rust snapshot', () async {
+    final bridge = _HomeCoreBridge()
+      ..snapshot = const RecommendationSnapshot(isLoading: true);
+    final userData = UserData(coreBridge: bridge);
+    addTearDown(userData.dispose);
+    addTearDown(bridge.eventController.close);
+    final controller = HomeController(
+      coreBridge: bridge,
+      userDataController: userData,
+    );
+    addTearDown(controller.dispose);
+    expect(controller.isLoadingRecommendations, isTrue);
+    expect(controller.recommendationItems, isEmpty);
+    await controller.load();
+    await Future<void>.delayed(Duration.zero);
+
+    bridge.snapshot = const RecommendationSnapshot();
+    bridge.eventController.add({'type': 'recommendations_changed'});
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.isLoadingRecommendations, isFalse);
+    expect(controller.recommendationItems, isEmpty);
+    expect(bridge.recommendationCalls, 2);
+  });
+
+  test(
+    'home reads a recommendation snapshot only once per initial load',
+    () async {
+      final bridge = _HomeCoreBridge();
+      final userData = UserData(coreBridge: bridge);
+      addTearDown(userData.dispose);
+      addTearDown(bridge.eventController.close);
+
+      final controller = HomeController(
+        coreBridge: bridge,
+        userDataController: userData,
+      );
+      addTearDown(controller.dispose);
+      await controller.load();
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.recommendationCalls, 1);
+      expect(controller.recommendationItems, isNotEmpty);
+    },
+  );
+
+  test('home unlocks ready folders while later folders are loading', () async {
+    final bridge = _HomeCoreBridge()
+      ..snapshot = const RecommendationSnapshot(isLoading: true);
+    final controller = HomeController(coreBridge: bridge);
+    addTearDown(controller.dispose);
+    addTearDown(bridge.eventController.close);
+    await controller.load();
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.isLoadingRecommendations, isTrue);
+    bridge.snapshot = const RecommendationSnapshot(
+      isLoading: true,
+      folders: [
+        RecommendationFolder(
+          itemId: 'user_recommendations',
+          provider: 'lb',
+          title: 'Ready',
+          items: [
+            Track(
+              itemId: 'first',
+              provider: 'lb',
+              name: 'First',
+              duration: 120,
+              artists: [],
+            ),
+          ],
+        ),
+        RecommendationFolder(
+          itemId: 'user_genre_playlists_monthly',
+          provider: 'lb',
+          title: 'Pending',
+          items: [],
+          isLoading: true,
+        ),
+      ],
+    );
+    bridge.eventController.add({'type': 'recommendations_changed'});
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.recommendationItems.single.itemId, 'first');
+    expect(controller.isLoadingRecommendations, isFalse);
+    expect(controller.isLoadingGenrePlaylists, isTrue);
+    bridge.snapshot = const RecommendationSnapshot(
+      folders: [
+        RecommendationFolder(
+          itemId: 'user_recommendations',
+          provider: 'lb',
+          title: 'Ready',
+          items: [
+            Track(
+              itemId: 'first',
+              provider: 'lb',
+              name: 'First',
+              duration: 120,
+              artists: [],
+            ),
+          ],
+        ),
+      ],
+    );
+    bridge.eventController.add({'type': 'recommendations_changed'});
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.recommendationItems.single.itemId, 'first');
+    expect(controller.isLoadingGenrePlaylists, isFalse);
+  });
+
   test('home maps renamed ListenBrainz folders', () async {
     final HomeController controller = HomeController(
       coreBridge: _HomeCoreBridge(),

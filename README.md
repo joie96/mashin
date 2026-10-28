@@ -22,10 +22,14 @@ item. Pending changes are not persisted and are lost when the app exits.
 Scrobbling is handled by Music Assistant and its configured integrations.
 
 Home opens without waiting for the full library or provider icons. Recommendations
-are requested first and shared by Home and Explore for the active native session,
-including Explore's recommended playlist tracks. A new native session loads fresh
-recommendations. Favorites, playlist metadata and playlist contents become available
-progressively in the background; normal library playlists remain live.
+are requested first, followed by Home's missing folder contents one at a time,
+then Explore's missing folder contents and recommended playlist tracks. Favorites
+load next, followed by private playlist metadata and contents. Each completed folder
+or data phase becomes visible immediately. This native startup pipeline runs once
+per session, independently of navigation; pages only read its in-memory snapshots.
+Favorite and playlist changes refresh the affected user data without reloading
+recommendations. A new native session starts with fresh data. There is no persistent
+database cache yet; normal library playlists remain live.
 
 ## Getting Started
 

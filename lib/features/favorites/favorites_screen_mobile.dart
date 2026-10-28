@@ -46,6 +46,9 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
       coreBridge: widget.coreBridge,
       userDataController: widget.userDataController,
     )..addListener(_onControllerChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_controller.load());
+    });
   }
 
   void _onControllerChanged() {
@@ -310,6 +313,8 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
           ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 20),
+        if (_controller.hasLoadError)
+          const Text('Favoriten konnten nicht geladen werden.'),
         SizedBox(
           height: 234,
           child: CustomScrollView(

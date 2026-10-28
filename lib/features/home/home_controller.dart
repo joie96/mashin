@@ -19,11 +19,23 @@ class HomeController extends ChangeNotifier {
     required this.coreBridge,
     this.userDataController,
     math.Random? random,
-  }) : _random = random ?? math.Random();
+  }) : _random = random ?? math.Random() {
+    _eventSubscription = coreBridge.events.listen((event) {
+      if (_hasStartedLoading && event['type'] == 'recommendations_changed') {
+        unawaited(_refreshRecommendationFolders());
+      }
+    });
+  }
 
   final MashinCoreBridgeApi coreBridge;
   final UserData? userDataController;
   final math.Random _random;
+  StreamSubscription<Map<String, dynamic>>? _eventSubscription;
+  bool _hasStartedLoading = false;
+  Future<void>? _recommendationRefresh;
+  bool _needsRecommendationRefresh = false;
+  final Map<String, List<(String, String)>> _selectedArtistFolders = {};
+  final Map<(String, String), HomeArtistSection> _loadedArtistSections = {};
 
   bool _isDisposed = false;
   final ChangeNotifier _recommendationsNotifier = ChangeNotifier();
@@ -110,7 +122,9 @@ class HomeController extends ChangeNotifier {
   }
 
   Future<void> load() async {
-    unawaited(_loadRecommendationFolders());
+    if (_isDisposed) return;
+    _hasStartedLoading = true;
+    unawaited(_refreshRecommendationFolders());
     unawaited(_loadRecentListens());
   }
 
@@ -166,92 +180,110 @@ class HomeController extends ChangeNotifier {
     }
   }
 
+  Future<void> _refreshRecommendationFolders() {
+    _needsRecommendationRefresh = true;
+    return _recommendationRefresh ??= Future<void>.microtask(() async {
+      try {
+        while (_needsRecommendationRefresh && !_isDisposed) {
+          _needsRecommendationRefresh = false;
+          await _loadRecommendationFolders();
+        }
+      } finally {
+        _recommendationRefresh = null;
+      }
+    });
+  }
+
   Future<void> _loadRecommendationFolders() async {
-    _isLoadingRecommendations = true;
-    _isLoadingGenrePlaylists = true;
-    _isLoadingPlaylists = true;
-    _isLoadingTopTracks = true;
-    _isLoadingTopArtists = true;
-    _isLoadingArtistSections = true;
-    _notifyRecommendationSections();
-    notifyListeners();
-
     try {
-      final List<RecommendationFolder> folders = await coreBridge
-          .getRecommendations();
-      final List<RecommendationFolder> recommendationFolders = folders
-          .where((folder) => folder.itemId.trim().isNotEmpty)
-          .toList(growable: false);
-
-      final List<Track> recommendations = _tracksFromFolder(
-        recommendationFolders,
-        'user_recommendations',
+      final snapshot = await coreBridge.getRecommendations(
+        view: RecommendationView.home,
       );
-      _shuffle(recommendations);
-      _recommendationItems = _withFavoriteStatuses(recommendations);
-      _genrePlaylists = _withFavoriteStatuses(
-        _playlistsFromFolder(
-          recommendationFolders,
-          'user_genre_playlists_monthly',
-        ).map(_withNormalizedPlaylistName).take(9).toList(growable: false),
-      );
-      _artistPlaylists = _withFavoriteStatuses(
-        _playlistsFromFolder(
-          recommendationFolders,
-          'user_artist_playlists_monthly',
-        ).map(_withNormalizedPlaylistName).toList(growable: false),
-      );
-      _topTracks = _withFavoriteStatuses(
-        _tracksFromFolder(recommendationFolders, 'user_top_tracks_monthly'),
-      );
-      _topArtists = _withFavoriteStatuses(
-        _artistsFromFolder(recommendationFolders, 'user_top_artists_monthly'),
-      );
-      final List<HomeArtistSection> genreSections = _artistSectionsFromFolders(
-        recommendationFolders,
-        'user_genre_artists_',
-      );
-      final List<HomeArtistSection> similarSections =
-          _artistSectionsFromFolders(
-            recommendationFolders,
-            'user_similar_artists_',
-          );
-      _artistSections = <HomeArtistSection>[
-        for (int index = 0; index < 2; index++) ...<HomeArtistSection>[
-          if (index < genreSections.length) genreSections[index],
-          if (index < similarSections.length) similarSections[index],
-        ],
-      ];
+      if (_isDisposed) return;
+      _applyRecommendationSnapshot(snapshot);
     } catch (_) {
-      _recommendationItems = const <Track>[];
-      _genrePlaylists = const <Playlist>[];
-      _artistPlaylists = const <Playlist>[];
-      _topTracks = const <Track>[];
-      _topArtists = const <Artist>[];
-      _artistSections = const <HomeArtistSection>[];
-    } finally {
       _isLoadingRecommendations = false;
       _isLoadingGenrePlaylists = false;
       _isLoadingPlaylists = false;
       _isLoadingTopTracks = false;
       _isLoadingTopArtists = false;
       _isLoadingArtistSections = false;
+    } finally {
       _notifyRecommendationSections();
       notifyListeners();
     }
   }
 
+  void _applyRecommendationSnapshot(RecommendationSnapshot snapshot) {
+    final List<RecommendationFolder> recommendationFolders = snapshot.folders
+        .where((folder) => folder.itemId.trim().isNotEmpty)
+        .toList(growable: false);
+
+    final List<Track> recommendations = List<Track>.of(
+      _tracksFromFolder(recommendationFolders, 'user_recommendations'),
+    );
+    if (_isLoadingRecommendations) {
+      _shuffle(recommendations);
+      _recommendationItems = _withFavoriteStatuses(recommendations);
+    }
+    _genrePlaylists = _withFavoriteStatuses(
+      _playlistsFromFolder(
+        recommendationFolders,
+        'user_genre_playlists_monthly',
+      ).map(_withNormalizedPlaylistName).take(9).toList(growable: false),
+    );
+    _artistPlaylists = _withFavoriteStatuses(
+      _playlistsFromFolder(
+        recommendationFolders,
+        'user_artist_playlists_monthly',
+      ).map(_withNormalizedPlaylistName).toList(growable: false),
+    );
+    _topTracks = _withFavoriteStatuses(
+      _tracksFromFolder(recommendationFolders, 'user_top_tracks_monthly'),
+    );
+    _topArtists = _withFavoriteStatuses(
+      _artistsFromFolder(recommendationFolders, 'user_top_artists_monthly'),
+    );
+    final List<HomeArtistSection> genreSections = _artistSectionsFromFolders(
+      recommendationFolders,
+      'user_genre_artists_',
+    );
+    final List<HomeArtistSection> similarSections = _artistSectionsFromFolders(
+      recommendationFolders,
+      'user_similar_artists_',
+    );
+    _artistSections = <HomeArtistSection>[
+      for (int index = 0; index < 2; index++) ...<HomeArtistSection>[
+        if (index < genreSections.length) genreSections[index],
+        if (index < similarSections.length) similarSections[index],
+      ],
+    ];
+    _isLoadingRecommendations = snapshot.isFolderLoading(
+      'user_recommendations',
+    );
+    _isLoadingGenrePlaylists = snapshot.isFolderLoading(
+      'user_genre_playlists_monthly',
+    );
+    _isLoadingPlaylists = snapshot.isFolderLoading(
+      'user_artist_playlists_monthly',
+    );
+    _isLoadingTopTracks = snapshot.isFolderLoading('user_top_tracks_monthly');
+    _isLoadingTopArtists = snapshot.isFolderLoading('user_top_artists_monthly');
+    _isLoadingArtistSections = snapshot.isLoading && _artistSections.isEmpty;
+  }
+
   Future<void> _loadRecentListens() async {
-    _isLoadingRecentListens = true;
+    _isLoadingRecentListens = _recentListens.isEmpty;
     _notifySection(_recentListensNotifier);
     notifyListeners();
     try {
       final List<Track> recent = (await coreBridge.getRecentlyPlayedTracks())
           .whereType<Track>()
           .toList(growable: false);
+      if (_isDisposed) return;
       _recentListens = _withFavoriteStatuses(recent);
     } catch (_) {
-      _recentListens = const <Track>[];
+      if (_isLoadingRecentListens) _recentListens = const <Track>[];
     } finally {
       _isLoadingRecentListens = false;
       _notifySection(_recentListensNotifier);
@@ -322,37 +354,47 @@ class HomeController extends ChangeNotifier {
     List<RecommendationFolder> folders,
     String prefix,
   ) {
-    final Set<(String, String)> seen = <(String, String)>{};
-    final List<HomeArtistSection> sections = folders
-        .where(
-          (RecommendationFolder folder) =>
-              folder.itemId.toLowerCase().startsWith(prefix) &&
-              seen.add((folder.provider, folder.itemId)),
-        )
-        .map(
-          (RecommendationFolder folder) => HomeArtistSection(
-            title: prefix == 'user_similar_artists_'
-                ? _normalizeSimilarArtistSectionTitle(folder.title)
-                : folder.title,
-            artists: _withFavoriteStatuses(
-              folder.items
-                  .whereType<Artist>()
-                  .where(_isValidPlayable)
-                  .toList(growable: false),
-            ),
+    final candidates = folders
+        .where((folder) => folder.itemId.toLowerCase().startsWith(prefix))
+        .toList();
+    if (candidates.isEmpty) return const [];
+    final selected = _selectedArtistFolders.putIfAbsent(prefix, () {
+      final identities = candidates
+          .map((folder) => (folder.provider, folder.itemId))
+          .toSet()
+          .toList();
+      _shuffle(identities);
+      return identities.take(2).toList();
+    });
+    final sections = <HomeArtistSection>[];
+    for (final identity in selected) {
+      final folder = candidates.firstWhere(
+        (folder) => (folder.provider, folder.itemId) == identity,
+      );
+      if (folder.isLoading) continue;
+      final section = _loadedArtistSections.putIfAbsent(identity, () {
+        final artists = folder.items
+            .whereType<Artist>()
+            .where(_isValidPlayable)
+            .toList();
+        _shuffle(artists);
+        return HomeArtistSection(
+          title: prefix == 'user_similar_artists_'
+              ? _normalizeSimilarArtistSectionTitle(folder.title)
+              : folder.title,
+          artists: artists,
+        );
+      });
+      if (section.artists.isNotEmpty) {
+        sections.add(
+          HomeArtistSection(
+            title: section.title,
+            artists: _withFavoriteStatuses(section.artists),
           ),
-        )
-        .where((HomeArtistSection section) => section.artists.isNotEmpty)
-        .toList(growable: false);
-    _shuffle(sections);
-    return sections
-        .take(2)
-        .map((HomeArtistSection section) {
-          final List<Artist> artists = section.artists.toList();
-          _shuffle(artists);
-          return HomeArtistSection(title: section.title, artists: artists);
-        })
-        .toList(growable: false);
+        );
+      }
+    }
+    return sections;
   }
 
   Playlist _withNormalizedPlaylistName(Playlist playlist) {
@@ -395,6 +437,7 @@ class HomeController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
+    unawaited(_eventSubscription?.cancel());
     _recommendationsNotifier.dispose();
     _genrePlaylistsNotifier.dispose();
     _artistPlaylistsNotifier.dispose();

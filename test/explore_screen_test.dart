@@ -7,6 +7,7 @@ import 'package:mashin_flutter/app/theme/app_theme.dart';
 import 'package:mashin_flutter/features/core/core_bridge.dart';
 import 'package:mashin_flutter/features/core/core_events.dart';
 import 'package:mashin_flutter/features/core/core_models.dart';
+import 'package:mashin_flutter/features/core/core_userdata.dart';
 import 'package:mashin_flutter/features/explore/explore_controller.dart';
 import 'package:mashin_flutter/features/explore/explore_screen.dart';
 import 'package:mashin_flutter/features/shared/widgets/media_row_section_desktop.dart';
@@ -21,87 +22,102 @@ class _ExploreBridge implements MashinCoreBridgeApi {
   bool shouldReturnEmpty = false;
   int recommendationCalls = 0;
   final List<(String, String)> playlistCalls = <(String, String)>[];
-  Completer<List<RecommendationFolder>>? pendingRecommendations;
+  Completer<RecommendationSnapshot>? pendingRecommendations;
+  final eventController = StreamController<Map<String, dynamic>>.broadcast(
+    sync: true,
+  );
 
   @override
-  Future<List<RecommendationFolder>> getRecommendations() async {
+  Stream<Map<String, dynamic>> get events => eventController.stream;
+
+  @override
+  Future<RecommendationSnapshot> getRecommendations({
+    required RecommendationView view,
+  }) async {
+    if (view == RecommendationView.home) {
+      return const RecommendationSnapshot();
+    }
+    expect(view, RecommendationView.explore);
     recommendationCalls += 1;
     if (shouldFail) throw StateError('Unavailable');
-    final Completer<List<RecommendationFolder>>? pending =
-        pendingRecommendations;
+    final Completer<RecommendationSnapshot>? pending = pendingRecommendations;
     if (pending != null) return pending.future;
-    if (shouldReturnEmpty) return <RecommendationFolder>[];
-    return <RecommendationFolder>[
-      RecommendationFolder(
-        itemId: 'user_exploration_weekly',
-        provider: 'lb',
-        title: 'Weekly',
-        items: <MediaItem>[
-          const Playlist(
-            itemId: 'exploration',
-            provider: 'lb',
-            name: 'Weekly Mix',
-            isEditable: false,
-          ),
-        ],
-      ),
-      RecommendationFolder(
-        itemId: 'similarusers_jam_weekly',
-        provider: 'lb',
-        title: 'Similar Users Jam',
-        items: <MediaItem>[
-          const Playlist(
-            itemId: 'similarusers_jam_latest',
-            provider: 'lb',
-            name: 'Similar Listener Weekly Jams',
-            isEditable: false,
-          ),
-        ],
-      ),
-      for (final String id in <String>[
-        'sitewide_top_albums_weekly',
-        'sitewide_releases_weekly',
-      ])
+    if (shouldReturnEmpty) return const RecommendationSnapshot();
+    return RecommendationSnapshot(
+      folders: <RecommendationFolder>[
         RecommendationFolder(
-          itemId: id,
+          itemId: 'user_exploration_weekly',
           provider: 'lb',
-          title: id,
+          title: 'Weekly',
+          playlistTracks: _tracks('exploration'),
           items: <MediaItem>[
-            Album(
-              itemId: id,
-              provider: 'library',
-              name: id,
-              artists: const <Artist>[],
+            const Playlist(
+              itemId: 'exploration',
+              provider: 'lb',
+              name: 'Weekly Mix',
+              isEditable: false,
             ),
           ],
         ),
-      RecommendationFolder(
-        itemId: 'sitewide_top_tracks_weekly',
-        provider: 'lb',
-        title: 'Charts',
-        items: <MediaItem>[
-          const Track(
-            itemId: 'chart',
-            provider: 'library',
-            name: 'Chart Track',
-            duration: 180,
-            artists: <Artist>[],
+        RecommendationFolder(
+          itemId: 'similarusers_jam_weekly',
+          provider: 'lb',
+          title: 'Similar Users Jam',
+          playlistTracks: _tracks('similarusers_jam_latest'),
+          items: <MediaItem>[
+            const Playlist(
+              itemId: 'similarusers_jam_latest',
+              provider: 'lb',
+              name: 'Similar Listener Weekly Jams',
+              isEditable: false,
+            ),
+          ],
+        ),
+        for (final String id in <String>[
+          'sitewide_top_albums_weekly',
+          'sitewide_releases_weekly',
+        ])
+          RecommendationFolder(
+            itemId: id,
+            provider: 'lb',
+            title: id,
+            items: <MediaItem>[
+              Album(
+                itemId: id,
+                provider: 'library',
+                name: id,
+                artists: const <Artist>[],
+              ),
+            ],
           ),
-        ],
-      ),
-      RecommendationFolder(
-        itemId: 'sitewide_top_artists_weekly',
-        provider: 'lb',
-        title: 'Artists',
-        items: <MediaItem>[
-          const Artist(
-            itemId: 'artist',
-            provider: 'library',
-            name: 'Chart Artist',
-          ),
-        ],
-      ),
-    ];
+        RecommendationFolder(
+          itemId: 'sitewide_top_tracks_weekly',
+          provider: 'lb',
+          title: 'Charts',
+          items: <MediaItem>[
+            const Track(
+              itemId: 'chart',
+              provider: 'library',
+              name: 'Chart Track',
+              duration: 180,
+              artists: <Artist>[],
+            ),
+          ],
+        ),
+        RecommendationFolder(
+          itemId: 'sitewide_top_artists_weekly',
+          provider: 'lb',
+          title: 'Artists',
+          items: <MediaItem>[
+            const Artist(
+              itemId: 'artist',
+              provider: 'library',
+              name: 'Chart Artist',
+            ),
+          ],
+        ),
+      ],
+    );
   }
 
   @override
@@ -112,11 +128,15 @@ class _ExploreBridge implements MashinCoreBridgeApi {
     bool allowDynamicTracks = false,
   }) async {
     playlistCalls.add((itemId, provider));
+    throw StateError('Recommendation pages must not load playlist tracks');
+  }
+
+  List<Track> _tracks(String itemId) {
     return List<Track>.generate(
       8,
       (int index) => Track(
         itemId: '$itemId-track-$index',
-        provider: provider,
+        provider: 'lb',
         name: '$itemId Track $index',
         duration: 180,
         artists: const <Artist>[],
@@ -129,6 +149,69 @@ class _ExploreBridge implements MashinCoreBridgeApi {
 }
 
 void main() {
+  test(
+    'explore starts with skeletons and reads Rust after page recreation',
+    () async {
+      final bridge = _ExploreBridge();
+      final userData = UserData(coreBridge: bridge);
+      addTearDown(userData.dispose);
+      addTearDown(bridge.eventController.close);
+      final first = ExploreController(
+        coreBridge: bridge,
+        userDataController: userData,
+      );
+      expect(first.weeklyExploration, isEmpty);
+      expect(first.isLoading, isTrue);
+      expect(bridge.recommendationCalls, 0);
+      await first.load();
+      expect(first.weeklyExploration, hasLength(8));
+      first.dispose();
+
+      final reopened = ExploreController(
+        coreBridge: bridge,
+        userDataController: userData,
+      );
+      addTearDown(reopened.dispose);
+      expect(reopened.isLoading, isTrue);
+      expect(reopened.isFolderLoading('user_exploration_weekly'), isTrue);
+      expect(reopened.weeklyExploration, isEmpty);
+      await reopened.load();
+      expect(bridge.recommendationCalls, 2);
+      expect(reopened.isLoading, isFalse);
+      expect(reopened.weeklyExploration, hasLength(8));
+    },
+  );
+
+  test('explore reads current Rust data when its page reopens', () async {
+    final bridge = _ExploreBridge()..shouldReturnEmpty = true;
+    final userData = UserData(coreBridge: bridge);
+    addTearDown(userData.dispose);
+    addTearDown(bridge.eventController.close);
+    final first = ExploreController(
+      coreBridge: bridge,
+      userDataController: userData,
+    );
+    expect(first.weeklyTracks, isEmpty);
+    await first.load();
+    first.dispose();
+
+    bridge.shouldReturnEmpty = false;
+    bridge.eventController.add({'type': 'recommendations_changed'});
+    await Future<void>.delayed(Duration.zero);
+
+    final reopened = ExploreController(
+      coreBridge: bridge,
+      userDataController: userData,
+    );
+    addTearDown(reopened.dispose);
+    expect(reopened.isLoading, isTrue);
+    expect(reopened.weeklyTracks, isEmpty);
+    await reopened.load();
+    expect(reopened.isLoading, isFalse);
+    expect(reopened.weeklyTracks.single.itemId, 'chart');
+    expect(bridge.recommendationCalls, 2);
+  });
+
   test('explore maps all five weekly folders', () async {
     final _ExploreBridge bridge = _ExploreBridge();
     final ExploreController controller = ExploreController(coreBridge: bridge);
@@ -147,51 +230,45 @@ void main() {
       controller.similarUsersJam.first.itemId,
       'similarusers_jam_latest-track-0',
     );
-    expect(
-      bridge.playlistCalls,
-      unorderedEquals(<(String, String)>[
-        ('exploration', 'lb'),
-        ('similarusers_jam_latest', 'lb'),
-      ]),
-    );
+    expect(bridge.playlistCalls, isEmpty);
     expect(controller.weeklyTracks.single.itemId, 'chart');
     expect(controller.weeklyArtists.single.itemId, 'artist');
     expect(controller.isLoading, isFalse);
     expect(controller.hasLoadError, isFalse);
   });
 
-  test('exploration tracks are shuffled on every load', () async {
-    final ExploreController controller = ExploreController(
-      coreBridge: _ExploreBridge(),
-      random: math.Random(42),
-    );
-    addTearDown(controller.dispose);
-    final math.Random expectedRandom = math.Random(42);
-    final List<String> originalOrder = List<String>.generate(
-      8,
-      (int index) => 'exploration-track-$index',
-    );
-    List<String> previousOrder = originalOrder;
-
-    for (int loadIndex = 0; loadIndex < 2; loadIndex++) {
+  test(
+    'exploration order remains stable when snapshots are read again',
+    () async {
+      final ExploreController controller = ExploreController(
+        coreBridge: _ExploreBridge(),
+        random: math.Random(42),
+      );
+      addTearDown(controller.dispose);
+      final math.Random expectedRandom = math.Random(42);
+      final List<String> originalOrder = List<String>.generate(
+        8,
+        (int index) => 'exploration-track-$index',
+      );
       final List<String> expectedOrder = List<String>.of(originalOrder)
         ..shuffle(expectedRandom);
-      await controller.load();
-      final List<String> actualOrder = controller.weeklyExploration
-          .map((Track track) => track.itemId)
-          .toList(growable: false);
-      expect(actualOrder, expectedOrder);
-      expect(actualOrder, isNot(orderedEquals(previousOrder)));
-      expect(
-        controller.similarUsersJam.map((Track track) => track.itemId),
-        List<String>.generate(
-          8,
-          (int index) => 'similarusers_jam_latest-track-$index',
-        ),
-      );
-      previousOrder = actualOrder;
-    }
-  });
+
+      for (int loadIndex = 0; loadIndex < 2; loadIndex++) {
+        await controller.load();
+        final List<String> actualOrder = controller.weeklyExploration
+            .map((Track track) => track.itemId)
+            .toList(growable: false);
+        expect(actualOrder, expectedOrder);
+        expect(
+          controller.similarUsersJam.map((Track track) => track.itemId),
+          List<String>.generate(
+            8,
+            (int index) => 'similarusers_jam_latest-track-$index',
+          ),
+        );
+      }
+    },
+  );
 
   test('failed refresh preserves loaded explore contents', () async {
     final _ExploreBridge bridge = _ExploreBridge();
@@ -255,8 +332,8 @@ void main() {
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
-        final Completer<List<RecommendationFolder>> pending =
-            Completer<List<RecommendationFolder>>();
+        final Completer<RecommendationSnapshot> pending =
+            Completer<RecommendationSnapshot>();
         final _ExploreBridge bridge = _ExploreBridge()
           ..pendingRecommendations = pending;
         final MashinCoreBridgeEvents events = MashinCoreBridgeEvents(
@@ -291,7 +368,7 @@ void main() {
           );
         }
         expect(find.byTooltip('Aktualisieren'), findsNothing);
-        pending.complete(<RecommendationFolder>[]);
+        pending.complete(const RecommendationSnapshot());
         await tester.pumpAndSettle();
         expect(
           find.text('Keine Weekly Exploration verfügbar.'),

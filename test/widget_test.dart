@@ -31,11 +31,11 @@ class _LightThemeSession extends AppSessionController {
 }
 
 class _StartupBridge extends Fake implements MashinCoreBridge {
-  final recommendationsStarted = Completer<void>();
-  final recommendations = Completer<List<RecommendationFolder>>();
+  final libraryStarted = Completer<void>();
   final library = Completer<Map<String, dynamic>>();
   final manifests = Completer<List<ProviderManifest>>();
   bool hasStartedLibrary = false;
+  int libraryCalls = 0;
   bool hasRefreshedQueue = false;
 
   @override
@@ -61,14 +61,19 @@ class _StartupBridge extends Fake implements MashinCoreBridge {
   );
 
   @override
-  Future<List<RecommendationFolder>> getRecommendations() {
-    if (!recommendationsStarted.isCompleted) recommendationsStarted.complete();
-    return recommendations.future;
+  Future<RecommendationSnapshot> getRecommendations({
+    required RecommendationView view,
+  }) {
+    throw StateError(
+      'Flutter startup must not start a second recommendation load',
+    );
   }
 
   @override
   Future<Map<String, dynamic>> loadUserData() {
     hasStartedLibrary = true;
+    libraryCalls += 1;
+    if (!libraryStarted.isCompleted) libraryStarted.complete();
     return library.future;
   }
 
@@ -179,26 +184,27 @@ class _PlaylistShellBridge implements MashinCoreBridgeApi {
 
 void main() {
   test(
-    'startup releases home before background data and prioritizes recommendations',
+    'startup releases home and delegates the one-shot data pipeline to Rust',
     () async {
       final bridge = _StartupBridge();
       final session = AppSessionController(coreBridge: bridge);
       addTearDown(session.dispose);
       final startup = session.initialize();
-      await bridge.recommendationsStarted.future;
+      expect(session.initialize(), same(startup));
+      await bridge.libraryStarted.future;
 
       expect(session.isLoading, isFalse);
       expect(session.isAuthenticated, isTrue);
       expect(session.userDataController, isNotNull);
       expect(session.isDarkTheme, isFalse);
-      expect(bridge.hasStartedLibrary, isFalse);
+      expect(bridge.hasStartedLibrary, isTrue);
       expect(bridge.hasRefreshedQueue, isTrue);
 
-      bridge.recommendations.complete(<RecommendationFolder>[]);
       bridge.library.complete(<String, dynamic>{});
       bridge.manifests.complete(<ProviderManifest>[]);
       await startup;
       expect(bridge.hasStartedLibrary, isTrue);
+      expect(bridge.libraryCalls, 1);
       expect(session.userDataController!.isLoadingLibraryData, isFalse);
     },
   );
@@ -210,8 +216,7 @@ void main() {
       final session = AppSessionController(coreBridge: bridge);
       addTearDown(session.dispose);
       final startup = session.initialize();
-      await bridge.recommendationsStarted.future;
-      bridge.recommendations.complete(<RecommendationFolder>[]);
+      await bridge.libraryStarted.future;
       bridge.manifests.complete(<ProviderManifest>[]);
       await Future<void>.delayed(Duration.zero);
       bridge.library.completeError(StateError('Unavailable'));

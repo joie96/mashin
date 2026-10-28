@@ -10,6 +10,8 @@ class _UnusedCoreBridge extends Fake implements MashinCoreBridgeApi {
 }
 
 class _FavoriteSnapshotBridge extends _UnusedCoreBridge {
+  bool hasFavorite = true;
+
   @override
   Future<Map<String, dynamic>> getUserData() => loadUserData();
 
@@ -17,7 +19,10 @@ class _FavoriteSnapshotBridge extends _UnusedCoreBridge {
   Future<Map<String, dynamic>> loadUserData() async => <String, dynamic>{
     'favorites': <String, dynamic>{
       'tracks': <Map<String, dynamic>>[
-        _mediaJson('track')..['favorite'] = true,
+        if (hasFavorite)
+          _mediaJson('track')
+            ..['favorite'] = true
+            ..['uri'] = 'library://track/track-id',
       ],
     },
     'playlists': <Map<String, dynamic>>[],
@@ -64,6 +69,36 @@ Map<String, dynamic> _mediaJson(String mediaType) => <String, dynamic>{
 };
 
 void main() {
+  test(
+    'recommendation snapshots preserve independent folder loading and cached playlist tracks',
+    () {
+      final snapshot = RecommendationSnapshot.fromJson({
+        'is_loading': true,
+        'folders': [
+          {
+            'item_id': 'ready',
+            'provider': 'lb',
+            'items': [],
+            'is_loading': false,
+            'playlist_tracks': [_mediaJson('track')],
+          },
+          {
+            'item_id': 'pending',
+            'provider': 'lb',
+            'items': [],
+            'is_loading': true,
+          },
+        ],
+      });
+      expect(snapshot.isLoading, isTrue);
+      expect(snapshot.isFolderLoading('ready'), isFalse);
+      expect(snapshot.isFolderLoading('pending'), isTrue);
+      expect(snapshot.isFolderLoading('not-discovered'), isTrue);
+      expect(snapshot.folders.first.playlistTracks.single.itemId, 'track-id');
+      expect(const RecommendationSnapshot().isFolderLoading('absent'), isFalse);
+    },
+  );
+
   test(
     'queue playback provider prefers stream details over library mappings',
     () {
@@ -202,6 +237,93 @@ void main() {
     userData.dispose();
   });
 
+  test(
+    'favorite indexes preserve identities, mappings and URI matches',
+    () async {
+      final bridge = _FavoriteSnapshotBridge();
+      final userData = UserData(coreBridge: bridge);
+      addTearDown(userData.dispose);
+      await userData.loadLibraryData();
+      for (final json in <Map<String, dynamic>>[
+        {'item_id': 'track-id', 'provider': 'library', 'name': 'Direct'},
+        {
+          'item_id': 'source-id',
+          'provider': 'source--one',
+          'name': 'Provider alias',
+        },
+        {
+          'item_id': 'other',
+          'provider': 'another',
+          'name': 'Shared mapping',
+          'provider_mappings': [
+            {
+              'item_id': 'source-id',
+              'provider_instance': 'source--one',
+              'provider_domain': 'source',
+            },
+          ],
+        },
+        {
+          'item_id': 'other',
+          'provider': 'another',
+          'name': 'Primary mapping',
+          'provider_mappings': [
+            {
+              'item_id': 'track-id',
+              'provider_instance': 'library',
+              'provider_domain': 'library',
+            },
+          ],
+        },
+        {
+          'item_id': 'other',
+          'provider': 'another',
+          'name': 'URI',
+          'uri': 'library://track/track-id',
+        },
+      ]) {
+        expect(
+          userData.isFavorite(Track.fromJson(json)),
+          isTrue,
+          reason: json['name'] as String,
+        );
+      }
+      final favorite = userData.favoriteTracks.single;
+      expect(userData.withFavoriteStatus(favorite), same(favorite));
+      expect(
+        userData.isFavorite(
+          Album.fromJson({
+            'item_id': favorite.itemId,
+            'provider': favorite.provider,
+            'name': 'Other type',
+          }),
+        ),
+        isFalse,
+      );
+      final unrelated = Track.fromJson({
+        'item_id': 'other',
+        'provider': 'unrelated',
+        'name': 'Unrelated',
+        'favorite': true,
+      });
+      expect(userData.isFavorite(unrelated), isFalse);
+      expect(userData.withFavoriteStatus(unrelated).favorite, isFalse);
+      bridge.hasFavorite = false;
+      await userData.refreshLibrarySnapshot();
+      expect(userData.isFavorite(favorite), isFalse);
+      expect(
+        userData.isFavorite(
+          Track.fromJson({
+            'item_id': 'source-id',
+            'provider': 'source--one',
+            'name': 'Alias',
+          }),
+        ),
+        isFalse,
+      );
+    },
+  );
+
   test('favorite projection preserves complete modeled media payloads', () {
     final userData = UserData(coreBridge: _UnusedCoreBridge());
     for (final mediaType in <String>['track', 'album', 'artist', 'playlist']) {
@@ -215,6 +337,7 @@ void main() {
         ..['is_dynamic'] = true;
       final original = mediaItemFromJson(json);
       final projected = userData.withFavoriteStatus(original);
+      expect(projected, same(original));
       expect(
         createMusicAssistantMediaItemPayload(projected),
         createMusicAssistantMediaItemPayload(original),

@@ -22,6 +22,8 @@ enum MediaType {
 
 enum AlbumType { album, single, live, soundtrack, compilation, ep, unknown }
 
+enum RecommendationView { home, explore }
+
 enum ContentType { pcm, opus, flac, mp3, aac, wav, ogg, unknown }
 
 enum QueueOption { play, replace, next, replaceNext, add }
@@ -1822,12 +1824,42 @@ class ProviderManifestRegistry {
   }
 }
 
+class RecommendationSnapshot {
+  const RecommendationSnapshot({
+    this.folders = const [],
+    this.isLoading = false,
+  });
+
+  final List<RecommendationFolder> folders;
+  final bool isLoading;
+
+  factory RecommendationSnapshot.fromJson(Map<String, dynamic> json) =>
+      RecommendationSnapshot(
+        folders: (json['folders'] as List)
+            .map(
+              (value) =>
+                  RecommendationFolder.fromJson(value as Map<String, dynamic>),
+            )
+            .toList(growable: false),
+        isLoading: json['is_loading'] as bool,
+      );
+
+  bool isFolderLoading(String itemId) {
+    final matches = folders.where((folder) => folder.itemId == itemId);
+    return matches.isEmpty
+        ? isLoading
+        : matches.any((folder) => folder.isLoading);
+  }
+}
+
 class RecommendationFolder {
   final String itemId;
   final String provider;
   final String title;
   final String? subtitle;
   final List<MediaItem> items;
+  final bool isLoading;
+  final List<Track> playlistTracks;
 
   const RecommendationFolder({
     required this.itemId,
@@ -1835,6 +1867,8 @@ class RecommendationFolder {
     required this.title,
     this.subtitle,
     required this.items,
+    this.isLoading = false,
+    this.playlistTracks = const [],
   });
 
   factory RecommendationFolder.fromJson(Map<String, dynamic> json) {
@@ -1854,6 +1888,10 @@ class RecommendationFolder {
               .map(mediaItemFromJson)
               .toList() ??
           const <MediaItem>[],
+      isLoading: json['is_loading'] == true,
+      playlistTracks: (json['playlist_tracks'] as List? ?? const [])
+          .map((value) => Track.fromJson(value as Map<String, dynamic>))
+          .toList(growable: false),
     );
   }
 }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../core/core_bridge.dart';
@@ -43,6 +45,9 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
       coreBridge: widget.coreBridge,
       userDataController: widget.userDataController,
     )..addListener(_onControllerChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_controller.load());
+    });
   }
 
   void _onControllerChanged() {
@@ -369,6 +374,8 @@ class _FavoritesScreenDesktopState extends State<FavoritesScreenDesktop> {
           ),
         ),
         const SliverPadding(padding: EdgeInsets.only(top: 20)),
+        if (_controller.hasLoadError)
+          _sectionSliver(const Text('Favoriten konnten nicht geladen werden.')),
         _sectionSliver(
           MediaTableSectionDesktop<Track>(
             title: 'Titel',

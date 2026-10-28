@@ -51,7 +51,9 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
       providerInstanceIdOrDomain: widget.providerInstanceIdOrDomain,
       userDataController: widget.userDataController,
     )..addListener(_onChanged);
-    unawaited(_controller.loadAlbum());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_controller.loadAlbum());
+    });
   }
 
   @override

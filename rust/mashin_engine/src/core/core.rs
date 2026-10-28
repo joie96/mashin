@@ -13,7 +13,7 @@ use crate::music_assistant::models::media::{
     Album, Artist, MediaItem, MediaType, MusicAssistantSearchResults, Playlist, Track,
 };
 use crate::music_assistant::models::queue::QueueOption;
-use crate::music_assistant::models::recommendation::MusicAssistantRecommendationFolder;
+use crate::music_assistant::models::recommendation::RecommendationSnapshot;
 use crate::music_assistant::models::session::ProviderManifest;
 use crate::music_assistant::user_data::LibraryUserData;
 use crate::music_assistant::user_data::UserDataSnapshot;
@@ -221,18 +221,7 @@ pub(crate) fn restore_persisted_session_and_collect_events(
 }
 
 fn start_session_data_load() {
-    let Ok(client) = music_assistant_client_for_query("preload session data") else {
-        return;
-    };
     spawn_blocking_operation(move || {
-        if let Err(error) = CORE_NETWORK_RUNTIME.block_on(client.get_recommendations()) {
-            LOGGER.warn(format!("load recommendations failed: {error}"));
-        }
-        CORE_NETWORK_RUNTIME.spawn(async move {
-            if let Err(error) = client.preload_recommendation_playlists().await {
-                LOGGER.warn(format!("load recommendation playlists failed: {error}"));
-            }
-        });
         if let Err(error) = read_or_load_user_data() {
             LOGGER.warn(format!("load user data failed: {}", error.message));
         }
@@ -370,7 +359,9 @@ pub(crate) fn start_music_assistant_query(
         }
 
         let result = match request.query {
-            MusicAssistantQuery::Recommendations => serialize_query!(client.get_recommendations()),
+            MusicAssistantQuery::Recommendations { view } => {
+                serialize_query!(client.get_recommendations(view))
+            }
             MusicAssistantQuery::ProviderManifests => {
                 serialize_query!(client.get_provider_manifests())
             }
@@ -464,10 +455,11 @@ pub(crate) fn start_music_assistant_query(
 
 // Synchronous Music Assistant reads for Android MediaLibrary browse callbacks.
 pub(crate) fn read_music_assistant_recommendations(
-) -> Result<Vec<MusicAssistantRecommendationFolder>, CoreError> {
+    view: crate::music_assistant::models::recommendation::RecommendationView,
+) -> Result<RecommendationSnapshot, CoreError> {
     let client = music_assistant_client_for_query("read Music Assistant recommendations")?;
     CORE_NETWORK_RUNTIME
-        .block_on(client.get_recommendations())
+        .block_on(client.get_recommendations(view))
         .map_err(CoreError::command_failed)
 }
 
@@ -753,7 +745,7 @@ mod tests {
     use super::CoreCoordinator;
     use crate::core::models::{LogLevelPreference, SelectedOutput, SessionConfig, ThemePreference};
     use crate::music_assistant::auth_store::AuthStore;
-    use crate::music_assistant::models::identifiers::AccessToken;
+    use crate::music_assistant::models::identifiers::{AccessToken, UserId};
     use crate::music_assistant::models::queue::PlayState;
     use crate::music_assistant::models::session::MusicAssistantServerUrl;
     use std::sync::Mutex;
@@ -826,6 +818,70 @@ mod tests {
             log_level: LogLevelPreference::Info,
             preferred_provider: None,
         }
+    }
+
+    #[test]
+    fn current_user_id_is_persisted_without_reconfiguring_the_session() {
+        let mut coordinator = test_coordinator();
+        let session = session_config();
+        coordinator
+            .auth_store
+            .save_session(session.clone())
+            .unwrap();
+        coordinator.session_configuration = Some(session.clone());
+        let generation = coordinator.user_data_session_generation;
+        coordinator
+            .remember_current_user_id(generation, UserId("user-1".into()))
+            .unwrap();
+        let mut expected = session;
+        expected.user_id = Some(UserId("user-1".into()));
+        assert_eq!(coordinator.session_configuration, Some(expected.clone()));
+        assert_eq!(
+            coordinator.auth_store.load_session().unwrap(),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn current_user_id_rejects_replaced_sessions_and_failed_storage_writes() {
+        let store = TestAuthStore::new();
+        let should_fail_writes = store.should_fail_writes.clone();
+        let mut coordinator = CoreCoordinator::with_auth_store(Box::new(store));
+        let session = session_config();
+        coordinator
+            .auth_store
+            .save_session(session.clone())
+            .unwrap();
+        coordinator.session_configuration = Some(session.clone());
+        let generation = coordinator.user_data_session_generation;
+        assert!(coordinator
+            .remember_current_user_id(generation.wrapping_add(1), UserId("other".into()))
+            .is_err());
+        should_fail_writes.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(coordinator
+            .remember_current_user_id(generation, UserId("user-1".into()))
+            .is_err());
+        assert_eq!(coordinator.session_configuration, Some(session.clone()));
+        assert_eq!(
+            coordinator.auth_store.load_session().unwrap(),
+            Some(session)
+        );
+    }
+
+    #[test]
+    fn current_user_id_from_stored_session_initializes_the_shared_client() {
+        let mut coordinator = test_coordinator();
+        let mut session = session_config();
+        session.user_id = Some(UserId("user-1".into()));
+        coordinator.configure_session(session).unwrap();
+        let client = &coordinator.connection.as_ref().unwrap().client;
+        assert_eq!(
+            super::CORE_NETWORK_RUNTIME
+                .block_on(client.get_current_user_id())
+                .unwrap()
+                .as_str(),
+            "user-1"
+        );
     }
 
     #[test]
@@ -1265,7 +1321,8 @@ mod tests {
             .expect("replace session");
 
         assert!(coordinator
-            .update_initial_user_data(old_generation, |data| data.has_loaded_library_data = true)
+            .update_initial_user_data(old_generation, |data| data.initial_load_result =
+                Some(Ok(())))
             .is_err());
         assert!(coordinator.user_data.is_none());
     }
@@ -1278,12 +1335,12 @@ mod tests {
             .update_initial_user_data(generation, |data| data.revision = 42)
             .unwrap();
         coordinator
-            .update_initial_user_data(generation, |data| data.has_loaded_library_data = true)
+            .update_initial_user_data(generation, |data| data.initial_load_result = Some(Ok(())))
             .unwrap();
         assert_eq!(coordinator.user_data_session_generation, generation);
         let data = coordinator.user_data.as_ref().unwrap();
         assert_eq!(data.revision, 42);
-        assert!(data.has_loaded_library_data);
+        assert_eq!(data.initial_load_result, Some(Ok(())));
     }
 
     #[test]

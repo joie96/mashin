@@ -7,7 +7,20 @@ use crate::core::models::{
 };
 use crate::music_assistant::client::MusicAssistantClient;
 use crate::music_assistant::connection::MusicAssistantConnection;
-use crate::music_assistant::models::identifiers::AccessToken;
+use crate::music_assistant::models::identifiers::{AccessToken, UserId};
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct LoginIdentity {
+    access_token: AccessToken,
+    user: LoginUser,
+}
+
+#[derive(Deserialize)]
+struct LoginUser {
+    user_id: UserId,
+    username: String,
+}
 
 impl CoreCoordinator {
     // Session configuration, persistence, and output selection.
@@ -51,7 +64,8 @@ impl CoreCoordinator {
         let unauthenticated_client = MusicAssistantClient::new(&login.music_assistant_url.0, None);
         let login_response = CORE_NETWORK_RUNTIME
             .block_on(unauthenticated_client.login(&login.username, &login.password))?;
-        let access_token = access_token_from_login_response(login_response)?;
+        let identity = identity_from_login_response(login_response)?;
+        let access_token = identity.access_token;
         let authenticated_client =
             MusicAssistantClient::new(&login.music_assistant_url.0, Some(access_token.clone()));
         if !CORE_NETWORK_RUNTIME.block_on(authenticated_client.has_valid_session()) {
@@ -60,8 +74,8 @@ impl CoreCoordinator {
         self.configure_session(SessionConfig {
             music_assistant_url: login.music_assistant_url,
             access_token: Some(access_token),
-            user_id: None,
-            username: login.username,
+            user_id: Some(identity.user.user_id),
+            username: identity.user.username,
             selected_output: SelectedOutput::Local,
             local: default_local_output(),
             volume: DEFAULT_LOCAL_VOLUME,
@@ -127,6 +141,11 @@ impl CoreCoordinator {
                 session.access_token.clone(),
             )?),
         };
+        if let Some(user_id) = &session.user_id {
+            connection
+                .client
+                .initialize_current_user_id(user_id.clone())?;
+        }
         self.playback.configure_session(
             crate::playback::models::PlaybackSessionConfiguration {
                 local: crate::playback::local::session::LocalSessionConfiguration {
@@ -149,11 +168,37 @@ impl CoreCoordinator {
         self.connection = Some(connection);
         Ok(())
     }
+
+    // Persist identity enrichment only for the session that requested it.
+    pub(super) fn remember_current_user_id(
+        &mut self,
+        generation: u64,
+        user_id: UserId,
+    ) -> Result<(), String> {
+        if self.user_data_session_generation != generation {
+            return Err("session changed while resolving the current user".into());
+        }
+        let mut session = self
+            .session_configuration
+            .clone()
+            .ok_or_else(|| "a restored session is required".to_owned())?;
+        if let Some(current) = &session.user_id {
+            return if current == &user_id {
+                Ok(())
+            } else {
+                Err("Music Assistant session user ID cannot change".into())
+            };
+        }
+        session.user_id = Some(user_id);
+        self.auth_store.save_session(session.clone())?;
+        self.session_configuration = Some(session);
+        Ok(())
+    }
 }
 
-pub(super) fn access_token_from_login_response(
+fn identity_from_login_response(
     login_response: serde_json::Value,
-) -> Result<AccessToken, String> {
+) -> Result<LoginIdentity, String> {
     if login_response
         .get("success")
         .and_then(serde_json::Value::as_bool)
@@ -161,14 +206,43 @@ pub(super) fn access_token_from_login_response(
     {
         return Err("Music Assistant login failed".to_string());
     }
-    let token = login_response
-        .get("token")
-        .or_else(|| login_response.get("access_token"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|token| !token.is_empty())
-        .ok_or_else(|| {
-            "Music Assistant login response did not contain an access token".to_string()
-        })?;
-    Ok(AccessToken(token.to_string()))
+    let identity: LoginIdentity = serde_json::from_value(login_response)
+        .map_err(|error| format!("invalid Music Assistant login response: {error}"))?;
+    if identity.access_token.as_str().trim().is_empty()
+        || identity.user.user_id.as_str().trim().is_empty()
+        || identity.user.username.trim().is_empty()
+    {
+        return Err("Music Assistant login response contains an empty session identity".into());
+    }
+    Ok(identity)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn login_identity_preserves_server_user_id_and_username() {
+        let identity = identity_from_login_response(json!({
+            "success":true, "access_token":"token",
+            "user":{"user_id":"user-1", "username":"canonical-name", "role":"user"}
+        }))
+        .unwrap();
+        assert_eq!(identity.access_token.as_str(), "token");
+        assert_eq!(identity.user.user_id.as_str(), "user-1");
+        assert_eq!(identity.user.username, "canonical-name");
+    }
+
+    #[test]
+    fn login_identity_rejects_failed_missing_and_empty_identities() {
+        for response in [
+            json!({"success":false, "error":"denied"}),
+            json!({"success":true, "access_token":"token"}),
+            json!({"access_token":"token", "user":{"user_id":"", "username":"test"}}),
+            json!({"access_token":"", "user":{"user_id":"user-1", "username":"test"}}),
+        ] {
+            assert!(identity_from_login_response(response).is_err());
+        }
+    }
 }

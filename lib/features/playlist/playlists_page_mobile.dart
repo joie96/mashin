@@ -39,6 +39,9 @@ class _PlaylistsPageMobileState extends State<PlaylistsPageMobile> {
       coreBridge: widget.coreBridge,
       userDataController: widget.userDataController,
     )..addListener(_onControllerChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_controller.load());
+    });
   }
 
   @override
@@ -194,7 +197,9 @@ class _PlaylistsPageMobileState extends State<PlaylistsPageMobile> {
             title: ' ',
             items: _controller.playlists,
             isLoading: _controller.isLoading,
-            emptyText: 'Keine Wiedergabelisten vorhanden.',
+            emptyText: _controller.hasLoadError
+                ? 'Wiedergabelisten konnten nicht geladen werden.'
+                : 'Keine Wiedergabelisten vorhanden.',
             maxItemsPerPage: 0,
             coreBridge: widget.coreBridge,
             coreEvents: widget.coreEvents,

@@ -55,7 +55,9 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
       providerInstanceIdOrDomain: widget.providerInstanceIdOrDomain,
       userDataController: widget.userDataController,
     );
-    unawaited(_controller.loadAlbum());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_controller.loadAlbum());
+    });
   }
 
   @override

@@ -55,7 +55,12 @@ class _ExploreFeedState extends State<ExploreFeed> {
       userDataController: widget.userDataController,
     );
     widget.userDataController?.addListener(_onUserDataChanged);
-    unawaited(_controller.load());
+    final controller = _controller;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && identical(controller, _controller)) {
+        unawaited(controller.load());
+      }
+    });
   }
 
   @override
@@ -107,6 +112,7 @@ class _ExploreFeedState extends State<ExploreFeed> {
         for (final Widget section in <Widget>[
           _section(
             _mediaRow<Album>(
+              'sitewide_top_albums_weekly',
               'Alben der Woche',
               _controller.weeklyAlbums,
               'Keine Album-Charts verfügbar.',
@@ -115,6 +121,7 @@ class _ExploreFeedState extends State<ExploreFeed> {
           _similarUsersTable(),
           _section(
             _mediaRow<Artist>(
+              'sitewide_top_artists_weekly',
               'Artists der Woche',
               _controller.weeklyArtists,
               'Keine Artist-Charts verfügbar.',
@@ -122,6 +129,7 @@ class _ExploreFeedState extends State<ExploreFeed> {
           ),
           _section(
             _mediaRow<Track>(
+              'sitewide_top_tracks_weekly',
               'Songs der Woche',
               _controller.weeklyTracks,
               'Keine Track-Charts verfügbar.',
@@ -149,7 +157,7 @@ class _ExploreFeedState extends State<ExploreFeed> {
         title: 'Entdecke etwas Neues',
         startsTrackRadio: true,
         items: _controller.weeklyExploration,
-        isLoading: _controller.isLoading,
+        isLoading: _controller.isFolderLoading('user_exploration_weekly'),
         emptyText: 'Keine Weekly Exploration verfügbar.',
         coreBridge: widget.coreBridge,
         coreEvents: widget.coreEvents,
@@ -161,7 +169,7 @@ class _ExploreFeedState extends State<ExploreFeed> {
       title: 'Entdecke etwas Neues',
       startsTrackRadio: true,
       items: _controller.weeklyExploration,
-      isLoading: _controller.isLoading,
+      isLoading: _controller.isFolderLoading('user_exploration_weekly'),
       emptyText: 'Keine Weekly Exploration verfügbar.',
       coreBridge: widget.coreBridge,
       coreEvents: widget.coreEvents,
@@ -188,7 +196,7 @@ class _ExploreFeedState extends State<ExploreFeed> {
         sliver: MediaTableSectionMobile<Track>(
           title: title,
           items: _controller.similarUsersJam,
-          isLoading: _controller.isLoading,
+          isLoading: _controller.isFolderLoading('similarusers_jam_weekly'),
           emptyText: emptyText,
           maxItemsPerPage: 3,
           skeletonRowCount: 3,
@@ -205,7 +213,7 @@ class _ExploreFeedState extends State<ExploreFeed> {
       MediaTableSectionDesktop<Track>(
         title: title,
         items: _controller.similarUsersJam,
-        isLoading: _controller.isLoading,
+        isLoading: _controller.isFolderLoading('similarusers_jam_weekly'),
         emptyText: emptyText,
         maxItemsPerPage: 5,
         skeletonRowCount: 5,
@@ -229,6 +237,7 @@ class _ExploreFeedState extends State<ExploreFeed> {
   }
 
   Widget _mediaRow<T extends MediaItem>(
+    String folderId,
     String title,
     List<T> items,
     String emptyText,
@@ -239,7 +248,7 @@ class _ExploreFeedState extends State<ExploreFeed> {
         startsTrackRadio: T == Track,
         items: items,
         emptyText: emptyText,
-        isLoading: _controller.isLoading,
+        isLoading: _controller.isFolderLoading(folderId),
         coreBridge: widget.coreBridge,
         coreEvents: widget.coreEvents,
         onItemTap: _openItem,
@@ -252,7 +261,7 @@ class _ExploreFeedState extends State<ExploreFeed> {
       startsTrackRadio: T == Track,
       items: items,
       emptyText: emptyText,
-      isLoading: _controller.isLoading,
+      isLoading: _controller.isFolderLoading(folderId),
       coreBridge: widget.coreBridge,
       coreEvents: widget.coreEvents,
       isRowFavorite: (T item, int index) => item.favorite,

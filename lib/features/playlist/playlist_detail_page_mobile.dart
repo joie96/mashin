@@ -59,7 +59,9 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
       providerInstanceIdOrDomain: widget.providerInstanceIdOrDomain,
       userDataController: widget.userDataController,
     )..addListener(_onChanged);
-    unawaited(_controller.loadPlaylist());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_controller.loadPlaylist());
+    });
   }
 
   @override

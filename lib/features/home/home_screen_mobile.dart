@@ -49,7 +49,9 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
       userDataController: widget.userDataController,
     );
     widget.userDataController?.addListener(_onUserDataChanged);
-    unawaited(_controller.load());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_controller.load());
+    });
   }
 
   @override

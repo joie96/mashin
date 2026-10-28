@@ -58,7 +58,9 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
       providerInstanceIdOrDomain: widget.providerInstanceIdOrDomain,
       userDataController: widget.userDataController,
     );
-    unawaited(_controller.loadArtist());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_controller.loadArtist());
+    });
   }
 
   @override

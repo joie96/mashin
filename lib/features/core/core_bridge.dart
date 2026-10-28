@@ -177,7 +177,9 @@ abstract class MashinCoreBridgeApi {
   Future<void> selectRemotePlayer(String playerId);
   Future<void> refreshQueue();
   Future<void> refreshPlayerState();
-  Future<List<RecommendationFolder>> getRecommendations();
+  Future<RecommendationSnapshot> getRecommendations({
+    required RecommendationView view,
+  });
   Future<List<ProviderManifest>> getProviderManifests();
   Future<String?> getProviderIconData(String provider);
   Future<List<MediaItem>> getRecentlyPlayedTracks({int limit = 40});
@@ -397,20 +399,18 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   );
 
   @override
-  Future<List<RecommendationFolder>> getRecommendations() =>
-      _startMusicAssistantQuery<List<RecommendationFolder>>(
-        'recommendations',
-        const <String, Object?>{},
-        (Object? decoded) {
-          if (decoded is! List) {
-            throw const FormatException('recommendations must be a list');
-          }
-          return decoded
-              .whereType<Map<String, dynamic>>()
-              .map(RecommendationFolder.fromJson)
-              .toList(growable: false);
-        },
-      );
+  Future<RecommendationSnapshot> getRecommendations({
+    required RecommendationView view,
+  }) => _startMusicAssistantQuery<RecommendationSnapshot>(
+    'recommendations',
+    <String, Object?>{'view': view.name},
+    (Object? decoded) {
+      if (decoded is! Map<String, dynamic>) {
+        throw const FormatException('recommendations must be a snapshot');
+      }
+      return RecommendationSnapshot.fromJson(decoded);
+    },
+  );
 
   @override
   Future<List<ProviderManifest>> getProviderManifests() =>
