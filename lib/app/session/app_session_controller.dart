@@ -34,6 +34,7 @@ class AppSessionController extends ChangeNotifier {
   bool _isDisposed = false;
   late int _localCacheSizeBytes;
   bool _isDarkTheme = true;
+  bool _shouldShowMultiDeviceButton = true;
   LogLevelPreference _logLevel = LogLevelPreference.info;
 
   UserData? get userDataController => _userDataController;
@@ -44,6 +45,7 @@ class AppSessionController extends ChangeNotifier {
   bool get isAuthenticated => _isAuthenticated;
   int get localCacheSizeBytes => _localCacheSizeBytes;
   bool get isDarkTheme => _isDarkTheme;
+  bool get shouldShowMultiDeviceButton => _shouldShowMultiDeviceButton;
   LogLevelPreference get logLevel => _logLevel;
   PreferredProvider? get preferredProvider =>
       PreferredProviderController.instance.preferredProvider;
@@ -127,6 +129,7 @@ class AppSessionController extends ChangeNotifier {
         localCacheSizeBytes: _localCacheSizeBytes,
         isDarkTheme: isDarkTheme,
         logLevel: _logLevel,
+        shouldShowMultiDeviceButton: _shouldShowMultiDeviceButton,
       ),
     );
   }
@@ -136,6 +139,7 @@ class AppSessionController extends ChangeNotifier {
     _localCacheSizeBytes = settings.localCacheSizeBytes;
     _isDarkTheme = settings.isDarkTheme;
     _logLevel = settings.logLevel;
+    _shouldShowMultiDeviceButton = settings.shouldShowMultiDeviceButton;
     notifyListeners();
   }
 
@@ -156,6 +160,7 @@ class AppSessionController extends ChangeNotifier {
     _localCacheSizeBytes = settings.localCacheSizeBytes;
     _isDarkTheme = settings.isDarkTheme;
     _logLevel = settings.logLevel;
+    _shouldShowMultiDeviceButton = settings.shouldShowMultiDeviceButton;
     PreferredProviderController.instance.initialize(
       preferredProvider: settings.preferredProvider,
       persist: coreBridge.setPreferredProvider,

@@ -462,6 +462,8 @@ class _AppShellState extends State<AppShell> {
               ),
               builder: (BuildContext context, Widget? currentTrackInfo) =>
                   _DesktopPlayerBar(
+                    shouldShowMultiDeviceButton:
+                        widget.session.shouldShowMultiDeviceButton,
                     currentTrackInfo:
                         currentTrackInfo ?? const SizedBox.shrink(),
                     playStateType:
@@ -566,6 +568,8 @@ class _AppShellState extends State<AppShell> {
           builder: (BuildContext context) => _MediaSessionScope(
             mediaSessionChanges: _coreEvents,
             builder: (BuildContext context, Widget? child) => PlayerBarOverlay(
+              shouldShowMultiDeviceButton:
+                  widget.session.shouldShowMultiDeviceButton,
               isOpen: _isMobilePlayerOverlayOpen,
               openProgress: _mobilePlayerOverlayOpenProgress,
               trackTitle: _currentTrackTitle,
@@ -1692,6 +1696,7 @@ class _DesktopPlayerBar extends StatelessWidget {
   static const double barHeight = 90;
 
   final Widget currentTrackInfo;
+  final bool shouldShowMultiDeviceButton;
   final PlayState playStateType;
   final PlayerState playbackState;
   final Queue playbackQueue;
@@ -1712,6 +1717,7 @@ class _DesktopPlayerBar extends StatelessWidget {
   final ValueChanged<BuildContext> onOpenAudioOptions;
 
   const _DesktopPlayerBar({
+    required this.shouldShowMultiDeviceButton,
     required this.currentTrackInfo,
     required this.playStateType,
     required this.playbackState,
@@ -1925,11 +1931,12 @@ class _DesktopPlayerBar extends StatelessWidget {
                         ? colors.accent
                         : colors.textSecondary,
                   ),
-                  _PlayerBarIconButton(
-                    icon: Icons.devices_outlined,
-                    onTap: () {},
-                    color: colors.textSecondary,
-                  ),
+                  if (shouldShowMultiDeviceButton)
+                    _PlayerBarIconButton(
+                      icon: Icons.devices_outlined,
+                      onTap: () {},
+                      color: colors.textSecondary,
+                    ),
                   _PlayerBarIconButton(
                     icon: playbackState.muted
                         ? Icons.volume_off_outlined

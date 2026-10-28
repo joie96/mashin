@@ -339,7 +339,7 @@ mod tests {
 
     #[test]
     fn session_settings_accept_the_flutter_commit_payload() {
-        let arguments = r#"{"localCacheSizeBytes":524288000,"theme":"light","logLevel":"warn"}"#;
+        let arguments = r#"{"localCacheSizeBytes":524288000,"theme":"light","logLevel":"warn","shouldShowMultiDeviceButton":false}"#;
         let command =
             decode_command("saveSessionSettings", Some(arguments)).expect("settings command");
         let super::PlaybackCommand::SaveSessionSettings { settings } = command else {
@@ -347,6 +347,7 @@ mod tests {
         };
         assert_eq!(settings.local_cache_size_bytes, 524_288_000);
         assert_eq!(settings.theme, crate::core::models::ThemePreference::Light);
+        assert!(!settings.should_show_multi_device_button);
         assert!(decode_command("saveSessionSettings", Some(r#"{"theme":"light"}"#)).is_err());
         let mut invalid: serde_json::Value = serde_json::from_str(arguments).unwrap();
         invalid["unexpected"] = serde_json::json!(true);

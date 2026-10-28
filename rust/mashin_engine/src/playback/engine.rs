@@ -532,6 +532,7 @@ mod tests {
             volume: 30,
             theme: ThemePreference::Dark,
             log_level: LogLevelPreference::Info,
+            should_show_multi_device_button: true,
             preferred_provider: None,
         };
         let connection = Arc::new(

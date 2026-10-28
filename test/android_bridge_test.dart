@@ -114,6 +114,7 @@ void main() {
       localCacheSizeBytes: 524288000,
       isDarkTheme: false,
       logLevel: LogLevelPreference.warn,
+      shouldShowMultiDeviceButton: false,
     );
     await AndroidBridge().execute(
       AndroidCoreCommand.saveSessionSettings,
@@ -125,6 +126,7 @@ void main() {
         'localCacheSizeBytes': 524288000,
         'theme': 'light',
         'logLevel': 'warn',
+        'shouldShowMultiDeviceButton': false,
       },
     });
   });
@@ -179,6 +181,7 @@ void main() {
         'localCacheSizeBytes': 262144000,
         'theme': 'dark',
         'logLevel': 'info',
+        'shouldShowMultiDeviceButton': true,
       },
     });
   });

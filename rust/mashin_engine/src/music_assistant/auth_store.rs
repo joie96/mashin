@@ -234,6 +234,7 @@ mod tests {
             volume: 100,
             theme: ThemePreference::Dark,
             log_level: LogLevelPreference::Info,
+            should_show_multi_device_button: true,
             preferred_provider: None,
         }
     }
@@ -251,6 +252,23 @@ mod tests {
         let session = session_config();
         let serialized = encode_session(session.clone()).unwrap();
         assert_eq!(decode_session(&serialized), Some(session));
+    }
+
+    #[test]
+    fn multi_device_visibility_defaults_for_existing_sessions_and_round_trips() {
+        let mut session = session_config();
+        let mut existing: serde_json::Value =
+            serde_json::from_str(&encode_session(session.clone()).unwrap()).unwrap();
+        existing["session"]
+            .as_object_mut()
+            .unwrap()
+            .remove("shouldShowMultiDeviceButton");
+        assert_eq!(decode_session(&existing.to_string()), Some(session.clone()));
+        session.should_show_multi_device_button = false;
+        assert_eq!(
+            decode_session(&encode_session(session.clone()).unwrap()),
+            Some(session)
+        );
     }
 
     #[test]

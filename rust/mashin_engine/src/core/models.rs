@@ -249,6 +249,8 @@ pub(crate) struct SessionConfig {
     pub(crate) theme: ThemePreference,
     #[serde(default)]
     pub(crate) log_level: LogLevelPreference,
+    #[serde(default = "default_should_show_multi_device_button")]
+    pub(crate) should_show_multi_device_button: bool,
     #[serde(default)]
     pub(crate) preferred_provider: Option<PreferredProvider>,
 }
@@ -259,6 +261,11 @@ pub(crate) struct SessionSettingsUpdate {
     pub(crate) local_cache_size_bytes: usize,
     pub(crate) theme: ThemePreference,
     pub(crate) log_level: LogLevelPreference,
+    pub(crate) should_show_multi_device_button: bool,
+}
+
+fn default_should_show_multi_device_button() -> bool {
+    true
 }
 
 #[derive(Deserialize)]

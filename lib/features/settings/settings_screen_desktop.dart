@@ -42,6 +42,8 @@ class SettingsScreenDesktop extends StatelessWidget {
     required this.logLevel,
     required this.onThemeChanged,
     required this.onLogLevelChanged,
+    required this.shouldShowMultiDeviceButton,
+    required this.onMultiDeviceButtonVisibilityChanged,
   });
 
   final String musicAssistantUrl;
@@ -51,6 +53,8 @@ class SettingsScreenDesktop extends StatelessWidget {
   final LogLevelPreference logLevel;
   final ValueChanged<bool> onThemeChanged;
   final ValueChanged<LogLevelPreference> onLogLevelChanged;
+  final bool shouldShowMultiDeviceButton;
+  final ValueChanged<bool> onMultiDeviceButtonVisibilityChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -99,6 +103,9 @@ class SettingsScreenDesktop extends StatelessWidget {
                       cacheSizeFocusNode: cacheSizeFocusNode,
                       isDarkTheme: isDarkTheme,
                       onThemeChanged: onThemeChanged,
+                      shouldShowMultiDeviceButton: shouldShowMultiDeviceButton,
+                      onMultiDeviceButtonVisibilityChanged:
+                          onMultiDeviceButtonVisibilityChanged,
                     ),
                     _DesktopLogTab(
                       logLevel: logLevel,
@@ -164,6 +171,8 @@ class _DesktopSettingsForm extends StatelessWidget {
     required this.cacheSizeFocusNode,
     required this.isDarkTheme,
     required this.onThemeChanged,
+    required this.shouldShowMultiDeviceButton,
+    required this.onMultiDeviceButtonVisibilityChanged,
   });
 
   final String musicAssistantUrl;
@@ -171,6 +180,8 @@ class _DesktopSettingsForm extends StatelessWidget {
   final FocusNode cacheSizeFocusNode;
   final bool isDarkTheme;
   final ValueChanged<bool> onThemeChanged;
+  final bool shouldShowMultiDeviceButton;
+  final ValueChanged<bool> onMultiDeviceButtonVisibilityChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -254,6 +265,25 @@ class _DesktopSettingsForm extends StatelessWidget {
                 selected: <bool>{isDarkTheme},
                 onSelectionChanged: (Set<bool> selection) =>
                     onThemeChanged(selection.first),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: _DesktopSettingRow(
+            title: 'Mehrgeräte-Button anzeigen',
+            description: '',
+            control: SizedBox(
+              width: _desktopSettingsControlWidth,
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Switch(
+                  key: const Key('settings-multi-device-button'),
+                  value: shouldShowMultiDeviceButton,
+                  onChanged: onMultiDeviceButtonVisibilityChanged,
+                ),
               ),
             ),
           ),

@@ -29,7 +29,12 @@ void main() {
           isDarkTheme: true,
           logLevel: LogLevelPreference.info,
         ).toJson(),
-        {'localCacheSizeBytes': 262144000, 'theme': 'dark', 'logLevel': 'info'},
+        {
+          'localCacheSizeBytes': 262144000,
+          'theme': 'dark',
+          'logLevel': 'info',
+          'shouldShowMultiDeviceButton': true,
+        },
       );
       expect(
         PlayerState.fromJson({'activeMode': 'local'}).activeMode,

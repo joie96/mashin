@@ -19,6 +19,7 @@ pub(crate) struct SessionSettings {
     pub(crate) local_cache_size_bytes: usize,
     pub(crate) theme: ThemePreference,
     pub(crate) log_level: LogLevelPreference,
+    pub(crate) should_show_multi_device_button: bool,
     pub(crate) preferred_provider: Option<PreferredProvider>,
 }
 
@@ -49,6 +50,8 @@ pub(crate) fn session_settings(session: Option<&SessionConfig>) -> SessionSettin
         local_cache_size_bytes,
         theme,
         log_level,
+        should_show_multi_device_button: session
+            .map_or(true, |session| session.should_show_multi_device_button),
         preferred_provider: session.and_then(|session| session.preferred_provider.clone()),
     }
 }
@@ -181,6 +184,7 @@ mod tests {
                 local_cache_size_bytes: DEFAULT_LOCAL_CACHE_SIZE_BYTES,
                 theme: ThemePreference::Dark,
                 log_level: LogLevelPreference::Info,
+                should_show_multi_device_button: true,
                 preferred_provider: None,
             }
         );
@@ -201,6 +205,7 @@ mod tests {
             volume: 100,
             theme: ThemePreference::Light,
             log_level: LogLevelPreference::Error,
+            should_show_multi_device_button: false,
             preferred_provider: None,
         };
 
@@ -212,5 +217,6 @@ mod tests {
         assert_eq!(configuration.local_cache_size_bytes, 1_024);
         assert_eq!(configuration.theme, ThemePreference::Light);
         assert_eq!(configuration.log_level, LogLevelPreference::Error);
+        assert!(!configuration.should_show_multi_device_button);
     }
 }

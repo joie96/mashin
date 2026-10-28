@@ -81,6 +81,7 @@ impl CoreCoordinator {
             volume: DEFAULT_LOCAL_VOLUME,
             theme: ThemePreference::Dark,
             log_level: LogLevelPreference::Info,
+            should_show_multi_device_button: true,
             preferred_provider: None,
         })
     }

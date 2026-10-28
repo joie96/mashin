@@ -14,6 +14,8 @@ class SettingsScreenMobile extends StatelessWidget {
     required this.logLevel,
     required this.onThemeChanged,
     required this.onLogLevelChanged,
+    required this.shouldShowMultiDeviceButton,
+    required this.onMultiDeviceButtonVisibilityChanged,
   });
 
   final String musicAssistantUrl;
@@ -23,6 +25,8 @@ class SettingsScreenMobile extends StatelessWidget {
   final LogLevelPreference logLevel;
   final ValueChanged<bool> onThemeChanged;
   final ValueChanged<LogLevelPreference> onLogLevelChanged;
+  final bool shouldShowMultiDeviceButton;
+  final ValueChanged<bool> onMultiDeviceButtonVisibilityChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -115,6 +119,14 @@ class SettingsScreenMobile extends StatelessWidget {
                   selected: <bool>{isDarkTheme},
                   onSelectionChanged: (Set<bool> selection) =>
                       onThemeChanged(selection.first),
+                ),
+                const SizedBox(height: 24),
+                SwitchListTile(
+                  key: const Key('settings-multi-device-button'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Mehrgeräte-Button anzeigen'),
+                  value: shouldShowMultiDeviceButton,
+                  onChanged: onMultiDeviceButtonVisibilityChanged,
                 ),
               ],
             ),

@@ -18,6 +18,7 @@ class SettingsScreen extends StatelessWidget {
       localCacheSizeBytes: session.localCacheSizeBytes,
       isDarkTheme: session.isDarkTheme,
       logLevel: session.logLevel,
+      shouldShowMultiDeviceButton: session.shouldShowMultiDeviceButton,
     ),
     onSave: session.saveSessionSettings,
   );
@@ -90,6 +91,7 @@ class _SettingsEditorState extends State<SettingsEditor> {
         localCacheSizeBytes: cacheSizeMb * _bytesPerMegabyte,
         isDarkTheme: _settings.isDarkTheme,
         logLevel: _settings.logLevel,
+        shouldShowMultiDeviceButton: _settings.shouldShowMultiDeviceButton,
       ),
     );
   }
@@ -97,7 +99,9 @@ class _SettingsEditorState extends State<SettingsEditor> {
   void _saveSettings(SessionSettingsUpdate update) {
     if (update.localCacheSizeBytes == _settings.localCacheSizeBytes &&
         update.isDarkTheme == _settings.isDarkTheme &&
-        update.logLevel == _settings.logLevel) {
+        update.logLevel == _settings.logLevel &&
+        update.shouldShowMultiDeviceButton ==
+            _settings.shouldShowMultiDeviceButton) {
       return;
     }
     _settings = update;
@@ -129,6 +133,7 @@ class _SettingsEditorState extends State<SettingsEditor> {
           localCacheSizeBytes: _settings.localCacheSizeBytes,
           isDarkTheme: value,
           logLevel: _settings.logLevel,
+          shouldShowMultiDeviceButton: _settings.shouldShowMultiDeviceButton,
         ),
       ),
     );
@@ -141,6 +146,20 @@ class _SettingsEditorState extends State<SettingsEditor> {
           localCacheSizeBytes: _settings.localCacheSizeBytes,
           isDarkTheme: _settings.isDarkTheme,
           logLevel: value,
+          shouldShowMultiDeviceButton: _settings.shouldShowMultiDeviceButton,
+        ),
+      ),
+    );
+  }
+
+  void _saveMultiDeviceButtonVisibility(bool value) {
+    setState(
+      () => _saveSettings(
+        SessionSettingsUpdate(
+          localCacheSizeBytes: _settings.localCacheSizeBytes,
+          isDarkTheme: _settings.isDarkTheme,
+          logLevel: _settings.logLevel,
+          shouldShowMultiDeviceButton: value,
         ),
       ),
     );
@@ -162,6 +181,9 @@ class _SettingsEditorState extends State<SettingsEditor> {
             logLevel: _settings.logLevel,
             onThemeChanged: _saveTheme,
             onLogLevelChanged: _saveLogLevel,
+            shouldShowMultiDeviceButton: _settings.shouldShowMultiDeviceButton,
+            onMultiDeviceButtonVisibilityChanged:
+                _saveMultiDeviceButtonVisibility,
           )
         : SettingsScreenDesktop(
             musicAssistantUrl: widget.musicAssistantUrl,
@@ -171,6 +193,9 @@ class _SettingsEditorState extends State<SettingsEditor> {
             logLevel: _settings.logLevel,
             onThemeChanged: _saveTheme,
             onLogLevelChanged: _saveLogLevel,
+            shouldShowMultiDeviceButton: _settings.shouldShowMultiDeviceButton,
+            onMultiDeviceButtonVisibilityChanged:
+                _saveMultiDeviceButtonVisibility,
           );
     return screen;
   }

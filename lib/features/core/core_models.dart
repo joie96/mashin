@@ -2193,16 +2193,20 @@ class SessionSettingsUpdate {
     required this.localCacheSizeBytes,
     required this.isDarkTheme,
     required this.logLevel,
+    this.shouldShowMultiDeviceButton = true,
   });
 
   final int localCacheSizeBytes;
   final bool isDarkTheme;
   final LogLevelPreference logLevel;
 
+  final bool shouldShowMultiDeviceButton;
+
   Map<String, Object?> toJson() => <String, Object?>{
     'localCacheSizeBytes': localCacheSizeBytes,
     'theme': isDarkTheme ? 'dark' : 'light',
     'logLevel': logLevel.name,
+    'shouldShowMultiDeviceButton': shouldShowMultiDeviceButton,
   };
 }
 
@@ -2214,6 +2218,7 @@ class SessionSettings {
     required this.localCacheSizeBytes,
     required this.isDarkTheme,
     required this.logLevel,
+    this.shouldShowMultiDeviceButton = true,
     this.preferredProvider,
   });
 
@@ -2224,6 +2229,7 @@ class SessionSettings {
   final bool isDarkTheme;
   final LogLevelPreference logLevel;
   final PreferredProvider? preferredProvider;
+  final bool shouldShowMultiDeviceButton;
 
   factory SessionSettings.fromJson(Map<String, dynamic> json) {
     return SessionSettings(
@@ -2234,6 +2240,8 @@ class SessionSettings {
           (json['localCacheSizeBytes'] as num?)?.toInt() ?? 250 * 1024 * 1024,
       isDarkTheme: json['theme'] != 'light',
       logLevel: LogLevelPreference.parse(json['logLevel'] as String? ?? 'info'),
+      shouldShowMultiDeviceButton:
+          json['shouldShowMultiDeviceButton'] as bool? ?? true,
       preferredProvider: switch (json['preferredProvider']) {
         final Map<String, dynamic> preferred => PreferredProvider.fromJson(
           preferred,

@@ -7,7 +7,45 @@ import 'package:mashin_flutter/features/core/core_models.dart';
 import 'package:mashin_flutter/features/settings/settings_screen.dart';
 
 void main() {
+  test('multi-device visibility is transferred in session settings', () {
+    const update = SessionSettingsUpdate(
+      localCacheSizeBytes: 250 * 1024 * 1024,
+      isDarkTheme: true,
+      logLevel: LogLevelPreference.info,
+      shouldShowMultiDeviceButton: false,
+    );
+    expect(update.toJson()['shouldShowMultiDeviceButton'], isFalse);
+    expect(
+      SessionSettings.fromJson(update.toJson()).shouldShowMultiDeviceButton,
+      isFalse,
+    );
+    expect(SessionSettings.fromJson({}).shouldShowMultiDeviceButton, isTrue);
+  });
+
   for (final isCompact in [true, false]) {
+    testWidgets(
+      'multi-device visibility saves and survives other edits in ${isCompact ? 'mobile' : 'desktop'} layout',
+      (tester) async {
+        final saved = <SessionSettingsUpdate>[];
+        await _pumpEditor(
+          tester,
+          isCompact,
+          (update) async => saved.add(update),
+        );
+        final toggle = find.byKey(const Key('settings-multi-device-button'));
+        await tester.ensureVisible(toggle);
+        await tester.tap(toggle);
+        await tester.pumpAndSettle();
+        expect(saved.single.shouldShowMultiDeviceButton, isFalse);
+        await tester.ensureVisible(find.text('Hell'));
+        await tester.tap(find.text('Hell'));
+        await tester.pumpAndSettle();
+        expect(saved.last.shouldShowMultiDeviceButton, isFalse);
+        expect(saved.last.isDarkTheme, isFalse);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
     testWidgets(
       'settings save on blur and selection in ${isCompact ? 'mobile' : 'desktop'} layout',
       (tester) async {

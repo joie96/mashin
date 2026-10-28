@@ -802,6 +802,7 @@ mod tests {
             local_cache_size_bytes: 512 * 1024 * 1024,
             theme: ThemePreference::Light,
             log_level: LogLevelPreference::Warn,
+            should_show_multi_device_button: false,
         }
     }
 
@@ -816,6 +817,7 @@ mod tests {
             volume: 100,
             theme: ThemePreference::Dark,
             log_level: LogLevelPreference::Info,
+            should_show_multi_device_button: true,
             preferred_provider: None,
         }
     }
@@ -907,6 +909,7 @@ mod tests {
             local_cache_size_bytes: 500 * 1024 * 1024,
             theme: ThemePreference::Light,
             log_level: LogLevelPreference::Warn,
+            should_show_multi_device_button: false,
         };
         coordinator.save_session_settings(update).unwrap();
         let stored = coordinator.auth_store.load_session().unwrap().unwrap();
@@ -915,11 +918,13 @@ mod tests {
         assert_eq!(settings.local_cache_size_bytes, 500 * 1024 * 1024);
         assert_eq!(settings.theme, ThemePreference::Light);
         assert_eq!(settings.log_level, LogLevelPreference::Warn);
+        assert!(!settings.should_show_multi_device_button);
         assert!(coordinator
             .save_session_settings(super::super::models::SessionSettingsUpdate {
                 local_cache_size_bytes: 1,
                 theme: ThemePreference::Dark,
                 log_level: LogLevelPreference::Error,
+                should_show_multi_device_button: true,
             })
             .is_err());
         assert_eq!(

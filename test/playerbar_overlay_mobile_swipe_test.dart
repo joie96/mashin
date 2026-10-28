@@ -49,54 +49,57 @@ void main() {
     int previousCalls = 0;
     int nextCalls = 0;
     double queueDragDistance = 0;
-    Widget overlay(int index) => MaterialApp(
-      theme: AppTheme.dark(),
-      home: Scaffold(
-        body: PlayerBarOverlayMobile(
-          isOpen: true,
-          openProgress: 1,
-          trackTitle: 'Current',
-          trackSubtitle: 'Artist',
-          trackCoverUrl: <String>[
-            _previousCover,
-            _currentCover,
-            _nextCover,
-          ][index],
-          currentTrack: null,
-          playbackStateType: PlayState.playing,
-          playbackState: const PlayerState(),
-          playbackQueue: Queue(items: items, currentIndex: index),
-          maxSeconds: 120,
-          currentSeconds: 10,
-          dontStopTheMusicEnabled: false,
-          userDataController: null,
-          onClose: () {},
-          onOpenQueue: () {},
-          onQueueDragUpdate: (double distance, _) {
-            queueDragDistance += distance;
-          },
-          onQueueDragEnd: (_) {},
-          onTogglePlayPause: () async {},
-          onPrevious: () async {
-            previousCalls++;
-          },
-          onNext: () async {
-            nextCalls++;
-          },
-          onToggleShuffle: () async {},
-          onToggleRepeatMode: () async {},
-          onToggleDontStopTheMusic: () async {},
-          onToggleMute: () async {},
-          onSeek: (_) async {},
-          onOpenAudioOptions: (_) {},
-        ),
-      ),
-    );
+    Widget overlay(int index, {bool shouldShowMultiDeviceButton = true}) =>
+        MaterialApp(
+          theme: AppTheme.dark(),
+          home: Scaffold(
+            body: PlayerBarOverlayMobile(
+              shouldShowMultiDeviceButton: shouldShowMultiDeviceButton,
+              isOpen: true,
+              openProgress: 1,
+              trackTitle: 'Current',
+              trackSubtitle: 'Artist',
+              trackCoverUrl: <String>[
+                _previousCover,
+                _currentCover,
+                _nextCover,
+              ][index],
+              currentTrack: null,
+              playbackStateType: PlayState.playing,
+              playbackState: const PlayerState(),
+              playbackQueue: Queue(items: items, currentIndex: index),
+              maxSeconds: 120,
+              currentSeconds: 10,
+              dontStopTheMusicEnabled: false,
+              userDataController: null,
+              onClose: () {},
+              onOpenQueue: () {},
+              onQueueDragUpdate: (double distance, _) {
+                queueDragDistance += distance;
+              },
+              onQueueDragEnd: (_) {},
+              onTogglePlayPause: () async {},
+              onPrevious: () async {
+                previousCalls++;
+              },
+              onNext: () async {
+                nextCalls++;
+              },
+              onToggleShuffle: () async {},
+              onToggleRepeatMode: () async {},
+              onToggleDontStopTheMusic: () async {},
+              onToggleMute: () async {},
+              onSeek: (_) async {},
+              onOpenAudioOptions: (_) {},
+            ),
+          ),
+        );
     Finder cover(String source) => find.byWidgetPredicate(
       (Widget widget) => widget is MediaImage && widget.source == source,
     );
 
     await tester.pumpWidget(overlay(0));
+    expect(find.byIcon(Icons.devices_outlined), findsOneWidget);
     final Offset start = tester.getCenter(cover(_previousCover));
     final double initialLeft = tester.getTopLeft(cover(_previousCover)).dx;
     final TestGesture gesture = await tester.startGesture(start);
@@ -176,5 +179,13 @@ void main() {
     await tester.drag(cover(_nextCover), const Offset(250, 0));
     await tester.pumpAndSettle();
     expect(previousCalls, 1);
+
+    await tester.pumpWidget(overlay(1, shouldShowMultiDeviceButton: false));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.devices_outlined), findsNothing);
+    await tester.pumpWidget(overlay(1));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.devices_outlined), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }

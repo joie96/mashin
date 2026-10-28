@@ -40,6 +40,7 @@ class PlayerBarOverlayMobile extends StatefulWidget {
     required this.onOpenAudioOptions,
     this.onOpenArtist,
     this.onOpenAlbum,
+    this.shouldShowMultiDeviceButton = true,
   });
 
   final bool isOpen;
@@ -54,6 +55,7 @@ class PlayerBarOverlayMobile extends StatefulWidget {
   final double maxSeconds;
   final double currentSeconds;
   final bool dontStopTheMusicEnabled;
+  final bool shouldShowMultiDeviceButton;
   final UserData? userDataController;
   final VoidCallback onClose;
   final VoidCallback onOpenQueue;
@@ -543,11 +545,12 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
                                         ? colors.accent
                                         : colors.textSecondary,
                                   ),
-                                  _MobileOverlayIconButton(
-                                    icon: Icons.devices_outlined,
-                                    onTap: () {},
-                                    color: colors.textSecondary,
-                                  ),
+                                  if (widget.shouldShowMultiDeviceButton)
+                                    _MobileOverlayIconButton(
+                                      icon: Icons.devices_outlined,
+                                      onTap: () {},
+                                      color: colors.textSecondary,
+                                    ),
                                   Builder(
                                     builder: (BuildContext menuContext) =>
                                         _MobileOverlayIconButton(

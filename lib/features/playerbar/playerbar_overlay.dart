@@ -35,6 +35,7 @@ class PlayerBarOverlay extends StatelessWidget {
     required this.onOpenAudioOptions,
     this.onOpenArtist,
     this.onOpenAlbum,
+    this.shouldShowMultiDeviceButton = true,
   });
 
   final bool isOpen;
@@ -49,6 +50,7 @@ class PlayerBarOverlay extends StatelessWidget {
   final double maxSeconds;
   final double currentSeconds;
   final bool dontStopTheMusicEnabled;
+  final bool shouldShowMultiDeviceButton;
   final UserData? userDataController;
   final VoidCallback onClose;
   final VoidCallback onOpenQueue;
@@ -82,6 +84,7 @@ class PlayerBarOverlay extends StatelessWidget {
       maxSeconds: maxSeconds,
       currentSeconds: currentSeconds,
       dontStopTheMusicEnabled: dontStopTheMusicEnabled,
+      shouldShowMultiDeviceButton: shouldShowMultiDeviceButton,
       userDataController: userDataController,
       onClose: onClose,
       onOpenQueue: onOpenQueue,

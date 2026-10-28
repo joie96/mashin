@@ -41,6 +41,7 @@ impl CoreCoordinator {
         session.local.cache_bytes = update.local_cache_size_bytes;
         session.theme = update.theme;
         session.log_level = update.log_level;
+        session.should_show_multi_device_button = update.should_show_multi_device_button;
         self.configure_and_persist_session(&session)?;
         crate::logging::set_minimum_level(session.log_level.as_str())?;
         self.session_configuration = Some(session);
