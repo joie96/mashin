@@ -81,15 +81,15 @@ jobs:
         include:
           - target: windows-x64
             runner: windows-2022
-            architecture: x64
+            flutter_architecture: x64
             rust_target: x86_64-pc-windows-msvc
           - target: windows-arm64
             runner: windows-11-arm
-            architecture: arm64
+            flutter_architecture: x64
             rust_target: aarch64-pc-windows-msvc
           - target: android-arm64
             runner: windows-2022
-            architecture: x64
+            flutter_architecture: x64
             rust_target: aarch64-linux-android
     steps:
       - name: Check Out Shared Source Commit
@@ -102,7 +102,7 @@ jobs:
         with:
           channel: stable
           flutter-version: ${{ env.FLUTTER_VERSION }}
-          architecture: ${{ matrix.architecture }}
+          architecture: ${{ matrix.flutter_architecture }}
       - name: Set Up Rust And LLVM
         env:
           RUST_TARGET: ${{ matrix.rust_target }}
