@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mashin_flutter/features/playerbar/playback_seek_slider.dart';
+import 'package:mashin/features/playerbar/playback_seek_slider.dart';
 
 void main() {
   Future<void> showSlider(

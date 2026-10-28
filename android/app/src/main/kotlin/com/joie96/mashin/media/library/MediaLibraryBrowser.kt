@@ -1,0 +1,564 @@
+package com.joie96.mashin.media.library
+
+import android.content.ContentResolver
+import android.content.Context
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaConstants
+import androidx.media3.session.MediaLibraryService
+import androidx.media3.session.MediaSession
+import com.joie96.mashin.core.RustCoreBridge
+import com.joie96.mashin.media.artwork.MediaArtworkContentProvider
+import com.joie96.mashin.media.session.PlaybackCommandKind
+import com.joie96.mashin.media.session.PlaybackRequest
+import com.joie96.mashin.R
+import com.google.common.collect.ImmutableList
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.MoreExecutors
+import com.google.common.util.concurrent.SettableFuture
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import org.json.JSONArray
+import org.json.JSONObject
+
+// Media-library browsing and boundary media-item caching.
+@UnstableApi
+internal class MediaLibraryBrowser(
+    private val context: Context,
+    private val search: MediaLibrarySearch = MediaLibrarySearch { kind, argument -> RustCoreBridge.query(kind, argument) },
+    private val query: (String, String?) -> String? = { kind, argument -> RustCoreBridge.query(kind, argument) },
+    private val dispatchCommand: (PlaybackRequest) -> ListenableFuture<*>,
+) : MediaLibraryService.MediaLibrarySession.Callback {
+    private val browseExecutor = MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor())
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var isClosed = false
+    private val libraryItemsById = ConcurrentHashMap<String, MediaItem>()
+    private val serializedMediaItems = ConcurrentHashMap<String, String>()
+    private val serializedTrackLists = ConcurrentHashMap<String, String>()
+    private val identifierSequence = AtomicLong()
+    private data class LibraryChildren(val items: List<MediaItem>, val isLoading: Boolean = false)
+    private data class PendingBrowse(
+        val parentId: String,
+        val params: MediaLibraryService.LibraryParams?,
+        val result: SettableFuture<LibraryResult<ImmutableList<MediaItem>>>,
+    )
+    private val pendingBrowses = ConcurrentHashMap.newKeySet<PendingBrowse>()
+
+    // Browser worker lifecycle.
+    fun close() {
+        isClosed = true
+        pendingBrowses.forEach { it.result.cancel(false) }
+        pendingBrowses.clear()
+        search.close()
+        browseExecutor.shutdown()
+    }
+
+    // Rust events retry only requests that are still waiting for their snapshot data.
+    fun onCoreEvent(eventType: String) {
+        if (isClosed || eventType !in setOf("recommendations_changed", "user_data_changed")) return
+        browseExecutor.execute {
+            pendingBrowses.toList().forEach(::completeBrowse)
+        }
+    }
+
+    // Controller media selection and canonical playback requests.
+    override fun onSetMediaItems(
+        mediaSession: MediaSession,
+        controller: MediaSession.ControllerInfo,
+        mediaItems: List<MediaItem>,
+        startIndex: Int,
+        startPositionMs: Long,
+    ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+        val resolvedItems = mediaItems.map { item ->
+            (libraryItemsById[item.mediaId] ?: item).buildUpon()
+                .setUri(android.net.Uri.Builder().scheme("mashin").authority("media").appendPath(item.mediaId).build())
+                .build()
+        }
+        return Futures.immediateFuture(MediaSession.MediaItemsWithStartPosition(resolvedItems, startIndex, startPositionMs))
+    }
+
+    fun startPlayback(mediaId: String): ListenableFuture<*> {
+        if (mediaId.startsWith("artistRadio:")) {
+            val artist = serializedMediaItems[mediaId.removePrefix("artistRadio:")]
+                ?: return Futures.immediateFailedFuture<Any>(IllegalArgumentException("unknown Android media ID: $mediaId"))
+            return dispatchCommand(PlaybackRequest(PlaybackCommandKind.StartRadio,
+                JSONObject().put("mediaItems", JSONArray().put(JSONObject(artist))).toString()))
+        }
+        serializedTrackLists[mediaId]?.let { serializedItems ->
+            return dispatchCommand(PlaybackRequest(
+                PlaybackCommandKind.QueuePlayMedia,
+                JSONObject().put("request", JSONObject()
+                    .put("mediaItems", JSONArray(serializedItems))
+                    .put("option", "play")
+                    .put("shuffle", mediaId.startsWith("action:shuffle:")))
+                    .toString(),
+            ))
+        }
+        serializedMediaItems[mediaId]?.let { serializedItem ->
+            if (JSONObject(serializedItem).optString("media_type") == "track") {
+                return dispatchCommand(PlaybackRequest(PlaybackCommandKind.StartRadio,
+                    JSONObject().put("mediaItems", JSONArray().put(JSONObject(serializedItem))).toString()))
+            }
+            return dispatchCommand(PlaybackRequest(
+                PlaybackCommandKind.QueuePlayMedia,
+                JSONObject().put("request", JSONObject().put("mediaItems", JSONArray().put(JSONObject(serializedItem)))
+                    .put("option", "play")).toString(),
+            ))
+        }
+        return Futures.immediateFailedFuture<Any>(IllegalArgumentException("unknown Android media ID: $mediaId"))
+    }
+
+    // Library queries and search results.
+    override fun onGetLibraryRoot(
+        session: MediaLibraryService.MediaLibrarySession,
+        browser: MediaSession.ControllerInfo,
+        params: MediaLibraryService.LibraryParams?,
+    ): ListenableFuture<LibraryResult<MediaItem>> {
+        return Futures.immediateFuture(LibraryResult.ofItem(libraryItem("root", "Mashin", false), params))
+    }
+
+    override fun onGetChildren(
+        session: MediaLibraryService.MediaLibrarySession,
+        browser: MediaSession.ControllerInfo,
+        parentId: String,
+        page: Int,
+        pageSize: Int,
+        params: MediaLibraryService.LibraryParams?,
+    ): ListenableFuture<LibraryResult<com.google.common.collect.ImmutableList<MediaItem>>> {
+        if (parentId in setOf("root", "node:home", "node:discover", "node:favorites") ||
+            parentId.startsWith("browse:artist:")) {
+            return Futures.immediateFuture(LibraryResult.ofItemList(libraryItems(parentId).items, params))
+        }
+        if (parentId.startsWith("search:")) {
+            return searchCategoryItems(parentId, page, pageSize, params)
+        }
+        val result = SettableFuture.create<LibraryResult<ImmutableList<MediaItem>>>()
+        val request = PendingBrowse(parentId, params, result)
+        pendingBrowses.add(request)
+        result.addListener({ pendingBrowses.remove(request) }, MoreExecutors.directExecutor())
+        browseExecutor.execute { completeBrowse(request) }
+        return result
+    }
+
+    override fun onGetItem(
+        session: MediaLibraryService.MediaLibrarySession,
+        browser: MediaSession.ControllerInfo,
+        mediaId: String,
+    ): ListenableFuture<LibraryResult<MediaItem>> = Futures.immediateFuture(
+        libraryItemsById[mediaId]?.let { LibraryResult.ofItem(it, null) }
+            ?: LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE),
+    )
+
+    override fun onSearch(
+        session: MediaLibraryService.MediaLibrarySession,
+        browser: MediaSession.ControllerInfo,
+        query: String,
+        params: MediaLibraryService.LibraryParams?,
+    ): ListenableFuture<LibraryResult<Void>> {
+        val results = search.start(query)
+        session.notifySearchResultChanged(browser, query, results.size, params)
+        results.forEach { (category, result) ->
+            result.addListener({
+                mainHandler.post {
+                    if (!isClosed && !result.isCancelled && search.isCurrent(query, category, result)) {
+                        val itemCount = JSONArray(Futures.getDone(result)).length()
+                        session.notifyChildrenChanged(browser, "search:${category.resultKey}?$query",
+                            itemCount + if (category == SearchMediaCategory.Tracks && itemCount > 0) 2 else 0, params)
+                    }
+                }
+            }, MoreExecutors.directExecutor())
+        }
+        return Futures.immediateFuture(LibraryResult.ofVoid(params))
+    }
+
+    override fun onGetSearchResult(
+        session: MediaLibraryService.MediaLibrarySession,
+        browser: MediaSession.ControllerInfo,
+        query: String,
+        page: Int,
+        pageSize: Int,
+        params: MediaLibraryService.LibraryParams?,
+    ): ListenableFuture<LibraryResult<com.google.common.collect.ImmutableList<MediaItem>>> {
+        if (page < 0 || pageSize <= 0) return Futures.immediateFuture(LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE))
+        return Futures.immediateFuture(LibraryResult.ofItemList(searchItems(query).drop(
+            (page.toLong() * pageSize).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()).take(pageSize), params))
+    }
+
+    fun resolveLibraryMediaItem(mediaId: String): JSONObject? = serializedMediaItems[mediaId]?.let(::JSONObject)
+
+    // An unfinished future keeps the host's loading UI active without blocking the browse worker.
+    private fun completeBrowse(request: PendingBrowse) {
+        if (isClosed || request.result.isDone) return
+        try {
+            val children = libraryItems(request.parentId)
+            if (!children.isLoading) {
+                request.result.set(LibraryResult.ofItemList(children.items, request.params))
+            }
+        } catch (error: Exception) {
+            request.result.setException(error)
+        }
+    }
+
+    // Library boundary mapping and serialized media caching.
+    private fun libraryItem(
+        id: String,
+        title: String,
+        playable: Boolean,
+        subtitle: String? = null,
+        artworkUri: String? = null,
+        browsableStyle: Int? = null,
+        iconResource: Int? = null,
+    ): MediaItem = MediaItem.Builder()
+        .setMediaId(id)
+        .setMediaMetadata(
+            MediaMetadata.Builder()
+                .setTitle(title)
+                .setSubtitle(subtitle)
+                .setArtworkUri(artworkUri?.let(android.net.Uri::parse) ?: iconResource?.let(::resourceUri))
+                .setIsBrowsable(!playable)
+                .setIsPlayable(playable)
+                .setExtras(browsableStyle?.let { style ->
+                    Bundle().apply { putInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE, style) }
+                })
+                .build(),
+        )
+        .build()
+        .also { libraryItemsById[id] = it }
+
+    private fun resourceUri(resourceId: Int): android.net.Uri = android.net.Uri.Builder()
+        .scheme(ContentResolver.SCHEME_ANDROID_RESOURCE)
+        .authority(context.resources.getResourcePackageName(resourceId))
+        .appendPath(context.resources.getResourceTypeName(resourceId))
+        .appendPath(context.resources.getResourceEntryName(resourceId))
+        .build()
+
+    private fun libraryItems(parentId: String): LibraryChildren = when (parentId) {
+        "root" -> LibraryChildren(listOf(
+            libraryItem("node:home", "Home", false, iconResource = R.drawable.home),
+            libraryItem("node:discover", "Entdecken", false, iconResource = R.drawable.explore),
+            libraryItem("node:playlists", "Playlists", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.playlist_play),
+            libraryItem("node:favorites", "Favoriten", false, iconResource = R.drawable.favorite),
+        ))
+        "node:home" -> LibraryChildren(homeItems())
+        "node:discover" -> LibraryChildren(discoverItems())
+        "node:playlists" -> playlistItems()
+        "node:favorites" -> LibraryChildren(favoriteCategoryItems())
+        "home:recommendations" -> recommendationItems("user_recommendations", "track")
+        "home:favoriteGenres" -> recommendationItems("user_genre_playlists_monthly", "playlist", 9, true)
+        "home:playlistSuggestions" -> recommendationItems("user_artist_playlists_monthly", "playlist", normalizePlaylistNames = true)
+        "home:topTracks" -> recommendationItems("user_top_tracks_monthly", "track")
+        "home:topArtists" -> recommendationItems("user_top_artists_monthly", "artist")
+        "home:recent" -> LibraryChildren(mediaItemsFromJson(query("recentlyPlayed", null), true, mediaType = "track"))
+        "discover:exploration" -> discoverRecommendationItems("user_exploration_weekly", "track", true)
+        "discover:albums" -> discoverRecommendationItems("sitewide_top_albums_weekly", "album")
+        "discover:similarUsers" -> discoverRecommendationItems("similarusers_jam_weekly", "track", true)
+        "discover:artists" -> discoverRecommendationItems("sitewide_top_artists_weekly", "artist")
+        "discover:tracks" -> discoverRecommendationItems("sitewide_top_tracks_weekly", "track")
+        "favorites:tracks" -> userDataItems("tracks", "track", true)
+        "favorites:albums" -> userDataItems("albums", "album")
+        "favorites:playlists" -> userDataItems("playlists", "playlist")
+        "favorites:artists" -> userDataItems("artists", "artist")
+        else -> dynamicLibraryChildren(parentId)
+    }
+
+    private fun homeItems(): List<MediaItem> = listOf(
+        libraryItem("home:recommendations", "Empfehlungen", false, iconResource = R.drawable.music_note_2),
+        libraryItem("home:favoriteGenres", "Lieblingsgenres", false, iconResource = R.drawable.genres),
+        libraryItem("home:playlistSuggestions", "Playlist-Empfehlungen", false, iconResource = R.drawable.playlist_play),
+        libraryItem("home:topTracks", "Top-Tracks", false, iconResource = R.drawable.music_note),
+        libraryItem("home:topArtists", "Top-Artists", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.artist),
+        libraryItem("home:recent", "Kürzlich gespielt", false, iconResource = R.drawable.music_history),
+    )
+
+    private fun favoriteCategoryItems(): List<MediaItem> = listOf(
+        libraryItem("favorites:tracks", "Tracks", false, iconResource = R.drawable.music_note),
+        libraryItem("favorites:albums", "Alben", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.album),
+        libraryItem("favorites:playlists", "Playlists", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.playlist_play),
+        libraryItem("favorites:artists", "Artists", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.artist),
+    )
+
+    private fun discoverItems(): List<MediaItem> = listOf(
+        libraryItem("discover:exploration", "Entdecke etwas Neues", false, iconResource = R.drawable.music_note_2),
+        libraryItem("discover:albums", "Alben der Woche", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.album),
+        libraryItem("discover:similarUsers", "Andere Nutzer hören", false, iconResource = R.drawable.groups),
+        libraryItem("discover:artists", "Artists der Woche", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.artist),
+        libraryItem("discover:tracks", "Songs der Woche", false, iconResource = R.drawable.music_note),
+    )
+
+    private fun playlistItems(): LibraryChildren = privatePlaylistItems()
+
+    // Exploration and similar-user recommendations contain playlists rather than direct tracks.
+    private fun discoverRecommendationItems(
+        folderId: String,
+        mediaType: String,
+        expandPlaylistTracks: Boolean = false,
+    ): LibraryChildren {
+        val snapshot = JSONObject(query("recommendations", JSONObject().put("view", "explore").toString())
+            ?: return LibraryChildren(emptyList(), true))
+        val folders = snapshot.getJSONArray("folders")
+        val selected = JSONArray()
+        var hasMatchingFolder = false
+        var isLoading = false
+        for (folderIndex in 0 until folders.length()) {
+            val folder = folders.optJSONObject(folderIndex) ?: continue
+            if (folder.optString("item_id") != folderId) continue
+            hasMatchingFolder = true
+            isLoading = isLoading || folder.optBoolean("is_loading")
+            val items = folder.optJSONArray("items") ?: JSONArray()
+            if (expandPlaylistTracks) {
+                val tracks = folder.optJSONArray("playlist_tracks") ?: JSONArray()
+                for (trackIndex in 0 until tracks.length()) {
+                    tracks.optJSONObject(trackIndex)?.let(selected::put)
+                }
+            }
+            for (itemIndex in 0 until items.length()) {
+                val item = items.optJSONObject(itemIndex) ?: continue
+                if (item.optString("item_id").isBlank() || item.optString("provider").isBlank()) continue
+                if (item.optString("media_type") == mediaType) selected.put(item)
+            }
+        }
+        return LibraryChildren(
+            mediaItemsFromJson(selected.toString(), includeTrackListActions = mediaType == "track", mediaType = mediaType),
+            if (hasMatchingFolder) isLoading else snapshot.optBoolean("is_loading"),
+        )
+    }
+
+    private fun recommendationItems(
+        folderId: String,
+        mediaType: String,
+        limit: Int = Int.MAX_VALUE,
+        normalizePlaylistNames: Boolean = false,
+    ): LibraryChildren {
+        val snapshot = JSONObject(query("recommendations", JSONObject().put("view", "home").toString())
+            ?: return LibraryChildren(emptyList(), true))
+        val folders = snapshot.getJSONArray("folders")
+        val folder = (0 until folders.length()).mapNotNull(folders::optJSONObject).firstOrNull {
+            it.optString("item_id").equals(folderId, ignoreCase = true)
+        } ?: return LibraryChildren(emptyList(), snapshot.optBoolean("is_loading"))
+        val items = folder.optJSONArray("items") ?: JSONArray()
+        val selected = JSONArray()
+        for (index in 0 until items.length()) {
+            val item = items.optJSONObject(index) ?: continue
+            if (item.optString("media_type") != mediaType || selected.length() >= limit) continue
+            if (normalizePlaylistNames) {
+                val name = item.optString("name")
+                if (name.startsWith("Radio: ", ignoreCase = true)) {
+                    item.put("name", name.substring(7).trimStart())
+                }
+            }
+            selected.put(item)
+        }
+        return LibraryChildren(mediaItemsFromJson(
+            selected.toString(),
+            includeTrackListActions = mediaType == "track",
+            fallbackIconResource = if (folderId == "user_top_artists_monthly") R.drawable.favorite else null,
+        ), folder.optBoolean("is_loading"))
+    }
+
+    // Private playlist tracks share the session snapshot instead of triggering a second download.
+    private fun dynamicLibraryChildren(parentId: String): LibraryChildren {
+        if (parentId.startsWith("browse:playlist:")) {
+            val reference = serializedMediaItems[parentId]?.let(::JSONObject)
+            if (reference?.optString("provider") == "library") {
+                val data = JSONObject(userDataSnapshot())
+                val playlists = data.optJSONArray("playlists") ?: JSONArray()
+                val playlist = (0 until playlists.length()).mapNotNull(playlists::optJSONObject).firstOrNull {
+                    it.optString("item_id") == reference.optString("item_id")
+                }
+                if (playlist != null) {
+                    return LibraryChildren(
+                        mediaItemsFromJson(playlist.optJSONArray("items")?.toString(), true, mediaType = "track"),
+                        playlist.optBoolean("is_loading_tracks"),
+                    )
+                }
+                if (data.optBoolean("is_loading_playlists")) return LibraryChildren(emptyList(), true)
+            }
+        }
+        return LibraryChildren(dynamicChildren(parentId))
+    }
+
+    private fun dynamicChildren(parentId: String): List<MediaItem> = when {
+        parentId.startsWith("browse:album:") -> referencedItems(parentId, "albumTracks")
+        parentId.startsWith("browse:playlist:") -> referencedItems(parentId, "playlistTracks")
+        parentId.startsWith("browse:artist:") -> artistChildren(parentId)
+        parentId.startsWith("artistAlbums:") -> referencedItems(parentId.removePrefix("artistAlbums:"), "artistAlbums")
+        parentId.startsWith("artistTopTracks:") -> referencedItems(parentId.removePrefix("artistTopTracks:"), "artistTopTracks")
+        parentId.startsWith("similarArtists:") -> referencedItems(parentId.removePrefix("similarArtists:"), "similarArtists")
+        else -> emptyList()
+    }
+
+    private fun searchItems(query: String): List<MediaItem> {
+        if (query.isBlank()) return emptyList()
+        search.start(query)
+        return SearchMediaCategory.entries.map { category ->
+            val iconResource = when (category) {
+                SearchMediaCategory.Tracks -> R.drawable.music_note
+                SearchMediaCategory.Albums -> R.drawable.album
+                SearchMediaCategory.Playlists -> R.drawable.playlist_play
+                SearchMediaCategory.Artists -> R.drawable.artist
+            }
+            libraryItem("search:${category.resultKey}?$query", category.title, false,
+                iconResource = iconResource)
+        }
+    }
+
+    private fun searchCategoryItems(
+        parentId: String,
+        page: Int,
+        pageSize: Int,
+        params: MediaLibraryService.LibraryParams?,
+    ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+        val categoryKey = parentId.substringAfter(':').substringBefore('?')
+        val category = SearchMediaCategory.entries.firstOrNull { it.resultKey == categoryKey }
+            ?: return Futures.immediateFuture(LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE))
+        if (page < 0 || pageSize <= 0) return Futures.immediateFuture(LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE))
+        val query = parentId.substringAfter('?', "")
+        return Futures.transform(search.results(query, category), { serializedItems ->
+            val items = mediaItemsFromJson(serializedItems,
+                includeTrackListActions = category == SearchMediaCategory.Tracks, mediaType = category.mediaType)
+            LibraryResult.ofItemList(items.drop(
+                (page.toLong() * pageSize).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()).take(pageSize), params)
+        }, MoreExecutors.directExecutor())
+    }
+
+    private fun userDataItems(category: String, mediaType: String, includeTrackListActions: Boolean = false): LibraryChildren {
+        val data = JSONObject(userDataSnapshot())
+        val items = data.optJSONObject("favorites")?.optJSONArray(category)
+        return LibraryChildren(mediaItemsFromJson(items?.toString(), includeTrackListActions, mediaType = mediaType),
+            data.optBoolean("is_loading_favorites"))
+    }
+
+    private fun privatePlaylistItems(): LibraryChildren {
+        val data = JSONObject(userDataSnapshot())
+        return LibraryChildren(mediaItemsFromJson(data.optJSONArray("playlists")?.toString(), mediaType = "playlist"),
+            data.optBoolean("is_loading_playlists"))
+    }
+
+    private fun userDataSnapshot(): String = query("userData", null)
+        ?: JSONObject().put("is_loading_favorites", true).put("is_loading_playlists", true).toString()
+
+    private fun referencedItems(referenceId: String, queryKind: String): List<MediaItem> {
+        val reference = serializedMediaItems[referenceId] ?: return emptyList()
+        val item = JSONObject(reference)
+        val fallbackIconResource = when (queryKind) {
+            "artistAlbums" -> R.drawable.playlist_play
+            "similarArtists" -> R.drawable.favorite
+            else -> null
+        }
+        return mediaItemsFromJson(
+            query(queryKind, itemReference(JSONObject(reference))),
+            includeTrackListActions = queryKind != "artistAlbums" && queryKind != "similarArtists",
+            fallbackIconResource = fallbackIconResource,
+            mediaType = when (queryKind) {
+                "artistAlbums" -> "album"
+                "similarArtists" -> "artist"
+                else -> "track"
+            },
+        )
+    }
+
+    private fun artistChildren(parentId: String): List<MediaItem> {
+        if (!serializedMediaItems.containsKey(parentId)) return emptyList()
+        return listOf(
+            libraryItem("artistRadio:$parentId", "Artist-Radio", true, iconResource = R.drawable.radio),
+            libraryItem("artistAlbums:$parentId", "Alben", false, iconResource = R.drawable.album),
+            libraryItem("similarArtists:$parentId", "Ähnliche Artists", false, iconResource = R.drawable.artist),
+            libraryItem("artistTopTracks:$parentId", "Top-Tracks", false, iconResource = R.drawable.music_note),
+        )
+    }
+
+    private fun mediaItemsFromJson(
+        serializedItems: String?,
+        includeTrackListActions: Boolean = false,
+        fallbackIconResource: Int? = null,
+        mediaType: String? = null,
+    ): List<MediaItem> {
+        val items = JSONArray(serializedItems ?: "[]")
+        val parsedItems = (0 until items.length()).mapNotNull(items::optJSONObject).onEach { item ->
+            if (mediaType != null && !item.has("media_type")) item.put("media_type", mediaType)
+        }
+        return buildList {
+            if (includeTrackListActions) {
+                val tracks = JSONArray().apply {
+                    parsedItems.filter { it.optString("media_type") == "track" }.forEach(::put)
+                }
+                if (tracks.length() > 0) {
+                    addAll(createTrackListActions(tracks))
+                }
+            }
+            for (item in parsedItems) {
+                val itemId = item.optString("item_id").ifEmpty { item.optString("uri") }
+                if (itemId.isEmpty()) continue
+                val mediaType = item.optString("media_type")
+                val mediaId = "browse:$mediaType:${item.optString("provider")}:$itemId"
+                serializedMediaItems[mediaId] = item.toString()
+                add(
+                    MediaItem.Builder()
+                        .setMediaId(mediaId)
+                        .setMediaMetadata(
+                            MediaMetadata.Builder()
+                                .setTitle(item.optString("name", itemId))
+                                .setArtist(itemArtists(item))
+                                .setArtworkUri(artworkUri(item)?.let(android.net.Uri::parse) ?: resourceUri(fallbackIconResource ?: when (mediaType) {
+                                    "track" -> R.drawable.play_arrow
+                                    "album" -> R.drawable.album
+                                    "playlist" -> R.drawable.playlist_play
+                                    "artist" -> R.drawable.artist
+                                    else -> R.drawable.music_note
+                                }))
+                                .setIsPlayable(mediaType == "track")
+                                .setIsBrowsable(mediaType != "track")
+                                .build(),
+                        )
+                        .build(),
+                )
+                libraryItemsById[mediaId] = last()
+            }
+        }
+    }
+
+    private fun createTrackListActions(tracks: JSONArray): List<MediaItem> {
+        val playId = "action:play:${identifierSequence.incrementAndGet()}"
+        val shuffleId = "action:shuffle:${identifierSequence.incrementAndGet()}"
+        serializedTrackLists[playId] = tracks.toString()
+        serializedTrackLists[shuffleId] = tracks.toString()
+        return listOf(
+            libraryItem(playId, "Abspielen", true, "${tracks.length()} Tracks", iconResource = R.drawable.play_arrow),
+            libraryItem(shuffleId, "Zufällige Wiedergabe", true, "${tracks.length()} Tracks", iconResource = R.drawable.shuffle),
+        )
+    }
+
+    private fun itemReference(item: JSONObject): String = JSONObject()
+        .put("itemId", item.optString("item_id"))
+        .put("provider", item.optString("provider"))
+        .toString()
+
+    private fun itemArtists(item: JSONObject): String? = item.optJSONArray("artists")
+        ?.let { artists -> (0 until artists.length()).mapNotNull(artists::optJSONObject) }
+        ?.joinToString(", ") { artist -> artist.optString("name") }
+        ?.takeIf(String::isNotBlank)
+
+    private fun artworkUri(item: JSONObject): String? {
+        val image = item.optJSONObject("image")
+            ?: item.optJSONObject("album")?.optJSONObject("image")
+            ?: item.optJSONObject("metadata")?.optJSONArray("images")?.optJSONObject(0)
+            ?: item.optJSONObject("album")?.optJSONObject("metadata")?.optJSONArray("images")?.optJSONObject(0)
+            ?: return null
+        val proxyId = image.optString("proxy_id").takeUnless { it == "null" }
+        val path = image.optString("path")
+        val source = if (!proxyId.isNullOrEmpty()) {
+            val settings = JSONObject(query("sessionSettings", null) ?: "{}")
+            val baseUrl = settings.optString("musicAssistantUrl").trimEnd('/')
+            if (baseUrl.isNotEmpty()) "$baseUrl/imageproxy/$proxyId" else path
+        } else path
+        return source.takeIf(String::isNotEmpty)?.let(MediaArtworkContentProvider::buildUri)
+    }
+}
+

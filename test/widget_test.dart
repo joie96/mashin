@@ -12,17 +12,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image/image.dart' as img;
 
-import 'package:mashin_flutter/app/navigation/app_router.dart';
-import 'package:mashin_flutter/app/session/app_session_controller.dart';
-import 'package:mashin_flutter/app/shell/app_shell.dart';
-import 'package:mashin_flutter/app/theme/app_theme.dart';
-import 'package:mashin_flutter/features/core/core_bridge.dart';
-import 'package:mashin_flutter/features/core/core_models.dart';
-import 'package:mashin_flutter/features/core/core_userdata.dart';
-import 'package:mashin_flutter/features/playerbar/playerbar_overlay.dart';
-import 'package:mashin_flutter/features/queue/queue_overlay.dart';
-import 'package:mashin_flutter/features/search/search_screen_mobile.dart';
-import 'package:mashin_flutter/features/shared/widgets/media_image.dart';
+import 'package:mashin/app/navigation/app_router.dart';
+import 'package:mashin/app/session/app_session_controller.dart';
+import 'package:mashin/app/shell/app_shell.dart';
+import 'package:mashin/app/theme/app_theme.dart';
+import 'package:mashin/features/core/core_bridge.dart';
+import 'package:mashin/features/core/core_models.dart';
+import 'package:mashin/features/core/core_userdata.dart';
+import 'package:mashin/features/playerbar/playerbar_overlay.dart';
+import 'package:mashin/features/queue/queue_overlay.dart';
+import 'package:mashin/features/search/search_screen_mobile.dart';
+import 'package:mashin/features/shared/widgets/media_image.dart';
 import 'dart:convert';
 
 class _LightThemeSession extends AppSessionController {

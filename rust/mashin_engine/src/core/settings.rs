@@ -21,7 +21,7 @@ impl CoreCoordinator {
             .clone()
             .ok_or_else(|| "a restored session is required before saving settings".to_string())?;
         session.preferred_provider = preferred_provider;
-        self.auth_store.save_session(session.clone())?;
+        self.session_store.save_session(session.clone())?;
         self.session_configuration = Some(session);
         Ok(())
     }
@@ -59,7 +59,7 @@ impl CoreCoordinator {
             .clone()
             .ok_or_else(|| "a restored session is required before changing volume".to_string())?;
         session.volume = volume;
-        self.auth_store.save_session(session.clone())?;
+        self.session_store.save_session(session.clone())?;
         self.session_configuration = Some(session);
         Ok(())
     }
@@ -75,7 +75,7 @@ impl CoreCoordinator {
                         .map_err(|_| "core coordinator lock poisoned")?;
                     let CoreCoordinator {
                         playback,
-                        auth_store,
+                        session_store,
                         session_configuration,
                         ..
                     } = &mut *coordinator;
@@ -84,7 +84,7 @@ impl CoreCoordinator {
                             .clone()
                             .ok_or("session ended during profile request")?;
                         configuration.local.audio_profile = profile;
-                        auth_store.save_session(configuration.clone())?;
+                        session_store.save_session(configuration.clone())?;
                         *session_configuration = Some(configuration);
                         Ok(())
                     })

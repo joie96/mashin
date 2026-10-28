@@ -2,9 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mashin_flutter/app/theme/app_theme.dart';
-import 'package:mashin_flutter/features/core/core_models.dart';
-import 'package:mashin_flutter/features/settings/settings_screen.dart';
+import 'package:mashin/app/theme/app_theme.dart';
+import 'package:mashin/features/core/core_models.dart';
+import 'package:mashin/features/settings/settings_screen.dart';
 
 void main() {
   test('multi-device visibility is transferred in session settings', () {

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mashin_flutter/app/logging/app_log_buffer.dart';
-import 'package:mashin_flutter/app/theme/app_theme.dart';
-import 'package:mashin_flutter/features/settings/settings_log_view.dart';
+import 'package:mashin/app/logging/app_log_buffer.dart';
+import 'package:mashin/app/theme/app_theme.dart';
+import 'package:mashin/features/settings/settings_log_view.dart';
 
 void main() {
   testWidgets('log follows new lines only while scrolled to the end', (

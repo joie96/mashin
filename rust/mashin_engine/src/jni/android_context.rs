@@ -131,7 +131,7 @@ pub(crate) fn device_name() -> Result<String, String> {
     })
 }
 
-// Android session persistence crosses the boundary only as one serialized SessionConfig value.
+// Only protected credentials cross JNI; the Rust session store owns non-secret configuration.
 pub(crate) fn read_secure_session() -> Result<Option<String>, String> {
     with_attached_environment(|env| {
         let secure_session_store = secure_session_store_global_class()?;

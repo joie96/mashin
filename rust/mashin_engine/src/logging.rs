@@ -153,15 +153,13 @@ pub(crate) fn initialize() {
 
 #[cfg(target_os = "android")]
 fn log_directory() -> Result<PathBuf, String> {
-    crate::jni::android_context::external_application_files_directory()
+    crate::configuration::application_data_directory()
         .map(|path| path.join("Logs"))
 }
 
 #[cfg(target_os = "windows")]
 fn log_directory() -> Result<PathBuf, String> {
-    env::var_os("LOCALAPPDATA")
-        .map(|path| PathBuf::from(path).join("Mashin").join("Logs"))
-        .ok_or_else(|| "LOCALAPPDATA is not set".to_string())
+    crate::configuration::application_data_directory().map(|path| path.join("Logs"))
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -178,11 +176,7 @@ fn log_directory() -> Result<PathBuf, String> {
 
 #[cfg(target_os = "linux")]
 fn log_directory() -> Result<PathBuf, String> {
-    let state_directory = env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|path| PathBuf::from(path).join(".local/state")))
-        .ok_or_else(|| "neither XDG_STATE_HOME nor HOME is set".to_string())?;
-    Ok(state_directory.join("mashin").join("logs"))
+    crate::configuration::application_data_directory().map(|path| path.join("logs"))
 }
 
 pub(crate) struct Logger {

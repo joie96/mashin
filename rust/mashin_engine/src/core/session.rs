@@ -37,7 +37,7 @@ impl CoreCoordinator {
         if self.session_configuration.is_some() {
             return Ok(true);
         }
-        let Some(mut session) = self.auth_store.load_session()? else {
+        let Some(mut session) = self.session_store.load_session()? else {
             return Ok(false);
         };
         refresh_local_client_name(&mut session.local);
@@ -116,7 +116,7 @@ impl CoreCoordinator {
         if requires_configuration {
             self.configure_selected_output(session)?;
         }
-        if let Err(error) = self.auth_store.save_session(session.clone()) {
+        if let Err(error) = self.session_store.save_session(session.clone()) {
             if requires_configuration {
                 self.playback
                     .restore_session(previous_playback, previous_connection.clone())?;
@@ -191,7 +191,7 @@ impl CoreCoordinator {
             };
         }
         session.user_id = Some(user_id);
-        self.auth_store.save_session(session.clone())?;
+        self.session_store.save_session(session.clone())?;
         self.session_configuration = Some(session);
         Ok(())
     }

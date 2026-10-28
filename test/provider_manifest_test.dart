@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mashin_flutter/features/core/core_models.dart';
+import 'package:mashin/features/core/core_models.dart';
 
 void main() {
   tearDown(() => MediaItemImage.configureProxyBaseUrl(null));

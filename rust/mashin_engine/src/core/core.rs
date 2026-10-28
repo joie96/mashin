@@ -6,7 +6,7 @@ use super::models::{
 };
 use crate::core::event_channel::publish_background_event;
 use crate::logging::Logger;
-use crate::music_assistant::auth_store::{platform_auth_store, AuthStore};
+use crate::music_assistant::session_store::{platform_session_store, SessionStore};
 use crate::music_assistant::client::MusicAssistantClient;
 use crate::music_assistant::models::identifiers::MediaId;
 use crate::music_assistant::models::media::{
@@ -53,7 +53,7 @@ where
 }
 
 pub(crate) struct CoreCoordinator {
-    auth_store: Box<dyn AuthStore + Send>,
+    session_store: Box<dyn SessionStore + Send>,
     playback: PlaybackEngine,
     session_configuration: Option<SessionConfig>,
     user_data: Option<LibraryUserData>,
@@ -67,12 +67,12 @@ pub(crate) struct CoreCoordinator {
 impl CoreCoordinator {
     // Construction and session configuration.
     pub(crate) fn new() -> Self {
-        Self::with_auth_store(platform_auth_store())
+        Self::with_session_store(platform_session_store())
     }
 
-    fn with_auth_store(auth_store: Box<dyn AuthStore + Send>) -> Self {
+    fn with_session_store(session_store: Box<dyn SessionStore + Send>) -> Self {
         Self {
-            auth_store,
+            session_store,
             playback: PlaybackEngine::new(),
             session_configuration: None,
             user_data: None,
@@ -744,18 +744,18 @@ fn collect_media_session_events(
 mod tests {
     use super::CoreCoordinator;
     use crate::core::models::{LogLevelPreference, SelectedOutput, SessionConfig, ThemePreference};
-    use crate::music_assistant::auth_store::AuthStore;
+    use crate::music_assistant::session_store::SessionStore;
     use crate::music_assistant::models::identifiers::{AccessToken, UserId};
     use crate::music_assistant::models::queue::PlayState;
     use crate::music_assistant::models::session::MusicAssistantServerUrl;
     use std::sync::Mutex;
 
-    struct TestAuthStore {
+    struct TestSessionStore {
         session: Mutex<Option<SessionConfig>>,
         should_fail_writes: std::sync::Arc<std::sync::atomic::AtomicBool>,
     }
 
-    impl TestAuthStore {
+    impl TestSessionStore {
         fn new() -> Self {
             Self {
                 session: Mutex::new(None),
@@ -764,7 +764,7 @@ mod tests {
         }
     }
 
-    impl AuthStore for TestAuthStore {
+    impl SessionStore for TestSessionStore {
         fn load_session(&self) -> Result<Option<SessionConfig>, String> {
             self.session
                 .lock()
@@ -794,7 +794,7 @@ mod tests {
     }
 
     fn test_coordinator() -> CoreCoordinator {
-        CoreCoordinator::with_auth_store(Box::new(TestAuthStore::new()))
+        CoreCoordinator::with_session_store(Box::new(TestSessionStore::new()))
     }
 
     fn settings_update() -> crate::core::models::SessionSettingsUpdate {
@@ -827,7 +827,7 @@ mod tests {
         let mut coordinator = test_coordinator();
         let session = session_config();
         coordinator
-            .auth_store
+            .session_store
             .save_session(session.clone())
             .unwrap();
         coordinator.session_configuration = Some(session.clone());
@@ -839,19 +839,19 @@ mod tests {
         expected.user_id = Some(UserId("user-1".into()));
         assert_eq!(coordinator.session_configuration, Some(expected.clone()));
         assert_eq!(
-            coordinator.auth_store.load_session().unwrap(),
+            coordinator.session_store.load_session().unwrap(),
             Some(expected)
         );
     }
 
     #[test]
     fn current_user_id_rejects_replaced_sessions_and_failed_storage_writes() {
-        let store = TestAuthStore::new();
+        let store = TestSessionStore::new();
         let should_fail_writes = store.should_fail_writes.clone();
-        let mut coordinator = CoreCoordinator::with_auth_store(Box::new(store));
+        let mut coordinator = CoreCoordinator::with_session_store(Box::new(store));
         let session = session_config();
         coordinator
-            .auth_store
+            .session_store
             .save_session(session.clone())
             .unwrap();
         coordinator.session_configuration = Some(session.clone());
@@ -865,7 +865,7 @@ mod tests {
             .is_err());
         assert_eq!(coordinator.session_configuration, Some(session.clone()));
         assert_eq!(
-            coordinator.auth_store.load_session().unwrap(),
+            coordinator.session_store.load_session().unwrap(),
             Some(session)
         );
     }
@@ -912,7 +912,7 @@ mod tests {
             should_show_multi_device_button: false,
         };
         coordinator.save_session_settings(update).unwrap();
-        let stored = coordinator.auth_store.load_session().unwrap().unwrap();
+        let stored = coordinator.session_store.load_session().unwrap().unwrap();
         assert_eq!(coordinator.playback.player_state().volume, stored.volume);
         let settings = crate::core::config::session_settings(Some(&stored));
         assert_eq!(settings.local_cache_size_bytes, 500 * 1024 * 1024);
@@ -933,7 +933,7 @@ mod tests {
         );
         assert_eq!(
             crate::core::config::session_settings(
-                coordinator.auth_store.load_session().unwrap().as_ref()
+                coordinator.session_store.load_session().unwrap().as_ref()
             ),
             settings
         );
@@ -952,7 +952,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             coordinator
-                .auth_store
+                .session_store
                 .load_session()
                 .unwrap()
                 .unwrap()
@@ -984,7 +984,7 @@ mod tests {
             .shares_local_session(&native));
         assert_eq!(
             coordinator
-                .auth_store
+                .session_store
                 .load_session()
                 .unwrap()
                 .unwrap()
@@ -1002,7 +1002,7 @@ mod tests {
         coordinator.set_preferred_provider(None).unwrap();
         assert_eq!(
             coordinator
-                .auth_store
+                .session_store
                 .load_session()
                 .unwrap()
                 .unwrap()
@@ -1013,9 +1013,9 @@ mod tests {
 
     #[test]
     fn preferred_provider_failed_write_preserves_memory_and_stored_settings() {
-        let store = TestAuthStore::new();
+        let store = TestSessionStore::new();
         let should_fail_writes = store.should_fail_writes.clone();
-        let mut coordinator = CoreCoordinator::with_auth_store(Box::new(store));
+        let mut coordinator = CoreCoordinator::with_session_store(Box::new(store));
         coordinator.configure_session(session_config()).unwrap();
         let previous = coordinator.session_configuration.clone();
         should_fail_writes.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -1026,14 +1026,14 @@ mod tests {
             }))
             .is_err());
         assert_eq!(coordinator.session_configuration, previous);
-        assert_eq!(coordinator.auth_store.load_session().unwrap(), previous);
+        assert_eq!(coordinator.session_store.load_session().unwrap(), previous);
     }
 
     #[test]
     fn failed_settings_write_restores_the_previous_native_session_and_connection() {
-        let store = TestAuthStore::new();
+        let store = TestSessionStore::new();
         let should_fail_writes = store.should_fail_writes.clone();
-        let mut coordinator = CoreCoordinator::with_auth_store(Box::new(store));
+        let mut coordinator = CoreCoordinator::with_session_store(Box::new(store));
         coordinator.configure_session(session_config()).unwrap();
         let native = coordinator.playback.checkpoint();
         let hub = coordinator.connection.as_ref().unwrap().clone();
@@ -1052,7 +1052,7 @@ mod tests {
         ));
         assert_eq!(coordinator.session_configuration, Some(previous.clone()));
         assert_eq!(
-            coordinator.auth_store.load_session().unwrap(),
+            coordinator.session_store.load_session().unwrap(),
             Some(previous)
         );
     }

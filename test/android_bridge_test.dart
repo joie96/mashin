@@ -2,12 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mashin_flutter/features/core/android_bridge.dart';
-import 'package:mashin_flutter/features/core/core_models.dart';
+import 'package:mashin/features/core/android_bridge.dart';
+import 'package:mashin/features/core/core_models.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  const channel = MethodChannel('mashin_flutter/playback');
+  const channel = MethodChannel('mashin/playback');
   final messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
 

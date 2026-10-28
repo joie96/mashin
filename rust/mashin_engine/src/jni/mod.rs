@@ -50,7 +50,7 @@ pub extern "system" fn JNI_OnLoad(java_vm: JavaVM, _: *mut c_void) -> jni::sys::
         },
     ];
     if env
-        .register_native_methods("com/example/mashin_flutter/core/RustCoreBridge", &methods)
+        .register_native_methods("com/joie96/mashin/core/RustCoreBridge", &methods)
         .is_err()
     {
         return 0;

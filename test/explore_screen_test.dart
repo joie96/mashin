@@ -3,19 +3,19 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mashin_flutter/app/theme/app_theme.dart';
-import 'package:mashin_flutter/features/core/core_bridge.dart';
-import 'package:mashin_flutter/features/core/core_events.dart';
-import 'package:mashin_flutter/features/core/core_models.dart';
-import 'package:mashin_flutter/features/core/core_userdata.dart';
-import 'package:mashin_flutter/features/explore/explore_controller.dart';
-import 'package:mashin_flutter/features/explore/explore_screen.dart';
-import 'package:mashin_flutter/features/shared/widgets/media_row_section_desktop.dart';
-import 'package:mashin_flutter/features/shared/widgets/media_row_section_mobile.dart';
-import 'package:mashin_flutter/features/shared/widgets/media_slide_section_desktop.dart';
-import 'package:mashin_flutter/features/shared/widgets/media_slide_section_mobile.dart';
-import 'package:mashin_flutter/features/shared/widgets/media_table_section_desktop.dart';
-import 'package:mashin_flutter/features/shared/widgets/media_table_section_mobile.dart';
+import 'package:mashin/app/theme/app_theme.dart';
+import 'package:mashin/features/core/core_bridge.dart';
+import 'package:mashin/features/core/core_events.dart';
+import 'package:mashin/features/core/core_models.dart';
+import 'package:mashin/features/core/core_userdata.dart';
+import 'package:mashin/features/explore/explore_controller.dart';
+import 'package:mashin/features/explore/explore_screen.dart';
+import 'package:mashin/features/shared/widgets/media_row_section_desktop.dart';
+import 'package:mashin/features/shared/widgets/media_row_section_mobile.dart';
+import 'package:mashin/features/shared/widgets/media_slide_section_desktop.dart';
+import 'package:mashin/features/shared/widgets/media_slide_section_mobile.dart';
+import 'package:mashin/features/shared/widgets/media_table_section_desktop.dart';
+import 'package:mashin/features/shared/widgets/media_table_section_mobile.dart';
 
 class _ExploreBridge implements MashinCoreBridgeApi {
   bool shouldFail = false;

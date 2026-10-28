@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mashin_flutter/app/theme/app_theme.dart';
-import 'package:mashin_flutter/features/core/core_models.dart' hide RepeatMode;
-import 'package:mashin_flutter/features/playerbar/playerbar_overlay_mobile.dart';
-import 'package:mashin_flutter/features/shared/widgets/media_image.dart';
+import 'package:mashin/app/theme/app_theme.dart';
+import 'package:mashin/features/core/core_models.dart' hide RepeatMode;
+import 'package:mashin/features/playerbar/playerbar_overlay_mobile.dart';
+import 'package:mashin/features/shared/widgets/media_image.dart';
 
 const String _previousCover = 'data:image/previous;base64,';
 const String _currentCover = 'data:image/current;base64,';

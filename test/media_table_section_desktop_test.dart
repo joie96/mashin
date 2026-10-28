@@ -2,18 +2,18 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mashin_flutter/app/theme/app_theme.dart';
-import 'package:mashin_flutter/features/core/core_bridge.dart';
-import 'package:mashin_flutter/features/core/core_events.dart';
-import 'package:mashin_flutter/features/core/core_models.dart';
-import 'package:mashin_flutter/features/shared/selection/selection_controller.dart';
-import 'package:mashin_flutter/features/shared/widgets/media_image.dart';
-import 'package:mashin_flutter/features/shared/widgets/media_row_section_desktop.dart';
-import 'package:mashin_flutter/features/shared/widgets/media_row_section_mobile.dart';
-import 'package:mashin_flutter/features/shared/widgets/media_slide_section_desktop.dart';
-import 'package:mashin_flutter/features/shared/widgets/media_slide_section_mobile.dart';
-import 'package:mashin_flutter/features/shared/widgets/media_table_section_desktop.dart';
-import 'package:mashin_flutter/features/shared/widgets/media_table_section_mobile.dart';
+import 'package:mashin/app/theme/app_theme.dart';
+import 'package:mashin/features/core/core_bridge.dart';
+import 'package:mashin/features/core/core_events.dart';
+import 'package:mashin/features/core/core_models.dart';
+import 'package:mashin/features/shared/selection/selection_controller.dart';
+import 'package:mashin/features/shared/widgets/media_image.dart';
+import 'package:mashin/features/shared/widgets/media_row_section_desktop.dart';
+import 'package:mashin/features/shared/widgets/media_row_section_mobile.dart';
+import 'package:mashin/features/shared/widgets/media_slide_section_desktop.dart';
+import 'package:mashin/features/shared/widgets/media_slide_section_mobile.dart';
+import 'package:mashin/features/shared/widgets/media_table_section_desktop.dart';
+import 'package:mashin/features/shared/widgets/media_table_section_mobile.dart';
 
 class _UnusedCoreBridge implements MashinCoreBridgeApi {
   @override

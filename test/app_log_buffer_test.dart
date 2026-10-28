@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mashin_flutter/app/logging/app_log_buffer.dart';
+import 'package:mashin/app/logging/app_log_buffer.dart';
 
 void main() {
   test('AppLogBuffer keeps only its newest 10000 lines', () {

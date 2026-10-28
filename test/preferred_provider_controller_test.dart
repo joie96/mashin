@@ -1,8 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mashin_flutter/app/session/preferred_provider_controller.dart';
-import 'package:mashin_flutter/features/core/core_models.dart';
+import 'package:mashin/app/session/preferred_provider_controller.dart';
+import 'package:mashin/features/core/core_models.dart';
 
 void main() {
   const preferred = PreferredProvider(

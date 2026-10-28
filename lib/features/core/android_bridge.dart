@@ -34,7 +34,7 @@ enum AndroidCoreCommand {
 /// Android playback commands are acknowledged by the service, never by FFI.
 class AndroidBridge {
   AndroidBridge({MethodChannel? channel})
-    : _channel = channel ?? const MethodChannel('mashin_flutter/playback');
+    : _channel = channel ?? const MethodChannel('mashin/playback');
 
   final MethodChannel _channel;
 

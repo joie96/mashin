@@ -77,6 +77,35 @@ including older manually saved snapshots. The configured log level still applies
 - macOS/iOS: `~/Library/Logs/Mashin`.
 - Linux: `$XDG_STATE_HOME/mashin/logs`, or `~/.local/state/mashin/logs`.
 
+## Configuration And App Data
+
+Non-secret session settings are stored in a versioned `config.json` file:
+
+- Windows: `%LOCALAPPDATA%\Mashin\config.json`, next to `Logs`.
+- Android: the app's external files directory, next to `Logs`, normally
+	`/storage/emulated/0/Android/data/com.joie96.mashin/files/config.json`.
+- macOS/iOS: `~/Library/Application Support/Mashin/config.json`.
+- Linux: `$XDG_STATE_HOME/mashin/config.json`, or `~/.local/state/mashin/config.json`.
+
+The file contains the server and user identity, output selection, local device
+identity, audio profile, RAM-buffer budget, volume, theme, log level and preferred
+provider. Access tokens are never written to this file. They remain in Windows
+Credential Manager, the Apple keychain, the Linux credential store, or Android's
+encrypted SharedPreferences. The existing secure service and account identifiers
+are unchanged. Signing out clears secure credentials without deleting the file.
+
+Existing version-3 secure sessions are migrated automatically on restoration.
+The configuration is written before the secure entry is reduced to credentials;
+failed writes preserve the old entry and roll back the file. Corrupt or unsupported
+data is reported without deleting it. Server and user identities must match before
+a stored token can be used; changing them in the file does not transfer a login.
+
+The planned per-user Windows installation directory is `%LOCALAPPDATA%\Mashin\App`.
+Program updates must replace only that directory, preserving the sibling
+`config.json` and `Logs`. There is no Windows installer yet; development and build
+output locations are unchanged. A future persistent cache will have its own data
+subdirectory. Audio buffering and library caches currently remain in memory.
+
 ## FFmpeg And Licenses
 
 Mashin includes shared [FFmpeg 9.0.2](https://ffmpeg.org/) libraries for FLAC and

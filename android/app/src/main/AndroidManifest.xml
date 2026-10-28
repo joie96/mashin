@@ -7,7 +7,7 @@
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
 
     <application
-        android:label="mashin_flutter"
+        android:label="mashin"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
@@ -44,7 +44,7 @@
         </service>
         <provider
             android:name=".media.artwork.MediaArtworkContentProvider"
-            android:authorities="com.example.mashin_flutter.mediaart"
+            android:authorities="com.joie96.mashin.mediaart"
             android:exported="true"
             android:grantUriPermissions="true" />
         <meta-data

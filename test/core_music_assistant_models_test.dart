@@ -1,8 +1,8 @@
 // ignore_for_file: prefer_const_constructors
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mashin_flutter/features/core/core_bridge.dart';
-import 'package:mashin_flutter/features/core/core_models.dart';
-import 'package:mashin_flutter/features/core/core_userdata.dart';
+import 'package:mashin/features/core/core_bridge.dart';
+import 'package:mashin/features/core/core_models.dart';
+import 'package:mashin/features/core/core_userdata.dart';
 
 class _UnusedCoreBridge extends Fake implements MashinCoreBridgeApi {
   @override
