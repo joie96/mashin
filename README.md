@@ -100,11 +100,20 @@ failed writes preserve the old entry and roll back the file. Corrupt or unsuppor
 data is reported without deleting it. Server and user identities must match before
 a stored token can be used; changing them in the file does not transfer a login.
 
-The planned per-user Windows installation directory is `%LOCALAPPDATA%\Mashin\App`.
-Program updates must replace only that directory, preserving the sibling
-`config.json` and `Logs`. There is no Windows installer yet; development and build
-output locations are unchanged. A future persistent cache will have its own data
+The per-user Windows MSI installs into `%LOCALAPPDATA%\Mashin\App`.
+Program updates replace packaged application files, preserving the sibling
+`config.json` and `Logs`. Development and build output locations are unchanged.
+A future persistent cache will have its own data
 subdirectory. Audio buffering and library caches currently remain in memory.
+
+## Release Builds
+
+Local builds produce Windows x64/ARM64 MSI packages or a signed Android ARM64 APK,
+with a shared version configuration, SHA-256 checksums and artifact metadata.
+See [Release Builds](docs/releases.md) for commands, signing prerequisites and
+the remaining steps toward GitHub releases and in-app updates.
+The [project automation guide](scripts/README.md) describes the build, release and
+script-test layout shared by local tasks and GitHub Actions.
 
 ## FFmpeg And Licenses
 

@@ -32,6 +32,7 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+/.wix/
 
 # Rust build artifacts
 /rust/**/target/
@@ -46,6 +47,11 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Private Android release signing material
+/android/key.properties
+*.jks
+*.keystore
 
 # Generated Flutter plugin registrants and platform build outputs
 **/generated_plugin_registrant.*

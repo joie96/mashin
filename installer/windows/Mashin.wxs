@@ -1,0 +1,51 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="$(var.ProductName)" Manufacturer="$(var.Manufacturer)"
+           Version="$(var.MsiVersion)" UpgradeCode="$(var.UpgradeCode)"
+           ProductCode="$(var.ProductCode)" Scope="perUser" Language="1031">
+    <MajorUpgrade DowngradeErrorMessage="Eine neuere Mashin-Version ist bereits installiert."
+                  Schedule="afterInstallInitialize" />
+        <Upgrade Id="$(var.UpgradeCode)">
+          <UpgradeVersion Minimum="$(var.MsiVersion)" Maximum="$(var.MsiVersion)"
+              IncludeMinimum="yes" IncludeMaximum="yes" OnlyDetect="yes"
+              Property="SAMEVERSIONFOUND" />
+        </Upgrade>
+        <Launch Condition="Installed OR NOT SAMEVERSIONFOUND"
+          Message="Diese Mashin-Version ist bereits installiert. Verwende das vorhandene MSI zum Reparieren oder Entfernen." />
+        <Property Id="MASHINACTION" Value="Installieren" />
+        <SetProperty Id="MASHINACTION" Value="Aktualisieren" After="FindRelatedProducts"
+         Sequence="both" Condition="WIX_UPGRADE_DETECTED" />
+    <MediaTemplate EmbedCab="yes" />
+    <Property Id="ARPURLINFOABOUT" Value="$(var.Repository)" />
+    <Property Id="ARPPRODUCTICON" Value="MashinIcon" />
+    <Icon Id="MashinIcon" SourceFile="$(var.IconPath)" />
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="MASHINDATA" Name="Mashin">
+        <Directory Id="INSTALLFOLDER" Name="App" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="*">
+        <Shortcut Id="MashinShortcut" Name="Mashin" Target="[INSTALLFOLDER]mashin.exe"
+                  WorkingDirectory="INSTALLFOLDER" Icon="MashinIcon" />
+        <RegistryValue Root="HKCU" Key="Software\joie96\Mashin\Installer"
+                       Name="Shortcut" Type="integer" Value="1" KeyPath="yes" />
+        <RemoveFolder Id="RemoveDataDirectoryIfEmpty" Directory="MASHINDATA" On="uninstall" />
+      </Component>
+    </StandardDirectory>
+    <Feature Id="Application" Title="Mashin" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <UI>
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog"
+               Value="VerifyReadyDlg" Order="10" Condition="NOT Installed" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
+               Value="WelcomeDlg" Order="10" Condition="NOT Installed" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="ChangeButton" Event="NewDialog"
+               Value="VerifyReadyDlg" Order="10" Condition="1" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
+               Value="MaintenanceTypeDlg" Order="10" Condition="Installed" />
+    </UI>
+  </Package>
+</Wix>

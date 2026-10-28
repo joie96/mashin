@@ -1,11 +1,14 @@
 param(
     [Parameter(Mandatory = $true)]
     [ValidateSet('x64', 'arm64')]
-    [string]$Architecture
+    [string]$Architecture,
+    [string]$Version = '',
+    [int]$BuildNumber = 0
 )
 
 $ErrorActionPreference = 'Stop'
-$workspaceRoot = Split-Path -Parent $PSScriptRoot
+$workspaceRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$metadata = & (Join-Path $PSScriptRoot '../release/get_release_metadata.ps1') -Version $Version -BuildNumber $BuildNumber
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
 $installation = & $vswhere -latest -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (-not $installation) { throw 'Visual Studio C++ build tools are required.' }
@@ -19,7 +22,7 @@ Push-Location $workspaceRoot
 try {
     & flutter precache --windows
     if ($LASTEXITCODE -ne 0) { throw 'Flutter Windows artifact download failed.' }
-    & flutter build windows --release --config-only
+    & flutter build windows --release --config-only "--build-name=$($metadata.Version)" "--build-number=$($metadata.BuildNumber)"
     if ($LASTEXITCODE -ne 0) { throw 'Flutter Windows configuration failed.' }
     $cache = Get-ChildItem "$workspaceRoot/build/windows/*/CMakeCache.txt" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if (-not $cache) { throw 'Flutter CMake configuration is missing.' }
@@ -50,6 +53,23 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed for $platform." }
     & $cmake --build $buildDirectory --config Release --target INSTALL
     if ($LASTEXITCODE -ne 0) { throw "Windows release build failed for $platform." }
+    $runtimeDirectory = Get-ChildItem "$installation/VC/Redist/MSVC/*/$Architecture/Microsoft.VC*.CRT" -Directory | Sort-Object FullName -Descending | Select-Object -First 1
+    if (-not $runtimeDirectory) { throw "Visual C++ redistributable DLLs are missing for $Architecture." }
+    $runtimeNames = @('msvcp140.dll', 'vcruntime140.dll')
+    if ($Architecture -eq 'x64') { $runtimeNames += 'vcruntime140_1.dll' }
+    foreach ($runtime in Get-ChildItem $runtimeDirectory.FullName -Filter '*.dll') {
+        $stagedRuntime = Join-Path $buildDirectory "runner/Release/$($runtime.Name)"
+        if ($runtime.Name -in $runtimeNames) {
+            Copy-Item $runtime.FullName $stagedRuntime -Force
+        } elseif (Test-Path $stagedRuntime) {
+            Remove-Item $stagedRuntime -Force
+        }
+    }
+    foreach ($runtimeName in $runtimeNames) {
+        if (-not (Test-Path (Join-Path $runtimeDirectory.FullName $runtimeName))) { throw "Missing Visual C++ runtime: $runtimeName" }
+    }
+    $bundleMetadata = @{ version = $metadata.Version; buildNumber = $metadata.BuildNumber; architecture = $Architecture } | ConvertTo-Json
+    [IO.File]::WriteAllText((Join-Path $buildDirectory 'runner/Release/data/release.json'), $bundleMetadata)
 } finally {
     Pop-Location
 }

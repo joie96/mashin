@@ -14,7 +14,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$workspaceRoot = Split-Path -Parent $PSScriptRoot
+$workspaceRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $engineRoot = Join-Path $workspaceRoot 'rust/mashin_engine'
 $isRelease = $Profile -eq 'Release'
 

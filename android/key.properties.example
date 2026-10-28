@@ -1,0 +1,4 @@
+storeFile=C:/private/mashin-release.jks
+storePassword=REPLACE_LOCALLY
+keyAlias=mashin
+keyPassword=REPLACE_LOCALLY

@@ -1,0 +1,9 @@
+{
+  "version": "0.0.1-dev.1",
+  "buildNumber": 1,
+  "productName": "Mashin",
+  "manufacturer": "joie96",
+  "applicationId": "com.joie96.mashin",
+  "upgradeCode": "42B743AA-1E80-4CED-BAC7-280341B98B91",
+  "repository": "https://github.com/joie96/mashin"
+}

@@ -1,8 +1,26 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+val signingProperties = Properties()
+val signingFile = rootProject.file("key.properties")
+if (signingFile.exists()) {
+    signingFile.inputStream().use { signingProperties.load(it) }
+}
+fun signingValue(environmentName: String, propertyName: String): String? =
+    System.getenv(environmentName)?.takeIf { it.isNotBlank() }
+        ?: signingProperties.getProperty(propertyName)?.takeIf { it.isNotBlank() }
+
+val releaseStoreFile = signingValue("MASHIN_ANDROID_KEYSTORE", "storeFile")
+val releaseStorePassword = signingValue("MASHIN_ANDROID_KEYSTORE_PASSWORD", "storePassword")
+val releaseKeyAlias = signingValue("MASHIN_ANDROID_KEY_ALIAS", "keyAlias")
+val releaseKeyPassword = signingValue("MASHIN_ANDROID_KEY_PASSWORD", "keyPassword")
+val hasReleaseSigning = listOf(releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword)
+    .all { !it.isNullOrBlank() }
 
 android {
     namespace = "com.joie96.mashin"
@@ -29,11 +47,20 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            if (hasReleaseSigning) {
+                storeFile = rootProject.file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles("proguard-rules.pro")
         }
     }
@@ -57,8 +84,22 @@ flutter {
     source = "../.."
 }
 
-// Resource-backed host tests consume the Flutter asset-copy task's output.
+val validateReleaseSigning = tasks.register("validateReleaseSigning") {
+    doLast {
+        check(hasReleaseSigning) {
+            "Android release signing is missing. Configure key.properties or MASHIN_ANDROID_KEY*; see docs/releases.md."
+        }
+        check(rootProject.file(releaseStoreFile!!).isFile) {
+            "Android release keystore does not exist."
+        }
+    }
+}
+
 tasks.configureEach {
+    if (name == "preReleaseBuild") {
+        dependsOn(validateReleaseSigning)
+    }
+    // Resource-backed host tests consume the Flutter asset-copy task's output.
     if (name.startsWith("package") && name.endsWith("UnitTestForUnitTest")) {
         val variant = name.removePrefix("package").removeSuffix("UnitTestForUnitTest")
         dependsOn("copyFlutterAssets$variant")

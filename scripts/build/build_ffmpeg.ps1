@@ -5,7 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$workspaceRoot = Split-Path -Parent $PSScriptRoot
+$workspaceRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $configuration = Get-Content (Join-Path $PSScriptRoot 'ffmpeg.json') -Raw | ConvertFrom-Json
 $cacheRoot = Join-Path $workspaceRoot 'build/native'
 $installRoot = Join-Path $cacheRoot "ffmpeg/$($configuration.version)/$Target"

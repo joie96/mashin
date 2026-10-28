@@ -1,0 +1,5 @@
+<WixLocalization xmlns="http://wixtoolset.org/schemas/v4/wxl" Culture="de-DE">
+  <String Id="VerifyReadyDlgInstall" Value="&amp;[MASHINACTION]" />
+  <String Id="VerifyReadyDlgInstallTitle" Value="{\WixUI_Font_Title}Bereit zum [MASHINACTION] von [ProductName]" />
+  <String Id="VerifyReadyDlgInstallText" Value="Klicke auf &quot;[MASHINACTION]&quot;, um fortzufahren. Deine Einstellungen bleiben erhalten." />
+</WixLocalization>
