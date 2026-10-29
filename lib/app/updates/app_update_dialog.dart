@@ -57,7 +57,7 @@ class _AppUpdateHostState extends State<AppUpdateHost> {
 
   Future<void> _checkForUpdate() async {
     try {
-      _pendingUpdate = await _service.checkAtStartup();
+      _pendingUpdate = await _service.checkForUpdate();
       if (mounted) _showWhenReady();
     } catch (error) {
       debugPrint('Update check failed: $error');

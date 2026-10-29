@@ -18,7 +18,7 @@ class FakeUpdateService extends AppUpdateService {
   void Function(double)? reportProgress;
 
   @override
-  Future<AppUpdate?> checkAtStartup() async {
+  Future<AppUpdate?> checkForUpdate() async {
     checkCount++;
     if (shouldFailCheck) throw const SocketException('offline');
     return startupUpdate;

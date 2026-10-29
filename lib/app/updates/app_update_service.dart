@@ -60,9 +60,16 @@ class AppUpdateService {
   bool _isCancelled = false;
 
   // Release discovery and version selection.
-  Future<AppUpdate?> checkAtStartup() async {
+  Future<AppUpdate?> checkForUpdate() async {
     final target = UpdateTarget.current;
     if (target == null) return null;
+    return findUpdate(
+      currentVersion: await getInstalledVersion(),
+      target: target,
+    );
+  }
+
+  Future<Version> getInstalledVersion() async {
     String version;
     if (Platform.isWindows) {
       final metadata = File.fromUri(
@@ -80,7 +87,7 @@ class AppUpdateService {
     } else {
       version = (await PackageInfo.fromPlatform()).version;
     }
-    return findUpdate(currentVersion: Version.parse(version), target: target);
+    return Version.parse(version);
   }
 
   Future<AppUpdate?> findUpdate({

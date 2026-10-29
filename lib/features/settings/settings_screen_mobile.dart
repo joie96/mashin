@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/app_theme.dart';
 import '../core/core_models.dart';
+import 'settings_info_view.dart';
 import 'settings_log_view.dart';
 
 class SettingsScreenMobile extends StatelessWidget {
@@ -32,7 +33,7 @@ class SettingsScreenMobile extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         backgroundColor: colors.bgPrimary,
         appBar: AppBar(
@@ -43,6 +44,7 @@ class SettingsScreenMobile extends StatelessWidget {
             tabs: <Widget>[
               Tab(text: 'Allgemein'),
               Tab(text: 'Log'),
+              Tab(text: 'Info'),
             ],
           ),
         ),
@@ -154,6 +156,7 @@ class SettingsScreenMobile extends StatelessWidget {
                 ],
               ),
             ),
+            const SettingsInfoView(),
           ],
         ),
       ),

@@ -3,10 +3,78 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mashin/app/theme/app_theme.dart';
+import 'package:mashin/app/updates/app_update_dialog.dart';
+import 'package:mashin/app/updates/app_update_service.dart';
 import 'package:mashin/features/core/core_models.dart';
+import 'package:mashin/features/settings/settings_info_view.dart';
 import 'package:mashin/features/settings/settings_screen.dart';
+import 'package:pub_semver/pub_semver.dart';
 
 void main() {
+  for (final width in [390.0, 1200.0]) {
+    testWidgets('Info shows app metadata and reuses update overlay at $width', (
+      tester,
+    ) async {
+      tester.view.physicalSize = Size(width, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final service = _InfoUpdateService();
+      Uri? projectUri;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.dark(),
+          home: Scaffold(
+            body: SettingsInfoView(
+              service: service,
+              openProjectLink: (uri) async {
+                projectUri = uri;
+                return true;
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Mashin'), findsOneWidget);
+      expect(find.text('0.0.1-dev.7'), findsOneWidget);
+      await tester.tap(find.text('github.com/joie96/mashin'));
+      expect(projectUri.toString(), 'https://github.com/joie96/mashin');
+      expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Update'))
+            .onPressed,
+        isNull,
+      );
+      await tester.tap(find.text('Nach Updates suchen'));
+      await tester.pumpAndSettle();
+      expect(service.checkCount, 1);
+      expect(find.byType(AppUpdateDialog), findsOneWidget);
+      await tester.tap(find.text('Abbrechen'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Update'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AppUpdateDialog), findsOneWidget);
+      expect(service.checkCount, 1);
+      await tester.tap(find.text('Abbrechen'));
+      await tester.pumpAndSettle();
+      service.shouldOfferUpdate = false;
+      await tester.tap(find.text('Nach Updates suchen'));
+      await tester.pumpAndSettle();
+      expect(service.checkCount, 2);
+      expect(find.byType(AppUpdateDialog), findsNothing);
+      expect(find.text('Mashin ist auf dem neuesten Stand.'), findsOneWidget);
+      service.shouldFailCheck = true;
+      await tester.tap(find.text('Nach Updates suchen'));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Update-Prüfung fehlgeschlagen'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   test('multi-device visibility is transferred in session settings', () {
     const update = SessionSettingsUpdate(
       localCacheSizeBytes: 250 * 1024 * 1024,
@@ -23,6 +91,21 @@ void main() {
   });
 
   for (final isCompact in [true, false]) {
+    testWidgets(
+      'Info tab is available in ${isCompact ? 'mobile' : 'desktop'} settings',
+      (tester) async {
+        await _pumpEditor(tester, isCompact, (_) async {});
+        await tester.tap(find.text('Info'));
+        await tester.pumpAndSettle();
+        expect(find.byType(SettingsInfoView), findsOneWidget);
+        expect(find.text('Mashin'), findsOneWidget);
+        expect(find.text('Version'), findsOneWidget);
+        expect(find.text('github.com/joie96/mashin'), findsOneWidget);
+        expect(find.text('Nach Updates suchen'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
     testWidgets(
       'multi-device visibility saves and survives other edits in ${isCompact ? 'mobile' : 'desktop'} layout',
       (tester) async {
@@ -179,6 +262,30 @@ void main() {
         expect(saved.single.localCacheSizeBytes, 600 * 1024 * 1024);
         expect(tester.takeException(), isNull);
       },
+    );
+  }
+}
+
+class _InfoUpdateService extends AppUpdateService {
+  int checkCount = 0;
+  bool shouldOfferUpdate = true;
+  bool shouldFailCheck = false;
+
+  @override
+  Future<Version> getInstalledVersion() async => Version.parse('0.0.1-dev.7');
+
+  @override
+  Future<AppUpdate?> checkForUpdate() async {
+    checkCount++;
+    if (shouldFailCheck) throw StateError('offline');
+    if (!shouldOfferUpdate) return null;
+    return AppUpdate(
+      version: Version.parse('0.0.1-dev.10'),
+      notes: "## What's Changed\n* Update test",
+      fileName: 'update.msi',
+      downloadUrl: Uri.https('github.com', '/installer'),
+      checksumUrl: Uri.https('github.com', '/checksum'),
+      size: 3,
     );
   }
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/app_theme.dart';
 import '../core/core_models.dart';
+import 'settings_info_view.dart';
 import 'settings_log_view.dart';
 
 const double _desktopSettingsControlWidth = 280;
@@ -62,7 +63,7 @@ class SettingsScreenDesktop extends StatelessWidget {
     return ColoredBox(
       color: colors.bgPrimary,
       child: DefaultTabController(
-        length: 2,
+        length: 3,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(32, 32, 32, 0),
           child: Column(
@@ -91,6 +92,7 @@ class SettingsScreenDesktop extends StatelessWidget {
                 tabs: <Widget>[
                   const Tab(text: 'Allgemein'),
                   const Tab(text: 'Log'),
+                  const Tab(text: 'Info'),
                 ],
               ),
               const SizedBox(height: 12),
@@ -111,6 +113,7 @@ class SettingsScreenDesktop extends StatelessWidget {
                       logLevel: logLevel,
                       onLogLevelChanged: onLogLevelChanged,
                     ),
+                    const SettingsInfoView(),
                   ],
                 ),
               ),
