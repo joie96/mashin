@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -13,6 +14,8 @@ class FakeUpdateService extends AppUpdateService {
   int checkCount = 0;
   AppUpdate? startupUpdate;
   bool shouldFailCheck = false;
+  Completer<File>? pendingDownload;
+  void Function(double)? reportProgress;
 
   @override
   Future<AppUpdate?> checkAtStartup() async {
@@ -27,6 +30,8 @@ class FakeUpdateService extends AppUpdateService {
     required void Function(double) onProgress,
   }) async {
     downloadCount++;
+    reportProgress = onProgress;
+    if (pendingDownload != null) return pendingDownload!.future;
     onProgress(1);
     return File('update.msi');
   }
@@ -50,10 +55,11 @@ void main() {
     WidgetTester tester,
     FakeUpdateService service, {
     required Future<void> Function(File) install,
+    ThemeData? theme,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
-        theme: AppTheme.dark(),
+        theme: theme ?? AppTheme.dark(),
         home: Builder(
           builder: (context) => Scaffold(
             body: TextButton(
@@ -92,6 +98,12 @@ void main() {
         await open(tester, service, install: (_) async => hasInstalled = true);
         expect(find.text('Update 0.0.1-dev.10 verfügbar'), findsOneWidget);
         expect(find.text("What's Changed"), findsOneWidget);
+        expect(find.text('See full changelog').hitTestable(), findsOneWidget);
+        if (size.width >= 720) {
+          final dialogSize = tester.getSize(find.byType(Dialog));
+          expect(dialogSize.width, greaterThanOrEqualTo(800));
+          expect(dialogSize.height, greaterThanOrEqualTo(600));
+        }
         expect(tester.takeException(), isNull);
         await tester.tap(find.text('Abbrechen'));
         await tester.pumpAndSettle();
@@ -100,6 +112,56 @@ void main() {
         expect(service.downloadCount, 0);
       },
     );
+  }
+
+  for (final isDark in [true, false]) {
+    for (final size in [
+      const Size(1280, 800),
+      const Size(360, 640),
+      const Size(640, 360),
+    ]) {
+      testWidgets(
+        'download progress is visible and neutral at $size, dark=$isDark',
+        (tester) async {
+          tester.view.physicalSize = size;
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final theme = isDark ? AppTheme.dark() : AppTheme.light();
+          final palette = theme.extension<MashinColors>()!;
+          final service = FakeUpdateService()
+            ..pendingDownload = Completer<File>();
+          await open(tester, service, install: (_) async {}, theme: theme);
+          await tester.tap(find.text('Update'));
+          await tester.pump();
+          service.reportProgress!(0.42);
+          await tester.pump(const Duration(milliseconds: 300));
+
+          final progress = tester.widget<LinearProgressIndicator>(
+            find.byType(LinearProgressIndicator),
+          );
+          expect(progress.value, 0.42);
+          expect(progress.color, palette.textPrimary);
+          expect(progress.backgroundColor, palette.selection);
+          expect(progress.color, isNot(theme.colorScheme.primary));
+          final foregroundLuminance = progress.color!.computeLuminance();
+          final backgroundLuminance = progress.backgroundColor!
+              .computeLuminance();
+          final contrast = foregroundLuminance > backgroundLuminance
+              ? (foregroundLuminance + 0.05) / (backgroundLuminance + 0.05)
+              : (backgroundLuminance + 0.05) / (foregroundLuminance + 0.05);
+          expect(contrast, greaterThan(3));
+          expect(find.text('Download: 42 %').hitTestable(), findsOneWidget);
+          expect(find.text('See full changelog').hitTestable(), findsOneWidget);
+          expect(find.text('Abbrechen').hitTestable(), findsOneWidget);
+          expect(tester.takeException(), isNull);
+
+          await tester.tap(find.text('Abbrechen'));
+          service.pendingDownload!.completeError(UpdateCancelled());
+          await tester.pumpAndSettle();
+        },
+      );
+    }
   }
 
   testWidgets(
