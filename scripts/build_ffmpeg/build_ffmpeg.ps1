@@ -76,8 +76,15 @@ try {
         $visualStudio = & $vswhere -latest -prerelease -products '*' -property installationPath
         if (-not $visualStudio) { throw 'Visual Studio C++ build tools are required.' }
         $architecture = if ($Target -like 'aarch64-*') { 'arm64' } else { 'x64' }
+        $hostProcessorArchitecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+        $hostArchitecture = switch ($hostProcessorArchitecture) {
+            'AMD64' { 'x64' }
+            'ARM64' { 'arm64' }
+            'x86' { 'x86' }
+            default { throw "Unsupported Windows host architecture: $hostProcessorArchitecture" }
+        }
         $developerCommand = Join-Path $visualStudio 'Common7/Tools/VsDevCmd.bat'
-        $environment = & cmd /d /c "call `"$developerCommand`" -arch=$architecture -no_logo >nul & set"
+        $environment = & cmd /d /c "call `"$developerCommand`" -host_arch=$hostArchitecture -arch=$architecture -no_logo >nul & set"
         if ($LASTEXITCODE -ne 0) { throw 'Cannot initialize the Visual Studio toolchain.' }
         foreach ($entry in $environment) {
             if ($entry -match '^([^=]+)=(.*)$') {
