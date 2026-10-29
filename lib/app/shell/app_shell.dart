@@ -21,6 +21,7 @@ import 'package:go_router/go_router.dart';
 import '../navigation/app_router.dart';
 import '../session/app_session_controller.dart';
 import '../theme/app_theme.dart';
+import '../updates/app_update_dialog.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({
@@ -2802,7 +2803,11 @@ class _MashinAppState extends State<MashinApp> {
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
       builder: (BuildContext context, Widget? child) {
-        return ExcludeSemantics(child: child ?? const SizedBox.shrink());
+        return AppUpdateHost(
+          navigatorKey: _appRouter.router.routerDelegate.navigatorKey,
+          isReady: !_session.isLoading,
+          child: ExcludeSemantics(child: child ?? const SizedBox.shrink()),
+        );
       },
     );
   }
