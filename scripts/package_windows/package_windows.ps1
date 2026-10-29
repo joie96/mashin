@@ -2,8 +2,8 @@ param(
     [Parameter(Mandatory = $true)]
     [ValidateSet('x64', 'arm64')]
     [string]$Architecture,
-    [string]$Version = '',
-    [int]$BuildNumber = 0,
+    [Parameter(Mandatory = $true)]
+    [pscustomobject]$Release,
     [string]$BundleDirectory = '',
     [string]$OutputDirectory = '',
     [string]$WixPath = ''
@@ -11,7 +11,24 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $workspaceRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$metadata = & (Join-Path $PSScriptRoot 'get_release_metadata.ps1') -Version $Version -BuildNumber $BuildNumber
+$metadata = $Release
+if ($metadata.Version -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(dev|beta)\.([1-9][0-9]*))?$') {
+    throw 'Invalid release version for MSI packaging.'
+}
+$major = [int]$Matches[1]
+$minor = [int]$Matches[2]
+$patch = [int]$Matches[3]
+$channel = if ($Matches[4]) { $Matches[4] } else { 'stable' }
+$sequence = if ($Matches[5]) { [int]$Matches[5] } else { 0 }
+if ($major -gt 255 -or $minor -gt 255 -or $patch -gt 64 -or $sequence -gt 399) {
+    throw 'MSI version limits: major/minor <= 255, patch <= 64, prerelease sequence <= 399.'
+}
+$channelOrder = switch ($channel) {
+    'dev' { $sequence }
+    'beta' { 400 + $sequence }
+    'stable' { 999 }
+}
+$msiVersion = "$major.$minor.$($patch * 1000 + $channelOrder)"
 if (-not $BundleDirectory) { $BundleDirectory = Join-Path $workspaceRoot "build/windows/$Architecture/runner/Release" }
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $workspaceRoot "build/releases/$($metadata.Tag)/windows-$Architecture" }
 $BundleDirectory = (Resolve-Path $BundleDirectory).Path
@@ -104,11 +121,11 @@ try {
     $hash.Dispose()
 }
 $output = Join-Path $OutputDirectory "Mashin-$($metadata.Version)-windows-$Architecture.msi"
-$arguments = @('build', (Join-Path $workspaceRoot 'installer/windows/Mashin.wxs'), $payloadSource,
+$arguments = @('build', (Join-Path $PSScriptRoot 'Mashin.wxs'), $payloadSource,
     '-arch', $Architecture, '-culture', 'de-DE', '-ext', 'WixToolset.UI.wixext/5.0.2',
-    '-loc', (Join-Path $workspaceRoot 'installer/windows/Mashin.de-DE.wxl'),
+    '-loc', (Join-Path $PSScriptRoot 'Mashin.de-DE.wxl'),
     '-d', "ProductName=$($metadata.ProductName)", '-d', "Manufacturer=$($metadata.Manufacturer)",
-    '-d', "MsiVersion=$($metadata.MsiVersion)", '-d', "UpgradeCode=$($metadata.UpgradeCode)",
+    '-d', "MsiVersion=$msiVersion", '-d', "UpgradeCode=$($metadata.UpgradeCode)",
     '-d', "ProductCode=$productCode", '-d', "Repository=$($metadata.Repository)",
     '-d', "IconPath=$(Join-Path $workspaceRoot 'windows/runner/resources/app_icon.ico')",
     '-intermediatefolder', (Join-Path $OutputDirectory 'obj'), '-o', $output)
@@ -119,4 +136,17 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'MSI packaging failed.' }
 } finally { Pop-Location }
 Write-Host "Created $output"
-return $output
+Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+$portableOutput = Join-Path $OutputDirectory "Mashin-$($metadata.Version)-windows-$Architecture-portable.zip"
+$archiveStream = [IO.File]::Open($portableOutput, [IO.FileMode]::Create)
+try {
+    $archive = [IO.Compression.ZipArchive]::new($archiveStream, [IO.Compression.ZipArchiveMode]::Create, $true)
+    try {
+        foreach ($file in $files) {
+            $relative = $file.FullName.Substring($BundleDirectory.Length + 1).Replace('\', '/')
+            [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $file.FullName, $relative, [IO.Compression.CompressionLevel]::Optimal) | Out-Null
+        }
+    } finally { $archive.Dispose() }
+} finally { $archiveStream.Dispose() }
+Write-Host "Created $portableOutput"
+return @($output, $portableOutput)

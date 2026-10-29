@@ -4,58 +4,59 @@
     {
       "label": "Rust Mashin Engine: Android arm64 Debug",
       "type": "shell",
-      "command": "& '${workspaceFolder}/scripts/build/build_mashin_engine.ps1' -Profile Debug -PlatformSelection AndroidArm64",
+      "command": "& '${workspaceFolder}/scripts/build_mashin_engine/build_mashin_engine.ps1' -Profile Debug -PlatformSelection AndroidArm64",
       "problemMatcher": []
     },
     {
       "label": "Rust Mashin Engine: Windows x64 Debug",
       "type": "shell",
-      "command": "& '${workspaceFolder}/scripts/build/build_mashin_engine.ps1' -Profile Debug -PlatformSelection WindowsX64",
+      "command": "& '${workspaceFolder}/scripts/build_mashin_engine/build_mashin_engine.ps1' -Profile Debug -PlatformSelection WindowsX64",
       "problemMatcher": []
     },
     {
       "label": "Rust Mashin Engine: Windows arm64 Debug",
       "type": "shell",
-      "command": "& '${workspaceFolder}/scripts/build/build_mashin_engine.ps1' -Profile Debug -PlatformSelection WindowsArm64",
+      "command": "& '${workspaceFolder}/scripts/build_mashin_engine/build_mashin_engine.ps1' -Profile Debug -PlatformSelection WindowsArm64",
       "problemMatcher": []
     },
     {
-      "label": "Rust Mashin Engine: Windows x64 Release",
+      "label": "Build Release: Android arm64",
       "type": "shell",
-      "command": "& '${workspaceFolder}/scripts/build/build_mashin_engine.ps1' -Profile Release -PlatformSelection WindowsX64",
-      "problemMatcher": []
-    },
-    {
-      "label": "Rust Mashin Engine: Windows arm64 Release",
-      "type": "shell",
-      "command": "& '${workspaceFolder}/scripts/build/build_mashin_engine.ps1' -Profile Release -PlatformSelection WindowsArm64",
-      "problemMatcher": []
-    },
-    {
-      "label": "Rust Mashin Engine: Android arm64 Release",
-      "type": "shell",
-      "command": "& '${workspaceFolder}/scripts/build/build_mashin_engine.ps1' -Profile Release -PlatformSelection AndroidArm64",
-      "problemMatcher": []
-    },
-    {
-      "label": "Release Build: Android APK",
-      "type": "shell",
-      "command": "& '${workspaceFolder}/scripts/release/build_release.ps1' -Target android-arm64",
+      "command": "& '${workspaceFolder}/scripts/build_release.ps1' -Platforms android-arm64",
       "group": "build",
+      "presentation": { "reveal": "always", "focus": true, "panel": "dedicated" },
       "problemMatcher": []
     },
     {
-      "label": "Release Build: Windows x64 MSI",
+      "label": "Build Release: Windows x64",
       "type": "shell",
-      "command": "& '${workspaceFolder}/scripts/release/build_release.ps1' -Target windows-x64",
+      "command": "& '${workspaceFolder}/scripts/build_release.ps1' -Platforms windows-x64",
       "group": "build",
+      "presentation": { "reveal": "always", "focus": true, "panel": "dedicated" },
       "problemMatcher": []
     },
     {
-      "label": "Release Build: Windows arm64 MSI",
+      "label": "Build Release: Windows arm64",
       "type": "shell",
-      "command": "& '${workspaceFolder}/scripts/release/build_release.ps1' -Target windows-arm64",
+      "command": "& '${workspaceFolder}/scripts/build_release.ps1' -Platforms windows-arm64",
       "group": "build",
+      "presentation": { "reveal": "always", "focus": true, "panel": "dedicated" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Release: All Platforms",
+      "type": "shell",
+      "command": "& '${workspaceFolder}/scripts/build_release.ps1' -Platforms windows-x64,windows-arm64,android-arm64",
+      "group": "build",
+      "presentation": { "reveal": "always", "focus": true, "panel": "dedicated" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Release & Publish: All Platforms",
+      "type": "shell",
+      "command": "& '${workspaceFolder}/scripts/build_release.ps1' -Platforms windows-x64,windows-arm64,android-arm64 -Publish",
+      "group": "build",
+      "presentation": { "reveal": "always", "focus": true, "panel": "dedicated" },
       "problemMatcher": []
     }
   ]

@@ -15,11 +15,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $workspaceRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$ffmpegDirectory = Join-Path $PSScriptRoot '../build_ffmpeg'
 $engineRoot = Join-Path $workspaceRoot 'rust/mashin_engine'
 $isRelease = $Profile -eq 'Release'
 
 function Invoke-EngineCargo([string]$target, [string[]]$cargoArguments) {
-    $ffmpegRoot = & (Join-Path $PSScriptRoot 'build_ffmpeg.ps1') -Target $target
+    $ffmpegRoot = & (Join-Path $ffmpegDirectory 'build_ffmpeg.ps1') -Target $target
     $originalFfmpeg = $env:FFMPEG_DIR
     $originalLibclang = $env:LIBCLANG_PATH
     $originalPath = $env:PATH
@@ -32,7 +33,7 @@ function Invoke-EngineCargo([string]$target, [string[]]$cargoArguments) {
         $cargoPath = ($env:PATH -split ';' | Where-Object { $_ -notmatch '[/\\]Git[/\\]usr[/\\]bin[/\\]?$' }) -join ';'
         $env:PATH = "$(Join-Path $ffmpegRoot 'bin');$cargoPath"
         if ($target -eq 'aarch64-linux-android') {
-            $configuration = Get-Content (Join-Path $PSScriptRoot 'ffmpeg.json') -Raw | ConvertFrom-Json
+            $configuration = Get-Content (Join-Path $ffmpegDirectory 'ffmpeg.json') -Raw | ConvertFrom-Json
             $sdkRoot = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { "$env:LOCALAPPDATA/Android/Sdk" }
             $env:ANDROID_NDK_HOME = Join-Path $sdkRoot "ndk/$($configuration.androidNdkVersion)"
             $sysroot = (Join-Path $env:ANDROID_NDK_HOME 'toolchains/llvm/prebuilt/windows-x86_64/sysroot') -replace '\\', '/'
@@ -68,7 +69,7 @@ function Build-WindowsEngine([string]$target) {
     $destinationDirectory = Join-Path $workspaceRoot 'windows/native'
     New-Item -ItemType Directory -Path $destinationDirectory -Force | Out-Null
     Copy-Item $source (Join-Path $destinationDirectory 'mashin_engine.dll') -Force
-    $configuration = Get-Content (Join-Path $PSScriptRoot 'ffmpeg.json') -Raw | ConvertFrom-Json
+    $configuration = Get-Content (Join-Path $ffmpegDirectory 'ffmpeg.json') -Raw | ConvertFrom-Json
     $runtimeDirectory = Join-Path $destinationDirectory 'ffmpeg'
     New-Item -ItemType Directory -Path $runtimeDirectory -Force | Out-Null
     Remove-Item "$runtimeDirectory/*.dll" -Force
@@ -89,7 +90,7 @@ function Build-AndroidEngine {
     }
     $ffmpegRoot = Invoke-EngineCargo 'aarch64-linux-android' $cargoArguments
     $destinationDirectory = Join-Path $workspaceRoot 'android/app/src/main/jniLibs/arm64-v8a'
-    $configuration = Get-Content (Join-Path $PSScriptRoot 'ffmpeg.json') -Raw | ConvertFrom-Json
+    $configuration = Get-Content (Join-Path $ffmpegDirectory 'ffmpeg.json') -Raw | ConvertFrom-Json
     foreach ($name in $configuration.libraries) {
         Copy-Item (Join-Path $ffmpegRoot "lib/lib$name.so") $destinationDirectory -Force
     }

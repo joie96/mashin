@@ -1,77 +1,82 @@
 # Project Automation
 
-All entry points are PowerShell 5.1-compatible and resolve project paths from
-their own location. Run them locally or call the same scripts from GitHub Actions.
-Keep YAML focused on runner/toolchain setup, job dependencies, secrets and artifacts.
+Release builds run locally through one PowerShell 5.1-compatible entry point.
+Paths are resolved from the script location, not the current working directory.
 
 ```text
-.github/workflows/
-  build.yml                   Manual build of all three platforms; no publishing
 scripts/
-  build/
+  build_release.ps1           Build selected platforms; optionally tag and publish
+  build_ffmpeg/
     build_ffmpeg.ps1           FFmpeg build and license/source staging
     ffmpeg.json                FFmpeg build configuration
+  build_mashin_engine/
     build_mashin_engine.ps1    Native build/test and platform staging
-    build_windows_app.ps1      Flutter Windows bundle and CRT runtime
-  release/
-    get_release_metadata.ps1   Version/channel/installer metadata
-    setup_release_tools.ps1    Local .NET and WiX setup
-    package_windows_app.ps1    Validated bundle to MSI
-    build_release.ps1          Native + Flutter + packaging + checksums
-    collect_release_artifacts.ps1  Verify and collect the complete shared build
-  tests/
-    test_script_layout.ps1    Syntax, dependencies and reference checks
-    test_release.ps1          Version rules and optional MSI fixture tests
+  package_windows/
+    package_windows.ps1        Validated bundle to MSI and portable ZIP
+    Mashin.wxs                 MSI package definition
+    Mashin.de-DE.wxl           German MSI localization
 ```
 
-Installer source stays in `installer/windows`; release identity stays in the root
-`release.json`. Generated tools, bundles, test fixtures and release assets stay
-under the ignored `build` directory; WiX's extension cache stays under `.wix`.
-Flutter tests remain in `test`, Rust tests next to their modules, and Android
-host tests in their standard Gradle source tree. `scripts/tests` is for testing
-project automation, not for moving application tests away from their toolchains.
+`build_release.ps1` reads version and build number once from `release.json`.
+It resolves Flutter dependencies and builds the requested platforms sequentially,
+ignoring duplicate selections. There are no version overrides or setup scripts.
+The release script reads and validates the shared configuration directly and
+passes that snapshot to Windows packaging. MSI version mapping and
+limits belong to Windows packaging, not a separate metadata helper.
 
-## Local Entry Points
+Each build area owns its implementation and adjacent resources: FFmpeg owns its
+configuration, the native engine calls FFmpeg through its sibling directory,
+and Windows packaging owns its WXS/WXL files. Windows app compilation and CRT
+staging live directly in the release script; there is no separate Windows build
+script. Debug native tasks and all existing debug launch configurations remain
+unchanged.
+
+## Usage
 
 ```powershell
-./scripts/build/build_mashin_engine.ps1 -Profile Debug -PlatformSelection WindowsArm64
-./scripts/build/build_mashin_engine.ps1 -Profile Debug -PlatformSelection WindowsArm64 -Action Test
-./scripts/release/build_release.ps1 -Target windows-arm64
-./scripts/tests/test_script_layout.ps1
-./scripts/tests/test_release.ps1
-./scripts/release/setup_release_tools.ps1
-./scripts/tests/test_release.ps1 -PackageFixture
+./scripts/build_release.ps1 -Platforms windows-arm64
+./scripts/build_release.ps1 -Platforms windows-x64,android-arm64
+./scripts/build_release.ps1 -Platforms windows-x64,windows-arm64,android-arm64
+./scripts/build_release.ps1 -Platforms windows-x64,windows-arm64,android-arm64 -Publish
 ```
 
-See [Release Builds](../docs/releases.md) for all targets and signing requirements.
-Do not build different targets concurrently in one checkout because native staging
-and Flutter configuration are shared. Do not retain forwarding scripts at the old
-paths; update tasks, workflows, documentation and callers together.
+VS Code provides `Build Release: <platform>` for Android arm64, Windows x64,
+Windows arm64 and All Platforms. There is only one publishing task:
+`Build Release & Publish: All Platforms`. The script rejects `-Publish` unless
+all three platforms are selected, before passwords or build/publish actions. The terminal is
+focused so Android passwords can be entered directly and invisibly.
+Do not run separate builds concurrently in one checkout: native staging and Flutter
+configuration are shared. Failure stops the run; already completed packages remain
+in their own `build/releases/v<VERSION>/<PLATFORM>` directories.
 
-## GitHub Actions Boundaries
+Each Windows target produces both an MSI and a `-portable.zip` containing the
+application files directly, without an installer. Each package has its own
+`.sha256` and `.json` sidecars. Both Windows formats are uploaded when publishing;
+JSON sidecars remain local build evidence.
 
-Tests are run locally before committing; no GitHub test workflow is configured.
-All GitHub builds, including development builds, must be started manually
-through `workflow_dispatch` (Run workflow). Do not add push, pull request, tag or
-scheduled triggers.
+See [Release Builds](../docs/releases.md) for local prerequisites and Android signing.
+Without `-Publish`, the build does not create tags or contact GitHub Releases.
+With `-Publish`, it checks for existing releases/drafts and conflicting tags before
+building, requires a clean working tree, creates or reuses the matching version
+tag, builds, pushes the tag, uploads packages/checksums to a draft and publishes it
+only after all uploads succeed. Publication always includes all three platforms
+under one shared version. The same version cannot be published twice.
+GitHub CLI (`gh auth login`) and Git push access are required.
+No publish command is executed just by configuring the task.
 
-`.github/workflows/build.yml` accepts one shared version and build number, falling
-back to `release.json` when empty. Every run builds Windows x64, Windows ARM64 and
-Android ARM64 in separate checkouts at the same resolved commit. There is no target
-selector. Toolchain versions are pinned in the workflow; the Android NDK version
-comes from `scripts/build/ffmpeg.json`.
+Android builds use `$HOME/.keys/mashin-release.jks`, alias `mashin`, and ask for
+both passwords using secure terminal prompts. Empty key password means reuse
+the keystore password. Credentials are only passed to the APK build through its
+temporary environment, restored in `finally`, and are never saved in arguments
+or project files.
 
-`scripts/release/collect_release_artifacts.ps1` verifies that all three manifests
-have the expected version, build number, channel and clean source commit. It also
-checks file names, sizes and SHA-256 files before producing the combined download.
-It is a packaging integrity check, not an app test or an authenticated update index.
-Only a completely successful platform matrix produces the combined artifact.
+The build does not install toolchains, generate signing keys or install the MSI.
+FFmpeg and matching Flutter engine artifacts are
+downloaded as needed by the compilation process and cached under `build` or the
+Flutter SDK cache. Existing locally cached WiX/.NET tools remain usable.
 
-No tests, releases, tags or Pages updates are run by this workflow. Windows remains
-unsigned; Android requires the four repository secrets documented in the release
-guide. Publishing will be a separate, explicit decision. Restrict future write
-permissions and publication secrets to the jobs that actually need them.
-
-Add `scripts/deploy` only when implementing publication or the signed Pages update
-index. Put upload/index logic there, not in build scripts or copied YAML commands.
-This keeps building and testing usable without GitHub credentials.
+Installer source stays beside Windows packaging in `scripts/package_windows`.
+Generated bundles and release assets
+stay under ignored `build`; the existing local WiX extension cache stays under `.wix`.
+There are no GitHub Actions workflows or script-test entry points. Application tests
+remain in their existing Flutter, Rust and Android locations.

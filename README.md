@@ -106,14 +106,30 @@ Program updates replace packaged application files, preserving the sibling
 A future persistent cache will have its own data
 subdirectory. Audio buffering and library caches currently remain in memory.
 
+## Platform Scope
+
+Active build targets are Android ARM64 and Windows x64/ARM64.
+The shared VS Code launch/tasks files and release configuration belong
+in version control; local build outputs, native binaries and signing keys do not.
+
 ## Release Builds
 
-Local builds produce Windows x64/ARM64 MSI packages or a signed Android ARM64 APK,
+Local builds produce Windows x64/ARM64 MSI packages plus portable ZIPs, or a signed Android ARM64 APK,
 with a shared version configuration, SHA-256 checksums and artifact metadata.
 See [Release Builds](docs/releases.md) for commands, signing prerequisites and
 the remaining steps toward GitHub releases and in-app updates.
-The [project automation guide](scripts/README.md) describes the build, release and
-script-test layout shared by local tasks and GitHub Actions.
+Use `./scripts/build_release.ps1 -Platforms windows-x64,windows-arm64,android-arm64`
+for all targets, or pass only the platforms you need. Version and build number
+come from `release.json`. The [project automation guide](scripts/README.md)
+describes the local release entry point and task-specific build directories; no GitHub Actions
+or script-test wrappers are configured.
+
+VS Code offers `Build Release` tasks per platform and for all platforms, plus one
+`Build Release & Publish: All Platforms` task. Publishing a subset is rejected.
+Publish checks GitHub for an existing version before
+building, tags the clean source commit and publishes the packages after upload.
+It requires GitHub CLI authentication. Android tasks use
+`$HOME/.keys/mashin-release.jks` and prompt securely for the signing passwords.
 
 ## FFmpeg And Licenses
 
