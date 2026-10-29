@@ -53,6 +53,18 @@ conflicting tags are rejected. The script tags the source commit, builds, pushes
 the tag and uploads packages/checksums to a draft before publishing. JSON metadata
 stays local. Without `-Publish`, no tags or GitHub releases are created.
 
+Release notes list commit subjects with links to each commit and the full comparison.
+The baseline is the most recently published release eligible for the new channel:
+
+- Dev: any release, including prereleases.
+- Beta: a beta or stable release, skipping dev releases.
+- Stable: a stable release, skipping all prereleases.
+
+Pure version-bump commits are omitted. If no eligible previous release exists,
+the complete history is listed.
+The previous release tag is fetched if missing locally and must be an ancestor
+of the source commit.
+
 ## Scripts
 
 - [build_release.ps1](build_release.ps1): builds and optionally publishes releases.

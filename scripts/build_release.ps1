@@ -122,6 +122,58 @@ function Assert-GitHubReleaseAbsent([string]$Repository, [string]$Tag) {
     throw "Could not check GitHub release $Tag. Check gh authentication, repository access and network connectivity."
 }
 
+# Release notes include direct commits, not only merged pull requests.
+function Get-ReleaseNotes(
+    [string]$Repository,
+    [string]$Tag,
+    [string]$Commit,
+    [Parameter(Mandatory = $true)]
+    [ValidateSet('dev', 'beta', 'stable')]
+    [string]$Channel
+) {
+    $releaseResponse = & gh api "repos/$Repository/releases" --paginate --slurp
+    if ($LASTEXITCODE -ne 0) { throw 'Could not load previous releases for the release notes.' }
+    $releases = @($releaseResponse -join "`n" | ConvertFrom-Json | ForEach-Object { $_ } | ForEach-Object { $_ })
+    $previousTagPattern = switch ($Channel) {
+        'dev' { '^v[0-9]+\.[0-9]+\.[0-9]+(?:-(?:dev|beta)\.[0-9]+)?$' }
+        'beta' { '^v[0-9]+\.[0-9]+\.[0-9]+(?:-beta\.[0-9]+)?$' }
+        'stable' { '^v[0-9]+\.[0-9]+\.[0-9]+$' }
+    }
+    $previousRelease = $releases | Where-Object {
+        -not $_.draft -and $_.tag_name -cne $Tag -and $_.tag_name -cmatch $previousTagPattern
+    } |
+        Sort-Object published_at -Descending | Select-Object -First 1
+    $commitRange = $Commit
+    $changelogUrl = "https://github.com/$Repository/commits/$Tag"
+    if ($previousRelease) {
+        $previousTag = [string]$previousRelease.tag_name
+        & git rev-parse --verify --quiet "refs/tags/${previousTag}^{commit}" | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            & git fetch --no-tags "https://github.com/$Repository.git" "refs/tags/${previousTag}:refs/tags/$previousTag" | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "Could not fetch previous release tag $previousTag." }
+        }
+        & git merge-base --is-ancestor "refs/tags/$previousTag" $Commit
+        if ($LASTEXITCODE -ne 0) { throw "Previous release $previousTag is not an ancestor of the release commit." }
+        $commitRange = "refs/tags/$previousTag..$Commit"
+        $changelogUrl = "https://github.com/$Repository/compare/$previousTag...$Tag"
+    }
+    $commits = @(& git log --reverse '--format=%H%x09%s' $commitRange --)
+    if ($LASTEXITCODE -ne 0) { throw 'Could not read commits for the release notes.' }
+    $versionBumpPattern = '^(?:(?:chore|build)(?:\([^)]*\))?:\s*)?(?:(?:bump|bumb|update|increment)\s+(?:(?:app|release|package)\s+)?version(?:\s+(?:to\s+)?v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)?|(?:release|version)\s+v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?|v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$'
+    $notes = [Collections.Generic.List[string]]::new()
+    $notes.Add("## What's Changed")
+    foreach ($entry in $commits) {
+        $commitHash, $subject = $entry -split "`t", 2
+        if ($subject.Trim() -match $versionBumpPattern) { continue }
+        $escapedSubject = $subject -replace '([\\`*_\[\]<>])', '\$1'
+        $notes.Add("* $escapedSubject ([$($commitHash.Substring(0, 7))](https://github.com/$Repository/commit/$commitHash))")
+    }
+    if ($notes.Count -eq 1) { $notes.Add('* No changes other than release version updates.') }
+    $notes.Add('')
+    $notes.Add("**Full Changelog**: $changelogUrl")
+    return $notes -join "`n"
+}
+
 # Release prerequisites and sequential platform builds share one metadata snapshot.
 if ('android-arm64' -in $Platforms) {
     $keystore = Join-Path $HOME '.keys/mashin-release.jks'
@@ -255,11 +307,12 @@ try {
         $changes = & git status --porcelain --untracked-files=normal
         if ($LASTEXITCODE -ne 0 -or $changes) { throw 'Working tree changed during the build. Nothing was published.' }
         Assert-GitHubReleaseAbsent -Repository $repository -Tag $metadata.Tag
+        $releaseNotes = Get-ReleaseNotes -Repository $repository -Tag $metadata.Tag -Commit $publishCommit -Channel $metadata.Channel
         if (-not $hasRemoteTag) {
             & git push $metadata.repository "refs/tags/$($metadata.Tag):refs/tags/$($metadata.Tag)" | Out-Host
             if ($LASTEXITCODE -ne 0) { throw 'Could not push the release tag. Nothing was published.' }
         }
-        $releaseArguments = @('release', 'create', $metadata.Tag) + $releaseAssets.ToArray() + @('--repo', $repository, '--verify-tag', '--draft', '--title', "Mashin $($metadata.Version)", '--generate-notes')
+        $releaseArguments = @('release', 'create', $metadata.Tag) + $releaseAssets.ToArray() + @('--repo', $repository, '--verify-tag', '--draft', '--title', "Mashin $($metadata.Version)", '--notes', $releaseNotes)
         if ($metadata.Channel -ne 'stable') { $releaseArguments += '--prerelease' }
         & gh @releaseArguments | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'Release upload failed. A draft may remain on GitHub; inspect it before retrying.' }
