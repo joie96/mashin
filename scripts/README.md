@@ -1,7 +1,14 @@
 # Project Automation
 
-Local builds run on Windows through PowerShell 5.1. Version and build number come
-from [release.json](../release.json).
+Local builds run on Windows through PowerShell 5.1. For a new release, change only
+`version` in [release.json](../release.json); build numbers are derived automatically.
+
+Versions follow `major.minor.patch[-dev.N|-beta.N]`, ordered `dev < beta < stable`.
+Limits: major/minor 0-255, patch 0-64, N 1-399. Android's build number is
+`((major * 256 + minor) * 65 + patch) * 1000 + channelOrder` (maximum 2100000000).
+`channelOrder` is N for dev, 400+N for beta and 999 for stable. Windows uses
+`major.minor.patch.channelOrder` for file versions and
+`major.minor.(patch * 1000 + channelOrder)` for MSI upgrades.
 
 ## Prerequisites
 

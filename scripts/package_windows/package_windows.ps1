@@ -12,23 +12,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $workspaceRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $metadata = $Release
-if ($metadata.Version -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(dev|beta)\.([1-9][0-9]*))?$') {
-    throw 'Invalid release version for MSI packaging.'
-}
-$major = [int]$Matches[1]
-$minor = [int]$Matches[2]
-$patch = [int]$Matches[3]
-$channel = if ($Matches[4]) { $Matches[4] } else { 'stable' }
-$sequence = if ($Matches[5]) { [int]$Matches[5] } else { 0 }
-if ($major -gt 255 -or $minor -gt 255 -or $patch -gt 64 -or $sequence -gt 399) {
-    throw 'MSI version limits: major/minor <= 255, patch <= 64, prerelease sequence <= 399.'
-}
-$channelOrder = switch ($channel) {
-    'dev' { $sequence }
-    'beta' { 400 + $sequence }
-    'stable' { 999 }
-}
-$msiVersion = "$major.$minor.$($patch * 1000 + $channelOrder)"
+$msiVersion = $metadata.MsiVersion
 if (-not $BundleDirectory) { $BundleDirectory = Join-Path $workspaceRoot "build/windows/$Architecture/runner/Release" }
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $workspaceRoot "build/releases/$($metadata.Tag)/windows-$Architecture" }
 $BundleDirectory = (Resolve-Path $BundleDirectory).Path

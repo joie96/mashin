@@ -16,10 +16,26 @@ $metadata = Get-Content (Join-Path $workspaceRoot 'release.json') -Raw | Convert
 if ($metadata.version -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(dev|beta)\.([1-9][0-9]*))?$') {
     throw 'Version must be major.minor.patch, major.minor.patch-beta.N or major.minor.patch-dev.N.'
 }
+$major = [long]$Matches[1]
+$minor = [long]$Matches[2]
+$patch = [long]$Matches[3]
 $channel = if ($Matches[4]) { $Matches[4] } else { 'stable' }
-if ($metadata.buildNumber -lt 1 -or $metadata.buildNumber -gt 65535) {
-    throw 'BuildNumber must be between 1 and 65535 for Android and Windows file versions.'
+$sequence = if ($Matches[5]) { [long]$Matches[5] } else { 0 }
+if ($major -gt 255 -or $minor -gt 255 -or $patch -gt 64 -or $sequence -gt 399) {
+    throw 'Release version limits: major/minor <= 255, patch <= 64, prerelease sequence <= 399.'
 }
+$channelOrder = switch ($channel) {
+    'dev' { $sequence }
+    'beta' { 400 + $sequence }
+    'stable' { 999 }
+}
+$buildNumber = (($major * 256 + $minor) * 65 + $patch) * 1000 + $channelOrder
+if ($buildNumber -gt 2100000000) {
+    throw 'Version exceeds the Android versionCode limit of 2100000000.'
+}
+$metadata | Add-Member -NotePropertyName BuildNumber -NotePropertyValue $buildNumber
+$metadata | Add-Member -NotePropertyName WindowsBuildNumber -NotePropertyValue $channelOrder
+$metadata | Add-Member -NotePropertyName MsiVersion -NotePropertyValue "$major.$minor.$($patch * 1000 + $channelOrder)"
 $metadata | Add-Member -NotePropertyName Channel -NotePropertyValue $channel
 $metadata | Add-Member -NotePropertyName Tag -NotePropertyValue "v$($metadata.version)"
 
@@ -35,7 +51,7 @@ function Invoke-WindowsReleaseBuild([string]$Architecture, [pscustomobject]$Rele
     $flutterRoot = Split-Path -Parent (Split-Path -Parent (Get-Command flutter -ErrorAction Stop).Source)
     & flutter precache --windows | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Flutter Windows artifact download failed.' }
-    & flutter build windows --release --config-only "--build-name=$($Release.Version)" "--build-number=$($Release.BuildNumber)" | Out-Host
+    & flutter build windows --release --config-only "--build-name=$($Release.Version)" "--build-number=$($Release.WindowsBuildNumber)" | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Flutter Windows configuration failed.' }
     $cache = Get-ChildItem "$workspaceRoot/build/windows/*/CMakeCache.txt" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if (-not $cache) { throw 'Flutter CMake configuration is missing.' }
