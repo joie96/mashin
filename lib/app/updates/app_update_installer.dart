@@ -12,7 +12,7 @@ abstract final class AppUpdateInstaller {
       }
       await Process.start(
         '$windowsDirectory\\System32\\msiexec.exe',
-        ['/i', file.path],
+        windowsInstallerArguments(file),
         mode: ProcessStartMode.detached,
       );
       exit(0);
@@ -27,4 +27,10 @@ abstract final class AppUpdateInstaller {
       'Updates werden auf dieser Plattform nicht unterstützt.',
     );
   }
+
+  // Windows Installer command arguments.
+  static List<String> windowsInstallerArguments(File file) => [
+    '/i',
+    file.absolute.uri.toFilePath(windows: true),
+  ];
 }
