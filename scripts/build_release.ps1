@@ -62,6 +62,7 @@ function Invoke-WindowsReleaseBuild([string]$Architecture, [pscustomobject]$Rele
     $downloadDirectory = Join-Path $workspaceRoot "build/native/flutter/$engine/$platform"
     $storage = if ($env:FLUTTER_STORAGE_BASE_URL) { $env:FLUTTER_STORAGE_BASE_URL.TrimEnd('/') } else { 'https://storage.googleapis.com' }
     $artifacts = @(
+        @{ Directory = $platform; Archive = "$platform/artifacts.zip"; Required = 'icudtl.dat' },
         @{ Directory = $platform; Archive = "$platform-debug/$platform-flutter.zip"; Required = 'flutter_windows.dll' },
         @{ Directory = $platform; Archive = "$platform/flutter-cpp-client-wrapper.zip"; Required = 'cpp_client_wrapper/include/flutter/flutter_engine.h' },
         @{ Directory = "$platform-release"; Archive = "$platform-release/$platform-flutter.zip"; Required = 'gen_snapshot.exe' }
