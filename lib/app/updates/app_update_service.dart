@@ -9,6 +9,9 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pub_semver/pub_semver.dart';
 
+import '../../features/core/core_bridge.dart';
+import 'update_channel.dart';
+
 enum UpdateTarget {
   windowsX64('windows-x64.msi'),
   windowsArm64('windows-arm64.msi'),
@@ -51,21 +54,36 @@ class AppUpdateService {
   AppUpdateService({
     http.Client Function()? createClient,
     Future<Directory> Function()? downloadDirectory,
+     this.coreBridge,
   }) : _createClient = createClient ?? http.Client.new,
        _downloadDirectory = downloadDirectory ?? getTemporaryDirectory;
 
   final http.Client Function() _createClient;
   final Future<Directory> Function() _downloadDirectory;
+  final MashinCoreBridgeApi? coreBridge;
   http.Client? _downloadClient;
   bool _isCancelled = false;
+
+  // App-wide update channel configuration.
+  Future<UpdateChannel> getUpdateChannel() async =>
+      _activeCoreBridge.getUpdateChannel(
+        defaultChannel: UpdateChannel.fromVersion(await getInstalledVersion()),
+      );
+
+  Future<void> saveUpdateChannel(UpdateChannel channel) =>
+      _activeCoreBridge.saveUpdateChannel(channel);
 
   // Release discovery and version selection.
   Future<AppUpdate?> checkForUpdate() async {
     final target = UpdateTarget.current;
     if (target == null) return null;
+    final currentVersion = await getInstalledVersion();
     return findUpdate(
-      currentVersion: await getInstalledVersion(),
+      currentVersion: currentVersion,
       target: target,
+      channel: await _activeCoreBridge.getUpdateChannel(
+        defaultChannel: UpdateChannel.fromVersion(currentVersion),
+      ),
     );
   }
 
@@ -93,6 +111,7 @@ class AppUpdateService {
   Future<AppUpdate?> findUpdate({
     required Version currentVersion,
     required UpdateTarget target,
+    required UpdateChannel channel,
   }) async {
     final client = _createClient();
     try {
@@ -121,8 +140,10 @@ class AppUpdateService {
               tag.startsWith('v') ? tag.substring(1) : tag,
             );
             if (_compareVersions(version, currentVersion) <= 0 ||
-                (currentVersion.isPreRelease == false &&
-                    (version.isPreRelease || release['prerelease'] == true)) ||
+                !channel.allows(
+                  version,
+                  isPrerelease: release['prerelease'] == true,
+                ) ||
                 (newest != null &&
                     _compareVersions(version, newest.version) <= 0)) {
               continue;
@@ -265,6 +286,10 @@ class AppUpdateService {
     final channelComparison = channelOrder(left).compareTo(channelOrder(right));
     return channelComparison == 0 ? left.compareTo(right) : channelComparison;
   }
+
+  // The app session owns the bridge and its single native event callback.
+  MashinCoreBridgeApi get _activeCoreBridge =>
+      coreBridge ?? MashinCoreBridge.instance;
 
   // GitHub boundary validation.
   static bool _isReleaseAsset(Uri uri, String tag, String name) =>

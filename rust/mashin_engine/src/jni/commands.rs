@@ -59,6 +59,9 @@ enum PlaybackCommand {
         #[serde(flatten)]
         settings: crate::core::models::SessionSettingsUpdate,
     },
+    SaveUpdateChannel {
+        channel: crate::core::models::UpdateChannel,
+    },
     SetPreferredProvider {
         #[serde(deserialize_with = "Option::deserialize")]
         preferred_provider: Option<crate::core::models::PreferredProvider>,
@@ -194,6 +197,10 @@ pub(crate) fn execute_command(kind: &str, argument: Option<&str>) -> Result<(), 
         PlaybackCommand::SaveSessionSettings { settings } => {
             execute_core_command(|coordinator| coordinator.save_session_settings(settings))
         }
+        PlaybackCommand::SaveUpdateChannel { channel } => {
+            core::save_update_channel(channel).map_err(|error| error.message)?;
+            return Ok(());
+        }
         PlaybackCommand::SetPreferredProvider { preferred_provider } => {
             execute_core_command(|coordinator| {
                 coordinator.set_preferred_provider(preferred_provider)
@@ -293,6 +300,24 @@ mod tests {
     use super::{decode_command, execute_command};
 
     // Platform command contracts.
+    #[test]
+    fn update_channel_commands_require_a_known_channel() {
+        for (name, expected) in [
+            ("stable", crate::core::models::UpdateChannel::Stable),
+            ("beta", crate::core::models::UpdateChannel::Beta),
+            ("dev", crate::core::models::UpdateChannel::Dev),
+        ] {
+            let arguments = serde_json::json!({"channel": name}).to_string();
+            assert!(matches!(
+                decode_command("saveUpdateChannel", Some(&arguments)).unwrap(),
+                super::PlaybackCommand::SaveUpdateChannel { channel } if channel == expected
+            ));
+        }
+        for arguments in ["{}", r#"{"channel":"alpha"}"#, r#"{"channel":null}"#, r#"{"channel":"beta","unexpected":true}"#] {
+            assert!(decode_command("saveUpdateChannel", Some(arguments)).is_err());
+        }
+    }
+
     #[test]
     fn preferred_provider_commands_require_named_settings_or_explicit_null() {
         let command = decode_command("setPreferredProvider", Some(r#"{"preferredProvider":{"providerInstance":"tidal-instance","providerDomain":"tidal"}}"#)).unwrap();

@@ -27,6 +27,7 @@ use tokio::runtime::Runtime;
 mod session;
 #[path = "settings.rs"]
 mod settings;
+pub(crate) use settings::{get_update_channel, save_update_channel};
 #[path = "user_data.rs"]
 mod user_data;
 pub(crate) use user_data::*;
@@ -752,6 +753,7 @@ mod tests {
 
     struct TestSessionStore {
         session: Mutex<Option<SessionConfig>>,
+        update_channel: Mutex<Option<crate::core::models::UpdateChannel>>,
         should_fail_writes: std::sync::Arc<std::sync::atomic::AtomicBool>,
     }
 
@@ -759,12 +761,23 @@ mod tests {
         fn new() -> Self {
             Self {
                 session: Mutex::new(None),
+                update_channel: Mutex::new(None),
                 should_fail_writes: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             }
         }
     }
 
     impl SessionStore for TestSessionStore {
+        fn get_update_channel(&self, default_channel: crate::core::models::UpdateChannel) -> Result<crate::core::models::UpdateChannel, String> {
+            let mut channel = self.update_channel.lock().map_err(|_| "test settings lock poisoned")?;
+            Ok(*channel.get_or_insert(default_channel))
+        }
+
+        fn save_update_channel(&self, channel: crate::core::models::UpdateChannel) -> Result<(), String> {
+            *self.update_channel.lock().map_err(|_| "test settings lock poisoned")? = Some(channel);
+            Ok(())
+        }
+
         fn load_session(&self) -> Result<Option<SessionConfig>, String> {
             self.session
                 .lock()

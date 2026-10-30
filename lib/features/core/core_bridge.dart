@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:ffi/ffi.dart';
 
 import '../../app/logging/app_log_buffer.dart';
+import '../../app/updates/update_channel.dart';
 import '../shared/item_provider_selection.dart';
 import 'android_bridge.dart';
 import 'core_models.dart';
@@ -242,6 +243,10 @@ abstract class MashinCoreBridgeApi {
   Future<void> playQueueIndex(int index);
   Future<void> setAudioProfile(String audioProfile);
   Future<void> saveSessionSettings(SessionSettingsUpdate settings);
+  Future<UpdateChannel> getUpdateChannel({
+    required UpdateChannel defaultChannel,
+  });
+  Future<void> saveUpdateChannel(UpdateChannel channel);
   Future<void> setPreferredProvider(PreferredProvider? preferredProvider);
   void log(LogLevelPreference level, String category, String message);
   Future<void> addPlaylistTracks(String playlistId, List<String> uris);
@@ -307,6 +312,10 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
 
   // The native callback can dispatch only to the currently active bridge.
   static MashinCoreBridge? _instance;
+
+  /// Non-owning access to the bridge initialized by the application session.
+  static MashinCoreBridge get instance =>
+      _instance ?? (throw StateError('Mashin core bridge is not initialized.'));
 
   final _RustBindings _bindings;
   final AndroidBridge? _androidBridge = Platform.isAndroid
@@ -843,6 +852,22 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     await _submitVoidOperation('saveSessionSettings', settings.toJson());
     _reapplyRuntimeLogLevelOverride();
   }
+
+  // App-wide settings persist in Rust independently of authentication.
+  @override
+  Future<UpdateChannel> getUpdateChannel({
+    required UpdateChannel defaultChannel,
+  }) => _submitOperation<UpdateChannel>(
+    'getUpdateChannel',
+    <String, Object?>{'defaultChannel': defaultChannel.name},
+    (Object? result) => UpdateChannel.values.byName(result as String),
+  );
+
+  @override
+  Future<void> saveUpdateChannel(UpdateChannel channel) => _submitVoidOperation(
+    'saveUpdateChannel',
+    <String, Object?>{'channel': channel.name},
+  );
 
   @override
   Future<void> setPreferredProvider(PreferredProvider? preferredProvider) =>

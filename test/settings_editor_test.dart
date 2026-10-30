@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mashin/app/theme/app_theme.dart';
 import 'package:mashin/app/updates/app_update_dialog.dart';
+import 'package:mashin/app/updates/update_channel.dart';
 import 'package:mashin/app/updates/app_update_service.dart';
 import 'package:mashin/features/core/core_models.dart';
 import 'package:mashin/features/settings/settings_info_view.dart';
@@ -43,14 +44,14 @@ void main() {
       for (final entry in <String, Finder>{
         'Version': find.text('0.0.1-dev.7'),
         'Projekt': find.widgetWithText(TextButton, 'github.com/joie96/mashin'),
-        'Updates': find.widgetWithText(OutlinedButton, 'Update suchen'),
+        'Update-Prüfung': find.widgetWithText(OutlinedButton, 'Update suchen'),
       }.entries) {
         final labelRect = tester.getRect(find.text(entry.key));
         final valueRect = tester.getRect(entry.value);
         if (width >= 720) {
           expect(valueRect.left, greaterThan(labelRect.right));
           expect(valueRect.center.dy, closeTo(labelRect.center.dy, 2));
-          if (entry.key == 'Updates') {
+          if (entry.key == 'Update-Prüfung') {
             expect(valueRect.right, greaterThan(width * .8));
           } else {
             expect(valueRect.left - labelRect.left, closeTo(144, 2));
@@ -99,6 +100,78 @@ void main() {
       expect(find.text(lastCheckedStatus), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
+  }
+
+  for (final width in [320.0, 720.0, 1200.0]) {
+    testWidgets(
+      'Info saves channels, rechecks and restores failed selection at $width',
+      (tester) async {
+        tester.view.physicalSize = Size(width, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final service = _InfoUpdateService()..shouldOfferUpdate = false;
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.light(),
+            home: Scaffold(body: SettingsInfoView(service: service)),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final field = find.byType(DropdownButtonFormField<UpdateChannel>);
+        expect(
+          tester
+              .widget<DropdownButtonFormField<UpdateChannel>>(field)
+              .initialValue,
+          UpdateChannel.dev,
+        );
+        final label = tester.getRect(find.text('Update-Kanal'));
+        final control = tester.getRect(field);
+        if (width >= 720) {
+          expect(control.width, 280);
+          expect(control.left, greaterThan(label.right));
+          expect(control.center.dy, closeTo(label.center.dy, 2));
+        } else {
+          expect(control.top, greaterThan(label.bottom));
+        }
+        await tester.tap(field);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Stabil').last);
+        await tester.pumpAndSettle();
+        expect(service.channel, UpdateChannel.stable);
+        expect(service.checkCount, 1);
+        expect(
+          find.textContaining('Die installierte Vorabversion bleibt bestehen'),
+          findsOneWidget,
+        );
+        expect(
+          find.text('Kein neueres Release im gewählten Kanal verfügbar.'),
+          findsOneWidget,
+        );
+        tester
+            .state<ScaffoldMessengerState>(find.byType(ScaffoldMessenger))
+            .removeCurrentSnackBar();
+        await tester.pumpAndSettle();
+        service.shouldFailSave = true;
+        await tester.tap(field);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Beta').last);
+        await tester.pumpAndSettle();
+        expect(service.channel, UpdateChannel.stable);
+        expect(service.checkCount, 1);
+        expect(
+          tester
+              .widget<DropdownButtonFormField<UpdateChannel>>(field)
+              .initialValue,
+          UpdateChannel.stable,
+        );
+        expect(
+          find.text('Update-Kanal konnte nicht gespeichert werden.'),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
   }
 
   test('multi-device visibility is transferred in session settings', () {
@@ -353,6 +426,18 @@ void main() {
 }
 
 class _InfoUpdateService extends AppUpdateService {
+  UpdateChannel channel = UpdateChannel.dev;
+  bool shouldFailSave = false;
+
+  @override
+  Future<UpdateChannel> getUpdateChannel() async => channel;
+
+  @override
+  Future<void> saveUpdateChannel(UpdateChannel value) async {
+    if (shouldFailSave) throw StateError('storage unavailable');
+    channel = value;
+  }
+
   int checkCount = 0;
   bool shouldOfferUpdate = true;
   bool shouldFailCheck = false;

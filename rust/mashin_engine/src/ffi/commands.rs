@@ -232,6 +232,14 @@ fn execute_async_operation(request: CoreOperationRequest) -> Result<Value, CoreE
             "uris",
         ),
         "getSessionSettings" => serialize_operation_result(core::read_session_settings()),
+        "getUpdateChannel" => {
+            let default_channel = read_update_channel(&arguments, "defaultChannel")?;
+            serialize_operation_result(core::get_update_channel(default_channel))
+        }
+        "saveUpdateChannel" => {
+            let channel = read_update_channel(&arguments, "channel")?;
+            serialize_operation_result(core::save_update_channel(channel))
+        }
         "refreshQueue" => serialize_operation_result(core::read_queue()),
         "refreshPlayerState" => serialize_operation_result(core::read_player_state()),
         "loadUserData" => serialize_operation_result(core::read_or_load_user_data()),
@@ -251,6 +259,14 @@ fn serialize_operation_result<T: serde::Serialize>(
             CoreError::internal(format!("serialize operation result failed: {error}"))
         })
     })
+}
+
+fn read_update_channel(
+    arguments: &serde_json::Map<String, Value>,
+    field: &str,
+) -> Result<crate::core::models::UpdateChannel, CoreError> {
+    serde_json::from_value(arguments.get(field).cloned().unwrap_or(Value::Null))
+        .map_err(|_| CoreError::command_failed(format!("invalid update channel in {field}")))
 }
 
 fn execute_restore_persisted_session() -> Result<Value, CoreError> {
@@ -940,4 +956,37 @@ fn parse_media_items(media_items_json: &str) -> Result<Vec<MediaItem>, String> {
 fn parse_tracks(tracks_json: *const c_char) -> Result<Vec<Track>, String> {
     let tracks_json = read_required_c_string(tracks_json, "tracks_json")?;
     serde_json::from_str(&tracks_json).map_err(|error| format!("invalid track array: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::models::UpdateChannel;
+
+    #[test]
+    fn update_channel_operations_validate_the_flutter_contract() {
+        for field in ["channel", "defaultChannel"] {
+            for (name, channel) in [
+                ("stable", UpdateChannel::Stable),
+                ("beta", UpdateChannel::Beta),
+                ("dev", UpdateChannel::Dev),
+            ] {
+                let mut arguments = serde_json::Map::new();
+                arguments.insert(field.into(), json!(name));
+                assert_eq!(read_update_channel(&arguments, field).unwrap(), channel);
+                assert_eq!(serde_json::to_value(channel).unwrap(), json!(name));
+            }
+        }
+        for kind in ["getUpdateChannel", "saveUpdateChannel"] {
+            for value in [Value::Null, json!("alpha"), json!(1), json!({})] {
+                let request = serde_json::from_value(json!({
+                    "requestId": 1,
+                    "kind": kind,
+                    "defaultChannel": value,
+                    "channel": value,
+                })).unwrap();
+                assert!(execute_async_operation(request).is_err());
+            }
+        }
+    }
 }

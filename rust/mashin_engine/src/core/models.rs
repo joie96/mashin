@@ -203,6 +203,14 @@ impl Default for ThemePreference {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+pub(crate) enum UpdateChannel {
+    Stable,
+    Beta,
+    Dev,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub(crate) enum LogLevelPreference {
     Trace,
     Debug,

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mashin/app/updates/update_channel.dart';
 import 'package:mashin/features/core/android_bridge.dart';
 import 'package:mashin/features/core/core_models.dart';
 
@@ -116,6 +117,32 @@ void main() {
       );
     },
   );
+
+  test('update channels are acknowledged by the Android service', () async {
+    MethodCall? receivedCall;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      receivedCall = call;
+      return null;
+    });
+    for (final updateChannel in UpdateChannel.values) {
+      await AndroidBridge().execute(AndroidCoreCommand.saveUpdateChannel, {
+        'channel': updateChannel.name,
+      });
+      expect(receivedCall?.arguments, {
+        'command': 'saveUpdateChannel',
+        'arguments': {'channel': updateChannel.name},
+      });
+    }
+    messenger.setMockMethodCallHandler(channel, (_) async {
+      throw PlatformException(code: 'configuration_unavailable');
+    });
+    await expectLater(
+      AndroidBridge().execute(AndroidCoreCommand.saveUpdateChannel, {
+        'channel': 'beta',
+      }),
+      throwsA(isA<PlatformException>()),
+    );
+  });
 
   test('settings are submitted in one complete Android command', () async {
     MethodCall? receivedCall;

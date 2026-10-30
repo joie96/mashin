@@ -6,6 +6,7 @@ pub(crate) mod event_channel;
 pub(crate) mod models;
 
 pub(crate) use core::{
+    get_update_channel, save_update_channel,
     add_playlist_tracks, add_private_playlist_tracks, create_private_playlist,
     execute_command_and_collect_events, execute_playback_command_and_collect_events,
     read_media_session_state, read_music_assistant_album, read_music_assistant_album_tracks,

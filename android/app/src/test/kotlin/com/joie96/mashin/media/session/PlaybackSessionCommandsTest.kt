@@ -44,6 +44,17 @@ class PlaybackSessionCommandsTest {
     }
 
     @Test
+    fun updateChannelsRoundTripWithoutStartingPlayback() {
+        for (channel in listOf("stable", "beta", "dev")) {
+            val request = PlaybackRequest(PlaybackCommandKind.SaveUpdateChannel,
+                """{"channel":"$channel"}""")
+            assertEquals("saveUpdateChannel", request.kind.action)
+            assertFalse(request.canStartPlayback)
+            assertEquals(request, PlaybackSessionCommands.decode(PlaybackSessionCommands.encode(request)))
+        }
+    }
+
+    @Test
     fun preferredProviderSettingsRoundTripWithoutStartingPlayback() {
         for (arguments in listOf(
             """{"preferredProvider":{"providerInstance":"tidal-instance","providerDomain":"tidal"}}""",

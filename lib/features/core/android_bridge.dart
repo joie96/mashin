@@ -21,6 +21,7 @@ enum AndroidCoreCommand {
   setVolume,
   setMuted,
   saveSessionSettings,
+  saveUpdateChannel,
   setPreferredProvider,
   queuePlayMedia,
   startRadio,

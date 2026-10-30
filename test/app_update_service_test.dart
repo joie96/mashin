@@ -5,7 +5,9 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:mashin/app/updates/update_channel.dart';
 import 'package:mashin/app/updates/app_update_service.dart';
+import 'package:mashin/features/core/core_bridge.dart';
 import 'package:pub_semver/pub_semver.dart';
 
 Map<String, dynamic> release(
@@ -33,14 +35,133 @@ Map<String, dynamic> release(
 }
 
 void main() {
+  group('Rust-owned channel preferences', () {
+    test('derives initial defaults from the installed version', () {
+      for (final entry in {
+        '1.0.0': UpdateChannel.stable,
+        '1.0.0-beta.1': UpdateChannel.beta,
+        '1.0.0-dev.1': UpdateChannel.dev,
+        '1.0.0-rc.1': UpdateChannel.stable,
+      }.entries) {
+        expect(
+          UpdateChannel.fromVersion(Version.parse(entry.key)),
+          entry.value,
+        );
+      }
+    });
+
+    test('loads and saves exclusively through the core bridge', () async {
+      final bridge = _UpdateChannelBridge();
+      final service = _InstalledUpdateService(coreBridge: bridge);
+      expect(await service.getUpdateChannel(), UpdateChannel.stable);
+      expect(bridge.defaultChannel, UpdateChannel.stable);
+      await service.saveUpdateChannel(UpdateChannel.beta);
+      expect(bridge.channel, UpdateChannel.beta);
+      expect(
+        await _InstalledUpdateService(coreBridge: bridge).getUpdateChannel(),
+        UpdateChannel.beta,
+      );
+    });
+
+    test('Rust persistence errors propagate without a Dart fallback', () async {
+      final bridge = _UpdateChannelBridge()..shouldFail = true;
+      final service = _InstalledUpdateService(coreBridge: bridge);
+      await expectLater(service.getUpdateChannel(), throwsStateError);
+      await expectLater(
+        service.saveUpdateChannel(UpdateChannel.beta),
+        throwsStateError,
+      );
+      expect(bridge.channel, isNull);
+    });
+
+    test(
+      'startup and manual services share the persisted channel',
+      () async {
+        final target = UpdateTarget.current!;
+        final releases = [
+          release('1.0.0', target: target.assetSuffix),
+          release('1.1.0-beta.1', target: target.assetSuffix),
+          release('1.2.0-dev.1', target: target.assetSuffix),
+        ];
+        final bridge = _UpdateChannelBridge();
+        AppUpdateService service() => _InstalledUpdateService(
+          coreBridge: bridge,
+          createClient: () =>
+              MockClient((_) async => http.Response(jsonEncode(releases), 200)),
+        );
+        final startup = service();
+        final manual = service();
+        await startup.saveUpdateChannel(UpdateChannel.beta);
+        expect(await manual.getUpdateChannel(), UpdateChannel.beta);
+        expect(
+          (await startup.checkForUpdate())?.version.toString(),
+          '1.1.0-beta.1',
+        );
+        expect(
+          (await manual.checkForUpdate())?.version.toString(),
+          '1.1.0-beta.1',
+        );
+        await manual.saveUpdateChannel(UpdateChannel.stable);
+        expect((await startup.checkForUpdate())?.version.toString(), '1.0.0');
+        expect((await service().checkForUpdate())?.version.toString(), '1.0.0');
+      },
+      skip: UpdateTarget.current == null,
+    );
+  });
+
   Future<AppUpdate?> find(
     List<Map<String, dynamic>> releases, {
     String current = '0.0.1-dev.5',
     UpdateTarget target = UpdateTarget.windowsX64,
-  }) => AppUpdateService(
-    createClient: () =>
-        MockClient((_) async => http.Response(jsonEncode(releases), 200)),
-  ).findUpdate(currentVersion: Version.parse(current), target: target);
+    UpdateChannel? channel,
+  }) =>
+      AppUpdateService(
+        createClient: () =>
+            MockClient((_) async => http.Response(jsonEncode(releases), 200)),
+      ).findUpdate(
+        currentVersion: Version.parse(current),
+        target: target,
+        channel: channel ?? UpdateChannel.fromVersion(Version.parse(current)),
+      );
+
+  test(
+    'filters releases by selected channel independently of installed version',
+    () async {
+      final releases = [
+        release('1.0.0'),
+        release('1.1.0-beta.1'),
+        release('1.2.0-dev.1'),
+        release('2.0.0-alpha.1'),
+        release('2.0.0-rc.1'),
+      ];
+      for (final entry in {
+        UpdateChannel.stable: '1.0.0',
+        UpdateChannel.beta: '1.1.0-beta.1',
+        UpdateChannel.dev: '1.2.0-dev.1',
+      }.entries) {
+        expect(
+          (await find(
+            releases,
+            current: '0.9.0',
+            channel: entry.key,
+          ))?.version.toString(),
+          entry.value,
+        );
+      }
+      expect(
+        await find([release('1.1.0-dev.1')], current: '1.0.0-beta.2'),
+        isNull,
+      );
+      expect(
+        await find(
+          [release('1.0.0')],
+          current: '1.1.0-dev.1',
+          channel: UpdateChannel.stable,
+        ),
+        isNull,
+      );
+    },
+  );
 
   test(
     'selects semantic newest version rather than GitHub order or text order',
@@ -124,6 +245,7 @@ void main() {
       service.findUpdate(
         currentVersion: Version.parse('0.0.1'),
         target: UpdateTarget.windowsX64,
+        channel: UpdateChannel.stable,
       ),
       throwsA(isA<HttpException>()),
     );
@@ -195,4 +317,35 @@ void main() {
       },
     );
   });
+}
+
+class _InstalledUpdateService extends AppUpdateService {
+  _InstalledUpdateService({required super.coreBridge, super.createClient});
+
+  @override
+  Future<Version> getInstalledVersion() async => Version.parse('0.9.0');
+}
+
+class _UpdateChannelBridge implements MashinCoreBridgeApi {
+  UpdateChannel? channel;
+  UpdateChannel? defaultChannel;
+  bool shouldFail = false;
+
+  @override
+  Future<UpdateChannel> getUpdateChannel({
+    required UpdateChannel defaultChannel,
+  }) async {
+    if (shouldFail) throw StateError('Rust configuration unavailable');
+    this.defaultChannel = defaultChannel;
+    return channel ??= defaultChannel;
+  }
+
+  @override
+  Future<void> saveUpdateChannel(UpdateChannel channel) async {
+    if (shouldFail) throw StateError('Rust configuration unavailable');
+    this.channel = channel;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
