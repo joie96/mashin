@@ -207,6 +207,8 @@ void main() {
         addTearDown(session.dispose);
         await session.initialize();
         final userData = session.userDataController;
+        final serverUrl = session.baseUrl;
+        expect(serverUrl, isNotEmpty);
         expect(session.isAuthenticated, isTrue);
         bridge.pendingLogout = Completer<void>();
         final logout = session.logout();
@@ -228,7 +230,7 @@ void main() {
           expect(session.isAuthenticated, isFalse);
           expect(session.userDataController, isNull);
           expect(session.username, isNull);
-          expect(session.baseUrl, isEmpty);
+          expect(session.baseUrl, serverUrl);
           expect(session.coreEvents.isStarted, isFalse);
           expect(
             ProviderManifestRegistry.iconSvgForProvider('logout-test'),

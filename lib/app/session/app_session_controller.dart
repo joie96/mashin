@@ -152,7 +152,6 @@ class AppSessionController extends ChangeNotifier {
     await coreBridge.logout();
     if (_isDisposed) return;
     _isAuthenticated = false;
-    _baseUrl = '';
     _username = null;
     _disposeUserDataController();
     PreferredProviderController.instance.reset();
