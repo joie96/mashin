@@ -178,6 +178,7 @@ pub(crate) struct LocalOutputConfig {
     pub(crate) device_id: String,
     pub(crate) client_name: String,
     pub(crate) cache_bytes: usize,
+    #[serde(default)]
     pub(crate) audio_profile: AudioProfileId,
 }
 

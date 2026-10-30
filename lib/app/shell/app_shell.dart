@@ -2030,16 +2030,12 @@ class _AudioOptionsMenu extends StatelessWidget {
                 ),
               ),
               const _AudioProfileOption(
-                value: 'opus_96k',
-                title: 'Low (Opus 96 kbit/s)',
-              ),
-              const _AudioProfileOption(
                 value: 'opus_128k',
-                title: 'Medium (Opus 128 kbit/s)',
+                title: 'Low (Opus 128 kbit/s)',
               ),
               const _AudioProfileOption(
                 value: 'opus_192k',
-                title: 'Default (Opus 192 kbit/s)',
+                title: 'Medium (Opus 192 kbit/s)',
               ),
               const _AudioProfileOption(
                 value: 'opus_256k',

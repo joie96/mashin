@@ -37,7 +37,7 @@ pub(crate) fn session_settings(session: Option<&SessionConfig>) -> SessionSettin
             None => (
                 DEFAULT_MUSIC_ASSISTANT_URL.to_string(),
                 None,
-                AudioProfileId::Flac,
+                AudioProfileId::default(),
                 DEFAULT_LOCAL_CACHE_SIZE_BYTES,
                 ThemePreference::Dark,
                 LogLevelPreference::Info,
@@ -63,7 +63,7 @@ pub(crate) fn default_local_output() -> LocalOutputConfig {
         device_id: format!("mashin-{platform}-{}", uuid::Uuid::new_v4()),
         client_name: local_client_name(),
         cache_bytes: DEFAULT_LOCAL_CACHE_SIZE_BYTES,
-        audio_profile: AudioProfileId::Flac,
+        audio_profile: AudioProfileId::default(),
     }
 }
 
@@ -132,7 +132,21 @@ mod tests {
         assert_ne!(configuration.device_id, default_local_output().device_id);
         assert_eq!(configuration.client_name, super::local_client_name());
         assert_eq!(configuration.cache_bytes, 250 * 1024 * 1024);
-        assert_eq!(configuration.audio_profile, AudioProfileId::Flac);
+        assert_eq!(configuration.audio_profile, AudioProfileId::Opus256k);
+    }
+
+    #[test]
+    fn missing_audio_profile_uses_opus_256k_and_preserves_explicit_profiles() {
+        let configuration = default_local_output();
+        let mut stored = serde_json::to_value(&configuration).unwrap();
+        stored.as_object_mut().unwrap().remove("audioProfile");
+
+        let restored: super::LocalOutputConfig = serde_json::from_value(stored.clone()).unwrap();
+        assert_eq!(restored.audio_profile, AudioProfileId::Opus256k);
+
+        stored["audioProfile"] = serde_json::json!("flac");
+        let restored: super::LocalOutputConfig = serde_json::from_value(stored).unwrap();
+        assert_eq!(restored.audio_profile, AudioProfileId::Flac);
     }
 
     #[test]
@@ -180,7 +194,7 @@ mod tests {
             super::SessionSettings {
                 music_assistant_url: DEFAULT_MUSIC_ASSISTANT_URL.to_string(),
                 username: None,
-                audio_profile: AudioProfileId::Flac,
+                audio_profile: AudioProfileId::Opus256k,
                 local_cache_size_bytes: DEFAULT_LOCAL_CACHE_SIZE_BYTES,
                 theme: ThemePreference::Dark,
                 log_level: LogLevelPreference::Info,
@@ -200,6 +214,7 @@ mod tests {
             selected_output: SelectedOutput::Local,
             local: super::LocalOutputConfig {
                 cache_bytes: 1024,
+                audio_profile: AudioProfileId::Flac,
                 ..default_local_output()
             },
             volume: 100,

@@ -11,7 +11,6 @@ pub(crate) const MAX_PAYLOAD_BYTES: usize = 262_144;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum AudioProfileId {
-    #[default]
     Flac,
     #[serde(rename = "opus_96k")]
     Opus96k,
@@ -19,6 +18,7 @@ pub(crate) enum AudioProfileId {
     Opus128k,
     #[serde(rename = "opus_192k")]
     Opus192k,
+    #[default]
     #[serde(rename = "opus_256k")]
     Opus256k,
 }
