@@ -35,6 +35,19 @@ class MashinCoreBridgeEvents extends ChangeNotifier {
     ]);
   }
 
+  // A new login can restart subscriptions without retaining the previous account's state.
+  Future<void> reset() async {
+    _isStarted = false;
+    final queueSubscription = _queueSubscription;
+    final playerStateSubscription = _playerStateSubscription;
+    _queueSubscription = null;
+    _playerStateSubscription = null;
+    await queueSubscription?.cancel();
+    await playerStateSubscription?.cancel();
+    _mediaSessionState = const MediaSessionState();
+    _notifyListeners();
+  }
+
   void _handleQueueChanged(Queue queue) {
     _mediaSessionState = MediaSessionState(
       queue: queue,

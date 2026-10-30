@@ -38,6 +38,14 @@ class _StartupBridge extends Fake implements MashinCoreBridge {
   bool hasStartedLibrary = false;
   int libraryCalls = 0;
   bool hasRefreshedQueue = false;
+  int logoutCount = 0;
+  Completer<void>? pendingLogout;
+
+  @override
+  Future<void> logout() async {
+    logoutCount++;
+    await pendingLogout?.future;
+  }
 
   @override
   Stream<Map<String, dynamic>> get events => const Stream.empty();
@@ -107,6 +115,10 @@ class _PlaylistShellSession extends AppSessionController {
     : userData = UserData(coreBridge: bridge);
 
   final UserData userData;
+  int logoutCount = 0;
+
+  @override
+  Future<void> logout() async => logoutCount++;
 
   @override
   UserData get userDataController => userData;
@@ -184,6 +196,49 @@ class _PlaylistShellBridge implements MashinCoreBridgeApi {
 }
 
 void main() {
+  for (final shouldFail in <bool>[false, true]) {
+    test(
+      'logout waits for native confirmation and handles failure $shouldFail',
+      () async {
+        final bridge = _StartupBridge();
+        bridge.library.complete(<String, dynamic>{});
+        bridge.manifests.complete(<ProviderManifest>[]);
+        final session = AppSessionController(coreBridge: bridge);
+        addTearDown(session.dispose);
+        await session.initialize();
+        final userData = session.userDataController;
+        expect(session.isAuthenticated, isTrue);
+        bridge.pendingLogout = Completer<void>();
+        final logout = session.logout();
+        expect(session.logout(), same(logout));
+        expect(session.isAuthenticated, isTrue);
+        expect(bridge.logoutCount, 1);
+        if (shouldFail) {
+          final failure = expectLater(logout, throwsStateError);
+          bridge.pendingLogout!.completeError(
+            StateError('storage unavailable'),
+          );
+          await failure;
+          expect(session.isAuthenticated, isTrue);
+          expect(session.userDataController, same(userData));
+        } else {
+          ProviderManifestRegistry.registerIconData('logout-test', '<svg />');
+          bridge.pendingLogout!.complete();
+          await logout;
+          expect(session.isAuthenticated, isFalse);
+          expect(session.userDataController, isNull);
+          expect(session.username, isNull);
+          expect(session.baseUrl, isEmpty);
+          expect(session.coreEvents.isStarted, isFalse);
+          expect(
+            ProviderManifestRegistry.iconSvgForProvider('logout-test'),
+            isNull,
+          );
+        }
+      },
+    );
+  }
+
   test(
     'startup releases home and delegates the one-shot data pipeline to Rust',
     () async {
@@ -367,6 +422,13 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('Settings page'), findsOneWidget);
         expect(find.text('Einstellungen'), findsNothing);
+        await tester.tap(userButton);
+        await tester.pumpAndSettle();
+        expect(find.byIcon(Icons.logout_outlined), findsOneWidget);
+        await tester.tap(find.text('Abmelden'));
+        await tester.pumpAndSettle();
+        expect(session.logoutCount, 1);
+        expect(find.text('Abmelden'), findsNothing);
         await mouse.removePointer();
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pumpAndSettle();

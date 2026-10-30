@@ -86,6 +86,17 @@ impl CoreCoordinator {
         })
     }
 
+    // Local logout remains effective when the server cannot revoke its token.
+    pub(crate) fn logout(&mut self) -> Result<(), String> {
+        self.session_store.clear_session()?;
+        let connection = self.connection.clone();
+        self.shutdown();
+        if let Some(connection) = connection {
+            let _ = CORE_NETWORK_RUNTIME.block_on(connection.client.logout());
+        }
+        Ok(())
+    }
+
     pub(crate) fn select_output(&mut self, selected_output: SelectedOutput) -> Result<(), String> {
         let mut session = self.session_configuration.clone().ok_or_else(|| {
             "a restored session is required before selecting an output".to_string()

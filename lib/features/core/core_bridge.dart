@@ -171,6 +171,7 @@ abstract class MashinCoreBridgeApi {
     required String username,
     required String password,
   });
+  Future<void> logout();
   Future<bool> restorePersistedSession();
   Future<SessionSettings> getSessionSettings();
   Future<void> selectLocalOutput();
@@ -345,6 +346,9 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     'username': username.trim(),
     'password': password,
   }, (_) {});
+
+  @override
+  Future<void> logout() => _submitVoidOperation('logout');
 
   @override
   Future<bool> restorePersistedSession() async {

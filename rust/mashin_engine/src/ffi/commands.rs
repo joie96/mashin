@@ -99,6 +99,7 @@ fn execute_async_operation(request: CoreOperationRequest) -> Result<Value, CoreE
     let arguments = request.arguments;
     match request.kind.as_str() {
         "login" => execute_json_command(mashin_core_login, &arguments),
+        "logout" => execute_void_command(mashin_core_logout),
         "restorePersistedSession" => execute_restore_persisted_session(),
         "selectLocalOutput" => execute_void_command(mashin_core_select_local_output),
         "selectRemotePlayer" => {
@@ -485,6 +486,11 @@ pub extern "C" fn mashin_core_login(login_json: *const c_char) -> i32 {
         }
     };
     execute_core_command(|coordinator| coordinator.authenticate_and_configure_session(login))
+}
+
+#[no_mangle]
+pub extern "C" fn mashin_core_logout() -> i32 {
+    execute_core_command(CoreCoordinator::logout)
 }
 
 #[no_mangle]

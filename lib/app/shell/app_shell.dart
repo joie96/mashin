@@ -429,6 +429,7 @@ class _AppShellState extends State<AppShell> {
                           canGoBack: _canGoBack,
                           onBack: _onBack,
                           onToggleTheme: _toggleTheme,
+                          onLogout: _logout,
                           isDarkTheme: widget.session.isDarkTheme,
                           searchController: _desktopSearchController,
                           onSearchChanged: _onDesktopSearchChanged,
@@ -1017,6 +1018,19 @@ class _AppShellState extends State<AppShell> {
     unawaited(widget.session.setDarkTheme(!widget.session.isDarkTheme));
   }
 
+  Future<void> _logout() async {
+    try {
+      await widget.session.logout();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Abmelden fehlgeschlagen. Bitte erneut versuchen.'),
+        ),
+      );
+    }
+  }
+
   void _onBack() {
     _popNavigationRoute();
   }
@@ -1247,6 +1261,7 @@ class _DesktopTopBar extends StatelessWidget {
   final bool canGoBack;
   final VoidCallback onBack;
   final VoidCallback onToggleTheme;
+  final Future<void> Function() onLogout;
   final bool isDarkTheme;
   final TextEditingController searchController;
   final ValueChanged<String> onSearchChanged;
@@ -1257,6 +1272,7 @@ class _DesktopTopBar extends StatelessWidget {
     required this.canGoBack,
     required this.onBack,
     required this.onToggleTheme,
+    required this.onLogout,
     required this.isDarkTheme,
     required this.searchController,
     required this.onSearchChanged,
@@ -1385,6 +1401,11 @@ class _DesktopTopBar extends StatelessWidget {
                     label: 'Einstellungen',
                     icon: Icons.settings_outlined,
                     onSelected: () => context.push(AppRoutes.settings),
+                  ),
+                  ContextMenuAction(
+                    label: 'Abmelden',
+                    icon: Icons.logout_outlined,
+                    onSelected: onLogout,
                   ),
                 ],
               ),

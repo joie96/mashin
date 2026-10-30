@@ -1760,6 +1760,11 @@ class ProviderManifestRegistry {
       <String, ProviderManifest>{};
   static final Map<String, String> _iconDataByDomain = <String, String>{};
 
+  static void clear() {
+    _byDomain.clear();
+    _iconDataByDomain.clear();
+  }
+
   static void registerAll(Iterable<ProviderManifest> manifests) {
     for (final manifest in manifests) {
       final key = manifest.domain.trim().toLowerCase();

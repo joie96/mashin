@@ -8,6 +8,7 @@ import org.json.JSONObject
 
 internal enum class PlaybackCommandKind(val action: String, val canStartPlayback: Boolean = false) {
     Login("login"),
+    Logout("logout"),
     RestorePersistedSession("restorePersistedSession"),
     SelectLocalOutput("selectLocalOutput"),
     SelectRemotePlayer("selectRemotePlayer"),

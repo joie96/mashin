@@ -9,6 +9,7 @@ class SettingsScreenMobile extends StatelessWidget {
   const SettingsScreenMobile({
     super.key,
     required this.musicAssistantUrl,
+    required this.onLogout,
     required this.cacheSizeController,
     required this.cacheSizeFocusNode,
     required this.isDarkTheme,
@@ -20,6 +21,7 @@ class SettingsScreenMobile extends StatelessWidget {
   });
 
   final String musicAssistantUrl;
+  final VoidCallback? onLogout;
   final TextEditingController cacheSizeController;
   final FocusNode cacheSizeFocusNode;
   final bool isDarkTheme;
@@ -67,6 +69,15 @@ class SettingsScreenMobile extends StatelessWidget {
                 Text(
                   'Die URL wird mit der Anmeldung gespeichert.',
                   style: TextStyle(color: colors.textSecondary),
+                ),
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    onPressed: onLogout,
+                    icon: const Icon(Icons.logout_outlined, size: 18),
+                    label: const Text('Abmelden'),
+                  ),
                 ),
                 const SizedBox(height: 32),
                 Text(

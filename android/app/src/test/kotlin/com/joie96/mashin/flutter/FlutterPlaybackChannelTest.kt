@@ -65,6 +65,26 @@ class FlutterPlaybackChannelTest {
     }
 
     @Test
+    fun logoutWaitsForAcknowledgementAndDoesNotStartPlayback() {
+        val messenger = RecordingMessenger()
+        val client = FakeClient()
+        FlutterPlaybackChannel(RuntimeEnvironment.getApplication(), messenger, client)
+        var response: ByteBuffer? = null
+        val message = StandardMethodCodec.INSTANCE.encodeMethodCall(MethodCall("execute",
+            mapOf("command" to "logout", "arguments" to emptyMap<String, Any>())))
+        message.flip()
+        messenger.handler!!.onMessage(message) { response = it }
+        assertEquals(PlaybackCommandKind.Logout, client.request!!.kind)
+        assertFalse(client.request!!.canStartPlayback)
+        assertNull(response)
+        client.completion.set(SessionResult(SessionResult.RESULT_SUCCESS))
+        shadowOf(Looper.getMainLooper()).idle()
+        val envelope = checkNotNull(response)
+        envelope.flip()
+        assertNull(StandardMethodCodec.INSTANCE.decodeEnvelope(envelope))
+    }
+
+    @Test
     fun sessionErrorIsReturnedWithoutExecutingAnotherCommand() {
         val messenger = RecordingMessenger()
         val client = FakeClient()

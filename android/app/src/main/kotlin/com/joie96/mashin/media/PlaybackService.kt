@@ -190,7 +190,7 @@ class PlaybackService : MediaLibraryService() {
         isProcessingPlaybackStart = request.canStartPlayback
         var requiresPlaybackStartup = false
         try {
-            check(initializationError == null || request.kind == PlaybackCommandKind.Login) { initializationError.orEmpty() }
+            check(initializationError == null || request.kind in setOf(PlaybackCommandKind.Login, PlaybackCommandKind.Logout)) { initializationError.orEmpty() }
             requiresPlaybackStartup = request.canStartPlayback && snapshot.isLocalPlayback
             if (requiresPlaybackStartup) {
                 startPlaybackForeground()
@@ -217,7 +217,7 @@ class PlaybackService : MediaLibraryService() {
                 } else {
                     check(RustCoreBridge.command(request.kind.action, request.arguments)) { "Core command failed" }
                     if (request.kind == PlaybackCommandKind.Login) hasRestoredSession = true
-                    if (request.kind == PlaybackCommandKind.Shutdown) hasRestoredSession = false
+                    if (request.kind in setOf(PlaybackCommandKind.Shutdown, PlaybackCommandKind.Logout)) hasRestoredSession = false
                 }
             } catch (error: Exception) {
                 commandError = error

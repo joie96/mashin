@@ -24,6 +24,7 @@ enum PlaybackCommand {
         username: String,
         password: String,
     },
+    Logout,
     ActivateEngine,
     DeactivateEngine,
     Shutdown,
@@ -116,6 +117,7 @@ pub(crate) fn execute_command(kind: &str, argument: Option<&str>) -> Result<(), 
                 password,
             })
         }),
+        PlaybackCommand::Logout => execute_core_command(|coordinator| coordinator.logout()),
         PlaybackCommand::ActivateEngine => {
             core::execute_playback_command_and_collect_events(|playback| playback.activate())
         }
@@ -382,6 +384,7 @@ mod tests {
             "transportPrevious",
             "activateEngine",
             "deactivateEngine",
+            "logout",
         ] {
             assert!(decode_command(kind, Some("{}")).is_ok(), "{kind}");
         }

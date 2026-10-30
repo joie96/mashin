@@ -36,6 +36,19 @@ void main() {
     expect(hasCompleted, isTrue);
   });
 
+  test('logout is acknowledged by the Android service', () async {
+    MethodCall? receivedCall;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      receivedCall = call;
+      return null;
+    });
+    await AndroidBridge().execute(AndroidCoreCommand.logout, const {});
+    expect(receivedCall?.arguments, <String, Object?>{
+      'command': 'logout',
+      'arguments': <String, Object?>{},
+    });
+  });
+
   test('session restoration returns the service result', () async {
     messenger.setMockMethodCallHandler(channel, (_) async => true);
     expect(

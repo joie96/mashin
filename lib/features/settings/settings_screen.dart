@@ -21,6 +21,7 @@ class SettingsScreen extends StatelessWidget {
       shouldShowMultiDeviceButton: session.shouldShowMultiDeviceButton,
     ),
     onSave: session.saveSessionSettings,
+    onLogout: session.logout,
   );
 }
 
@@ -30,11 +31,13 @@ class SettingsEditor extends StatefulWidget {
     required this.musicAssistantUrl,
     required this.settings,
     required this.onSave,
+    required this.onLogout,
   });
 
   final String musicAssistantUrl;
   final SessionSettingsUpdate settings;
   final Future<void> Function(SessionSettingsUpdate) onSave;
+  final Future<void> Function() onLogout;
 
   @override
   State<SettingsEditor> createState() => _SettingsEditorState();
@@ -46,6 +49,7 @@ class _SettingsEditorState extends State<SettingsEditor> {
   late SessionSettingsUpdate _savedSettings;
   late SessionSettingsUpdate _settings;
   Future<void> _pendingSave = Future<void>.value();
+  bool _isLoggingOut = false;
 
   // Editor construction and lifecycle.
   @override
@@ -165,6 +169,22 @@ class _SettingsEditorState extends State<SettingsEditor> {
     );
   }
 
+  Future<void> _logout() async {
+    if (_isLoggingOut) return;
+    _cacheSizeFocusNode.unfocus();
+    setState(() => _isLoggingOut = true);
+    try {
+      await _pendingSave;
+      await widget.onLogout();
+    } catch (_) {
+      if (mounted) {
+        _showMessage('Abmelden fehlgeschlagen. Bitte erneut versuchen.');
+      }
+    } finally {
+      if (mounted) setState(() => _isLoggingOut = false);
+    }
+  }
+
   void _showMessage(String message) => ScaffoldMessenger.of(
     context,
   ).showSnackBar(SnackBar(content: Text(message)));
@@ -175,6 +195,7 @@ class _SettingsEditorState extends State<SettingsEditor> {
     final screen = isCompactLayout(context)
         ? SettingsScreenMobile(
             musicAssistantUrl: widget.musicAssistantUrl,
+            onLogout: _isLoggingOut ? null : _logout,
             cacheSizeController: _cacheSizeController,
             cacheSizeFocusNode: _cacheSizeFocusNode,
             isDarkTheme: _settings.isDarkTheme,

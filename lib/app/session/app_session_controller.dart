@@ -26,6 +26,7 @@ class AppSessionController extends ChangeNotifier {
 
   UserData? _userDataController;
   Future<void>? _initialization;
+  Future<void>? _pendingLogout;
   String _baseUrl = '';
   String? _username;
   late String _audioProfile;
@@ -109,6 +110,9 @@ class AppSessionController extends ChangeNotifier {
     }
   }
 
+  Future<void> logout() =>
+      _pendingLogout ??= _logout().whenComplete(() => _pendingLogout = null);
+
   Future<void> setAudioProfile(String audioProfile) async {
     if (audioProfile == _audioProfile) {
       return;
@@ -141,6 +145,21 @@ class AppSessionController extends ChangeNotifier {
     _logLevel = settings.logLevel;
     _shouldShowMultiDeviceButton = settings.shouldShowMultiDeviceButton;
     notifyListeners();
+  }
+
+  // Do not redirect until native logout has removed the persisted credentials.
+  Future<void> _logout() async {
+    await coreBridge.logout();
+    if (_isDisposed) return;
+    _isAuthenticated = false;
+    _baseUrl = '';
+    _username = null;
+    _disposeUserDataController();
+    PreferredProviderController.instance.reset();
+    ProviderManifestRegistry.clear();
+    MediaItemImage.configureProxyBaseUrl('');
+    await coreEvents.reset();
+    if (!_isDisposed) notifyListeners();
   }
 
   Future<void> _restoreSession() async {
@@ -219,7 +238,13 @@ class AppSessionController extends ChangeNotifier {
       return;
     }
 
+    final controller = _userDataController;
     final manifests = await coreBridge.getProviderManifests();
+    if (_isDisposed ||
+        !_isAuthenticated ||
+        !identical(controller, _userDataController)) {
+      return;
+    }
     ProviderManifestRegistry.registerAll(manifests);
     await Future.wait(
       manifests.where((manifest) => manifest.hasDefaultIcon).map((
@@ -229,7 +254,10 @@ class AppSessionController extends ChangeNotifier {
           final iconData = await coreBridge.getProviderIconData(
             manifest.domain,
           );
-          if (iconData != null) {
+          if (iconData != null &&
+              !_isDisposed &&
+              _isAuthenticated &&
+              identical(controller, _userDataController)) {
             ProviderManifestRegistry.registerIconData(
               manifest.domain,
               iconData,

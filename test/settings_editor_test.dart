@@ -118,6 +118,48 @@ void main() {
 
   for (final isCompact in [true, false]) {
     testWidgets(
+      'logout is available only in the mobile server section $isCompact',
+      (tester) async {
+        final completion = Completer<void>();
+        int logoutCount = 0;
+        await _pumpEditor(
+          tester,
+          isCompact,
+          (_) async {},
+          onLogout: () {
+            logoutCount++;
+            return completion.future;
+          },
+        );
+        final button = find.widgetWithText(OutlinedButton, 'Abmelden');
+        if (!isCompact) {
+          expect(button, findsNothing);
+          return;
+        }
+        expect(button, findsOneWidget);
+        expect(
+          tester.getRect(button).top,
+          greaterThan(tester.getRect(find.byType(TextFormField)).bottom),
+        );
+        expect(
+          tester.getRect(button).bottom,
+          lessThan(tester.getRect(find.text('Lokaler Cache')).top),
+        );
+        await tester.tap(button);
+        await tester.pump();
+        expect(logoutCount, 1);
+        expect(tester.widget<OutlinedButton>(button).onPressed, isNull);
+        completion.completeError(StateError('storage unavailable'));
+        await tester.pumpAndSettle();
+        expect(
+          find.text('Abmelden fehlgeschlagen. Bitte erneut versuchen.'),
+          findsOneWidget,
+        );
+        expect(tester.widget<OutlinedButton>(button).onPressed, isNotNull);
+      },
+    );
+
+    testWidgets(
       'Info tab is available in ${isCompact ? 'mobile' : 'desktop'} settings',
       (tester) async {
         await _pumpEditor(tester, isCompact, (_) async {});
@@ -320,8 +362,9 @@ class _InfoUpdateService extends AppUpdateService {
 Future<void> _pumpEditor(
   WidgetTester tester,
   bool isCompact,
-  Future<void> Function(SessionSettingsUpdate) onSave,
-) async {
+  Future<void> Function(SessionSettingsUpdate) onSave, {
+  Future<void> Function()? onLogout,
+}) async {
   tester.view.physicalSize = isCompact
       ? const Size(390, 800)
       : const Size(1200, 900);
@@ -340,6 +383,7 @@ Future<void> _pumpEditor(
             logLevel: LogLevelPreference.info,
           ),
           onSave: onSave,
+          onLogout: onLogout ?? () async {},
         ),
       ),
     ),

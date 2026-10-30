@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 
 enum AndroidCoreCommand {
   login,
+  logout,
   restorePersistedSession,
   selectLocalOutput,
   selectRemotePlayer,

@@ -786,6 +786,12 @@ mod tests {
         }
 
         fn clear_session(&self) -> Result<(), String> {
+            if self
+                .should_fail_writes
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err("test storage unavailable".into());
+            }
             self.session
                 .lock()
                 .map(|mut current| *current = None)
@@ -820,6 +826,41 @@ mod tests {
             should_show_multi_device_button: true,
             preferred_provider: None,
         }
+    }
+
+    #[test]
+    fn logout_clears_stored_session_and_invalidates_user_data() {
+        let mut coordinator = test_coordinator();
+        let session = session_config();
+        coordinator.session_store.save_session(session.clone()).unwrap();
+        coordinator.session_configuration = Some(session);
+        coordinator.user_data = Some(Default::default());
+        let generation = coordinator.user_data_session_generation;
+
+        coordinator.logout().unwrap();
+
+        assert!(coordinator.session_store.load_session().unwrap().is_none());
+        assert!(coordinator.session_configuration.is_none());
+        assert!(coordinator.connection.is_none());
+        assert!(coordinator.user_data.is_none());
+        assert_ne!(coordinator.user_data_session_generation, generation);
+        assert!(!coordinator.restore_persisted_session().unwrap());
+        coordinator.logout().unwrap();
+    }
+
+    #[test]
+    fn logout_preserves_the_active_session_when_storage_cannot_be_cleared() {
+        let store = TestSessionStore::new();
+        let should_fail_writes = store.should_fail_writes.clone();
+        let mut coordinator = CoreCoordinator::with_session_store(Box::new(store));
+        let session = session_config();
+        coordinator.session_store.save_session(session.clone()).unwrap();
+        coordinator.session_configuration = Some(session.clone());
+        should_fail_writes.store(true, std::sync::atomic::Ordering::SeqCst);
+
+        assert!(coordinator.logout().is_err());
+        assert_eq!(coordinator.session_configuration, Some(session.clone()));
+        assert_eq!(coordinator.session_store.load_session().unwrap(), Some(session));
     }
 
     #[test]
