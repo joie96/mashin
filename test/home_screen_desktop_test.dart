@@ -281,10 +281,9 @@ void main() {
     for (final String category in <String>['genre', 'similar'])
       for (int index = 0; index < 5; index++)
         RecommendationFolder(
-          itemId:
-              'user_${category}_artists_${category == 'genre' ? index % 4 : index}_monthly',
+          itemId: 'user_${category}_artists_${index}_monthly',
           provider: 'lb',
-          title: '$category ${category == 'genre' ? index % 4 : index}',
+          title: '$category $index',
           items: List<Artist>.generate(
             8,
             (int artistIndex) => Artist(
@@ -300,8 +299,11 @@ void main() {
     'home samples distinct artist sections and shuffles their contents',
     () async {
       final List<RecommendationFolder> folders = artistFolders();
+      folders.add(folders.first);
       final Set<String> selections = <String>{};
-      for (int seed = 0; seed < 8; seed++) {
+      final Set<String> selectedGenres = <String>{};
+      final Set<String> selectedSimilarArtists = <String>{};
+      for (int seed = 0; seed < 32; seed++) {
         final HomeController controller = HomeController(
           coreBridge: _HomeCoreBridge()..artistFolders = folders,
           random: math.Random(seed),
@@ -317,6 +319,16 @@ void main() {
         );
         expect(sections.map((section) => section.title).toSet(), hasLength(4));
         selections.add(sections.map((section) => section.title).join(','));
+        selectedGenres.addAll(
+          sections
+              .where((section) => section.title.startsWith('genre '))
+              .map((section) => section.title),
+        );
+        selectedSimilarArtists.addAll(
+          sections
+              .where((section) => section.title.startsWith('similar '))
+              .map((section) => section.title),
+        );
         for (final HomeArtistSection section in sections) {
           final List<Artist> original = folders
               .firstWhere((folder) => folder.title == section.title)
@@ -340,6 +352,14 @@ void main() {
         }
       }
       expect(selections.length, greaterThan(1));
+      expect(
+        selectedGenres,
+        unorderedEquals(List.generate(5, (index) => 'genre $index')),
+      );
+      expect(
+        selectedSimilarArtists,
+        unorderedEquals(List.generate(5, (index) => 'similar $index')),
+      );
     },
   );
 

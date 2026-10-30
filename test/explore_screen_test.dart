@@ -227,8 +227,13 @@ void main() {
     expect(controller.weeklyAlbums.single.itemId, 'sitewide_top_albums_weekly');
     expect(controller.similarUsersJam, hasLength(8));
     expect(
-      controller.similarUsersJam.first.itemId,
-      'similarusers_jam_latest-track-0',
+      controller.similarUsersJam.map((Track track) => track.itemId),
+      unorderedEquals(
+        List<String>.generate(
+          8,
+          (int index) => 'similarusers_jam_latest-track-$index',
+        ),
+      ),
     );
     expect(bridge.playlistCalls, isEmpty);
     expect(controller.weeklyTracks.single.itemId, 'chart');
@@ -237,38 +242,40 @@ void main() {
     expect(controller.hasLoadError, isFalse);
   });
 
-  test(
-    'exploration order remains stable when snapshots are read again',
-    () async {
-      final ExploreController controller = ExploreController(
-        coreBridge: _ExploreBridge(),
-        random: math.Random(42),
-      );
-      addTearDown(controller.dispose);
-      final math.Random expectedRandom = math.Random(42);
-      final List<String> originalOrder = List<String>.generate(
-        8,
-        (int index) => 'exploration-track-$index',
-      );
-      final List<String> expectedOrder = List<String>.of(originalOrder)
-        ..shuffle(expectedRandom);
+  test('exploration and similar users tracks shuffle once per page', () async {
+    final ExploreController controller = ExploreController(
+      coreBridge: _ExploreBridge(),
+      random: math.Random(42),
+    );
+    addTearDown(controller.dispose);
+    final math.Random expectedRandom = math.Random(42);
+    final List<String> originalOrder = List<String>.generate(
+      8,
+      (int index) => 'exploration-track-$index',
+    );
+    final List<String> expectedOrder = List<String>.of(originalOrder)
+      ..shuffle(expectedRandom);
+    final List<String> originalJamOrder = List<String>.generate(
+      8,
+      (int index) => 'similarusers_jam_latest-track-$index',
+    );
+    final List<String> expectedJamOrder = List<String>.of(originalJamOrder)
+      ..shuffle(expectedRandom);
+    expect(expectedOrder, isNot(orderedEquals(originalOrder)));
+    expect(expectedJamOrder, isNot(orderedEquals(originalJamOrder)));
 
-      for (int loadIndex = 0; loadIndex < 2; loadIndex++) {
-        await controller.load();
-        final List<String> actualOrder = controller.weeklyExploration
-            .map((Track track) => track.itemId)
-            .toList(growable: false);
-        expect(actualOrder, expectedOrder);
-        expect(
-          controller.similarUsersJam.map((Track track) => track.itemId),
-          List<String>.generate(
-            8,
-            (int index) => 'similarusers_jam_latest-track-$index',
-          ),
-        );
-      }
-    },
-  );
+    for (int loadIndex = 0; loadIndex < 2; loadIndex++) {
+      await controller.load();
+      final List<String> actualOrder = controller.weeklyExploration
+          .map((Track track) => track.itemId)
+          .toList(growable: false);
+      expect(actualOrder, expectedOrder);
+      expect(
+        controller.similarUsersJam.map((Track track) => track.itemId),
+        expectedJamOrder,
+      );
+    }
+  });
 
   test('failed refresh preserves loaded explore contents', () async {
     final _ExploreBridge bridge = _ExploreBridge();

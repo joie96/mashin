@@ -30,6 +30,7 @@ class ExploreController extends ChangeNotifier {
     isLoading: true,
   );
   bool _hasLoadedExploration = false;
+  bool _hasLoadedSimilarUsersJam = false;
   bool _hasStartedLoading = false;
 
   bool _isDisposed = false;
@@ -115,10 +116,15 @@ class ExploreController extends ChangeNotifier {
       folders,
       'sitewide_top_albums_weekly',
     );
-    _similarUsersJam = _tracksFromPlaylistFolders(
-      folders,
-      'similarusers_jam_weekly',
-    );
+    if (!_hasLoadedSimilarUsersJam) {
+      _similarUsersJam = _tracksFromPlaylistFolders(
+        folders,
+        'similarusers_jam_weekly',
+      )..shuffle(_random);
+      _hasLoadedSimilarUsersJam = !snapshot.isFolderLoading(
+        'similarusers_jam_weekly',
+      );
+    }
     _weeklyTracks = _itemsFromFolders<Track>(
       folders,
       'sitewide_top_tracks_weekly',
