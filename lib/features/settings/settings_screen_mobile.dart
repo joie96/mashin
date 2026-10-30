@@ -134,12 +134,24 @@ class SettingsScreenMobile extends StatelessWidget {
                       onThemeChanged(selection.first),
                 ),
                 const SizedBox(height: 24),
-                SwitchListTile(
-                  key: const Key('settings-multi-device-button'),
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Mehrgeräte-Button anzeigen'),
-                  value: shouldShowMultiDeviceButton,
-                  onChanged: onMultiDeviceButtonVisibilityChanged,
+                MergeSemantics(
+                  child: ListTile(
+                    key: const Key('settings-multi-device-button'),
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Mehrgeräte-Button anzeigen'),
+                    onTap: () => onMultiDeviceButtonVisibilityChanged(
+                      !shouldShowMultiDeviceButton,
+                    ),
+                    trailing: Transform.scale(
+                      scale: .7,
+                      alignment: Alignment.centerRight,
+                      child: Switch(
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        value: shouldShowMultiDeviceButton,
+                        onChanged: onMultiDeviceButtonVisibilityChanged,
+                      ),
+                    ),
+                  ),
                 ),
               ],
             ),

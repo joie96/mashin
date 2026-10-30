@@ -185,6 +185,13 @@ void main() {
         );
         final toggle = find.byKey(const Key('settings-multi-device-button'));
         await tester.ensureVisible(toggle);
+        if (isCompact) {
+          final transform = tester.widget<Transform>(
+            find.descendant(of: toggle, matching: find.byType(Transform)).first,
+          );
+          expect(transform.transform.entry(0, 0), .7);
+          expect(transform.transform.entry(1, 1), .7);
+        }
         if (!isCompact) {
           final transform = tester.widget<Transform>(
             find.ancestor(of: toggle, matching: find.byType(Transform)).first,
