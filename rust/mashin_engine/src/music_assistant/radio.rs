@@ -193,6 +193,7 @@ fn filter_recommendations(tracks: Vec<Track>, started: &[Track]) -> Vec<Track> {
 
 #[cfg(test)]
 mod tests {
+    use futures_util::TryFutureExt;
     use super::*;
     use serde_json::json;
 
@@ -384,7 +385,7 @@ mod tests {
                             start_item: None,
                             shuffle: false,
                         },
-                    )
+                    ).map_err(String::from)
                 },
             )
             .await;
@@ -447,7 +448,7 @@ mod tests {
                         start_item: None,
                         shuffle: false,
                     },
-                )
+                ).map_err(String::from)
             })
             .await
             .unwrap();

@@ -168,7 +168,7 @@ impl MusicAssistantPlaybackTarget {
     }
 
     pub(crate) fn select_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {
-        self.queue_command(QueueCommand::PlayItem(item_id))
+        self.queue_command(QueueCommand::PlayItem { item_id, position_seconds: 0 })
     }
 
     pub(crate) fn play_queue_index(&mut self, index: usize) -> Result<(), String> {
@@ -289,7 +289,7 @@ impl MusicAssistantPlaybackTarget {
             .clone();
         let queue_id = projection.queue().queue_id;
         self.pending_commands.push(Box::pin(async move {
-            client.execute_queue_command(&queue_id, command).await
+            client.execute_queue_command(&queue_id, command).await.map_err(String::from)
         }));
         Ok(())
     }

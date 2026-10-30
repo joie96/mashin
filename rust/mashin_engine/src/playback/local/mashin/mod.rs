@@ -4,4 +4,5 @@ pub(crate) mod audio_adapter;
 pub(crate) mod models;
 pub(crate) mod protocol;
 pub(crate) mod receiver;
+pub(crate) mod recovery;
 pub(crate) mod streams;

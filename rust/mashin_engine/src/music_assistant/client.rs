@@ -60,7 +60,10 @@ pub(crate) enum QueueCommand {
         shuffle: bool,
     },
     PlayIndex(usize),
-    PlayItem(QueueItemId),
+    PlayItem {
+        item_id: QueueItemId,
+        position_seconds: u64,
+    },
     MoveItem {
         item_id: QueueItemId,
         shift: i64,
@@ -85,6 +88,10 @@ static PROVIDER_AVAILABILITY: once_cell::sync::Lazy<
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum HttpCommandError {
+    InvalidArguments {
+        command: String,
+        details: String,
+    },
     Http {
         command: String,
         status: u16,
@@ -111,6 +118,7 @@ impl HttpCommandError {
 impl std::fmt::Display for HttpCommandError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidArguments { command, details } => write!(formatter, "Music Assistant command '{command}' has invalid arguments: {details}"),
             Self::Http {
                 command,
                 status,
@@ -879,9 +887,9 @@ impl MusicAssistantClient {
         &self,
         queue_id: &QueueId,
         command: QueueCommand,
-    ) -> Result<(), String> {
-        let (name, arguments) = queue_command_request(queue_id, command)?;
-        self.execute_command::<Value>(&format!("player_queues/{name}"), arguments)
+    ) -> Result<(), HttpCommandError> {
+        let (name, arguments) = queue_command_request(queue_id, command).map_err(|details| HttpCommandError::InvalidArguments { command: "player_queues".into(), details })?;
+        self.execute_http_command::<Value>(&format!("player_queues/{name}"), arguments)
             .await
             .map(|_| ())
     }
@@ -921,8 +929,8 @@ impl MusicAssistantClient {
         .await
     }
 
-    pub(crate) async fn get_player_queues(&self) -> Result<Vec<MusicAssistantQueue>, String> {
-        self.execute_command("player_queues/all", json!({})).await
+    pub(crate) async fn get_player_queues(&self) -> Result<Vec<MusicAssistantQueue>, HttpCommandError> {
+        self.execute_http_command("player_queues/all", json!({})).await
     }
 
     pub(crate) async fn get_queue_items(
@@ -1334,8 +1342,8 @@ fn queue_command_request(
         QueueCommand::PlayIndex(index) => {
             ("play_index", json!({"queue_id":queue_id,"index":index}))
         }
-        QueueCommand::PlayItem(item_id) => {
-            ("play_index", json!({"queue_id":queue_id,"index":item_id}))
+        QueueCommand::PlayItem { item_id, position_seconds } => {
+            ("play_index", json!({"queue_id":queue_id,"index":item_id,"seek_position":position_seconds}))
         }
         QueueCommand::MoveItem { item_id, shift } => (
             "move_item",
@@ -1395,9 +1403,9 @@ mod command_tests {
                 json!({"queue_id":"room", "autoplay_enabled":false}),
             ),
             (
-                QueueCommand::PlayItem(QueueItemId("stable-item".into())),
+                QueueCommand::PlayItem { item_id: QueueItemId("stable-item".into()), position_seconds: 162 },
                 "play_index",
-                json!({"queue_id":"room", "index":"stable-item"}),
+                json!({"queue_id":"room", "index":"stable-item", "seek_position":162}),
             ),
             (
                 QueueCommand::DeleteItem(QueueItemId("stable-item".into())),
@@ -1500,6 +1508,7 @@ mod command_tests {
             )
             .await
             .unwrap_err()
+            .to_string()
             .contains("outside"));
     }
 }

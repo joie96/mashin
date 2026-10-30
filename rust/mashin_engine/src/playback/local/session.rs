@@ -157,6 +157,7 @@ impl LocalSession {
                 audio_profile: configuration.audio_profile,
             },
             output.clone(),
+            connection.client.clone(),
         )?;
         Ok(Self {
             output,

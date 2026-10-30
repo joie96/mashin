@@ -4,13 +4,14 @@ use super::models::{
     OutputState, StreamCursor, StreamDescriptor, HEADER_BYTES, MAX_INTEGER, MAX_PAYLOAD_BYTES,
 };
 use super::protocol::{ControlCommand, ProtocolError, ResumeState, Welcome};
+use super::recovery::{RecoveryState, RecoveryTarget};
 use crate::audio::buffer::EncodedChunk;
 use crate::audio::models::{AudioCommand, AudioState, AudioStream};
 use crate::audio::models::{AudioEvent, AudioSnapshot};
 use crate::audio::pipeline::AudioPipeline;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, watch, Mutex};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +31,7 @@ pub(crate) struct MashinAudioAdapter {
     streams: Arc<std::sync::Mutex<HashMap<Uuid, StreamDescriptor>>>,
     commands: Arc<Mutex<()>>,
     last_media: Arc<std::sync::Mutex<Option<ControlCommand>>>,
+    recovery: watch::Sender<RecoveryState>,
 }
 
 impl MashinAudioAdapter {
@@ -47,12 +49,20 @@ impl MashinAudioAdapter {
             streams: Arc::new(std::sync::Mutex::new(HashMap::new())),
             commands: Arc::new(Mutex::new(())),
             last_media: Arc::new(std::sync::Mutex::new(None)),
+            recovery: watch::channel(RecoveryState::default()).0,
         })
     }
 
     // Metadata must already exist when the worker publishes a newly accepted stream.
     pub(crate) async fn execute(&self, command: ControlCommand) -> Result<OutputSnapshot, String> {
         let _command = self.commands.lock().await;
+        let target = self.recovery.borrow().target.clone();
+        let replacement = match &command {
+            ControlCommand::SetMedia { current: Some(stream), .. }
+                if target.as_ref().is_some_and(|target| stream.playback.queue_id == target.playback.queue_id && stream.playback.queue_item_id == target.playback.queue_item_id) => Some(stream.stream_id),
+            _ => None,
+        };
+        let replaces_playback = matches!(&command, ControlCommand::SetMedia { .. } | ControlCommand::Stop { .. });
         let announcement = if let ControlCommand::SetMedia { media_revision, .. } = &command {
             let mut normalized = command.clone();
             if let ControlCommand::SetMedia { command_id, .. } = &mut normalized {
@@ -89,7 +99,9 @@ impl MashinAudioAdapter {
                     current: current.as_ref().map(audio_stream),
                     prepared: prepared.as_ref().map(audio_stream),
                     media_revision,
-                    initial_output_state: match initial_output_state {
+                    initial_output_state: match if target.as_ref().is_some_and(|target| target.is_paused && current.as_ref().is_some_and(|stream| stream.playback.queue_id == target.playback.queue_id && stream.playback.queue_item_id == target.playback.queue_item_id)) {
+                        OutputState::Paused
+                    } else { initial_output_state } {
                         OutputState::Playing => AudioState::Playing,
                         OutputState::Paused => AudioState::Paused,
                         _ => return Err("invalid Mashin initial output state".into()),
@@ -123,6 +135,7 @@ impl MashinAudioAdapter {
             }
             previous
         };
+        let changes_pause = matches!(audio, AudioCommand::Play { .. } | AudioCommand::Pause { .. });
         if let Err(error) = self.pipeline.execute(audio).await {
             *self
                 .streams
@@ -135,6 +148,20 @@ impl MashinAudioAdapter {
                 .last_media
                 .lock()
                 .map_err(|_| "Mashin media lock poisoned")? = Some(announcement);
+        }
+        if replaces_playback {
+            self.recovery.send_modify(|state| {
+                if let Some(stream_id) = replacement {
+                    state.replacement_stream_id = Some(stream_id);
+                    state.revision = state.revision.wrapping_add(1);
+                } else {
+                    state.cancel();
+                    state.is_stopped = self.pipeline.snapshot().current.is_none();
+                    state.is_paused = None;
+                }
+            });
+        } else if changes_pause {
+            self.recovery.send_modify(|state| state.is_paused = Some(self.pipeline.snapshot().status.output_state == AudioState::Paused));
         }
         let mut streams = self
             .streams
@@ -152,6 +179,68 @@ impl MashinAudioAdapter {
                     .is_some_and(|stream| stream.stream_id == *id)
         });
         Ok(project(snapshot, &streams))
+    }
+
+    // Rejection frees unusable audio without turning the user's intent into a local stop.
+    pub(crate) async fn reject_retained_playback(&self) -> Result<(), String> {
+        let _command = self.commands.lock().await;
+        let mut target = RecoveryTarget::from_snapshot(&self.snapshot());
+        self.recovery.send_modify(|state| {
+            if !state.is_stopped {
+            if let (Some(target), Some(is_paused)) = (&mut target, state.is_paused) { target.is_paused = is_paused; }
+                if state.target.is_none() {
+                    state.retry_revision = state.retry_revision.wrapping_add(1);
+                }
+                if target.is_some() { state.target = target; }
+                state.replacement_stream_id = None;
+                state.revision = state.revision.wrapping_add(1);
+            }
+        });
+        self.pipeline.execute(AudioCommand::Stop { stream_id: None }).await?;
+        self.streams.lock().map_err(|_| "Mashin metadata lock poisoned")?.clear();
+        Ok(())
+    }
+
+    // A replacement is recovered only when it has usable audio, not merely a media ACK.
+    pub(crate) fn confirm_recovery(&self) {
+        let snapshot = self.snapshot();
+        self.recovery.send_if_modified(|state| {
+            if state.replacement_stream_id.is_some()
+                && state.replacement_stream_id == snapshot.resume.current_stream_id
+                && (snapshot.resume.output_state == OutputState::Playing
+                    || (snapshot.resume.output_state == OutputState::Paused && snapshot.buffered_duration_millis > 0))
+            {
+                state.cancel();
+                return true;
+            }
+            false
+        });
+    }
+
+    // Invalidate queued requests synchronously, before a UI command's asynchronous execution.
+    pub(crate) fn cancel_recovery(&self) {
+        self.recovery.send_modify(RecoveryState::cancel);
+    }
+
+    pub(crate) fn recovery(&self) -> watch::Receiver<RecoveryState> {
+        self.recovery.subscribe()
+    }
+
+    pub(crate) fn authorize_local_command(&self, command: &AudioCommand) -> bool {
+        let has_recovery = self.recovery.borrow().target.is_some();
+        match command {
+            AudioCommand::Play { .. } => self.recovery.send_modify(|state| state.set_paused(false)),
+            AudioCommand::Pause { .. } => self.recovery.send_modify(|state| state.set_paused(true)),
+            AudioCommand::Stop { .. } => self.recovery.send_modify(|state| {
+                state.cancel();
+                state.is_stopped = true;
+            }),
+            AudioCommand::SetVolume { .. } | AudioCommand::SetMute { .. } => {}
+            _ => self.cancel_recovery(),
+        }
+        has_recovery
+            && self.pipeline.snapshot().current.is_none()
+            && matches!(command, AudioCommand::Play { .. } | AudioCommand::Pause { .. })
     }
 
     // Serialize local seeks against provider commands, retaining immutable descriptor provenance.

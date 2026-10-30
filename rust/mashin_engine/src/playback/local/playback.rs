@@ -16,6 +16,7 @@ use crate::playback::local::mashin::audio_adapter::OutputSnapshot;
 use crate::playback::local::mashin::models::OutputState;
 use crate::playback::local::mashin::models::StreamDescriptor;
 use crate::playback::local::mashin::receiver::{ConnectionState, ReceiverSnapshot};
+use crate::playback::local::mashin::recovery::RecoveryTarget;
 use crate::playback::local::session::{LocalSession, LocalSessionConfiguration};
 use crate::playback::mode::PlaybackMode;
 use crate::playback::models::{MediaSessionState, PlaybackConnectionState, PlayerState, Queue};
@@ -133,7 +134,11 @@ impl PlaybackBackend for LocalPlayback {
         shuffle: bool,
     ) -> Result<(), String> {
         self.synchronize_projection()?;
-        self.take_local_authority();
+        if matches!(option, QueueOption::Play | QueueOption::Replace) {
+            self.take_playback_authority();
+        } else {
+            self.take_local_authority();
+        }
         self.target
             .queue_play_media(media, option, start_item, shuffle)
     }
@@ -150,11 +155,11 @@ impl PlaybackBackend for LocalPlayback {
         self.target.delete_queue_items(item_ids)
     }
     fn select_queue_item(&mut self, id: QueueItemId) -> Result<(), String> {
-        self.take_local_authority();
+        self.take_playback_authority();
         self.target.select_queue_item(id)
     }
     fn play_queue_index(&mut self, index: usize) -> Result<(), String> {
-        self.take_local_authority();
+        self.take_playback_authority();
         self.target.play_queue_index(index)
     }
 
@@ -162,7 +167,10 @@ impl PlaybackBackend for LocalPlayback {
     // Local transport and shared queue preferences.
     fn transport_play(&mut self) -> Result<(), String> {
         self.synchronize_projection()?;
-        self.take_local_authority();
+        if self.session.as_ref().is_some_and(|session| session.output.recovery().borrow().target.is_some()) {
+            return self.local_command(AudioCommand::Play { stream_id: None });
+        }
+        self.take_playback_authority();
         if self.session.as_ref().is_some_and(|session| session.output.snapshot().current.is_none()) {
             return self.target.transport_play();
         }
@@ -176,7 +184,7 @@ impl PlaybackBackend for LocalPlayback {
         self.record_failure(result);
     }
     fn transport_next(&mut self) -> Result<(), String> {
-        self.take_local_authority();
+        self.take_playback_authority();
         if let Some(session) = self.session.as_ref() {
             let snapshot = session.output.snapshot();
             if let (Some(current), Some(prepared)) = (snapshot.current, snapshot.prepared) {
@@ -193,12 +201,12 @@ impl PlaybackBackend for LocalPlayback {
         self.target.transport_next()
     }
     fn transport_previous(&mut self) -> Result<(), String> {
-        self.take_local_authority();
+        self.take_playback_authority();
         self.target.transport_previous()
     }
     fn transport_seek(&mut self, seconds: f64) -> Result<(), String> {
         let position_millis = seek_position_millis(seconds)?;
-        self.take_local_authority();
+        self.take_playback_authority();
         let session = self
             .session
             .as_ref()
@@ -334,7 +342,14 @@ impl LocalPlayback {
                 revision: output.resume.output_revision,
                 state: state.player_state.playback_state,
             }, Instant::now());
+        let recovery = session.output.recovery().borrow().target.clone();
+        if output.current.is_none() {
+            if let Some(target) = &recovery {
+                project_recovery_intent(&mut state, target);
+            }
+        }
         let has_local_activity = output.current.is_some()
+            || recovery.is_some()
             || output.resume.output_revision != 0
             || matches!(state.player_state.playback_state, PlayState::Buffering | PlayState::Error);
         session.queue_bootstrap.lock().expect("queue bootstrap lock poisoned").project(
@@ -372,16 +387,25 @@ impl LocalPlayback {
         }
     }
 
+    fn take_playback_authority(&self) {
+        self.take_local_authority();
+        if let Some(session) = &self.session {
+            session.output.cancel_recovery();
+        }
+    }
+
     fn local_command(&mut self, command: AudioCommand) -> Result<(), String> {
-        let output = self
+        let session = self
             .session
             .as_ref()
-            .ok_or("Mashin session is not configured")?
-            .output
-            .pipeline();
+            .ok_or("Mashin session is not configured")?;
         if !matches!(command, AudioCommand::SetVolume { .. } | AudioCommand::SetMute { .. }) {
-            self.take_local_authority();
+            session.queue_bootstrap.lock().expect("queue bootstrap lock poisoned").take_local_authority();
         }
+        if session.output.authorize_local_command(&command) {
+            return Ok(());
+        }
+        let output = session.output.pipeline();
         self.pending_commands.push(Box::pin(async move {
             output.execute(command).await.map(|_| ())
         }));
@@ -501,6 +525,26 @@ fn project_media_session_state(
     }
 }
 
+// Presentation retains intent while the protocol truthfully reports an empty output cache.
+fn project_recovery_intent(state: &mut MediaSessionState, target: &RecoveryTarget) {
+    state.player_state.playback_state = if target.is_paused {
+        PlayState::Paused
+    } else {
+        PlayState::Buffering
+    };
+    state.player_state.current_queue_item_id = Some(target.playback.queue_item_id.clone());
+    state.player_state.position_millis = Some((target.position_seconds * 1000) as i64);
+    state.player_state.buffered_position_millis = state.player_state.position_millis;
+    if state.queue.queue_id == target.playback.queue_id {
+        state.queue.current_index = state.queue.items.iter()
+            .position(|item| item.queue_item_id == target.playback.queue_item_id);
+        state.player_state.current_index = state.queue.current_index;
+        state.player_state.duration_millis = state.queue.current_index
+            .and_then(|index| state.queue.items[index].duration)
+            .map(|seconds| i64::from(seconds) * 1000);
+    }
+}
+
 // Cached chunks start at whole seconds; invalid UI values never reach either seek path.
 fn seek_position_millis(seconds: f64) -> Result<u64, String> {
     if !seconds.is_finite()
@@ -556,6 +600,24 @@ mod tests {
             project_queue(queue, Some(&stream), None).current_index,
             None
         );
+    }
+
+    #[test]
+    fn recovery_presentation_keeps_play_pause_and_position_without_faking_cache() {
+        let stream = super::super::mashin::models::test_stream();
+        let mut state = MediaSessionState {
+            queue: Queue { queue_id: stream.playback.queue_id.clone(), items: vec![queue_item(&stream, "item")], ..Default::default() },
+            player_state: PlayerState::default(),
+        };
+        let mut target = RecoveryTarget { playback: stream.playback, position_seconds: 162, is_paused: false };
+        project_recovery_intent(&mut state, &target);
+        assert_eq!(state.player_state.playback_state, PlayState::Buffering);
+        assert_eq!(state.player_state.position_millis, Some(162_000));
+        assert_eq!(state.player_state.current_queue_item_id, Some(QueueItemId("item".into())));
+        assert_eq!(state.queue.current_index, Some(0));
+        target.is_paused = true;
+        project_recovery_intent(&mut state, &target);
+        assert_eq!(state.player_state.playback_state, PlayState::Paused);
     }
 
     #[test]
